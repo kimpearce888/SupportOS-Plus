@@ -1,10 +1,10 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::NotificationType;
 use crate::error::Result;
 use crate::mentions;
-use crate::notifications::{record_notification, NotificationInput};
+use crate::notifications::{NotificationInput, record_notification};
 
 pub const M006_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS side_threads (
@@ -237,49 +237,50 @@ pub fn parse_create_side_thread_input(
             "Required and must be a non-empty string.".into(),
         ));
     }
-    if let Some(v) = body.get("title") {
-        if !v.is_string() {
-            issues.push((
-                "title".into(),
-                "Expected string, received other type.".into(),
-            ));
-        }
+    if let Some(v) = body.get("title")
+        && !v.is_string()
+    {
+        issues.push((
+            "title".into(),
+            "Expected string, received other type.".into(),
+        ));
     }
     let mut team_local_id = body_i64(body, &["teamId", "team_local_id"]);
-    if let Some(v) = body.get("teamId").or_else(|| body.get("team_local_id")) {
-        if !v.is_null() && v.as_i64().is_none() {
-            issues.push((
-                "teamId".into(),
-                "Expected number, received other type.".into(),
-            ));
-            team_local_id = None;
-        }
+    if let Some(v) = body.get("teamId").or_else(|| body.get("team_local_id"))
+        && !v.is_null()
+        && v.as_i64().is_none()
+    {
+        issues.push((
+            "teamId".into(),
+            "Expected number, received other type.".into(),
+        ));
+        team_local_id = None;
     }
     let participant_user_ids =
         body_i64_array(body, &["participantUserIds", "participant_user_ids"]).unwrap_or_default();
     if let Some(v) = body
         .get("participantUserIds")
         .or_else(|| body.get("participant_user_ids"))
+        && !v.is_null()
+        && v.as_array().is_none()
     {
-        if !v.is_null() && v.as_array().is_none() {
-            issues.push((
-                "participantUserIds".into(),
-                "Expected array of numbers.".into(),
-            ));
-        }
+        issues.push((
+            "participantUserIds".into(),
+            "Expected array of numbers.".into(),
+        ));
     }
     let mut created_by_user_id = body_i64(body, &["createdByUserId", "created_by_user_id"]);
     if let Some(v) = body
         .get("createdByUserId")
         .or_else(|| body.get("created_by_user_id"))
+        && !v.is_null()
+        && v.as_i64().is_none()
     {
-        if !v.is_null() && v.as_i64().is_none() {
-            issues.push((
-                "createdByUserId".into(),
-                "Expected number, received other type.".into(),
-            ));
-            created_by_user_id = None;
-        }
+        issues.push((
+            "createdByUserId".into(),
+            "Expected number, received other type.".into(),
+        ));
+        created_by_user_id = None;
     }
     let mut first_message = body_str(body, &["firstMessage", "first_message"])
         .map(|s| s.trim().to_string())
@@ -287,14 +288,14 @@ pub fn parse_create_side_thread_input(
     if let Some(v) = body
         .get("firstMessage")
         .or_else(|| body.get("first_message"))
+        && !v.is_null()
+        && !v.is_string()
     {
-        if !v.is_null() && !v.is_string() {
-            issues.push((
-                "firstMessage".into(),
-                "Expected string, received other type.".into(),
-            ));
-            first_message = None;
-        }
+        issues.push((
+            "firstMessage".into(),
+            "Expected string, received other type.".into(),
+        ));
+        first_message = None;
     }
     if issues.is_empty() {
         Ok(CreateSideThreadInput {

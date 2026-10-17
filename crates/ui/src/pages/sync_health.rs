@@ -1,4 +1,4 @@
-use leptos::*;
+use leptos::prelude::*;
 
 use crate::components::button::{Button, ButtonStyle};
 use crate::components::state_view::EmptyState;
@@ -75,22 +75,22 @@ pub fn derive_push_state(status: &serde_json::Value) -> WebhookPushState {
 
 #[component]
 pub fn SyncHealthPage() -> impl IntoView {
-    let status = create_rw_signal(serde_json::Value::Null);
-    let push_state = create_rw_signal(WebhookPushState::NotConfigured);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let action_msg = create_rw_signal(None::<String>);
-    let running = create_rw_signal(false);
-    let webhook_url_input = create_rw_signal(String::new());
-    let selected_events = create_rw_signal(
+    let status = RwSignal::new(serde_json::Value::Null);
+    let push_state = RwSignal::new(WebhookPushState::NotConfigured);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let action_msg = RwSignal::new(None::<String>);
+    let running = RwSignal::new(false);
+    let webhook_url_input = RwSignal::new(String::new());
+    let selected_events = RwSignal::new(
         SUPPORTED_WEBHOOK_EVENTS
             .iter()
             .map(|e| (*e, true))
             .collect::<Vec<(&'static str, bool)>>(),
     );
-    let reload = create_rw_signal(0u32);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let status = status;
         let push_state = push_state;
@@ -207,7 +207,7 @@ pub fn SyncHealthPage() -> impl IntoView {
         <div class="spp-page spp-page--sync-health">
             <h2 class="spp-page__title">"Sync Health"</h2>
 
-            <Show when=move || error_msg.get().is_some() fallback=|| ().into_view()>
+            <Show when=move || error_msg.get().is_some() fallback=|| ().into_any()>
                 <div class="spp-state spp-state--error">
                     <p class="spp-state__body">{move || error_msg.get().unwrap_or_default()}</p>
                 </div>
@@ -274,7 +274,7 @@ pub fn SyncHealthPage() -> impl IntoView {
                         "Cancel"
                     </Button>
                 </div>
-                <Show when=move || action_msg.get().is_some() fallback=|| ().into_view()>
+                <Show when=move || action_msg.get().is_some() fallback=|| ().into_any()>
                     <div class="spp-state spp-state--info">
                         <p class="spp-state__body">{move || action_msg.get().unwrap_or_default()}</p>
                     </div>
@@ -393,7 +393,7 @@ pub fn SyncHealthPage() -> impl IntoView {
                 </p>
 
                 <div class="spp-webhook-push__state">
-                    <span class="spp-webhook-state-badge" class=move || push_state.get().css_class()>
+                    <span class=move || format!("spp-webhook-state-badge {}", push_state.get().css_class())>
                         {move || push_state.get().label()}
                     </span>
                     <Show when=move || push_state.get().is_realtime() fallback=|| ()>
@@ -450,7 +450,7 @@ pub fn SyncHealthPage() -> impl IntoView {
 
                 <Show
                     when=move || status.get().pointer("/webhook/configured").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
-                    fallback=|| ().into_view()
+                    fallback=|| ().into_any()
                 >
                     <div class="spp-webhook-push__configured">
                         <span class="spp-webhook-push__label">"Registered webhooks:"</span>

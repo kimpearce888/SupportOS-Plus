@@ -320,7 +320,7 @@ body {
   background: var(--spp-bg-hover);
   text-decoration: none;
 }
-.spp-nav__link--active {
+.spp-nav__link--active, .spp-nav__link[aria-current="page"] {
   color: var(--spp-accent);
   background: var(--spp-accent-soft);
 }
@@ -913,7 +913,7 @@ body {
   color: var(--spp-accent-hover);
   text-decoration: underline;
 }
-.spp-tile__link--active {
+.spp-tile__link--active, .spp-tile__link[aria-current="page"] {
   color: var(--spp-accent-pressed);
   font-weight: 500;
 }

@@ -1,8 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 
@@ -1629,14 +1629,14 @@ impl SyncEngine {
                         }
                     }
                 }
-                if fresh > 0 {
-                    if let Some(bus) = &self.bus {
-                        use crate::events::ServerEvent;
-                        bus.emit(&ServerEvent::ratings_refreshed(
-                            ratings.len() as u32,
-                            fresh as u32,
-                        ));
-                    }
+                if fresh > 0
+                    && let Some(bus) = &self.bus
+                {
+                    use crate::events::ServerEvent;
+                    bus.emit(&ServerEvent::ratings_refreshed(
+                        ratings.len() as u32,
+                        fresh as u32,
+                    ));
                 }
                 Ok(ResourceSyncResult {
                     resource,
@@ -1889,11 +1889,9 @@ impl SyncEngine {
             let conn = self.lock();
             c.customer_id > 0 && local_id(&conn, "customers", c.customer_id).is_none()
         };
-        if need_customer {
-            if let Some(cust) = self.provider.get_customer(c.customer_id).await? {
-                let conn = self.lock();
-                mirror::upsert_customer(&conn, &cust)?;
-            }
+        if need_customer && let Some(cust) = self.provider.get_customer(c.customer_id).await? {
+            let conn = self.lock();
+            mirror::upsert_customer(&conn, &cust)?;
         }
         {
             let conn = self.lock();

@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use crate::toasts;
 
@@ -148,15 +149,15 @@ pub fn confidence_class(confidence: &str) -> &'static str {
 
 #[component]
 pub fn TranslationPanel(conversation_id: i64) -> impl IntoView {
-    let open = create_rw_signal(false);
-    let target = create_rw_signal("en".to_string());
-    let languages = create_rw_signal(Vec::<(String, String)>::new());
-    let summary = create_rw_signal(None::<ConversationLanguageSummary>);
-    let loading = create_rw_signal(false);
-    let draft = create_rw_signal(String::new());
-    let translated_draft = create_rw_signal(None::<TranslationResult>);
-    let active_message = create_rw_signal(None::<ActiveMessage>);
-    let translating = create_rw_signal(false);
+    let open = RwSignal::new(false);
+    let target = RwSignal::new("en".to_string());
+    let languages = RwSignal::new(Vec::<(String, String)>::new());
+    let summary = RwSignal::new(None::<ConversationLanguageSummary>);
+    let loading = RwSignal::new(false);
+    let draft = RwSignal::new(String::new());
+    let translated_draft = RwSignal::new(None::<TranslationResult>);
+    let active_message = RwSignal::new(None::<ActiveMessage>);
+    let translating = RwSignal::new(false);
 
     spawn_local(async move {
         if let Ok(r) = crate::api::get_json::<serde_json::Value>("/api/translation/meta").await {
@@ -181,7 +182,7 @@ pub fn TranslationPanel(conversation_id: i64) -> impl IntoView {
         }
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         if open.get() && summary.get_untracked().is_none() {
             loading.set(true);
             let summary = summary;
@@ -226,10 +227,10 @@ pub fn TranslationPanel(conversation_id: i64) -> impl IntoView {
                     let r = parse_translation_result(&v);
                     if r.purpose == "customer_inbound" {
                         active_message.update(|m| {
-                            if let Some(m) = m {
-                                if m.text == r.source_text {
-                                    m.translated = Some(r);
-                                }
+                            if let Some(m) = m
+                                && m.text == r.source_text
+                            {
+                                m.translated = Some(r);
                             }
                         });
                     } else if r.purpose == "agent_draft" {
@@ -296,9 +297,9 @@ pub fn TranslationPanel(conversation_id: i64) -> impl IntoView {
                                             <span class=format!("spp-badge {}", confidence_class(&s.primary.confidence))>
                                                 {badge}
                                             </span>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                 </div>
                                 <div class="spp-muted spp-text-xs">{s.notes.join(" ")}</div>
@@ -341,9 +342,9 @@ pub fn TranslationPanel(conversation_id: i64) -> impl IntoView {
                                                 })
                                                 .collect::<Vec<_>>()}
                                         </div>
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
-                                    ().into_view()
+                                    ().into_any()
                                 }}
                         </div>
                     }}}
@@ -370,9 +371,9 @@ pub fn TranslationPanel(conversation_id: i64) -> impl IntoView {
                                         }}
                                     </div>
                                     {if let Some(t) = &translated {
-                                        view! { <div class="spp-muted spp-text-xs">{t.note.clone()}</div> }.into_view()
+                                        view! { <div class="spp-muted spp-text-xs">{t.note.clone()}</div> }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                 </div>
                                 <div class="spp-translation-panel__row">

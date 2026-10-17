@@ -1,6 +1,6 @@
-use axum::extract::{Path, State};
 use axum::Json;
-use serde_json::{json, Value};
+use axum::extract::{Path, State};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 
@@ -658,7 +658,9 @@ pub async fn create_campaign(
         }
     }
     let Some(tree) = tree else {
-        return bad("A segment definition or saved segment is required (campaigns never target the whole address book by accident).");
+        return bad(
+            "A segment definition or saved segment is required (campaigns never target the whole address book by accident).",
+        );
     };
     const SNAPSHOT_LIMIT: i64 = 5000;
     let engine = crate::segment::SegmentEngine::new(&conn);
@@ -804,7 +806,7 @@ pub async fn render_route(State(state): State<AppState>, body: Option<Json<Value
                     "message": "customer_local_id is required."
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
     let conn = state.conn_lock();

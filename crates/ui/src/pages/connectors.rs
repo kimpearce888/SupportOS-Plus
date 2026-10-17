@@ -1,4 +1,4 @@
-use leptos::*;
+use leptos::prelude::*;
 use std::sync::Arc;
 
 use crate::components::overlays::ConfirmDialog;
@@ -6,20 +6,20 @@ use crate::components::state_view::{EmptyState, LoadingState};
 
 #[component]
 pub fn ConnectorsPage() -> impl IntoView {
-    let connectors = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let selected = create_rw_signal(None::<i64>);
-    let rows = create_rw_signal(Vec::<serde_json::Value>::new());
-    let rows_total = create_rw_signal(0i64);
-    let rows_loading = create_rw_signal(false);
-    let row_query = create_rw_signal(String::new());
-    let reload = create_rw_signal(0u32);
-    let rows_reload = create_rw_signal(0u32);
-    let create_open = create_rw_signal(false);
-    let confirm_delete = create_rw_signal(None::<serde_json::Value>);
+    let connectors = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let selected = RwSignal::new(None::<i64>);
+    let rows = RwSignal::new(Vec::<serde_json::Value>::new());
+    let rows_total = RwSignal::new(0i64);
+    let rows_loading = RwSignal::new(false);
+    let row_query = RwSignal::new(String::new());
+    let reload = RwSignal::new(0u32);
+    let rows_reload = RwSignal::new(0u32);
+    let create_open = RwSignal::new(false);
+    let confirm_delete = RwSignal::new(None::<serde_json::Value>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let connectors = connectors;
         let loading = loading;
@@ -43,7 +43,7 @@ pub fn ConnectorsPage() -> impl IntoView {
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = rows_reload.get();
         let selected_now = selected.get();
         let q = row_query.get();
@@ -278,9 +278,9 @@ pub fn ConnectorsPage() -> impl IntoView {
                                                 {if !enabled {
                                                     view! {
                                                         <span class="spp-badge spp-badge--warn" title="disabled">"disabled"</span>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                             </td>
                                             <td>
@@ -295,9 +295,9 @@ pub fn ConnectorsPage() -> impl IntoView {
                                                     let truncated: String = last_sync_error.chars().take(60).collect();
                                                     view! {
                                                         <div class="spp-text-xs spp-text-err" title=last_sync_error.clone()>{truncated}</div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                             </td>
                                             <td><span class="spp-badge">{row_count.to_string()}</span></td>
@@ -327,9 +327,9 @@ pub fn ConnectorsPage() -> impl IntoView {
                                                         <span class="spp-text-muted">
                                                             {format!(" · every {}m", (refresh_seconds / 60).max(1))}
                                                         </span>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                             </td>
                                             <td>
@@ -376,7 +376,7 @@ pub fn ConnectorsPage() -> impl IntoView {
 
                 {move || {
                     let Some(active_row) = active() else {
-                        return ().into_view();
+                        return ().into_any();
                     };
                     let name = str_field(&active_row, "name");
                     let row_count = active_row.get("row_count").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -432,9 +432,9 @@ pub fn ConnectorsPage() -> impl IntoView {
                             {if !schema_line.is_empty() {
                                 view! {
                                     <p class="spp-text-xs spp-text-muted">{format!("Inferred schema: {schema_line}")}</p>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                             <Show when=move || rows_loading_view.get() fallback=|| ()>
                                 <LoadingState />
@@ -494,19 +494,19 @@ pub fn ConnectorsPage() -> impl IntoView {
                                     <p class="spp-text-xs spp-text-muted">
                                         {format!("Auth material ({auth_mode}) is stored locally only and always redacted in API responses.")}
                                     </p>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                         </div>
-                    }.into_view()
+                    }.into_any()
                 }}
             </Show>
 
             <Show when=move || create_open.get() fallback=|| ()>
                 <ConnectorCreateModal
-                    on_close=std::rc::Rc::new(move || create_open.set(false))
-                    on_saved=std::rc::Rc::new(move || {
+                    on_close=std::sync::Arc::new(move || create_open.set(false))
+                    on_saved=std::sync::Arc::new(move || {
                         create_open.set(false);
                         reload.update(|n| *n = n.wrapping_add(1));
                     })
@@ -530,9 +530,9 @@ pub fn ConnectorsPage() -> impl IntoView {
                             on_confirm
                             on_cancel
                         />
-                    }.into_view()
+                    }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
         </div>
@@ -541,23 +541,23 @@ pub fn ConnectorsPage() -> impl IntoView {
 
 #[component]
 fn ConnectorCreateModal(
-    on_close: std::rc::Rc<dyn Fn()>,
-    on_saved: std::rc::Rc<dyn Fn()>,
+    on_close: std::sync::Arc<dyn Fn() + Send + Sync>,
+    on_saved: std::sync::Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
-    let name = create_rw_signal(String::new());
-    let kind = create_rw_signal("local_json".to_string());
-    let file = create_rw_signal(String::new());
-    let url = create_rw_signal(String::new());
-    let table = create_rw_signal(String::new());
-    let key_column = create_rw_signal(String::new());
-    let auth_mode = create_rw_signal("none".to_string());
-    let header_name = create_rw_signal(String::new());
-    let header_value = create_rw_signal(String::new());
-    let bearer_token = create_rw_signal(String::new());
-    let refresh_method = create_rw_signal("manual".to_string());
-    let refresh_seconds = create_rw_signal(3600i64);
-    let allowed_ai = create_rw_signal(false);
-    let submitting = create_rw_signal(false);
+    let name = RwSignal::new(String::new());
+    let kind = RwSignal::new("local_json".to_string());
+    let file = RwSignal::new(String::new());
+    let url = RwSignal::new(String::new());
+    let table = RwSignal::new(String::new());
+    let key_column = RwSignal::new(String::new());
+    let auth_mode = RwSignal::new("none".to_string());
+    let header_name = RwSignal::new(String::new());
+    let header_value = RwSignal::new(String::new());
+    let bearer_token = RwSignal::new(String::new());
+    let refresh_method = RwSignal::new("manual".to_string());
+    let refresh_seconds = RwSignal::new(3600i64);
+    let allowed_ai = RwSignal::new(false);
+    let submitting = RwSignal::new(false);
 
     let can_submit = move || {
         !name.get().trim().is_empty()
@@ -606,7 +606,7 @@ fn ConnectorCreateModal(
             "refreshSeconds": refresh_seconds.get(),
             "allowedAi": allowed_ai.get(),
         });
-        let on_saved = std::rc::Rc::clone(&on_saved);
+        let on_saved = std::sync::Arc::clone(&on_saved);
         wasm_bindgen_futures::spawn_local(async move {
             match crate::api::post_json::<serde_json::Value>("/api/connectors", Some(&payload))
                 .await
@@ -623,10 +623,9 @@ fn ConnectorCreateModal(
                             let path = format!("/api/connectors/{id}/refresh");
                             if let Ok(rr) =
                                 crate::api::post_json::<serde_json::Value>(&path, None).await
+                                && rr.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)
                             {
-                                if rr.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-                                    crate::toasts::success("First refresh completed.");
-                                }
+                                crate::toasts::success("First refresh completed.");
                             }
                         }
                         on_saved();

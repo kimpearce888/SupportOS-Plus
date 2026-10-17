@@ -1,5 +1,5 @@
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 pub const INCIDENT_STATUSES: [&str; 5] = [
     "investigating",

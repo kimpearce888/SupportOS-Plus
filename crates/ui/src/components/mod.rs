@@ -25,7 +25,7 @@ pub use builder_tab::BuilderTab;
 pub use button::Button;
 pub use coaching_panel::CoachingPanel;
 pub use command_palette::CommandPalette;
-pub use condition_editor::{describe_condition, ConditionEditor};
+pub use condition_editor::{ConditionEditor, describe_condition};
 pub use copilot_panel::CopilotPanel;
 pub use effectiveness_tab::EffectivenessTab;
 pub use friction_tab::FrictionTab;
@@ -38,7 +38,7 @@ pub use qa_panel::QaPanel;
 pub use safe_html::SafeHtml;
 pub use side_threads::SideThreadsPanel;
 pub use state_view::{
-    format_relative_time, AppErrorBoundary, EmptyState, ErrorState, KeyboardRow, LoadingState,
-    RelativeTime, StateView, ViewState,
+    AppErrorBoundary, EmptyState, ErrorState, KeyboardRow, LoadingState, RelativeTime, StateView,
+    ViewState, format_relative_time,
 };
 pub use translation_panel::TranslationPanel;

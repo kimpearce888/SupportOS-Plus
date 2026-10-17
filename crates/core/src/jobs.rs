@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
 
@@ -323,14 +323,14 @@ pub fn retry_job(conn: &Connection, id: i64, patch: Option<&str>) -> Result<Opti
         )?;
         return Ok(if any { Some(false) } else { None });
     };
-    if let Some(patch_json) = patch {
-        if let Some(existing_payload) = payload.as_deref() {
-            let merged = merge_payloads(existing_payload, patch_json);
-            conn.execute(
-                "UPDATE jobs SET payload = ?1 WHERE id = ?2",
-                params![merged, id],
-            )?;
-        }
+    if let Some(patch_json) = patch
+        && let Some(existing_payload) = payload.as_deref()
+    {
+        let merged = merge_payloads(existing_payload, patch_json);
+        conn.execute(
+            "UPDATE jobs SET payload = ?1 WHERE id = ?2",
+            params![merged, id],
+        )?;
     }
     let rows = conn.execute(
         "UPDATE jobs SET status = 'queued', attempt = 0, error = NULL, run_at = datetime('now')

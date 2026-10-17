@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::NotificationType;
@@ -312,10 +312,9 @@ pub fn list(conn: &Connection, opts: &ListOptions<'_>) -> Result<NotificationLis
              FROM notifications n WHERE {where_sql}
              ORDER BY n.created_at DESC, n.id DESC LIMIT ?2 OFFSET ?3"
         ))?;
-        let mapped = stmt
-            .query_map(params![me, limit, offset], row_to_notification)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map(params![me, limit, offset], row_to_notification)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let total: i64 = conn.query_row(
         &format!("SELECT COUNT(*) FROM notifications n WHERE {where_sql}"),

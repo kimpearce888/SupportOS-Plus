@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use super::super::server::AppState;
@@ -332,11 +332,7 @@ fn js_number_or(params: &HashMap<String, String>, key: &str, default: f64) -> f6
         None => default,
         Some(raw) => {
             let n = crate::conversation_ops::js_number(raw).unwrap_or(f64::NAN);
-            if n == 0.0 || n.is_nan() {
-                default
-            } else {
-                n
-            }
+            if n == 0.0 || n.is_nan() { default } else { n }
         }
     }
 }

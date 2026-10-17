@@ -1,23 +1,23 @@
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::hooks::*;
 
 use crate::components::command_palette::{
-    move_selection, response_is_current, take_hits, PaletteHit, DEBOUNCE_MS,
+    DEBOUNCE_MS, PaletteHit, move_selection, response_is_current, take_hits,
 };
 
 #[component]
 pub fn CommandPalettePage() -> impl IntoView {
-    let query = create_rw_signal(String::new());
-    let hits = create_rw_signal(Vec::<PaletteHit>::new());
-    let selected = create_rw_signal(0usize);
-    let searching = create_rw_signal(false);
-    let generation = create_rw_signal(0u64);
+    let query = RwSignal::new(String::new());
+    let hits = RwSignal::new(Vec::<PaletteHit>::new());
+    let selected = RwSignal::new(0usize);
+    let searching = RwSignal::new(false);
+    let generation = RwSignal::new(0u64);
     let navigate = use_navigate();
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let q = query.get();
-        let gen = generation.get() + 1;
-        generation.set(gen);
+        let req_id = generation.get() + 1;
+        generation.set(req_id);
         if q.trim().is_empty() {
             hits.set(Vec::new());
             selected.set(0);
@@ -27,7 +27,7 @@ pub fn CommandPalettePage() -> impl IntoView {
         searching.set(true);
         set_timeout(
             move || {
-                if !response_is_current(gen, generation.get_untracked()) {
+                if !response_is_current(req_id, generation.get_untracked()) {
                     return;
                 }
                 wasm_bindgen_futures::spawn_local(async move {
@@ -35,7 +35,7 @@ pub fn CommandPalettePage() -> impl IntoView {
                     let result =
                         crate::api::post_json::<serde_json::Value>("/api/search", Some(&body))
                             .await;
-                    if !response_is_current(gen, generation.get_untracked()) {
+                    if !response_is_current(req_id, generation.get_untracked()) {
                         return;
                     }
                     match result {
@@ -62,10 +62,10 @@ pub fn CommandPalettePage() -> impl IntoView {
     let go = {
         let navigate = navigate.clone();
         move |hit: Option<PaletteHit>| {
-            if let Some(hit) = hit {
-                if !hit.href.is_empty() {
-                    navigate(&hit.href, Default::default());
-                }
+            if let Some(hit) = hit
+                && !hit.href.is_empty()
+            {
+                navigate(&hit.href, Default::default());
             }
         }
     };
@@ -135,9 +135,9 @@ pub fn CommandPalettePage() -> impl IntoView {
                                     {if !snippet.is_empty() {
                                         view! {
                                             <span class="spp-command-palette__desc">{snippet}</span>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                 </li>
                             }

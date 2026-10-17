@@ -1,5 +1,5 @@
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 const IMPACT_NOTE: &str = "Customer and organization counts are distinct entities, never ticket counts. Products come from the local AI attribute layer (empty until conversations are analyzed). Release entries describe temporal associations only.";
 

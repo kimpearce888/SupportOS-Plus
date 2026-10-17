@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::Result;
 

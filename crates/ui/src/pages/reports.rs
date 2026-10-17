@@ -1,4 +1,4 @@
-use leptos::*;
+use leptos::prelude::*;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 use crate::components::{BuilderTab, EffectivenessTab, FrictionTab};
@@ -19,7 +19,7 @@ pub enum ReportsTab {
 
 #[component]
 pub fn ReportsPage() -> impl IntoView {
-    let tab = create_rw_signal(ReportsTab::Overview);
+    let tab = RwSignal::new(ReportsTab::Overview);
 
     view! {
         <div class="spp-page spp-page--reports">
@@ -221,11 +221,11 @@ pub fn parse_overview(v: &serde_json::Value) -> OverviewFacts {
 
 #[component]
 fn OverviewTab() -> impl IntoView {
-    let facts = create_rw_signal(None::<OverviewFacts>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let facts = RwSignal::new(None::<OverviewFacts>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let facts = facts;
         let loading = loading;
         let error_msg = error_msg;
@@ -261,10 +261,10 @@ fn OverviewTab() -> impl IntoView {
                 {move || {
                     let f = facts.clone().get();
                     if loading.get() {
-                        return ().into_view();
+                        return ().into_any();
                     }
                     let Some(f) = f else {
-                        return ().into_view();
+                        return ().into_any();
                     };
                     view! {
                         <div class="spp-flex spp-flex--col spp-gap-4">
@@ -293,7 +293,7 @@ fn OverviewTab() -> impl IntoView {
                         <p class="spp-muted spp-text-xs spp-mt-8">
                             "All numbers are local calculations over the mirror (last 30 days)."
                         </p>
-                    }.into_view()
+                    }.into_any()
                 }}
             </div>
             <div class="spp-card">
@@ -429,14 +429,14 @@ pub fn parse_sla_report(v: &serde_json::Value) -> (Vec<SlaMailboxView>, Vec<Stri
 
 #[component]
 fn SlaTab() -> impl IntoView {
-    let days = create_rw_signal(30u32);
-    let rows = create_rw_signal(Vec::<SlaMailboxView>::new());
-    let unconfigured = create_rw_signal(Vec::<String>::new());
-    let range = create_rw_signal(String::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let days = RwSignal::new(30u32);
+    let rows = RwSignal::new(Vec::<SlaMailboxView>::new());
+    let unconfigured = RwSignal::new(Vec::<String>::new());
+    let range = RwSignal::new(String::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let days = days.get();
         let rows = rows;
         let unconfigured = unconfigured;
@@ -539,13 +539,13 @@ fn SlaTab() -> impl IntoView {
                                                             <div class="spp-muted spp-text-xs">
                                                                 {m.schedule.clone()}
                                                             </div>
-                                                        }.into_view()
+                                                        }.into_any()
                                                     } else {
                                                         view! {
                                                             <div class="spp-muted spp-text-xs">
                                                                 "no business hours configured"
                                                             </div>
-                                                        }.into_view()
+                                                        }.into_any()
                                                     }}
                                                 </td>
                                                 <td>{m.conversations_in_range.to_string()}</td>
@@ -566,9 +566,9 @@ fn SlaTab() -> impl IntoView {
                                                             <span class="spp-badge spp-badge--warn">
                                                                 {format!("{} missed", m.first_response.missed)}
                                                             </span>
-                                                        }.into_view()
+                                                        }.into_any()
                                                     } else {
-                                                        ().into_view()
+                                                        ().into_any()
                                                     }}
                                                 </td>
                                                 <td class="spp-table__cell-muted">
@@ -584,9 +584,9 @@ fn SlaTab() -> impl IntoView {
                                                             <span class="spp-badge">
                                                                 {format!("{} no-target", m.resolution.no_target)}
                                                             </span>
-                                                        }.into_view()
+                                                        }.into_any()
                                                     } else {
-                                                        ().into_view()
+                                                        ().into_any()
                                                     }}
                                                 </td>
                                                 <td class="spp-table__cell-muted">
@@ -615,13 +615,13 @@ fn SlaTab() -> impl IntoView {
 
 #[component]
 fn WhyContactingTab() -> impl IntoView {
-    let days = create_rw_signal(30u32);
-    let categories = create_rw_signal(Vec::<serde_json::Value>::new());
-    let questions = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let days = RwSignal::new(30u32);
+    let categories = RwSignal::new(Vec::<serde_json::Value>::new());
+    let questions = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let days = days.get();
         let categories = categories;
         let questions = questions;
@@ -782,11 +782,11 @@ fn WhyContactingTab() -> impl IntoView {
 
 #[component]
 fn IntelligenceTab() -> impl IntoView {
-    let alerts = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let alerts = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = crate::queries::version("dashboard").get();
         let alerts = alerts;
         let loading = loading;
@@ -885,14 +885,14 @@ const HS_KEYS: [(&str, &str); 4] = [
 
 #[component]
 fn HelpScoutTab() -> impl IntoView {
-    let key = create_rw_signal("company");
-    let days = create_rw_signal(30u32);
-    let report = create_rw_signal(serde_json::json!({}));
-    let note = create_rw_signal(String::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let key = RwSignal::new("company");
+    let days = RwSignal::new(30u32);
+    let report = RwSignal::new(serde_json::json!({}));
+    let note = RwSignal::new(String::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let key = key.get();
         let days = days.get();
         let report = report;
@@ -1006,11 +1006,11 @@ fn HelpScoutTab() -> impl IntoView {
 
 #[component]
 fn DefinitionsTab() -> impl IntoView {
-    let definitions = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let definitions = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let definitions = definitions;
         let loading = loading;
         let error_msg = error_msg;
@@ -1079,9 +1079,9 @@ fn DefinitionsTab() -> impl IntoView {
                                                     {if !description.is_empty() {
                                                         view! {
                                                             <div class="spp-muted spp-text-xs">{description}</div>
-                                                        }.into_view()
+                                                        }.into_any()
                                                     } else {
-                                                        ().into_view()
+                                                        ().into_any()
                                                     }}
                                                 </td>
                                                 <td class="spp-table__cell-muted">{formula}</td>
@@ -1102,18 +1102,18 @@ fn DefinitionsTab() -> impl IntoView {
 
 #[component]
 fn ReleasesTab() -> impl IntoView {
-    let releases = create_rw_signal(Vec::<serde_json::Value>::new());
-    let note = create_rw_signal(String::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let name = create_rw_signal(String::new());
-    let version = create_rw_signal(String::new());
-    let occurred_at = create_rw_signal(String::new());
-    let notes = create_rw_signal(String::new());
-    let submitting = create_rw_signal(false);
+    let releases = RwSignal::new(Vec::<serde_json::Value>::new());
+    let note = RwSignal::new(String::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let name = RwSignal::new(String::new());
+    let version = RwSignal::new(String::new());
+    let occurred_at = RwSignal::new(String::new());
+    let notes = RwSignal::new(String::new());
+    let submitting = RwSignal::new(false);
 
-    let reload = create_rw_signal(0u32);
-    create_effect(move |_| {
+    let reload = RwSignal::new(0u32);
+    Effect::new(move |_| {
         let _ = reload.get();
         loading.set(true);
         error_msg.set(None);
@@ -1238,9 +1238,9 @@ fn ReleasesTab() -> impl IntoView {
                                                             <span class="spp-badge spp-badge--warn">
                                                                 {format!("+{}", after - before)}
                                                             </span>
-                                                        }.into_view()
+                                                        }.into_any()
                                                     } else {
-                                                        ().into_view()
+                                                        ().into_any()
                                                     }}
                                                 </td>
                                             </tr>

@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension, ToSql};
+use rusqlite::{Connection, OptionalExtension, ToSql, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -394,12 +394,13 @@ pub fn search_conversations(
         args.push(Box::new(assignee));
     }
     let trimmed = query.trim();
-    if !trimmed.is_empty() && trimmed.chars().all(|c| c.is_ascii_digit()) {
-        if let Ok(num) = trimmed.parse::<i64>() {
-            let idx = args.len() + 1;
-            where_sql.push(format!("c.number = ?{idx}"));
-            args.push(Box::new(num));
-        }
+    if !trimmed.is_empty()
+        && trimmed.chars().all(|c| c.is_ascii_digit())
+        && let Ok(num) = trimmed.parse::<i64>()
+    {
+        let idx = args.len() + 1;
+        where_sql.push(format!("c.number = ?{idx}"));
+        args.push(Box::new(num));
     }
 
     let mut join_fts = String::new();
@@ -871,13 +872,13 @@ pub fn index_thread_fts(conn: &Connection, thread_local_id: i64) -> Result<()> {
             flag = Some(0);
         }
     }
-    if let Some(flag) = flag {
-        if column_exists(conn, "conversation_threads", "fts_indexed")? {
-            conn.execute(
-                "UPDATE conversation_threads SET fts_indexed = ?1 WHERE id = ?2",
-                params![flag, thread_local_id],
-            )?;
-        }
+    if let Some(flag) = flag
+        && column_exists(conn, "conversation_threads", "fts_indexed")?
+    {
+        conn.execute(
+            "UPDATE conversation_threads SET fts_indexed = ?1 WHERE id = ?2",
+            params![flag, thread_local_id],
+        )?;
     }
     Ok(())
 }
@@ -1035,10 +1036,9 @@ fn rebuild_indexes_tx(conn: &Connection) -> Result<usize> {
 
     let conv_ids: Vec<i64> = {
         let mut stmt = conn.prepare("SELECT id FROM conversations WHERE deleted_at IS NULL")?;
-        let rows = stmt
-            .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for id in &conv_ids {
         index_conversation_fts(conn, *id)?;
@@ -1140,10 +1140,9 @@ fn rebuild_custom_objects_fts(conn: &Connection) -> Result<()> {
                JOIN custom_object_types t ON t.id = o.type_id
               WHERE o.deleted_at IS NULL",
         )?;
-        let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for (id, title, data_json) in rows {
         let search_text = build_custom_object_search_text(&title, data_json.as_deref());
@@ -1157,15 +1156,15 @@ fn rebuild_custom_objects_fts(conn: &Connection) -> Result<()> {
 
 fn build_custom_object_search_text(title: &str, data_json: Option<&str>) -> String {
     let mut parts = vec![title.to_string()];
-    if let Some(json) = data_json {
-        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(json) {
-            for value in map.values() {
-                match value {
-                    serde_json::Value::String(s) => parts.push(s.clone()),
-                    serde_json::Value::Number(n) => parts.push(n.to_string()),
-                    serde_json::Value::Bool(b) => parts.push(b.to_string()),
-                    _ => {}
-                }
+    if let Some(json) = data_json
+        && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(json)
+    {
+        for value in map.values() {
+            match value {
+                serde_json::Value::String(s) => parts.push(s.clone()),
+                serde_json::Value::Number(n) => parts.push(n.to_string()),
+                serde_json::Value::Bool(b) => parts.push(b.to_string()),
+                _ => {}
             }
         }
     }

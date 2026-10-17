@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use super::mention_textarea::MentionTextarea;
 
@@ -148,11 +149,11 @@ pub fn split_mention_segments(body: &str, known: &[String]) -> Vec<(String, bool
 
 #[component]
 pub fn SideThreadsPanel(conversation_id: i64) -> impl IntoView {
-    let threads = create_rw_signal(Vec::<SideThreadSummary>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let creating = create_rw_signal(false);
-    let open_thread_id = create_rw_signal(None::<i64>);
+    let threads = RwSignal::new(Vec::<SideThreadSummary>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let creating = RwSignal::new(false);
+    let open_thread_id = RwSignal::new(None::<i64>);
 
     let load = {
         move || {
@@ -256,14 +257,14 @@ pub fn SideThreadsPanel(conversation_id: i64) -> impl IntoView {
                                     >
                                         <span class="spp-side-thread-row__title">{title.clone()}</span>
                                         {if let Some(team) = &t.team_name {
-                                            view! { <span class="spp-badge spp-badge--tag">{team.clone()}</span> }.into_view()
+                                            view! { <span class="spp-badge spp-badge--tag">{team.clone()}</span> }.into_any()
                                         } else {
-                                            ().into_view()
+                                            ().into_any()
                                         }}
                                         {if t.status == "resolved" {
-                                            view! { <span class="spp-badge spp-badge--ok">"resolved"</span> }.into_view()
+                                            view! { <span class="spp-badge spp-badge--ok">"resolved"</span> }.into_any()
                                         } else {
-                                            ().into_view()
+                                            ().into_any()
                                         }}
                                         <span class="spp-muted spp-text-xs">{count_label.clone()}</span>
                                         <span class="spp-muted spp-text-xs">{updated.clone()}</span>
@@ -277,8 +278,8 @@ pub fn SideThreadsPanel(conversation_id: i64) -> impl IntoView {
 
             {move || {
                 match open_thread_id.get() {
-                    Some(tid) => view! { <SideThreadDetail thread_id=tid on_change=load /> }.into_view(),
-                    None => ().into_view(),
+                    Some(tid) => view! { <SideThreadDetail thread_id=tid on_change=load /> }.into_any(),
+                    None => ().into_any(),
                 }
             }}
         </div>
@@ -288,13 +289,13 @@ pub fn SideThreadsPanel(conversation_id: i64) -> impl IntoView {
 #[component]
 fn CreateThreadForm(conversation_id: i64, on_done: impl Fn() + 'static) -> impl IntoView {
     let directory = super::mention::use_mention_directory();
-    let title = create_rw_signal(String::new());
-    let team = create_rw_signal(String::new());
-    let participants = create_rw_signal(Vec::<i64>::new());
-    let first_message = create_rw_signal(String::new());
-    let saving = create_rw_signal(false);
-    let on_done = std::rc::Rc::new(on_done);
-    let on_done_for_create = std::rc::Rc::clone(&on_done);
+    let title = RwSignal::new(String::new());
+    let team = RwSignal::new(String::new());
+    let participants = RwSignal::new(Vec::<i64>::new());
+    let first_message = RwSignal::new(String::new());
+    let saving = RwSignal::new(false);
+    let on_done = std::sync::Arc::new(on_done);
+    let on_done_for_create = std::sync::Arc::clone(&on_done);
 
     let create = move || {
         let t = title.get_untracked().trim().to_string();
@@ -314,7 +315,7 @@ fn CreateThreadForm(conversation_id: i64, on_done: impl Fn() + 'static) -> impl 
             },
         });
         let saving = saving;
-        let on_done_for_create = std::rc::Rc::clone(&on_done_for_create);
+        let on_done_for_create = std::sync::Arc::clone(&on_done_for_create);
         spawn_local(async move {
             if crate::api::post_json::<serde_json::Value>(
                 &format!("/api/conversations/{conversation_id}/side-threads"),
@@ -414,12 +415,15 @@ fn CreateThreadForm(conversation_id: i64, on_done: impl Fn() + 'static) -> impl 
 }
 
 #[component]
-fn SideThreadDetail(thread_id: i64, on_change: impl Fn() + 'static + Copy) -> impl IntoView {
-    let detail = create_rw_signal(None::<SideThreadDetail>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let body = create_rw_signal(String::new());
-    let participants_open = create_rw_signal(false);
+fn SideThreadDetail(
+    thread_id: i64,
+    on_change: impl Fn() + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    let detail = RwSignal::new(None::<SideThreadDetail>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let body = RwSignal::new(String::new());
+    let participants_open = RwSignal::new(false);
     let directory = super::mention::use_mention_directory();
 
     let load = {
@@ -528,9 +532,9 @@ fn SideThreadDetail(thread_id: i64, on_change: impl Fn() + 'static + Copy) -> im
                                 <div class="spp-side-thread-detail__id">
                                     <strong>{t.title.clone()}</strong>
                                     {if let Some(team) = &t.team_name {
-                                        view! { <span class="spp-badge spp-badge--tag">{team.clone()}</span> }.into_view()
+                                        view! { <span class="spp-badge spp-badge--tag">{team.clone()}</span> }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                     <span class=format!(
                                         "spp-badge {}",
@@ -551,13 +555,13 @@ fn SideThreadDetail(thread_id: i64, on_change: impl Fn() + 'static + Copy) -> im
                                             <button class="spp-button spp-button--small" on:click=move |_| set_status("resolved")>
                                                 "Resolve"
                                             </button>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
                                         view! {
                                             <button class="spp-button spp-button--small" on:click=move |_| set_status("open")>
                                                 "Reopen"
                                             </button>
-                                        }.into_view()
+                                        }.into_any()
                                     }}
                                 </div>
                             </div>
@@ -591,7 +595,7 @@ fn SideThreadDetail(thread_id: i64, on_change: impl Fn() + 'static + Copy) -> im
                                         <div class="spp-state spp-state--empty">
                                             <p class="spp-state__title">"No messages yet"</p>
                                         </div>
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
                                     t.messages
                                         .iter()
@@ -615,9 +619,9 @@ fn SideThreadDetail(thread_id: i64, on_change: impl Fn() + 'static + Copy) -> im
                                                             .into_iter()
                                                             .map(|(text, is_mention)| {
                                                                 if is_mention {
-                                                                    view! { <span class="spp-mention-token">{text}</span> }.into_view()
+                                                                    view! { <span class="spp-mention-token">{text}</span> }.into_any()
                                                                 } else {
-                                                                    view! { <span>{text}</span> }.into_view()
+                                                                    view! { <span>{text}</span> }.into_any()
                                                                 }
                                                             })
                                                             .collect::<Vec<_>>()}
@@ -626,7 +630,7 @@ fn SideThreadDetail(thread_id: i64, on_change: impl Fn() + 'static + Copy) -> im
                                             }
                                         })
                                         .collect::<Vec<_>>()
-                                        .into_view()
+                                        .into_any()
                                 }}
                             </div>
                             {if t.status == "open" {
@@ -645,13 +649,13 @@ fn SideThreadDetail(thread_id: i64, on_change: impl Fn() + 'static + Copy) -> im
                                             "Send"
                                         </button>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
-                        }.into_view()
+                        }.into_any()
                     }
-                    None => ().into_view(),
+                    None => ().into_any(),
                 }
             }}
         </div>

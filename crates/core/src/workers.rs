@@ -593,12 +593,11 @@ impl WorkerManager {
                     }
                 }
                 "sync_customer" => {
-                    if let Some(remote) = num("remoteId") {
-                        if let Some(customer) = self.provider.get_customer(remote).await? {
+                    if let Some(remote) = num("remoteId")
+                        && let Some(customer) = self.provider.get_customer(remote).await? {
                             let conn = self.lock();
                             crate::sync::upsert_customer(&conn, &customer)?;
                         }
-                    }
                 }
                 "delete_customer" => {
                     if let Some(remote) = num("remoteId") {
@@ -630,8 +629,8 @@ impl WorkerManager {
                 "sync_conversation_ratings" => {
                     let rating_id = num("ratingId");
                     let conv_remote = num("conversationId").or_else(|| num("remoteId"));
-                    if let Some(rating_id) = rating_id {
-                        if let Ok(Some(r)) = self.provider.get_rating(rating_id).await {
+                    if let Some(rating_id) = rating_id
+                        && let Ok(Some(r)) = self.provider.get_rating(rating_id).await {
                             let (inserted, conv_local, conv_number, customer_local) = {
                                 let conn = self.lock();
                                 let conv_local = r
@@ -670,7 +669,6 @@ impl WorkerManager {
                                 );
                             }
                         }
-                    }
                     if let Some(conv_remote) = conv_remote {
                         self.run_engine(|e| async move {
                             e.sync_single_conversation(conv_remote).await.map(|_| ())
@@ -1384,13 +1382,13 @@ impl WorkerManager {
                             )?;
                         }
                     }
-                    if action == "assign" {
-                        if let Some(local) = assignee_local {
-                            tx.execute(
-                                "UPDATE conversations SET assignee_local_id = ?1 WHERE id = ?2",
-                                rusqlite::params![local, conv_id],
-                            )?;
-                        }
+                    if action == "assign"
+                        && let Some(local) = assignee_local
+                    {
+                        tx.execute(
+                            "UPDATE conversations SET assignee_local_id = ?1 WHERE id = ?2",
+                            rusqlite::params![local, conv_id],
+                        )?;
                     }
                     if action == "unassign" {
                         tx.execute(

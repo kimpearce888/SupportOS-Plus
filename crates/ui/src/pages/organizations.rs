@@ -1,21 +1,21 @@
-use leptos::*;
-use leptos_router::A;
+use leptos::prelude::*;
+use leptos_router::components::A;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
 #[component]
 pub fn OrganizationsPage() -> impl IntoView {
-    let organizations = create_rw_signal(Vec::<serde_json::Value>::new());
-    let total = create_rw_signal(0i64);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let query = create_rw_signal(String::new());
-    let creating = create_rw_signal(false);
-    let reload = create_rw_signal(0u32);
-    let page = create_rw_signal(0u32);
+    let organizations = RwSignal::new(Vec::<serde_json::Value>::new());
+    let total = RwSignal::new(0i64);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let query = RwSignal::new(String::new());
+    let creating = RwSignal::new(false);
+    let reload = RwSignal::new(0u32);
+    let page = RwSignal::new(0u32);
     let per_page: u32 = 25;
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let p = page.get();
         let organizations = organizations;
@@ -140,7 +140,7 @@ pub fn OrganizationsPage() -> impl IntoView {
                                         view! {
                                             <tr class="spp-table__row--clickable">
                                                 <td>
-                                                    <A href=href class="spp-table__link">
+                                                    <A href=href attr:class="spp-table__link">
                                                         {name}
                                                     </A>
                                                 </td>
@@ -190,8 +190,8 @@ pub fn OrganizationsPage() -> impl IntoView {
             <Show when=move || creating.get() fallback=|| ()>
                 <EditOrganizationModal
                     organization=None
-                    on_close=std::rc::Rc::new(move || creating.set(false))
-                    on_saved=std::rc::Rc::new(move || {
+                    on_close=std::sync::Arc::new(move || creating.set(false))
+                    on_saved=std::sync::Arc::new(move || {
                         creating.set(false);
                         reload.set(reload.get_untracked() + 1);
                     })
@@ -203,15 +203,15 @@ pub fn OrganizationsPage() -> impl IntoView {
 
 #[component]
 pub fn OrganizationDetailPage(organization_id: i64) -> impl IntoView {
-    let organization = create_rw_signal(None::<serde_json::Value>);
-    let health = create_rw_signal(None::<serde_json::Value>);
-    let timeline = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let editing = create_rw_signal(false);
-    let reload = create_rw_signal(0u32);
+    let organization = RwSignal::new(None::<serde_json::Value>);
+    let health = RwSignal::new(None::<serde_json::Value>);
+    let timeline = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let editing = RwSignal::new(false);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let organization = organization;
         let health = health;
@@ -258,7 +258,7 @@ pub fn OrganizationDetailPage(organization_id: i64) -> impl IntoView {
                     >
                         "Edit"
                     </button>
-                    <A href="/organizations" class="spp-button spp-button--ghost spp-button--small">
+                    <A href="/organizations" attr:class="spp-button spp-button--ghost spp-button--small">
                         "← All organizations"
                     </A>
                 </div>
@@ -408,7 +408,7 @@ pub fn OrganizationDetailPage(organization_id: i64) -> impl IntoView {
                                                     view! {
                                                         <tr>
                                                             <td>
-                                                                <A href=href class="spp-table__link">{member_name}</A>
+                                                                <A href=href attr:class="spp-table__link">{member_name}</A>
                                                             </td>
                                                             <td class="spp-table__cell-muted">{email}</td>
                                                             <td><span class="spp-badge">{convs}</span></td>
@@ -448,9 +448,9 @@ pub fn OrganizationDetailPage(organization_id: i64) -> impl IntoView {
                                                         {if !title.is_empty() {
                                                             view! {
                                                                 <div class="spp-timeline-entry__body">{title.clone()}</div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
-                                                            ().into_view()
+                                                            ().into_any()
                                                         }}
                                                     </div>
                                                 }
@@ -467,8 +467,8 @@ pub fn OrganizationDetailPage(organization_id: i64) -> impl IntoView {
             <Show when=move || editing.get() fallback=|| ()>
                 <EditOrganizationModal
                     organization=organization.get_untracked()
-                    on_close=std::rc::Rc::new(move || editing.set(false))
-                    on_saved=std::rc::Rc::new(move || {
+                    on_close=std::sync::Arc::new(move || editing.set(false))
+                    on_saved=std::sync::Arc::new(move || {
                         editing.set(false);
                         reload.set(reload.get_untracked() + 1);
                     })
@@ -481,19 +481,19 @@ pub fn OrganizationDetailPage(organization_id: i64) -> impl IntoView {
 #[component]
 fn EditOrganizationModal(
     organization: Option<serde_json::Value>,
-    on_close: std::rc::Rc<dyn Fn()>,
-    on_saved: std::rc::Rc<dyn Fn()>,
+    on_close: std::sync::Arc<dyn Fn() + Send + Sync>,
+    on_saved: std::sync::Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let existing = organization.unwrap_or_default();
     let editing_id = existing.get("id").and_then(|v| v.as_i64());
-    let name = create_rw_signal(
+    let name = RwSignal::new(
         existing
             .get("name")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
     );
-    let domains_text = create_rw_signal(
+    let domains_text = RwSignal::new(
         existing
             .get("domains")
             .and_then(|v| v.as_array())
@@ -505,7 +505,7 @@ fn EditOrganizationModal(
             })
             .unwrap_or_default(),
     );
-    let submitting = create_rw_signal(false);
+    let submitting = RwSignal::new(false);
 
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
@@ -524,7 +524,7 @@ fn EditOrganizationModal(
             .map(|d| d.to_string())
             .collect();
         submitting.set(true);
-        let on_saved = std::rc::Rc::clone(&on_saved);
+        let on_saved = std::sync::Arc::clone(&on_saved);
         wasm_bindgen_futures::spawn_local(async move {
             let result = match editing_id {
                 Some(id) => {
@@ -622,8 +622,8 @@ fn EditOrganizationModal(
 }
 
 fn filtered_organizations(
-    organizations: leptos::RwSignal<Vec<serde_json::Value>>,
-    query: leptos::RwSignal<String>,
+    organizations: leptos::prelude::RwSignal<Vec<serde_json::Value>>,
+    query: leptos::prelude::RwSignal<String>,
 ) -> Vec<serde_json::Value> {
     let needle = query.get().to_lowercase();
     organizations

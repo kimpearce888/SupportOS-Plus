@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use regex::Regex;
-use rusqlite::{params, Connection};
-use serde_json::{json, Map, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::error::Result;
@@ -819,7 +819,11 @@ fn check_detail(signals: &str, threads: &[ThreadRow], draft: &str) -> Value {
             "flagged",
             format!(
                 "Draft is only {words} words while {question_count} open customer question(s){} exist.",
-                if technical { " and technical-language signals" } else { "" }
+                if technical {
+                    " and technical-language signals"
+                } else {
+                    ""
+                }
             ),
             vec![json!({
                 "draft_excerpt": draft.chars().take(240).collect::<String>(),
@@ -873,10 +877,10 @@ fn check_internal_leakage(
                         ("internal_explanation", internal_explanation),
                         ("known_cause", known_cause),
                     ] {
-                        if let Some(v) = value {
-                            if !v.trim().is_empty() {
-                                out.push((describe(&name, field, &v), v));
-                            }
+                        if let Some(v) = value
+                            && !v.trim().is_empty()
+                        {
+                            out.push((describe(&name, field, &v), v));
                         }
                     }
                 }
@@ -907,13 +911,13 @@ fn check_internal_leakage(
             Err(_) => Vec::new(),
         };
         for (title, content) in docs.into_iter().take(10) {
-            if let Some(content) = content {
-                if !content.trim().is_empty() {
-                    corpus.push((
-                        format!("internal knowledge document \"{title}\""),
-                        content.chars().take(8000).collect(),
-                    ));
-                }
+            if let Some(content) = content
+                && !content.trim().is_empty()
+            {
+                corpus.push((
+                    format!("internal knowledge document \"{title}\""),
+                    content.chars().take(8000).collect(),
+                ));
             }
         }
     }
@@ -1011,8 +1015,8 @@ fn check_wrong_context(
                 "advice": format!("#{r} does not match any known conversation - verify the number before sending.")
             })),
             Some((id, row_customer)) => {
-                if let Some(conv_customer) = conv.customer_id {
-                    if row_customer != Some(conv_customer) {
+                if let Some(conv_customer) = conv.customer_id
+                    && row_customer != Some(conv_customer) {
                         findings.push(json!({
                             "draft_excerpt": format!("#{r}"),
                             "evidence": [evidence(
@@ -1023,24 +1027,22 @@ fn check_wrong_context(
                             "advice": format!("#{r} belongs to another customer - referencing it here may leak cross-customer context.")
                         }));
                     }
-                }
             }
         }
     }
 
     let greeting_re = Regex::new(r"(?im)^(?:hi|hello|hey|dear)\s+([a-z][a-z'-]{1,30})\b").unwrap();
-    if let Some(greeting) = greeting_re.captures(draft) {
-        if let Some((first_name, _)) = customer {
-            if let Some(greeted) = greeting.get(1).map(|m| m.as_str().to_lowercase()) {
-                let first = first_name.to_lowercase();
-                let generic = [
-                    "team", "support", "there", "all", "everyone", "sir", "madam", "folks",
-                ];
-                if !generic.contains(&greeted.as_str())
-                    && greeted != first
-                    && !first.starts_with(&greeted)
-                {
-                    findings.push(json!({
+    if let Some(greeting) = greeting_re.captures(draft)
+        && let Some((first_name, _)) = customer
+        && let Some(greeted) = greeting.get(1).map(|m| m.as_str().to_lowercase())
+    {
+        let first = first_name.to_lowercase();
+        let generic = [
+            "team", "support", "there", "all", "everyone", "sir", "madam", "folks",
+        ];
+        if !generic.contains(&greeted.as_str()) && greeted != first && !first.starts_with(&greeted)
+        {
+            findings.push(json!({
                         "draft_excerpt": greeting.get(0).map(|m| m.as_str()).unwrap_or("").chars().take(240).collect::<String>(),
                         "evidence": [evidence(
                             "customer record",
@@ -1049,8 +1051,6 @@ fn check_wrong_context(
                         )],
                         "advice": "The greeting names someone else - confirm you are replying in the right conversation with the right customer."
                     }));
-                }
-            }
         }
     }
 
@@ -1117,16 +1117,26 @@ fn check_preference_mismatch(
     let ev = vec![evidence(
         format!(
             "communication preference: {pref}{}",
-            if overridden { " (human override active)" } else { "" }
+            if overridden {
+                " (human override active)"
+            } else {
+                ""
+            }
         ),
-        format!("preference {pref}, confidence {confidence}, {evidence_count} supporting conversation(s)"),
-        None, None, None,
+        format!(
+            "preference {pref}, confidence {confidence}, {evidence_count} supporting conversation(s)"
+        ),
+        None,
+        None,
+        None,
     )];
     if let Some(mismatch) = mismatch {
         return result(
             kind,
             "flagged",
-            format!("Draft shape does not match the observed preference ({mismatch}). This is an observed preference, not a rule."),
+            format!(
+                "Draft shape does not match the observed preference ({mismatch}). This is an observed preference, not a rule."
+            ),
             vec![json!({
                 "draft_excerpt": draft.chars().take(240).collect::<String>(),
                 "evidence": ev,
@@ -1200,10 +1210,11 @@ fn coerce_ai_layer(content: &str) -> Option<Value> {
 
 fn ai_checks(layer: &Value) -> Vec<Value> {
     let mut out = Vec::new();
-    if let Some(c) = layer.get("unsupported_claims") {
-        if !c.is_null() {
-            let verdict = c["verdict"].as_str().unwrap_or("possible");
-            out.push(result(
+    if let Some(c) = layer.get("unsupported_claims")
+        && !c.is_null()
+    {
+        let verdict = c["verdict"].as_str().unwrap_or("possible");
+        out.push(result(
                 "unsupported_claims",
                 if verdict == "none" { "pass" } else { "flagged" },
                 format!(
@@ -1222,12 +1233,12 @@ fn ai_checks(layer: &Value) -> Vec<Value> {
                 },
                 false,
             ));
-        }
     }
-    if let Some(c) = layer.get("wrong_context") {
-        if !c.is_null() {
-            let verdict = c["verdict"].as_str().unwrap_or("possible");
-            out.push(result(
+    if let Some(c) = layer.get("wrong_context")
+        && !c.is_null()
+    {
+        let verdict = c["verdict"].as_str().unwrap_or("possible");
+        out.push(result(
                 "wrong_customer_context",
                 if verdict == "no" { "pass" } else { "flagged" },
                 format!(
@@ -1246,7 +1257,6 @@ fn ai_checks(layer: &Value) -> Vec<Value> {
                 },
                 true,
             ));
-        }
     }
     out
 }
@@ -1310,7 +1320,7 @@ async fn compute_ai_layer(
 
     let mut hasher = Sha256::new();
     hasher.update(&user);
-    let input_hash = format!("{:x}", hasher.finalize());
+    let input_hash = crate::crypto::hex(&hasher.finalize());
     let run_id = crate::ai_pipeline::start_run(
         conn,
         "agent_coaching",
@@ -1506,7 +1516,7 @@ pub async fn review_draft(
     let draft_words = word_count(trimmed);
     let mut hasher = Sha256::new();
     hasher.update(trimmed.as_bytes());
-    let draft_sha256 = format!("{:x}", hasher.finalize());
+    let draft_sha256 = crate::crypto::hex(&hasher.finalize());
     let deterministic_only: Vec<Value> = checks
         .iter()
         .filter(|c| c.get("layer").and_then(|l| l.as_str()) == Some("deterministic"))

@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use crate::coaching;
@@ -97,7 +97,7 @@ pub async fn review(
             return validation_422(format!(
                 "draft must be a string of 1 to {} characters.",
                 coaching::COACHING_MAX_DRAFT_CHARS
-            ))
+            ));
         }
     };
     let include_ai = match body.get("includeAi") {

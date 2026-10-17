@@ -1,6 +1,6 @@
-use leptos::*;
+use leptos::prelude::*;
 
-use super::mention::{use_mention_directory, MentionDirectory};
+use super::mention::{MentionDirectory, use_mention_directory};
 
 #[must_use]
 pub fn caret_query(value: &str, caret: usize) -> Option<(String, usize)> {
@@ -65,15 +65,15 @@ pub fn MentionTextarea(
     #[prop(default = false)] submit_on_enter: bool,
     #[prop(default = 3)] submit_key: u8,
     #[prop(default = 13)] submit_key_code: u32,
-    #[prop(optional)] on_submit: Option<std::rc::Rc<dyn Fn()>>,
+    #[prop(optional)] on_submit: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 ) -> impl IntoView {
     let _ = submit_key;
     let directory = use_mention_directory();
-    let popup_open = create_rw_signal(false);
-    let active = create_rw_signal(0usize);
-    let caret = create_rw_signal(0usize);
+    let popup_open = RwSignal::new(false);
+    let active = RwSignal::new(0usize);
+    let caret = RwSignal::new(0usize);
 
-    let matches = create_memo(move |_| {
+    let matches = Memo::new(move |_| {
         let value_now = value.get();
         let caret_now = caret.get();
         caret_query(&value_now, caret_now)

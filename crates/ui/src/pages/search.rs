@@ -1,5 +1,5 @@
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::hooks::*;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -15,14 +15,14 @@ const SCOPES: &[(&str, &str)] = &[
 
 #[component]
 pub fn SearchPage() -> impl IntoView {
-    let query = create_rw_signal(String::new());
-    let results = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(false);
-    let error_msg = create_rw_signal(None::<String>);
-    let has_searched = create_rw_signal(false);
-    let scope = create_rw_signal("all".to_string());
-    let semantic = create_rw_signal(false);
-    let navigate = store_value(use_navigate());
+    let query = RwSignal::new(String::new());
+    let results = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(false);
+    let error_msg = RwSignal::new(None::<String>);
+    let has_searched = RwSignal::new(false);
+    let scope = RwSignal::new("all".to_string());
+    let semantic = RwSignal::new(false);
+    let navigate = StoredValue::new_local(use_navigate());
 
     let do_search = move || {
         let q = query.get();

@@ -1,5 +1,5 @@
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 use crate::error::Result;
 
@@ -544,27 +544,27 @@ pub fn rebuild_gaps(conn: &Connection, days: i64) -> (usize, usize) {
         if !troubleshooting.is_match(&q.question) {
             continue;
         }
-        if let Some((doc_id, title, content)) = closest_document(conn, &q.question) {
-            if !step_structure.is_match(&content) {
-                let (first_seen, last_seen) = seen_bounds(conn, &q.conversation_ids);
-                let newly = insert_gap_candidate(
-                    conn,
-                    "missing_troubleshooting_steps",
-                    &q.question,
-                    q.count,
-                    &q.conversation_ids,
-                    &[doc_id],
-                    json!({
-                        "explanation": format!("\"{}\" is troubleshooting-shaped, and the closest document (\"{}\") contains no step structure (no numbered steps, no step markers).",
-                            q.question.chars().take(120).collect::<String>(), title),
-                        "closest_document_title": title,
-                        "method": "Troubleshooting-shaped question detection + step-structure regex over the closest FTS-matching document. A heuristic; the document may simply use prose.",
-                        "first_seen": first_seen,
-                        "last_seen": last_seen
-                    }),
-                );
-                created += usize::from(newly);
-            }
+        if let Some((doc_id, title, content)) = closest_document(conn, &q.question)
+            && !step_structure.is_match(&content)
+        {
+            let (first_seen, last_seen) = seen_bounds(conn, &q.conversation_ids);
+            let newly = insert_gap_candidate(
+                conn,
+                "missing_troubleshooting_steps",
+                &q.question,
+                q.count,
+                &q.conversation_ids,
+                &[doc_id],
+                json!({
+                    "explanation": format!("\"{}\" is troubleshooting-shaped, and the closest document (\"{}\") contains no step structure (no numbered steps, no step markers).",
+                        q.question.chars().take(120).collect::<String>(), title),
+                    "closest_document_title": title,
+                    "method": "Troubleshooting-shaped question detection + step-structure regex over the closest FTS-matching document. A heuristic; the document may simply use prose.",
+                    "first_seen": first_seen,
+                    "last_seen": last_seen
+                }),
+            );
+            created += usize::from(newly);
         }
     }
 
@@ -647,16 +647,15 @@ fn gap_candidate_json(
     updated_at: String,
 ) -> Value {
     let mut detail_obj = json!({ "explanation": "", "method": "" });
-    if let Some(d) = detail.as_deref() {
-        if let Ok(parsed) = serde_json::from_str::<Value>(d) {
-            if let Some(map) = parsed.as_object() {
-                for (k, v) in map {
-                    detail_obj
-                        .as_object_mut()
-                        .unwrap()
-                        .insert(k.clone(), v.clone());
-                }
-            }
+    if let Some(d) = detail.as_deref()
+        && let Ok(parsed) = serde_json::from_str::<Value>(d)
+        && let Some(map) = parsed.as_object()
+    {
+        for (k, v) in map {
+            detail_obj
+                .as_object_mut()
+                .unwrap()
+                .insert(k.clone(), v.clone());
         }
     }
     json!({
@@ -985,7 +984,11 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
             .collect();
         push(
             "repeated_customer_explanations",
-            if best.thread_ids.len() >= 3 { "high" } else { "moderate" },
+            if best.thread_ids.len() >= 3 {
+                "high"
+            } else {
+                "moderate"
+            },
             evidence,
             format!(
                 "The customer re-stated the same {MIN_REPEAT_WORDS}+ word span across {} messages (\"{}\"). Detected by repeated-span matching across customer messages; a heuristic, not a judgment.",
@@ -1046,7 +1049,10 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
                 "The agent asked the same question in {} replies (\"{}\"). Detected by normalized question-sentence matching; a heuristic.",
                 group.len(),
                 excerpt_of(
-                    group.first().map(|(_, _, q)| q.as_str()).unwrap_or_default(),
+                    group
+                        .first()
+                        .map(|(_, _, q)| q.as_str())
+                        .unwrap_or_default(),
                     80
                 )
             ),
@@ -1078,7 +1084,11 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
             .collect();
         push(
             "troubleshooting_loop",
-            if loop_restatements.len() >= 3 { "high" } else { "moderate" },
+            if loop_restatements.len() >= 3 {
+                "high"
+            } else {
+                "moderate"
+            },
             evidence,
             format!(
                 "After agent replies, the customer restated the unresolved problem {} times (issue-shaped language after an agent reply). Detected by problem-restatement patterns; a heuristic.",
@@ -1124,12 +1134,20 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
             .collect();
         push(
             "repeated_handoffs",
-            if handoffs.len() >= 4 { "high" } else { "moderate" },
+            if handoffs.len() >= 4 {
+                "high"
+            } else {
+                "moderate"
+            },
             evidence,
             format!(
                 "{} assignment changes observed in the local event history{}. Detected deterministically from recorded conversation events.",
                 handoffs.len(),
-                if history_complete { "" } else { " (pre-sync history is unknown - Help Scout exposes no historical event log)" }
+                if history_complete {
+                    ""
+                } else {
+                    " (pre-sync history is unknown - Help Scout exposes no historical event log)"
+                }
             ),
         );
     }
@@ -1180,7 +1198,11 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
                 .collect();
             push(
                 "repeated_unresolved_interactions",
-                if related.len() >= 3 { "high" } else { "moderate" },
+                if related.len() >= 3 {
+                    "high"
+                } else {
+                    "moderate"
+                },
                 evidence,
                 format!(
                     "The customer opened {} conversations in the last 90 days sharing the tag{} - the same problem keeps returning. Customer-level pattern detected from the local mirror; association, not causation.",
@@ -1833,7 +1855,7 @@ pub async fn compute_qa_ai_layer(
     let input_hash = {
         let mut hasher = Sha256::new();
         hasher.update(prompt.as_bytes());
-        format!("{:x}", hasher.finalize())
+        crate::crypto::hex(&hasher.finalize())
     };
     let run_id = crate::ai_pipeline::start_run(
         conn,
@@ -2109,14 +2131,14 @@ pub fn effectiveness_report(conn: &Connection, days: i64) -> Value {
             "SELECT conversation_id, rating FROM ratings WHERE conversation_id IN ({})",
             ids.join(",")
         );
-        if let Ok(mut stmt) = conn.prepare(&sql) {
-            if let Ok(rows) = stmt.query_map([], |r| {
+        if let Ok(mut stmt) = conn.prepare(&sql)
+            && let Ok(rows) = stmt.query_map([], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
-            }) {
-                for row in rows.flatten() {
-                    if let Some(rating) = row.1 {
-                        ratings_by_conv.entry(row.0).or_default().push(rating);
-                    }
+            })
+        {
+            for row in rows.flatten() {
+                if let Some(rating) = row.1 {
+                    ratings_by_conv.entry(row.0).or_default().push(rating);
                 }
             }
         }
@@ -2171,20 +2193,22 @@ pub fn effectiveness_report(conn: &Connection, days: i64) -> Value {
             let high_friction = matches.iter().filter(|o| o.friction == "high").count();
             let efforts: Vec<f64> = matches.iter().filter_map(|o| o.effort_score).collect();
             let rating_distribution: Value = if n > 0 {
-                json!(["great", "okay", "not-good"]
-                    .iter()
-                    .map(|rating| {
-                        let count = matches
-                            .iter()
-                            .filter(|o| {
-                                ratings_by_conv
-                                    .get(&o.conversation_id)
-                                    .is_some_and(|list| list.contains(&rating.to_string()))
-                            })
-                            .count();
-                        json!({ "rating": rating, "count": count })
-                    })
-                    .collect::<Vec<_>>())
+                json!(
+                    ["great", "okay", "not-good"]
+                        .iter()
+                        .map(|rating| {
+                            let count = matches
+                                .iter()
+                                .filter(|o| {
+                                    ratings_by_conv
+                                        .get(&o.conversation_id)
+                                        .is_some_and(|list| list.contains(&rating.to_string()))
+                                })
+                                .count();
+                            json!({ "rating": rating, "count": count })
+                        })
+                        .collect::<Vec<_>>()
+                )
             } else {
                 Value::Null
             };

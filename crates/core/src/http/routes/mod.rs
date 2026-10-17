@@ -61,11 +61,11 @@ pub mod views;
 #[allow(warnings)]
 pub mod webhook;
 
+use axum::Json;
 use axum::body::Bytes;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub async fn not_found() -> Response {
     (

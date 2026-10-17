@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use leptos::*;
+use leptos::prelude::*;
 
 pub const KEYS: [&str; 13] = [
     "dashboard",
@@ -24,7 +24,7 @@ static COUNTERS: OnceLock<HashMap<&'static str, RwSignal<u32>>> = OnceLock::new(
 pub fn init() {
     let mut map = HashMap::new();
     for key in KEYS {
-        map.insert(key, create_rw_signal(0u32));
+        map.insert(key, RwSignal::new(0u32));
     }
     let _ = COUNTERS.set(map);
 }

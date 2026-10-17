@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoachingCheck {
@@ -151,10 +152,10 @@ pub fn status_class(status: &str) -> &'static str {
 
 #[component]
 pub fn CoachingPanel(conversation_id: i64, #[prop(into)] draft: RwSignal<String>) -> impl IntoView {
-    let open = create_rw_signal(false);
-    let include_ai = create_rw_signal(false);
-    let review = create_rw_signal(None::<CoachingReview>);
-    let checking = create_rw_signal(false);
+    let open = RwSignal::new(false);
+    let include_ai = RwSignal::new(false);
+    let review = RwSignal::new(None::<CoachingReview>);
+    let checking = RwSignal::new(false);
 
     let run_check = move || {
         let text = draft.get_untracked();
@@ -276,9 +277,9 @@ pub fn CoachingPanel(conversation_id: i64, #[prop(into)] draft: RwSignal<String>
                                                                         <span class="spp-muted">"Draft: "</span>
                                                                         "\u{201c}" {truncated} "\u{201d}"
                                                                     </div>
-                                                                }.into_view()
+                                                                }.into_any()
                                                             } else {
-                                                                ().into_view()
+                                                                ().into_any()
                                                             }}
                                                             {f.evidence
                                                                 .iter()
@@ -310,9 +311,9 @@ pub fn CoachingPanel(conversation_id: i64, #[prop(into)] draft: RwSignal<String>
                                     <div class="spp-muted spp-text-xs">
                                         {format!("AI model: {}", r.ai_model.clone().unwrap_or_default())}
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                         </div>
                     }

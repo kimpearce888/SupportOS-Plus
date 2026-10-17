@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::http::{header, HeaderValue};
+use axum::http::{HeaderValue, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use futures_util::stream::Stream;
 use futures_util::stream::{self, StreamExt as _};

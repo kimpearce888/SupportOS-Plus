@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use crate::embeddings;
-use crate::hybrid_search::{merge_doc_hits, FtsDocHit, SemanticDocHit};
+use crate::hybrid_search::{FtsDocHit, SemanticDocHit, merge_doc_hits};
 
 const FTS_ROW_LIMIT: i64 = 400;
 const SEMANTIC_LIMIT: usize = 20;

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 pub const MAX_TREE_DEPTH: u32 = 10;
 pub const MAX_NODE_COUNT: u32 = 200;
@@ -1750,10 +1750,10 @@ impl<'a> SegmentEngine<'a> {
 
         if let Some(aa) = ai_attribute {
             let Some(def) = crate::catalog::AiAttributeKey::parse(&aa.attribute) else {
-                notes
-                    .push(format!(
+                notes.push(format!(
                     "AI attribute '{}' is not in the catalog - condition matched no conversations.",
-                    aa.attribute));
+                    aa.attribute
+                ));
                 return Vec::new();
             };
             if aa.value.to_lowercase() == "unknown" {
@@ -1860,10 +1860,10 @@ impl<'a> SegmentEngine<'a> {
                 )
                 .ok();
             if exists.is_none() {
-                notes
-                    .push(format!(
+                notes.push(format!(
                     "Custom field #{} does not exist locally - condition matched no conversations.",
-                    cf.field_local_id));
+                    cf.field_local_id
+                ));
                 return Vec::new();
             }
             let val = cf.value.as_deref().unwrap_or("").trim().to_string();
@@ -2642,16 +2642,16 @@ pub fn validate_segment_tree(input: &Value) -> Result<SegmentDefinition, String>
                     ),
                     ("customFields", "ticket.customFields must be an array."),
                 ] {
-                    if let Some(v) = c.get(key) {
-                        if !v.is_array() {
-                            return Err(err.to_string());
-                        }
+                    if let Some(v) = c.get(key)
+                        && !v.is_array()
+                    {
+                        return Err(err.to_string());
                     }
                 }
-                if let Some(ch) = c.get("channel") {
-                    if !ch.is_string() {
-                        return Err("ticket.channel must be a string.".to_string());
-                    }
+                if let Some(ch) = c.get("channel")
+                    && !ch.is_string()
+                {
+                    return Err("ticket.channel must be a string.".to_string());
                 }
                 if let Some(aa) = c.get("aiAttribute").filter(|v| !v.is_null()) {
                     let Some(aa) = aa.as_object() else {

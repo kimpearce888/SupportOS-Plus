@@ -1,7 +1,7 @@
-use std::rc::Rc;
-
-use leptos::*;
-use leptos_router::{use_navigate, A};
+use leptos::prelude::*;
+use leptos_router::components::A;
+use leptos_router::hooks::use_navigate;
+use std::sync::Arc;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -33,15 +33,15 @@ fn date_part(iso: Option<&str>) -> String {
 
 #[component]
 pub fn CustomerSearchPage() -> impl IntoView {
-    let query = create_rw_signal(String::new());
-    let page = create_rw_signal(1i64);
-    let rows = create_rw_signal(Vec::<serde_json::Value>::new());
-    let total = create_rw_signal(0i64);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let navigate = StoredValue::new(use_navigate());
+    let query = RwSignal::new(String::new());
+    let page = RwSignal::new(1i64);
+    let rows = RwSignal::new(Vec::<serde_json::Value>::new());
+    let total = RwSignal::new(0i64);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let navigate = StoredValue::new_local(use_navigate());
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let q = query.get();
         let page = page.get();
         let rows = rows;
@@ -175,13 +175,13 @@ pub fn CustomerSearchPage() -> impl IntoView {
                                             on:click=move |_| navigate.with_value(|n| n(&format!("/customers/{id}"), Default::default()))
                                         >
                                             <td>
-                                                <A href={format!("/customers/{id}")} class="spp-customer-search__name-link">
+                                                <A href={format!("/customers/{id}")} attr:class="spp-customer-search__name-link">
                                                     {full_name}
                                                 </A>
                                                 {if let Some(title) = job_title {
-                                                    view! { <div class="spp-muted spp-text-xs">{title}</div> }.into_view()
+                                                    view! { <div class="spp-muted spp-text-xs">{title}</div> }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                             </td>
                                             <td class="spp-table__cell-muted">{email}</td>
@@ -189,9 +189,9 @@ pub fn CustomerSearchPage() -> impl IntoView {
                                             <td><span class="spp-badge">{conv_count.to_string()}</span></td>
                                             <td>
                                                 {if open_count > 0 {
-                                                    view! { <span class="spp-badge spp-badge--ok">{open_count.to_string()}</span> }.into_view()
+                                                    view! { <span class="spp-badge spp-badge--ok">{open_count.to_string()}</span> }.into_any()
                                                 } else {
-                                                    view! { <span class="spp-muted">"0"</span> }.into_view()
+                                                    view! { <span class="spp-muted">"0"</span> }.into_any()
                                                 }}
                                             </td>
                                             <td class="spp-table__cell-muted">{last_activity}</td>
@@ -229,16 +229,16 @@ pub fn CustomerSearchPage() -> impl IntoView {
 
 #[component]
 pub fn CustomerProfilePage(customer_id: i64) -> impl IntoView {
-    let detail = create_rw_signal(None::<serde_json::Value>);
-    let support_health = create_rw_signal(None::<serde_json::Value>);
-    let interaction_profile = create_rw_signal(None::<serde_json::Value>);
-    let timeline = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let reload = create_rw_signal(0u32);
-    let editing = create_rw_signal(false);
+    let detail = RwSignal::new(None::<serde_json::Value>);
+    let support_health = RwSignal::new(None::<serde_json::Value>);
+    let interaction_profile = RwSignal::new(None::<serde_json::Value>);
+    let timeline = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let reload = RwSignal::new(0u32);
+    let editing = RwSignal::new(false);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let _ = crate::queries::version("customer").get();
         let _ = crate::queries::version("interaction-profile").get();
@@ -314,7 +314,7 @@ pub fn CustomerProfilePage(customer_id: i64) -> impl IntoView {
                     {move || {
                         let d = match detail.get() {
                             Some(d) => d,
-                            None => return view! { <div></div> }.into_view(),
+                            None => return view! { <div></div> }.into_any(),
                         };
                         let c = d.get("customer").cloned().unwrap_or_default();
                         let first_name = c.get("first_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -357,7 +357,7 @@ pub fn CustomerProfilePage(customer_id: i64) -> impl IntoView {
                                     >
                                         "Edit profile"
                                     </button>
-                                    <A href="/customers" class="spp-button">"← All customers"</A>
+                                    <A href="/customers" attr:class="spp-button">"← All customers"</A>
                                 </div>
                             </div>
 
@@ -378,7 +378,7 @@ pub fn CustomerProfilePage(customer_id: i64) -> impl IntoView {
                                 <ResolutionsCard resolutions=d.get("resolutions").and_then(|v| v.as_array()).cloned() />
                                 <RatingsCard ratings=d.get("ratings").and_then(|v| v.as_array()).cloned() />
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }}
 
                     <Show when=move || editing.get() fallback=|| ()>
@@ -390,8 +390,8 @@ pub fn CustomerProfilePage(customer_id: i64) -> impl IntoView {
                                 <EditCustomerModal
                                     customer_id=customer_id
                                     customer=customer
-                                    on_close=Rc::new(move || editing.set(false))
-                                    on_saved=Rc::new(move || {
+                                    on_close=Arc::new(move || editing.set(false))
+                                    on_saved=Arc::new(move || {
                                         editing.set(false);
                                         reload.set(reload.get_untracked() + 1);
                                     })
@@ -494,9 +494,9 @@ fn ContactCard(detail: serde_json::Value) -> impl IntoView {
                     view! { <dt>"Phone"</dt> <dd>{p.clone()}</dd> }
                 }).collect::<Vec<_>>()}
                 {if let Some(address) = address {
-                    view! { <dt>"Address"</dt> <dd>{address}</dd> }.into_view()
+                    view! { <dt>"Address"</dt> <dd>{address}</dd> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }}
                 {websites.iter().map(|w| {
                     let href = safe_external_href(w);
@@ -506,9 +506,9 @@ fn ContactCard(detail: serde_json::Value) -> impl IntoView {
                             {if let Some(href) = href {
                                 view! {
                                     <a class="spp-dashboard__banner-link" href=href target="_blank" rel="noopener noreferrer">{w.clone()}</a>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                view! { <span>{w.clone()}</span> }.into_view()
+                                view! { <span>{w.clone()}</span> }.into_any()
                             }}
                         </dd>
                     }
@@ -530,7 +530,7 @@ fn MemoryCard(memories: Option<Vec<serde_json::Value>>) -> impl IntoView {
     let body = if memories.is_empty() {
         view! {
                 <EmptyState message="No memories yet. Memories are extracted by the local AI when analyzing this customer's tickets." />
-            }.into_view()
+            }.into_any()
     } else {
         view! {
                 {memories.iter().map(|m| {
@@ -556,14 +556,14 @@ fn MemoryCard(memories: Option<Vec<serde_json::Value>>) -> impl IntoView {
                             </div>
                             <div class="spp-text-sm">{value}</div>
                             {if !last_seen.is_empty() {
-                                view! { <div class="spp-muted spp-text-xs">{format!("last seen {last_seen}")}</div> }.into_view()
+                                view! { <div class="spp-muted spp-text-xs">{format!("last seen {last_seen}")}</div> }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                         </div>
                     }
                 }).collect::<Vec<_>>()}
-            }.into_view()
+            }.into_any()
     };
     view! {
         <div class="spp-card">
@@ -581,7 +581,7 @@ type MonthRow = (String, i64, String, Vec<(String, String)>);
 #[component]
 fn InteractionProfileSection(profile: Option<serde_json::Value>) -> impl IntoView {
     let Some(p) = profile else {
-        return view! { <div class="spp-customer__hidden"></div> }.into_view();
+        return view! { <div class="spp-customer__hidden"></div> }.into_any();
     };
     let client_kind = p
         .get("client_kind")
@@ -698,9 +698,9 @@ fn InteractionProfileSection(profile: Option<serde_json::Value>) -> impl IntoVie
                             {format!("{obs} observations across {convs} conversations")}
                         </div>
                     </div>
-                }.into_view()
+                }.into_any()
             } else {
-                ().into_view()
+                ().into_any()
             }}
 
             <div class="spp-dashboard-grid spp-dashboard-grid--two">
@@ -711,7 +711,7 @@ fn InteractionProfileSection(profile: Option<serde_json::Value>) -> impl IntoVie
                             <span class="spp-muted spp-text-xs">
                                 "No preferences yet — repeated evidence across 3+ interactions is required before a preference is inferred."
                             </span>
-                        }.into_view()
+                        }.into_any()
                     } else {
                         preferences.iter().map(|(pref, origin)| {
                             view! {
@@ -719,14 +719,14 @@ fn InteractionProfileSection(profile: Option<serde_json::Value>) -> impl IntoVie
                                     <span class="spp-text-sm">{pref.clone()}</span>
                                     <span class="spp-badge">{origin.clone()}</span>
                                 </div>
-                            }
-                        }).collect::<Vec<_>>().into_view()
+                            }.into_any()
+                        }).collect::<Vec<_>>().into_any()
                     }}
                 </div>
                 <div>
                     <h4 class="spp-text-sm">"Historical timeline"</h4>
                     {if months.is_empty() {
-                        view! { <span class="spp-muted spp-text-xs">"No history yet."</span> }.into_view()
+                        view! { <span class="spp-muted spp-text-xs">"No history yet."</span> }.into_any()
                     } else {
                         months.iter().map(|(month, count, summary, ids)| {
                             view! {
@@ -741,13 +741,13 @@ fn InteractionProfileSection(profile: Option<serde_json::Value>) -> impl IntoVie
                                             let href = href.clone();
                                             let label = label.clone();
                                             view! {
-                                                <A href=href class="spp-badge">{label}</A>
+                                                <A href=href attr:class="spp-badge">{label}</A>
                                             }
                                         }).collect::<Vec<_>>()}
                                     </div>
                                 </div>
                             }
-                        }).collect::<Vec<_>>().into_view()
+                        }).collect::<Vec<_>>().into_any()
                     }}
                 </div>
             </div>
@@ -758,39 +758,39 @@ fn InteractionProfileSection(profile: Option<serde_json::Value>) -> impl IntoVie
                         <h4 class="spp-text-sm">"Previous support outcomes"</h4>
                         <div class="spp-flex spp-flex--wrap">
                             {if let Some(r) = first_response_pct {
-                                view! { <span class="spp-badge spp-badge--ok">{format!("first-response resolution: {r}%")}</span> }.into_view()
+                                view! { <span class="spp-badge spp-badge--ok">{format!("first-response resolution: {r}%")}</span> }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                             {if let Some(r) = follow_up_pct {
-                                view! { <span class="spp-badge">{format!("follow-up rate: {r}%")}</span> }.into_view()
+                                view! { <span class="spp-badge">{format!("follow-up rate: {r}%")}</span> }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                             {if let Some(r) = clarification_pct {
-                                view! { <span class="spp-badge">{format!("clarification rate: {r}%")}</span> }.into_view()
+                                view! { <span class="spp-badge">{format!("clarification rate: {r}%")}</span> }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                             {if let Some(r) = escalation_pct {
-                                view! { <span class="spp-badge">{format!("escalation rate: {r}%")}</span> }.into_view()
+                                view! { <span class="spp-badge">{format!("escalation rate: {r}%")}</span> }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                         </div>
                     </div>
-                }.into_view()
+                }.into_any()
             } else {
-                ().into_view()
+                ().into_any()
             }}
         </div>
-    }.into_view()
+    }.into_any()
 }
 
 #[component]
 fn SupportHealthSection(report: Option<serde_json::Value>) -> impl IntoView {
     let Some(r) = report else {
-        return view! { <div class="spp-customer__hidden"></div> }.into_view();
+        return view! { <div class="spp-customer__hidden"></div> }.into_any();
     };
     let flags: Vec<serde_json::Value> = r
         .get("flags")
@@ -821,7 +821,7 @@ fn SupportHealthSection(report: Option<serde_json::Value>) -> impl IntoView {
             </div>
 
             {if flags.is_empty() {
-                view! { <span class="spp-muted spp-text-xs">"No attention flags."</span> }.into_view()
+                view! { <span class="spp-muted spp-text-xs">"No attention flags."</span> }.into_any()
             } else {
                 view! {
                     <div class="spp-customer__subsection">
@@ -849,8 +849,8 @@ fn SupportHealthSection(report: Option<serde_json::Value>) -> impl IntoView {
                                     _ => "spp-issues__alert spp-issues__alert--info",
                                 }>
                                     <div class="spp-flex spp-flex--between">
-                                        <strong class="spp-text-sm">{label}</strong>
-                                        <span class="spp-badge">{severity}</span>
+                                        <strong class="spp-text-sm">{label.clone()}</strong>
+                                        <span class="spp-badge">{severity.clone()}</span>
                                     </div>
                                     <p class="spp-text-sm">{detail}</p>
                                     <div class="spp-issues__alert-convs">
@@ -858,7 +858,7 @@ fn SupportHealthSection(report: Option<serde_json::Value>) -> impl IntoView {
                                             let href = href.clone();
                                             let label = label.clone();
                                             view! {
-                                                <A href=href class="spp-badge">{label}</A>
+                                                <A href=href attr:class="spp-badge">{label}</A>
                                             }
                                         }).collect::<Vec<_>>()}
                                     </div>
@@ -866,11 +866,11 @@ fn SupportHealthSection(report: Option<serde_json::Value>) -> impl IntoView {
                             }
                         }).collect::<Vec<_>>()}
                     </div>
-                }.into_view()
+                }.into_any()
             }}
 
             {if incidents.is_empty() {
-                ().into_view()
+                ().into_any()
             } else {
                 view! {
                     <div class="spp-customer__subsection">
@@ -884,7 +884,7 @@ fn SupportHealthSection(report: Option<serde_json::Value>) -> impl IntoView {
                             let convs = i.get("conversations").and_then(|v| v.as_i64()).unwrap_or(0);
                             view! {
                                 <div class="spp-flex spp-flex--between spp-customer__incident">
-                                    <A href={format!("/incidents/{id}")} class="spp-text-sm">
+                                    <A href={format!("/incidents/{id}")} attr:class="spp-text-sm">
                                         {code} " " {title}
                                     </A>
                                     <span class="spp-muted spp-text-xs">
@@ -894,10 +894,10 @@ fn SupportHealthSection(report: Option<serde_json::Value>) -> impl IntoView {
                             }
                         }).collect::<Vec<_>>()}
                     </div>
-                }.into_view()
+                }.into_any()
             }}
         </div>
-    }.into_view()
+    }.into_any()
 }
 
 #[component]
@@ -905,7 +905,7 @@ fn TimelineSection(timeline: Vec<serde_json::Value>) -> impl IntoView {
     let body = if timeline.is_empty() {
         view! {
             <EmptyState message="No timeline events yet. Send a reply or note to start the history." />
-        }.into_view()
+        }.into_any()
     } else {
         view! {
             <div class="spp-customer-profile__timeline">
@@ -924,7 +924,7 @@ fn TimelineSection(timeline: Vec<serde_json::Value>) -> impl IntoView {
                         }
                     }).collect::<Vec<_>>()}
             </div>
-        }.into_view()
+        }.into_any()
     };
     view! {
         <div class="spp-card">
@@ -937,9 +937,9 @@ fn TimelineSection(timeline: Vec<serde_json::Value>) -> impl IntoView {
 #[component]
 fn ConversationsCard(conversations: Option<Vec<serde_json::Value>>) -> impl IntoView {
     let rows = conversations.unwrap_or_default();
-    let navigate = StoredValue::new(use_navigate());
+    let navigate = StoredValue::new_local(use_navigate());
     let body = if rows.is_empty() {
-        view! { <EmptyState message="No conversations for this customer yet." /> }.into_view()
+        view! { <EmptyState message="No conversations for this customer yet." /> }.into_any()
     } else {
         view! {
             <table class="spp-table">
@@ -969,7 +969,7 @@ fn ConversationsCard(conversations: Option<Vec<serde_json::Value>>) -> impl Into
                                 >
                                     <td class="spp-table__cell-mono">{number.to_string()}</td>
                                     <td>
-                                        <A href={format!("/inbox/conversation/{id}")} class="spp-customer-search__name-link">{subject}</A>
+                                        <A href={format!("/inbox/conversation/{id}")} attr:class="spp-customer-search__name-link">{subject}</A>
                                     </td>
                                     <td>
                                         <span class=match status.as_str() {
@@ -977,7 +977,7 @@ fn ConversationsCard(conversations: Option<Vec<serde_json::Value>>) -> impl Into
                                             "pending" => "spp-badge spp-badge--warn",
                                             _ => "spp-badge spp-badge--ok",
                                         }>
-                                            {status}
+                                            {status.clone()}
                                         </span>
                                     </td>
                                     <td class="spp-table__cell-muted">{assignee.unwrap_or_else(|| "—".to_string())}</td>
@@ -988,7 +988,7 @@ fn ConversationsCard(conversations: Option<Vec<serde_json::Value>>) -> impl Into
                         }).collect::<Vec<_>>()}
                 </tbody>
             </table>
-        }.into_view()
+        }.into_any()
     };
     view! {
         <div class="spp-card">
@@ -1002,7 +1002,7 @@ fn ConversationsCard(conversations: Option<Vec<serde_json::Value>>) -> impl Into
 fn ResolutionsCard(resolutions: Option<Vec<serde_json::Value>>) -> impl IntoView {
     let rows = resolutions.unwrap_or_default();
     let body = if rows.is_empty() {
-        view! { <span class="spp-muted spp-text-xs">"No closed conversations with replies yet."</span> }.into_view()
+        view! { <span class="spp-muted spp-text-xs">"No closed conversations with replies yet."</span> }.into_any()
     } else {
         view! {
             {rows.iter().map(|r| {
@@ -1021,7 +1021,7 @@ fn ResolutionsCard(resolutions: Option<Vec<serde_json::Value>>) -> impl IntoView
                         </div>
                     }
                 }).collect::<Vec<_>>()}
-        }.into_view()
+        }.into_any()
     };
     view! {
         <div class="spp-card">
@@ -1035,7 +1035,7 @@ fn ResolutionsCard(resolutions: Option<Vec<serde_json::Value>>) -> impl IntoView
 fn RatingsCard(ratings: Option<Vec<serde_json::Value>>) -> impl IntoView {
     let rows = ratings.unwrap_or_default();
     let body = if rows.is_empty() {
-        view! { <span class="spp-muted spp-text-xs">"No ratings synced."</span> }.into_view()
+        view! { <span class="spp-muted spp-text-xs">"No ratings synced."</span> }.into_any()
     } else {
         view! {
             {rows.iter().map(|r| {
@@ -1050,27 +1050,27 @@ fn RatingsCard(ratings: Option<Vec<serde_json::Value>>) -> impl IntoView {
                                 "okay" => "spp-badge spp-badge--warn",
                                 _ => "spp-badge",
                             }>
-                                {rating}
+                                {rating.clone()}
                             </span>
                             <span class="spp-text-sm">{comments}</span>
                             {if let Some(cid) = conversation_id {
                                 view! {
-                                    <A href={format!("/inbox/conversation/{cid}")} class="spp-muted spp-text-xs">
+                                    <A href={format!("/inbox/conversation/{cid}")} attr:class="spp-muted spp-text-xs">
                                         {format!("#{cid}")}
                                     </A>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                             {if !created.is_empty() {
-                                view! { <span class="spp-muted spp-text-xs">{created}</span> }.into_view()
+                                view! { <span class="spp-muted spp-text-xs">{created}</span> }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                         </div>
                     }
                 }).collect::<Vec<_>>()}
-        }.into_view()
+        }.into_any()
     };
     view! {
         <div class="spp-card">
@@ -1084,8 +1084,8 @@ fn RatingsCard(ratings: Option<Vec<serde_json::Value>>) -> impl IntoView {
 fn EditCustomerModal(
     customer_id: i64,
     customer: Option<serde_json::Value>,
-    on_close: Rc<dyn Fn()>,
-    on_saved: Rc<dyn Fn()>,
+    on_close: Arc<dyn Fn() + Send + Sync>,
+    on_saved: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let c = customer.unwrap_or_default();
     let field = |key: &str| -> String {
@@ -1094,19 +1094,19 @@ fn EditCustomerModal(
             .unwrap_or("")
             .to_string()
     };
-    let first_name = create_rw_signal(field("first_name"));
-    let last_name = create_rw_signal(field("last_name"));
+    let first_name = RwSignal::new(field("first_name"));
+    let last_name = RwSignal::new(field("last_name"));
     let first_email = c
         .get("emails")
         .and_then(|e| e.as_array())
         .and_then(|a| a.first().and_then(|e| e.as_str()))
         .unwrap_or("")
         .to_string();
-    let email = create_rw_signal(first_email);
-    let organization = create_rw_signal(field("organization_name"));
-    let job_title = create_rw_signal(field("job_title"));
-    let phone = create_rw_signal(field("phone"));
-    let submitting = create_rw_signal(false);
+    let email = RwSignal::new(first_email);
+    let organization = RwSignal::new(field("organization_name"));
+    let job_title = RwSignal::new(field("job_title"));
+    let phone = RwSignal::new(field("phone"));
+    let submitting = RwSignal::new(false);
 
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
@@ -1122,7 +1122,7 @@ fn EditCustomerModal(
             "jobTitle": job_title.get(),
             "phone": phone.get(),
         });
-        let on_saved = Rc::clone(&on_saved);
+        let on_saved = Arc::clone(&on_saved);
         wasm_bindgen_futures::spawn_local(async move {
             let path = format!("/api/customers/{customer_id}");
             match crate::api::patch_json::<serde_json::Value>(&path, &body).await {

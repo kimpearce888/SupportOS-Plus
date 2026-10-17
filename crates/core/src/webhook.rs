@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use subtle::ConstantTimeEq;
 
 use crate::error::{Error, Result};
@@ -168,13 +168,14 @@ pub fn ensure_webhook_events_table(conn: &Connection) -> Result<()> {
             |r| r.get(0),
         )
         .ok();
-    if let Some(schema) = old_schema {
-        if schema.contains("body") && !schema.contains("event_hash") {
-            conn.execute_batch(
-                "ALTER TABLE webhook_events RENAME TO webhook_events_legacy;
+    if let Some(schema) = old_schema
+        && schema.contains("body")
+        && !schema.contains("event_hash")
+    {
+        conn.execute_batch(
+            "ALTER TABLE webhook_events RENAME TO webhook_events_legacy;
                  DROP TABLE IF EXISTS webhook_events_legacy;",
-            )?;
-        }
+        )?;
     }
 
     conn.execute_batch(
@@ -329,4 +330,34 @@ pub fn pending_event_ids(conn: &Connection) -> Result<Vec<String>> {
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signature_matches_hmac_sha1_test_vector() {
+        // RFC 2202-style vector: HMAC-SHA1("key", "The quick brown fox jumps
+        // over the lazy dog") = de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9
+        let sig = compute_signature(b"key", b"The quick brown fox jumps over the lazy dog");
+        assert_eq!(sig, "3nybhbi3iqa8ino29wqQcBydtNk=");
+    }
+
+    #[test]
+    fn signature_is_deterministic_base64_hmac() {
+        let sig = compute_signature(b"top-secret", b"{\"id\":1}");
+        assert_eq!(sig.len(), 28);
+        assert_eq!(sig, compute_signature(b"top-secret", b"{\"id\":1}"));
+        assert_ne!(sig, compute_signature(b"other-secret", b"{\"id\":1}"));
+    }
+
+    #[test]
+    fn signature_verification_accepts_valid_and_rejects_invalid() {
+        let sig = compute_signature(b"top-secret", b"body");
+        assert!(verify_signature(b"top-secret", b"body", &sig).is_ok());
+        assert!(verify_signature(b"top-secret", b"tampered", &sig).is_err());
+        assert!(verify_signature(b"wrong", b"body", &sig).is_err());
+        assert!(verify_signature(b"top-secret", b"body", "not-hex").is_err());
+    }
 }

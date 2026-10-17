@@ -1,10 +1,10 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
-use leptos::*;
-use leptos_router::{use_location, use_navigate, use_query_map};
+use leptos::prelude::*;
+use leptos_router::hooks::{use_location, use_navigate, use_query_map};
 
-use crate::components::state_view::{EmptyState, LoadingState};
 use crate::components::GapsTab;
+use crate::components::state_view::{EmptyState, LoadingState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KnowledgeTab {
@@ -16,25 +16,25 @@ pub enum KnowledgeTab {
 
 #[component]
 pub fn KnowledgePage() -> impl IntoView {
-    let tab = create_rw_signal(KnowledgeTab::Documents);
-    let reload_documents = create_rw_signal(0u32);
-    let importing = create_rw_signal(false);
+    let tab = RwSignal::new(KnowledgeTab::Documents);
+    let reload_documents = RwSignal::new(0u32);
+    let importing = RwSignal::new(false);
 
     let query_map = use_query_map();
     let location = use_location();
     let navigate = use_navigate();
-    let reading = create_rw_signal(None::<i64>);
-    create_effect(move |_| {
+    let reading = RwSignal::new(None::<i64>);
+    Effect::new(move |_| {
         let m = query_map.get();
         let doc = crate::url_state::query_pos_int(&m, "doc");
         if reading.get_untracked() != doc {
             reading.set(doc);
         }
     });
-    let open_doc: Rc<dyn Fn(i64)> = {
+    let open_doc: Arc<dyn Fn(i64) + Send + Sync> = {
         let navigate = navigate.clone();
         let pathname = location.pathname;
-        Rc::new(move |id: i64| {
+        Arc::new(move |id: i64| {
             reading.set(Some(id));
             navigate(
                 &format!(
@@ -49,10 +49,10 @@ pub fn KnowledgePage() -> impl IntoView {
             );
         })
     };
-    let close_doc: Rc<dyn Fn()> = {
+    let close_doc: Arc<dyn Fn() + Send + Sync> = {
         let navigate = navigate.clone();
         let pathname = location.pathname;
-        Rc::new(move || {
+        Arc::new(move || {
             reading.set(None);
             navigate(
                 &pathname.get_untracked(),
@@ -63,8 +63,8 @@ pub fn KnowledgePage() -> impl IntoView {
             );
         })
     };
-    let open_doc_stored = StoredValue::new(open_doc);
-    let close_doc_stored = StoredValue::new(close_doc);
+    let open_doc_stored = StoredValue::new_local(open_doc);
+    let close_doc_stored = StoredValue::new_local(close_doc);
 
     let do_reindex = move |_| {
         wasm_bindgen_futures::spawn_local(async move {
@@ -138,7 +138,7 @@ pub fn KnowledgePage() -> impl IntoView {
                 fallback=|| ()
             >
                 {move || {
-                    let open = open_doc_stored.with_value(Rc::clone);
+                    let open = open_doc_stored.with_value(Arc::clone);
                     view! { <DocumentsTab reload=reload_documents open_doc=open /> }
                 }}
             </Show>
@@ -163,8 +163,8 @@ pub fn KnowledgePage() -> impl IntoView {
 
             <Show when=move || importing.get() fallback=|| ()>
                 <ImportKnowledgeModal
-                    on_close=Rc::new(move || importing.set(false))
-                    on_imported=Rc::new(move || {
+                    on_close=Arc::new(move || importing.set(false))
+                    on_imported=Arc::new(move || {
                         importing.set(false);
                         reload_documents.update(|t| *t += 1);
                     })
@@ -174,7 +174,7 @@ pub fn KnowledgePage() -> impl IntoView {
             <Show when=move || reading.get().is_some() fallback=|| ()>
                 {move || {
                     let id = reading.get().unwrap_or_default();
-                    let close = close_doc_stored.with_value(Rc::clone);
+                    let close = close_doc_stored.with_value(Arc::clone);
                     view! { <DocReader id=id on_close=close /> }
                 }}
             </Show>
@@ -183,13 +183,13 @@ pub fn KnowledgePage() -> impl IntoView {
 }
 
 #[component]
-fn DocumentsTab(reload: RwSignal<u32>, open_doc: Rc<dyn Fn(i64)>) -> impl IntoView {
-    let documents = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let open_doc_for_table = StoredValue::new(open_doc);
+fn DocumentsTab(reload: RwSignal<u32>, open_doc: Arc<dyn Fn(i64) + Send + Sync>) -> impl IntoView {
+    let documents = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let open_doc_for_table = StoredValue::new_local(open_doc);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _tick = reload.get();
         let documents = documents;
         let loading = loading;
@@ -235,7 +235,7 @@ fn DocumentsTab(reload: RwSignal<u32>, open_doc: Rc<dyn Fn(i64)>) -> impl IntoVi
                 }
             >
                 {move || {
-                    let open = open_doc_for_table.with_value(Rc::clone);
+                    let open = open_doc_for_table.with_value(Arc::clone);
                     view! { <DocumentsTable documents=documents reload=reload open_doc=open /> }
                 }}
             </Show>
@@ -247,7 +247,7 @@ fn DocumentsTab(reload: RwSignal<u32>, open_doc: Rc<dyn Fn(i64)>) -> impl IntoVi
 fn DocumentsTable(
     documents: RwSignal<Vec<serde_json::Value>>,
     reload: RwSignal<u32>,
-    open_doc: Rc<dyn Fn(i64)>,
+    open_doc: Arc<dyn Fn(i64) + Send + Sync>,
 ) -> impl IntoView {
     let rows = move || {
         documents
@@ -255,7 +255,7 @@ fn DocumentsTable(
             .into_iter()
             .map(|doc| {
                 view! {
-                    <DocumentRow doc=doc reload=reload open_doc=Rc::clone(&open_doc) />
+                    <DocumentRow doc=doc reload=reload open_doc=Arc::clone(&open_doc) />
                 }
             })
             .collect::<Vec<_>>()
@@ -283,7 +283,7 @@ fn DocumentsTable(
 fn DocumentRow(
     doc: serde_json::Value,
     reload: RwSignal<u32>,
-    open_doc: Rc<dyn Fn(i64)>,
+    open_doc: Arc<dyn Fn(i64) + Send + Sync>,
 ) -> impl IntoView {
     let id = doc.get("id").and_then(|v| v.as_i64()).unwrap_or_default();
     let title = doc
@@ -369,14 +369,17 @@ fn DocumentRow(
 }
 
 #[component]
-fn ImportKnowledgeModal(on_close: Rc<dyn Fn()>, on_imported: Rc<dyn Fn()>) -> impl IntoView {
-    let title = create_rw_signal(String::new());
-    let content = create_rw_signal(String::new());
-    let visibility = create_rw_signal("internal_only".to_string());
-    let source_name = create_rw_signal("Manual import".to_string());
-    let submitting = create_rw_signal(false);
-    let importable = create_rw_signal(None::<serde_json::Value>);
-    let file_pending = create_rw_signal(None::<String>);
+fn ImportKnowledgeModal(
+    on_close: Arc<dyn Fn() + Send + Sync>,
+    on_imported: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let title = RwSignal::new(String::new());
+    let content = RwSignal::new(String::new());
+    let visibility = RwSignal::new("internal_only".to_string());
+    let source_name = RwSignal::new("Manual import".to_string());
+    let submitting = RwSignal::new(false);
+    let importable = RwSignal::new(None::<serde_json::Value>);
+    let file_pending = RwSignal::new(None::<String>);
 
     wasm_bindgen_futures::spawn_local(async move {
         if let Ok(v) = crate::api::get_json::<serde_json::Value>("/api/knowledge/importable").await
@@ -386,7 +389,7 @@ fn ImportKnowledgeModal(on_close: Rc<dyn Fn()>, on_imported: Rc<dyn Fn()>) -> im
     });
 
     let submit = {
-        let on_imported = Rc::clone(&on_imported);
+        let on_imported = Arc::clone(&on_imported);
         move |ev: leptos::ev::SubmitEvent| {
             ev.prevent_default();
             if submitting.get() {
@@ -395,7 +398,7 @@ fn ImportKnowledgeModal(on_close: Rc<dyn Fn()>, on_imported: Rc<dyn Fn()>) -> im
             if let Some(file) = file_pending.get() {
                 file_pending.set(None);
                 submitting.set(true);
-                let on_imported = Rc::clone(&on_imported);
+                let on_imported = Arc::clone(&on_imported);
                 wasm_bindgen_futures::spawn_local(async move {
                     let body = serde_json::json!({
                         "path": file,
@@ -439,7 +442,7 @@ fn ImportKnowledgeModal(on_close: Rc<dyn Fn()>, on_imported: Rc<dyn Fn()>) -> im
                     "format": "markdown",
                 }],
             });
-            let on_imported = Rc::clone(&on_imported);
+            let on_imported = Arc::clone(&on_imported);
             wasm_bindgen_futures::spawn_local(async move {
                 match crate::api::post_json::<serde_json::Value>(
                     "/api/knowledge/import",
@@ -549,7 +552,7 @@ fn ImportKnowledgeModal(on_close: Rc<dyn Fn()>, on_imported: Rc<dyn Fn()>) -> im
                                 "The folder is empty or does not exist. Create it and copy your documents there."
                             </span>
                         }
-                        .into_view()
+                        .into_any()
                     } else {
                         files
                             .into_iter()
@@ -586,10 +589,10 @@ fn ImportKnowledgeModal(on_close: Rc<dyn Fn()>, on_imported: Rc<dyn Fn()>) -> im
                                             }}
                                         </button>
                                     </div>
-                                }
+                                }.into_any()
                             })
                             .collect::<Vec<_>>()
-                            .into_view()
+                            .into_any()
                     }
                 }}
             </div>
@@ -644,11 +647,11 @@ pub fn parse_sources(v: &serde_json::Value) -> Vec<KnowledgeSource> {
 
 #[component]
 fn SourcesTab() -> impl IntoView {
-    let sources = create_rw_signal(Vec::<KnowledgeSource>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let sources = RwSignal::new(Vec::<KnowledgeSource>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let sources = sources;
         let loading = loading;
         let error_msg = error_msg;
@@ -821,12 +824,12 @@ pub fn parse_freshness(v: &serde_json::Value) -> FreshnessOverview {
 
 #[component]
 fn FreshnessTab() -> impl IntoView {
-    let overview = create_rw_signal(None::<FreshnessOverview>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let reload = create_rw_signal(0u32);
+    let overview = RwSignal::new(None::<FreshnessOverview>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _tick = reload.get();
         let overview = overview;
         let loading = loading;
@@ -858,10 +861,10 @@ fn FreshnessTab() -> impl IntoView {
             {move || {
                 let o = overview.clone().get();
                 if loading.get() {
-                    return ().into_view();
+                    return ().into_any();
                 }
                 let Some(o) = o else {
-                    return ().into_view();
+                    return ().into_any();
                 };
                 view! {
                     <div class="spp-flex spp-gap-8 spp-mb-12">
@@ -869,7 +872,7 @@ fn FreshnessTab() -> impl IntoView {
                         <span class="spp-badge spp-badge--ok">{format!("{} fresh", o.fresh)}</span>
                     </div>
                     {if o.documents.is_empty() {
-                        view! { <EmptyState message="Nothing flagged in this view. Flags appear as documents age or go unreviewed." /> }.into_view()
+                        view! { <EmptyState message="Nothing flagged in this view. Flags appear as documents age or go unreviewed." /> }.into_any()
                     } else {
                         o.documents
                             .iter()
@@ -882,12 +885,12 @@ fn FreshnessTab() -> impl IntoView {
                                 }
                             })
                             .collect::<Vec<_>>()
-                            .into_view()
+                            .into_any()
                     }}
                     <p class="spp-muted spp-text-xs spp-mt-8">
                         "Review and verify are human-only timestamps — SupportOS never edits or publishes knowledge automatically."
                     </p>
-                }.into_view()
+                }.into_any()
             }}
         </div>
     }
@@ -957,34 +960,34 @@ fn FreshnessRow(row: FreshnessDocument, reload: RwSignal<u32>) -> impl IntoView 
             </div>
             <div class="spp-flex">
                 {if row.stale {
-                    view! { <span class=badge>"stale"</span> }.into_view()
+                    view! { <span class=badge>"stale"</span> }.into_any()
                 } else {
-                    view! { <span class=badge>"fresh"</span> }.into_view()
+                    view! { <span class=badge>"fresh"</span> }.into_any()
                 }}
                 {if row.unreviewed_long {
-                    view! { <span class="spp-badge spp-badge--warn">"needs review"</span> }.into_view()
+                    view! { <span class="spp-badge spp-badge--warn">"needs review"</span> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }}
                 {if row.unverified {
-                    view! { <span class="spp-badge spp-badge--warn">"unverified"</span> }.into_view()
+                    view! { <span class="spp-badge spp-badge--warn">"unverified"</span> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }}
                 {if row.low_usage {
-                    view! { <span class="spp-badge spp-badge--info">"low usage"</span> }.into_view()
+                    view! { <span class="spp-badge spp-badge--info">"low usage"</span> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }}
                 {if row.conflicting {
-                    view! { <span class="spp-badge spp-badge--danger">"conflicting"</span> }.into_view()
+                    view! { <span class="spp-badge spp-badge--danger">"conflicting"</span> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }}
                 {if row.recurring_questions {
-                    view! { <span class="spp-badge spp-badge--warn">"recurring questions"</span> }.into_view()
+                    view! { <span class="spp-badge spp-badge--warn">"recurring questions"</span> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }}
                 <span class="spp-badge spp-badge--muted">
                     {format!("{} citations", row.usage_count)}
@@ -1009,14 +1012,14 @@ fn FreshnessRow(row: FreshnessDocument, reload: RwSignal<u32>) -> impl IntoView 
 }
 
 #[component]
-fn DocReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
-    let document = create_rw_signal(None::<serde_json::Value>);
-    let related_ticket_estimate = create_rw_signal(0i64);
-    let related_known_issues = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+fn DocReader(id: i64, on_close: Arc<dyn Fn() + Send + Sync>) -> impl IntoView {
+    let document = RwSignal::new(None::<serde_json::Value>);
+    let related_ticket_estimate = RwSignal::new(0i64);
+    let related_known_issues = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let document = document;
         let related_ticket_estimate = related_ticket_estimate;
         let related_known_issues = related_known_issues;
@@ -1084,7 +1087,7 @@ fn DocReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
                     {move || {
                         let d = match document.get() {
                             Some(d) => d,
-                            None => return view! { <div></div> }.into_view(),
+                            None => return view! { <div></div> }.into_any(),
                         };
                         let visibility = d
                             .get("visibility")
@@ -1124,7 +1127,7 @@ fn DocReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
                                 " cited by AI analysis in "
                                 {format!("{estimate} conversation{}", if estimate == 1 { "" } else { "s" })}
                                 {if issues.is_empty() {
-                                    ().into_view()
+                                    ().into_any()
                                 } else {
                                     view! {
                                         " · "
@@ -1136,10 +1139,10 @@ fn DocReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
                                                 .to_string();
                                             view! { <span class="spp-chip">{title}</span> }
                                         }).collect::<Vec<_>>()}
-                                    }.into_view()
+                                    }.into_any()
                                 }}
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }}
                 </Show>
             </div>

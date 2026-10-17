@@ -1,7 +1,8 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{ConnectorAuthMode, ConnectorKind, CustomFieldType};
+use crate::crypto;
 use crate::error::{Error, Result};
 
 pub const M026_TO_M027_SQL: &str = r#"
@@ -285,17 +286,15 @@ fn dump_table(conn: &Connection, name: &str) -> Result<Vec<Vec<serde_json::Value
                     rusqlite::types::Value::Integer(n) => serde_json::Value::from(n),
                     rusqlite::types::Value::Real(f) => serde_json::Value::from(f),
                     rusqlite::types::Value::Text(s) => serde_json::Value::from(s),
-                    rusqlite::types::Value::Blob(b) => serde_json::Value::from(hex_encode(&b)),
+                    rusqlite::types::Value::Blob(b) => {
+                        serde_json::Value::from(crate::crypto::hex(&b))
+                    }
                 });
             }
             Ok(row)
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
-}
-
-fn hex_encode(data: &[u8]) -> String {
-    data.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 pub fn export_settings(conn: &Connection, password: &str) -> Result<Vec<u8>> {
@@ -307,85 +306,47 @@ pub fn export_settings(conn: &Connection, password: &str) -> Result<Vec<u8>> {
     let json = serde_json::to_vec(&settings_rows)
         .map_err(|e| Error::Config(format!("settings export serialization failed: {e}")))?;
 
-    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-    use rand::RngCore;
-    use scrypt::scrypt;
+    const LOG_N: u8 = 17;
+    const SETTINGS_VERSION: u8 = 2;
+    const HEADER_LEN: usize = 7 + 1 + crypto::SALT_LEN + crypto::NONCE_LEN;
 
-    const SALT_LEN: usize = 16;
-    const NONCE_LEN: usize = 12;
-    const KEY_LEN: usize = 32;
+    let salt = crypto::random_salt();
+    let key = crypto::derive_key(password.as_bytes(), &salt, LOG_N)?;
+    let (nonce, ciphertext) = crypto::encrypt(&key, &json)?;
 
-    let mut salt = [0u8; SALT_LEN];
-    rand::thread_rng().fill_bytes(&mut salt);
-    let mut key = [0u8; KEY_LEN];
-    scrypt(
-        password.as_bytes(),
-        &salt,
-        &scrypt::Params::new(17, 8, 1, KEY_LEN)
-            .map_err(|e| Error::Config(format!("scrypt: {e}")))?,
-        &mut key,
-    )
-    .map_err(|e| Error::Config(format!("scrypt: {e}")))?;
-
-    let cipher =
-        Aes256Gcm::new_from_slice(&key).map_err(|e| Error::Config(format!("AES key: {e}")))?;
-
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(nonce, json.as_ref())
-        .map_err(|e| Error::Config(format!("AES encrypt: {e}")))?;
-
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(HEADER_LEN + ciphertext.len());
     result.extend_from_slice(b"SOSYNC1");
-    result.push(2);
+    result.push(SETTINGS_VERSION);
     result.extend_from_slice(&salt);
-    result.extend_from_slice(&nonce_bytes);
+    result.extend_from_slice(&nonce);
     result.extend_from_slice(&ciphertext);
     Ok(result)
 }
 
 pub fn import_settings(conn: &Connection, data: &[u8], password: &str) -> Result<()> {
-    if data.len() < 7 + 1 + 16 + 12 {
+    const LOG_N: u8 = 17;
+    const SETTINGS_VERSION: u8 = 2;
+    const HEADER_LEN: usize = 7 + 1 + crypto::SALT_LEN + crypto::NONCE_LEN;
+
+    if data.len() < HEADER_LEN {
         return Err(Error::Config("encrypted settings data too short".into()));
     }
     if &data[..7] != b"SOSYNC1" {
         return Err(Error::Config("invalid magic header for settings".into()));
     }
     let version = data[7];
-    if version != 2 {
+    if version != SETTINGS_VERSION {
         return Err(Error::Config(format!(
-            "unsupported settings version {version} (expected 2)"
+            "unsupported settings version {version} (expected {SETTINGS_VERSION})"
         )));
     }
 
-    const SALT_LEN: usize = 16;
-    const NONCE_LEN: usize = 12;
-    const KEY_LEN: usize = 32;
+    let salt = &data[8..8 + crypto::SALT_LEN];
+    let nonce = &data[8 + crypto::SALT_LEN..8 + crypto::SALT_LEN + crypto::NONCE_LEN];
+    let ciphertext = &data[8 + crypto::SALT_LEN + crypto::NONCE_LEN..];
 
-    let salt = &data[8..8 + SALT_LEN];
-    let nonce_bytes = &data[8 + SALT_LEN..8 + SALT_LEN + NONCE_LEN];
-    let ciphertext = &data[8 + SALT_LEN + NONCE_LEN..];
-
-    use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
-    use scrypt::scrypt;
-
-    let mut key = [0u8; KEY_LEN];
-    scrypt(
-        password.as_bytes(),
-        salt,
-        &scrypt::Params::new(17, 8, 1, KEY_LEN)
-            .map_err(|e| Error::Config(format!("scrypt: {e}")))?,
-        &mut key,
-    )
-    .map_err(|e| Error::Config(format!("scrypt: {e}")))?;
-
-    let cipher =
-        Aes256Gcm::new_from_slice(&key).map_err(|e| Error::Config(format!("AES key: {e}")))?;
-    let nonce = Nonce::from_slice(nonce_bytes);
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+    let key = crypto::derive_key(password.as_bytes(), salt, LOG_N)?;
+    let plaintext = crypto::decrypt(&key, nonce, ciphertext)
         .map_err(|_| Error::Config("settings decryption failed — wrong password".into()))?;
 
     let settings_rows: Vec<(String, String)> = serde_json::from_slice(&plaintext)

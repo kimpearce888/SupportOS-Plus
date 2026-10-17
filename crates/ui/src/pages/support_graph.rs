@@ -1,18 +1,18 @@
-use leptos::*;
+use leptos::prelude::*;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
 #[component]
 pub fn SupportGraphPage() -> impl IntoView {
-    let nodes = create_rw_signal(Vec::<serde_json::Value>::new());
-    let selected_node = create_rw_signal(None::<(String, i64)>);
-    let neighbors = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let search_query = create_rw_signal(String::new());
-    let stats = create_rw_signal(None::<serde_json::Value>);
+    let nodes = RwSignal::new(Vec::<serde_json::Value>::new());
+    let selected_node = RwSignal::new(None::<(String, i64)>);
+    let neighbors = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let search_query = RwSignal::new(String::new());
+    let stats = RwSignal::new(None::<serde_json::Value>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let nodes = nodes;
         let loading = loading;
         let error_msg = error_msg;
@@ -39,7 +39,7 @@ pub fn SupportGraphPage() -> impl IntoView {
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let neighbors = neighbors;
         let error_msg = error_msg;
         if let Some((kind, nid)) = selected_node.get() {

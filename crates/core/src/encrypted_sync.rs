@@ -2,23 +2,21 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use aes_gcm::aead::Aead;
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::error::{Error, Result};
+use crate::crypto;
+use crate::error::Result;
 
 pub const MAGIC: &[u8; 6] = b"SOSYNC";
 pub const FORMAT_VERSION: u32 = 1;
 const SCRYPT_N: u32 = 1 << 15;
-const SCRYPT_R: u32 = 8;
-const SCRYPT_P: u32 = 1;
-const KEY_LEN: usize = 32;
+const LOG_N: u8 = SCRYPT_N.trailing_zeros() as u8;
+const KEY_LEN: usize = crypto::KEY_LEN;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncBundleInfo {
@@ -92,12 +90,7 @@ fn stamp() -> String {
 }
 
 fn derive_key(passphrase: &str, salt: &[u8]) -> Result<[u8; KEY_LEN]> {
-    let mut key = [0u8; KEY_LEN];
-    let params = scrypt::Params::new(SCRYPT_N.trailing_zeros() as u8, SCRYPT_R, SCRYPT_P, KEY_LEN)
-        .map_err(|e| Error::Config(format!("scrypt params invalid: {e}")))?;
-    scrypt::scrypt(passphrase.as_bytes(), salt, &params, &mut key)
-        .map_err(|e| Error::Config(format!("scrypt derivation failed: {e}")))?;
-    Ok(key)
+    crypto::derive_key(passphrase.as_bytes(), salt, LOG_N)
 }
 
 pub fn ensure_log_table(conn: &Connection) -> Result<()> {
@@ -124,7 +117,7 @@ fn snapshot_info(snapshot_path: &Path) -> Result<SyncBundleInfo> {
     let customers: i64 = test.query_row("SELECT COUNT(*) FROM customers", [], |r| r.get(0))?;
     drop(test);
     let bytes = fs::read(snapshot_path)?;
-    let sha256 = hex(&Sha256::digest(&bytes));
+    let sha256 = crypto::hex(&Sha256::digest(&bytes));
     Ok(SyncBundleInfo {
         version: FORMAT_VERSION,
         created_at: now_iso(),
@@ -133,10 +126,6 @@ fn snapshot_info(snapshot_path: &Path) -> Result<SyncBundleInfo> {
         app_version: app_version(),
         sha256,
     })
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn schema_version_of_file(path: &Path) -> i64 {
@@ -157,14 +146,14 @@ fn schema_version_of_file(path: &Path) -> i64 {
             )
             .map(|n| n > 0)
             .unwrap_or(false);
-        if exists {
-            if let Ok(v) = test.query_row(
+        if exists
+            && let Ok(v) = test.query_row(
                 &format!("SELECT COALESCE(MAX({col}), 0) FROM {table}"),
                 [],
                 |r| r.get(0),
-            ) {
-                return v;
-            }
+            )
+        {
+            return v;
         }
     }
     0
@@ -228,7 +217,7 @@ pub fn schema_fingerprint(conn: &Connection) -> Result<String> {
         let normalized: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
         canonical.push_str(&format!("{typ}\u{1f}{name}\u{1f}{normalized}\n"));
     }
-    Ok(hex(&Sha256::digest(canonical.as_bytes())))
+    Ok(crypto::hex(&Sha256::digest(canonical.as_bytes())))
 }
 
 fn fingerprint_of_file(path: &Path) -> Result<String> {
@@ -354,19 +343,16 @@ fn try_export_bundle(
     let info = snapshot_info(&snapshot_path)?;
     let fingerprint = fingerprint_of_file(&snapshot_path)?;
 
-    let mut salt = [0u8; 16];
-    let mut iv = [0u8; 12];
-    use rand::RngCore;
-    rand::thread_rng().fill_bytes(&mut salt);
-    rand::thread_rng().fill_bytes(&mut iv);
+    let salt = crypto::random_salt();
     let key = derive_key(passphrase, &salt)?;
+    let (iv, ciphertext) = crypto::encrypt(&key, &fs::read(&snapshot_path)?)?;
     let header = BundleHeader {
         v: FORMAT_VERSION,
         kdf: KdfParams {
             name: "scrypt".into(),
             n: SCRYPT_N,
-            r: SCRYPT_R,
-            p: SCRYPT_P,
+            r: 8,
+            p: 1,
             salt: B64.encode(salt),
         },
         cipher: "aes-256-gcm".into(),
@@ -385,11 +371,6 @@ fn try_export_bundle(
     header_len[2] = (header_bytes.len() >> 8) as u8;
     header_len[3] = header_bytes.len() as u8;
 
-    let plaintext = fs::read(&snapshot_path)?;
-    let cipher = Aes256Gcm::new((&key).into());
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&iv), plaintext.as_slice())
-        .map_err(|_| Error::Config("encryption failed".into()))?;
     let mut out = Vec::with_capacity(MAGIC.len() + 4 + header_bytes.len() + ciphertext.len());
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&header_len);
@@ -447,30 +428,30 @@ fn decrypt_to_temp(
     if header.v != FORMAT_VERSION {
         return Err(format!("Unsupported bundle format version {}.", header.v));
     }
-    if header.cipher != "aes-256-gcm" || header.kdf.name != "scrypt" {
-        return Err("Bundle uses an unsupported cipher.".into());
+    if header.cipher != "aes-256-gcm"
+        || header.kdf.name != "scrypt"
+        || header.kdf.r != 8
+        || header.kdf.p != 1
+    {
+        return Err("Bundle uses an unsupported cipher or KDF.".into());
     }
-    let ciphertext = &raw[offset + header_len as usize..raw.len() - 16];
-    let tag = &raw[raw.len() - 16..];
-    let mut ct_with_tag = Vec::with_capacity(ciphertext.len() + 16);
-    ct_with_tag.extend_from_slice(ciphertext);
-    ct_with_tag.extend_from_slice(tag);
+    let ciphertext = &raw[offset + header_len as usize..];
 
     let salt = B64
         .decode(&header.kdf.salt)
         .map_err(|_| "Bundle header is corrupt.".to_string())?;
-    let key =
-        scrypt_derive_with_params(passphrase, &salt, header.kdf.n, header.kdf.r, header.kdf.p)
-            .map_err(|e| format!("Key derivation failed: {e}"))?;
+    let key = crypto::derive_key(
+        passphrase.as_bytes(),
+        &salt,
+        header.kdf.n.trailing_zeros() as u8,
+    )
+    .map_err(|e| format!("Key derivation failed: {e}"))?;
     let iv = B64
         .decode(&header.iv)
         .map_err(|_| "Bundle header is corrupt.".to_string())?;
-    let cipher = Aes256Gcm::new((&key).into());
-    let plain = cipher
-        .decrypt(Nonce::from_slice(&iv), ct_with_tag.as_slice())
-        .map_err(|_| {
-            "Wrong passphrase (or the bundle was modified). Nothing was changed.".to_string()
-        })?;
+    let plain = crypto::decrypt(&key, &iv, ciphertext).map_err(|_| {
+        "Wrong passphrase (or the bundle was modified). Nothing was changed.".to_string()
+    })?;
     let temp_path = bundles_dir.join(format!(
         ".import-{}.tmp",
         chrono::Utc::now().timestamp_millis()
@@ -478,21 +459,6 @@ fn decrypt_to_temp(
     fs::create_dir_all(bundles_dir).map_err(|e| e.to_string())?;
     fs::write(&temp_path, plain).map_err(|e| e.to_string())?;
     Ok(temp_path)
-}
-
-fn scrypt_derive_with_params(
-    passphrase: &str,
-    salt: &[u8],
-    n: u32,
-    r: u32,
-    p: u32,
-) -> Result<[u8; KEY_LEN]> {
-    let mut key = [0u8; KEY_LEN];
-    let params = scrypt::Params::new(n.trailing_zeros() as u8, r, p, KEY_LEN)
-        .map_err(|e| Error::Config(format!("scrypt params invalid: {e}")))?;
-    scrypt::scrypt(passphrase.as_bytes(), salt, &params, &mut key)
-        .map_err(|e| Error::Config(format!("scrypt derivation failed: {e}")))?;
-    Ok(key)
 }
 
 fn integrity_check(path: &Path) -> bool {
@@ -564,7 +530,7 @@ pub fn import_bundle(
                 ok: false,
                 message: format!("Import failed: {msg}"),
                 require_restart: None,
-            }
+            };
         }
     };
     if !integrity_check(&temp) {

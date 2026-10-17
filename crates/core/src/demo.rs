@@ -1,8 +1,8 @@
 use rusqlite::Connection;
 
-use crate::ai_pipeline::{upsert_cluster, ClusterUpsert};
+use crate::ai_pipeline::{ClusterUpsert, upsert_cluster};
 use crate::jobs;
-use crate::quality::{is_closing_acknowledgment, published_threads, ThreadLite};
+use crate::quality::{ThreadLite, is_closing_acknowledgment, published_threads};
 use crate::settings;
 use crate::webhook;
 use crate::webhook_handler;
@@ -27,9 +27,15 @@ impl DemoTool {
     #[must_use]
     pub fn description(self) -> &'static str {
         match self {
-            Self::SimulatedWebhookEvent => "Pushes a simulated Help Scout webhook event through the real HMAC + dedup + job pipeline.",
-            Self::SimulatedCsatRating => "Pushes a simulated CSAT rating through the real ratings pipeline.",
-            Self::SimulatedIncomingMessage => "Pushes a simulated incoming customer message through the real sync + live-update pipeline.",
+            Self::SimulatedWebhookEvent => {
+                "Pushes a simulated Help Scout webhook event through the real HMAC + dedup + job pipeline."
+            }
+            Self::SimulatedCsatRating => {
+                "Pushes a simulated CSAT rating through the real ratings pipeline."
+            }
+            Self::SimulatedIncomingMessage => {
+                "Pushes a simulated incoming customer message through the real sync + live-update pipeline."
+            }
         }
     }
 
@@ -140,7 +146,9 @@ fn simulate_incoming_message(conn: &Connection) -> DemoToolResult {
 
     match jobs::enqueue(conn, "sync.conversations", &payload.to_string()) {
         Ok(job_id) => DemoToolResult::Success {
-            message: format!("Simulated incoming message (conversation #{conv_number}) enqueued as job #{job_id}."),
+            message: format!(
+                "Simulated incoming message (conversation #{conv_number}) enqueued as job #{job_id}."
+            ),
         },
         Err(e) => DemoToolResult::Failed {
             message: format!("Failed to enqueue simulated incoming message: {e}"),
@@ -405,21 +413,24 @@ fn save_analysis(
         ("requested_action", analysis.get("requested_action")),
         ("summary", analysis.get("summary")),
     ] {
-        if let Some(v) = value {
-            if !v.is_null() {
-                conn.execute(
-                    "INSERT INTO ai_extracted_facts (conversation_id, run_id, key, value, confidence)
+        if let Some(v) = value
+            && !v.is_null()
+        {
+            conn.execute(
+                "INSERT INTO ai_extracted_facts (conversation_id, run_id, key, value, confidence)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![
-                        conv_id,
-                        run_id,
-                        key,
-                        v.as_str().unwrap_or_default(),
-                        analysis.get("confidence").and_then(|c| c.as_str()).unwrap_or("medium"),
-                    ],
-                )
-                .ok();
-            }
+                rusqlite::params![
+                    conv_id,
+                    run_id,
+                    key,
+                    v.as_str().unwrap_or_default(),
+                    analysis
+                        .get("confidence")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("medium"),
+                ],
+            )
+            .ok();
         }
     }
     for s in sources {
@@ -633,11 +644,36 @@ pub fn seed_demo_data(conn: &Connection, demo_mode: bool) -> bool {
     let source = source_id(conn, "Demo product docs", "customer_safe");
     let internal_source = source_id(conn, "Demo internal runbook", "internal_only");
     let docs: Vec<(i64, &str, &str, &str)> = vec![
-        (source, "Timezones and scheduled reports", "# Timezones and scheduled reports\n\nScheduled reports follow the **workspace timezone**: Settings > Workspace > Regional settings.\n\nAfter changing the workspace timezone, open each schedule and re-save it once so the stored times re-anchor to the new timezone.\n\nDaylight-saving changes do not automatically re-anchor schedules that were saved before the change; re-saving after a DST change fixes the stored offset.\n\nAll schedule times are displayed in the workspace timezone.", "customer_safe"),
-        (source, "Inviting teammates", "# Inviting teammates\n\nGo to Settings > Users > Invite. Invitation emails are sent immediately.\n\nIf an invitation does not arrive, common causes are spam filtering or a typo in the address. Ask your mail provider to whitelist our sending domain. Invitations can be re-sent from the Users screen at any time.", "customer_safe"),
-        (source, "Viewer role capabilities", "# Viewer role\n\nA Viewer can see every dashboard and report shared with their team, but cannot edit, comment or create new ones. Viewers can export data (CSV/PDF) from reports they can see. An Editor seat is required for edit rights.", "customer_safe"),
-        (source, "Updating your payment method", "# Updating your payment method\n\nYou can update your card under Settings > Billing > Payment method. After updating, click \"Retry payment\" so the pending invoice is charged again; the license re-activates immediately after a successful charge.\n\nIf your bank reports no charge attempt, the invoice may have entered a retry backoff - retrying manually triggers it immediately.", "customer_safe"),
-        (internal_source, "Slack integration 401 runbook (ENG-4471)", "# Slack integration 401 runbook - INTERNAL\n\nSymptom: workspaces report the Slack integration stopped posting updates; integration log shows repeated 401 from Slack.\n\nCause: Slack token rotation policy change; refresh tokens were invalidated for workspaces connected before <policy date>.\n\nFix status: engineering is deploying automatic re-auth flow (ENG-4471). Until deployed, instruct customers to disconnect/reconnect the integration - historical sync data is preserved.\n\nCustomer-facing wording must stay generic: \"an authentication change on Slack's side\" - do not mention internal ticket IDs.", "internal_only"),
+        (
+            source,
+            "Timezones and scheduled reports",
+            "# Timezones and scheduled reports\n\nScheduled reports follow the **workspace timezone**: Settings > Workspace > Regional settings.\n\nAfter changing the workspace timezone, open each schedule and re-save it once so the stored times re-anchor to the new timezone.\n\nDaylight-saving changes do not automatically re-anchor schedules that were saved before the change; re-saving after a DST change fixes the stored offset.\n\nAll schedule times are displayed in the workspace timezone.",
+            "customer_safe",
+        ),
+        (
+            source,
+            "Inviting teammates",
+            "# Inviting teammates\n\nGo to Settings > Users > Invite. Invitation emails are sent immediately.\n\nIf an invitation does not arrive, common causes are spam filtering or a typo in the address. Ask your mail provider to whitelist our sending domain. Invitations can be re-sent from the Users screen at any time.",
+            "customer_safe",
+        ),
+        (
+            source,
+            "Viewer role capabilities",
+            "# Viewer role\n\nA Viewer can see every dashboard and report shared with their team, but cannot edit, comment or create new ones. Viewers can export data (CSV/PDF) from reports they can see. An Editor seat is required for edit rights.",
+            "customer_safe",
+        ),
+        (
+            source,
+            "Updating your payment method",
+            "# Updating your payment method\n\nYou can update your card under Settings > Billing > Payment method. After updating, click \"Retry payment\" so the pending invoice is charged again; the license re-activates immediately after a successful charge.\n\nIf your bank reports no charge attempt, the invoice may have entered a retry backoff - retrying manually triggers it immediately.",
+            "customer_safe",
+        ),
+        (
+            internal_source,
+            "Slack integration 401 runbook (ENG-4471)",
+            "# Slack integration 401 runbook - INTERNAL\n\nSymptom: workspaces report the Slack integration stopped posting updates; integration log shows repeated 401 from Slack.\n\nCause: Slack token rotation policy change; refresh tokens were invalidated for workspaces connected before <policy date>.\n\nFix status: engineering is deploying automatic re-auth flow (ENG-4471). Until deployed, instruct customers to disconnect/reconnect the integration - historical sync data is preserved.\n\nCustomer-facing wording must stay generic: \"an authentication change on Slack's side\" - do not mention internal ticket IDs.",
+            "internal_only",
+        ),
     ];
     for (sid, title, content, visibility) in &docs {
         upsert_document(conn, *sid, title, content, visibility);
@@ -882,21 +918,21 @@ pub fn seed_demo_data(conn: &Connection, demo_mode: bool) -> bool {
             .ok();
         }
     };
-    if let Some(lucia) = by_number(5001) {
-        if let Some(customer) = lucia.customer_id {
-            ai_memory(
-                customer,
-                "operates_in_chile",
-                "Operations in Santiago, Chile (America/Santiago timezone, UTC-4 during DST).",
-                lucia.id,
-            );
-            ai_memory(
-                customer,
-                "vip_account",
-                "Andes Logistics is a VIP account (vip tag applied).",
-                lucia.id,
-            );
-        }
+    if let Some(lucia) = by_number(5001)
+        && let Some(customer) = lucia.customer_id
+    {
+        ai_memory(
+            customer,
+            "operates_in_chile",
+            "Operations in Santiago, Chile (America/Santiago timezone, UTC-4 during DST).",
+            lucia.id,
+        );
+        ai_memory(
+            customer,
+            "vip_account",
+            "Andes Logistics is a VIP account (vip tag applied).",
+            lucia.id,
+        );
     }
     tracing::info!("Seeded customer memories");
 
@@ -1319,8 +1355,8 @@ pub fn seed_demo_data(conn: &Connection, demo_mode: bool) -> bool {
                     |r| r.get(0),
                 )
                 .ok();
-            if exists.is_none() {
-                if let Ok(connector) = crate::connectors::create(
+            if exists.is_none()
+                && let Ok(connector) = crate::connectors::create(
                     conn,
                     "Product releases",
                     "local_json",
@@ -1329,12 +1365,12 @@ pub fn seed_demo_data(conn: &Connection, demo_mode: bool) -> bool {
                     "manual",
                     3600,
                     true,
-                ) {
-                    tracing::info!(
-                        id = connector.get("id").and_then(|v| v.as_i64()).unwrap_or(0),
-                        "Seeded 1 local JSON connector (Product releases, AI-visible)"
-                    );
-                }
+                )
+            {
+                tracing::info!(
+                    id = connector.get("id").and_then(|v| v.as_i64()).unwrap_or(0),
+                    "Seeded 1 local JSON connector (Product releases, AI-visible)"
+                );
             }
         }
     }
@@ -1494,7 +1530,9 @@ pub fn seed_demo_data(conn: &Connection, demo_mode: bool) -> bool {
     }
 
     tracing::info!("Demo seed complete");
-    tracing::info!("NOTE: all seeded AI content is marked ai_generated; demo data never mixes with production data.");
+    tracing::info!(
+        "NOTE: all seeded AI content is marked ai_generated; demo data never mixes with production data."
+    );
     true
 }
 

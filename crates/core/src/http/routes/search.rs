@@ -1,14 +1,14 @@
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::Json;
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use crate::embeddings::{self, utf16_len};
-use crate::hybrid_search::{cosine_similarity, merge_doc_hits, FtsDocHit, SemanticDocHit};
+use crate::hybrid_search::{FtsDocHit, SemanticDocHit, cosine_similarity, merge_doc_hits};
 use crate::search::{SearchFilters, SearchHit, SearchResponse};
 
 const MAX_QUERY_UNITS: usize = 500;
@@ -84,7 +84,7 @@ pub async fn search(State(state): State<AppState>, body: Bytes) -> impl IntoResp
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"message": e.to_string()})),
-                )
+                );
             }
         };
         let settings = match embeddings::lm_studio_embedding_settings(&conn) {
@@ -93,7 +93,7 @@ pub async fn search(State(state): State<AppState>, body: Bytes) -> impl IntoResp
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"message": e.to_string()})),
-                )
+                );
             }
         };
         let qdrant_enabled =
@@ -109,7 +109,7 @@ pub async fn search(State(state): State<AppState>, body: Bytes) -> impl IntoResp
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"message": e.to_string()})),
-                )
+                );
             }
         };
         if settings.embedding_model.is_some() && stats.indexed > 0 {

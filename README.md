@@ -20,7 +20,7 @@ A single Cargo workspace, split by concern:
 |---|---|
 | `crates/catalog` | Shared type catalog re-exported by every other crate |
 | `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, AI providers, embedded vector store. **No UI, no Tauri deps.** |
-| `crates/ui` | Leptos/WASM frontend; depends on `core` types only |
+| `crates/ui` | Leptos 0.8/WASM frontend; depends on `core` types only |
 | `crates/app/src-tauri` | Tauri 2 desktop shell; serves the WASM bundle and bridges to `core` |
 | `crates/xtask` | Developer entry point — `dev` / `lint` / `verify-icons` / `package` / db ops (`migrate`/`backup`/`restore`/`seed`/`healthcheck`) |
 
@@ -30,7 +30,9 @@ A single Cargo workspace, split by concern:
   for semantic docs search — no separate Qdrant server to install or babysit.
 - **SQLite everywhere.** `rusqlite` (bundled) for tickets, conversations and docs;
   business-minutes SLA math with full IANA timezone parity (`chrono-tz`).
-- **Encrypted backups.** AES-GCM + scrypt key derivation; constant-time comparison via `subtle`.
+- **One crypto module.** All encrypted artifacts (`.sosync` sync bundles, settings
+  exports) share `core::crypto`: scrypt key derivation + AES-256-GCM sealing,
+  written once and tested.
 - **Loopback-only HTTP.** An `axum` listener bound to `127.0.0.1` bridges the webview
   and the Rust core — no network exposure, ever.
 - **Local AI adapters.** LM Studio, Ollama and generic OpenAI-compatible endpoints
@@ -41,8 +43,8 @@ A single Cargo workspace, split by concern:
 
 ## Building
 
-Requires a stable Rust toolchain (1.80+) with the `wasm32-unknown-unknown` target
-and the Tauri 2 prerequisites for your platform.
+Requires a stable Rust toolchain (1.85+ for edition 2024) with the
+`wasm32-unknown-unknown` target and the Tauri 2 prerequisites for your platform.
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -50,6 +52,7 @@ rustup target add wasm32-unknown-unknown
 cargo xtask dev
 cargo xtask lint
 cargo xtask package
+cargo test          # unit tests (crypto round-trips, HMAC vectors, SLA math)
 ```
 
 ## License

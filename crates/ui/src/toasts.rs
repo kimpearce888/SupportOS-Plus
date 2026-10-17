@@ -1,6 +1,6 @@
-use leptos::*;
-use std::sync::atomic::{AtomicU64, Ordering};
+use leptos::prelude::*;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const MAX_TOASTS: usize = 5;
 
@@ -36,7 +36,7 @@ static TOASTS: OnceLock<RwSignal<Vec<Toast>>> = OnceLock::new();
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 pub fn init() {
-    let _ = TOASTS.set(create_rw_signal(Vec::<Toast>::new()));
+    let _ = TOASTS.set(RwSignal::new(Vec::<Toast>::new()));
 }
 
 #[must_use]
@@ -122,7 +122,7 @@ pub fn Toasts() -> impl IntoView {
                                 <div class="spp-toast__detail-body">{d.to_string()}</div>
                             </details>
                         }
-                        .into_view()
+                        .into_any()
                     });
                     view! {
                         <div class=class role="status">

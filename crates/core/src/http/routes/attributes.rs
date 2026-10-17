@@ -1,13 +1,13 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use super::super::server::AppState;
 use crate::ai_attributes::{self, MatchOp};
-use crate::catalog::{AiAttributeKey, AttributeValueType, AI_ATTRIBUTE_SCHEMA_VERSION};
+use crate::catalog::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValueType};
 
 fn clamp_list_param(raw: Option<&String>, fallback: i64, min: i64, max: i64) -> i64 {
     let n = match raw {

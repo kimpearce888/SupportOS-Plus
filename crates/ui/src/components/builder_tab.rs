@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -354,24 +355,24 @@ pub const STATE_KEYS: [&str; 6] = [
 
 #[component]
 pub fn BuilderTab() -> impl IntoView {
-    let catalog = create_rw_signal(None::<BuilderCatalog>);
-    let catalog_error = create_rw_signal(false);
-    let saved = create_rw_signal(Vec::<SavedReportRow>::new());
-    let result = create_rw_signal(None::<BuilderResult>);
-    let running = create_rw_signal(false);
-    let notice = create_rw_signal(None::<(String, String)>);
+    let catalog = RwSignal::new(None::<BuilderCatalog>);
+    let catalog_error = RwSignal::new(false);
+    let saved = RwSignal::new(Vec::<SavedReportRow>::new());
+    let result = RwSignal::new(None::<BuilderResult>);
+    let running = RwSignal::new(false);
+    let notice = RwSignal::new(None::<(String, String)>);
 
-    let metric = create_rw_signal("conversations".to_string());
-    let dimension = create_rw_signal("day".to_string());
-    let date_from = create_rw_signal(iso_days_ago(30));
-    let date_to = create_rw_signal(iso_days_ago(0));
-    let comparison = create_rw_signal("previous_period".to_string());
-    let sort = create_rw_signal("dimension_asc".to_string());
-    let limit = create_rw_signal(30i64);
-    let attribute_key = create_rw_signal(String::new());
-    let state_key = create_rw_signal(String::new());
-    let name = create_rw_signal(String::new());
-    let chart_bar = create_rw_signal(true);
+    let metric = RwSignal::new("conversations".to_string());
+    let dimension = RwSignal::new("day".to_string());
+    let date_from = RwSignal::new(iso_days_ago(30));
+    let date_to = RwSignal::new(iso_days_ago(0));
+    let comparison = RwSignal::new("previous_period".to_string());
+    let sort = RwSignal::new("dimension_asc".to_string());
+    let limit = RwSignal::new(30i64);
+    let attribute_key = RwSignal::new(String::new());
+    let state_key = RwSignal::new(String::new());
+    let name = RwSignal::new(String::new());
+    let chart_bar = RwSignal::new(true);
 
     let load_saved = {
         move || {
@@ -537,7 +538,7 @@ pub fn BuilderTab() -> impl IntoView {
             {move || {
                 let cat = catalog.clone().get();
                 if cat.is_none() {
-                    return view! { <LoadingState /> }.into_view();
+                    return view! { <LoadingState /> }.into_any();
                 }
                 let cat = cat.unwrap_or_default();
                 let metric_entry = cat
@@ -566,7 +567,7 @@ pub fn BuilderTab() -> impl IntoView {
                                 <span class="spp-muted">"Metric"</span>
                                 <select
                                     class="spp-input"
-                                    value=move || metric.get()
+                                    prop:value=move || metric.get()
                                     on:change=move |ev| {
                                         let next = event_target_value(&ev);
                                         if is_total_only(&next, &cat_for_change) {
@@ -585,7 +586,7 @@ pub fn BuilderTab() -> impl IntoView {
                                 <span class="spp-muted">"Group by"</span>
                                 <select
                                     class="spp-input"
-                                    value=move || dimension.get()
+                                    prop:value=move || dimension.get()
                                     prop:disabled=total_only
                                     on:change=move |ev| dimension.set(event_target_value(&ev))
                                 >
@@ -622,7 +623,7 @@ pub fn BuilderTab() -> impl IntoView {
                                 <span class="spp-muted">"Comparison"</span>
                                 <select
                                     class="spp-input"
-                                    value=move || comparison.get()
+                                    prop:value=move || comparison.get()
                                     on:change=move |ev| comparison.set(event_target_value(&ev))
                                 >
                                     <option value="none">"None"</option>
@@ -633,7 +634,7 @@ pub fn BuilderTab() -> impl IntoView {
                                 <span class="spp-muted">"Sort"</span>
                                 <select
                                     class="spp-input"
-                                    value=move || sort.get()
+                                    prop:value=move || sort.get()
                                     on:change=move |ev| sort.set(event_target_value(&ev))
                                 >
                                     <option value="metric_desc">"Metric (high to low)"</option>
@@ -659,7 +660,7 @@ pub fn BuilderTab() -> impl IntoView {
                                 <span class="spp-muted">"Display"</span>
                                 <select
                                     class="spp-input"
-                                    value=move || if chart_bar.get() { "bar".to_string() } else { "table".to_string() }
+                                    prop:value=move || if chart_bar.get() { "bar".to_string() } else { "table".to_string() }
                                     on:change=move |ev| chart_bar.set(event_target_value(&ev) == "bar")
                                 >
                                     <option value="bar">"Bar chart"</option>
@@ -672,7 +673,7 @@ pub fn BuilderTab() -> impl IntoView {
                                         <span class="spp-muted">"AI attribute key"</span>
                                         <select
                                             class="spp-input"
-                                            value=move || attribute_key.get()
+                                            prop:value=move || attribute_key.get()
                                             on:change=move |ev| attribute_key.set(event_target_value(&ev))
                                         >
                                             <option value="">"(choose an attribute)"</option>
@@ -682,9 +683,9 @@ pub fn BuilderTab() -> impl IntoView {
                                                 .collect::<Vec<_>>()}
                                         </select>
                                     </label>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                             {if needs_state {
                                 view! {
@@ -692,7 +693,7 @@ pub fn BuilderTab() -> impl IntoView {
                                         <span class="spp-muted">"Custom state"</span>
                                         <select
                                             class="spp-input"
-                                            value=move || state_key.get()
+                                            prop:value=move || state_key.get()
                                             on:change=move |ev| state_key.set(event_target_value(&ev))
                                         >
                                             <option value="">"(choose a state)"</option>
@@ -702,9 +703,9 @@ pub fn BuilderTab() -> impl IntoView {
                                                 .collect::<Vec<_>>()}
                                         </select>
                                     </label>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }}
                         </div>
                         <div class="spp-flex spp-gap-8 spp-mt-12 spp-flex--wrap">
@@ -746,17 +747,17 @@ pub fn BuilderTab() -> impl IntoView {
                                             <div class="spp-muted">
                                                 {format!("Grouping: {}", dimension_entry.definition)}
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }}
                     </div>
-                }.into_view()
+                }.into_any()
             }}
             {move || {
                 let notice = notice.get();
@@ -766,15 +767,15 @@ pub fn BuilderTab() -> impl IntoView {
                     } else {
                         "spp-alert spp-alert--error"
                     };
-                    view! { <div class=class><div class="spp-text-sm">{message}</div></div> }.into_view()
+                    view! { <div class=class><div class="spp-text-sm">{message}</div></div> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
             {move || {
                 let r = result.clone().get();
                 let Some(r) = r else {
-                    return ().into_view();
+                    return ().into_any();
                 };
                 let has_comparison = r.comparison_rows.is_some();
                 let title = if r.dimension_key != "none" {
@@ -795,7 +796,7 @@ pub fn BuilderTab() -> impl IntoView {
                         {if r.rows.is_empty() {
                             view! {
                                 <EmptyState message="No data in this range. Try a wider date range or different filters." />
-                            }.into_view()
+                            }.into_any()
                         } else if chart_bar.get() && r.dimension_key != "none" {
                             let max = r.rows.iter().map(|x| x.value).fold(0.0_f64, f64::max).max(1.0);
                             view! {
@@ -833,9 +834,9 @@ pub fn BuilderTab() -> impl IntoView {
                                                         {if let Some(cw) = cmp_width {
                                                             view! {
                                                                 <div class="spp-bar spp-bar--compare" style=format!("width: {cw:.1}%")></div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
-                                                            ().into_view()
+                                                            ().into_any()
                                                         }}
                                                     </div>
                                                 </div>
@@ -843,7 +844,7 @@ pub fn BuilderTab() -> impl IntoView {
                                         })
                                         .collect::<Vec<_>>()}
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
                             view! {
                                 <table class="spp-table">
@@ -852,9 +853,9 @@ pub fn BuilderTab() -> impl IntoView {
                                             <th>{if r.dimension_key == "none" { "Total".to_string() } else { r.dimension_label.clone() }}</th>
                                             <th>{r.metric_label.clone()}</th>
                                             {if has_comparison {
-                                                view! { <th>"Previous period"</th> }.into_view()
+                                                view! { <th>"Previous period"</th> }.into_any()
                                             } else {
-                                                ().into_view()
+                                                ().into_any()
                                             }}
                                             <th>"Samples"</th>
                                         </tr>
@@ -889,14 +890,14 @@ pub fn BuilderTab() -> impl IntoView {
                                                                         };
                                                                         view! {
                                                                             <span class=badge>{format!("{}{:.0}%", if d > 0.0 { "+" } else { "" }, d)}</span>
-                                                                        }.into_view()
+                                                                        }.into_any()
                                                                     } else {
-                                                                        ().into_view()
+                                                                        ().into_any()
                                                                     }}
                                                                 </td>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
-                                                            ().into_view()
+                                                            ().into_any()
                                                         }}
                                                         <td>
                                                             <div class="spp-flex spp-gap-4 spp-flex--wrap">
@@ -919,7 +920,7 @@ pub fn BuilderTab() -> impl IntoView {
                                             .collect::<Vec<_>>()}
                                     </tbody>
                                 </table>
-                            }.into_view()
+                            }.into_any()
                         }}
                         <div class="spp-alert spp-alert--info spp-mt-12">
                             {r.notes
@@ -928,12 +929,12 @@ pub fn BuilderTab() -> impl IntoView {
                                 .collect::<Vec<_>>()}
                         </div>
                     </div>
-                }.into_view()
+                }.into_any()
             }}
             {move || {
                 let s = saved.get();
                 if s.is_empty() {
-                    return ().into_view();
+                    return ().into_any();
                 }
                 view! {
                     <div class="spp-card">
@@ -978,7 +979,7 @@ pub fn BuilderTab() -> impl IntoView {
                                 .collect::<Vec<_>>()}
                         </div>
                     </div>
-                }.into_view()
+                }.into_any()
             }}
             <p class="spp-muted spp-text-xs">
                 "Every number above is a local calculation from the local mirror. Origin: local."

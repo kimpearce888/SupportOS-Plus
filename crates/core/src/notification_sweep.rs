@@ -1,9 +1,9 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::catalog::NotificationType;
 use crate::error::Result;
 use crate::mentions::{build_mention_directory, parse_mentions};
-use crate::notifications::{record_notification, NotificationInput};
+use crate::notifications::{NotificationInput, record_notification};
 
 pub const CURSOR_KEY: &str = "notif_event_cursor";
 
@@ -123,19 +123,18 @@ fn sweep_conversation_events(
                AND e.event_type IN ('customer_message', 'internal_note', 'assignment_changed')
              ORDER BY e.id LIMIT 500",
         )?;
-        let rows = stmt
-            .query_map(params![after_event_id], |r| {
-                Ok(EventRow {
-                    conversation_id: r.get(0)?,
-                    thread_local_id: r.get(1)?,
-                    event_type: r.get(2)?,
-                    actor_local_id: r.get(3)?,
-                    metadata: r.get(4)?,
-                    dedup_key: r.get(5)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map(params![after_event_id], |r| {
+            Ok(EventRow {
+                conversation_id: r.get(0)?,
+                thread_local_id: r.get(1)?,
+                event_type: r.get(2)?,
+                actor_local_id: r.get(3)?,
+                metadata: r.get(4)?,
+                dedup_key: r.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     if events.is_empty() {
         return Ok(0);
@@ -181,27 +180,27 @@ fn sweep_conversation_events(
             "assignment_changed" => {
                 let meta = safe_json_object(e.metadata.as_deref());
                 let next = meta.get("next").and_then(|v| v.as_i64());
-                if let Some(next) = next {
-                    if Some(next) != e.actor_local_id {
-                        let name = user_display(conn, Some(next));
-                        let r = record_notification(
-                            conn,
-                            bus,
-                            &NotificationInput {
-                                notification_type: NotificationType::TicketAssigned,
-                                title: format!("#{} assigned to {name}", number.unwrap_or(conv_id)),
-                                body: conv.subject.as_deref().map(|s| trim(s, 120)),
-                                target_user_local_id: Some(next),
-                                actor_user_local_id: e.actor_local_id,
-                                conversation_id: Some(conv_id),
-                                conversation_number: number,
-                                dedup_key: format!("n:evt:ticket_assigned:{}", e.dedup_key),
-                                ..Default::default()
-                            },
-                        )?;
-                        if r.is_some() {
-                            created += 1;
-                        }
+                if let Some(next) = next
+                    && Some(next) != e.actor_local_id
+                {
+                    let name = user_display(conn, Some(next));
+                    let r = record_notification(
+                        conn,
+                        bus,
+                        &NotificationInput {
+                            notification_type: NotificationType::TicketAssigned,
+                            title: format!("#{} assigned to {name}", number.unwrap_or(conv_id)),
+                            body: conv.subject.as_deref().map(|s| trim(s, 120)),
+                            target_user_local_id: Some(next),
+                            actor_user_local_id: e.actor_local_id,
+                            conversation_id: Some(conv_id),
+                            conversation_number: number,
+                            dedup_key: format!("n:evt:ticket_assigned:{}", e.dedup_key),
+                            ..Default::default()
+                        },
+                    )?;
+                    if r.is_some() {
+                        created += 1;
                     }
                 }
             }
@@ -304,10 +303,9 @@ fn sweep_automation_approvals(
                AND status IN ('queued', 'awaiting_approval')
              ORDER BY id LIMIT 100",
         )?;
-        let mapped = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     for (job_id, payload) in rows {
@@ -361,12 +359,11 @@ fn sweep_failed_jobs(
             "SELECT id, queue, type, error, completed_at FROM jobs
              WHERE status = 'failed' ORDER BY id DESC LIMIT 200",
         )?;
-        let mapped = stmt
-            .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     for (job_id, queue, job_type, error, completed_at) in rows {
@@ -436,19 +433,18 @@ fn sweep_campaign_replies(
              FROM outreach_recipients r JOIN outreach_campaigns c ON c.id = r.campaign_id
              WHERE r.replied_at IS NOT NULL ORDER BY r.id DESC LIMIT 200",
         )?;
-        let mapped = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     for (id, campaign_id, customer_local_id, replied_at, name, subject) in rows {
@@ -501,12 +497,11 @@ fn sweep_known_issues(
             "SELECT id, title, name, status, created_at FROM known_issues
              ORDER BY id DESC LIMIT 100",
         )?;
-        let mapped = stmt
-            .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     for (id, title, name, status, created_at) in rows {
@@ -554,12 +549,11 @@ fn sweep_issue_spikes(
             "SELECT id, title, name, conversation_count, updated_at FROM issue_clusters
              WHERE trend = 'rising' ORDER BY id DESC LIMIT 100",
         )?;
-        let mapped = stmt
-            .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     let day = day_stamp();
@@ -615,20 +609,19 @@ fn sweep_ai_escalations(
                AND a.conversation_id IS NOT NULL
              ORDER BY a.id DESC LIMIT 200",
         )?;
-        let mapped = stmt
-            .query_map([], |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                    r.get(6)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     for (run_id, conversation_id, output, created_at, number, subject, status) in rows {
@@ -700,12 +693,11 @@ fn sweep_ratings(
             "SELECT id, remote_id, customer_local_id, comments, conversation_id
              FROM ratings WHERE rating = 'not-good' ORDER BY id DESC LIMIT 100",
         )?;
-        let mapped = stmt
-            .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        mapped
+
+        stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     for (id, remote_id, customer_local_id, comments, conversation_id) in rows {

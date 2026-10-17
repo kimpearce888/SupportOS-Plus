@@ -1,5 +1,5 @@
-use rusqlite::{params, Connection};
-use serde_json::{json, Map, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Map, Value, json};
 
 use crate::error::{Error, Result};
 
@@ -167,13 +167,13 @@ pub fn patch_type(
         let mut keys = std::collections::HashSet::new();
         for f in fields {
             f.validate()?;
-            if let Some(c) = current.get(&f.key) {
-                if c.field_type != f.field_type {
-                    return Err(Error::Validation(format!(
-                        "Field \"{}\" already exists as {}; field types are immutable (existing objects store values)",
-                        f.key, c.field_type
-                    )));
-                }
+            if let Some(c) = current.get(&f.key)
+                && c.field_type != f.field_type
+            {
+                return Err(Error::Validation(format!(
+                    "Field \"{}\" already exists as {}; field types are immutable (existing objects store values)",
+                    f.key, c.field_type
+                )));
             }
             if !keys.insert(f.key.clone()) {
                 return Err(Error::Validation(format!(

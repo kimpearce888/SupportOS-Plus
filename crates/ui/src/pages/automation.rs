@@ -1,5 +1,5 @@
-use leptos::*;
-use std::rc::Rc;
+use leptos::prelude::*;
+use std::sync::Arc;
 
 use crate::components::state_view::EmptyState;
 use crate::toasts;
@@ -84,20 +84,20 @@ impl ActionView {
 
 #[component]
 pub fn AutomationPage() -> impl IntoView {
-    let rules = create_rw_signal(Vec::<AutomationRuleView>::new());
-    let automation_enabled = create_rw_signal(None::<bool>);
-    let risk_tier_note = create_rw_signal(String::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let creating = create_rw_signal(false);
-    let new_name = create_rw_signal(String::new());
-    let new_trigger = create_rw_signal("sla_risk".to_string());
-    let new_action = create_rw_signal("add_tag".to_string());
-    let new_tag = create_rw_signal(String::new());
-    let new_status = create_rw_signal("pending".to_string());
-    let new_priority = create_rw_signal("medium".to_string());
+    let rules = RwSignal::new(Vec::<AutomationRuleView>::new());
+    let automation_enabled = RwSignal::new(None::<bool>);
+    let risk_tier_note = RwSignal::new(String::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let creating = RwSignal::new(false);
+    let new_name = RwSignal::new(String::new());
+    let new_trigger = RwSignal::new("sla_risk".to_string());
+    let new_action = RwSignal::new("add_tag".to_string());
+    let new_tag = RwSignal::new(String::new());
+    let new_status = RwSignal::new("pending".to_string());
+    let new_priority = RwSignal::new("medium".to_string());
 
-    let load: Rc<dyn Fn()> = Rc::new(move || {
+    let load: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let rules = rules;
         let automation_enabled = automation_enabled;
         let risk_tier_note = risk_tier_note;
@@ -131,12 +131,12 @@ pub fn AutomationPage() -> impl IntoView {
         });
     });
     load();
-    let load_stored = store_value(Rc::clone(&load));
+    let load_stored = StoredValue::new_local(Arc::clone(&load));
 
-    let toggle_engine: Rc<dyn Fn(bool)> = Rc::new({
-        let load = Rc::clone(&load);
+    let toggle_engine: Arc<dyn Fn(bool) + Send + Sync> = Arc::new({
+        let load = Arc::clone(&load);
         move |on: bool| {
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 let body = serde_json::json!({ "automation_enabled": on });
                 match crate::api::patch_json::<serde_json::Value>("/api/settings", &body).await {
@@ -185,8 +185,8 @@ pub fn AutomationPage() -> impl IntoView {
                 </div>
                 {move || {
                     let note = risk_tier_note.get();
-                    if note.is_empty() { ().into_view() } else {
-                        view! { <p class="spp-page__subtitle">{note}</p> }.into_view()
+                    if note.is_empty() { ().into_any() } else {
+                        view! { <p class="spp-page__subtitle">{note}</p> }.into_any()
                     }
                 }}
             </section>
@@ -209,7 +209,7 @@ pub fn AutomationPage() -> impl IntoView {
                         }
                     }
                 >
-                    <RulesList rules=rules reload=Rc::clone(&load) />
+                    <RulesList rules=rules reload=Arc::clone(&load) />
                 </Show>
             </section>
 
@@ -319,7 +319,7 @@ pub fn AutomationPage() -> impl IntoView {
                                         "priority": 100,
                                         "requires_approval": true,
                                     });
-                                    let load = load_stored.with_value(Rc::clone);
+                                    let load = load_stored.with_value(Arc::clone);
                                     wasm_bindgen_futures::spawn_local(async move {
                                         let _ = crate::api::post_json::<serde_json::Value>(
                                             "/api/automation/rules",
@@ -341,16 +341,19 @@ pub fn AutomationPage() -> impl IntoView {
 }
 
 #[component]
-fn RulesList(rules: RwSignal<Vec<AutomationRuleView>>, reload: Rc<dyn Fn()>) -> impl IntoView {
+fn RulesList(
+    rules: RwSignal<Vec<AutomationRuleView>>,
+    reload: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
     let cards = move || {
         rules
             .get()
             .into_iter()
             .map(|r| {
                 view! {
-                    <RuleCard rule=r reload=Rc::clone(&reload) />
+                    <RuleCard rule=r reload=Arc::clone(&reload) />
                 }
-                .into_view()
+                .into_any()
             })
             .collect::<Vec<_>>()
     };
@@ -362,7 +365,7 @@ fn RulesList(rules: RwSignal<Vec<AutomationRuleView>>, reload: Rc<dyn Fn()>) -> 
 }
 
 #[component]
-fn RuleCard(rule: AutomationRuleView, reload: Rc<dyn Fn()>) -> impl IntoView {
+fn RuleCard(rule: AutomationRuleView, reload: Arc<dyn Fn() + Send + Sync>) -> impl IntoView {
     let name = rule.name.clone();
     let trigger_label = rule.trigger.label();
     let action_label = rule.action.label();
@@ -371,9 +374,9 @@ fn RuleCard(rule: AutomationRuleView, reload: Rc<dyn Fn()>) -> impl IntoView {
     let rule_id = rule.id;
 
     let toggle_rule = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |_| {
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/automation/rules/{rule_id}");
                 let body = serde_json::json!({ "enabled": !enabled });
@@ -385,9 +388,9 @@ fn RuleCard(rule: AutomationRuleView, reload: Rc<dyn Fn()>) -> impl IntoView {
         }
     };
     let delete_rule = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |_| {
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/automation/rules/{rule_id}");
                 match crate::api::delete_json::<serde_json::Value>(&path).await {
@@ -430,7 +433,7 @@ fn RuleCard(rule: AutomationRuleView, reload: Rc<dyn Fn()>) -> impl IntoView {
                 <div class="spp-rule-card__row">
                     <span class="spp-rule-card__label">"Action:"</span>
                     <span class="spp-rule-card__value">{action_label}</span>
-                    <Show when=move || requires_approval fallback=|| ().into_view()>
+                    <Show when=move || requires_approval fallback=|| ().into_any()>
                         <span class="spp-rule-card__badge">"requires approval"</span>
                     </Show>
                 </div>

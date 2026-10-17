@@ -1,5 +1,6 @@
-use leptos::*;
-use std::rc::Rc;
+use leptos::ev;
+use leptos::prelude::*;
+use std::sync::Arc;
 use wasm_bindgen::JsCast;
 
 use crate::components::state_view::{EmptyState, ErrorState, LoadingState};
@@ -46,7 +47,7 @@ impl SettingsTab {
 
 #[component]
 pub fn SettingsPage() -> impl IntoView {
-    let tab = create_rw_signal(SettingsTab::General);
+    let tab = RwSignal::new(SettingsTab::General);
 
     view! {
         <div class="spp-page spp-page--settings">
@@ -69,33 +70,33 @@ pub fn SettingsPage() -> impl IntoView {
                                 {t.label()}
                             </button>
                         }
-                            .into_view()
+                            .into_any()
                     })
                     .collect::<Vec<_>>()}
             </div>
 
-            <Show when=move || tab.get() == SettingsTab::General fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::General fallback=|| ().into_any()>
                 <GeneralSettingsTab />
             </Show>
-            <Show when=move || tab.get() == SettingsTab::HelpScout fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::HelpScout fallback=|| ().into_any()>
                 <HelpScoutSettingsTab />
             </Show>
-            <Show when=move || tab.get() == SettingsTab::LmStudio fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::LmStudio fallback=|| ().into_any()>
                 <LmStudioSettingsTab />
             </Show>
-            <Show when=move || tab.get() == SettingsTab::Qdrant fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::Qdrant fallback=|| ().into_any()>
                 <QdrantSettingsTab />
             </Show>
-            <Show when=move || tab.get() == SettingsTab::Hours fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::Hours fallback=|| ().into_any()>
                 <BusinessHoursSettingsTab />
             </Show>
-            <Show when=move || tab.get() == SettingsTab::Backups fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::Backups fallback=|| ().into_any()>
                 <BackupsSettingsTab />
             </Show>
-            <Show when=move || tab.get() == SettingsTab::EncSync fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::EncSync fallback=|| ().into_any()>
                 <EncryptedSyncSettingsTab />
             </Show>
-            <Show when=move || tab.get() == SettingsTab::Capability fallback=|| ().into_view()>
+            <Show when=move || tab.get() == SettingsTab::Capability fallback=|| ().into_any()>
                 <CapabilitySettingsTab />
             </Show>
         </div>
@@ -162,11 +163,11 @@ pub fn number_patch(raw: &str, nullable: bool, current: Option<i64>) -> Option<s
 
 #[component]
 fn GeneralSettingsTab() -> impl IntoView {
-    let settings = create_rw_signal(None::<GeneralSettings>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let settings = RwSignal::new(None::<GeneralSettings>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    let load: Rc<dyn Fn()> = Rc::new(move || {
+    let load: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let settings = settings;
         let loading = loading;
         let error_msg = error_msg;
@@ -186,10 +187,10 @@ fn GeneralSettingsTab() -> impl IntoView {
     });
     load();
 
-    let save: Rc<dyn Fn(serde_json::Value)> = Rc::new({
-        let load = Rc::clone(&load);
+    let save: Arc<dyn Fn(serde_json::Value) + Send + Sync> = Arc::new({
+        let load = Arc::clone(&load);
         move |patch: serde_json::Value| {
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 match crate::api::patch_json::<serde_json::Value>("/api/settings", &patch).await {
                     Ok(r) => {
@@ -212,17 +213,17 @@ fn GeneralSettingsTab() -> impl IntoView {
     });
 
     view! {
-        <Show when=move || loading.get() fallback=|| ().into_view()>
+        <Show when=move || loading.get() fallback=|| ().into_any()>
             <LoadingState />
         </Show>
-        <Show when=move || error_msg.get().is_some() fallback=|| ().into_view()>
+        <Show when=move || error_msg.get().is_some() fallback=|| ().into_any()>
             <ErrorState message="Could not load settings" retry=None />
         </Show>
         <Show
             when=move || !loading.get() && error_msg.get().is_none()
-            fallback=|| ().into_view()
+            fallback=|| ().into_any()
         >
-            <GeneralSettingsForm settings=settings save=Rc::clone(&save) />
+            <GeneralSettingsForm settings=settings save=Arc::clone(&save) />
         </Show>
     }
 }
@@ -230,17 +231,17 @@ fn GeneralSettingsTab() -> impl IntoView {
 #[component]
 fn GeneralSettingsForm(
     settings: RwSignal<Option<GeneralSettings>>,
-    save: Rc<dyn Fn(serde_json::Value)>,
+    save: Arc<dyn Fn(serde_json::Value) + Send + Sync>,
 ) -> impl IntoView {
-    let toggle: Rc<dyn Fn(&'static str, bool)> = Rc::new({
-        let save = Rc::clone(&save);
+    let toggle: Arc<dyn Fn(&'static str, bool) + Send + Sync> = Arc::new({
+        let save = Arc::clone(&save);
         move |key, value| {
             save(serde_json::json!({ key: value }));
         }
     });
 
     let blur_sync_interval = {
-        let save = Rc::clone(&save);
+        let save = Arc::clone(&save);
         move |ev: ev::FocusEvent| {
             let current = settings.get().map(|s| s.sync_interval_minutes);
             if let Some(v) = number_patch(&event_target_value(&ev), false, current) {
@@ -249,7 +250,7 @@ fn GeneralSettingsForm(
         }
     };
     let blur_api_conc = {
-        let save = Rc::clone(&save);
+        let save = Arc::clone(&save);
         move |ev: ev::FocusEvent| {
             let current = settings.get().map(|s| s.api_concurrency);
             if let Some(v) = number_patch(&event_target_value(&ev), false, current) {
@@ -258,7 +259,7 @@ fn GeneralSettingsForm(
         }
     };
     let blur_retention = {
-        let save = Rc::clone(&save);
+        let save = Arc::clone(&save);
         move |ev: ev::FocusEvent| {
             let current = settings.get().and_then(|s| s.retention_days);
             if let Some(v) = number_patch(&event_target_value(&ev), true, current) {
@@ -267,7 +268,7 @@ fn GeneralSettingsForm(
         }
     };
     let blur_backup_interval = {
-        let save = Rc::clone(&save);
+        let save = Arc::clone(&save);
         move |ev: ev::FocusEvent| {
             let current = settings.get().and_then(|s| s.backup_interval_hours);
             if let Some(v) = number_patch(&event_target_value(&ev), true, current) {
@@ -276,7 +277,7 @@ fn GeneralSettingsForm(
         }
     };
     let on_language_change = {
-        let save = Rc::clone(&save);
+        let save = Arc::clone(&save);
         move |ev: ev::Event| {
             let lang = event_target_value(&ev);
             save(serde_json::json!({ "agent_language": lang }));
@@ -315,7 +316,7 @@ fn GeneralSettingsForm(
                         "Attachment auto-download",
                         "Download attachments in the background after sync",
                         move || settings.get().unwrap_or_default().attachment_auto_download,
-                        { let t = Rc::clone(&toggle); move |v| t("attachment_auto_download", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("attachment_auto_download", v) },
                     )}
                     <div class="spp-settings__field">
                         <label class="spp-settings__label" for="retention">"Retention days (blank = keep forever)"</label>
@@ -344,37 +345,37 @@ fn GeneralSettingsForm(
                         "AI enabled",
                         "The app remains fully usable when off",
                         move || settings.get().unwrap_or_default().ai_enabled,
-                        { let t = Rc::clone(&toggle); move |v| t("ai_enabled", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("ai_enabled", v) },
                     )}
                     {toggle_row(
                         "Automatic ticket analysis",
                         "Analyze new/changed tickets in the background",
                         move || settings.get().unwrap_or_default().automatic_analysis_enabled,
-                        { let t = Rc::clone(&toggle); move |v| t("automatic_analysis_enabled", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("automatic_analysis_enabled", v) },
                     )}
                     {toggle_row(
                         "Automatic AI note creation",
                         "Create internal Help Scout notes with the AI analysis",
                         move || settings.get().unwrap_or_default().automatic_note_enabled,
-                        { let t = Rc::clone(&toggle); move |v| t("automatic_note_enabled", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("automatic_note_enabled", v) },
                     )}
                     {toggle_row(
                         "Automatic AI draft creation",
                         "Generate customer-safe draft suggestions",
                         move || settings.get().unwrap_or_default().automatic_draft_enabled,
-                        { let t = Rc::clone(&toggle); move |v| t("automatic_draft_enabled", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("automatic_draft_enabled", v) },
                     )}
                     {toggle_row(
                         "Automation engine",
                         "",
                         move || settings.get().unwrap_or_default().automation_enabled,
-                        { let t = Rc::clone(&toggle); move |v| t("automation_enabled", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("automation_enabled", v) },
                     )}
                     {toggle_row(
                         "Automation write actions",
                         "Without this, all non-read automation actions await approval",
                         move || settings.get().unwrap_or_default().automation_write_actions_enabled,
-                        { let t = Rc::clone(&toggle); move |v| t("automation_write_actions_enabled", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("automation_write_actions_enabled", v) },
                     )}
                     <div class="spp-state spp-state--error spp-settings__locked">
                         <strong>"Automatic reply sending: permanently OFF."</strong>
@@ -384,7 +385,7 @@ fn GeneralSettingsForm(
                         "Redaction layer",
                         "Mask payment data, tokens, API keys before prompting the model",
                         move || settings.get().unwrap_or_default().redaction_enabled,
-                        { let t = Rc::clone(&toggle); move |v| t("redaction_enabled", v) },
+                        { let t = Arc::clone(&toggle); move |v| t("redaction_enabled", v) },
                     )}
                     <div class="spp-settings__field">
                         <label class="spp-settings__label" for="agent-language">"Your drafting language (translation feature)"</label>
@@ -436,21 +437,21 @@ pub const SUPPORTED_LANGUAGES: &[(&str, &str)] = &[
 fn toggle_row<F>(
     label: &'static str,
     hint: &'static str,
-    value: impl Fn() -> bool + 'static,
+    value: impl Fn() -> bool + Send + Sync + 'static,
     on_change: F,
 ) -> impl IntoView
 where
     F: Fn(bool) + 'static,
 {
-    let on_change = Rc::new(on_change);
+    let on_change = Arc::new(on_change);
     view! {
         <div class="spp-settings__toggle">
             <div>
                 <div class="spp-settings__toggle-label">{label}</div>
                 {if hint.is_empty() {
-                    ().into_view()
+                    ().into_any()
                 } else {
-                    view! { <div class="spp-muted spp-text-xs">{hint}</div> }.into_view()
+                    view! { <div class="spp-muted spp-text-xs">{hint}</div> }.into_any()
                 }}
             </div>
             <label class="spp-settings__switch">
@@ -521,11 +522,11 @@ pub fn format_oauth_me(o: &OauthStatus) -> String {
 
 #[component]
 fn HelpScoutSettingsTab() -> impl IntoView {
-    let oauth = create_rw_signal(None::<OauthStatus>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let oauth = RwSignal::new(None::<OauthStatus>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    let load: Rc<dyn Fn()> = Rc::new(move || {
+    let load: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let oauth = oauth;
         let loading = loading;
         let error_msg = error_msg;
@@ -546,27 +547,30 @@ fn HelpScoutSettingsTab() -> impl IntoView {
     load();
 
     view! {
-        <Show when=move || loading.get() fallback=|| ().into_view()>
+        <Show when=move || loading.get() fallback=|| ().into_any()>
             <LoadingState />
         </Show>
-        <Show when=move || error_msg.get().is_some() fallback=|| ().into_view()>
+        <Show when=move || error_msg.get().is_some() fallback=|| ().into_any()>
             <ErrorState message="Could not load the Help Scout connection state." retry=None />
         </Show>
         <Show
             when=move || oauth.get().is_some() && error_msg.get().is_none()
-            fallback=|| ().into_view()
+            fallback=|| ().into_any()
         >
-            <HelpScoutConnection oauth=oauth load=Rc::clone(&load) />
+            <HelpScoutConnection oauth=oauth load=Arc::clone(&load) />
         </Show>
     }
 }
 
 #[component]
-fn HelpScoutConnection(oauth: RwSignal<Option<OauthStatus>>, load: Rc<dyn Fn()>) -> impl IntoView {
+fn HelpScoutConnection(
+    oauth: RwSignal<Option<OauthStatus>>,
+    load: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
     let authorize = {
-        let load = Rc::clone(&load);
+        let load = Arc::clone(&load);
         move |_| {
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 match crate::api::get_json::<serde_json::Value>("/api/oauth/authorize-url").await {
                     Ok(r) => {
@@ -592,9 +596,9 @@ fn HelpScoutConnection(oauth: RwSignal<Option<OauthStatus>>, load: Rc<dyn Fn()>)
     };
 
     let client_creds = {
-        let load = Rc::clone(&load);
+        let load = Arc::clone(&load);
         move |_| {
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 match crate::api::post_json::<serde_json::Value>(
                     "/api/oauth/client-credentials",
@@ -622,9 +626,9 @@ fn HelpScoutConnection(oauth: RwSignal<Option<OauthStatus>>, load: Rc<dyn Fn()>)
     };
 
     let disconnect = {
-        let load = Rc::clone(&load);
+        let load = Arc::clone(&load);
         move |_| {
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 match crate::api::post_json::<serde_json::Value>("/api/oauth/disconnect", None)
                     .await
@@ -649,7 +653,7 @@ fn HelpScoutConnection(oauth: RwSignal<Option<OauthStatus>>, load: Rc<dyn Fn()>)
             {move || {
                     let o = oauth.get().unwrap_or_default();
                     view! {
-                        <Show when=move || o.demo_mode fallback=|| ().into_view()>
+                        <Show when=move || o.demo_mode fallback=|| ().into_any()>
                             <div class="spp-state spp-state--warn">
                                 "Demo mode is active (simulated Help Scout account). Switch off LOCAL_DEMO_MODE in .env and restart to connect a real account."
                             </div>
@@ -672,7 +676,7 @@ fn HelpScoutConnection(oauth: RwSignal<Option<OauthStatus>>, load: Rc<dyn Fn()>)
                             <span class="spp-settings__label">"Token expires"</span>
                             <span>{o.expires_at.clone().unwrap_or_else(|| "—".to_string())}</span>
                         </div>
-                    }.into_view()
+                    }.into_any()
                 }}
                 <div class="spp-flex spp-flex--wrap spp-mt-4">
                     <button class="spp-button spp-button--primary" type="button" on:click=authorize>
@@ -752,10 +756,10 @@ pub fn lmstudio_patch_body(f: &LmStudioForm) -> serde_json::Value {
 
 #[component]
 fn LmStudioSettingsTab() -> impl IntoView {
-    let form = create_rw_signal(LmStudioForm::default());
-    let loaded = create_rw_signal(false);
-    let testing = create_rw_signal(false);
-    let models = create_rw_signal(Vec::<String>::new());
+    let form = RwSignal::new(LmStudioForm::default());
+    let loaded = RwSignal::new(false);
+    let testing = RwSignal::new(false);
+    let models = RwSignal::new(Vec::<String>::new());
 
     wasm_bindgen_futures::spawn_local(async move {
         match crate::api::get_json::<serde_json::Value>("/api/settings/lmstudio").await {
@@ -867,7 +871,7 @@ fn LmStudioSettingsTab() -> impl IntoView {
                         .get()
                         .into_iter()
                         .map(|m| {
-                            view! { <option value=m.clone() /> }.into_view()
+                            view! { <option value=m.clone() /> }.into_any()
                         })
                         .collect::<Vec<_>>()
                 }}
@@ -907,7 +911,7 @@ fn LmStudioSettingsTab() -> impl IntoView {
             {move || {
                 let discovered = models.get();
                 if discovered.is_empty() {
-                    ().into_view()
+                    ().into_any()
                 } else {
                     view! {
                         <div class="spp-mt-4">
@@ -926,12 +930,12 @@ fn LmStudioSettingsTab() -> impl IntoView {
                                                 {m.clone()}
                                             </button>
                                         }
-                                        .into_view()
+                                        .into_any()
                                     })
                                     .collect::<Vec<_>>()}
                             </div>
                         </div>
-                    }.into_view()
+                    }.into_any()
                 }
             }}
             <p class="spp-settings__hint">
@@ -970,9 +974,9 @@ pub fn parse_qdrant(v: &serde_json::Value) -> QdrantForm {
 
 #[component]
 fn QdrantSettingsTab() -> impl IntoView {
-    let form = create_rw_signal(QdrantForm::default());
-    let loaded = create_rw_signal(false);
-    let result = create_rw_signal(None::<String>);
+    let form = RwSignal::new(QdrantForm::default());
+    let loaded = RwSignal::new(false);
+    let result = RwSignal::new(None::<String>);
 
     wasm_bindgen_futures::spawn_local(async move {
         match crate::api::get_json::<serde_json::Value>("/api/settings/qdrant").await {
@@ -1061,8 +1065,8 @@ fn QdrantSettingsTab() -> impl IntoView {
                 match result.get() {
                     Some(r) => view! {
                         <div class="spp-state spp-state--info spp-mt-4">{r}</div>
-                    }.into_view(),
-                    None => ().into_view(),
+                    }.into_any(),
+                    None => ().into_any(),
                 }
             }}
             <p class="spp-settings__hint">
@@ -1176,12 +1180,12 @@ pub fn bh_schedule_label(row: &BusinessHoursRow) -> Option<String> {
 
 #[component]
 fn BusinessHoursSettingsTab() -> impl IntoView {
-    let rows = create_rw_signal(Vec::<BusinessHoursRow>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let editing = create_rw_signal(None::<BusinessHoursRow>);
+    let rows = RwSignal::new(Vec::<BusinessHoursRow>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let editing = RwSignal::new(None::<BusinessHoursRow>);
 
-    let load: Rc<dyn Fn()> = Rc::new(move || {
+    let load: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let rows = rows;
         let loading = loading;
         let error_msg = error_msg;
@@ -1207,17 +1211,17 @@ fn BusinessHoursSettingsTab() -> impl IntoView {
             <p class="spp-settings__hint">
                 "SLA reports measure first-response and resolution times in business minutes - nights, weekends and non-configured weekdays contribute zero. Without a schedule the mailbox is measured in wall-clock minutes and labeled as such in Reports → SLA."
             </p>
-            <Show when=move || loading.get() fallback=|| ().into_view()>
+            <Show when=move || loading.get() fallback=|| ().into_any()>
                 <LoadingState />
             </Show>
-            <Show when=move || error_msg.get().is_some() fallback=|| ().into_view()>
+            <Show when=move || error_msg.get().is_some() fallback=|| ().into_any()>
                 <ErrorState message="Could not load business hours." retry=None />
             </Show>
             <Show
                 when=move || !loading.get() && error_msg.get().is_none()
-                fallback=|| ().into_view()
+                fallback=|| ().into_any()
             >
-                <BusinessHoursContent rows=rows editing=editing load=Rc::clone(&load) />
+                <BusinessHoursContent rows=rows editing=editing load=Arc::clone(&load) />
             </Show>
         </section>
     }
@@ -1227,12 +1231,12 @@ fn BusinessHoursSettingsTab() -> impl IntoView {
 fn BusinessHoursContent(
     rows: RwSignal<Vec<BusinessHoursRow>>,
     editing: RwSignal<Option<BusinessHoursRow>>,
-    load: Rc<dyn Fn()>,
+    load: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
-    let clear_hours: Rc<dyn Fn(i64)> = Rc::new({
-        let load = Rc::clone(&load);
+    let clear_hours: Arc<dyn Fn(i64) + Send + Sync> = Arc::new({
+        let load = Arc::clone(&load);
         move |mailbox_id: i64| {
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/settings/business-hours/{mailbox_id}");
                 match crate::api::delete_json::<serde_json::Value>(&path).await {
@@ -1250,14 +1254,14 @@ fn BusinessHoursContent(
         }
     });
 
-    let close_editor: Rc<dyn Fn()> = Rc::new({
-        let load = Rc::clone(&load);
+    let close_editor: Arc<dyn Fn() + Send + Sync> = Arc::new({
+        let load = Arc::clone(&load);
         move || {
             editing.set(None);
             load();
         }
     });
-    let cancel_editor: Rc<dyn Fn()> = Rc::new(move || editing.set(None));
+    let cancel_editor: Arc<dyn Fn() + Send + Sync> = Arc::new(move || editing.set(None));
 
     view! {
         <Show
@@ -1266,21 +1270,21 @@ fn BusinessHoursContent(
                 view! {
                     <EmptyState message="No mailboxes yet - run an initial sync first." />
                 }
-                .into_view()
+                .into_any()
             }
         >
-            <BusinessHoursTable rows=rows editing=editing clear_hours=Rc::clone(&clear_hours) />
+            <BusinessHoursTable rows=rows editing=editing clear_hours=Arc::clone(&clear_hours) />
         </Show>
         {move || {
             match editing.get() {
                 Some(row) => view! {
                     <BusinessHoursEditor
                         row=row
-                        on_done=Rc::clone(&close_editor)
-                        on_cancel=Rc::clone(&cancel_editor)
+                        on_done=Arc::clone(&close_editor)
+                        on_cancel=Arc::clone(&cancel_editor)
                     />
-                }.into_view(),
-                None => ().into_view(),
+                }.into_any(),
+                None => ().into_any(),
             }
         }}
     }
@@ -1290,7 +1294,7 @@ fn BusinessHoursContent(
 fn BusinessHoursTable(
     rows: RwSignal<Vec<BusinessHoursRow>>,
     editing: RwSignal<Option<BusinessHoursRow>>,
-    clear_hours: Rc<dyn Fn(i64)>,
+    clear_hours: Arc<dyn Fn(i64) + Send + Sync>,
 ) -> impl IntoView {
     view! {
         <table class="spp-table">
@@ -1311,7 +1315,7 @@ fn BusinessHoursTable(
                                 <BusinessHoursRowView
                                     row=m
                                     editing=editing
-                                    clear_hours=Rc::clone(&clear_hours)
+                                    clear_hours=Arc::clone(&clear_hours)
                                 />
                             }
                         })
@@ -1326,7 +1330,7 @@ fn BusinessHoursTable(
 fn BusinessHoursRowView(
     row: BusinessHoursRow,
     editing: RwSignal<Option<BusinessHoursRow>>,
-    clear_hours: Rc<dyn Fn(i64)>,
+    clear_hours: Arc<dyn Fn(i64) + Send + Sync>,
 ) -> impl IntoView {
     let schedule = bh_schedule_label(&row);
     let mailbox_id = row.mailbox_id;
@@ -1338,10 +1342,10 @@ fn BusinessHoursRowView(
             <td><strong>{name}</strong></td>
             <td class="spp-text-sm">
                 {match schedule {
-                    Some(s) => view! { <span>{s}</span> }.into_view(),
+                    Some(s) => view! { <span>{s}</span> }.into_any(),
                     None => view! {
                         <span class="spp-badge">"wall-clock (not configured)"</span>
-                    }.into_view(),
+                    }.into_any(),
                 }}
             </td>
             <td class="spp-text-sm">
@@ -1368,9 +1372,9 @@ fn BusinessHoursRowView(
                             >
                                 "Clear"
                             </button>
-                        }.into_view()
+                        }.into_any()
                     } else {
-                        ().into_view()
+                        ().into_any()
                     }}
                 </div>
             </td>
@@ -1381,28 +1385,28 @@ fn BusinessHoursRowView(
 #[component]
 fn BusinessHoursEditor(
     row: BusinessHoursRow,
-    on_done: Rc<dyn Fn()>,
-    on_cancel: Rc<dyn Fn()>,
+    on_done: Arc<dyn Fn() + Send + Sync>,
+    on_cancel: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let name = row.name.clone();
     let mailbox_id = row.mailbox_id;
-    let timezone = create_rw_signal(row.timezone.clone().unwrap_or_else(|| "UTC".to_string()));
-    let days = create_rw_signal(row.days.clone().unwrap_or_else(|| vec![1, 2, 3, 4, 5]));
-    let start = create_rw_signal(minutes_to_hhmm(row.start_minute.or(Some(540))));
-    let end = create_rw_signal(minutes_to_hhmm(row.end_minute.or(Some(1020))));
-    let fr_target = create_rw_signal(
+    let timezone = RwSignal::new(row.timezone.clone().unwrap_or_else(|| "UTC".to_string()));
+    let days = RwSignal::new(row.days.clone().unwrap_or_else(|| vec![1, 2, 3, 4, 5]));
+    let start = RwSignal::new(minutes_to_hhmm(row.start_minute.or(Some(540))));
+    let end = RwSignal::new(minutes_to_hhmm(row.end_minute.or(Some(1020))));
+    let fr_target = RwSignal::new(
         row.first_response_target_min
             .map(|n| n.to_string())
             .unwrap_or_default(),
     );
-    let res_target = create_rw_signal(
+    let res_target = RwSignal::new(
         row.resolution_target_min
             .map(|n| n.to_string())
             .unwrap_or_default(),
     );
 
     let submit = {
-        let on_done = Rc::clone(&on_done);
+        let on_done = Arc::clone(&on_done);
         move |_| {
             let Some(start_min) = hhmm_to_minutes(&start.get()) else {
                 toasts::error("Day starts must be HH:MM.");
@@ -1424,7 +1428,7 @@ fn BusinessHoursEditor(
                 "first_response_target_min": parse_optional_positive(&fr_target.get()),
                 "resolution_target_min": parse_optional_positive(&res_target.get()),
             });
-            let on_done = Rc::clone(&on_done);
+            let on_done = Arc::clone(&on_done);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/settings/business-hours/{mailbox_id}");
                 match crate::api::put_json::<serde_json::Value>(&path, &body).await {
@@ -1605,11 +1609,11 @@ pub fn format_mb(bytes: i64) -> String {
 
 #[component]
 fn BackupsSettingsTab() -> impl IntoView {
-    let backups = create_rw_signal(Vec::<BackupRow>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let backups = RwSignal::new(Vec::<BackupRow>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    let load: Rc<dyn Fn()> = Rc::new(move || {
+    let load: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         let backups = backups;
         let loading = loading;
         let error_msg = error_msg;
@@ -1632,28 +1636,31 @@ fn BackupsSettingsTab() -> impl IntoView {
     view! {
         <section class="spp-card spp-settings__card">
             <h3 class="spp-settings__card-title">"Backups & export"</h3>
-            <Show when=move || loading.get() fallback=|| ().into_view()>
+            <Show when=move || loading.get() fallback=|| ().into_any()>
                 <LoadingState />
             </Show>
-            <Show when=move || error_msg.get().is_some() fallback=|| ().into_view()>
+            <Show when=move || error_msg.get().is_some() fallback=|| ().into_any()>
                 <ErrorState message="Could not load backups." retry=None />
             </Show>
             <Show
                 when=move || !loading.get() && error_msg.get().is_none()
-                fallback=|| ().into_view()
+                fallback=|| ().into_any()
             >
-                <BackupsContent backups=backups load=Rc::clone(&load) />
+                <BackupsContent backups=backups load=Arc::clone(&load) />
             </Show>
         </section>
     }
 }
 
 #[component]
-fn BackupsContent(backups: RwSignal<Vec<BackupRow>>, load: Rc<dyn Fn()>) -> impl IntoView {
-    let run_backup_action: Rc<dyn Fn(&'static str)> = Rc::new({
-        let load = Rc::clone(&load);
+fn BackupsContent(
+    backups: RwSignal<Vec<BackupRow>>,
+    load: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let run_backup_action: Arc<dyn Fn(&'static str) + Send + Sync> = Arc::new({
+        let load = Arc::clone(&load);
         move |path: &'static str| {
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 match crate::api::post_json::<serde_json::Value>(path, None).await {
                     Ok(r) => {
@@ -1680,15 +1687,15 @@ fn BackupsContent(backups: RwSignal<Vec<BackupRow>>, load: Rc<dyn Fn()>) -> impl
         }
     });
     let create_backup = {
-        let r = Rc::clone(&run_backup_action);
+        let r = Arc::clone(&run_backup_action);
         move |_| r("/api/backups/create")
     };
     let export_json = {
-        let r = Rc::clone(&run_backup_action);
+        let r = Arc::clone(&run_backup_action);
         move |_| r("/api/backups/export-json")
     };
     let export_csv = {
-        let r = Rc::clone(&run_backup_action);
+        let r = Arc::clone(&run_backup_action);
         move |_| r("/api/backups/export-csv")
     };
 
@@ -1707,7 +1714,7 @@ fn BackupsContent(backups: RwSignal<Vec<BackupRow>>, load: Rc<dyn Fn()>) -> impl
         <Show
                     when=move || !backups.get().is_empty()
                     fallback=|| {
-                        view! { <EmptyState message="No backups yet." /> }.into_view()
+                        view! { <EmptyState message="No backups yet." /> }.into_any()
                     }
                 >
                     <table class="spp-table">
@@ -1735,13 +1742,13 @@ fn BackupsContent(backups: RwSignal<Vec<BackupRow>>, load: Rc<dyn Fn()>) -> impl
                                                 <td>{created}</td>
                                                 <td>
                                                     {if verified {
-                                                        view! { <span class="spp-badge spp-badge--ok">"verified"</span> }.into_view()
+                                                        view! { <span class="spp-badge spp-badge--ok">"verified"</span> }.into_any()
                                                     } else {
-                                                        view! { <span class="spp-badge spp-badge--err">"check failed"</span> }.into_view()
+                                                        view! { <span class="spp-badge spp-badge--err">"check failed"</span> }.into_any()
                                                     }}
                                                 </td>
                                             </tr>
-                                        }.into_view()
+                                        }.into_any()
                                     })
                                     .collect::<Vec<_>>()
                             }}
@@ -1815,13 +1822,13 @@ pub fn passphrase_strength(pass: &str) -> &'static str {
 
 #[component]
 fn EncryptedSyncSettingsTab() -> impl IntoView {
-    let passphrase = create_rw_signal(String::new());
-    let confirm = create_rw_signal(String::new());
-    let import_path = create_rw_signal(String::new());
-    let import_pass = create_rw_signal(String::new());
-    let data = create_rw_signal(EncryptedSyncData::default());
+    let passphrase = RwSignal::new(String::new());
+    let confirm = RwSignal::new(String::new());
+    let import_path = RwSignal::new(String::new());
+    let import_pass = RwSignal::new(String::new());
+    let data = RwSignal::new(EncryptedSyncData::default());
 
-    let load: Rc<dyn Fn()> = Rc::new(move || {
+    let load: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(v) = crate::api::get_json::<serde_json::Value>("/api/sync/encrypted").await {
                 data.set(parse_encrypted_sync(&v));
@@ -1831,10 +1838,10 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
     load();
 
     let export_bundle = {
-        let load = Rc::clone(&load);
+        let load = Arc::clone(&load);
         move |_| {
             let pass = passphrase.get();
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 let body = serde_json::json!({ "passphrase": pass });
                 match crate::api::post_json::<serde_json::Value>(
@@ -1862,12 +1869,12 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
         }
     };
 
-    let verify_or_import: Rc<dyn Fn(bool)> = Rc::new({
-        let load = Rc::clone(&load);
+    let verify_or_import: Arc<dyn Fn(bool) + Send + Sync> = Arc::new({
+        let load = Arc::clone(&load);
         move |import: bool| {
             let path = import_path.get();
             let pass = import_pass.get();
-            let load = Rc::clone(&load);
+            let load = Arc::clone(&load);
             wasm_bindgen_futures::spawn_local(async move {
                 let body = serde_json::json!({ "path": path, "passphrase": pass });
                 let endpoint = if import {
@@ -1897,11 +1904,11 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
         }
     });
     let do_verify = {
-        let r = Rc::clone(&verify_or_import);
+        let r = Arc::clone(&verify_or_import);
         move |_| r(false)
     };
     let do_import = {
-        let r = Rc::clone(&verify_or_import);
+        let r = Arc::clone(&verify_or_import);
         move |_| r(true)
     };
 
@@ -1915,7 +1922,7 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
         let Some(file) = input.files().and_then(|f| f.get(0)) else {
             return;
         };
-        let load = Rc::clone(&load);
+        let load = Arc::clone(&load);
         wasm_bindgen_futures::spawn_local(async move {
             match upload_bundle(&file).await {
                 Ok(r) => {
@@ -1971,7 +1978,7 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
                 {move || {
                     let pass = passphrase.get();
                     if pass.is_empty() {
-                        ().into_view()
+                        ().into_any()
                     } else {
                         let strength = passphrase_strength(&pass);
                         let class = match strength {
@@ -1981,7 +1988,7 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
                         };
                         view! {
                             <span class=class>{format!("{strength} passphrase")}</span>
-                        }.into_view()
+                        }.into_any()
                     }
                 }}
                 <div class="spp-mt-4">
@@ -2047,7 +2054,7 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
                 {move || {
                     let d = data.get();
                     if d.log.is_empty() {
-                        ().into_view()
+                        ().into_any()
                     } else {
                         view! {
                             <div class="spp-mt-4">
@@ -2078,11 +2085,11 @@ fn EncryptedSyncSettingsTab() -> impl IntoView {
                                                     {format!("{} · {} conv", format_mb(l.size_bytes), conv)}
                                                 </span>
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     })
                                     .collect::<Vec<_>>()}
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                 }}
             </section>
@@ -2206,9 +2213,9 @@ pub fn parse_capabilities(v: &serde_json::Value) -> CapabilityData {
 
 #[component]
 fn CapabilitySettingsTab() -> impl IntoView {
-    let data = create_rw_signal(CapabilityData::default());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let data = RwSignal::new(CapabilityData::default());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
     wasm_bindgen_futures::spawn_local(async move {
         match crate::api::get_json::<serde_json::Value>("/api/system/capabilities").await {
@@ -2237,15 +2244,15 @@ fn CapabilitySettingsTab() -> impl IntoView {
                     }}
                 </p>
             </div>
-            <Show when=move || loading.get() fallback=|| ().into_view()>
+            <Show when=move || loading.get() fallback=|| ().into_any()>
                 <LoadingState />
             </Show>
-            <Show when=move || error_msg.get().is_some() fallback=|| ().into_view()>
+            <Show when=move || error_msg.get().is_some() fallback=|| ().into_any()>
                 <ErrorState message="Could not load the capability matrix." retry=None />
             </Show>
             <Show
                 when=move || !loading.get() && error_msg.get().is_none()
-                fallback=|| ().into_view()
+                fallback=|| ().into_any()
             >
                 <Show
                     when=move || !data.get().matrix.is_empty()
@@ -2253,7 +2260,7 @@ fn CapabilitySettingsTab() -> impl IntoView {
                         view! {
                             <EmptyState message="The capability matrix is empty on this build." />
                         }
-                        .into_view()
+                        .into_any()
                     }
                 >
                     <div class="spp-settings__matrix-scroll">
@@ -2298,16 +2305,16 @@ fn CapabilitySettingsTab() -> impl IntoView {
                                                             };
                                                             view! {
                                                                 <span class="spp-badge spp-badge--ok">{label}</span>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
                                                             view! {
                                                                 <span class="spp-badge spp-badge--err">"no"</span>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         }}
                                                     </td>
                                                     <td class="spp-muted spp-text-xs">{notes}</td>
                                                 </tr>
-                                            }.into_view()
+                                            }.into_any()
                                         })
                                         .collect::<Vec<_>>()
                                 }}

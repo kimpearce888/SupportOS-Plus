@@ -1,4 +1,4 @@
-use leptos::*;
+use leptos::prelude::*;
 
 use crate::catalog::NotificationType;
 use crate::components::state_view::EmptyState;
@@ -91,11 +91,7 @@ impl NotificationPreferenceView {
 
     #[must_use]
     pub fn from_bool(b: bool) -> Self {
-        if b {
-            Self::Enabled
-        } else {
-            Self::Disabled
-        }
+        if b { Self::Enabled } else { Self::Disabled }
     }
 }
 
@@ -156,20 +152,20 @@ pub fn notification_description(notif_type: NotificationType) -> &'static str {
 
 #[component]
 pub fn NotificationsPage() -> impl IntoView {
-    let notifications = create_rw_signal(Vec::<NotificationView>::new());
-    let mentions = create_rw_signal(Vec::<MentionView>::new());
-    let preferences = create_rw_signal(default_preferences());
-    let prefs_loaded = create_rw_signal(false);
-    let retention_ttl_days = create_rw_signal(DEFAULT_TTL_DAYS_DISPLAY);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let unread = create_rw_signal(0i64);
-    let tab = create_rw_signal(NotificationTab::All);
-    let type_filter = create_rw_signal(String::new());
-    let reload = create_rw_signal(0u32);
+    let notifications = RwSignal::new(Vec::<NotificationView>::new());
+    let mentions = RwSignal::new(Vec::<MentionView>::new());
+    let preferences = RwSignal::new(default_preferences());
+    let prefs_loaded = RwSignal::new(false);
+    let retention_ttl_days = RwSignal::new(DEFAULT_TTL_DAYS_DISPLAY);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let unread = RwSignal::new(0i64);
+    let tab = RwSignal::new(NotificationTab::All);
+    let type_filter = RwSignal::new(String::new());
+    let reload = RwSignal::new(0u32);
     let sse_refresh = crate::queries::version("notifications");
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let _ = sse_refresh.get();
         let type_filter = type_filter.get();
@@ -216,7 +212,7 @@ pub fn NotificationsPage() -> impl IntoView {
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = tab.get();
         if tab.get() != NotificationTab::Mentions || !mentions.get_untracked().is_empty() {
             return;
@@ -259,7 +255,7 @@ pub fn NotificationsPage() -> impl IntoView {
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         if prefs_loaded.get() {
             return;
         }
@@ -364,7 +360,7 @@ pub fn NotificationsPage() -> impl IntoView {
         <div class="spp-page spp-page--notifications">
             <h2 class="spp-page__title">
                 "Notifications"
-                <Show when=move || { unread.get() > 0 } fallback=|| ().into_view()>
+                <Show when=move || { unread.get() > 0 } fallback=|| ().into_any()>
                     <span class="spp-badge spp-badge--err">{move || unread.get().to_string()}</span>
                 </Show>
             </h2>
@@ -403,7 +399,7 @@ pub fn NotificationsPage() -> impl IntoView {
                         "Mentions"
                     </button>
                 </div>
-                <Show when=move || tab.get() != NotificationTab::Mentions fallback=|| ().into_view()>
+                <Show when=move || tab.get() != NotificationTab::Mentions fallback=|| ().into_any()>
                     <label class="spp-notifications-toolbar__filter" for="notification-type-filter">
                         "Type"
                         <select
@@ -418,7 +414,7 @@ pub fn NotificationsPage() -> impl IntoView {
                             <option value="">"All types"</option>
                             {NotificationType::ALL.iter().map(|t| {
                                 let key = t.as_str().to_string();
-                                view! { <option value=key.clone()>{notification_label(*t)}</option> }.into_view()
+                                view! { <option value=key.clone()>{notification_label(*t)}</option> }.into_any()
                             }).collect::<Vec<_>>()}
                         </select>
                     </label>
@@ -433,13 +429,13 @@ pub fn NotificationsPage() -> impl IntoView {
                 </Show>
             </div>
 
-            <Show when=move || error_msg.get().is_some() fallback=|| ().into_view()>
+            <Show when=move || error_msg.get().is_some() fallback=|| ().into_any()>
                 <div class="spp-state spp-state--error">
                     <p class="spp-state__body">{move || error_msg.get().unwrap_or_default()}</p>
                 </div>
             </Show>
 
-            <Show when=move || tab.get() == NotificationTab::Mentions fallback=|| ().into_view()>
+            <Show when=move || tab.get() == NotificationTab::Mentions fallback=|| ().into_any()>
                 <section class="spp-notifications-list">
                     <h3 class="spp-notifications-list__title">"Mentions for you"</h3>
                     <Show
@@ -470,12 +466,12 @@ pub fn NotificationsPage() -> impl IntoView {
                                 view! {
                                     <li class="spp-notification-row" title="Mentioned in a side thread">
                                         <span class="spp-notification-row__label">{title}</span>
-                                        <Show when=move || has_body fallback=|| ().into_view()>
+                                        <Show when=move || has_body fallback=|| ().into_any()>
                                             <span class="spp-notification-row__body">
                                                 {body_display.clone()}
                                             </span>
                                         </Show>
-                                        <Show when=move || has_number fallback=|| ().into_view()>
+                                        <Show when=move || has_number fallback=|| ().into_any()>
                                             <span class="spp-notification-row__read-badge">
                                                 {number_display.clone()}
                                             </span>
@@ -489,7 +485,7 @@ pub fn NotificationsPage() -> impl IntoView {
                 </section>
             </Show>
 
-            <Show when=move || tab.get() != NotificationTab::Mentions fallback=|| ().into_view()>
+            <Show when=move || tab.get() != NotificationTab::Mentions fallback=|| ().into_any()>
                 <section class="spp-notifications-list">
                     <h3 class="spp-notifications-list__title">
                         {move || if tab.get() == NotificationTab::Unread { "Unread" } else { "Recent" }.to_string()}
@@ -556,7 +552,7 @@ fn NotificationSeverityGroups<F>(
     on_mark_read: F,
 ) -> impl IntoView
 where
-    F: Fn(i64) + 'static + Clone,
+    F: Fn(i64) + Clone + Send + Sync + 'static,
 {
     let on_critical = on_mark_read.clone();
     let on_warning = on_mark_read.clone();
@@ -592,29 +588,29 @@ fn NotificationSeveritySection<F>(
     on_mark_read: F,
 ) -> impl IntoView
 where
-    F: Fn(i64) + 'static + Clone,
+    F: Fn(i64) + Clone + Send + Sync + 'static,
 {
     let has_notifications = !notifications.is_empty();
-    let rows_fragment = leptos::Fragment::new(
+    let rows = move || {
         notifications
             .iter()
             .map(|n| {
                 view! {
                     <NotificationRow notification=n.clone() on_mark_read=on_mark_read.clone() />
                 }
-                .into_view()
+                .into_any()
             })
-            .collect::<Vec<_>>(),
-    );
+            .collect::<Vec<AnyView>>()
+    };
     view! {
         <section class="spp-notifications-severity-group">
             <h4 class="spp-notifications-severity-group__title">{title}</h4>
             <Show
                 when=move || has_notifications
-                fallback=|| ().into_view()
+                fallback=|| ().into_any()
             >
                 <ul class="spp-notifications-severity-group__list">
-                    {rows_fragment.clone()}
+                    {rows()}
                 </ul>
             </Show>
         </section>
@@ -624,7 +620,7 @@ where
 #[component]
 fn NotificationRow<F>(notification: NotificationView, on_mark_read: F) -> impl IntoView
 where
-    F: Fn(i64) + 'static + Clone,
+    F: Fn(i64) + Clone + Send + Sync + 'static,
 {
     let label = notification_label(notification.notification_type);
     let description = notification_description(notification.notification_type);
@@ -653,20 +649,20 @@ where
     let has_number = !number_display.is_empty();
     let is_unread = !notification.read;
     let row_id = notification.id;
-    let on_mark_read = std::rc::Rc::new(on_mark_read);
+    let on_mark_read = std::sync::Arc::new(on_mark_read);
 
     view! {
         <li class=severity_class title=description>
             <span class="spp-notification-row__label">{title_text}</span>
-            <Show when=move || has_body fallback=|| ().into_view()>
+            <Show when=move || has_body fallback=|| ().into_any()>
                 <span class="spp-notification-row__body">{body_text.clone()}</span>
             </Show>
-            <Show when=move || has_number fallback=|| ().into_view()>
+            <Show when=move || has_number fallback=|| ().into_any()>
                 <span class="spp-notification-row__read-badge">{number_display.clone()}</span>
             </Show>
             <span class="spp-notification-row__time">{created_at}</span>
             <span class=read_badge_class>{read_label}</span>
-            <Show when=move || is_unread fallback=|| ().into_view()>
+            <Show when=move || is_unread fallback=|| ().into_any()>
                 <button
                     class="spp-notification-row__mark-read"
                     type="button"
@@ -690,38 +686,36 @@ fn PreferencesList<F>(
 where
     F: Fn(usize, bool) + 'static + Clone,
 {
-    let on_toggle = std::rc::Rc::new(on_toggle);
-    let rows_fragment = leptos::Fragment::new(
-        preferences
-            .iter()
-            .enumerate()
-            .map(|(i, (t, pref))| {
-                let label = notification_label(*t);
-                let description = notification_description(*t);
-                let checked = pref.as_bool();
-                let on_toggle_clone = std::rc::Rc::clone(&on_toggle);
-                let on_toggle_inner = move |_| on_toggle_clone(i, !checked);
-                view! {
-                    <li class="spp-preferences-list__row" title=description>
-                        <span class="spp-preferences-list__label">{label}</span>
-                        <button
-                            class="spp-preferences-list__toggle"
-                            type="button"
-                            role="switch"
-                            aria-checked=checked
-                            on:click=on_toggle_inner
-                        >
-                            {move || if checked { "On" } else { "Off" }}
-                        </button>
-                    </li>
-                }
-                .into_view()
-            })
-            .collect::<Vec<_>>(),
-    );
+    let on_toggle = std::sync::Arc::new(on_toggle);
+    let rows: Vec<AnyView> = preferences
+        .iter()
+        .enumerate()
+        .map(|(i, (t, pref))| {
+            let label = notification_label(*t);
+            let description = notification_description(*t);
+            let checked = pref.as_bool();
+            let on_toggle_clone = std::sync::Arc::clone(&on_toggle);
+            let on_toggle_inner = move |_| on_toggle_clone(i, !checked);
+            view! {
+                <li class="spp-preferences-list__row" title=description>
+                    <span class="spp-preferences-list__label">{label}</span>
+                    <button
+                        class="spp-preferences-list__toggle"
+                        type="button"
+                        role="switch"
+                        aria-checked=checked
+                        on:click=on_toggle_inner
+                    >
+                        {move || if checked { "On" } else { "Off" }}
+                    </button>
+                </li>
+            }
+            .into_any()
+        })
+        .collect();
     view! {
         <ul class="spp-preferences-list">
-            {rows_fragment.clone()}
+            {rows}
         </ul>
     }
 }

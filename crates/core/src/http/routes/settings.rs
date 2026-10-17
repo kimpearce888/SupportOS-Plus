@@ -1,7 +1,7 @@
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use axum::response::IntoResponse;
@@ -263,7 +263,7 @@ pub async fn update_lmstudio(
                     "error": "ValidationError",
                     "message": "Invalid LM Studio settings."
                 })),
-            )
+            );
         }
     };
     let chat_model = match body.get("chat_model") {
@@ -278,7 +278,7 @@ pub async fn update_lmstudio(
                     "error": "ValidationError",
                     "message": "Invalid LM Studio settings."
                 })),
-            )
+            );
         }
     };
     let embedding_model = match body.get("embedding_model") {
@@ -293,7 +293,7 @@ pub async fn update_lmstudio(
                     "error": "ValidationError",
                     "message": "Invalid LM Studio settings."
                 })),
-            )
+            );
         }
     };
     let timeout_ms = match body.get("timeout_ms") {
@@ -308,7 +308,7 @@ pub async fn update_lmstudio(
                         "error": "ValidationError",
                         "message": "Invalid LM Studio settings."
                     })),
-                )
+                );
             }
         },
     };
@@ -324,7 +324,7 @@ pub async fn update_lmstudio(
                         "error": "ValidationError",
                         "message": "Invalid LM Studio settings."
                     })),
-                )
+                );
             }
         },
     };
@@ -631,7 +631,7 @@ pub async fn set_business_hours(
                 Json(
                     json!({"statusCode": 422, "error": "ValidationError", "message": "mailboxId must be a positive integer."}),
                 ),
-            )
+            );
         }
     };
     let mailbox_name: Option<String> = conn
@@ -721,7 +721,7 @@ pub async fn delete_business_hours(
                 Json(
                     json!({"statusCode": 422, "error": "ValidationError", "message": "mailboxId must be a positive integer."}),
                 ),
-            )
+            );
         }
     };
     let _ = ensure_business_hours_table(&conn);
@@ -758,7 +758,10 @@ pub async fn qdrant_test(State(state): State<AppState>) -> impl IntoResponse {
             health.collections.len()
         )
     } else {
-        format!("Qdrant is not reachable at {}. Keyword search (FTS) remains fully functional without it.", health.url)
+        format!(
+            "Qdrant is not reachable at {}. Keyword search (FTS) remains fully functional without it.",
+            health.url
+        )
     };
     (
         StatusCode::OK,

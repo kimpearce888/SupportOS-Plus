@@ -1,24 +1,24 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
-use leptos::*;
-use leptos_router::{use_location, use_navigate, use_query_map};
+use leptos::prelude::*;
+use leptos_router::hooks::{use_location, use_navigate, use_query_map};
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
 #[component]
 pub fn DocsPage() -> impl IntoView {
-    let stats = create_rw_signal(None::<serde_json::Value>);
-    let collections = create_rw_signal(Vec::<serde_json::Value>::new());
-    let articles = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let search_query = create_rw_signal(String::new());
-    let semantic = create_rw_signal(false);
-    let collection_filter = create_rw_signal(String::new());
-    let status_filter = create_rw_signal("all".to_string());
-    let reload = create_rw_signal(0u32);
+    let stats = RwSignal::new(None::<serde_json::Value>);
+    let collections = RwSignal::new(Vec::<serde_json::Value>::new());
+    let articles = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let search_query = RwSignal::new(String::new());
+    let semantic = RwSignal::new(false);
+    let collection_filter = RwSignal::new(String::new());
+    let status_filter = RwSignal::new("all".to_string());
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _tick = reload.get();
         let stats = stats;
         let collections = collections;
@@ -84,18 +84,18 @@ pub fn DocsPage() -> impl IntoView {
     let query_map = use_query_map();
     let location = use_location();
     let navigate = use_navigate();
-    let reading = create_rw_signal(None::<i64>);
-    create_effect(move |_| {
+    let reading = RwSignal::new(None::<i64>);
+    Effect::new(move |_| {
         let m = query_map.get();
         let article = crate::url_state::query_pos_int(&m, "article");
         if reading.get_untracked() != article {
             reading.set(article);
         }
     });
-    let open_article: Rc<dyn Fn(i64)> = {
+    let open_article: Arc<dyn Fn(i64) + Send + Sync> = {
         let navigate = navigate.clone();
         let pathname = location.pathname;
-        Rc::new(move |id: i64| {
+        Arc::new(move |id: i64| {
             reading.set(Some(id));
             navigate(
                 &format!(
@@ -110,10 +110,10 @@ pub fn DocsPage() -> impl IntoView {
             );
         })
     };
-    let close_article: Rc<dyn Fn()> = {
+    let close_article: Arc<dyn Fn() + Send + Sync> = {
         let navigate = navigate.clone();
         let pathname = location.pathname;
-        Rc::new(move || {
+        Arc::new(move || {
             reading.set(None);
             navigate(
                 &pathname.get_untracked(),
@@ -124,8 +124,8 @@ pub fn DocsPage() -> impl IntoView {
             );
         })
     };
-    let open_article_stored = StoredValue::new(open_article);
-    let close_article_stored = StoredValue::new(close_article);
+    let open_article_stored = StoredValue::new_local(open_article);
+    let close_article_stored = StoredValue::new_local(close_article);
 
     view! {
         <div class="spp-page spp-page--docs">
@@ -200,7 +200,7 @@ pub fn DocsPage() -> impl IntoView {
                         {move || collections.with(|cs| {
                             cs.iter().map(|c| {
                                 let name = c.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                view! { <option value=name.clone()>{name}</option> }
+                                view! { <option value=name.clone()>{name.clone()}</option> }
                             }).collect::<Vec<_>>()
                         })}
                     </select>
@@ -320,7 +320,7 @@ pub fn DocsPage() -> impl IntoView {
                                                 .get(..10)
                                                 .unwrap_or("")
                                                 .to_string();
-                                            let open_row = open_article_stored.with_value(Rc::clone);
+                                            let open_row = open_article_stored.with_value(Arc::clone);
                                             view! {
                                                 <tr class="spp-table__row-clickable" on:click=move |_| open_row(id)>
                                                     <td>
@@ -328,9 +328,9 @@ pub fn DocsPage() -> impl IntoView {
                                                         {if !preview.is_empty() {
                                                             view! {
                                                                 <div class="spp-muted spp-text-xs">{format!("{preview}…")}</div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
-                                                            ().into_view()
+                                                            ().into_any()
                                                         }}
                                                     </td>
                                                     <td>
@@ -338,9 +338,9 @@ pub fn DocsPage() -> impl IntoView {
                                                         {if let Some(category) = category {
                                                             view! {
                                                                 <div class="spp-muted spp-text-xs">{category}</div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
-                                                            ().into_view()
+                                                            ().into_any()
                                                         }}
                                                     </td>
                                                     <td>
@@ -349,7 +349,7 @@ pub fn DocsPage() -> impl IntoView {
                                                             "internal" => "spp-badge spp-badge--warn",
                                                             _ => "spp-badge",
                                                         }>
-                                                            {status}
+                                                            {status.clone()}
                                                         </span>
                                                     </td>
                                                     <td class="spp-table__cell-muted">
@@ -370,7 +370,7 @@ pub fn DocsPage() -> impl IntoView {
             <Show when=move || reading.get().is_some() fallback=|| ()>
                 {move || {
                     let id = reading.get().unwrap_or_default();
-                    let close = close_article_stored.with_value(Rc::clone);
+                    let close = close_article_stored.with_value(Arc::clone);
                     view! { <ArticleReader id=id on_close=close /> }
                 }}
             </Show>
@@ -379,12 +379,12 @@ pub fn DocsPage() -> impl IntoView {
 }
 
 #[component]
-fn ArticleReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
-    let article = create_rw_signal(None::<serde_json::Value>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+fn ArticleReader(id: i64, on_close: Arc<dyn Fn() + Send + Sync>) -> impl IntoView {
+    let article = RwSignal::new(None::<serde_json::Value>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let article = article;
         let loading = loading;
         let error_msg = error_msg;
@@ -439,7 +439,7 @@ fn ArticleReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
                     {move || {
                         let a = match article.get() {
                             Some(a) => a,
-                            None => return view! { <div></div> }.into_view(),
+                            None => return view! { <div></div> }.into_any(),
                         };
                         let status = a.get("status").and_then(|v| v.as_str()).unwrap_or("—").to_string();
                         let collection = a
@@ -460,20 +460,20 @@ fn ArticleReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
                                     "internal" => "spp-badge spp-badge--warn",
                                     _ => "spp-badge",
                                 }>
-                                    {status}
+                                    {status.clone()}
                                 </span>
                                 <span class="spp-badge">{collection}</span>
                                 {if let Some(category) = category {
-                                    view! { <span class="spp-badge">{category}</span> }.into_view()
+                                    view! { <span class="spp-badge">{category}</span> }.into_any()
                                 } else {
-                                    ().into_view()
+                                    ().into_any()
                                 }}
                                 {if let Some(views) = views {
                                     view! {
                                         <span class="spp-badge">{format!("{views} views")}</span>
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
-                                    ().into_view()
+                                    ().into_any()
                                 }}
                             </div>
                             {if text.is_empty() {
@@ -481,14 +481,14 @@ fn ArticleReader(id: i64, on_close: Rc<dyn Fn()>) -> impl IntoView {
                                     <div class="spp-doc-reader__content spp-muted">
                                         "No text stored for this article."
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                view! { <div class="spp-doc-reader__content">{text}</div> }.into_view()
+                                view! { <div class="spp-doc-reader__content">{text}</div> }.into_any()
                             }}
                             <p class="spp-muted spp-text-xs">
                                 "Mirrored read-only from Help Scout Docs; edits happen in Help Scout and arrive on the next sync."
                             </p>
-                        }.into_view()
+                        }.into_any()
                     }}
                 </Show>
             </div>

@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use crate::toasts;
 
@@ -250,12 +251,12 @@ pub fn severity_class(severity: &str) -> &'static str {
 
 #[component]
 pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> impl IntoView {
-    let open = create_rw_signal(false);
-    let include_ai = create_rw_signal(false);
-    let qa = create_rw_signal(None::<QaPayload>);
-    let friction = create_rw_signal(Vec::<FrictionFinding>::new());
-    let loading = create_rw_signal(false);
-    let analyzing = create_rw_signal(false);
+    let open = RwSignal::new(false);
+    let include_ai = RwSignal::new(false);
+    let qa = RwSignal::new(None::<QaPayload>);
+    let friction = RwSignal::new(Vec::<FrictionFinding>::new());
+    let loading = RwSignal::new(false);
+    let analyzing = RwSignal::new(false);
 
     let load = move || {
         loading.set(true);
@@ -280,7 +281,7 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
         });
     };
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         if open.get() && qa.get_untracked().is_none() && !loading.get_untracked() {
             load();
         }
@@ -415,9 +416,9 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
                                                     })
                                                     .collect::<Vec<_>>()}
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                 </div>
                                 <div>
@@ -438,14 +439,14 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
                                                                     <div class="spp-muted spp-text-xs">
                                                                         {format!("Evidence threads: {}", j.evidence_thread_ids.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(", "))}
                                                                     </div>
-                                                                }.into_view()
+                                                                }.into_any()
                                                             } else {
-                                                                ().into_view()
+                                                                ().into_any()
                                                             }}
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                                 {if let Some(j) = ai.evidence_supported {
                                                     view! {
@@ -454,9 +455,9 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
                                                             <span class=format!("spp-badge {}", judgment_class(&j.value))>{j.value.clone()}</span>
                                                             <div class="spp-muted spp-text-xs">{j.reasoning.clone()}</div>
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                                 {if let Some(j) = ai.correct_issue {
                                                     view! {
@@ -465,9 +466,9 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
                                                             <span class=format!("spp-badge {}", judgment_class(&j.value))>{j.value.clone()}</span>
                                                             <div class="spp-muted spp-text-xs">{j.reasoning.clone()}</div>
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                                 {if let (Some(kb), reason) = (ai.suggestions_kb_improve, ai.suggestions_kb_reason.clone()) {
                                                     view! {
@@ -489,21 +490,21 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
                                                                 }
                                                             )}</div>
                                                             {if let Some(assoc) = ai.suggestions_issue_association.clone() {
-                                                                view! { <div>{format!("Issue association: {assoc}")}</div> }.into_view()
+                                                                view! { <div>{format!("Issue association: {assoc}")}</div> }.into_any()
                                                             } else {
-                                                                ().into_view()
+                                                                ().into_any()
                                                             }}
                                                             <div class="spp-muted">"Suggestions are recommendations for humans — nothing applies automatically."</div>
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                                 <div class="spp-muted spp-text-xs">
                                                     {format!("Model: {}", ai.model.clone().unwrap_or_else(|| "unknown".to_string()))}
                                                 </div>
                                             </div>
-                                        }.into_view(),
+                                        }.into_any(),
                                         None => view! {
                                             <div class="spp-state spp-state--empty">
                                                 <p class="spp-state__title">"AI layer not computed"</p>
@@ -515,7 +516,7 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
                                                     }
                                                 }</p>
                                             </div>
-                                        }.into_view(),
+                                        }.into_any(),
                                     }}
                                 </div>
                             </div>
@@ -556,9 +557,9 @@ pub fn QaPanel(conversation_id: i64, #[prop(default = false)] closed: bool) -> i
                                     })
                                     .collect::<Vec<_>>()}
                             </div>
-                        }.into_view()
+                        }.into_any()
                     } else {
-                        view! { <div class="spp-muted spp-text-xs">"No friction findings detected for this conversation."</div> }.into_view()
+                        view! { <div class="spp-muted spp-text-xs">"No friction findings detected for this conversation."</div> }.into_any()
                     }
                 }}
             </Show>

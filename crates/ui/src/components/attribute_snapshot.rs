@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use crate::toasts;
 
@@ -102,12 +103,12 @@ pub fn confidence_badge_class(confidence: &str) -> &'static str {
 
 #[component]
 pub fn AttributeSnapshotCard(conversation_id: i64) -> impl IntoView {
-    let snapshot = create_rw_signal(None::<AttributeSnapshot>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let recomputing = create_rw_signal(false);
-    let show_unknown = create_rw_signal(false);
-    let expanded_attr = create_rw_signal(None::<String>);
+    let snapshot = RwSignal::new(None::<AttributeSnapshot>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let recomputing = RwSignal::new(false);
+    let show_unknown = RwSignal::new(false);
+    let expanded_attr = RwSignal::new(None::<String>);
 
     let load = {
         move || {
@@ -193,7 +194,7 @@ pub fn AttributeSnapshotCard(conversation_id: i64) -> impl IntoView {
                             <p class="spp-state__title">"No attributes yet"</p>
                             <p class="spp-state__hint">"Recompute to build the deterministic layer now; AI slots fill when LM Studio analyzes the ticket."</p>
                         </div>
-                    }.into_view()
+                    }.into_any()
                 } else {
                     view! {
                         <div class="spp-attribute-grid">
@@ -228,9 +229,9 @@ pub fn AttributeSnapshotCard(conversation_id: i64) -> impl IntoView {
                                                     >
                                                         {if is_expanded { "▾" } else { "▸" }.to_string()}
                                                     </button>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
-                                                ().into_view()
+                                                ().into_any()
                                             }}
                                             {if is_expanded && !a.evidence.is_empty() {
                                                 view! {
@@ -251,9 +252,9 @@ pub fn AttributeSnapshotCard(conversation_id: i64) -> impl IntoView {
                                                             })
                                                             .collect::<Vec<_>>()}
                                                     </div>
-                                                }.into_view()
+                                                }.into_any()
                                             } else {
-                                                ().into_view()
+                                                ().into_any()
                                             }}
                                         </div>
                                     }
@@ -285,20 +286,20 @@ pub fn AttributeSnapshotCard(conversation_id: i64) -> impl IntoView {
                                         </div>
                                     </Show>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }}
                         {if let Some(at) = &s.computed_at {
                             view! {
                                 <p class="spp-muted spp-text-xs">
                                     {format!("Local layer · computed {at} · never written to Help Scout")}
                                 </p>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }}
-                    }.into_view()
+                    }.into_any()
                 }
             }}
         </div>

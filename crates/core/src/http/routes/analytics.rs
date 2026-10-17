@@ -1,7 +1,7 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use axum::response::IntoResponse;
@@ -1417,7 +1417,7 @@ pub async fn release_events(
             return release_event_422(
                 "name",
                 &format!("Expected string, received {}", zod_type_of(other)),
-            )
+            );
         }
     };
     let version = match body.get("version") {
@@ -1435,7 +1435,7 @@ pub async fn release_events(
             return release_event_422(
                 "version",
                 &format!("Expected string, received {}", zod_type_of(other)),
-            )
+            );
         }
     };
     let occurred_at = match body.get("occurredAt") {
@@ -1450,7 +1450,7 @@ pub async fn release_events(
             return release_event_422(
                 "occurredAt",
                 &format!("Expected string, received {}", zod_type_of(other)),
-            )
+            );
         }
     };
     let notes = match body.get("notes") {
@@ -1465,7 +1465,7 @@ pub async fn release_events(
             return release_event_422(
                 "notes",
                 &format!("Expected string, received {}", zod_type_of(other)),
-            )
+            );
         }
     };
 
@@ -1597,7 +1597,7 @@ pub async fn narrative(
             return narrative_422(
                 "reportName",
                 &format!("Expected string, received {}", zod_type_of(other)),
-            )
+            );
         }
     };
     let facts = match body.get("facts") {
@@ -1620,7 +1620,7 @@ pub async fn narrative(
             return narrative_422(
                 "facts",
                 &format!("Expected object, received {}", zod_type_of(other)),
-            )
+            );
         }
     };
 

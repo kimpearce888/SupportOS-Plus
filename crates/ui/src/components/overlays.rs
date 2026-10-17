@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use leptos::*;
+use leptos::ev;
+use leptos::prelude::*;
 
 #[component]
 pub fn ConfirmDialog(
@@ -72,7 +73,7 @@ pub fn Modal(
             on:click=on_backdrop_click
         >
             <div class="spp-modal" tabindex="0">
-                <h3 class="spp-modal__title">{title}</h3>
+                <h3 class="spp-modal__title">{title.clone()}</h3>
                 {children()}
             </div>
         </div>

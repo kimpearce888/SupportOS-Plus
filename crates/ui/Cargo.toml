@@ -11,8 +11,8 @@ description = "SupportOS++ Leptos/WASM UI."
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-leptos = { version = "0.6", features = ["csr"] }
-leptos_router = { version = "0.6", features = ["csr"] }
+leptos = { version = "0.8", features = ["csr"] }
+leptos_router = "0.8"
 serde.workspace = true
 serde_json.workspace = true
 supportos-plusplus-catalog = { workspace = true }

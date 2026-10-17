@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::ai_prompts::{
     EvidenceContext, HistoryEntry, KnowledgeEntry, KnownIssueEntry, SavedReplyEntry, SimilarCase,
@@ -360,11 +360,11 @@ pub fn find_similar(
     for c in &candidates {
         let mut score = c.score;
         let mut why = c.why.clone();
-        if let (Some(their), Some(mine)) = (c.row.customer_id, me.customer_id) {
-            if their == mine {
-                score += 0.15;
-                why.push("same customer".to_string());
-            }
+        if let (Some(their), Some(mine)) = (c.row.customer_id, me.customer_id)
+            && their == mine
+        {
+            score += 0.15;
+            why.push("same customer".to_string());
         }
         let their_tags: Vec<String> = c
             .row
@@ -584,10 +584,10 @@ fn parse_epoch_millis(s: &str) -> i64 {
         if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, f) {
             return dt.and_utc().timestamp_millis();
         }
-        if f == "%Y-%m-%d" {
-            if let Ok(d) = chrono::NaiveDate::parse_from_str(s, f) {
-                return d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
-            }
+        if f == "%Y-%m-%d"
+            && let Ok(d) = chrono::NaiveDate::parse_from_str(s, f)
+        {
+            return d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
         }
     }
     0

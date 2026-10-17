@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MemoryEntry {
@@ -180,14 +181,14 @@ pub fn freshness_class(freshness: &str) -> &'static str {
 
 #[component]
 pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoView {
-    let open = create_rw_signal(false);
-    let profile = create_rw_signal(None::<MemoryProfile>);
-    let loading = create_rw_signal(false);
-    let new_key = create_rw_signal(String::new());
-    let new_value = create_rw_signal(String::new());
-    let new_kind = create_rw_signal("fact".to_string());
-    let saving = create_rw_signal(false);
-    let expanded_entry = create_rw_signal(None::<String>);
+    let open = RwSignal::new(false);
+    let profile = RwSignal::new(None::<MemoryProfile>);
+    let loading = RwSignal::new(false);
+    let new_key = RwSignal::new(String::new());
+    let new_value = RwSignal::new(String::new());
+    let new_kind = RwSignal::new("fact".to_string());
+    let saving = RwSignal::new(false);
+    let expanded_entry = RwSignal::new(None::<String>);
 
     let load = move || {
         let Some(cid) = customer_id else { return };
@@ -203,7 +204,7 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
         });
     };
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         if open.get() && profile.get_untracked().is_none() && !loading.get_untracked() {
             load();
         }
@@ -279,7 +280,7 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                             <p class="spp-state__title">"No customer on this conversation"</p>
                             <p class="spp-state__hint">"Memory composes per customer; this conversation has none linked."</p>
                         </div>
-                    }.into_view(),
+                    }.into_any(),
                     Some(_) => view! {
                         <p class="spp-muted spp-text-xs">
                             "Composed live from the local mirror — issue history, resolutions, preferences, patterns, campaigns and account facts. Human-written entries are the only stored rows."
@@ -303,7 +304,7 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                                         <span class="spp-muted spp-text-xs">{format!(" ({})", s.entries.len())}</span>
                                                     </h4>
                                                     {if s.entries.is_empty() {
-                                                        view! { <div class="spp-muted spp-text-xs">"Nothing on record (honest unknown)."</div> }.into_view()
+                                                        view! { <div class="spp-muted spp-text-xs">"Nothing on record (honest unknown)."</div> }.into_any()
                                                     } else {
                                                         s.entries
                                                             .iter()
@@ -330,9 +331,9 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                                                                         <div class="spp-muted spp-text-xs spp-pre-wrap">
                                                                                             {format!("{shown}{ellipsis}")}
                                                                                         </div>
-                                                                                    }.into_view()
+                                                                                    }.into_any()
                                                                                 } else {
-                                                                                    ().into_view()
+                                                                                    ().into_any()
                                                                                 }}
                                                                             </div>
                                                                             <div class="spp-memory-entry__badges">
@@ -347,7 +348,7 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                                                         </div>
                                                                         <div class="spp-memory-entry__meta">
                                                                             {if e.evidence.is_empty() {
-                                                                                view! { <span class="spp-muted spp-text-xs">"no evidence links"</span> }.into_view()
+                                                                                view! { <span class="spp-muted spp-text-xs">"no evidence links"</span> }.into_any()
                                                                             } else {
                                                                                 let key_for_toggle = entry_key.clone();
                                                                                 view! {
@@ -359,7 +360,7 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                                                                     >
                                                                                         {if is_expanded { "Hide evidence".to_string() } else { format!("Evidence ({})", e.evidence.len()) }}
                                                                                     </button>
-                                                                                }.into_view()
+                                                                                }.into_any()
                                                                             }}
                                                                             <span class="spp-muted spp-text-xs">
                                                                                 {match (&e.last_seen_at, &e.first_seen_at) {
@@ -376,9 +377,9 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                                                                     >
                                                                                         "Delete"
                                                                                     </button>
-                                                                                }.into_view()
+                                                                                }.into_any()
                                                                             } else {
-                                                                                ().into_view()
+                                                                                ().into_any()
                                                                             }}
                                                                         </div>
                                                                         {if is_expanded && !e.evidence.is_empty() {
@@ -398,15 +399,15 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                                                                         })
                                                                                         .collect::<Vec<_>>()}
                                                                                 </div>
-                                                                            }.into_view()
+                                                                            }.into_any()
                                                                         } else {
-                                                                            ().into_view()
+                                                                            ().into_any()
                                                                         }}
                                                                     </div>
                                                                 }
                                                             })
                                                             .collect::<Vec<_>>()
-                                                            .into_view()
+                                                            .into_any()
                                                     }}
                                                 </div>
                                             }
@@ -435,9 +436,9 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                                     })
                                                     .collect::<Vec<_>>()}
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                     <div class="spp-memory-add">
                                         <h4 class="spp-card__title">"Add a human memory entry"</h4>
@@ -487,7 +488,7 @@ pub fn MemoryPanel(customer_id: Option<i64>, conversation_id: i64) -> impl IntoV
                                 }
                             }}
                         </Show>
-                    }.into_view(),
+                    }.into_any(),
                 }}
             </Show>
         </section>

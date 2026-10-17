@@ -1,4 +1,5 @@
-use leptos_router::*;
+use leptos_router::NavigateOptions;
+use leptos_router::params::ParamsMap;
 
 #[must_use]
 pub fn encode_value(s: &str) -> String {

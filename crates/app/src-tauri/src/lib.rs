@@ -27,21 +27,6 @@ pub fn run() {
         }
     };
 
-    let loopback_addr = match tauri::async_runtime::block_on(spp_core::loopback::Loopback::bind(
-        app_config.loopback_port,
-    )) {
-        Ok(l) => {
-            let addr = l.local_addr();
-            tracing::info!(%addr, "loopback listener bound");
-            Some(addr)
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "failed to bind loopback listener");
-            None
-        }
-    };
-    let _loopback_addr_str = loopback_addr.map(|a| a.to_string());
-
     let http_port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
@@ -102,7 +87,7 @@ pub fn run() {
 
     let http_server = spp_core::http::HttpServer::new(http_state);
     let http_addr = http_server.addr();
-    tracing::info!(%http_addr, "HTTP API server starting (mirrors reference Fastify on :3000)");
+    tracing::info!(%http_addr, "HTTP API server starting on the loopback interface");
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = http_server.serve().await {

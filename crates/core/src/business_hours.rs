@@ -223,3 +223,77 @@ pub fn iso_days_ago(days: i64) -> String {
         .map(|t| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
         .unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nine_to_five_utc() -> BusinessHoursConfig {
+        BusinessHoursConfig {
+            timezone: "UTC".to_string(),
+            days: vec![1, 2, 3, 4, 5],
+            start_minute: 540,
+            end_minute: 1020,
+        }
+    }
+
+    #[test]
+    fn timezone_validation_accepts_known_zones() {
+        assert!(is_valid_timezone("UTC"));
+        assert!(is_valid_timezone("America/New_York"));
+        assert!(is_valid_timezone("Asia/Dhaka"));
+        assert!(!is_valid_timezone("Mars/Olympus_Mons"));
+        assert!(!is_valid_timezone(""));
+    }
+
+    #[test]
+    fn business_minutes_inside_one_workday() {
+        let cfg = nine_to_five_utc();
+        // Wednesday 2024-06-05, 10:00 -> 12:00 UTC = 120 business minutes
+        let minutes =
+            business_minutes_between("2024-06-05T10:00:00Z", "2024-06-05T12:00:00Z", &cfg).unwrap();
+        assert!((minutes - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn business_minutes_exclude_nights_and_weekends() {
+        let cfg = nine_to_five_utc();
+        // Friday 2024-06-07 17:00 UTC -> Monday 2024-06-10 09:00 UTC = 0 minutes
+        let minutes =
+            business_minutes_between("2024-06-07T17:00:00Z", "2024-06-10T09:00:00Z", &cfg).unwrap();
+        assert!((minutes - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn business_minutes_spanning_whole_workday() {
+        let cfg = nine_to_five_utc();
+        // Monday 09:00 -> Tuesday 09:00 UTC = 480 minutes (one full day 09-17)
+        let minutes =
+            business_minutes_between("2024-06-03T09:00:00Z", "2024-06-04T09:00:00Z", &cfg).unwrap();
+        assert!((minutes - 480.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn reversed_range_is_rejected() {
+        let cfg = nine_to_five_utc();
+        assert!(
+            business_minutes_between("2024-06-05T12:00:00Z", "2024-06-05T10:00:00Z", &cfg)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn sla_verdict_matrix() {
+        assert_eq!(sla_status(Some(30.0), Some(60)), SlaVerdict::Met);
+        assert_eq!(sla_status(Some(61.0), Some(60)), SlaVerdict::Missed);
+        assert_eq!(sla_status(Some(61.0), None), SlaVerdict::NoTarget);
+        assert_eq!(sla_status(None, Some(60)), SlaVerdict::Unmeasured);
+        assert_eq!(sla_status(None, None), SlaVerdict::Unmeasured);
+    }
+
+    #[test]
+    fn wall_minutes_are_calendar_diff() {
+        let minutes = wall_minutes_between("2024-06-05T10:00:00Z", "2024-06-05T11:30:00Z");
+        assert!((minutes.unwrap() - 90.0).abs() < 1e-9);
+    }
+}

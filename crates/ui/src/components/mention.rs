@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DirectoryUser {
@@ -89,7 +90,7 @@ pub fn parse_mention_directory(v: &serde_json::Value) -> MentionDirectory {
 }
 
 pub fn provide_mention_directory() -> RwSignal<MentionDirectory> {
-    let dir = create_rw_signal(MentionDirectory::default());
+    let dir = RwSignal::new(MentionDirectory::default());
     provide_context(dir);
     spawn_local(async move {
         if let Ok(v) = crate::api::get_json::<serde_json::Value>("/api/mention-directory").await {

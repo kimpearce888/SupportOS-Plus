@@ -1,5 +1,5 @@
-use leptos::*;
-use leptos_router::A;
+use leptos::prelude::*;
+use leptos_router::components::A;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -15,8 +15,8 @@ enum AiTab {
 
 #[component]
 pub fn AiCenterPage() -> impl IntoView {
-    let tab = create_rw_signal(AiTab::Health);
-    let clustering = create_rw_signal(false);
+    let tab = RwSignal::new(AiTab::Health);
+    let clustering = RwSignal::new(false);
 
     let run_clustering = move |_| {
         if clustering.get() {
@@ -138,11 +138,11 @@ pub fn AiCenterPage() -> impl IntoView {
 
 #[component]
 fn HealthTab() -> impl IntoView {
-    let status = create_rw_signal(Option::<serde_json::Value>::None);
-    let error_msg = create_rw_signal(None::<String>);
-    let reload = create_rw_signal(0u32);
+    let status = RwSignal::new(Option::<serde_json::Value>::None);
+    let error_msg = RwSignal::new(None::<String>);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let status = status;
         let error_msg = error_msg;
@@ -168,7 +168,7 @@ fn HealthTab() -> impl IntoView {
             <LoadingState />
         </Show>
         {move || {
-            let Some(s) = status.get() else { return ().into_view(); };
+            let Some(s) = status.get() else { return ().into_any(); };
             let settings = s.get("settings").cloned().unwrap_or(serde_json::Value::Null);
             let lmstudio = s.get("lmstudio").cloned().unwrap_or(serde_json::Value::Null);
             let index = s.get("index").cloned().unwrap_or(serde_json::Value::Null);
@@ -203,9 +203,9 @@ fn HealthTab() -> impl IntoView {
                                     <span class="spp-badge spp-badge--ok">
                                         {format!("connected · {} models", models.len())}
                                     </span>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                view! { <span class="spp-badge spp-badge--err">"offline"</span> }.into_view()
+                                view! { <span class="spp-badge spp-badge--err">"offline"</span> }.into_any()
                             }}
                         </div>
                         {if !lmstudio_error.is_empty() {
@@ -213,9 +213,9 @@ fn HealthTab() -> impl IntoView {
                                 <div class="spp-state spp-state--warning spp-mt-2">
                                     <p class="spp-state__body">{lmstudio_error}</p>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }}
                         {if !models.is_empty() {
                             view! {
@@ -224,12 +224,12 @@ fn HealthTab() -> impl IntoView {
                                         view! { <span class="spp-badge">{m.clone()}</span> }
                                     }).collect::<Vec<_>>()}
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }}
                         <div class="spp-mt-4">
-                            <A href="/settings" class="spp-button spp-button--small">"Configure in Settings →"</A>
+                            <A href="/settings" attr:class="spp-button spp-button--small">"Configure in Settings →"</A>
                         </div>
                     </div>
                     <div class="spp-card">
@@ -237,30 +237,30 @@ fn HealthTab() -> impl IntoView {
                         <div class="spp-kv">
                             <span>"AI enabled"</span>
                             {if ai_enabled {
-                                view! { <span class="spp-badge spp-badge--ok">"enabled"</span> }.into_view()
+                                view! { <span class="spp-badge spp-badge--ok">"enabled"</span> }.into_any()
                             } else {
-                                view! { <span class="spp-badge">"disabled"</span> }.into_view()
+                                view! { <span class="spp-badge">"disabled"</span> }.into_any()
                             }}
                         </div>
                         <div class="spp-kv">
                             <span>"Last inference"</span>
                             {if last_inference.is_null() {
-                                "—".to_string().into_view()
+                                "—".to_string().into_any()
                             } else {
                                 format!(
                                     "{} · {}ms",
                                     str_field(&last_inference, "at"),
                                     last_inference.get("latencyMs").and_then(|v| v.as_i64()).unwrap_or(0)
-                                ).into_view()
+                                ).into_any()
                             }}
                         </div>
                         <div class="spp-kv"><span>"Queued AI jobs"</span>{queued.to_string()}</div>
                         <div class="spp-kv">
                             <span>"Failed AI jobs"</span>
                             {if failed > 0 {
-                                view! { <span class="spp-badge spp-badge--err">{failed.to_string()}</span> }.into_view()
+                                view! { <span class="spp-badge spp-badge--err">{failed.to_string()}</span> }.into_any()
                             } else {
-                                failed.to_string().into_view()
+                                failed.to_string().into_any()
                             }}
                         </div>
                         <div class="spp-kv">
@@ -288,17 +288,17 @@ fn HealthTab() -> impl IntoView {
                         <li>"Every AI result records model, prompt version, latency and sources for auditability."</li>
                     </ul>
                 </div>
-            }.into_view()
+            }.into_any()
         }}
     }
 }
 
 #[component]
 fn AnalyticsTab() -> impl IntoView {
-    let analytics = create_rw_signal(Option::<serde_json::Value>::None);
-    let error_msg = create_rw_signal(None::<String>);
+    let analytics = RwSignal::new(Option::<serde_json::Value>::None);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let analytics = analytics;
         let error_msg = error_msg;
         wasm_bindgen_futures::spawn_local(async move {
@@ -323,7 +323,7 @@ fn AnalyticsTab() -> impl IntoView {
             <LoadingState />
         </Show>
         {move || {
-            let Some(a) = analytics.get() else { return ().into_view(); };
+            let Some(a) = analytics.get() else { return ().into_any(); };
             let patterns: Vec<serde_json::Value> = a
                 .get("common_failure_patterns")
                 .and_then(|v| v.as_array())
@@ -361,36 +361,36 @@ fn AnalyticsTab() -> impl IntoView {
                                         })
                                         .collect::<Vec<_>>()}
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
                             view! {
                                 <EmptyState message="No failure patterns recorded. Warnings from draft verification accumulate here." />
-                            }.into_view()
+                            }.into_any()
                         }}
                         <p class="spp-text-xs spp-text-muted spp-mt-2">
                             "No claims are made about AI performance beyond what is stored locally."
                         </p>
                     </div>
                 </div>
-            }.into_view()
+            }.into_any()
         }}
     }
 }
 
 #[component]
 fn AttributesTab() -> impl IntoView {
-    let report = create_rw_signal(Vec::<serde_json::Value>::new());
-    let catalog = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let attribute = create_rw_signal(String::new());
-    let op = create_rw_signal("equals".to_string());
-    let value = create_rw_signal(String::new());
-    let drill = create_rw_signal(Vec::<serde_json::Value>::new());
-    let drill_loaded = create_rw_signal(false);
-    let reload = create_rw_signal(0u32);
+    let report = RwSignal::new(Vec::<serde_json::Value>::new());
+    let catalog = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let attribute = RwSignal::new(String::new());
+    let op = RwSignal::new("equals".to_string());
+    let value = RwSignal::new(String::new());
+    let drill = RwSignal::new(Vec::<serde_json::Value>::new());
+    let drill_loaded = RwSignal::new(false);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let report = report;
         let catalog = catalog;
@@ -433,7 +433,7 @@ fn AttributesTab() -> impl IntoView {
         }
     };
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let attr = attribute.get();
         let effective = effective_op();
         let val = value.get();
@@ -553,9 +553,9 @@ fn AttributesTab() -> impl IntoView {
                                                 }
                                             }).collect::<Vec<_>>()}
                                         </div>
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
-                                    ().into_view()
+                                    ().into_any()
                                 }}
                             </div>
                         }
@@ -643,7 +643,7 @@ fn AttributesTab() -> impl IntoView {
                                     view! {
                                         <tr>
                                             <td>
-                                                <A href=format!("/inbox/conversation/{conversation_id}") class="spp-table__link">
+                                                <A href=format!("/inbox/conversation/{conversation_id}") attr:class="spp-table__link">
                                                     {format!("#{number}")}
                                                 </A>
                                             </td>
@@ -668,11 +668,11 @@ fn AttributesTab() -> impl IntoView {
 
 #[component]
 fn CopilotTab() -> impl IntoView {
-    let sessions = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let reload = create_rw_signal(0u32);
+    let sessions = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let sessions = sessions;
         let loading = loading;
@@ -724,7 +724,7 @@ fn CopilotTab() -> impl IntoView {
                 <li>"If LM Studio is off, the Copilot says so instead of pretending."</li>
             </ul>
             <div class="spp-mt-4">
-                <A href="/inbox" class="spp-button spp-button--small">"Open a conversation to use it →"</A>
+                <A href="/inbox" attr:class="spp-button spp-button--small">"Open a conversation to use it →"</A>
             </div>
         </div>
         <div class="spp-card spp-mt-4">
@@ -774,13 +774,13 @@ fn CopilotTab() -> impl IntoView {
                                         {match (conversation_id, conversation_number) {
                                             (Some(cid), _) => {
                                                 view! {
-                                                    <A href=format!("/inbox/conversation/{cid}") class="spp-table__link">
+                                                    <A href=format!("/inbox/conversation/{cid}") attr:class="spp-table__link">
                                                         {format!("#{}", conversation_number.unwrap_or(cid))}
                                                     </A>
-                                                }.into_view()
+                                                }.into_any()
                                             }
                                             (None, _) => {
-                                                view! { <span class="spp-text-xs spp-text-muted">"global"</span> }.into_view()
+                                                view! { <span class="spp-text-xs spp-text-muted">"global"</span> }.into_any()
                                             }
                                         }}
                                     </td>
@@ -807,12 +807,12 @@ fn CopilotTab() -> impl IntoView {
 
 #[component]
 fn JobsTab() -> impl IntoView {
-    let jobs = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let reload = create_rw_signal(0u32);
+    let jobs = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let jobs = jobs;
         let loading = loading;
@@ -895,12 +895,12 @@ fn JobsTab() -> impl IntoView {
                                             {match conversation_id {
                                                 Some(cid) => {
                                                     view! {
-                                                        <A href=format!("/inbox/conversation/{cid}") class="spp-table__link">
+                                                        <A href=format!("/inbox/conversation/{cid}") attr:class="spp-table__link">
                                                             {format!("#{cid}")}
                                                         </A>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 }
-                                                None => "—".to_string().into_view(),
+                                                None => "—".to_string().into_any(),
                                             }}
                                         </td>
                                         <td class="spp-text-xs">{if model.is_empty() { "—".to_string() } else { model }}</td>
@@ -924,13 +924,13 @@ fn JobsTab() -> impl IntoView {
 
 #[component]
 fn EvaluationTab() -> impl IntoView {
-    let evaluation = create_rw_signal(Option::<serde_json::Value>::None);
-    let error_msg = create_rw_signal(None::<String>);
-    let toggling = create_rw_signal(false);
-    let reload = create_rw_signal(0u32);
-    let running = create_rw_signal(false);
+    let evaluation = RwSignal::new(Option::<serde_json::Value>::None);
+    let error_msg = RwSignal::new(None::<String>);
+    let toggling = RwSignal::new(false);
+    let reload = RwSignal::new(0u32);
+    let running = RwSignal::new(false);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let evaluation = evaluation;
         let error_msg = error_msg;
@@ -1003,7 +1003,7 @@ fn EvaluationTab() -> impl IntoView {
             </div>
         </Show>
         {move || {
-            let Some(e) = evaluation.get() else { return ().into_view(); };
+            let Some(e) = evaluation.get() else { return ().into_any(); };
             let tests: Vec<serde_json::Value> = e
                 .get("tests")
                 .and_then(|v| v.as_array())
@@ -1075,7 +1075,7 @@ fn EvaluationTab() -> impl IntoView {
                 {move || {
                     let last = e.get("last_run").cloned();
                     let Some(last) = last.filter(|l| !l.is_null()) else {
-                        return ().into_view();
+                        return ().into_any();
                     };
                     let results: Vec<serde_json::Value> = last
                         .get("results")
@@ -1141,9 +1141,9 @@ fn EvaluationTab() -> impl IntoView {
                                 </table>
                             </Show>
                         </div>
-                    }.into_view()
+                    }.into_any()
                 }}
-            }.into_view()
+            }.into_any()
         }}
     }
 }
@@ -1166,9 +1166,9 @@ fn pct(v: &serde_json::Value, key: &str) -> String {
 
 fn opt_str(value: String, fallback: &str) -> impl IntoView {
     if value.is_empty() {
-        fallback.to_string().into_view()
+        fallback.to_string().into_any()
     } else {
-        value.into_view()
+        value.into_any()
     }
 }
 

@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::api_queue::{
     ApiQueue, DEFAULT_CONCURRENCY, PRIORITY_ANALYTICS, PRIORITY_INDEXING, PRIORITY_INTERACTIVE,
@@ -246,12 +246,12 @@ impl HsRateLimiter {
     pub fn wait_time_ms(&self, _is_write: bool) -> i64 {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        if let (Some(retry), Some(0)) = (state.retry_after_sec, state.remaining) {
-            if let Ok(updated) = chrono::DateTime::parse_from_rfc3339(&state.updated_at) {
-                let reset_at = updated.timestamp_millis() + retry * 1000;
-                if reset_at > now_ms {
-                    return reset_at - now_ms + 250;
-                }
+        if let (Some(retry), Some(0)) = (state.retry_after_sec, state.remaining)
+            && let Ok(updated) = chrono::DateTime::parse_from_rfc3339(&state.updated_at)
+        {
+            let reset_at = updated.timestamp_millis() + retry * 1000;
+            if reset_at > now_ms {
+                return reset_at - now_ms + 250;
             }
         }
         let mut sends = self
@@ -260,12 +260,12 @@ impl HsRateLimiter {
             .unwrap_or_else(|p| p.into_inner());
         sends.retain(|t| now_ms - t < 60_000);
         let effective_limit = (state.limit_per_minute - 5).max(5);
-        if sends.len() as i64 + 1 > effective_limit {
-            if let Some(oldest) = sends.first() {
-                let wait = 60_000 - (now_ms - oldest) + 100;
-                if wait > 0 {
-                    return wait;
-                }
+        if sends.len() as i64 + 1 > effective_limit
+            && let Some(oldest) = sends.first()
+        {
+            let wait = 60_000 - (now_ms - oldest) + 100;
+            if wait > 0 {
+                return wait;
             }
         }
         0
@@ -503,10 +503,10 @@ impl RealHelpScoutProvider {
         if !expires_soon {
             return Ok(row.access_token.unwrap_or_default());
         }
-        if let Some(refresh) = row.refresh_token {
-            if let Ok(token) = self.refresh_tokens(&refresh).await {
-                return Ok(token);
-            }
+        if let Some(refresh) = row.refresh_token
+            && let Ok(token) = self.refresh_tokens(&refresh).await
+        {
+            return Ok(token);
         }
         Ok(row.access_token.unwrap_or_default())
     }
@@ -790,11 +790,10 @@ impl RealHelpScoutProvider {
                 let conn = self.conn_lock();
                 token_row(&conn).and_then(|r| r.refresh_token)
             };
-            if let Some(refresh) = refreshed {
-                if self.refresh_tokens(&refresh).await.is_ok() {
-                    return Box::pin(self.request_inner(path, method, body, retries_left - 1))
-                        .await;
-                }
+            if let Some(refresh) = refreshed
+                && self.refresh_tokens(&refresh).await.is_ok()
+            {
+                return Box::pin(self.request_inner(path, method, body, retries_left - 1)).await;
             }
         }
 
@@ -2042,10 +2041,10 @@ fn is_not_found(e: &Error) -> bool {
 }
 
 pub fn hs_status(e: &Error) -> Option<u16> {
-    if let Error::Other(b) = e {
-        if let Some(hs) = b.downcast_ref::<HsApiError>() {
-            return Some(hs.status_code);
-        }
+    if let Error::Other(b) = e
+        && let Some(hs) = b.downcast_ref::<HsApiError>()
+    {
+        return Some(hs.status_code);
     }
     None
 }

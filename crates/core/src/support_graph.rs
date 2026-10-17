@@ -1,6 +1,6 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::catalog::{GraphHumanRelation, GraphNodeKind};
 use crate::error::Result;
@@ -693,19 +693,19 @@ fn derived_edges_touching(
                     |r| r.get(0),
                 )
                 .ok();
-            if let Some(name) = product_name {
-                if let Some(product) = product_id_by_name(&name) {
-                    push(DerivedEdge {
-                        relation: "about_product",
-                        origin: "deterministic_local",
-                        source_kind: kind,
-                        source_id: local_id,
-                        target_kind: GraphNodeKind::Product,
-                        target_id: product,
-                        note: None,
-                        at: None,
-                    });
-                }
+            if let Some(name) = product_name
+                && let Some(product) = product_id_by_name(&name)
+            {
+                push(DerivedEdge {
+                    relation: "about_product",
+                    origin: "deterministic_local",
+                    source_kind: kind,
+                    source_id: local_id,
+                    target_kind: GraphNodeKind::Product,
+                    target_id: product,
+                    note: None,
+                    at: None,
+                });
             }
             {
                 let mut stmt = conn.prepare(
@@ -768,19 +768,19 @@ fn derived_edges_touching(
                     |r| r.get(0),
                 )
                 .ok();
-            if let Some(name) = product_name {
-                if let Some(product) = product_id_by_name(&name) {
-                    push(DerivedEdge {
-                        relation: "about_product",
-                        origin: "deterministic_local",
-                        source_kind: kind,
-                        source_id: local_id,
-                        target_kind: GraphNodeKind::Product,
-                        target_id: product,
-                        note: None,
-                        at: None,
-                    });
-                }
+            if let Some(name) = product_name
+                && let Some(product) = product_id_by_name(&name)
+            {
+                push(DerivedEdge {
+                    relation: "about_product",
+                    origin: "deterministic_local",
+                    source_kind: kind,
+                    source_id: local_id,
+                    target_kind: GraphNodeKind::Product,
+                    target_id: product,
+                    note: None,
+                    at: None,
+                });
             }
             for conv in many_i64(
                 "SELECT conversation_id FROM issue_cluster_conversations WHERE cluster_id = ?1 LIMIT ?2",
@@ -843,19 +843,19 @@ fn derived_edges_touching(
                     |r| r.get(0),
                 )
                 .ok();
-            if let Some(name) = product_name {
-                if let Some(product) = product_id_by_name(&name) {
-                    push(DerivedEdge {
-                        relation: "about_product",
-                        origin: "deterministic_local",
-                        source_kind: kind,
-                        source_id: local_id,
-                        target_kind: GraphNodeKind::Product,
-                        target_id: product,
-                        note: None,
-                        at: None,
-                    });
-                }
+            if let Some(name) = product_name
+                && let Some(product) = product_id_by_name(&name)
+            {
+                push(DerivedEdge {
+                    relation: "about_product",
+                    origin: "deterministic_local",
+                    source_kind: kind,
+                    source_id: local_id,
+                    target_kind: GraphNodeKind::Product,
+                    target_id: product,
+                    note: None,
+                    at: None,
+                });
             }
             for conv in many_i64(
                 "SELECT conversation_id FROM incident_conversations WHERE incident_id = ?1 LIMIT ?2",
@@ -906,21 +906,20 @@ fn derived_edges_touching(
                                 .filter_map(|s| s.trim().parse::<i64>().ok())
                                 .collect::<Vec<i64>>()
                         })
-                    }) {
-                        if ids.contains(&local_id) {
-                            for other in ids {
-                                if other != local_id {
-                                    push(DerivedEdge {
-                                        relation: "gap_evidence",
-                                        origin: "deterministic_local",
-                                        source_kind: kind,
-                                        source_id: local_id,
-                                        target_kind: kind,
-                                        target_id: other,
-                                        note: None,
-                                        at: None,
-                                    });
-                                }
+                    }) && ids.contains(&local_id)
+                    {
+                        for other in ids {
+                            if other != local_id {
+                                push(DerivedEdge {
+                                    relation: "gap_evidence",
+                                    origin: "deterministic_local",
+                                    source_kind: kind,
+                                    source_id: local_id,
+                                    target_kind: kind,
+                                    target_id: other,
+                                    note: None,
+                                    at: None,
+                                });
                             }
                         }
                     }
@@ -1029,10 +1028,7 @@ fn derived_edges_touching(
                     "SELECT id FROM known_issues WHERE product = ?1 AND product IS NOT NULL AND TRIM(product) != ''",
                     "SELECT id FROM issue_clusters WHERE product = ?1 AND product IS NOT NULL AND TRIM(product) != ''",
                 ] {
-                    for source in many_i64(
-                        &format!("{sql} LIMIT {BRANCH_CAP}"),
-                        &[&name],
-                    ) {
+                    for source in many_i64(&format!("{sql} LIMIT {BRANCH_CAP}"), &[&name]) {
                         let source_kind = if sql.contains("incidents") {
                             GraphNodeKind::Incident
                         } else if sql.contains("known_issues") {
@@ -1397,23 +1393,91 @@ pub fn graph_stats(conn: &Connection) -> Result<Value> {
         })
         .collect();
     let edge_specs: [(&str, &str, &str); 18] = [
-        ("belongs_to", "helpscout_mirror", "SELECT 1 FROM customers cu JOIN organizations o ON o.id = cu.organization_id"),
-        ("involves", "helpscout_mirror", "SELECT 1 FROM conversations c WHERE c.customer_local_id IS NOT NULL AND c.deleted_at IS NULL"),
-        ("assigned_to", "helpscout_mirror", "SELECT 1 FROM conversations c WHERE c.assignee_local_id IS NOT NULL AND c.deleted_at IS NULL"),
-        ("owns", "helpscout_mirror", "SELECT 1 FROM incidents i WHERE i.owner_user_local_id IS NOT NULL"),
-        ("linked_to_issue", "ai_derived", "SELECT 1 FROM known_issue_links"),
-        ("clustered_into", "deterministic_local", "SELECT 1 FROM issue_cluster_conversations"),
-        ("promoted_to_issue", "helpscout_mirror", "SELECT 1 FROM issue_clusters WHERE known_issue_id IS NOT NULL"),
-        ("affected_by", "deterministic_local", "SELECT 1 FROM incident_conversations"),
-        ("related_to", "human_local", "SELECT 1 FROM incident_related"),
-        ("linked_to", "human_local", "SELECT 1 FROM custom_object_links"),
-        ("sent_to", "helpscout_mirror", "SELECT 1 FROM outreach_recipients"),
-        ("generated_conversation", "helpscout_mirror", "SELECT 1 FROM outreach_recipients WHERE hs_conversation_remote_id IS NOT NULL"),
-        ("cites", "ai_derived", "SELECT 1 FROM ai_sources s JOIN ai_runs r ON r.id = s.run_id WHERE s.source_type = 'knowledge_document' AND r.conversation_id IS NOT NULL"),
-        ("collaborated_on", "human_local", "SELECT 1 FROM side_thread_participants stp JOIN side_threads st ON st.id = stp.side_thread_id"),
-        ("about_product", "deterministic_local", "SELECT 1 FROM (SELECT 1 FROM incidents WHERE product IS NOT NULL AND TRIM(product) != '' UNION ALL SELECT 1 FROM known_issues WHERE product IS NOT NULL AND TRIM(product) != '' UNION ALL SELECT 1 FROM issue_clusters WHERE product IS NOT NULL AND TRIM(product) != '')"),
-        ("about_product", "ai_derived", "SELECT 1 FROM ai_attributes WHERE attribute = 'product' AND superseded_at IS NULL AND value_type = 'text'"),
-        ("gap_evidence", "deterministic_local", "SELECT 1 FROM knowledge_gap_candidates WHERE related_document_ids NOT IN ('[]', '')"),
+        (
+            "belongs_to",
+            "helpscout_mirror",
+            "SELECT 1 FROM customers cu JOIN organizations o ON o.id = cu.organization_id",
+        ),
+        (
+            "involves",
+            "helpscout_mirror",
+            "SELECT 1 FROM conversations c WHERE c.customer_local_id IS NOT NULL AND c.deleted_at IS NULL",
+        ),
+        (
+            "assigned_to",
+            "helpscout_mirror",
+            "SELECT 1 FROM conversations c WHERE c.assignee_local_id IS NOT NULL AND c.deleted_at IS NULL",
+        ),
+        (
+            "owns",
+            "helpscout_mirror",
+            "SELECT 1 FROM incidents i WHERE i.owner_user_local_id IS NOT NULL",
+        ),
+        (
+            "linked_to_issue",
+            "ai_derived",
+            "SELECT 1 FROM known_issue_links",
+        ),
+        (
+            "clustered_into",
+            "deterministic_local",
+            "SELECT 1 FROM issue_cluster_conversations",
+        ),
+        (
+            "promoted_to_issue",
+            "helpscout_mirror",
+            "SELECT 1 FROM issue_clusters WHERE known_issue_id IS NOT NULL",
+        ),
+        (
+            "affected_by",
+            "deterministic_local",
+            "SELECT 1 FROM incident_conversations",
+        ),
+        (
+            "related_to",
+            "human_local",
+            "SELECT 1 FROM incident_related",
+        ),
+        (
+            "linked_to",
+            "human_local",
+            "SELECT 1 FROM custom_object_links",
+        ),
+        (
+            "sent_to",
+            "helpscout_mirror",
+            "SELECT 1 FROM outreach_recipients",
+        ),
+        (
+            "generated_conversation",
+            "helpscout_mirror",
+            "SELECT 1 FROM outreach_recipients WHERE hs_conversation_remote_id IS NOT NULL",
+        ),
+        (
+            "cites",
+            "ai_derived",
+            "SELECT 1 FROM ai_sources s JOIN ai_runs r ON r.id = s.run_id WHERE s.source_type = 'knowledge_document' AND r.conversation_id IS NOT NULL",
+        ),
+        (
+            "collaborated_on",
+            "human_local",
+            "SELECT 1 FROM side_thread_participants stp JOIN side_threads st ON st.id = stp.side_thread_id",
+        ),
+        (
+            "about_product",
+            "deterministic_local",
+            "SELECT 1 FROM (SELECT 1 FROM incidents WHERE product IS NOT NULL AND TRIM(product) != '' UNION ALL SELECT 1 FROM known_issues WHERE product IS NOT NULL AND TRIM(product) != '' UNION ALL SELECT 1 FROM issue_clusters WHERE product IS NOT NULL AND TRIM(product) != '')",
+        ),
+        (
+            "about_product",
+            "ai_derived",
+            "SELECT 1 FROM ai_attributes WHERE attribute = 'product' AND superseded_at IS NULL AND value_type = 'text'",
+        ),
+        (
+            "gap_evidence",
+            "deterministic_local",
+            "SELECT 1 FROM knowledge_gap_candidates WHERE related_document_ids NOT IN ('[]', '')",
+        ),
         ("human_edge", "human_local", "SELECT 1 FROM graph_edges"),
     ];
     let edges: Vec<Value> = edge_specs
@@ -1462,10 +1526,8 @@ pub fn graph_search(
         None => GraphNodeKind::ALL.to_vec(),
     };
     let per_kind = GRAPH_MAX_SEARCH_PER_KIND;
-    let customer_label =
-        "COALESCE(NULLIF(TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, '')), ''), 'Customer #' || cu.id)";
-    let user_label =
-        "COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), 'User #' || u.id)";
+    let customer_label = "COALESCE(NULLIF(TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, '')), ''), 'Customer #' || cu.id)";
+    let user_label = "COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), 'User #' || u.id)";
     let conversation_label =
         "'#' || c.number || ' ' || COALESCE(SUBSTR(c.subject, 1, 100), '(no subject)')";
     let incident_label =
@@ -1633,15 +1695,18 @@ pub fn neighbors_json(
                FROM graph_edges WHERE source_kind = ?1 AND source_local_id = ?2
                LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![kind.as_str(), id, GRAPH_MAX_NEIGHBOR_EDGES], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, Option<String>>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, i64>(4)?,
-            ))
-        })?;
+        let rows = stmt.query_map(
+            params![kind.as_str(), id, GRAPH_MAX_NEIGHBOR_EDGES as i64],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            },
+        )?;
         for row in rows {
             let (relation, note, at, target_kind, target_local_id) = row?;
             let Some(tk) = GraphNodeKind::ALL
@@ -1673,15 +1738,18 @@ pub fn neighbors_json(
                FROM graph_edges WHERE target_kind = ?1 AND target_local_id = ?2
                LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![kind.as_str(), id, GRAPH_MAX_NEIGHBOR_EDGES], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, Option<String>>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, i64>(4)?,
-            ))
-        })?;
+        let rows = stmt.query_map(
+            params![kind.as_str(), id, GRAPH_MAX_NEIGHBOR_EDGES as i64],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            },
+        )?;
         for row in rows {
             let (relation, note, at, source_kind, source_local_id) = row?;
             let Some(sk) = GraphNodeKind::ALL

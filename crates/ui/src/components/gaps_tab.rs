@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -185,13 +186,13 @@ pub fn gap_status_badge_class(status: &str) -> &'static str {
 
 #[component]
 pub fn GapsTab() -> impl IntoView {
-    let report = create_rw_signal(None::<GapReport>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let notice = create_rw_signal(None::<(String, String)>);
-    let rebuilding = create_rw_signal(false);
-    let deciding_id = create_rw_signal(None::<i64>);
-    let draft = create_rw_signal(None::<GapDraft>);
+    let report = RwSignal::new(None::<GapReport>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let notice = RwSignal::new(None::<(String, String)>);
+    let rebuilding = RwSignal::new(false);
+    let deciding_id = RwSignal::new(None::<i64>);
+    let draft = RwSignal::new(None::<GapDraft>);
 
     let load = {
         move || {
@@ -314,15 +315,15 @@ pub fn GapsTab() -> impl IntoView {
                         <div class=class>
                             <div class="spp-text-sm">{message}</div>
                         </div>
-                    }.into_view()
+                    }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
             {move || {
                 let r = report.clone().get().unwrap_or_default();
                 if loading.get() {
-                    return ().into_view();
+                    return ().into_any();
                 }
                 view! {
                     <div class="spp-card">
@@ -361,7 +362,7 @@ pub fn GapsTab() -> impl IntoView {
                                     {if k.candidates.is_empty() {
                                         view! {
                                             <EmptyState message="No candidates of this kind. This detection found nothing in the current data." />
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
                                         k.candidates
                                             .iter()
@@ -405,16 +406,16 @@ pub fn GapsTab() -> impl IntoView {
                                                                                 })
                                                                                 .collect::<Vec<_>>()}
                                                                         </div>
-                                                                    }.into_view()
+                                                                    }.into_any()
                                                                 } else {
-                                                                    ().into_view()
+                                                                    ().into_any()
                                                                 }}
                                                                 {if let Some(note) = decision_note {
                                                                     view! {
                                                                         <div class="spp-text-xs spp-mt-4">{format!("Decision note: {note}")}</div>
-                                                                    }.into_view()
+                                                                    }.into_any()
                                                                 } else {
-                                                                    ().into_view()
+                                                                    ().into_any()
                                                                 }}
                                                                 {if let Some(d) = active_draft {
                                                                     view! {
@@ -439,15 +440,15 @@ pub fn GapsTab() -> impl IntoView {
                                                                                             })
                                                                                             .collect::<Vec<_>>()}
                                                                                     </div>
-                                                                                }.into_view()
+                                                                                }.into_any()
                                                                             } else {
-                                                                                ().into_view()
+                                                                                ().into_any()
                                                                             }}
                                                                             <div class="spp-muted spp-text-xs spp-mt-4">{d.note.clone()}</div>
                                                                         </div>
-                                                                    }.into_view()
+                                                                    }.into_any()
                                                                 } else {
-                                                                    ().into_view()
+                                                                    ().into_any()
                                                                 }}
                                                             </div>
                                                             <div class="spp-flex spp-flex--col spp-gap-4">
@@ -467,9 +468,9 @@ pub fn GapsTab() -> impl IntoView {
                                                                                         >
                                                                                             "Reject"
                                                                                         </button>
-                                                                                    }.into_view()
+                                                                                    }.into_any()
                                                                 } else {
-                                                                    ().into_view()
+                                                                    ().into_any()
                                                                 }}
                                                                 <button
                                                                     class="spp-button spp-button--small spp-button--ghost"
@@ -487,13 +488,13 @@ pub fn GapsTab() -> impl IntoView {
                                                 }
                                             })
                                             .collect::<Vec<_>>()
-                                            .into_view()
+                                            .into_any()
                                     }}
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         })
                         .collect::<Vec<_>>()}
-                }.into_view()
+                }.into_any()
             }}
         </div>
     }

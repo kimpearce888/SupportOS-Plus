@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use leptos::*;
-use serde_json::{json, Value};
+use leptos::prelude::*;
+use serde_json::{Value, json};
 
 static NEXT_UID: AtomicU64 = AtomicU64::new(1);
 
@@ -15,16 +15,16 @@ fn uid_of(n: &Value) -> u64 {
 
 pub fn inject_uid(n: &Value) -> Value {
     let mut out = n.clone();
-    if let Some(obj) = out.as_object_mut() {
-        if !obj.contains_key("_uid") {
-            obj.insert("_uid".into(), json!(next_uid()));
-        }
+    if let Some(obj) = out.as_object_mut()
+        && !obj.contains_key("_uid")
+    {
+        obj.insert("_uid".into(), json!(next_uid()));
     }
-    if out.get("kind").and_then(|k| k.as_str()) == Some("group") {
-        if let Some(children) = out.get_mut("children").and_then(|c| c.as_array_mut()) {
-            for child in children.iter_mut() {
-                *child = inject_uid(child);
-            }
+    if out.get("kind").and_then(|k| k.as_str()) == Some("group")
+        && let Some(children) = out.get_mut("children").and_then(|c| c.as_array_mut())
+    {
+        for child in children.iter_mut() {
+            *child = inject_uid(child);
         }
     }
     out
@@ -642,7 +642,7 @@ pub fn ConditionEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) 
             <div class="spp-cond-editor__head">
                 <select
                     class="spp-input spp-cond-editor__kind"
-                    value=kind_now
+                    prop:value=kind_now
                     on:change=move |ev| {
                         let next = event_target_value(&ev);
                         let m = meta.get();
@@ -683,44 +683,44 @@ pub fn ConditionEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) 
                     "customer_property" => view! {
                         <PropertyEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
+                    .into_any(),
                     "contact" => view! {
                         <ContactEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
+                    .into_any(),
                     "ticket" => view! {
                         <TicketEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
-                    "history" => view! { <HistoryEditor list=list uid=uid /> }.into_view(),
-                    "history_tag" => view! { <HistoryTagEditor list=list uid=uid meta=meta /> }.into_view(),
+                    .into_any(),
+                    "history" => view! { <HistoryEditor list=list uid=uid /> }.into_any(),
+                    "history_tag" => view! { <HistoryTagEditor list=list uid=uid meta=meta /> }.into_any(),
                     "organization_property" => view! {
                         <OrganizationPropertyEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
+                    .into_any(),
                     "history_issue" => view! {
                         <HistoryIssueEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
+                    .into_any(),
                     "incident_exposure" => view! {
                         <IncidentExposureEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
+                    .into_any(),
                     "campaign_history" => view! {
                         <CampaignHistoryEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
+                    .into_any(),
                     "support_health" => view! { <SupportHealthEditor list=list uid=uid /> }
-                        .into_view(),
+                        .into_any(),
                     "custom_object_link" => view! {
                         <CustomObjectLinkEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
+                    .into_any(),
                     "customer_event" => view! {
                         <CustomerEventEditor list=list uid=uid meta=meta />
                     }
-                    .into_view(),
-                    _ => ().into_view(),
+                    .into_any(),
+                    _ => ().into_any(),
                 }
             }}
         </div>
@@ -729,14 +729,14 @@ pub fn ConditionEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) 
 
 #[component]
 fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl IntoView {
-    let values_input = create_rw_signal(String::new());
+    let values_input = RwSignal::new(String::new());
     let op_now = move || cur_s(list, uid, "op");
     view! {
         <div class="spp-flex spp-flex--wrap">
             <FieldRow label="Property">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_oi(list, uid, "definitionId").map(|i| i.to_string()).unwrap_or_default()
+                    prop:value=move || cur_oi(list, uid, "definitionId").map(|i| i.to_string()).unwrap_or_default()
                     on:change=move |ev| {
                         let raw = event_target_value(&ev);
                         let m = meta.get();
@@ -762,7 +762,7 @@ fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> im
                         let m = meta.get();
                         let defs = meta_arr(&m, "property_definitions");
                         if defs.is_empty() {
-                            vec![view! { <option value="0">"(no properties synced)"</option> }]
+                            vec![view! { <option value="0">"(no properties synced)"</option> }.into_any()]
                         } else {
                             defs.iter()
                                 .map(|d| {
@@ -775,7 +775,7 @@ fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> im
                                     } else {
                                         format!("{name} \u{b7} {ty}")
                                     };
-                                    view! { <option value=id.to_string()>{label}</option> }
+                                    view! { <option value=id.to_string()>{label}</option> }.into_any()
                                 })
                                 .collect::<Vec<_>>()
                         }
@@ -785,7 +785,7 @@ fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> im
             <FieldRow label="Operator">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=op_now
+                    prop:value=op_now
                     on:change=move |ev| set_str(list, uid, "op", &event_target_value(&ev))
                 >
                     {move || {
@@ -802,7 +802,7 @@ fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> im
             {move || {
                 let op = op_now();
                 if op == "is_empty" || op == "is_not_empty" || op == "is_any_of" || op == "is_none_of" {
-                    Vec::<View>::new().into_view()
+                    Vec::<AnyView>::new().into_any()
                 } else {
                     let m = meta.get();
                     let node = node_by(list, uid);
@@ -822,7 +822,7 @@ fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> im
                             />
                         </FieldRow>
                     }
-                    .into_view()
+                    .into_any()
                 }
             }}
             {move || {
@@ -837,9 +837,9 @@ fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> im
                             />
                         </FieldRow>
                     }
-                    .into_view()
+                    .into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
             {move || {
@@ -907,9 +907,9 @@ fn PropertyEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> im
                             </div>
                         </FieldRow>
                     }
-                    .into_view()
+                    .into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
         </div>
@@ -931,11 +931,7 @@ fn find_def_type(m: &Option<Value>, node: &Value) -> Option<String> {
 }
 
 fn non_empty(v: String) -> Option<String> {
-    if v.is_empty() {
-        None
-    } else {
-        Some(v)
-    }
+    if v.is_empty() { None } else { Some(v) }
 }
 
 #[component]
@@ -945,7 +941,7 @@ fn ContactEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> imp
             <FieldRow label="Field">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "field")
+                    prop:value=move || cur_s(list, uid, "field")
                     on:change=move |ev| set_str(list, uid, "field", &event_target_value(&ev))
                 >
                     {move || {
@@ -966,7 +962,7 @@ fn ContactEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> imp
             <FieldRow label="Operator">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "op")
+                    prop:value=move || cur_s(list, uid, "op")
                     on:change=move |ev| set_str(list, uid, "op", &event_target_value(&ev))
                 >
                     {CONTACT_OPS
@@ -978,7 +974,7 @@ fn ContactEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> imp
             {move || {
                 let op = cur_s(list, uid, "op");
                 if op == "is_empty" || op == "is_not_empty" {
-                    ().into_view()
+                    ().into_any()
                 } else {
                     view! {
                         <FieldRow label="Value">
@@ -992,7 +988,7 @@ fn ContactEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> imp
                             />
                         </FieldRow>
                     }
-                    .into_view()
+                    .into_any()
                 }
             }}
         </div>
@@ -1011,7 +1007,7 @@ const CONTACT_OPS: [&str; 7] = [
 
 #[component]
 fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl IntoView {
-    let tag_input = create_rw_signal(String::new());
+    let tag_input = RwSignal::new(String::new());
     let datalist_id = format!("outreach-tag-list-{uid}");
     let datalist_id_input = datalist_id.clone();
     let datalist_id_list = datalist_id.clone();
@@ -1021,7 +1017,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                 <FieldRow label="Tag mode">
                     <select
                         class="spp-input spp-cond-editor__control"
-                        value=move || cur_s(list, uid, "tagMode")
+                        prop:value=move || cur_s(list, uid, "tagMode")
                         on:change=move |ev| set_str(list, uid, "tagMode", &event_target_value(&ev))
                     >
                         <option value="any">"has ANY of"</option>
@@ -1058,7 +1054,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                         <input
                             class="spp-input spp-cond-editor__add"
                             placeholder="add tag + Enter"
-                            attr:list=datalist_id_input.clone()
+                            list=datalist_id_input.clone()
                             value=move || tag_input.get()
                             on:input=move |ev| tag_input.set(event_target_value(&ev))
                             on:keydown=move |ev| {
@@ -1075,7 +1071,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                                 let m = meta.get();
                                 meta_str_list(&m, "tags")
                                     .into_iter()
-                                    .map(|t| view! { <option value=t.clone()>{t}</option> })
+                                    .map(|t| view! { <option value=t.clone()>{t.clone()}</option> })
                                     .collect::<Vec<_>>()
                             }}
                         </datalist>
@@ -1084,7 +1080,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                 <FieldRow label="Status">
                     <select
                         class="spp-input spp-cond-editor__control"
-                        value=move || cur_sarr(list, uid, "statuses").first().cloned().unwrap_or_default()
+                        prop:value=move || cur_sarr(list, uid, "statuses").first().cloned().unwrap_or_default()
                         on:change=move |ev| set_str_arr_first(list, uid, "statuses", non_empty(event_target_value(&ev)).as_deref())
                     >
                         <option value="">"any status"</option>
@@ -1098,7 +1094,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                             };
                             statuses
                                 .into_iter()
-                                .map(|st| view! { <option value=st.clone()>{st}</option> })
+                                .map(|st| view! { <option value=st.clone()>{st.clone()}</option> })
                                 .collect::<Vec<_>>()
                         }}
                     </select>
@@ -1106,7 +1102,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                 <FieldRow label="Inbox">
                     <select
                         class="spp-input spp-cond-editor__control"
-                        value=move || cur_i64_first(list, uid, "mailboxLocalIds")
+                        prop:value=move || cur_i64_first(list, uid, "mailboxLocalIds")
                         on:change=move |ev| set_opt_i64_arr(list, uid, "mailboxLocalIds", parse_opt_i64(&event_target_value(&ev)))
                     >
                         <option value="">"any inbox"</option>
@@ -1128,7 +1124,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                 <FieldRow label="Assignee">
                     <select
                         class="spp-input spp-cond-editor__control"
-                        value=move || cur_i64_first(list, uid, "assigneeLocalIds")
+                        prop:value=move || cur_i64_first(list, uid, "assigneeLocalIds")
                         on:change=move |ev| set_opt_i64_arr(list, uid, "assigneeLocalIds", parse_opt_i64(&event_target_value(&ev)))
                     >
                         <option value="">"any assignee"</option>
@@ -1187,7 +1183,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                 <FieldRow label="Channel">
                     <select
                         class="spp-input spp-cond-editor__control"
-                        value=move || cur_os(list, uid, "channel").unwrap_or_default()
+                        prop:value=move || cur_os(list, uid, "channel").unwrap_or_default()
                         on:change=move |ev| set_opt(list, uid, "channel", non_empty(event_target_value(&ev)))
                     >
                         <option value="">"any channel"</option>
@@ -1195,7 +1191,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                             let m = meta.get();
                             meta_str_list(&m, "channels")
                                 .into_iter()
-                                .map(|ch| view! { <option value=ch.clone()>{ch}</option> })
+                                .map(|ch| view! { <option value=ch.clone()>{ch.clone()}</option> })
                                 .collect::<Vec<_>>()
                         }}
                     </select>
@@ -1205,7 +1201,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                 let m = meta.get();
                 let fields = meta_arr(&m, "ticket_custom_fields");
                 if fields.is_empty() {
-                    ().into_view()
+                    ().into_any()
                 } else {
                     let fields: Vec<Value> = fields.into_iter().take(12).collect();
                     view! {
@@ -1274,15 +1270,14 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                                             <div class="spp-flex spp-gap-4">
                                                 <select
                                                     class="spp-input spp-cond-editor__control"
-                                                    value=cf.get("op").and_then(|v| v.as_str()).unwrap_or("is_not_empty").to_string()
+                                                    prop:value=cf.get("op").and_then(|v| v.as_str()).unwrap_or("is_not_empty").to_string()
                                                     on:change=move |ev| {
                                                         let new_op = event_target_value(&ev);
                                                         with_custom_fields(list, uid, |cfs2| {
-                                                            if let Some(row) = cfs2.get_mut(idx) {
-                                                                if let Some(o) = row.as_object_mut() {
+                                                            if let Some(row) = cfs2.get_mut(idx)
+                                                                && let Some(o) = row.as_object_mut() {
                                                                     o.insert("op".into(), json!(new_op));
                                                                 }
-                                                            }
                                                         });
                                                     }
                                                 >
@@ -1301,7 +1296,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                                                         .and_then(|cf2| cf2.get("op").and_then(|v| v.as_str()).map(str::to_string))
                                                         .unwrap_or_default();
                                                     if op == "is_empty" || op == "is_not_empty" {
-                                                        ().into_view()
+                                                        ().into_any()
                                                     } else {
                                                         view! {
                                                             <input
@@ -1320,19 +1315,18 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                                                                 on:change=move |ev| {
                                                                     let new_val = event_target_value(&ev);
                                                                     with_custom_fields(list, uid, |cfs2| {
-                                                                        if let Some(row) = cfs2.get_mut(idx) {
-                                                                            if let Some(o) = row.as_object_mut() {
+                                                                        if let Some(row) = cfs2.get_mut(idx)
+                                                                            && let Some(o) = row.as_object_mut() {
                                                                                 o.insert(
                                                                                     "value".into(),
                                                                                     if new_val.is_empty() { json!(null) } else { json!(new_val.clone()) },
                                                                                 );
                                                                             }
-                                                                        }
                                                                     });
                                                                 }
                                                             />
-                                                        }
-                                                        .into_view()
+                                                        }.into_any()
+                                                        .into_any()
                                                     }
                                                 }}
                                             </div>
@@ -1342,7 +1336,7 @@ fn TicketEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> impl
                             }}
                         </div>
                     }
-                    .into_view()
+                    .into_any()
                 }
             }}
         </div>
@@ -1381,7 +1375,7 @@ fn HistoryEditor(list: NodeList, uid: u64) -> impl IntoView {
             <FieldRow label="Metric">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || cur_s(list, uid, "metric")
+                    prop:value=move || cur_s(list, uid, "metric")
                     on:change=move |ev| set_str(list, uid, "metric", &event_target_value(&ev))
                 >
                     <option value="ticket_count">"total tickets"</option>
@@ -1395,7 +1389,7 @@ fn HistoryEditor(list: NodeList, uid: u64) -> impl IntoView {
             <FieldRow label="Comparison">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "op")
+                    prop:value=move || cur_s(list, uid, "op")
                     on:change=move |ev| set_str(list, uid, "op", &event_target_value(&ev))
                 >
                     <option value="gte">"is at least"</option>
@@ -1426,7 +1420,7 @@ fn HistoryTagEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> 
                 <input
                     class="spp-input spp-cond-editor__control"
                     placeholder="timezone"
-                    attr:list=datalist_id_input.clone()
+                    list=datalist_id_input.clone()
                     value=move || cur_s(list, uid, "tag")
                     on:change=move |ev| set_str(list, uid, "tag", &event_target_value(&ev))
                 />
@@ -1435,7 +1429,7 @@ fn HistoryTagEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -> 
                         let m = meta.get();
                         meta_str_list(&m, "tags")
                             .into_iter()
-                            .map(|t| view! { <option value=t.clone()>{t}</option> })
+                            .map(|t| view! { <option value=t.clone()>{t.clone()}</option> })
                             .collect::<Vec<_>>()
                     }}
                 </datalist>
@@ -1472,7 +1466,7 @@ fn OrganizationPropertyEditor(
             <FieldRow label="Field">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || {
+                    prop:value=move || {
                         if using_standard() {
                             cur_s(list, uid, "field")
                         } else {
@@ -1528,7 +1522,7 @@ fn OrganizationPropertyEditor(
             <FieldRow label="Operator">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "op")
+                    prop:value=move || cur_s(list, uid, "op")
                     on:change=move |ev| set_str(list, uid, "op", &event_target_value(&ev))
                 >
                     {move || {
@@ -1547,7 +1541,7 @@ fn OrganizationPropertyEditor(
             {move || {
                 let op = cur_s(list, uid, "op");
                 if op == "is_empty" || op == "is_not_empty" {
-                    ().into_view()
+                    ().into_any()
                 } else {
                     view! {
                         <FieldRow label="Value">
@@ -1565,7 +1559,7 @@ fn OrganizationPropertyEditor(
                             />
                         </FieldRow>
                     }
-                    .into_view()
+                    .into_any()
                 }
             }}
         </div>
@@ -1589,7 +1583,7 @@ fn HistoryIssueEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -
             <FieldRow label="Issue kind">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "issueKind")
+                    prop:value=move || cur_s(list, uid, "issueKind")
                     on:change=move |ev| {
                         set_fields(list, uid, vec![
                             ("issueKind", json!(event_target_value(&ev))),
@@ -1604,7 +1598,7 @@ fn HistoryIssueEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -
             <FieldRow label="Issue">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || cur_oi(list, uid, "issueLocalId").map(|i| i.to_string()).unwrap_or_default()
+                    prop:value=move || cur_oi(list, uid, "issueLocalId").map(|i| i.to_string()).unwrap_or_default()
                     on:change=move |ev| set_opt_i64(list, uid, "issueLocalId", parse_opt_i64(&event_target_value(&ev)))
                 >
                     {move || {
@@ -1612,7 +1606,7 @@ fn HistoryIssueEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -
                         let kind = cur_s(list, uid, "issueKind");
                         let want = if kind == "cluster" { "cluster" } else { "known_issue" };
                         let any_label = if want == "cluster" { "any cluster" } else { "any known issue" };
-                        let mut out = vec![view! { <option value="">{any_label}</option> }];
+                        let mut out = vec![view! { <option value="">{any_label}</option> }.into_any()];
                         out.extend(meta_arr(&m, "issues").into_iter().filter(|i| {
                             i.get("kind").and_then(|v| v.as_str()) == Some(want)
                         }).map(|i| {
@@ -1624,7 +1618,7 @@ fn HistoryIssueEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -
                                 .chars()
                                 .take(60)
                                 .collect();
-                            view! { <option value=id.to_string()>{label}</option> }
+                            view! { <option value=id.to_string()>{label}</option> }.into_any()
                         }));
                         out
                     }}
@@ -1633,7 +1627,7 @@ fn HistoryIssueEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -
             <FieldRow label="Linked conversations">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "op")
+                    prop:value=move || cur_s(list, uid, "op")
                     on:change=move |ev| set_str(list, uid, "op", &event_target_value(&ev))
                 >
                     <option value="gte">"at least"</option>
@@ -1653,9 +1647,9 @@ fn HistoryIssueEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) -
                             />
                         </FieldRow>
                     }
-                    .into_view()
+                    .into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
         </div>
@@ -1673,7 +1667,7 @@ fn IncidentExposureEditor(
             <FieldRow label="Incident">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || cur_oi(list, uid, "incidentId").map(|i| i.to_string()).unwrap_or_default()
+                    prop:value=move || cur_oi(list, uid, "incidentId").map(|i| i.to_string()).unwrap_or_default()
                     on:change=move |ev| set_opt_i64(list, uid, "incidentId", parse_opt_i64(&event_target_value(&ev)))
                 >
                     <option value="">"any ACTIVE incident"</option>
@@ -1723,7 +1717,7 @@ fn CampaignHistoryEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>
             <FieldRow label="Relation">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "relation")
+                    prop:value=move || cur_s(list, uid, "relation")
                     on:change=move |ev| set_str(list, uid, "relation", &event_target_value(&ev))
                 >
                     <option value="received">"received a campaign"</option>
@@ -1734,7 +1728,7 @@ fn CampaignHistoryEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>
             <FieldRow label="Campaign">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || cur_oi(list, uid, "campaignId").map(|i| i.to_string()).unwrap_or_default()
+                    prop:value=move || cur_oi(list, uid, "campaignId").map(|i| i.to_string()).unwrap_or_default()
                     on:change=move |ev| set_opt_i64(list, uid, "campaignId", parse_opt_i64(&event_target_value(&ev)))
                 >
                     <option value="">"any campaign"</option>
@@ -1764,7 +1758,7 @@ fn SupportHealthEditor(list: NodeList, uid: u64) -> impl IntoView {
             <FieldRow label="Metric">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || cur_s(list, uid, "metric")
+                    prop:value=move || cur_s(list, uid, "metric")
                     on:change=move |ev| set_str(list, uid, "metric", &event_target_value(&ev))
                 >
                     {HEALTH_METRICS
@@ -1776,7 +1770,7 @@ fn SupportHealthEditor(list: NodeList, uid: u64) -> impl IntoView {
             <FieldRow label="Comparison">
                 <select
                     class="spp-input spp-cond-editor__control"
-                    value=move || cur_s(list, uid, "op")
+                    prop:value=move || cur_s(list, uid, "op")
                     on:change=move |ev| set_str(list, uid, "op", &event_target_value(&ev))
                 >
                     <option value="gte">"is at least"</option>
@@ -1820,7 +1814,7 @@ fn CustomObjectLinkEditor(
             <FieldRow label="Object type">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || cur_oi(list, uid, "typeId").map(|i| i.to_string()).unwrap_or_default()
+                    prop:value=move || cur_oi(list, uid, "typeId").map(|i| i.to_string()).unwrap_or_default()
                     on:change=move |ev| set_opt_i64(list, uid, "typeId", parse_opt_i64(&event_target_value(&ev)))
                 >
                     <option value="">"any custom object type"</option>
@@ -1851,7 +1845,7 @@ fn CustomerEventEditor(list: NodeList, uid: u64, meta: RwSignal<Option<Value>>) 
             <FieldRow label="Event kind">
                 <select
                     class="spp-input spp-cond-editor__control--wide"
-                    value=move || cur_s(list, uid, "eventKind")
+                    prop:value=move || cur_s(list, uid, "eventKind")
                     on:change=move |ev| set_str(list, uid, "eventKind", &event_target_value(&ev))
                 >
                     {move || {

@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -137,10 +138,10 @@ pub fn fmt_score(v: Option<f64>) -> String {
 
 #[component]
 pub fn EffectivenessTab() -> impl IntoView {
-    let report = create_rw_signal(None::<EffectivenessReport>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let days = create_rw_signal(90i64);
+    let report = RwSignal::new(None::<EffectivenessReport>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let days = RwSignal::new(90i64);
 
     let load = {
         move |days: i64| {
@@ -205,7 +206,7 @@ pub fn EffectivenessTab() -> impl IntoView {
             {move || {
                 let r = report.clone().get().unwrap_or_default();
                 if loading.get() {
-                    return ().into_view();
+                    return ().into_any();
                 }
                 let first_note = r.notes.first().cloned().unwrap_or_default();
                 view! {
@@ -215,7 +216,7 @@ pub fn EffectivenessTab() -> impl IntoView {
                     {if r.buckets.is_empty() {
                         view! {
                             <EmptyState message="No analyzed conversations yet. The interaction engine analyzes conversations as they sync; style outcome data appears here once outcomes exist." />
-                        }.into_view()
+                        }.into_any()
                     } else {
                         view! {
                             <table class="spp-table">
@@ -288,7 +289,7 @@ pub fn EffectivenessTab() -> impl IntoView {
                                         .collect::<Vec<_>>()}
                                 </tbody>
                             </table>
-                        }.into_view()
+                        }.into_any()
                     }}
                     <div class="spp-alert spp-alert--info spp-mt-12">
                         {r.notes
@@ -296,7 +297,7 @@ pub fn EffectivenessTab() -> impl IntoView {
                             .map(|n| view! { <div class="spp-text-sm">{n.clone()}</div> })
                             .collect::<Vec<_>>()}
                     </div>
-                }.into_view()
+                }.into_any()
             }}
         </div>
     }

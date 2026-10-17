@@ -1,8 +1,8 @@
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
@@ -26,10 +26,10 @@ pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
         let mut end = (start + max_len).min(bytes.len());
         if end < bytes.len() {
             let window = &clean[start..end];
-            if let Some(dot) = window.rfind(". ") {
-                if dot > max_len / 2 {
-                    end = start + dot + 1;
-                }
+            if let Some(dot) = window.rfind(". ")
+                && dot > max_len / 2
+            {
+                end = start + dot + 1;
             }
         }
         while end < bytes.len() && !clean.is_char_boundary(end) {
@@ -48,7 +48,7 @@ pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
 pub fn checksum(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
+    crate::crypto::hex(&hasher.finalize())
 }
 
 pub fn get_or_create_source(
@@ -199,10 +199,10 @@ pub fn upsert_document(
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             other => Err(other),
         })?;
-    if let Some((id, existing_checksum)) = &existing {
-        if existing_checksum.as_deref() == Some(checksum.as_str()) {
-            return Ok((*id, false));
-        }
+    if let Some((id, existing_checksum)) = &existing
+        && existing_checksum.as_deref() == Some(checksum.as_str())
+    {
+        return Ok((*id, false));
     }
 
     let chunks = chunk_text(content, 1200, 150);

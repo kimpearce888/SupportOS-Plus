@@ -1,6 +1,6 @@
 use crate::business_hours::{
-    business_minutes_between, default_business_hours, is_valid_timezone, now_iso_millis,
-    sla_status, wall_minutes_between, BusinessHoursConfig, SlaTargets, SlaVerdict,
+    BusinessHoursConfig, SlaTargets, SlaVerdict, business_minutes_between, default_business_hours,
+    is_valid_timezone, now_iso_millis, sla_status, wall_minutes_between,
 };
 use crate::error::Result;
 use rusqlite::{Connection, OptionalExtension};
@@ -250,10 +250,10 @@ fn effective_config(conn: &Connection, mailbox_local_id: i64) -> Result<Option<E
         return Ok(None);
     };
     let mut days = default_business_hours().days;
-    if let Ok(parsed) = serde_json::from_str::<Vec<i64>>(&stored.days) {
-        if !parsed.is_empty() {
-            days = parsed;
-        }
+    if let Ok(parsed) = serde_json::from_str::<Vec<i64>>(&stored.days)
+        && !parsed.is_empty()
+    {
+        days = parsed;
     }
     Ok(Some(EffectiveConfig {
         business_hours: BusinessHoursConfig {

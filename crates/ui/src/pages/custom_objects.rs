@@ -1,4 +1,4 @@
-use leptos::*;
+use leptos::prelude::*;
 use std::sync::Arc;
 
 use crate::components::overlays::ConfirmDialog;
@@ -15,20 +15,20 @@ const TARGET_KINDS: [&str; 6] = [
 
 #[component]
 pub fn CustomObjectsPage() -> impl IntoView {
-    let types = create_rw_signal(Vec::<serde_json::Value>::new());
-    let objects = create_rw_signal(Vec::<serde_json::Value>::new());
-    let report = create_rw_signal(serde_json::Value::Null);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let selected_type_id = create_rw_signal(None::<i64>);
-    let query = create_rw_signal(String::new());
-    let type_modal_open = create_rw_signal(false);
+    let types = RwSignal::new(Vec::<serde_json::Value>::new());
+    let objects = RwSignal::new(Vec::<serde_json::Value>::new());
+    let report = RwSignal::new(serde_json::Value::Null);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let selected_type_id = RwSignal::new(None::<i64>);
+    let query = RwSignal::new(String::new());
+    let type_modal_open = RwSignal::new(false);
     let object_modal =
-        create_rw_signal(Option::<(serde_json::Value, Option<serde_json::Value>)>::None);
-    let confirm_delete = create_rw_signal(Option::<(String, i64, String)>::None);
-    let reload = create_rw_signal(0u32);
+        RwSignal::new(Option::<(serde_json::Value, Option<serde_json::Value>)>::None);
+    let confirm_delete = RwSignal::new(Option::<(String, i64, String)>::None);
+    let reload = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let types = types;
         let report = report;
@@ -58,7 +58,7 @@ pub fn CustomObjectsPage() -> impl IntoView {
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = reload.get();
         let type_now = selected_type_id.get();
         let q = query.get();
@@ -180,12 +180,12 @@ pub fn CustomObjectsPage() -> impl IntoView {
                                         {format!("+ New {name}")}
                                     </button>
                                 }
-                                .into_view()
+                                .into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }
                     }}
                 </div>
@@ -238,7 +238,7 @@ pub fn CustomObjectsPage() -> impl IntoView {
                     }
                 >
                     {move || {
-                        let Some(t) = active_type() else { return ().into_view(); };
+                        let Some(t) = active_type() else { return ().into_any(); };
                         let fields: Vec<serde_json::Value> = t
                             .get("fields")
                             .and_then(|v| v.as_array())
@@ -250,7 +250,7 @@ pub fn CustomObjectsPage() -> impl IntoView {
                         if rows.is_empty() {
                             return view! {
                                 <EmptyState message=format!("No {type_name} objects yet.") />
-                            }.into_view();
+                            }.into_any();
                         }
                         view! {
                             <table class="spp-table">
@@ -323,17 +323,17 @@ pub fn CustomObjectsPage() -> impl IntoView {
                                     }).collect::<Vec<_>>()}
                                 </tbody>
                             </table>
-                        }.into_view()
+                        }.into_any()
                     }}
 
                     {move || {
                         if active_type().is_some() {
-                            return ().into_view();
+                            return ().into_any();
                         }
                         if objects.get().is_empty() {
                             return view! {
                                 <EmptyState message="No objects match." />
-                            }.into_view();
+                            }.into_any();
                         }
                         let types_snapshot = types.get();
                         view! {
@@ -363,7 +363,7 @@ pub fn CustomObjectsPage() -> impl IntoView {
                                     }).collect::<Vec<_>>()}
                                 </tbody>
                             </table>
-                        }.into_view()
+                        }.into_any()
                     }}
 
                     {move || {
@@ -374,7 +374,7 @@ pub fn CustomObjectsPage() -> impl IntoView {
                             .cloned()
                             .unwrap_or_default();
                         if report_types.is_empty() {
-                            return ().into_view();
+                            return ().into_any();
                         }
                         view! {
                             <div class="spp-card spp-mt-4">
@@ -413,15 +413,15 @@ pub fn CustomObjectsPage() -> impl IntoView {
                                     }
                                 }).collect::<Vec<_>>()}
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }}
                 </Show>
             </Show>
 
             <Show when=move || type_modal_open.get() fallback=|| ()>
                 <TypeModal
-                    on_close=std::rc::Rc::new(move || type_modal_open.set(false))
-                    on_saved=std::rc::Rc::new(move || {
+                    on_close=std::sync::Arc::new(move || type_modal_open.set(false))
+                    on_saved=std::sync::Arc::new(move || {
                         type_modal_open.set(false);
                         reload.update(|n| *n = n.wrapping_add(1));
                     })
@@ -434,16 +434,16 @@ pub fn CustomObjectsPage() -> impl IntoView {
                         <ObjectModal
                             type_definition=t
                             existing=existing
-                            on_close=std::rc::Rc::new(move || object_modal.set(None))
-                            on_saved=std::rc::Rc::new(move || {
+                            on_close=std::sync::Arc::new(move || object_modal.set(None))
+                            on_saved=std::sync::Arc::new(move || {
                                 object_modal.set(None);
                                 reload.update(|n| *n = n.wrapping_add(1));
                             })
                         />
                     }
-                    .into_view()
+                    .into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
 
@@ -467,9 +467,9 @@ pub fn CustomObjectsPage() -> impl IntoView {
                             on_cancel
                         />
                     }
-                    .into_view()
+                    .into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
         </div>
@@ -486,11 +486,14 @@ struct FieldDraft {
 }
 
 #[component]
-fn TypeModal(on_close: std::rc::Rc<dyn Fn()>, on_saved: std::rc::Rc<dyn Fn()>) -> impl IntoView {
-    let name = create_rw_signal(String::new());
-    let description = create_rw_signal(String::new());
-    let fields = create_rw_signal(vec![FieldDraft::default()]);
-    let submitting = create_rw_signal(false);
+fn TypeModal(
+    on_close: std::sync::Arc<dyn Fn() + Send + Sync>,
+    on_saved: std::sync::Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let name = RwSignal::new(String::new());
+    let description = RwSignal::new(String::new());
+    let fields = RwSignal::new(vec![FieldDraft::default()]);
+    let submitting = RwSignal::new(false);
 
     let can_submit = move || {
         !name.get().trim().is_empty()
@@ -541,7 +544,7 @@ fn TypeModal(on_close: std::rc::Rc<dyn Fn()>, on_saved: std::rc::Rc<dyn Fn()>) -
                 })
                 .collect::<Vec<_>>(),
         });
-        let on_saved = std::rc::Rc::clone(&on_saved);
+        let on_saved = std::sync::Arc::clone(&on_saved);
         wasm_bindgen_futures::spawn_local(async move {
             match crate::api::post_json::<serde_json::Value>(
                 "/api/custom-objects/types",
@@ -642,9 +645,9 @@ fn TypeModal(on_close: std::rc::Rc<dyn Fn()>, on_saved: std::rc::Rc<dyn Fn()>) -
                                                 prop:value=options_value
                                                 on:input=move |ev| fields.update(|fs| fs[i].options = event_target_value(&ev))
                                             />
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        ().into_view()
+                                        ().into_any()
                                     }}
                                     <label class="spp-custom-objects__checkbox">
                                         <input
@@ -697,8 +700,8 @@ fn TypeModal(on_close: std::rc::Rc<dyn Fn()>, on_saved: std::rc::Rc<dyn Fn()>) -
 fn ObjectModal(
     type_definition: serde_json::Value,
     existing: Option<serde_json::Value>,
-    on_close: std::rc::Rc<dyn Fn()>,
-    on_saved: std::rc::Rc<dyn Fn()>,
+    on_close: std::sync::Arc<dyn Fn() + Send + Sync>,
+    on_saved: std::sync::Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let type_id = type_definition
         .get("id")
@@ -717,7 +720,7 @@ fn ObjectModal(
     let editing_id = existing
         .as_ref()
         .and_then(|o| o.get("id").and_then(|v| v.as_i64()));
-    let title = create_rw_signal(
+    let title = RwSignal::new(
         existing
             .as_ref()
             .and_then(|o| o.get("title"))
@@ -725,7 +728,7 @@ fn ObjectModal(
             .unwrap_or("")
             .to_string(),
     );
-    let values = create_rw_signal({
+    let values = RwSignal::new({
         let mut out = std::collections::BTreeMap::new();
         for f in &fields {
             let key = f
@@ -756,7 +759,7 @@ fn ObjectModal(
         }
         out
     });
-    let links = create_rw_signal({
+    let links = RwSignal::new({
         existing
             .as_ref()
             .and_then(|o| o.get("links"))
@@ -778,7 +781,7 @@ fn ObjectModal(
             })
             .unwrap_or_default()
     });
-    let submitting = create_rw_signal(false);
+    let submitting = RwSignal::new(false);
     let fields_for_submit = fields.clone();
 
     let can_submit = move || !title.get().trim().is_empty();
@@ -826,7 +829,7 @@ fn ObjectModal(
             "properties": properties,
             "links": links_wire,
         });
-        let on_saved = std::rc::Rc::clone(&on_saved);
+        let on_saved = std::sync::Arc::clone(&on_saved);
         let editing_id = editing_id;
         wasm_bindgen_futures::spawn_local(async move {
             let result = match editing_id {
@@ -920,7 +923,7 @@ fn ObjectModal(
                                             <option value="true">"yes"</option>
                                             <option value="false">"no"</option>
                                         </select>
-                                    }.into_view()
+                                    }.into_any()
                                 } else if field_type == "select" {
                                     view! {
                                         <select
@@ -936,7 +939,7 @@ fn ObjectModal(
                                                 view! { <option value=o.clone()>{o.clone()}</option> }
                                             }).collect::<Vec<_>>()}
                                         </select>
-                                    }.into_view()
+                                    }.into_any()
                                 } else if field_type == "date" {
                                     view! {
                                         <input
@@ -948,7 +951,7 @@ fn ObjectModal(
                                                 values.update(|m| { m.insert(key_date2.clone(), v); });
                                             }
                                         />
-                                    }.into_view()
+                                    }.into_any()
                                 } else if field_type == "number" {
                                     view! {
                                         <input
@@ -961,7 +964,7 @@ fn ObjectModal(
                                                 values.update(|m| { m.insert(key_number2.clone(), v); });
                                             }
                                         />
-                                    }.into_view()
+                                    }.into_any()
                                 } else if field_type == "long_text" {
                                     view! {
                                         <textarea
@@ -974,7 +977,7 @@ fn ObjectModal(
                                             }
                                         >
                                         </textarea>
-                                    }.into_view()
+                                    }.into_any()
                                 } else {
                                     view! {
                                         <input
@@ -985,7 +988,7 @@ fn ObjectModal(
                                                 values.update(|m| { m.insert(key_plain2.clone(), v); });
                                             }
                                         />
-                                    }.into_view()
+                                    }.into_any()
                                 }}
                             }
                         }).collect::<Vec<_>>()}

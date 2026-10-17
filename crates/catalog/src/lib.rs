@@ -17,7 +17,7 @@ pub mod reporting;
 pub mod workspace;
 
 pub use activity::{ActivityField, ConditionKind, DateMode, ResponseState};
-pub use attributes::{AiAttributeKey, AttributeValueType, AI_ATTRIBUTE_SCHEMA_VERSION};
+pub use attributes::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValueType};
 pub use copilot::CopilotTool;
 pub use graph::{GraphHumanRelation, GraphNodeKind};
 pub use notifications::NotificationType;

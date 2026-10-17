@@ -1,7 +1,8 @@
-use std::rc::Rc;
-
-use leptos::*;
-use leptos_router::{use_navigate, NavigateOptions, A};
+use leptos::prelude::*;
+use leptos_router::NavigateOptions;
+use leptos_router::components::A;
+use leptos_router::hooks::use_navigate;
+use std::sync::Arc;
 
 use wasm_bindgen::JsCast;
 
@@ -73,17 +74,17 @@ fn timeline_detail_summary(detail: Option<&str>) -> String {
 
 #[component]
 pub fn IncidentsPage() -> impl IntoView {
-    let incidents = create_rw_signal(Vec::<serde_json::Value>::new());
-    let total = create_rw_signal(0i64);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let q = create_rw_signal(String::new());
-    let status_filter = create_rw_signal(String::new());
-    let open_only = create_rw_signal(true);
-    let create_open = create_rw_signal(false);
+    let incidents = RwSignal::new(Vec::<serde_json::Value>::new());
+    let total = RwSignal::new(0i64);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let q = RwSignal::new(String::new());
+    let status_filter = RwSignal::new(String::new());
+    let open_only = RwSignal::new(true);
+    let create_open = RwSignal::new(false);
     let navigate = use_navigate();
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let q_now = q.get();
         let status_now = status_filter.get();
         let open_now = open_only.get();
@@ -119,17 +120,17 @@ pub fn IncidentsPage() -> impl IntoView {
         });
     });
 
-    let on_open: Rc<dyn Fn(i64)> = {
+    let on_open: Arc<dyn Fn(i64) + Send + Sync> = {
         let navigate = navigate.clone();
-        Rc::new(move |id| {
+        Arc::new(move |id| {
             navigate(&format!("/incidents/{id}"), NavigateOptions::default());
         })
     };
-    let on_created: Rc<dyn Fn(i64)> = Rc::new(move |id| {
+    let on_created: Arc<dyn Fn(i64) + Send + Sync> = Arc::new(move |id| {
         toasts::success("Incident declared.");
         navigate(&format!("/incidents/{id}"), NavigateOptions::default());
     });
-    let on_modal_close: Rc<dyn Fn()> = Rc::new(move || create_open.set(false));
+    let on_modal_close: Arc<dyn Fn() + Send + Sync> = Arc::new(move || create_open.set(false));
 
     view! {
         <div class="spp-page spp-page--incidents">
@@ -221,7 +222,7 @@ pub fn IncidentsPage() -> impl IntoView {
                 }
                 fallback=|| ()
             >
-                <IncidentsTable incidents=incidents on_open=Rc::clone(&on_open) />
+                <IncidentsTable incidents=incidents on_open=Arc::clone(&on_open) />
             </Show>
             <Show
                 when=move || {
@@ -239,8 +240,8 @@ pub fn IncidentsPage() -> impl IntoView {
                 fallback=|| ()
             >
                 <CreateIncidentModal
-                    on_close=Rc::clone(&on_modal_close)
-                    on_created=Rc::clone(&on_created)
+                    on_close=Arc::clone(&on_modal_close)
+                    on_created=Arc::clone(&on_created)
                 />
             </Show>
         </div>
@@ -250,7 +251,7 @@ pub fn IncidentsPage() -> impl IntoView {
 #[component]
 fn IncidentsTable(
     incidents: RwSignal<Vec<serde_json::Value>>,
-    on_open: Rc<dyn Fn(i64)>,
+    on_open: Arc<dyn Fn(i64) + Send + Sync>,
 ) -> impl IntoView {
     let rows = move || {
         incidents
@@ -258,7 +259,7 @@ fn IncidentsTable(
             .into_iter()
             .map(|row| {
                 view! {
-                    <IncidentListRow row=row on_open=Rc::clone(&on_open) />
+                    <IncidentListRow row=row on_open=Arc::clone(&on_open) />
                 }
             })
             .collect::<Vec<_>>()
@@ -286,7 +287,10 @@ fn IncidentsTable(
 }
 
 #[component]
-fn IncidentListRow(row: serde_json::Value, on_open: Rc<dyn Fn(i64)>) -> impl IntoView {
+fn IncidentListRow(
+    row: serde_json::Value,
+    on_open: Arc<dyn Fn(i64) + Send + Sync>,
+) -> impl IntoView {
     let id = row.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
     let code = row
         .get("code")
@@ -340,8 +344,8 @@ fn IncidentListRow(row: serde_json::Value, on_open: Rc<dyn Fn(i64)>) -> impl Int
         .to_string();
     let href = format!("/incidents/{id}");
 
-    let open_row = Rc::clone(&on_open);
-    let open_link = Rc::clone(&on_open);
+    let open_row = Arc::clone(&on_open);
+    let open_link = Arc::clone(&on_open);
     view! {
         <tr class="spp-table__row--clickable" on:click=move |_| open_row(id)>
             <td class="spp-mono">
@@ -361,11 +365,11 @@ fn IncidentListRow(row: serde_json::Value, on_open: Rc<dyn Fn(i64)>) -> impl Int
                 {match (&product, &feature) {
                     (Some(p), Some(f)) => view! {
                         <div class="spp-muted spp-text-xs">{format!("{p} · {f}")}</div>
-                    }.into_view(),
+                    }.into_any(),
                     (Some(p), None) => view! {
                         <div class="spp-muted spp-text-xs">{p.clone()}</div>
-                    }.into_view(),
-                    _ => ().into_view(),
+                    }.into_any(),
+                    _ => ().into_any(),
                 }}
             </td>
             <td><span class=status_badge_class(&status)>{humanize(&status)}</span></td>
@@ -384,12 +388,15 @@ fn IncidentListRow(row: serde_json::Value, on_open: Rc<dyn Fn(i64)>) -> impl Int
 }
 
 #[component]
-fn CreateIncidentModal(on_close: Rc<dyn Fn()>, on_created: Rc<dyn Fn(i64)>) -> impl IntoView {
-    let title = create_rw_signal(String::new());
-    let severity = create_rw_signal("sev3".to_string());
-    let status = create_rw_signal("investigating".to_string());
-    let description = create_rw_signal(String::new());
-    let submitting = create_rw_signal(false);
+fn CreateIncidentModal(
+    on_close: Arc<dyn Fn() + Send + Sync>,
+    on_created: Arc<dyn Fn(i64) + Send + Sync>,
+) -> impl IntoView {
+    let title = RwSignal::new(String::new());
+    let severity = RwSignal::new("sev3".to_string());
+    let status = RwSignal::new("investigating".to_string());
+    let description = RwSignal::new(String::new());
+    let submitting = RwSignal::new(false);
 
     let declare = move |_| {
         let title_now = title.get();
@@ -403,7 +410,7 @@ fn CreateIncidentModal(on_close: Rc<dyn Fn()>, on_created: Rc<dyn Fn(i64)>) -> i
             "status": status.get(),
             "description": if description.get().trim().is_empty() { serde_json::Value::Null } else { serde_json::Value::String(description.get()) },
         });
-        let on_created = Rc::clone(&on_created);
+        let on_created = Arc::clone(&on_created);
         wasm_bindgen_futures::spawn_local(async move {
             match crate::api::post_json::<serde_json::Value>("/api/incidents", Some(&body)).await {
                 Ok(r) if r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) => {
@@ -496,12 +503,12 @@ fn CreateIncidentModal(on_close: Rc<dyn Fn()>, on_created: Rc<dyn Fn(i64)>) -> i
 
 #[component]
 pub fn IncidentDetailPage(incident_id: i64) -> impl IntoView {
-    let data = create_rw_signal(None::<serde_json::Value>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let refresh = create_rw_signal(0u32);
+    let data = RwSignal::new(None::<serde_json::Value>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let refresh = RwSignal::new(0u32);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _tick = refresh.get();
         let data = data;
         let loading = loading;
@@ -527,7 +534,7 @@ pub fn IncidentDetailPage(incident_id: i64) -> impl IntoView {
         });
     });
 
-    let reload: Rc<dyn Fn()> = Rc::new(move || refresh.update(|t| *t += 1));
+    let reload: Arc<dyn Fn() + Send + Sync> = Arc::new(move || refresh.update(|t| *t += 1));
 
     view! {
         <div class="spp-page spp-page--incident-detail">
@@ -538,7 +545,7 @@ pub fn IncidentDetailPage(incident_id: i64) -> impl IntoView {
                 <ErrorState message="Could not load incident" retry=None />
                 <p class="spp-muted spp-text-xs">{move || error_msg.get().unwrap_or_default()}</p>
             </Show>
-            <IncidentDetailContent data=data reload=Rc::clone(&reload) />
+            <IncidentDetailContent data=data reload=Arc::clone(&reload) />
         </div>
     }
 }
@@ -546,14 +553,14 @@ pub fn IncidentDetailPage(incident_id: i64) -> impl IntoView {
 #[component]
 fn IncidentDetailContent(
     data: RwSignal<Option<serde_json::Value>>,
-    reload: Rc<dyn Fn()>,
+    reload: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let content = move || match data.get() {
         Some(payload) => view! {
-            <IncidentDetailLoaded payload=payload reload=Rc::clone(&reload) />
+            <IncidentDetailLoaded payload=payload reload=Arc::clone(&reload) />
         }
-        .into_view(),
-        None => ().into_view(),
+        .into_any(),
+        None => ().into_any(),
     };
     view! {
         <div class="spp-incidents__detail-content">
@@ -563,7 +570,10 @@ fn IncidentDetailContent(
 }
 
 #[component]
-fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> impl IntoView {
+fn IncidentDetailLoaded(
+    payload: serde_json::Value,
+    reload: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
     let inc = payload
         .get("incident")
         .cloned()
@@ -644,10 +654,10 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
         .map(str::to_string);
 
     let set_status = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |ev: leptos::ev::Event| {
             let value = event_target_value(&ev);
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}");
                 let body = serde_json::json!({ "status": value });
@@ -659,10 +669,10 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
         }
     };
     let set_severity = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |ev: leptos::ev::Event| {
             let value = event_target_value(&ev);
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}");
                 let body = serde_json::json!({ "severity": value });
@@ -675,7 +685,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
     };
 
     let append_resolution = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         let existing = inc
             .get("resolution")
             .and_then(|v| v.as_str())
@@ -695,7 +705,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                 .target()
                 .and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
                 .map(|ta| ta.set_value(""));
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}");
                 let body = serde_json::json!({ "resolution": joined });
@@ -707,9 +717,9 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
         }
     };
 
-    let link_number = create_rw_signal(String::new());
+    let link_number = RwSignal::new(String::new());
     let submit_link = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |ev: leptos::ev::SubmitEvent| {
             ev.prevent_default();
             let raw = link_number.get().trim().replace('#', "");
@@ -720,7 +730,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                 return;
             }
             link_number.set(String::new());
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let list_path = format!("/api/conversations?number={num}&view=all&pageSize=5");
                 match crate::api::get_json::<serde_json::Value>(&list_path).await {
@@ -759,9 +769,9 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
         }
     };
 
-    let note_body = create_rw_signal(String::new());
+    let note_body = RwSignal::new(String::new());
     let add_note = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |ev: leptos::ev::SubmitEvent| {
             ev.prevent_default();
             let body = note_body.get().trim().to_string();
@@ -769,7 +779,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                 return;
             }
             note_body.set(String::new());
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}/notes");
                 let body = serde_json::json!({ "body": body });
@@ -782,7 +792,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
     };
 
     let add_ref = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |_| {
             let Some(window) = web_sys::window() else {
                 return;
@@ -803,7 +813,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
             else {
                 return;
             };
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}/refs");
                 let body =
@@ -816,8 +826,8 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
         }
     };
 
-    let confirm_delete = create_rw_signal(false);
-    let release_open = create_rw_signal(false);
+    let confirm_delete = RwSignal::new(false);
+    let release_open = RwSignal::new(false);
     let do_delete = {
         let navigate = use_navigate();
         move |_| {
@@ -834,16 +844,16 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
             });
         }
     };
-    let on_release_close: Rc<dyn Fn()> = Rc::new(move || release_open.set(false));
-    let on_release_saved: Rc<dyn Fn()> = Rc::new({
-        let reload = Rc::clone(&reload);
+    let on_release_close: Arc<dyn Fn() + Send + Sync> = Arc::new(move || release_open.set(false));
+    let on_release_saved: Arc<dyn Fn() + Send + Sync> = Arc::new({
+        let reload = Arc::clone(&reload);
         move || {
             release_open.set(false);
             reload();
         }
     });
-    let delete_requested = create_rw_signal(false);
-    create_effect(move |_| {
+    let delete_requested = RwSignal::new(false);
+    Effect::new(move |_| {
         if delete_requested.get() {
             delete_requested.set(false);
             do_delete(());
@@ -978,9 +988,9 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                     " "
                     <span class=severity_badge_class(&severity)>{severity.to_uppercase()}</span>
                     {match (&product, &feature) {
-                        (Some(p), Some(f)) => view! { " · " {format!("{p} · {f}")} }.into_view(),
-                        (Some(p), None) => view! { " · " {p.clone()} }.into_view(),
-                        _ => ().into_view(),
+                        (Some(p), Some(f)) => view! { " · " {format!("{p} · {f}")} }.into_any(),
+                        (Some(p), None) => view! { " · " {p.clone()} }.into_any(),
+                        _ => ().into_any(),
                     }}
                     {format!(
                         " · {} conversations · {} customers · {} organizations",
@@ -1012,7 +1022,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                     <option value="sev3">"SEV3"</option>
                     <option value="sev4">"SEV4"</option>
                 </select>
-                <A href="/incidents" class="spp-button">"← All incidents"</A>
+                <A href="/incidents" attr:class="spp-button">"← All incidents"</A>
                 <button class="spp-button spp-button--danger" on:click=move |_| confirm_delete.set(true)>
                     "Delete"
                 </button>
@@ -1052,24 +1062,24 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                     {if !inboxes_line.is_empty() {
                         view! {
                             <div class="spp-kv-row"><dt>"Inboxes"</dt><dd>{inboxes_line}</dd></div>
-                        }.into_view()
-                    } else { ().into_view() }}
+                        }.into_any()
+                    } else { ().into_any() }}
                     {if !tags_line.is_empty() {
                         view! {
                             <div class="spp-kv-row"><dt>"Tags"</dt><dd>{tags_line}</dd></div>
-                        }.into_view()
-                    } else { ().into_view() }}
+                        }.into_any()
+                    } else { ().into_any() }}
                     {if !products_line.is_empty() {
                         view! {
                             <div class="spp-kv-row"><dt>"Products (AI attributes)"</dt><dd>{products_line}</dd></div>
-                        }.into_view()
+                        }.into_any()
                     } else {
                         view! {
                             <div class="spp-kv-row">
                                 <dt>"Products (AI attributes)"</dt>
                                 <dd class="spp-muted">"unknown until conversations are analyzed"</dd>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }}
                 </dl>
                 <p class="spp-muted spp-text-xs spp-incidents__note">{impact_note}</p>
@@ -1110,7 +1120,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
             {if conversations.is_empty() {
                 view! {
                     <EmptyState message="No conversations linked yet. Link conversations by number to make affected customers and impact counts real." />
-                }.into_view()
+                }.into_any()
             } else {
                 view! {
                     <table class="spp-table">
@@ -1133,14 +1143,14 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                                         <ConversationRow
                                             incident_id=incident_id
                                             row=row.clone()
-                                            reload=Rc::clone(&reload)
+                                            reload=Arc::clone(&reload)
                                         />
                                     }
                                 })
                                 .collect::<Vec<_>>()}
                         </tbody>
                     </table>
-                }.into_view()
+                }.into_any()
             }}
         </div>
 
@@ -1153,7 +1163,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                     "Distinct customers derived from the linked conversations — a ticket count is never used as a customer count."
                 </p>
                 {if affected_customers.is_empty() {
-                    view! { <span class="spp-muted">"None yet."</span> }.into_view()
+                    view! { <span class="spp-muted">"None yet."</span> }.into_any()
                 } else {
                     view! {
                         <table class="spp-table">
@@ -1167,7 +1177,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                                     .collect::<Vec<_>>()}
                             </tbody>
                         </table>
-                    }.into_view()
+                    }.into_any()
                 }}
                 {if !affected_organizations.is_empty() {
                     view! {
@@ -1198,8 +1208,8 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                                 }
                             })
                             .collect::<Vec<_>>()}
-                    }.into_view()
-                } else { ().into_view() }}
+                    }.into_any()
+                } else { ().into_any() }}
             </div>
 
             <div class="spp-card">
@@ -1207,13 +1217,13 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                 {if refs.is_empty() && releases.is_empty() && related.is_empty() {
                     view! {
                         <EmptyState message="No references yet. Attach the Jira/Linear ticket, the release that may be associated, related known issues, knowledge articles or campaigns." />
-                    }.into_view()
-                } else { ().into_view() }}
+                    }.into_any()
+                } else { ().into_any() }}
                 {refs
                     .iter()
                     .map(|r| {
                         view! {
-                            <RefRow incident_id=incident_id row=r.clone() reload=Rc::clone(&reload) />
+                            <RefRow incident_id=incident_id row=r.clone() reload=Arc::clone(&reload) />
                         }
                     })
                     .collect::<Vec<_>>()}
@@ -1221,7 +1231,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                     .iter()
                     .map(|r| {
                         view! {
-                            <ReleaseRow incident_id=incident_id row=r.clone() reload=Rc::clone(&reload) />
+                            <ReleaseRow incident_id=incident_id row=r.clone() reload=Arc::clone(&reload) />
                         }
                     })
                     .collect::<Vec<_>>()}
@@ -1229,7 +1239,7 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                     .iter()
                     .map(|r| {
                         view! {
-                            <RelatedRow incident_id=incident_id row=r.clone() reload=Rc::clone(&reload) />
+                            <RelatedRow incident_id=incident_id row=r.clone() reload=Arc::clone(&reload) />
                         }
                     })
                     .collect::<Vec<_>>()}
@@ -1322,9 +1332,9 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
                                 <span class="spp-badge">{humanize(&event_type)}</span>
                                 <span class="spp-muted spp-text-xs">{short_date(&occurred)}</span>
                                 {if detail.is_empty() {
-                                    ().into_view()
+                                    ().into_any()
                                 } else {
-                                    view! { <span class="spp-text-xs">{detail}</span> }.into_view()
+                                    view! { <span class="spp-text-xs">{detail}</span> }.into_any()
                                 }}
                             </div>
                         }
@@ -1336,8 +1346,8 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
         <Show when=move || release_open.get() fallback=|| ()>
             <ReleaseForm
                 incident_id=incident_id
-                on_close=Rc::clone(&on_release_close)
-                on_saved=Rc::clone(&on_release_saved)
+                on_close=Arc::clone(&on_release_close)
+                on_saved=Arc::clone(&on_release_saved)
             />
         </Show>
         <Show when=move || confirm_delete.get() fallback=|| ()>
@@ -1355,7 +1365,11 @@ fn IncidentDetailLoaded(payload: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
     }
 }
 
-fn explanation_field(incident: &serde_json::Value, label: &str, key: &str) -> impl IntoView {
+fn explanation_field(
+    incident: &serde_json::Value,
+    label: &str,
+    key: &str,
+) -> impl IntoView + use<> {
     let label = label.to_string();
     let value = incident
         .get(key)
@@ -1373,14 +1387,20 @@ fn explanation_field(incident: &serde_json::Value, label: &str, key: &str) -> im
 
 #[component]
 fn ExplanationsCard(incident: serde_json::Value) -> impl IntoView {
+    let fields = [
+        ("Description", "description"),
+        ("Internal explanation", "internal_explanation"),
+        ("Customer-safe explanation", "customer_safe_explanation"),
+        ("Known cause", "known_cause"),
+        ("Workaround", "workaround"),
+        ("Resolution", "resolution"),
+    ]
+    .into_iter()
+    .map(|(label, key)| explanation_field(&incident, label, key))
+    .collect::<Vec<_>>();
     view! {
         <div>
-            {explanation_field(&incident, "Description", "description")}
-            {explanation_field(&incident, "Internal explanation", "internal_explanation")}
-            {explanation_field(&incident, "Customer-safe explanation", "customer_safe_explanation")}
-            {explanation_field(&incident, "Known cause", "known_cause")}
-            {explanation_field(&incident, "Workaround", "workaround")}
-            {explanation_field(&incident, "Resolution", "resolution")}
+            {fields}
         </div>
     }
 }
@@ -1389,7 +1409,7 @@ fn ExplanationsCard(incident: serde_json::Value) -> impl IntoView {
 fn ConversationRow(
     incident_id: i64,
     row: serde_json::Value,
-    reload: Rc<dyn Fn()>,
+    reload: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let conversation_id = row
         .get("conversation_id")
@@ -1425,9 +1445,9 @@ fn ConversationRow(
         .to_string();
 
     let unlink = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |_| {
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}/conversations/{conversation_id}");
                 match crate::api::delete_json::<serde_json::Value>(&path).await {
@@ -1441,12 +1461,12 @@ fn ConversationRow(
     view! {
         <tr>
             <td class="spp-mono">
-                <A href=format!("/inbox/conversation/{conversation_id}") class="spp-table__link">
+                <A href=format!("/inbox/conversation/{conversation_id}") attr:class="spp-table__link">
                     {format!("#{number}")}
                 </A>
             </td>
             <td>
-                <A href=format!("/inbox/conversation/{conversation_id}") class="spp-table__link">
+                <A href=format!("/inbox/conversation/{conversation_id}") attr:class="spp-table__link">
                     {subject}
                 </A>
             </td>
@@ -1454,11 +1474,11 @@ fn ConversationRow(
             <td class="spp-table__cell-muted">
                 {match (customer_id, customer_name) {
                     (Some(cid), name) => view! {
-                        <A href=format!("/customers/{cid}") class="spp-table__link">
+                        <A href=format!("/customers/{cid}") attr:class="spp-table__link">
                             {name.unwrap_or_else(|| "—".to_string())}
                         </A>
-                    }.into_view(),
-                    (None, _) => view! { "—" }.into_view(),
+                    }.into_any(),
+                    (None, _) => view! { "—" }.into_any(),
                 }}
             </td>
             <td class="spp-table__cell-muted">{mailbox.unwrap_or_else(|| "—".to_string())}</td>
@@ -1505,7 +1525,7 @@ fn AffectedCustomerRow(row: serde_json::Value) -> impl IntoView {
     view! {
         <tr>
             <td>
-                <A href=format!("/customers/{customer_id}") class="spp-table__link spp-incidents__customer-name">
+                <A href=format!("/customers/{customer_id}") attr:class="spp-table__link spp-incidents__customer-name">
                     {name}
                 </A>
                 <div class="spp-muted spp-text-xs">{email}</div>
@@ -1514,9 +1534,9 @@ fn AffectedCustomerRow(row: serde_json::Value) -> impl IntoView {
             <td><span class="spp-badge">{conversations.to_string()}</span></td>
             <td>
                 {if open > 0 {
-                    view! { <span class="spp-badge spp-badge--ok">{open.to_string()}</span> }.into_view()
+                    view! { <span class="spp-badge spp-badge--ok">{open.to_string()}</span> }.into_any()
                 } else {
-                    view! { "—" }.into_view()
+                    view! { "—" }.into_any()
                 }}
             </td>
         </tr>
@@ -1524,7 +1544,11 @@ fn AffectedCustomerRow(row: serde_json::Value) -> impl IntoView {
 }
 
 #[component]
-fn RefRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) -> impl IntoView {
+fn RefRow(
+    incident_id: i64,
+    row: serde_json::Value,
+    reload: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
     let ref_id = row.get("id").and_then(|v| v.as_i64()).unwrap_or_default();
     let system = row
         .get("system")
@@ -1553,9 +1577,9 @@ fn RefRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
         .to_string();
 
     let remove = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |_| {
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}/refs/{ref_id}");
                 match crate::api::delete_json::<serde_json::Value>(&path).await {
@@ -1583,7 +1607,11 @@ fn RefRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) -> imp
 }
 
 #[component]
-fn ReleaseRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) -> impl IntoView {
+fn ReleaseRow(
+    incident_id: i64,
+    row: serde_json::Value,
+    reload: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
     let release_id = row.get("id").and_then(|v| v.as_i64()).unwrap_or_default();
     let label = row
         .get("version_label")
@@ -1601,9 +1629,9 @@ fn ReleaseRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) ->
         .map(|s| format!(" — {s}"));
 
     let remove = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         move |_| {
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}/releases/{release_id}");
                 match crate::api::delete_json::<serde_json::Value>(&path).await {
@@ -1634,7 +1662,11 @@ fn ReleaseRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) ->
 }
 
 #[component]
-fn RelatedRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) -> impl IntoView {
+fn RelatedRow(
+    incident_id: i64,
+    row: serde_json::Value,
+    reload: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
     let target_kind = row
         .get("target_kind")
         .and_then(|v| v.as_str())
@@ -1656,10 +1688,10 @@ fn RelatedRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) ->
         .map(|s| format!(" · {s}"));
 
     let unlink = {
-        let reload = Rc::clone(&reload);
+        let reload = Arc::clone(&reload);
         let target_kind = target_kind.clone();
         move |_| {
-            let reload = Rc::clone(&reload);
+            let reload = Arc::clone(&reload);
             let target_kind = target_kind.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let path =
@@ -1688,15 +1720,19 @@ fn RelatedRow(incident_id: i64, row: serde_json::Value, reload: Rc<dyn Fn()>) ->
 }
 
 #[component]
-fn ReleaseForm(incident_id: i64, on_close: Rc<dyn Fn()>, on_saved: Rc<dyn Fn()>) -> impl IntoView {
-    let version_label = create_rw_signal(String::new());
-    let released_at = create_rw_signal(String::new());
-    let notes = create_rw_signal(String::new());
-    let submitting = create_rw_signal(false);
+fn ReleaseForm(
+    incident_id: i64,
+    on_close: Arc<dyn Fn() + Send + Sync>,
+    on_saved: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let version_label = RwSignal::new(String::new());
+    let released_at = RwSignal::new(String::new());
+    let notes = RwSignal::new(String::new());
+    let submitting = RwSignal::new(false);
 
     let add = {
-        let on_saved = Rc::clone(&on_saved);
-        let on_close = Rc::clone(&on_close);
+        let on_saved = Arc::clone(&on_saved);
+        let on_close = Arc::clone(&on_close);
         move |_| {
             if version_label.get().trim().is_empty() || submitting.get() {
                 return;
@@ -1715,8 +1751,8 @@ fn ReleaseForm(incident_id: i64, on_close: Rc<dyn Fn()>, on_saved: Rc<dyn Fn()>)
                     serde_json::Value::String(notes.get())
                 },
             });
-            let on_saved = Rc::clone(&on_saved);
-            let on_close = Rc::clone(&on_close);
+            let on_saved = Arc::clone(&on_saved);
+            let on_close = Arc::clone(&on_close);
             wasm_bindgen_futures::spawn_local(async move {
                 let path = format!("/api/incidents/{incident_id}/releases");
                 match crate::api::post_json::<serde_json::Value>(&path, Some(&body)).await {

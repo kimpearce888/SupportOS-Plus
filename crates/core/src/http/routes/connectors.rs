@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 
 use super::super::server::AppState;
@@ -572,7 +572,7 @@ pub async fn refresh(State(state): State<AppState>, Path(id): Path<String>) -> R
                     "message": e.to_string()
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
     let result_json = json!({

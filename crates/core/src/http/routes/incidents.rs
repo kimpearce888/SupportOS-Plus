@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
-use crate::incident_workspace::{IncidentListFilters, INCIDENT_SEVERITIES, INCIDENT_STATUSES};
+use crate::incident_workspace::{INCIDENT_SEVERITIES, INCIDENT_STATUSES, IncidentListFilters};
 
 fn notify_incident_update(
     conn: &rusqlite::Connection,
@@ -214,11 +214,7 @@ pub async fn create(State(state): State<AppState>, Json(body): Json<Value>) -> R
                         }
                     }
                 }
-                if ok {
-                    Some(ids)
-                } else {
-                    None
-                }
+                if ok { Some(ids) } else { None }
             }
         }
         Some(_) => {

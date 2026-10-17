@@ -1,4 +1,4 @@
-use leptos::*;
+use leptos::prelude::*;
 
 pub const THEME_STORAGE_KEY: &str = "supportos-theme";
 
@@ -37,10 +37,10 @@ impl Theme {
 
     pub fn apply(self) {
         #[cfg(target_arch = "wasm32")]
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            if let Some(html) = doc.document_element() {
-                let _ = html.set_attribute("data-theme", self.as_str());
-            }
+        if let Some(doc) = web_sys::window().and_then(|w| w.document())
+            && let Some(html) = doc.document_element()
+        {
+            let _ = html.set_attribute("data-theme", self.as_str());
         }
         #[cfg(not(target_arch = "wasm32"))]
         let _ = self;
@@ -90,12 +90,12 @@ impl UiState {
         let theme = Theme::from_stored(local_storage_get(THEME_STORAGE_KEY).as_deref());
         let collapsed = local_storage_get(SIDEBAR_STORAGE_KEY).as_deref() == Some("collapsed");
         Self {
-            theme: create_rw_signal(theme),
-            sidebar_collapsed: create_rw_signal(collapsed),
-            palette_open: create_rw_signal(false),
-            onboarding_completed: create_rw_signal(None),
-            inbox_count: create_rw_signal(None),
-            unread_count: create_rw_signal(None),
+            theme: RwSignal::new(theme),
+            sidebar_collapsed: RwSignal::new(collapsed),
+            palette_open: RwSignal::new(false),
+            onboarding_completed: RwSignal::new(None),
+            inbox_count: RwSignal::new(None),
+            unread_count: RwSignal::new(None),
         }
     }
 
@@ -120,17 +120,15 @@ impl UiState {
                 "/api/conversations?view=active&pageSize=1",
             )
             .await
+                && let Some(total) = v.get("total").and_then(serde_json::Value::as_u64)
             {
-                if let Some(total) = v.get("total").and_then(serde_json::Value::as_u64) {
-                    inbox.set(Some(u32::try_from(total).unwrap_or(u32::MAX)));
-                }
+                inbox.set(Some(u32::try_from(total).unwrap_or(u32::MAX)));
             }
             if let Ok(v) =
                 crate::api::get_json::<serde_json::Value>("/api/notifications/unread-count").await
+                && let Some(count) = v.get("unread").and_then(serde_json::Value::as_u64)
             {
-                if let Some(count) = v.get("unread").and_then(serde_json::Value::as_u64) {
-                    unread.set(Some(u32::try_from(count).unwrap_or(u32::MAX)));
-                }
+                unread.set(Some(u32::try_from(count).unwrap_or(u32::MAX)));
             }
         });
     }

@@ -1,8 +1,8 @@
-use axum::extract::{Query, State};
-use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde_json::{json, Value};
+use axum::extract::{Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use crate::helpscout::HelpScoutProvider;
@@ -51,12 +51,9 @@ pub async fn authorize_url(State(state): State<AppState>) -> Response {
         )
             .into_response();
     }
-    let state_hex = {
-        use rand::RngCore;
-        let mut bytes = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut bytes);
-        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
-    };
+    let mut state_bytes = [0u8; 16];
+    rand::fill(&mut state_bytes[..]);
+    let state_hex = crate::crypto::hex(&state_bytes);
     {
         let conn = state.conn_lock();
         let _ = conn.execute(
@@ -219,7 +216,9 @@ pub async fn callback(
     match stored {
         Some(s) if s == *state_param => {}
         _ => {
-            return fail_page("The state parameter did not match the authorization request (it may have expired or been reused). For safety the code was not exchanged.");
+            return fail_page(
+                "The state parameter did not match the authorization request (it may have expired or been reused). For safety the code was not exchanged.",
+            );
         }
     }
     match real.exchange_code(code).await {

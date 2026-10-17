@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 use crate::error::Result;
 
@@ -554,18 +554,17 @@ fn read_conversation_fields(conn: &Connection, conversation_id: i64) -> Vec<Valu
     ) else {
         return Vec::new();
     };
-    let rows = stmt
-        .query_map(params![conversation_id], |r| {
-            Ok(json!({
-                "field_id": r.get::<_, i64>(0)?,
-                "value": r.get::<_, Option<String>>(1)?,
-                "text_value": r.get::<_, Option<String>>(2)?,
-                "system_type": r.get::<_, Option<String>>(3)?,
-            }))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default();
-    rows
+
+    stmt.query_map(params![conversation_id], |r| {
+        Ok(json!({
+            "field_id": r.get::<_, i64>(0)?,
+            "value": r.get::<_, Option<String>>(1)?,
+            "text_value": r.get::<_, Option<String>>(2)?,
+            "system_type": r.get::<_, Option<String>>(3)?,
+        }))
+    })
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
 }
 
 fn resolve_field_text(conn: &Connection, field_id: i64, value: &Option<String>) -> Option<String> {
@@ -851,15 +850,15 @@ pub fn op_run_workflow(
             |r| r.get(0),
         )
         .ok();
-    if let Some(name) = wf_name.as_deref() {
-        if name.contains("Tier 1") {
-            let _ = conn.execute(
-                "UPDATE conversations SET assignee_local_id =
+    if let Some(name) = wf_name.as_deref()
+        && name.contains("Tier 1")
+    {
+        let _ = conn.execute(
+            "UPDATE conversations SET assignee_local_id =
                      (SELECT id FROM users WHERE remote_id = 1001)
                    WHERE id = ?1",
-                params![conv.id],
-            );
-        }
+            params![conv.id],
+        );
     }
     let _ = crate::jobs::audit(
         conn,
@@ -1168,11 +1167,7 @@ pub fn require_auth(conn: &Connection, provider_kind: &str) -> Option<&'static s
     } else {
         crate::oauth::has_token(conn).unwrap_or(false)
     };
-    if connected {
-        None
-    } else {
-        Some(NOT_CONNECTED)
-    }
+    if connected { None } else { Some(NOT_CONNECTED) }
 }
 
 pub fn create_outbound_job_keyed(
@@ -1616,13 +1611,14 @@ pub async fn op_change_status(
             ) {
                 return internal_error(&e.to_string());
             }
-            if status == "closed" && conv.closed_at.is_none() {
-                if let Err(e) = tx.execute(
+            if status == "closed"
+                && conv.closed_at.is_none()
+                && let Err(e) = tx.execute(
                     "UPDATE conversations SET closed_at = datetime('now') WHERE id = ?1",
                     params![conv.id],
-                ) {
-                    return internal_error(&e.to_string());
-                }
+                )
+            {
+                return internal_error(&e.to_string());
             }
             if let Err(e) = tx.commit() {
                 return internal_error(&e.to_string());

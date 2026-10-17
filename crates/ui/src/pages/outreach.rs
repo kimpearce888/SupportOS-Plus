@@ -1,11 +1,12 @@
-use leptos::*;
-use std::rc::Rc;
+use leptos::prelude::*;
+use leptos::task::*;
+use std::sync::Arc;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
 use crate::components::condition_editor::{
-    default_node, describe_condition, inject_uid, strip_uid, ConditionEditor,
+    ConditionEditor, default_node, describe_condition, inject_uid, strip_uid,
 };
 use crate::components::state_view::{EmptyState, LoadingState};
 use crate::toasts;
@@ -100,10 +101,10 @@ struct IntervalGuard {
 impl Drop for IntervalGuard {
     fn drop(&mut self) {
         #[cfg(target_arch = "wasm32")]
-        if let Some(id) = self.id {
-            if let Some(w) = web_sys::window() {
-                let _ = w.clear_interval_with_handle(id);
-            }
+        if let Some(id) = self.id
+            && let Some(w) = web_sys::window()
+        {
+            w.clear_interval_with_handle(id);
         }
     }
 }
@@ -142,26 +143,26 @@ fn page_interval(f: impl Fn() + 'static, ms: i32) -> IntervalGuard {
 
 #[component]
 pub fn OutreachPage() -> impl IntoView {
-    let tab = create_rw_signal(Tab::Campaigns);
-    let wizard_step = create_rw_signal(WizardStep::Audience);
-    let combinator = create_rw_signal("all".to_string());
-    let conditions = create_rw_signal(Vec::<serde_json::Value>::new());
-    let exclude = create_rw_signal(Vec::<serde_json::Value>::new());
-    let selected_ids = create_rw_signal(Vec::<i64>::new());
-    let loading_recipients = create_rw_signal(false);
-    let recipient_rows = create_rw_signal(Vec::<serde_json::Value>::new());
-    let saved_segment_id = create_rw_signal(None::<i64>);
-    let draft = create_rw_signal(Draft::default());
-    let created_campaign_id = create_rw_signal(None::<i64>);
-    let creating = create_rw_signal(false);
+    let tab = RwSignal::new(Tab::Campaigns);
+    let wizard_step = RwSignal::new(WizardStep::Audience);
+    let combinator = RwSignal::new("all".to_string());
+    let conditions = RwSignal::new(Vec::<serde_json::Value>::new());
+    let exclude = RwSignal::new(Vec::<serde_json::Value>::new());
+    let selected_ids = RwSignal::new(Vec::<i64>::new());
+    let loading_recipients = RwSignal::new(false);
+    let recipient_rows = RwSignal::new(Vec::<serde_json::Value>::new());
+    let saved_segment_id = RwSignal::new(None::<i64>);
+    let draft = RwSignal::new(Draft::default());
+    let created_campaign_id = RwSignal::new(None::<i64>);
+    let creating = RwSignal::new(false);
 
-    let meta = create_rw_signal(None::<serde_json::Value>);
-    let segments = create_rw_signal(Vec::<serde_json::Value>::new());
-    let campaigns = create_rw_signal(Vec::<serde_json::Value>::new());
-    let campaigns_error = create_rw_signal(None::<String>);
-    let preview = create_rw_signal(None::<serde_json::Value>);
-    let preview_loading = create_rw_signal(false);
-    let preview_error = create_rw_signal(None::<String>);
+    let meta = RwSignal::new(None::<serde_json::Value>);
+    let segments = RwSignal::new(Vec::<serde_json::Value>::new());
+    let campaigns = RwSignal::new(Vec::<serde_json::Value>::new());
+    let campaigns_error = RwSignal::new(None::<String>);
+    let preview = RwSignal::new(None::<serde_json::Value>);
+    let preview_loading = RwSignal::new(false);
+    let preview_error = RwSignal::new(None::<String>);
 
     let load_meta = move || {
         let meta = meta;
@@ -212,15 +213,15 @@ pub fn OutreachPage() -> impl IntoView {
         on_cleanup(move || drop(guard));
     }
 
-    let debounced = create_rw_signal(None::<serde_json::Value>);
-    create_effect(move |_| {
+    let debounced = RwSignal::new(None::<serde_json::Value>);
+    Effect::new(move |_| {
         let def = assemble_definition(&combinator.get(), &conditions.get(), &exclude.get());
         set_timeout(
             move || debounced.set(Some(def)),
             std::time::Duration::from_millis(300),
         );
     });
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let Some(def) = debounced.get() else { return };
         preview_loading.set(true);
         spawn_local(async move {
@@ -433,7 +434,7 @@ pub fn OutreachPage() -> impl IntoView {
             </div>
 
             <Show when=move || tab.get() == Tab::Campaigns fallback=|| ()>
-                <CampaignsPanel campaigns campaigns_error load_campaigns=Rc::new(load_campaigns) />
+                <CampaignsPanel campaigns campaigns_error load_campaigns=Arc::new(load_campaigns) />
             </Show>
 
             <Show when=move || tab.get() == Tab::New fallback=|| ()>
@@ -468,18 +469,18 @@ pub fn OutreachPage() -> impl IntoView {
                             preview_error
                             segments
                             saved_segment_id
-                            on_apply=Rc::new(move |def| apply_definition(def, None))
-                            on_next=Rc::new(go_recipients)
+                            on_apply=Arc::new(move |def| apply_definition(def, None))
+                            on_next=Arc::new(go_recipients)
                             loading_recipients
-                            load_segments=Rc::new(load_segments)
+                            load_segments=Arc::new(load_segments)
                         />
                     </Show>
                     <Show when=move || wizard_step.get() == WizardStep::Recipients fallback=|| ()>
                         <RecipientsStep
                             rows=recipient_rows
                             selected_ids
-                            on_back=Rc::new(move || wizard_step.set(WizardStep::Audience))
-                            on_next=Rc::new(move || wizard_step.set(WizardStep::Compose))
+                            on_back=Arc::new(move || wizard_step.set(WizardStep::Audience))
+                            on_next=Arc::new(move || wizard_step.set(WizardStep::Compose))
                         />
                     </Show>
                     <Show when=move || wizard_step.get() == WizardStep::Compose fallback=|| ()>
@@ -488,8 +489,8 @@ pub fn OutreachPage() -> impl IntoView {
                             draft
                             preview
                             selected_ids
-                            on_back=Rc::new(move || wizard_step.set(WizardStep::Recipients))
-                            on_next=Rc::new(move || wizard_step.set(WizardStep::Review))
+                            on_back=Arc::new(move || wizard_step.set(WizardStep::Recipients))
+                            on_next=Arc::new(move || wizard_step.set(WizardStep::Review))
                         />
                     </Show>
                     <Show when=move || wizard_step.get() == WizardStep::Review fallback=|| ()>
@@ -498,10 +499,10 @@ pub fn OutreachPage() -> impl IntoView {
                             selected_ids
                             created_campaign_id
                             creating
-                            create_campaign=Rc::new(create_campaign)
-                            load_campaigns=Rc::new(load_campaigns)
-                            on_back=Rc::new(move || wizard_step.set(WizardStep::Compose))
-                            on_done=Rc::new(done_wizard)
+                            create_campaign=Arc::new(create_campaign)
+                            load_campaigns=Arc::new(load_campaigns)
+                            on_back=Arc::new(move || wizard_step.set(WizardStep::Compose))
+                            on_done=Arc::new(done_wizard)
                         />
                     </Show>
                 </div>
@@ -510,8 +511,8 @@ pub fn OutreachPage() -> impl IntoView {
             <Show when=move || tab.get() == Tab::Segments fallback=|| ()>
                 <SegmentsPanel
                     segments
-                    load_segments=Rc::new(load_segments)
-                    on_use=Rc::new(move |s: serde_json::Value| {
+                    load_segments=Arc::new(load_segments)
+                    on_use=Arc::new(move |s: serde_json::Value| {
                         apply_definition(
                             s.get("definition").cloned().unwrap_or(serde_json::json!({})),
                             s.get("id").and_then(|v| v.as_i64()),
@@ -540,13 +541,13 @@ fn AudienceStep(
     preview_error: RwSignal<Option<String>>,
     segments: RwSignal<Vec<serde_json::Value>>,
     saved_segment_id: RwSignal<Option<i64>>,
-    on_apply: Rc<dyn Fn(serde_json::Value)>,
-    on_next: Rc<dyn Fn()>,
+    on_apply: Arc<dyn Fn(serde_json::Value) + Send + Sync>,
+    on_next: Arc<dyn Fn() + Send + Sync>,
     loading_recipients: RwSignal<bool>,
-    load_segments: Rc<dyn Fn()>,
+    load_segments: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
-    let save_name = create_rw_signal(String::new());
-    let saving = create_rw_signal(false);
+    let save_name = RwSignal::new(String::new());
+    let saving = RwSignal::new(false);
 
     let condition_rows = move || {
         conditions
@@ -619,7 +620,7 @@ fn AudienceStep(
                     <span class="spp-muted spp-text-xs">"Match"</span>
                     <select
                         class="spp-input spp-cond-editor__kind"
-                        value=move || combinator.get()
+                        prop:value=move || combinator.get()
                         on:change=move |ev| combinator.set(event_target_value(&ev))
                     >
                         <option value="all">"ALL"</option>
@@ -727,7 +728,7 @@ fn AudienceStep(
                     </div>
                 </Show>
                 {move || {
-                    let Some(p) = preview.get() else { return ().into_view() };
+                    let Some(p) = preview.get() else { return ().into_any() };
                     let on_next = on_next.clone();
                     let matched = p.get("matched").and_then(|v| v.as_i64()).unwrap_or(0);
                     let excluded = p.get("excluded").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -806,13 +807,13 @@ fn AudienceStep(
                                     <p class="spp-muted spp-text-xs">
                                         {format!("\u{2026}and {} more (full list in the next step)", rows.len() - 20)}
                                     </p>
-                                }.into_view()]
+                                }.into_any()]
                             } else if rows.is_empty() {
                                 vec![view! {
                                     <EmptyState message="No customers match - loosen a condition or check the honest notes above." />
-                                }.into_view()]
+                                }.into_any()]
                             } else {
-                                Vec::<View>::new()
+                                Vec::<AnyView>::new()
                             }}
                         </div>
                         <button
@@ -829,19 +830,19 @@ fn AudienceStep(
                             }}
                         </button>
                     }
-                    .into_view()
+                    .into_any()
                 }}
                 <div class="spp-mt-16">
                     <p class="spp-muted spp-text-xs" style="margin:0;">"Load a saved segment:"</p>
                     <select
                         class="spp-input"
-                        value=move || saved_segment_id.get().map(|i| i.to_string()).unwrap_or_default()
+                        prop:value=move || saved_segment_id.get().map(|i| i.to_string()).unwrap_or_default()
                         on:change=move |ev| {
                             let raw = event_target_value(&ev);
                             let id = raw.parse::<i64>().ok();
                             saved_segment_id.set(id);
-                            if let Some(id) = id {
-                                if let Some(s) = segments.get().into_iter().find(|s| {
+                            if let Some(id) = id
+                                && let Some(s) = segments.get().into_iter().find(|s| {
                                     s.get("id").and_then(|v| v.as_i64()) == Some(id)
                                 }) {
                                     let def = s.get("definition").cloned().unwrap_or_default();
@@ -850,7 +851,6 @@ fn AudienceStep(
                                     conditions.set(conds);
                                     exclude.set(excl);
                                 }
-                            }
                         }
                     >
                         <option value="">"\u{2014} none \u{2014}"</option>
@@ -875,10 +875,10 @@ fn AudienceStep(
 }
 
 #[component]
-fn SuggestBox(on_apply: Rc<dyn Fn(serde_json::Value)>) -> impl IntoView {
-    let request = create_rw_signal(String::new());
-    let result = create_rw_signal(None::<(serde_json::Value, String, Vec<String>)>);
-    let pending = create_rw_signal(false);
+fn SuggestBox(on_apply: Arc<dyn Fn(serde_json::Value) + Send + Sync>) -> impl IntoView {
+    let request = RwSignal::new(String::new());
+    let result = RwSignal::new(None::<(serde_json::Value, String, Vec<String>)>);
+    let pending = RwSignal::new(false);
 
     let suggest = move || {
         if pending.get_untracked() {
@@ -953,7 +953,7 @@ fn SuggestBox(on_apply: Rc<dyn Fn(serde_json::Value)>) -> impl IntoView {
                 "The local model only proposes the condition definition; the deterministic engine selects recipients. Nothing is saved - apply it below and review."
             </p>
             {move || {
-                let Some((definition, model, notes)) = result.get() else { return ().into_view() };
+                let Some((definition, model, notes)) = result.get() else { return ().into_any() };
                 let on_apply = on_apply.clone();
                 let conds: Vec<serde_json::Value> = definition
                     .get("conditions")
@@ -1008,7 +1008,7 @@ fn SuggestBox(on_apply: Rc<dyn Fn(serde_json::Value)>) -> impl IntoView {
                             .collect::<Vec<_>>()}
                     </div>
                 }
-                .into_view()
+                .into_any()
             }}
         </div>
     }
@@ -1018,10 +1018,10 @@ fn SuggestBox(on_apply: Rc<dyn Fn(serde_json::Value)>) -> impl IntoView {
 fn RecipientsStep(
     rows: RwSignal<Vec<serde_json::Value>>,
     selected_ids: RwSignal<Vec<i64>>,
-    on_back: Rc<dyn Fn()>,
-    on_next: Rc<dyn Fn()>,
+    on_back: Arc<dyn Fn() + Send + Sync>,
+    on_next: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
-    let expanded = create_rw_signal(None::<i64>);
+    let expanded = RwSignal::new(None::<i64>);
     let selectable_ids = move || {
         rows.get()
             .iter()
@@ -1164,15 +1164,15 @@ fn RecipientsStep(
                                             <td>
                                                 <strong class="spp-text-sm">{format!("{first} {last}")}</strong>
                                                 {if org.is_empty() {
-                                                    Vec::<View>::new()
+                                                    Vec::<AnyView>::new()
                                                 } else {
-                                                    vec![view! { <div class="spp-muted spp-text-xs">{org}</div> }.into_view()]
+                                                    vec![view! { <div class="spp-muted spp-text-xs">{org}</div> }.into_any()]
                                                 }}
                                             </td>
                                             <td class="spp-text-sm">
                                                 {match email {
-                                                    Some(e) => view! { {e} }.into_view(),
-                                                    None => view! { <span class="spp-badge spp-badge--warn">"no email"</span> }.into_view(),
+                                                    Some(e) => view! { {e} }.into_any(),
+                                                    None => view! { <span class="spp-badge spp-badge--warn">"no email"</span> }.into_any(),
                                                 }}
                                             </td>
                                             <td class="spp-text-xs">
@@ -1180,9 +1180,9 @@ fn RecipientsStep(
                                             </td>
                                             <td class="spp-text-sm">
                                                 {if open > 0 {
-                                                    view! { <span class="spp-badge spp-badge--active">{open.to_string()}</span> }.into_view()
+                                                    view! { <span class="spp-badge spp-badge--active">{open.to_string()}</span> }.into_any()
                                                 } else {
-                                                    "0".into_view()
+                                                    "0".into_any()
                                                 }}
                                             </td>
                                             <td class="spp-text-xs">
@@ -1192,9 +1192,9 @@ fn RecipientsStep(
                                                     .map(|w| view! { <div>{"\u{2713} "}{w.clone()}</div> })
                                                     .collect::<Vec<_>>()}
                                                 {if why.len() > 2 {
-                                                    vec![view! { <span class="spp-muted">{format!("+{} more", why.len() - 2)}</span> }.into_view()]
+                                                    vec![view! { <span class="spp-muted">{format!("+{} more", why.len() - 2)}</span> }.into_any()]
                                                 } else {
-                                                    Vec::<View>::new()
+                                                    Vec::<AnyView>::new()
                                                 }}
                                             </td>
                                             <td class="spp-text-sm">
@@ -1208,9 +1208,9 @@ fn RecipientsStep(
                                                             )}
                                                         </span>
                                                     }
-                                                    .into_view()
+                                                    .into_any()
                                                 } else {
-                                                    "\u{2014}".into_view()
+                                                    "\u{2014}".into_any()
                                                 }}
                                             </td>
                                         </tr>
@@ -1256,16 +1256,16 @@ fn RecipientsStep(
                                                                             .collect::<Vec<_>>()}
                                                                     </div>
                                                                 }
-                                                                .into_view()
+                                                                .into_any()
                                                             } else {
-                                                                ().into_view()
+                                                                ().into_any()
                                                             }}
                                                         </td>
                                                     </tr>
                                                 }
-                                                .into_view()
+                                                .into_any()
                                             } else {
-                                                ().into_view()
+                                                ().into_any()
                                             }
                                         }}
                                     </>
@@ -1297,14 +1297,14 @@ fn ComposeStep(
     draft: RwSignal<Draft>,
     preview: RwSignal<Option<serde_json::Value>>,
     selected_ids: RwSignal<Vec<i64>>,
-    on_back: Rc<dyn Fn()>,
-    on_next: Rc<dyn Fn()>,
+    on_back: Arc<dyn Fn() + Send + Sync>,
+    on_next: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
-    let preview_customer_id = create_rw_signal(None::<i64>);
-    let rendered = create_rw_signal(None::<serde_json::Value>);
-    let rendering = create_rw_signal(false);
+    let preview_customer_id = RwSignal::new(None::<i64>);
+    let rendered = RwSignal::new(None::<serde_json::Value>);
+    let rendering = RwSignal::new(false);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let customer = preview_customer_id.get();
         let d = draft.get();
         let Some(customer) =
@@ -1353,7 +1353,7 @@ fn ComposeStep(
                     <span class="spp-muted">"From mailbox"</span>
                     <select
                         class="spp-input"
-                        value=move || {
+                        prop:value=move || {
                             let id = draft.get().mailbox_local_id;
                             if id > 0 { id.to_string() } else { String::new() }
                         }
@@ -1469,7 +1469,7 @@ fn ComposeStep(
                 </p>
                 <select
                     class="spp-input"
-                    value=move || preview_customer_id.get().map(|i| i.to_string()).unwrap_or_default()
+                    prop:value=move || preview_customer_id.get().map(|i| i.to_string()).unwrap_or_default()
                     on:change=move |ev| {
                         preview_customer_id.set(event_target_value(&ev).parse::<i64>().ok());
                     }
@@ -1502,7 +1502,7 @@ fn ComposeStep(
                         return view! {
                             <EmptyState message="Pick a recipient - the rendered message appears here before you send anything." />
                         }
-                        .into_view();
+                        .into_any();
                     };
                     let rendered_msg = v.get("rendered").cloned().unwrap_or_default();
                     let subject = rendered_msg.get("subject").and_then(|x| x.as_str()).unwrap_or("").to_string();
@@ -1532,9 +1532,9 @@ fn ComposeStep(
                                         <span class="spp-badge spp-badge--warn">
                                             {format!("unresolved: {}", unresolved.join(", "))}
                                         </span>
-                                    }.into_view()]
+                                    }.into_any()]
                                 } else {
-                                    Vec::<View>::new()
+                                    Vec::<AnyView>::new()
                                 }}
                             </div>
                             <div class="spp-text-sm" style="padding:6px 0;">{subject}</div>
@@ -1547,13 +1547,13 @@ fn ComposeStep(
                                     <p class="spp-muted spp-text-xs">
                                         {format!("Sources used for personalization: {}", sources.join(", "))}
                                     </p>
-                                }.into_view()]
+                                }.into_any()]
                             } else {
-                                Vec::<View>::new()
+                                Vec::<AnyView>::new()
                             }}
                         </div>
                     }
-                    .into_view()
+                    .into_any()
                 }}
                 <Show when=move || rendering.get() fallback=|| ()>
                     <LoadingState />
@@ -1569,15 +1569,15 @@ fn ReviewStep(
     selected_ids: RwSignal<Vec<i64>>,
     created_campaign_id: RwSignal<Option<i64>>,
     creating: RwSignal<bool>,
-    create_campaign: Rc<dyn Fn()>,
-    load_campaigns: Rc<dyn Fn()>,
-    on_back: Rc<dyn Fn()>,
-    on_done: Rc<dyn Fn()>,
+    create_campaign: Arc<dyn Fn() + Send + Sync>,
+    load_campaigns: Arc<dyn Fn() + Send + Sync>,
+    on_back: Arc<dyn Fn() + Send + Sync>,
+    on_done: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
-    let validation = create_rw_signal(None::<serde_json::Value>);
-    let queueing = create_rw_signal(false);
+    let validation = RwSignal::new(None::<serde_json::Value>);
+    let queueing = RwSignal::new(false);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let Some(id) = created_campaign_id.get() else {
             validation.set(None);
             return;
@@ -1595,7 +1595,7 @@ fn ReviewStep(
     let queue_campaign = {
         let load_campaigns = load_campaigns.clone();
         let on_done = on_done.clone();
-        Rc::new(move || {
+        Arc::new(move || {
             let Some(id) = created_campaign_id.get_untracked() else {
                 return;
             };
@@ -1631,118 +1631,118 @@ fn ReviewStep(
     };
 
     view! {
-        {move || {
-            if created_campaign_id.get().is_none() {
-                let create_campaign = create_campaign.clone();
-                let on_back = on_back.clone();
-                view! {
-                    <div class="spp-card">
-                        <h3 class="spp-card__title">"Final review"</h3>
-                        <div class="spp-mb-8">
-                            <Kv2 k="Campaign" value=move || draft.get().name />
-                            <Kv2 k="Subject" value=move || draft.get().subject />
-                            <Kv2 k="Mailbox" value=move || draft.get().mailbox_local_id.to_string() />
-                            <Kv2 k="Tags" value=move || {
-                                let t = draft.get().tags;
-                                if t.is_empty() { "\u{2014}".to_string() } else { t }
-                            } />
-                            <Kv2 k="Recipients (selected)" value=move || selected_ids.get().len().to_string() />
-                        </div>
-                        <p class="spp-muted spp-text-xs">
-                            "Sending is explicit: creating the campaign snapshots its recipients (audience changes later will NOT alter it), then you queue it on the next screen. Each selected customer receives their own Help Scout conversation - never a shared BCC email."
-                        </p>
-                        <div class="spp-flex spp-flex--between spp-mt-12">
-                            <button class="spp-button spp-button--ghost" on:click=move |_| on_back()>
-                                "\u{2190} Back to compose"
-                            </button>
-                            <button
-                                class="spp-button"
-                                disabled=move || creating.get()
-                                on:click=move |_| create_campaign()
-                            >
-                                {move || format!("Create campaign ({} recipients)", selected_ids.get().len())}
-                            </button>
-                        </div>
-                    </div>
-                }
-            } else {
-                let on_done = on_done.clone();
-                let queue_campaign = queue_campaign.clone();
-                view! {
-                    <div class="spp-card">
-                        <h3 class="spp-card__title">"Campaign created \u{2014} final check before sending"</h3>
-                        {move || {
-                            let Some(v) = validation.get() else {
-                                return view! { <LoadingState /> }.into_view();
-                            };
-                            let on_done = on_done.clone();
-                            let queue_campaign = queue_campaign.clone();
-                            let counts = v.get("counts").cloned().unwrap_or_default();
-                            let recipients = counts.get("recipients").and_then(|x| x.as_i64()).unwrap_or(0);
-                            let ready = counts.get("ready").and_then(|x| x.as_i64()).unwrap_or(0);
-                            let invalid_email = counts.get("invalid_email").and_then(|x| x.as_i64()).unwrap_or(0);
-                            let on_dnc = counts.get("on_dnc").and_then(|x| x.as_i64()).unwrap_or(0);
-                            let no_email = counts.get("no_email").and_then(|x| x.as_i64()).unwrap_or(0);
-                            let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
-                            let has_invalid_email = invalid_email > 0;
-                            let has_on_dnc = on_dnc > 0;
-                            let has_no_email = no_email > 0;
-                            let errors: Vec<String> = v
-                                .get("errors")
-                                .and_then(|x| x.as_array())
-                                .map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect())
-                                .unwrap_or_default();
-                            let warnings: Vec<String> = v
-                                .get("warnings")
-                                .and_then(|x| x.as_array())
-                                .map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect())
-                                .unwrap_or_default();
-                            view! {
-                                <div class="spp-flex spp-flex--wrap spp-gap-8 spp-mb-8">
-                                    <span class="spp-badge spp-badge--active">{format!("recipients: {recipients}")}</span>
-                                    <span class="spp-badge spp-badge--ok">{format!("ready: {ready}")}</span>
-                                    <Show when=move || has_invalid_email fallback=|| ()>
-                                        <span class="spp-badge spp-badge--err">{format!("invalid email: {invalid_email}")}</span>
-                                    </Show>
-                                    <Show when=move || has_on_dnc fallback=|| ()>
-                                        <span class="spp-badge spp-badge--warn">{format!("do-not-contact: {on_dnc}")}</span>
-                                    </Show>
-                                    <Show when=move || has_no_email fallback=|| ()>
-                                        <span class="spp-badge spp-badge--warn">{format!("no email: {no_email}")}</span>
-                                    </Show>
-                                </div>
-                                {errors
-                                    .iter()
-                                    .map(|e| view! { <p class="spp-text-sm spp-outreach__error">{"\u{2717} "}{e.clone()}</p> })
-                                    .collect::<Vec<_>>()}
-                                {warnings
-                                    .iter()
-                                    .map(|w| view! { <p class="spp-text-sm spp-outreach__warning">{"\u{26a0} "}{w.clone()}</p> })
-                                    .collect::<Vec<_>>()}
-                                <div class="spp-flex spp-flex--between spp-mt-12">
-                                    <button class="spp-button spp-button--ghost" on:click=move |_| on_done()>
-                                        "Done for now (campaign stays in drafts)"
-                                    </button>
-                                    <button
-                                        class="spp-button spp-button--danger"
-                                        disabled=move || !ok || queueing.get()
-                                        on:click=move |_| queue_campaign()
-                                    >
-                                        {move || format!("Send to {ready} clients")}
-                                    </button>
-                                </div>
-                            }
-                            .into_view()
-                        }}
-                    </div>
-                }
-            }
-        }}
-    }
+           {move || {
+               if created_campaign_id.get().is_none() {
+                   let create_campaign = create_campaign.clone();
+                   let on_back = on_back.clone();
+                   view! {
+                       <div class="spp-card">
+                           <h3 class="spp-card__title">"Final review"</h3>
+                           <div class="spp-mb-8">
+                               <Kv2 k="Campaign" value=move || draft.get().name />
+                               <Kv2 k="Subject" value=move || draft.get().subject />
+                               <Kv2 k="Mailbox" value=move || draft.get().mailbox_local_id.to_string() />
+                               <Kv2 k="Tags" value=move || {
+                                   let t = draft.get().tags;
+                                   if t.is_empty() { "\u{2014}".to_string() } else { t }
+                               } />
+                               <Kv2 k="Recipients (selected)" value=move || selected_ids.get().len().to_string() />
+                           </div>
+                           <p class="spp-muted spp-text-xs">
+                               "Sending is explicit: creating the campaign snapshots its recipients (audience changes later will NOT alter it), then you queue it on the next screen. Each selected customer receives their own Help Scout conversation - never a shared BCC email."
+                           </p>
+                           <div class="spp-flex spp-flex--between spp-mt-12">
+                               <button class="spp-button spp-button--ghost" on:click=move |_| on_back()>
+                                   "\u{2190} Back to compose"
+                               </button>
+                               <button
+                                   class="spp-button"
+                                   disabled=move || creating.get()
+                                   on:click=move |_| create_campaign()
+                               >
+                                   {move || format!("Create campaign ({} recipients)", selected_ids.get().len())}
+                               </button>
+                           </div>
+                       </div>
+                   }.into_any()
+               } else {
+                   let on_done = on_done.clone();
+                   let queue_campaign = queue_campaign.clone();
+                   view! {
+                       <div class="spp-card">
+                           <h3 class="spp-card__title">"Campaign created \u{2014} final check before sending"</h3>
+                           {move || {
+                               let Some(v) = validation.get() else {
+                                   return view! { <LoadingState /> }.into_any();
+                               };
+                               let on_done = on_done.clone();
+                               let queue_campaign = queue_campaign.clone();
+                               let counts = v.get("counts").cloned().unwrap_or_default();
+                               let recipients = counts.get("recipients").and_then(|x| x.as_i64()).unwrap_or(0);
+                               let ready = counts.get("ready").and_then(|x| x.as_i64()).unwrap_or(0);
+                               let invalid_email = counts.get("invalid_email").and_then(|x| x.as_i64()).unwrap_or(0);
+                               let on_dnc = counts.get("on_dnc").and_then(|x| x.as_i64()).unwrap_or(0);
+                               let no_email = counts.get("no_email").and_then(|x| x.as_i64()).unwrap_or(0);
+                               let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+                               let has_invalid_email = invalid_email > 0;
+                               let has_on_dnc = on_dnc > 0;
+                               let has_no_email = no_email > 0;
+                               let errors: Vec<String> = v
+                                   .get("errors")
+                                   .and_then(|x| x.as_array())
+                                   .map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect())
+                                   .unwrap_or_default();
+                               let warnings: Vec<String> = v
+                                   .get("warnings")
+                                   .and_then(|x| x.as_array())
+                                   .map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect())
+                                   .unwrap_or_default();
+                               view! {
+                                   <div class="spp-flex spp-flex--wrap spp-gap-8 spp-mb-8">
+                                       <span class="spp-badge spp-badge--active">{format!("recipients: {recipients}")}</span>
+                                       <span class="spp-badge spp-badge--ok">{format!("ready: {ready}")}</span>
+                                       <Show when=move || has_invalid_email fallback=|| ()>
+                                           <span class="spp-badge spp-badge--err">{format!("invalid email: {invalid_email}")}</span>
+                                       </Show>
+                                       <Show when=move || has_on_dnc fallback=|| ()>
+                                           <span class="spp-badge spp-badge--warn">{format!("do-not-contact: {on_dnc}")}</span>
+                                       </Show>
+                                       <Show when=move || has_no_email fallback=|| ()>
+                                           <span class="spp-badge spp-badge--warn">{format!("no email: {no_email}")}</span>
+                                       </Show>
+                                   </div>
+                                   {errors
+                                       .iter()
+                                       .map(|e| view! { <p class="spp-text-sm spp-outreach__error">{"\u{2717} "}{e.clone()}</p> })
+                                       .collect::<Vec<_>>()}
+                                   {warnings
+                                       .iter()
+                                       .map(|w| view! { <p class="spp-text-sm spp-outreach__warning">{"\u{26a0} "}{w.clone()}</p> })
+                                       .collect::<Vec<_>>()}
+                                   <div class="spp-flex spp-flex--between spp-mt-12">
+                                       <button class="spp-button spp-button--ghost" on:click=move |_| on_done()>
+                                           "Done for now (campaign stays in drafts)"
+                                       </button>
+                                       <button
+                                           class="spp-button spp-button--danger"
+                                           disabled=move || !ok || queueing.get()
+                                           on:click=move |_| queue_campaign()
+                                       >
+                                           {move || format!("Send to {ready} clients")}
+                                       </button>
+                                   </div>
+                               }
+                               .into_any()
+                           }}
+                       </div>
+    }.into_any()
+               }
+           }}
+       }
 }
 
 #[component]
-fn Kv2(k: &'static str, value: impl Fn() -> String + 'static) -> impl IntoView {
+fn Kv2(k: &'static str, value: impl Fn() -> String + Send + Sync + 'static) -> impl IntoView {
     view! {
         <div class="spp-flex spp-gap-8">
             <span class="spp-muted spp-text-xs" style="width:160px;">{k}</span>
@@ -1777,13 +1777,13 @@ fn recipient_state_pill_class(state: &str) -> &'static str {
 fn CampaignsPanel(
     campaigns: RwSignal<Vec<serde_json::Value>>,
     campaigns_error: RwSignal<Option<String>>,
-    load_campaigns: Rc<dyn Fn()>,
+    load_campaigns: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
-    let open_id = create_rw_signal(None::<i64>);
-    let detail = create_rw_signal(None::<serde_json::Value>);
-    let events = create_rw_signal(Vec::<serde_json::Value>::new());
-    let report = create_rw_signal(None::<serde_json::Value>);
-    let acting = create_rw_signal(false);
+    let open_id = RwSignal::new(None::<i64>);
+    let detail = RwSignal::new(None::<serde_json::Value>);
+    let events = RwSignal::new(Vec::<serde_json::Value>::new());
+    let report = RwSignal::new(None::<serde_json::Value>);
+    let acting = RwSignal::new(false);
 
     let load_detail = move |with_report: bool| {
         let Some(id) = open_id.get_untracked() else {
@@ -1816,7 +1816,7 @@ fn CampaignsPanel(
         });
     };
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let open = open_id.get();
         if open.is_some() {
             load_detail(true);
@@ -1827,7 +1827,7 @@ fn CampaignsPanel(
         }
     });
     {
-        let tick = create_rw_signal(0u32);
+        let tick = RwSignal::new(0u32);
         let guard = page_interval(
             move || {
                 if open_id.get_untracked().is_some() {
@@ -1842,7 +1842,7 @@ fn CampaignsPanel(
         on_cleanup(move || drop(guard));
     }
 
-    let act = Rc::new(move |id: i64, action: &'static str| {
+    let act = Arc::new(move |id: i64, action: &'static str| {
         if acting.get_untracked() {
             return;
         }
@@ -1888,7 +1888,7 @@ fn CampaignsPanel(
                 return view! {
                     <EmptyState message="No campaigns yet. Build an audience from your local mirror, review why each customer matched, and send each of them an individual Help Scout conversation." />
                 }
-                .into_view();
+                .into_any();
             }
             view! {
                 <div class="spp-card" style="padding:0;">
@@ -1941,16 +1941,16 @@ fn CampaignsPanel(
                                             <td class="spp-text-sm">{recipients.to_string()}</td>
                                             <td class="spp-text-sm">
                                                 {if sent > 0 {
-                                                    view! { <span class="spp-badge spp-badge--ok">{sent.to_string()}</span> }.into_view()
+                                                    view! { <span class="spp-badge spp-badge--ok">{sent.to_string()}</span> }.into_any()
                                                 } else {
-                                                    "0".into_view()
+                                                    "0".into_any()
                                                 }}
                                             </td>
                                             <td class="spp-text-sm">
                                                 {if failed > 0 {
-                                                    view! { <span class="spp-badge spp-badge--err">{failed.to_string()}</span> }.into_view()
+                                                    view! { <span class="spp-badge spp-badge--err">{failed.to_string()}</span> }.into_any()
                                                 } else {
-                                                    "0".into_view()
+                                                    "0".into_any()
                                                 }}
                                             </td>
                                             <td class="spp-text-sm">{replied.to_string()}</td>
@@ -1966,9 +1966,9 @@ fn CampaignsPanel(
                                                             >
                                                                 "Queue"
                                                             </button>
-                                                        }.into_view()]
+                                                        }.into_any()]
                                                     } else {
-                                                        Vec::<View>::new()
+                                                        Vec::<AnyView>::new()
                                                     }}
                                                     {if status == "queued" || status == "sending" {
                                                         let act = act.clone();
@@ -1979,9 +1979,9 @@ fn CampaignsPanel(
                                                             >
                                                                 "Pause"
                                                             </button>
-                                                        }.into_view()]
+                                                        }.into_any()]
                                                     } else {
-                                                        Vec::<View>::new()
+                                                        Vec::<AnyView>::new()
                                                     }}
                                                     {if status == "paused" {
                                                         let act = act.clone();
@@ -1992,9 +1992,9 @@ fn CampaignsPanel(
                                                             >
                                                                 "Resume"
                                                             </button>
-                                                        }.into_view()]
+                                                        }.into_any()]
                                                     } else {
-                                                        Vec::<View>::new()
+                                                        Vec::<AnyView>::new()
                                                     }}
                                                     {if status == "queued" || status == "sending" || status == "paused" {
                                                         let act = act.clone();
@@ -2005,9 +2005,9 @@ fn CampaignsPanel(
                                                             >
                                                                 "Cancel rest"
                                                             </button>
-                                                        }.into_view()]
+                                                        }.into_any()]
                                                     } else {
-                                                        Vec::<View>::new()
+                                                        Vec::<AnyView>::new()
                                                     }}
                                                     {if failed > 0 {
                                                         let act = act.clone();
@@ -2018,9 +2018,9 @@ fn CampaignsPanel(
                                                             >
                                                                 "Retry failed"
                                                             </button>
-                                                        }.into_view()]
+                                                        }.into_any()]
                                                     } else {
-                                                        Vec::<View>::new()
+                                                        Vec::<AnyView>::new()
                                                     }}
                                                     {if unknown > 0 {
                                                         let act = act.clone();
@@ -2031,9 +2031,9 @@ fn CampaignsPanel(
                                                             >
                                                                 "Reconcile"
                                                             </button>
-                                                        }.into_view()]
+                                                        }.into_any()]
                                                     } else {
-                                                        Vec::<View>::new()
+                                                        Vec::<AnyView>::new()
                                                     }}
                                                 </div>
                                             </td>
@@ -2045,11 +2045,11 @@ fn CampaignsPanel(
                     </table>
                 </div>
             }
-            .into_view()
+            .into_any()
         }}
         {move || {
             let open = open_id.get();
-            let Some(d) = detail.get() else { return ().into_view() };
+            let Some(d) = detail.get() else { return ().into_any() };
             let _ = open;
             let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let recipients_list = d
@@ -2071,7 +2071,7 @@ fn CampaignsPanel(
                         </button>
                     </div>
                     {move || {
-                        let Some(r) = report.get() else { return ().into_view() };
+                        let Some(r) = report.get() else { return ().into_any() };
                         let t = r.get("totals").cloned().unwrap_or_default();
                         let reply_rate = t.get("reply_rate").and_then(|x| x.as_f64());
                         let reply_label = match reply_rate {
@@ -2093,7 +2093,7 @@ fn CampaignsPanel(
                                 <span class="spp-badge spp-badge--active">{reply_label}</span>
                             </div>
                         }
-                        .into_view()
+                        .into_any()
                     }}
                     <table class="spp-table spp-table--compact spp-mt-8">
                         <thead>
@@ -2151,9 +2151,9 @@ fn CampaignsPanel(
                                                         <div class="spp-text-xs spp-outreach__error">
                                                             {last_error.chars().take(140).collect::<String>()}
                                                         </div>
-                                                    }.into_view()]
+                                                    }.into_any()]
                                                 } else {
-                                                    Vec::<View>::new()
+                                                    Vec::<AnyView>::new()
                                                 }}
                                             </td>
                                             <td class="spp-text-sm">{attempts.to_string()}</td>
@@ -2163,9 +2163,9 @@ fn CampaignsPanel(
                                                         <a class="spp-text-xs" href=format!("/inbox/conversation/{c}")>
                                                             {format!("#{n}")}
                                                         </a>
-                                                    }.into_view(),
-                                                    (None, Some(n)) => view! { {format!("#{n}")} }.into_view(),
-                                                    _ => "\u{2014}".into_view(),
+                                                    }.into_any(),
+                                                    (None, Some(n)) => view! { {format!("#{n}")} }.into_any(),
+                                                    _ => "\u{2014}".into_any(),
                                                 }}
                                             </td>
                                             <td class="spp-muted spp-text-xs">{date_short(&sent_at)}</td>
@@ -2196,14 +2196,14 @@ fn CampaignsPanel(
                         </tbody>
                     </table>
                     {move || {
-                        let Some(r) = report.get() else { return ().into_view() };
+                        let Some(r) = report.get() else { return ().into_any() };
                         let replies = r
                             .get("replies")
                             .and_then(|v| v.as_array())
                             .cloned()
                             .unwrap_or_default();
                         if replies.is_empty() {
-                            return ().into_view();
+                            return ().into_any();
                         }
                         let note = r.get("note").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         view! {
@@ -2224,8 +2224,8 @@ fn CampaignsPanel(
                                                         <a class="spp-text-xs" href=format!("/inbox/conversation/{c}")>
                                                             {format!("#{n}")}
                                                         </a>
-                                                    }.into_view()],
-                                                    _ => Vec::<View>::new(),
+                                                    }.into_any()],
+                                                    _ => Vec::<AnyView>::new(),
                                                 }}
                                                 <span class="spp-muted spp-text-xs">{format!("replied {replied_at}")}</span>
                                             </div>
@@ -2235,7 +2235,7 @@ fn CampaignsPanel(
                                 <p class="spp-muted spp-text-xs">{note}</p>
                             </div>
                         }
-                        .into_view()
+                        .into_any()
                     }}
                     <div class="spp-mt-16">
                         <h4 class="spp-card__title">"Audit events"</h4>
@@ -2261,7 +2261,7 @@ fn CampaignsPanel(
                     </div>
                 </div>
             }
-            .into_view()
+            .into_any()
         }}
     }
 }
@@ -2269,11 +2269,11 @@ fn CampaignsPanel(
 #[component]
 fn SegmentsPanel(
     segments: RwSignal<Vec<serde_json::Value>>,
-    load_segments: Rc<dyn Fn()>,
-    on_use: Rc<dyn Fn(serde_json::Value)>,
+    load_segments: Arc<dyn Fn() + Send + Sync>,
+    on_use: Arc<dyn Fn(serde_json::Value) + Send + Sync>,
 ) -> impl IntoView {
-    let deleting = create_rw_signal(false);
-    let del = Rc::new(move |id: i64| {
+    let deleting = RwSignal::new(false);
+    let del = Arc::new(move |id: i64| {
         if deleting.get_untracked() {
             return;
         }
@@ -2309,7 +2309,7 @@ fn SegmentsPanel(
                 return view! {
                     <EmptyState message="No saved segments. Save an audience rule from the New campaign builder to reuse it later." />
                 }
-                .into_view();
+                .into_any();
             }
             view! {
                 <div class="spp-card" style="padding:0;">
@@ -2366,9 +2366,9 @@ fn SegmentsPanel(
                                                 {if !description.is_empty() {
                                                     vec![view! {
                                                         <div class="spp-muted spp-text-xs">{description}</div>
-                                                    }.into_view()]
+                                                    }.into_any()]
                                                 } else {
-                                                    Vec::<View>::new()
+                                                    Vec::<AnyView>::new()
                                                 }}
                                             </td>
                                             <td class="spp-text-xs">
@@ -2385,9 +2385,9 @@ fn SegmentsPanel(
                                                         <div class="spp-muted">
                                                             {format!("excluding {} rule(s)", excl.len())}
                                                         </div>
-                                                    }.into_view()]
+                                                    }.into_any()]
                                                 } else {
-                                                    Vec::<View>::new()
+                                                    Vec::<AnyView>::new()
                                                 }}
                                             </td>
                                             <td class="spp-text-sm">{format!("v{version}")}</td>
@@ -2416,18 +2416,18 @@ fn SegmentsPanel(
                     </table>
                 </div>
             }
-            .into_view()
+            .into_any()
         }}
     }
 }
 
 #[component]
 fn DncPanel() -> impl IntoView {
-    let dnc = create_rw_signal(Vec::<serde_json::Value>::new());
-    let candidates = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let acting = create_rw_signal(false);
+    let dnc = RwSignal::new(Vec::<serde_json::Value>::new());
+    let candidates = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let acting = RwSignal::new(false);
 
     let load_dnc = move || {
         let dnc = dnc;
@@ -2550,7 +2550,7 @@ fn DncPanel() -> impl IntoView {
                 {move || {
                     let list = dnc.get();
                     if list.is_empty() {
-                        return vec![view! { <EmptyState message="Nobody on the list." /> }.into_view()];
+                        return vec![view! { <EmptyState message="Nobody on the list." /> }.into_any()];
                     }
                     list.into_iter()
                         .map(|d| {
@@ -2566,9 +2566,9 @@ fn DncPanel() -> impl IntoView {
                                         {if !reason.is_empty() {
                                             vec![view! {
                                                 <div class="spp-muted spp-text-xs">{reason}</div>
-                                            }.into_view()]
+                                            }.into_any()]
                                         } else {
-                                            Vec::<View>::new()
+                                            Vec::<AnyView>::new()
                                         }}
                                     </div>
                                     <div class="spp-flex spp-gap-8">
@@ -2581,7 +2581,7 @@ fn DncPanel() -> impl IntoView {
                                         </button>
                                     </div>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         })
                         .collect::<Vec<_>>()
                 }}

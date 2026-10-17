@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -90,10 +90,10 @@ pub fn apply_m004(conn: &Connection) -> Result<()> {
 
     for col in ["supportos_priority TEXT", "supportos_state TEXT"] {
         let sql = format!("ALTER TABLE conversations ADD COLUMN {col}");
-        if let Err(e) = conn.execute(&sql, []) {
-            if !e.to_string().contains("duplicate column name") {
-                return Err(crate::error::Error::Sqlite(e));
-            }
+        if let Err(e) = conn.execute(&sql, [])
+            && !e.to_string().contains("duplicate column name")
+        {
+            return Err(crate::error::Error::Sqlite(e));
         }
     }
 
@@ -442,12 +442,11 @@ pub fn update_state(
     let Some(state) = get_state(conn, id) else {
         return Ok(None);
     };
-    if state.built_in == 1 {
-        if let Some(want) = patch.get("is_resolved").and_then(|v| v.as_bool()) {
-            if want != (state.is_resolved == 1) {
-                return Err("The resolved semantics of built-in states cannot be changed.".into());
-            }
-        }
+    if state.built_in == 1
+        && let Some(want) = patch.get("is_resolved").and_then(|v| v.as_bool())
+        && want != (state.is_resolved == 1)
+    {
+        return Err("The resolved semantics of built-in states cannot be changed.".into());
     }
     let name = patch
         .get("name")
@@ -640,16 +639,14 @@ pub fn state_lifecycle(conn: &Connection, conversation_local_id: i64) -> Result<
         }
     }
     let mut time_in_current: Option<i64> = None;
-    if let (Some(current), Some(last)) = (current.as_ref(), transitions.last()) {
-        if last["new_state_id"].as_i64() == Some(current.id) {
-            if let Some(occurred) = last["occurred_at"].as_str() {
-                if let Some(start) = parse_ts(occurred) {
-                    let mins = (now - start).num_milliseconds() as f64 / 60_000.0;
-                    if mins.is_finite() && mins >= 0.0 {
-                        time_in_current = Some(mins.round() as i64);
-                    }
-                }
-            }
+    if let (Some(current), Some(last)) = (current.as_ref(), transitions.last())
+        && last["new_state_id"].as_i64() == Some(current.id)
+        && let Some(occurred) = last["occurred_at"].as_str()
+        && let Some(start) = parse_ts(occurred)
+    {
+        let mins = (now - start).num_milliseconds() as f64 / 60_000.0;
+        if mins.is_finite() && mins >= 0.0 {
+            time_in_current = Some(mins.round() as i64);
         }
     }
     let current_json = current
@@ -667,9 +664,10 @@ pub fn state_lifecycle(conn: &Connection, conversation_local_id: i64) -> Result<
             let avg = if e.total_minutes.is_empty() {
                 serde_json::Value::Null
             } else {
-                serde_json::json!((e.total_minutes.iter().sum::<f64>()
-                    / e.total_minutes.len() as f64)
-                    .round() as i64)
+                serde_json::json!(
+                    (e.total_minutes.iter().sum::<f64>() / e.total_minutes.len() as f64).round()
+                        as i64
+                )
             };
             serde_json::json!({
                 "state_id": e.state_id,

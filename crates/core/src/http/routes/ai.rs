@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use crate::ai_pipeline::{self, AiBackend, LmStudioError};
@@ -278,7 +278,7 @@ pub async fn rewrite(
         _ => {
             return validation_422(
                 "instruction must be one of 'shorten', 'expand', 'warmer', 'more_direct'.",
-            )
+            );
         }
     };
     let result = state

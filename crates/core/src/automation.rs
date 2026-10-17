@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -348,7 +348,7 @@ fn execute_action(
     conversation_remote_id: i64,
     conversation_local_id: i64,
 ) -> &'static str {
-    use crate::ticket_ops::{execute, OperationResult, TicketOperation};
+    use crate::ticket_ops::{OperationResult, TicketOperation, execute};
     if action.requires_approval() {
         if let Ok(action_json) = serde_json::to_string(action) {
             let _ = conn.execute(

@@ -1,5 +1,5 @@
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::components::*;
 
 use crate::catalog::OperationsTileKey;
 use crate::components::state_view::EmptyState;
@@ -136,14 +136,14 @@ pub fn tile_inbox_link(tile: OperationsTileKey, mailbox_id: Option<i64>) -> Opti
 
 #[component]
 pub fn OperationsPage() -> impl IntoView {
-    let snapshot = create_rw_signal(OperationsSnapshotView::default());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let active_tab = create_rw_signal(0u8);
-    let workload = create_rw_signal(Vec::<serde_json::Value>::new());
+    let snapshot = RwSignal::new(OperationsSnapshotView::default());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let active_tab = RwSignal::new(0u8);
+    let workload = RwSignal::new(Vec::<serde_json::Value>::new());
     let sse_refresh = crate::queries::version("operations-center");
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = sse_refresh.get();
         let snapshot = snapshot;
         let loading = loading;
@@ -201,7 +201,7 @@ pub fn OperationsPage() -> impl IntoView {
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let _ = sse_refresh.get();
         if active_tab.get() != 1 {
             return;
@@ -394,7 +394,7 @@ fn TileSection(
     mailbox: Option<i64>,
 ) -> impl IntoView {
     let has_tiles = !tiles.is_empty();
-    let cards_fragment = leptos::Fragment::new(
+    let cards = move || {
         tiles
             .iter()
             .copied()
@@ -402,19 +402,19 @@ fn TileSection(
                 view! {
                     <TileCard tile=tile count=count mailbox=mailbox />
                 }
-                .into_view()
+                .into_any()
             })
-            .collect::<Vec<_>>(),
-    );
+            .collect::<Vec<AnyView>>()
+    };
     view! {
         <section class="spp-operations-section">
             <h3 class="spp-operations-section__title">{title}</h3>
             <Show
                 when=move || has_tiles
-                fallback=|| ().into_view()
+                fallback=|| ().into_any()
             >
                 <div class="spp-operations-section__grid">
-                    {cards_fragment.clone()}
+                    {cards()}
                 </div>
             </Show>
         </section>
@@ -442,8 +442,7 @@ fn TileCard(tile: OperationsTileKey, count: TileCountView, mailbox: Option<i64>)
             <Show when=move || has_link fallback=|| ()>
                 <A
                     href={href.clone()}
-                    class="spp-tile__link"
-                    active_class="spp-tile__link--active"
+                    attr:class="spp-tile__link"
                 >
                     "Open in inbox →"
                 </A>

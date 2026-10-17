@@ -1,20 +1,21 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::ai_evidence::{build as build_evidence, find_similar, sources_for, AiSourceRef};
+use crate::ai_evidence::{AiSourceRef, build as build_evidence, find_similar, sources_for};
 use crate::ai_lm_studio::{ChatOpts, OpenAiCompatibleClient};
 use crate::ai_prompts::{
-    build_customer_draft_user, build_draft_verification_user, build_interaction_observation_user,
-    build_interaction_recommendation_user, build_issue_cluster_user, build_memory_extraction_user,
-    build_report_narrative_user, build_ticket_analysis_user, truncate, ClusterConversation,
-    DraftVerification, InteractionChangeInput, TicketAnalysis, CUSTOMER_DRAFT_SYSTEM,
-    DRAFT_VERIFICATION_SYSTEM, INTERACTION_OBSERVATION_SYSTEM, INTERACTION_RECOMMENDATION_SYSTEM,
-    ISSUE_CLUSTER_SYSTEM, MEMORY_EXTRACTION_SYSTEM, PROMPT_VERSIONS_CUSTOMER_DRAFT,
+    CUSTOMER_DRAFT_SYSTEM, ClusterConversation, DRAFT_VERIFICATION_SYSTEM, DraftVerification,
+    INTERACTION_OBSERVATION_SYSTEM, INTERACTION_RECOMMENDATION_SYSTEM, ISSUE_CLUSTER_SYSTEM,
+    InteractionChangeInput, MEMORY_EXTRACTION_SYSTEM, PROMPT_VERSIONS_CUSTOMER_DRAFT,
     PROMPT_VERSIONS_DRAFT_VERIFICATION, PROMPT_VERSIONS_INTERACTION_OBSERVATION,
     PROMPT_VERSIONS_INTERACTION_RECOMMENDATION, PROMPT_VERSIONS_ISSUE_CLUSTER,
     PROMPT_VERSIONS_MEMORY_EXTRACTION, PROMPT_VERSIONS_REPORT_NARRATIVE,
     PROMPT_VERSIONS_TICKET_ANALYSIS, REPORT_NARRATIVE_SYSTEM, TICKET_ANALYSIS_SYSTEM,
+    TicketAnalysis, build_customer_draft_user, build_draft_verification_user,
+    build_interaction_observation_user, build_interaction_recommendation_user,
+    build_issue_cluster_user, build_memory_extraction_user, build_report_narrative_user,
+    build_ticket_analysis_user, truncate,
 };
 use crate::ai_provider::ChatMessage;
 use crate::error::Result;
@@ -680,7 +681,7 @@ pub fn record_feedback(
     final_text: &str,
     was_sent: bool,
 ) -> Result<()> {
-    let edit_distance = levenshtein(original, final_text);
+    let edit_distance = levenshtein(original, final_text) as i64;
     conn.execute(
         "INSERT INTO ai_feedback (draft_id, original_content, final_content, edit_distance,
                                   was_sent, sent_at)
@@ -817,22 +818,21 @@ pub async fn analyze_ticket(
 ) -> std::result::Result<AnalyzeOutcome, LmStudioError> {
     let signature = get_analysis_signature(conn, conversation_local_id);
     let hash = input_hash(conversation_local_id, &signature);
-    if !force {
-        if let Ok(Some(cached)) = find_cached_run(
+    if !force
+        && let Ok(Some(cached)) = find_cached_run(
             conn,
             "ticket_analysis",
             &hash,
             PROMPT_VERSIONS_TICKET_ANALYSIS,
-        ) {
-            if let Ok(Some(existing)) = get_latest_analysis(conn, conversation_local_id) {
-                return Ok(AnalyzeOutcome {
-                    analysis: existing.analysis,
-                    sources: existing.sources,
-                    cached: true,
-                    run_id: cached.id,
-                });
-            }
-        }
+        )
+        && let Ok(Some(existing)) = get_latest_analysis(conn, conversation_local_id)
+    {
+        return Ok(AnalyzeOutcome {
+            analysis: existing.analysis,
+            sources: existing.sources,
+            cached: true,
+            run_id: cached.id,
+        });
     }
     let ctx = build_evidence(conn, conversation_local_id, true)
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
@@ -1173,8 +1173,12 @@ pub async fn rewrite_draft(
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
         .ok_or_else(|| LmStudioError::new("Draft not found", false))?;
     let instructions = match instruction {
-        "shorten" => "Rewrite the reply to be roughly half as long while keeping every essential fact.",
-        "expand" => "Rewrite the reply with a little more context and a warmer structure, without adding any new facts.",
+        "shorten" => {
+            "Rewrite the reply to be roughly half as long while keeping every essential fact."
+        }
+        "expand" => {
+            "Rewrite the reply with a little more context and a warmer structure, without adding any new facts."
+        }
         "warmer" => "Rewrite the reply with a warmer, friendlier tone. Keep facts identical.",
         "more_direct" => "Rewrite the reply to be more direct and concise. Keep facts identical.",
         _ => "Rewrite the reply to be more direct and concise. Keep facts identical.",
@@ -2297,11 +2301,11 @@ pub async fn analyze_interaction(
                 sources: "heuristic+ai".into(),
                 generated_at: None,
             });
-    if let Some(stored) = &stored {
-        if !stored.signals.is_empty() {
-            stage_current.signals = stored.signals.clone();
-            stage_current.customer_goal = stored.customer_goal.clone();
-        }
+    if let Some(stored) = &stored
+        && !stored.signals.is_empty()
+    {
+        stage_current.signals = stored.signals.clone();
+        stage_current.customer_goal = stored.customer_goal.clone();
     }
     let fresh_baseline = engine::comparison_baseline(conn, customer_id, conversation_local_id)
         .ok()

@@ -1,4 +1,4 @@
-use leptos::*;
+use leptos::prelude::*;
 
 #[must_use]
 pub fn split_paragraphs(text: &str) -> Vec<String> {
@@ -33,7 +33,7 @@ pub fn SafeHtml(html: Option<String>, fallback_text: String) -> impl IntoView {
     let raw = html.unwrap_or_default();
     let trimmed = raw.trim();
     if !trimmed.is_empty() && looks_like_html(trimmed) {
-        view! { <div class="spp-thread-body" inner_html=raw></div> }
+        view! { <div class="spp-thread-body" inner_html=raw></div> }.into_any()
     } else {
         let text = if trimmed.is_empty() {
             fallback_text
@@ -48,5 +48,6 @@ pub fn SafeHtml(html: Option<String>, fallback_text: String) -> impl IntoView {
                     .collect::<Vec<_>>()}
             </div>
         }
+        .into_any()
     }
 }

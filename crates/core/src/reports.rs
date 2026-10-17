@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{GraphNodeKind, ReportDimensionKey, ReportMetricKey};
@@ -299,18 +299,66 @@ pub fn build_report(
 #[must_use]
 fn metric_info(metric: ReportMetricKey) -> (&'static str, &'static str, &'static str) {
     match metric {
-        ReportMetricKey::Conversations => ("COUNT(*)", "Total number of conversations.", "Does not include deleted conversations."),
-        ReportMetricKey::UniqueCustomers => ("COUNT(DISTINCT customer_local_id)", "Number of unique customers who contacted support.", "A customer with multiple conversations is counted once."),
-        ReportMetricKey::Organizations => ("COUNT(DISTINCT customer_local_id)", "Approximate organization count (proxy via distinct customers).", "True organization count requires the customers table's organization field; this is a proxy."),
-        ReportMetricKey::FirstResponses => ("COUNT(CASE WHEN first_response_at IS NOT NULL THEN 1 END)", "Number of conversations that received a first response.", "Only counts conversations with a recorded first_response_at."),
-        ReportMetricKey::AgentReplies => ("COUNT(*)", "Total conversations (proxy for agent reply count).", "True agent reply count requires message-level data; this is a proxy at conversation level."),
-        ReportMetricKey::CustomerReplies => ("COUNT(*)", "Total conversations (proxy for customer reply count).", "True customer reply count requires message-level data."),
-        ReportMetricKey::Closures => ("COUNT(CASE WHEN status = 'closed' THEN 1 END)", "Number of closed conversations.", "Only counts conversations with status='closed'."),
-        ReportMetricKey::AvgFirstResponseMinutes => ("AVG((julianday(first_response_at) - julianday(created_at)) * 24 * 60)", "Average time to first response in minutes.", "Only includes conversations with a first_response_at; NULL values are excluded."),
-        ReportMetricKey::AvgResolutionMinutes => ("AVG((julianday(closed_at) - julianday(created_at)) * 24 * 60)", "Average time from creation to closure in minutes.", "Only includes closed conversations."),
-        ReportMetricKey::AvgWaitHours => ("AVG((julianday('now') - julianday(customer_waiting_since)) * 24)", "Average customer waiting time in hours.", "Only includes conversations currently in 'customer_waiting' state."),
-        ReportMetricKey::SlaBreached => ("COUNT(CASE WHEN status = 'closed' AND closed_at IS NOT NULL THEN 1 END)", "Proxy for SLA breaches (closed conversations).", "True SLA breach count comes from the sla_breaches table; this is a conversation-level proxy."),
-        _ => ("COUNT(*)", "Generic count metric.", "This metric's specific definition is not yet implemented; falls back to conversation count."),
+        ReportMetricKey::Conversations => (
+            "COUNT(*)",
+            "Total number of conversations.",
+            "Does not include deleted conversations.",
+        ),
+        ReportMetricKey::UniqueCustomers => (
+            "COUNT(DISTINCT customer_local_id)",
+            "Number of unique customers who contacted support.",
+            "A customer with multiple conversations is counted once.",
+        ),
+        ReportMetricKey::Organizations => (
+            "COUNT(DISTINCT customer_local_id)",
+            "Approximate organization count (proxy via distinct customers).",
+            "True organization count requires the customers table's organization field; this is a proxy.",
+        ),
+        ReportMetricKey::FirstResponses => (
+            "COUNT(CASE WHEN first_response_at IS NOT NULL THEN 1 END)",
+            "Number of conversations that received a first response.",
+            "Only counts conversations with a recorded first_response_at.",
+        ),
+        ReportMetricKey::AgentReplies => (
+            "COUNT(*)",
+            "Total conversations (proxy for agent reply count).",
+            "True agent reply count requires message-level data; this is a proxy at conversation level.",
+        ),
+        ReportMetricKey::CustomerReplies => (
+            "COUNT(*)",
+            "Total conversations (proxy for customer reply count).",
+            "True customer reply count requires message-level data.",
+        ),
+        ReportMetricKey::Closures => (
+            "COUNT(CASE WHEN status = 'closed' THEN 1 END)",
+            "Number of closed conversations.",
+            "Only counts conversations with status='closed'.",
+        ),
+        ReportMetricKey::AvgFirstResponseMinutes => (
+            "AVG((julianday(first_response_at) - julianday(created_at)) * 24 * 60)",
+            "Average time to first response in minutes.",
+            "Only includes conversations with a first_response_at; NULL values are excluded.",
+        ),
+        ReportMetricKey::AvgResolutionMinutes => (
+            "AVG((julianday(closed_at) - julianday(created_at)) * 24 * 60)",
+            "Average time from creation to closure in minutes.",
+            "Only includes closed conversations.",
+        ),
+        ReportMetricKey::AvgWaitHours => (
+            "AVG((julianday('now') - julianday(customer_waiting_since)) * 24)",
+            "Average customer waiting time in hours.",
+            "Only includes conversations currently in 'customer_waiting' state.",
+        ),
+        ReportMetricKey::SlaBreached => (
+            "COUNT(CASE WHEN status = 'closed' AND closed_at IS NOT NULL THEN 1 END)",
+            "Proxy for SLA breaches (closed conversations).",
+            "True SLA breach count comes from the sla_breaches table; this is a conversation-level proxy.",
+        ),
+        _ => (
+            "COUNT(*)",
+            "Generic count metric.",
+            "This metric's specific definition is not yet implemented; falls back to conversation count.",
+        ),
     }
 }
 
@@ -546,7 +594,10 @@ fn metric_spec(metric: ReportMetricKey) -> MetricSpec {
             from: "conversations c",
             date_expr: "c.first_response_at",
             value_expr: "AVG((julianday(c.first_response_at) - julianday(c.created_at)) * 1440)",
-            extra_where: &["c.first_response_at IS NOT NULL", "c.created_at IS NOT NULL"],
+            extra_where: &[
+                "c.first_response_at IS NOT NULL",
+                "c.created_at IS NOT NULL",
+            ],
             requires_attribute: false,
             requires_state: false,
             total_only: false,
@@ -1800,10 +1851,10 @@ pub fn compute_friction(conn: &Connection, conversation_id: i64) -> Result<Frict
     if factors.message_count > 20 {
         score += 0.3;
     }
-    if let Some(hours) = resolution_hours {
-        if hours > 48.0 {
-            score += 0.3;
-        }
+    if let Some(hours) = resolution_hours
+        && hours > 48.0
+    {
+        score += 0.3;
     }
     score += (factors.reopen_count as f64 * 0.2).min(0.4);
     if factors.escalated {
@@ -2003,14 +2054,12 @@ pub fn get_graph_neighbors(
         for side in ["source", "target"] {
             if let Some(v) = edge.get(side) {
                 let key = serde_json::to_string(v).unwrap_or_default();
-                if seen.insert(key) {
-                    if let Ok(r) =
+                if seen.insert(key)
+                    && let Ok(r) =
                         serde_json::from_value::<crate::support_graph::GraphNodeRef>(v.clone())
-                    {
-                        if r.kind != kind.as_str() || r.local_id != local_id {
-                            out.push(r);
-                        }
-                    }
+                    && (r.kind != kind.as_str() || r.local_id != local_id)
+                {
+                    out.push(r);
                 }
             }
         }

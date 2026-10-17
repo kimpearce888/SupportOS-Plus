@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rusqlite::{params, Connection};
-use serde_json::{json, Map, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Map, Value, json};
 
 use crate::error::{Error, Result};
 
@@ -768,18 +768,18 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
                 .timeout(std::time::Duration::from_millis(HTTP_TIMEOUT_MS));
             let auth = connector.get("auth").cloned().unwrap_or(Value::Null);
             let mode = auth.get("mode").and_then(|v| v.as_str()).unwrap_or("");
-            if mode == "header" {
-                if let (Some(name), Some(value)) = (
+            if mode == "header"
+                && let (Some(name), Some(value)) = (
                     auth.get("headerName").and_then(|v| v.as_str()),
                     auth.get("headerValue").and_then(|v| v.as_str()),
-                ) {
-                    request = request.header(name, value);
-                }
+                )
+            {
+                request = request.header(name, value);
             }
-            if mode == "bearer" {
-                if let Some(token) = auth.get("token").and_then(|v| v.as_str()) {
-                    request = request.header("Authorization", format!("Bearer {token}"));
-                }
+            if mode == "bearer"
+                && let Some(token) = auth.get("token").and_then(|v| v.as_str())
+            {
+                request = request.header("Authorization", format!("Bearer {token}"));
             }
             let response = request
                 .send()
@@ -791,13 +791,13 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
                     response.status().as_u16()
                 )));
             }
-            if let Some(len) = response.content_length() {
-                if len > HTTP_MAX_BYTES {
-                    return Err(Error::Config(format!(
-                        "response too large ({}MB > 10MB cap)",
-                        len / 1024 / 1024
-                    )));
-                }
+            if let Some(len) = response.content_length()
+                && len > HTTP_MAX_BYTES
+            {
+                return Err(Error::Config(format!(
+                    "response too large ({}MB > 10MB cap)",
+                    len / 1024 / 1024
+                )));
             }
             let content_type = response
                 .headers()
@@ -893,10 +893,11 @@ pub fn parse_csv(text: &str, max_rows: usize) -> Vec<Value> {
         record.push(field);
         records.push(record);
     }
-    if let Some(last) = records.last() {
-        if last.len() == 1 && last[0].is_empty() {
-            records.pop();
-        }
+    if let Some(last) = records.last()
+        && last.len() == 1
+        && last[0].is_empty()
+    {
+        records.pop();
     }
     let Some(headers) = records.first() else {
         return Vec::new();
@@ -950,8 +951,8 @@ fn normalize_rows(
         }
         _ => {
             return Err(Error::Config(format!(
-            "{source_label} must be an array of objects (or {{ data: [...] }} / {{ rows: [...] }})"
-        )))
+                "{source_label} must be an array of objects (or {{ data: [...] }} / {{ rows: [...] }})"
+            )));
         }
     };
     let list: Vec<Value> = list.into_iter().take(MAX_ROWS_PER_CONNECTOR).collect();

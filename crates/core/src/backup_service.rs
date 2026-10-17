@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 
@@ -43,10 +43,10 @@ fn cached_verify(full_path: &Path) -> bool {
     let key = full_path.to_string_lossy().into_owned();
     let mut guard = VERIFY_CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let cache = guard.get_or_insert_with(HashMap::new);
-    if let Some((m, v)) = cache.get(&key) {
-        if *m == mtime {
-            return *v;
-        }
+    if let Some((m, v)) = cache.get(&key)
+        && *m == mtime
+    {
+        return *v;
     }
     let verified = verify_backup(full_path);
     cache.insert(key, (mtime, verified));

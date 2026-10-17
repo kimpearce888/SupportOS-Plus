@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
 
@@ -28,7 +28,7 @@ pub fn get_bool(conn: &Connection, key: &str, default: bool) -> Result<bool> {
             other => {
                 return Err(Error::Config(format!(
                     "settings key {key:?} = {other:?}; expected \"true\" or \"false\""
-                )))
+                )));
             }
         },
     })

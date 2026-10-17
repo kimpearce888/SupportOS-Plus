@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use leptos::*;
+use leptos::prelude::*;
 
 use crate::components::Button;
 
@@ -48,8 +48,8 @@ impl OnboardingProps {
 #[component]
 pub fn OnboardingOverlay(props: OnboardingProps) -> impl IntoView {
     let visible = !props.first_run_done;
-    let on_accept = StoredValue::new(Arc::clone(&props.on_accept_demo));
-    let on_dismiss = StoredValue::new(Arc::clone(&props.on_dismiss));
+    let on_accept = StoredValue::new_local(Arc::clone(&props.on_accept_demo));
+    let on_dismiss = StoredValue::new_local(Arc::clone(&props.on_dismiss));
 
     view! {
         <Show when=move || visible fallback=|| ()>

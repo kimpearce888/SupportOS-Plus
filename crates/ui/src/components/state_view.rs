@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use leptos::*;
+use leptos::ev;
+use leptos::prelude::*;
 
 #[derive(Clone)]
 pub enum ViewState {
@@ -69,21 +70,18 @@ impl ViewState {
 }
 
 #[component]
-pub fn StateView(
-    #[prop(into)] state: MaybeSignal<ViewState>,
-    children: ChildrenFn,
-) -> impl IntoView {
+pub fn StateView(#[prop(into)] state: Signal<ViewState>, children: ChildrenFn) -> impl IntoView {
     move || match state.get() {
-        ViewState::Loading => view! { <LoadingState /> }.into_view(),
+        ViewState::Loading => view! { <LoadingState /> }.into_any(),
         ViewState::Empty { message } => view! {
             <EmptyState message=message.clone() />
         }
-        .into_view(),
+        .into_any(),
         ViewState::Error { message, retry } => view! {
             <ErrorState message=message.clone() retry=retry.clone() />
         }
-        .into_view(),
-        ViewState::Loaded => children().into_view(),
+        .into_any(),
+        ViewState::Loaded => children().into_any(),
     }
 }
 
@@ -109,7 +107,7 @@ pub fn EmptyState(#[prop(into)] message: String) -> impl IntoView {
 
 #[component]
 pub fn ErrorState(#[prop(into)] message: String, retry: Option<RetryAction>) -> impl IntoView {
-    let retry_signal = create_rw_signal(retry);
+    let retry_signal = RwSignal::new(retry);
     let on_retry = move |_| {
         if let Some(cb) = retry_signal.get() {
             cb();
@@ -211,7 +209,7 @@ fn parse_iso_to_epoch(iso: &str) -> Option<u64> {
 
 #[component]
 pub fn AppErrorBoundary(children: Children) -> impl IntoView {
-    let fallback = move |_: leptos::RwSignal<leptos::Errors>| {
+    let fallback = move |_: ArcRwSignal<Errors>| {
         view! {
             <div class="spp-app-error">
                 <h2>"Something went wrong"</h2>

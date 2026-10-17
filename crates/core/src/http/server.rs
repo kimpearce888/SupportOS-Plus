@@ -2,10 +2,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{
+    Router,
     extract::State,
     response::{IntoResponse, Response},
     routing::{any, get, post},
-    Router,
 };
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -14,9 +14,9 @@ use tower_http::trace::TraceLayer;
 
 use crate::error::Result;
 
+use super::EventBus;
 use super::rate_limit::RateLimiter;
 use super::routes;
-use super::EventBus;
 use std::sync::{Mutex, MutexGuard};
 
 pub fn lock_or_recover<T: ?Sized>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -64,11 +64,10 @@ impl AppState {
     pub async fn run_ai<T>(
         &self,
         f: impl for<'a> FnOnce(
-                &'a rusqlite::Connection,
-            )
-                -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>
-            + Send
-            + 'static,
+            &'a rusqlite::Connection,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>
+        + Send
+        + 'static,
     ) -> std::result::Result<T, String>
     where
         T: Send + 'static,
@@ -242,59 +241,59 @@ impl HttpServer {
             )
             .route("/api/events", get(routes::events::sse_handler))
             .route("/api/conversations", get(routes::conversations::list))
-            .route("/api/conversations/:id", get(routes::conversations::get))
+            .route("/api/conversations/{id}", get(routes::conversations::get))
             .route(
-                "/api/conversations/:id/reply",
+                "/api/conversations/{id}/reply",
                 post(routes::conversations::reply),
             )
             .route(
-                "/api/conversations/:id/note",
+                "/api/conversations/{id}/note",
                 post(routes::conversations::note),
             )
             .route(
-                "/api/conversations/:id/status",
+                "/api/conversations/{id}/status",
                 post(routes::conversations::status),
             )
             .route(
-                "/api/conversations/:id/assign",
+                "/api/conversations/{id}/assign",
                 post(routes::conversations::assign),
             )
             .route(
-                "/api/conversations/:id/priority",
+                "/api/conversations/{id}/priority",
                 post(routes::conversations::priority),
             )
             .route(
-                "/api/conversations/:id/subject",
+                "/api/conversations/{id}/subject",
                 post(routes::conversations::subject),
             )
             .route(
-                "/api/conversations/:id/state",
+                "/api/conversations/{id}/state",
                 post(routes::conversations::set_state),
             )
             .route(
-                "/api/conversations/:id/move",
+                "/api/conversations/{id}/move",
                 post(routes::conversations::move_to_inbox),
             )
             .route(
-                "/api/conversations/:id/tags",
+                "/api/conversations/{id}/tags",
                 post(routes::conversations::update_tags_route),
             )
             .route(
-                "/api/conversations/:id/fields",
+                "/api/conversations/{id}/fields",
                 post(routes::conversations::update_fields_route),
             )
             .route(
-                "/api/conversations/:id/snooze",
+                "/api/conversations/{id}/snooze",
                 post(routes::conversations::snooze_route)
                     .delete(routes::conversations::unsnooze_route),
             )
             .route(
-                "/api/conversations/:id/schedule",
+                "/api/conversations/{id}/schedule",
                 post(routes::conversations::schedule_route)
                     .delete(routes::conversations::schedule_delete_route),
             )
             .route(
-                "/api/conversations/:id/schedule/publish",
+                "/api/conversations/{id}/schedule/publish",
                 post(routes::conversations::schedule_publish_route),
             )
             .route(
@@ -302,23 +301,23 @@ impl HttpServer {
                 post(routes::conversations::bulk_route),
             )
             .route(
-                "/api/conversations/:id/refresh",
+                "/api/conversations/{id}/refresh",
                 post(routes::conversations::refresh_route),
             )
             .route(
-                "/api/conversations/:id/workflow/:workflowId",
+                "/api/conversations/{id}/workflow/{workflowId}",
                 post(routes::conversations::workflow_route),
             )
             .route(
-                "/api/attachments/:id/download",
+                "/api/attachments/{id}/download",
                 post(routes::conversations::attachment_download_route),
             )
             .route(
-                "/api/attachments/:id/file",
+                "/api/attachments/{id}/file",
                 get(routes::system::attachment_file),
             )
             .route(
-                "/api/conversations/:id/events",
+                "/api/conversations/{id}/events",
                 get(routes::conversations::events),
             )
             .route(
@@ -331,7 +330,7 @@ impl HttpServer {
                     .post(routes::conversations::create_ticket_state),
             )
             .route(
-                "/api/ticket-states/:id",
+                "/api/ticket-states/{id}",
                 axum::routing::patch(routes::conversations::update_ticket_state)
                     .delete(routes::conversations::delete_ticket_state),
             )
@@ -361,15 +360,15 @@ impl HttpServer {
                 get(routes::people::list_customers).post(routes::people::create_customer),
             )
             .route(
-                "/api/customers/:id",
+                "/api/customers/{id}",
                 get(routes::people::get_customer).patch(routes::people::update_customer),
             )
             .route(
-                "/api/customers/:id/timeline",
+                "/api/customers/{id}/timeline",
                 get(routes::people::customer_timeline),
             )
             .route(
-                "/api/customers/:id/support-health",
+                "/api/customers/{id}/support-health",
                 get(routes::people::customer_support_health),
             )
             .route(
@@ -377,15 +376,15 @@ impl HttpServer {
                 get(routes::people::list_organizations).post(routes::people::create_organization),
             )
             .route(
-                "/api/organizations/:id",
+                "/api/organizations/{id}",
                 get(routes::people::get_organization).patch(routes::people::update_organization),
             )
             .route(
-                "/api/organizations/:id/timeline",
+                "/api/organizations/{id}/timeline",
                 get(routes::people::organization_timeline),
             )
             .route(
-                "/api/organizations/:id/support-health",
+                "/api/organizations/{id}/support-health",
                 get(routes::people::organization_support_health),
             )
             .route(
@@ -394,14 +393,14 @@ impl HttpServer {
             )
             .route("/api/search", post(routes::search::search))
             .route("/api/inbox-views", get(routes::views::list_views))
-            .route("/api/inbox-views/:id", get(routes::views::get_view))
+            .route("/api/inbox-views/{id}", get(routes::views::get_view))
             .route("/api/inbox-views", post(routes::views::create_view))
             .route(
-                "/api/inbox-views/:id",
+                "/api/inbox-views/{id}",
                 axum::routing::patch(routes::views::update_view),
             )
             .route(
-                "/api/inbox-views/:id",
+                "/api/inbox-views/{id}",
                 axum::routing::delete(routes::views::delete_view),
             )
             .route(
@@ -431,7 +430,7 @@ impl HttpServer {
                 get(routes::notifications::unread_count),
             )
             .route(
-                "/api/notifications/:id/read",
+                "/api/notifications/{id}/read",
                 post(routes::notifications::mark_read),
             )
             .route(
@@ -443,7 +442,7 @@ impl HttpServer {
                 get(routes::notifications::list_prefs),
             )
             .route(
-                "/api/notifications/prefs/:type",
+                "/api/notifications/prefs/{type}",
                 axum::routing::put(routes::notifications::set_pref),
             )
             .route(
@@ -489,11 +488,11 @@ impl HttpServer {
                 get(routes::settings::get_business_hours),
             )
             .route(
-                "/api/settings/business-hours/:mailboxId",
+                "/api/settings/business-hours/{mailboxId}",
                 axum::routing::put(routes::settings::set_business_hours),
             )
             .route(
-                "/api/settings/business-hours/:mailboxId",
+                "/api/settings/business-hours/{mailboxId}",
                 axum::routing::delete(routes::settings::delete_business_hours),
             )
             .route("/api/sync/status", get(routes::sync::status))
@@ -544,12 +543,12 @@ impl HttpServer {
                 post(routes::sync::register_webhook),
             )
             .route(
-                "/api/webhooks/:remoteId",
+                "/api/webhooks/{remoteId}",
                 axum::routing::delete(routes::sync::unregister_webhook),
             )
             .route("/api/queue", get(routes::sync::queue))
-            .route("/api/queue/:id/retry", post(routes::sync::retry_job))
-            .route("/api/queue/:id/cancel", post(routes::sync::cancel_job))
+            .route("/api/queue/{id}/retry", post(routes::sync::retry_job))
+            .route("/api/queue/{id}/cancel", post(routes::sync::cancel_job))
             .route(
                 "/api/queue/clear-completed",
                 post(routes::sync::clear_completed),
@@ -603,7 +602,7 @@ impl HttpServer {
                     .post(routes::analytics::builder_saved_create),
             )
             .route(
-                "/api/reports/builder/saved/:id",
+                "/api/reports/builder/saved/{id}",
                 axum::routing::delete(routes::analytics::builder_saved_delete),
             )
             .route(
@@ -619,7 +618,7 @@ impl HttpServer {
                 post(routes::analytics::release_events),
             )
             .route(
-                "/api/reports/helpscout/:reportKey",
+                "/api/reports/helpscout/{reportKey}",
                 get(routes::analytics::helpscout_report),
             )
             .route("/api/reports/narrative", post(routes::analytics::narrative))
@@ -628,56 +627,62 @@ impl HttpServer {
                 get(routes::analytics::report_catalog),
             )
             .route("/api/ai/status", get(routes::ai::status))
-            .route("/api/ai/analyze/:conversationId", post(routes::ai::analyze))
-            .route("/api/ai/draft/:conversationId", post(routes::ai::draft))
-            .route("/api/ai/similar/:conversationId", get(routes::ai::similar))
-            .route("/api/ai/memory/:customerId", get(routes::ai::get_memory))
-            .route("/api/ai/memory/:customerId", post(routes::ai::set_memory))
+            .route(
+                "/api/ai/analyze/{conversationId}",
+                post(routes::ai::analyze),
+            )
+            .route("/api/ai/draft/{conversationId}", post(routes::ai::draft))
+            .route("/api/ai/similar/{conversationId}", get(routes::ai::similar))
+            .route("/api/ai/memory/{customerId}", get(routes::ai::get_memory))
+            .route("/api/ai/memory/{customerId}", post(routes::ai::set_memory))
             .route("/api/ai/jobs", get(routes::ai::jobs))
             .route("/api/ai/analytics", get(routes::ai::ai_analytics))
             .route("/api/ai/evaluation", get(routes::ai::evaluation))
             .route("/api/ai/evaluation/run", post(routes::ai::evaluation_run))
             .route("/api/ai/cluster-issues", post(routes::ai::cluster_issues))
-            .route("/api/ai/draft/:draftId/rewrite", post(routes::ai::rewrite))
-            .route("/api/ai/draft/:draftId/verify", post(routes::ai::verify))
+            .route("/api/ai/draft/{draftId}/rewrite", post(routes::ai::rewrite))
+            .route("/api/ai/draft/{draftId}/verify", post(routes::ai::verify))
             .route(
-                "/api/ai/draft/:draftId/feedback",
+                "/api/ai/draft/{draftId}/feedback",
                 post(routes::ai::feedback),
             )
             .route("/api/issues/clusters", get(routes::issues::list_clusters))
             .route("/api/issues/sla-alerts", get(routes::issues::sla_alerts))
             .route("/api/issues/known", get(routes::issues::list_known))
             .route("/api/issues/known", post(routes::issues::create_known))
-            .route("/api/issues/known/:id", get(routes::issues::get_known))
+            .route("/api/issues/known/{id}", get(routes::issues::get_known))
             .route(
-                "/api/issues/known/:id",
+                "/api/issues/known/{id}",
                 axum::routing::patch(routes::issues::update_known),
             )
             .route(
-                "/api/issues/known/:id",
+                "/api/issues/known/{id}",
                 axum::routing::delete(routes::issues::delete_known),
             )
             .route(
-                "/api/issues/known/:id/impact",
+                "/api/issues/known/{id}/impact",
                 get(routes::issues::known_impact),
             )
             .route("/api/issues/cases", get(routes::issues::list_cases))
             .route(
-                "/api/issues/cases/from-conversation/:conversationId",
+                "/api/issues/cases/from-conversation/{conversationId}",
                 post(routes::issues::case_from_conversation),
             )
-            .route("/api/issues/clusters/:id", get(routes::issues::get_cluster))
             .route(
-                "/api/issues/clusters/:id",
+                "/api/issues/clusters/{id}",
+                get(routes::issues::get_cluster),
+            )
+            .route(
+                "/api/issues/clusters/{id}",
                 axum::routing::delete(routes::issues::delete_cluster),
             )
-            .route("/api/issues/known/:id/refs", post(routes::issues::add_ref))
+            .route("/api/issues/known/{id}/refs", post(routes::issues::add_ref))
             .route(
-                "/api/issues/known/:id/link/:conversationId",
+                "/api/issues/known/{id}/link/{conversationId}",
                 post(routes::issues::link_known),
             )
             .route(
-                "/api/issues/known/:id/link/:conversationId",
+                "/api/issues/known/{id}/link/{conversationId}",
                 axum::routing::delete(routes::issues::unlink_known),
             )
             .route("/api/automation/rules", get(routes::automation::list_rules))
@@ -686,43 +691,43 @@ impl HttpServer {
                 post(routes::automation::create_rule),
             )
             .route(
-                "/api/automation/rules/:id",
+                "/api/automation/rules/{id}",
                 axum::routing::patch(routes::automation::update_rule),
             )
             .route(
-                "/api/automation/rules/:id",
+                "/api/automation/rules/{id}",
                 axum::routing::delete(routes::automation::delete_rule),
             )
             .route(
-                "/api/automation/rules/:id/trigger/:conversationId",
+                "/api/automation/rules/{id}/trigger/{conversationId}",
                 post(routes::automation::trigger),
             )
             .route(
-                "/api/conversations/:id/side-threads",
+                "/api/conversations/{id}/side-threads",
                 get(routes::collaboration::list_side_threads),
             )
             .route(
-                "/api/conversations/:id/side-threads",
+                "/api/conversations/{id}/side-threads",
                 post(routes::collaboration::create_side_thread),
             )
             .route(
-                "/api/side-threads/:id",
+                "/api/side-threads/{id}",
                 get(routes::collaboration::get_side_thread),
             )
             .route(
-                "/api/side-threads/:id/messages",
+                "/api/side-threads/{id}/messages",
                 post(routes::collaboration::add_message),
             )
             .route(
-                "/api/side-threads/:id/resolve",
+                "/api/side-threads/{id}/resolve",
                 post(routes::collaboration::resolve),
             )
             .route(
-                "/api/side-threads/:id/reopen",
+                "/api/side-threads/{id}/reopen",
                 post(routes::collaboration::reopen),
             )
             .route(
-                "/api/side-threads/:id/participants",
+                "/api/side-threads/{id}/participants",
                 post(routes::collaboration::add_participants),
             )
             .route(
@@ -732,16 +737,16 @@ impl HttpServer {
             .route("/api/copilot/sessions", get(routes::copilot::list_sessions))
             .route("/api/copilot/chat", post(routes::copilot::chat))
             .route(
-                "/api/copilot/sessions/:id",
+                "/api/copilot/sessions/{id}",
                 get(routes::copilot::get_session),
             )
             .route(
-                "/api/copilot/sessions/:id",
+                "/api/copilot/sessions/{id}",
                 axum::routing::delete(routes::copilot::delete_session),
             )
             .route("/api/copilot/tools", get(routes::copilot::tools))
             .route(
-                "/api/copilot/starter-questions/:conversationId",
+                "/api/copilot/starter-questions/{conversationId}",
                 get(routes::copilot::starter_questions),
             )
             .route(
@@ -753,7 +758,7 @@ impl HttpServer {
                 get(routes::knowledge::list_documents),
             )
             .route(
-                "/api/knowledge/documents/:id",
+                "/api/knowledge/documents/{id}",
                 get(routes::knowledge::get_document),
             )
             .route("/api/knowledge/search", get(routes::knowledge::search))
@@ -772,15 +777,15 @@ impl HttpServer {
                 post(routes::knowledge::import_file),
             )
             .route(
-                "/api/knowledge/documents/:id",
+                "/api/knowledge/documents/{id}",
                 axum::routing::delete(routes::knowledge::delete_document),
             )
             .route(
-                "/api/knowledge/documents/:id/review",
+                "/api/knowledge/documents/{id}/review",
                 post(routes::knowledge::review_document),
             )
             .route(
-                "/api/knowledge/documents/:id/verify",
+                "/api/knowledge/documents/{id}/verify",
                 post(routes::knowledge::verify_document),
             )
             .route("/api/outreach/meta", get(routes::outreach::meta))
@@ -793,7 +798,7 @@ impl HttpServer {
                 post(routes::outreach::create_segment),
             )
             .route(
-                "/api/outreach/segments/:id",
+                "/api/outreach/segments/{id}",
                 axum::routing::delete(routes::outreach::delete_segment),
             )
             .route(
@@ -817,54 +822,54 @@ impl HttpServer {
                 post(routes::outreach::create_campaign),
             )
             .route(
-                "/api/outreach/campaigns/:id",
+                "/api/outreach/campaigns/{id}",
                 get(routes::outreach::get_campaign),
             )
             .route(
-                "/api/outreach/campaigns/:id/validate",
+                "/api/outreach/campaigns/{id}/validate",
                 get(routes::outreach::campaign_validate_route),
             )
             .route("/api/outreach/render", post(routes::outreach::render_route))
             .route(
-                "/api/outreach/campaigns/:id/preview",
+                "/api/outreach/campaigns/{id}/preview",
                 post(routes::outreach::campaign_preview_route),
             )
             .route(
-                "/api/outreach/campaigns/:id/queue",
+                "/api/outreach/campaigns/{id}/queue",
                 post(routes::outreach::campaign_queue_route),
             )
             .route(
-                "/api/outreach/campaigns/:id/pause",
+                "/api/outreach/campaigns/{id}/pause",
                 post(routes::outreach::campaign_pause_route),
             )
             .route(
-                "/api/outreach/campaigns/:id/resume",
+                "/api/outreach/campaigns/{id}/resume",
                 post(routes::outreach::campaign_resume_route),
             )
             .route(
-                "/api/outreach/campaigns/:id/cancel",
+                "/api/outreach/campaigns/{id}/cancel",
                 post(routes::outreach::campaign_cancel_route),
             )
             .route(
-                "/api/outreach/campaigns/:id/retry",
+                "/api/outreach/campaigns/{id}/retry",
                 post(routes::outreach::campaign_retry_route),
             )
             .route(
-                "/api/outreach/campaigns/:id/reconcile",
+                "/api/outreach/campaigns/{id}/reconcile",
                 post(routes::outreach::campaign_reconcile_route),
             )
             .route(
-                "/api/outreach/campaigns/:id/report",
+                "/api/outreach/campaigns/{id}/report",
                 get(routes::outreach::campaign_report_route),
             )
             .route(
-                "/api/outreach/campaigns/:id",
+                "/api/outreach/campaigns/{id}",
                 axum::routing::delete(routes::outreach::campaign_delete_route),
             )
             .route("/api/outreach/dnc", get(routes::outreach::list_dnc_route))
             .route("/api/outreach/dnc", post(routes::outreach::add_dnc_route))
             .route(
-                "/api/outreach/dnc/:customerLocalId",
+                "/api/outreach/dnc/{customerLocalId}",
                 axum::routing::delete(routes::outreach::remove_dnc_route),
             )
             .route(
@@ -876,15 +881,15 @@ impl HttpServer {
                 post(routes::custom_objects::create_type),
             )
             .route(
-                "/api/custom-objects/types/:id",
+                "/api/custom-objects/types/{id}",
                 get(routes::custom_objects::get_type),
             )
             .route(
-                "/api/custom-objects/types/:id",
+                "/api/custom-objects/types/{id}",
                 axum::routing::patch(routes::custom_objects::update_type),
             )
             .route(
-                "/api/custom-objects/types/:id",
+                "/api/custom-objects/types/{id}",
                 axum::routing::delete(routes::custom_objects::delete_type),
             )
             .route(
@@ -896,15 +901,15 @@ impl HttpServer {
                 post(routes::custom_objects::create_object),
             )
             .route(
-                "/api/custom-objects/:id",
+                "/api/custom-objects/{id}",
                 get(routes::custom_objects::get_object),
             )
             .route(
-                "/api/custom-objects/:id",
+                "/api/custom-objects/{id}",
                 axum::routing::patch(routes::custom_objects::update_object),
             )
             .route(
-                "/api/custom-objects/:id",
+                "/api/custom-objects/{id}",
                 axum::routing::delete(routes::custom_objects::delete_object),
             )
             .route(
@@ -912,116 +917,116 @@ impl HttpServer {
                 get(routes::custom_objects::report),
             )
             .route(
-                "/api/custom-objects/for/:targetKind/:targetId",
+                "/api/custom-objects/for/{targetKind}/{targetId}",
                 get(routes::custom_objects::list_for_target),
             )
             .route(
-                "/api/custom-objects/:id/links",
+                "/api/custom-objects/{id}/links",
                 post(routes::custom_objects::create_link),
             )
             .route(
-                "/api/custom-objects/:id/links/:targetKind/:targetLocalId",
+                "/api/custom-objects/{id}/links/{targetKind}/{targetLocalId}",
                 axum::routing::delete(routes::custom_objects::delete_link),
             )
             .route("/api/connectors", get(routes::connectors::list))
             .route("/api/connectors", post(routes::connectors::create))
-            .route("/api/connectors/:id", get(routes::connectors::get))
+            .route("/api/connectors/{id}", get(routes::connectors::get))
             .route(
-                "/api/connectors/:id",
+                "/api/connectors/{id}",
                 axum::routing::patch(routes::connectors::update),
             )
             .route(
-                "/api/connectors/:id",
+                "/api/connectors/{id}",
                 axum::routing::delete(routes::connectors::delete),
             )
             .route(
-                "/api/connectors/:id/refresh",
+                "/api/connectors/{id}/refresh",
                 post(routes::connectors::refresh),
             )
-            .route("/api/connectors/:id/rows", get(routes::connectors::rows))
-            .route("/api/connectors/:id/test", post(routes::connectors::test))
+            .route("/api/connectors/{id}/rows", get(routes::connectors::rows))
+            .route("/api/connectors/{id}/test", post(routes::connectors::test))
             .route("/api/incidents", get(routes::incidents::list))
             .route("/api/incidents", post(routes::incidents::create))
-            .route("/api/incidents/:id", get(routes::incidents::get))
+            .route("/api/incidents/{id}", get(routes::incidents::get))
             .route(
-                "/api/incidents/:id",
+                "/api/incidents/{id}",
                 axum::routing::patch(routes::incidents::update),
             )
             .route(
-                "/api/incidents/:id",
+                "/api/incidents/{id}",
                 axum::routing::delete(routes::incidents::delete),
             )
-            .route("/api/incidents/:id/impact", get(routes::incidents::impact))
+            .route("/api/incidents/{id}/impact", get(routes::incidents::impact))
             .route(
-                "/api/incidents/:id/notes",
+                "/api/incidents/{id}/notes",
                 post(routes::incidents::add_note),
             )
-            .route("/api/incidents/:id/refs", post(routes::incidents::add_ref))
+            .route("/api/incidents/{id}/refs", post(routes::incidents::add_ref))
             .route(
-                "/api/incidents/:id/related",
+                "/api/incidents/{id}/related",
                 post(routes::incidents::add_related),
             )
             .route(
-                "/api/incidents/:id/related/:targetKind/:targetLocalId",
+                "/api/incidents/{id}/related/{targetKind}/{targetLocalId}",
                 axum::routing::delete(routes::incidents::delete_related),
             )
             .route(
-                "/api/incidents/:id/releases",
+                "/api/incidents/{id}/releases",
                 post(routes::incidents::add_release),
             )
             .route(
-                "/api/incidents/:id/releases/:releaseId",
+                "/api/incidents/{id}/releases/{releaseId}",
                 axum::routing::delete(routes::incidents::delete_release),
             )
             .route(
-                "/api/incidents/:id/conversations/:conversationId",
+                "/api/incidents/{id}/conversations/{conversationId}",
                 post(routes::incidents::link_conversation),
             )
             .route(
-                "/api/incidents/:id/conversations/:conversationId",
+                "/api/incidents/{id}/conversations/{conversationId}",
                 axum::routing::delete(routes::incidents::unlink_conversation),
             )
             .route(
-                "/api/incidents/:id/refs/:refId",
+                "/api/incidents/{id}/refs/{refId}",
                 axum::routing::delete(routes::incidents::delete_ref),
             )
             .route(
-                "/api/incidents/from-cluster/:clusterId",
+                "/api/incidents/from-cluster/{clusterId}",
                 post(routes::incidents::from_cluster),
             )
             .route(
-                "/api/incidents/from-known-issue/:knownIssueId",
+                "/api/incidents/from-known-issue/{knownIssueId}",
                 post(routes::incidents::from_known_issue),
             )
             .route("/api/graph/stats", get(routes::graph::stats))
             .route("/api/graph/meta", get(routes::graph::meta))
             .route("/api/graph/search", get(routes::graph::search))
-            .route("/api/graph/node/:kind/:id", get(routes::graph::node))
+            .route("/api/graph/node/{kind}/{id}", get(routes::graph::node))
             .route(
-                "/api/graph/neighbors/:kind/:id",
+                "/api/graph/neighbors/{kind}/{id}",
                 get(routes::graph::neighbors),
             )
             .route(
-                "/api/graph/subgraph/:kind/:id",
+                "/api/graph/subgraph/{kind}/{id}",
                 get(routes::graph::subgraph),
             )
             .route("/api/graph/edges", get(routes::graph::list_edges))
             .route("/api/graph/edges", post(routes::graph::create_edge))
             .route(
-                "/api/graph/edges/:id",
+                "/api/graph/edges/{id}",
                 axum::routing::delete(routes::graph::delete_edge),
             )
             .route("/api/attributes/catalog", get(routes::attributes::catalog))
             .route(
-                "/api/attributes/conversation/:id",
+                "/api/attributes/conversation/{id}",
                 get(routes::attributes::conversation_attributes),
             )
             .route(
-                "/api/attributes/conversation/:id/history/:attribute",
+                "/api/attributes/conversation/{id}/history/{attribute}",
                 get(routes::attributes::conversation_attribute_history),
             )
             .route(
-                "/api/attributes/conversation/:id/recompute",
+                "/api/attributes/conversation/{id}/recompute",
                 post(routes::attributes::recompute),
             )
             .route(
@@ -1030,19 +1035,19 @@ impl HttpServer {
             )
             .route("/api/attributes/report", get(routes::attributes::report))
             .route(
-                "/api/attributes/values/:attribute",
+                "/api/attributes/values/{attribute}",
                 get(routes::attributes::values),
             )
             .route("/api/coaching/meta", get(routes::coaching::meta))
-            .route("/api/coaching/:conversationId", get(routes::coaching::get))
+            .route("/api/coaching/{conversationId}", get(routes::coaching::get))
             .route(
-                "/api/coaching/:conversationId/review",
+                "/api/coaching/{conversationId}/review",
                 post(routes::coaching::review),
             )
             .route("/api/translation/meta", get(routes::translation::meta))
             .route("/api/translation/detect", post(routes::translation::detect))
             .route(
-                "/api/translation/conversation/:id",
+                "/api/translation/conversation/{id}",
                 get(routes::translation::conversation),
             )
             .route(
@@ -1050,37 +1055,37 @@ impl HttpServer {
                 post(routes::translation::translate),
             )
             .route("/api/memory/meta", get(routes::memory::meta))
-            .route("/api/memory/:customerId", get(routes::memory::get))
+            .route("/api/memory/{customerId}", get(routes::memory::get))
             .route(
-                "/api/memory/:customerId/entries",
+                "/api/memory/{customerId}/entries",
                 post(routes::memory::add_entry),
             )
             .route(
-                "/api/memory/:customerId/entries/:entryId",
+                "/api/memory/{customerId}/entries/{entryId}",
                 axum::routing::delete(routes::memory::delete_entry),
             )
             .route(
-                "/api/interaction/:conversationId",
+                "/api/interaction/{conversationId}",
                 get(routes::interactions::get),
             )
             .route(
-                "/api/interaction/:conversationId/refresh",
+                "/api/interaction/{conversationId}/refresh",
                 post(routes::interactions::refresh),
             )
             .route(
-                "/api/interaction/:conversationId/evidence",
+                "/api/interaction/{conversationId}/evidence",
                 get(routes::interactions::evidence),
             )
             .route(
-                "/api/interaction/profile/:customerId",
+                "/api/interaction/profile/{customerId}",
                 get(routes::interactions::profile),
             )
             .route(
-                "/api/interaction/profile/:customerId/override",
+                "/api/interaction/profile/{customerId}/override",
                 post(routes::interactions::set_override),
             )
             .route(
-                "/api/interaction/profile/:customerId/override/:field",
+                "/api/interaction/profile/{customerId}/override/{field}",
                 axum::routing::delete(routes::interactions::clear_override),
             )
             .route("/api/knowledge/gaps", get(routes::quality::list_gaps))
@@ -1089,21 +1094,21 @@ impl HttpServer {
                 post(routes::quality::rebuild_gaps),
             )
             .route(
-                "/api/knowledge/gaps/candidates/:id/decide",
+                "/api/knowledge/gaps/candidates/{id}/decide",
                 post(routes::quality::decide_candidate),
             )
             .route(
-                "/api/knowledge/gaps/candidates/:id/draft",
+                "/api/knowledge/gaps/candidates/{id}/draft",
                 get(routes::quality::draft_candidate),
             )
             .route("/api/qa/overview", get(routes::quality::qa_overview))
             .route("/api/qa/rebuild", post(routes::quality::qa_rebuild))
             .route(
-                "/api/qa/:conversationId",
+                "/api/qa/{conversationId}",
                 get(routes::quality::qa_conversation),
             )
             .route(
-                "/api/qa/:conversationId/analyze",
+                "/api/qa/{conversationId}/analyze",
                 post(routes::quality::qa_analyze),
             )
             .route(
@@ -1115,14 +1120,14 @@ impl HttpServer {
                 post(routes::quality::friction_rebuild),
             )
             .route(
-                "/api/friction/:conversationId",
+                "/api/friction/{conversationId}",
                 get(routes::quality::friction_conversation),
             )
             .route("/api/docs/collections", get(routes::docs::collections))
             .route("/api/docs/stats", get(routes::docs::stats))
             .route("/api/docs/search", get(routes::docs::search))
             .route("/api/docs/articles", get(routes::docs::articles))
-            .route("/api/docs/articles/:id", get(routes::docs::article))
+            .route("/api/docs/articles/{id}", get(routes::docs::article))
             .fallback(any(routes::not_found))
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
@@ -1212,7 +1217,7 @@ impl HttpServer {
 pub async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut term = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {},

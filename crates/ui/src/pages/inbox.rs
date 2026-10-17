@@ -1,5 +1,5 @@
-use leptos::*;
-use leptos_router::{use_location, use_navigate, use_query_map};
+use leptos::prelude::*;
+use leptos_router::hooks::{use_location, use_navigate, use_query_map};
 
 use crate::components::attribute_snapshot::AttributeSnapshotCard;
 use crate::components::coaching_panel::CoachingPanel;
@@ -175,55 +175,55 @@ fn parse_recipients(raw: &str) -> Vec<String> {
 
 #[component]
 pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl IntoView {
-    let conversations = create_rw_signal(Vec::<ConversationListItem>::new());
-    let total = create_rw_signal(0u32);
-    let filters = create_rw_signal(InboxFilters::default());
-    let selected_id = create_rw_signal(conversation_id);
-    let detail = create_rw_signal(None::<ConversationDetail>);
-    let detail_loading = create_rw_signal(false);
-    let detail_error = create_rw_signal(None::<String>);
-    let list_loading = create_rw_signal(true);
-    let list_error = create_rw_signal(None::<String>);
-    let saved_views = create_rw_signal(Vec::<SavedView>::new());
-    let composer_mode = create_rw_signal(ComposerMode::Reply);
-    let composer_body = create_rw_signal(String::new());
-    let composer_error = create_rw_signal(None::<String>);
-    let selected_ids = create_rw_signal(Vec::<i64>::new());
-    let context_tab = create_rw_signal(ContextTab::Ai);
-    let context_open = create_rw_signal(true);
-    let confirm_send = create_rw_signal(false);
-    let ai_analysis = create_rw_signal(None::<serde_json::Value>);
-    let ai_analyzing = create_rw_signal(false);
-    let similar = create_rw_signal(Vec::<SimilarConversation>::new());
+    let conversations = RwSignal::new(Vec::<ConversationListItem>::new());
+    let total = RwSignal::new(0u32);
+    let filters = RwSignal::new(InboxFilters::default());
+    let selected_id = RwSignal::new(conversation_id);
+    let detail = RwSignal::new(None::<ConversationDetail>);
+    let detail_loading = RwSignal::new(false);
+    let detail_error = RwSignal::new(None::<String>);
+    let list_loading = RwSignal::new(true);
+    let list_error = RwSignal::new(None::<String>);
+    let saved_views = RwSignal::new(Vec::<SavedView>::new());
+    let composer_mode = RwSignal::new(ComposerMode::Reply);
+    let composer_body = RwSignal::new(String::new());
+    let composer_error = RwSignal::new(None::<String>);
+    let selected_ids = RwSignal::new(Vec::<i64>::new());
+    let context_tab = RwSignal::new(ContextTab::Ai);
+    let context_open = RwSignal::new(true);
+    let confirm_send = RwSignal::new(false);
+    let ai_analysis = RwSignal::new(None::<serde_json::Value>);
+    let ai_analyzing = RwSignal::new(false);
+    let similar = RwSignal::new(Vec::<SimilarConversation>::new());
 
-    let users = create_rw_signal(Vec::<(i64, i64, String)>::new());
-    let mailboxes = create_rw_signal(Vec::<(i64, String)>::new());
-    let tag_names = create_rw_signal(Vec::<String>::new());
-    let saved_replies = create_rw_signal(Vec::<(String, String)>::new());
+    let users = RwSignal::new(Vec::<(i64, i64, String)>::new());
+    let mailboxes = RwSignal::new(Vec::<(i64, String)>::new());
+    let tag_names = RwSignal::new(Vec::<String>::new());
+    let saved_replies = RwSignal::new(Vec::<(String, String)>::new());
 
-    let composer_cc = create_rw_signal(String::new());
-    let composer_bcc = create_rw_signal(String::new());
-    let ai_drafting = create_rw_signal(false);
+    let composer_cc = RwSignal::new(String::new());
+    let composer_bcc = RwSignal::new(String::new());
+    let ai_drafting = RwSignal::new(false);
 
-    let editing_subject = create_rw_signal(false);
-    let subject_draft = create_rw_signal(String::new());
-    let snooze_until = create_rw_signal(String::new());
+    let editing_subject = RwSignal::new(false);
+    let subject_draft = RwSignal::new(String::new());
+    let snooze_until = RwSignal::new(String::new());
 
-    let bulk_action = create_rw_signal("close".to_string());
-    let bulk_param = create_rw_signal(String::new());
+    let bulk_action = RwSignal::new("close".to_string());
+    let bulk_param = RwSignal::new(String::new());
 
-    let tag_input = create_rw_signal(String::new());
+    let tag_input = RwSignal::new(String::new());
 
-    let saving_view = create_rw_signal(false);
-    let view_name = create_rw_signal(String::new());
-    let saved_reply_pick = create_rw_signal(String::new());
+    let saving_view = RwSignal::new(false);
+    let view_name = RwSignal::new(String::new());
+    let saved_reply_pick = RwSignal::new(String::new());
 
     let sse_refresh = crate::queries::version("conversations");
 
     let query_map = use_query_map();
     let location = use_location();
     let navigate = use_navigate();
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let m = query_map.get();
         let url_status = crate::url_state::query_str(&m, "view");
         let url_tag = crate::url_state::query_str(&m, "tag");
@@ -264,10 +264,10 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
             list_loading.set(true);
         }
     });
-    let sync_url = StoredValue::new({
+    let sync_url = StoredValue::new_local({
         let navigate = navigate.clone();
         let pathname = location.pathname;
-        std::rc::Rc::new(move || {
+        std::sync::Arc::new(move || {
             let f = filters.get_untracked();
             crate::url_state::replace_query(
                 &navigate,
@@ -288,10 +288,10 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                     ),
                 ],
             );
-        }) as std::rc::Rc<dyn Fn()>
+        }) as std::sync::Arc<dyn Fn() + Send + Sync>
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let users = users;
         let mailboxes = mailboxes;
         let tag_names = tag_names;
@@ -373,7 +373,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let conversations = conversations;
         let total = total;
         let list_loading = list_loading;
@@ -430,7 +430,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let saved_views = saved_views;
         wasm_bindgen_futures::spawn_local(async move {
             if let Ok(payload) = crate::api::get_json::<serde_json::Value>("/api/inbox-views").await
@@ -457,7 +457,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
         });
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let id = selected_id.get();
         let detail = detail;
         let detail_loading = detail_loading;
@@ -489,7 +489,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
         }
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let id = selected_id.get();
         ai_analysis.set(None);
         similar.set(Vec::new());
@@ -665,11 +665,9 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                 "Status change rejected"
                             })
                             .to_string();
-                        if ok {
-                            if let Some(id) = selected_id.get() {
-                                selected_id.set(None);
-                                selected_id.set(Some(id));
-                            }
+                        if ok && let Some(id) = selected_id.get() {
+                            selected_id.set(None);
+                            selected_id.set(Some(id));
                         }
                         let kind = if ok {
                             crate::toasts::ToastKind::Success
@@ -703,11 +701,9 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                 "Assignment rejected"
                             })
                             .to_string();
-                        if ok {
-                            if let Some(id) = selected_id.get() {
-                                selected_id.set(None);
-                                selected_id.set(Some(id));
-                            }
+                        if ok && let Some(id) = selected_id.get() {
+                            selected_id.set(None);
+                            selected_id.set(Some(id));
                         }
                         let kind = if ok {
                             crate::toasts::ToastKind::Success
@@ -1074,11 +1070,9 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                         .unwrap_or("Bulk action failed")
                         .to_string();
                     if ok {
-                        if open_in_selection {
-                            if let Some(id) = selected_id.get() {
-                                selected_id.set(None);
-                                selected_id.set(Some(id));
-                            }
+                        if open_in_selection && let Some(id) = selected_id.get() {
+                            selected_id.set(None);
+                            selected_id.set(Some(id));
                         }
                         let current = filters.get();
                         filters.set(InboxFilters::default());
@@ -1412,7 +1406,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                     <div class="spp-inbox__url-chips">
                         {move || {
                             let f = filters.get();
-                            let mut chips: Vec<leptos::View> = Vec::new();
+                            let mut chips: Vec<AnyView> = Vec::new();
                             if let Some(channel) = f.channel {
                                 let clear = {
                                     let filters = filters;
@@ -1434,7 +1428,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                             <span class="spp-chip__label">{label}</span>
                                             <button class="spp-chip__clear" aria-label="Clear channel filter" on:click=clear>"\u{d7}"</button>
                                         </span>
-                                    }.into_view(),
+                                    }.into_any(),
                                 );
                             }
                             if let Some(tag) = f.tag {
@@ -1453,7 +1447,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                             <span class="spp-chip__label">{format!("tag: {tag}")}</span>
                                             <button class="spp-chip__clear" aria-label="Clear tag filter" on:click=clear>"\u{d7}"</button>
                                         </span>
-                                    }.into_view(),
+                                    }.into_any(),
                                 );
                             }
                             chips
@@ -1770,7 +1764,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                         {move || detail.with(|d| {
                             let d = match d {
                                 Some(d) => d.clone(),
-                                None => return view! { <div></div> }.into_view(),
+                                None => return view! { <div></div> }.into_any(),
                             };
                             let d_status = d.status.clone();
                             let d_priority = d.priority.clone();
@@ -1812,7 +1806,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                                 "Cancel"
                                                             </button>
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
                                                     view! {
                                                         {move || {
@@ -1841,7 +1835,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                         >
                                                             "Edit"
                                                         </button>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 }
                                             }}
                                         </h3>
@@ -1862,7 +1856,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                         <label>"Status:"</label>
                                         <select
                                             class="spp-inbox__control"
-                                            value=d_status.clone()
+                                            prop:value=d_status.clone()
                                             on:change=move |ev| {
                                                 change_status(event_target_value(&ev));
                                             }
@@ -1876,7 +1870,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                         <label>"Assignee:"</label>
                                         <select
                                             class="spp-inbox__control"
-                                            value=d_assignee_id.clone()
+                                            prop:value=d_assignee_id.clone()
                                             on:change=move |ev| {
                                                 let val = event_target_value(&ev);
                                                 let remote: i64 = val.parse().unwrap_or(0);
@@ -1901,7 +1895,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                         <label>"Priority:"</label>
                                         <select
                                             class="spp-inbox__control"
-                                            value=d_priority.clone().unwrap_or_default()
+                                            prop:value=d_priority.clone().unwrap_or_default()
                                             on:change=move |ev| {
                                                 change_priority(event_target_value(&ev));
                                             }
@@ -1942,7 +1936,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                         {if d_thread_clone.is_empty() {
                                             view! {
                                                 <EmptyState message="No thread entries yet. Send a reply or note to start the conversation." />
-                                            }.into_view()
+                                            }.into_any()
                                         } else {
                                             d_thread_clone.iter().map(|entry| {
                                                 let class = match entry.thread_type.as_str() {
@@ -1973,9 +1967,9 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                             {if is_draft {
                                                                 view! {
                                                                     <span class="spp-badge spp-badge--warn">"draft"</span>
-                                                                }.into_view()
+                                                                }.into_any()
                                                             } else {
-                                                                ().into_view()
+                                                                ().into_any()
                                                             }}
                                                         </div>
                                                         <SafeHtml html=entry_body fallback_text=String::new() />
@@ -1997,13 +1991,13 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                                         "Cancel schedule"
                                                                     </button>
                                                                 </div>
-                                                            }.into_view()
+                                                            }.into_any()
                                                         } else {
-                                                            ().into_view()
+                                                            ().into_any()
                                                         }}
                                                     </div>
                                                 }
-                                            }).collect::<Vec<_>>().into_view()
+                                            }).collect::<Vec<_>>().into_any()
                                         }}
                                     </div>
 
@@ -2040,7 +2034,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                     rows=6
                                                     submit_on_enter=true
                                                     submit_key_code=13
-                                                    on_submit={std::rc::Rc::new(request_submit) as std::rc::Rc<dyn Fn()>}
+                                                    on_submit={std::sync::Arc::new(request_submit) as std::sync::Arc<dyn Fn() + Send + Sync>}
                                                 />
                                             }
                                         >
@@ -2050,7 +2044,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                 rows=6
                                                 submit_on_enter=true
                                                 submit_key_code=13
-                                                on_submit={std::rc::Rc::new(request_submit) as std::rc::Rc<dyn Fn()>}
+                                                on_submit={std::sync::Arc::new(request_submit) as std::sync::Arc<dyn Fn() + Send + Sync>}
                                             />
                                         </Show>
                                         <Show
@@ -2181,7 +2175,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                         </Show>
                                     </div>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         })}
                     </Show>
                 </Show>
@@ -2292,14 +2286,14 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                                             <strong>"Topics: "</strong>
                                                                             {topics.join(", ")}
                                                                         </div>
-                                                                    }.into_view()
+                                                                    }.into_any()
                                                                 } else {
-                                                                    ().into_view()
+                                                                    ().into_any()
                                                                 }}
                                                             </div>
-                                                        }.into_view()
+                                                        }.into_any()
                                                     }
-                                                    None => ().into_view(),
+                                                    None => ().into_any(),
                                                 }
                                             }}
 
@@ -2309,7 +2303,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                 if rows.is_empty() {
                                                     view! {
                                                         <div class="spp-muted spp-text-xs">"No similar conversations found yet."</div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
                                                     rows.iter().map(|s| {
                                                         let href = format!("/inbox/conversation/{}", s.conversation_id);
@@ -2322,20 +2316,20 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                                 {if !s.why.is_empty() {
                                                                     view! {
                                                                         <div class="spp-muted spp-text-xs">{s.why.join(" · ")}</div>
-                                                                    }.into_view()
+                                                                    }.into_any()
                                                                 } else {
-                                                                    ().into_view()
+                                                                    ().into_any()
                                                                 }}
                                                                 {if !s.resolution.is_empty() {
                                                                     view! {
                                                                         <div class="spp-text-xs spp-ai-similar__resolution">{s.resolution.clone()}</div>
-                                                                    }.into_view()
+                                                                    }.into_any()
                                                                 } else {
-                                                                    ().into_view()
+                                                                    ().into_any()
                                                                 }}
                                                             </div>
                                                         }
-                                                    }).collect::<Vec<_>>().into_view()
+                                                    }).collect::<Vec<_>>().into_any()
                                                 }
                                             }}
                                         </div>
@@ -2349,7 +2343,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                     {move || detail.with(|d| {
                                         let d = match d {
                                             Some(d) => d.clone(),
-                                            None => return view! { <div></div> }.into_view(),
+                                            None => return view! { <div></div> }.into_any(),
                                         };
                                         let c_name = d.customer_name.clone().unwrap_or_else(|| format!("#{}", d.customer_id));
                                         let c_email = d.customer_email.clone();
@@ -2402,12 +2396,12 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                                 }
                                                             }).collect::<Vec<_>>()}
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
                                                     view! {
                                                         <h3>"Tags"</h3>
                                                         <div class="spp-muted spp-text-xs">"No tags yet."</div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 }}
                                                 <div class="spp-flex spp-mt-8">
                                                     <input
@@ -2435,7 +2429,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                                     </button>
                                                 </div>
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     })}
                                 </Show>
 
@@ -2455,7 +2449,7 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
                                     <ActivityTab conversation_id=conv_id />
                                 </Show>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }}
                 </Show>
             </aside>
@@ -2465,12 +2459,12 @@ pub fn InboxPage(#[prop(optional, into)] conversation_id: Option<i64>) -> impl I
 
 #[component]
 fn ActivityTab(conversation_id: i64) -> impl IntoView {
-    let events = create_rw_signal(Vec::<serde_json::Value>::new());
-    let audit = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let events = RwSignal::new(Vec::<serde_json::Value>::new());
+    let audit = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let conversation_id = conversation_id;
         let events = events;
         let audit = audit;

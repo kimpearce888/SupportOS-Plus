@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CopilotMessage {
@@ -53,12 +54,12 @@ pub fn parse_copilot_message(v: &serde_json::Value) -> CopilotMessage {
 
 #[component]
 pub fn CopilotPanel(conversation_id: i64) -> impl IntoView {
-    let session_id = create_rw_signal(None::<i64>);
-    let messages = create_rw_signal(Vec::<CopilotMessage>::new());
-    let question = create_rw_signal(String::new());
-    let sending = create_rw_signal(false);
-    let failure = create_rw_signal(None::<String>);
-    let starters = create_rw_signal(Vec::<(String, String)>::new());
+    let session_id = RwSignal::new(None::<i64>);
+    let messages = RwSignal::new(Vec::<CopilotMessage>::new());
+    let question = RwSignal::new(String::new());
+    let sending = RwSignal::new(false);
+    let failure = RwSignal::new(None::<String>);
+    let starters = RwSignal::new(Vec::<(String, String)>::new());
 
     let load_latest = move || {
         let session_id = session_id;
@@ -80,21 +81,21 @@ pub fn CopilotPanel(conversation_id: i64) -> impl IntoView {
                         .collect()
                 })
                 .unwrap_or_default();
-            if session_id.get_untracked().is_none() {
-                if let Some(latest) = mine.first() {
-                    session_id.set(Some(*latest));
-                    if let Ok(r) = crate::api::get_json::<serde_json::Value>(&format!(
-                        "/api/copilot/sessions/{latest}"
-                    ))
-                    .await
-                    {
-                        let parsed = r
-                            .get("messages")
-                            .and_then(|m| m.as_array())
-                            .map(|rows| rows.iter().map(parse_copilot_message).collect())
-                            .unwrap_or_default();
-                        messages.set(parsed);
-                    }
+            if session_id.get_untracked().is_none()
+                && let Some(latest) = mine.first()
+            {
+                session_id.set(Some(*latest));
+                if let Ok(r) = crate::api::get_json::<serde_json::Value>(&format!(
+                    "/api/copilot/sessions/{latest}"
+                ))
+                .await
+                {
+                    let parsed = r
+                        .get("messages")
+                        .and_then(|m| m.as_array())
+                        .map(|rows| rows.iter().map(parse_copilot_message).collect())
+                        .unwrap_or_default();
+                    messages.set(parsed);
                 }
             }
         });
@@ -279,9 +280,9 @@ pub fn CopilotPanel(conversation_id: i64) -> impl IntoView {
                                                 <span class="spp-badge spp-badge--tag" title="Number of read-only tool calls used">
                                                     {t}
                                                 </span>
-                                            }.into_view()
+                                            }.into_any()
                                         } else {
-                                            ().into_view()
+                                            ().into_any()
                                         }}
                                         {if !citations.is_empty() {
                                             view! {
@@ -304,18 +305,18 @@ pub fn CopilotPanel(conversation_id: i64) -> impl IntoView {
                                                                     {if let Some(href) = open_link {
                                                                         view! {
                                                                             <a class="spp-text-xs" href=href>"open"</a>
-                                                                        }.into_view()
+                                                                        }.into_any()
                                                                     } else {
-                                                                        ().into_view()
+                                                                        ().into_any()
                                                                     }}
                                                                 </div>
                                                             }
                                                         })
                                                         .collect::<Vec<_>>()}
                                                 </div>
-                                            }.into_view()
+                                            }.into_any()
                                         } else {
-                                            ().into_view()
+                                            ().into_any()
                                         }}
                                     </div>
                                 }

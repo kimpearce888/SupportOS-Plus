@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -610,35 +610,37 @@ pub fn render_template(text: &str, ctx: &serde_json::Value) -> (String, Vec<Stri
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'{' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            if let Some(close) = text[i + 2..].find("}}") {
-                let inner = &text[i + 2..i + 2 + close];
-                let raw_name = inner.trim();
-                let name = raw_name.to_lowercase();
-                if !raw_name.is_empty()
-                    && raw_name
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-                {
-                    if PERSONALIZATION_VARIABLES.contains(&name.as_str()) {
-                        let v = &ctx[&name];
-                        match v {
-                            serde_json::Value::Null => {
-                                unresolved.push(name.clone());
-                            }
-                            serde_json::Value::String(s) if s.is_empty() => {
-                                unresolved.push(name.clone());
-                            }
-                            serde_json::Value::String(s) => out.push_str(s),
-                            other => out.push_str(&other.to_string()),
+        if bytes[i] == b'{'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'{'
+            && let Some(close) = text[i + 2..].find("}}")
+        {
+            let inner = &text[i + 2..i + 2 + close];
+            let raw_name = inner.trim();
+            let name = raw_name.to_lowercase();
+            if !raw_name.is_empty()
+                && raw_name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                if PERSONALIZATION_VARIABLES.contains(&name.as_str()) {
+                    let v = &ctx[&name];
+                    match v {
+                        serde_json::Value::Null => {
+                            unresolved.push(name.clone());
                         }
-                    } else {
-                        unresolved.push(name);
-                        out.push_str(&format!("{{{{{raw_name}}}}}"));
+                        serde_json::Value::String(s) if s.is_empty() => {
+                            unresolved.push(name.clone());
+                        }
+                        serde_json::Value::String(s) => out.push_str(s),
+                        other => out.push_str(&other.to_string()),
                     }
-                    i = i + 2 + close + 2;
-                    continue;
+                } else {
+                    unresolved.push(name);
+                    out.push_str(&format!("{{{{{raw_name}}}}}"));
                 }
+                i = i + 2 + close + 2;
+                continue;
             }
         }
         let ch_len = text[i..].chars().next().map_or(1, char::len_utf8);
@@ -787,10 +789,10 @@ pub fn campaign_validate(conn: &Connection, campaign_id: i64) -> serde_json::Val
             .unwrap_or_default();
         let rendered = render_for(conn, *cid, &tickets, &c.subject, &c.body);
         for v in rendered["unresolved"].as_array().unwrap_or(&Vec::new()) {
-            if let Some(name) = v.as_str() {
-                if !unresolved_vars.contains(&name.to_string()) {
-                    unresolved_vars.push(name.to_string());
-                }
+            if let Some(name) = v.as_str()
+                && !unresolved_vars.contains(&name.to_string())
+            {
+                unresolved_vars.push(name.to_string());
             }
         }
     }
@@ -1077,31 +1079,35 @@ pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Va
             3,
         );
     } else {
-        if let Some(c) = get_outreach_campaign(conn, campaign_id).ok().flatten() {
-            if c.status != "completed" && c.status != "cancelled" && c.status != "paused" {
-                update_status(conn, campaign_id, "completed");
-                let _ = conn.execute(
-                    "UPDATE outreach_campaigns SET completed_at = datetime('now') WHERE id = ?1",
-                    [campaign_id],
-                );
-                log_event(
-                    conn,
-                    campaign_id,
-                    None,
-                    "campaign_completed",
-                    Some(&format!(
-                        "{} sent, {} failed, {} skipped{}",
-                        c.sent,
-                        c.failed,
-                        c.skipped,
-                        if still_unknown > 0 {
-                            format!(", {still_unknown} recipients left with unknown delivery outcomes (attempts exhausted)")
-                        } else {
-                            String::new()
-                        }
-                    )),
-                );
-            }
+        if let Some(c) = get_outreach_campaign(conn, campaign_id).ok().flatten()
+            && c.status != "completed"
+            && c.status != "cancelled"
+            && c.status != "paused"
+        {
+            update_status(conn, campaign_id, "completed");
+            let _ = conn.execute(
+                "UPDATE outreach_campaigns SET completed_at = datetime('now') WHERE id = ?1",
+                [campaign_id],
+            );
+            log_event(
+                conn,
+                campaign_id,
+                None,
+                "campaign_completed",
+                Some(&format!(
+                    "{} sent, {} failed, {} skipped{}",
+                    c.sent,
+                    c.failed,
+                    c.skipped,
+                    if still_unknown > 0 {
+                        format!(
+                            ", {still_unknown} recipients left with unknown delivery outcomes (attempts exhausted)"
+                        )
+                    } else {
+                        String::new()
+                    }
+                )),
+            );
         }
     }
     serde_json::json!({ "resolvedSent": resolved_sent, "returnedToQueue": returned, "stillUnknown": still_unknown })
@@ -1117,11 +1123,10 @@ pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
                 AND r.replied_at IS NULL
                 AND r.hs_conversation_remote_id IS NOT NULL",
         )?;
-        let rows = stmt
-            .query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+
+        stmt.query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .filter_map(|r| r.ok())
-            .collect();
-        rows
+            .collect()
     };
     let mut replied = 0i64;
     for (id, remote_id, sent_at) in sent {
@@ -1204,38 +1209,36 @@ pub fn campaign_report(conn: &Connection, campaign_id: i64) -> serde_json::Value
            LEFT JOIN conversations cv ON cv.remote_id = r.hs_conversation_remote_id
           WHERE r.campaign_id = ?1 AND r.replied_at IS NOT NULL
           ORDER BY r.replied_at DESC LIMIT 500",
-    ) {
-        if let Ok(rows) = stmt.query_map([campaign_id], |r| {
-            Ok(serde_json::json!({
-                "customer_local_id": r.get::<_, i64>(0)?,
-                "email": r.get::<_, Option<String>>(1)?,
-                "hs_conversation_number": r.get::<_, Option<i64>>(2)?,
-                "replied_at": r.get::<_, Option<String>>(3)?,
-                "first_name": r.get::<_, Option<String>>(4)?,
-                "last_name": r.get::<_, Option<String>>(5)?,
-                "conversation_local_id": r.get::<_, Option<i64>>(6)?,
-            }))
-        }) {
-            for row in rows.flatten() {
-                let name = {
-                    let first = row["first_name"].as_str().unwrap_or("");
-                    let last = row["last_name"].as_str().unwrap_or("");
-                    let joined = format!("{first} {last}").trim().to_string();
-                    if !joined.is_empty() {
-                        joined
-                    } else if let Some(e) = row["email"].as_str() {
-                        e.to_string()
-                    } else {
-                        format!("customer {}", row["customer_local_id"])
-                    }
-                };
-                replies.push(serde_json::json!({
-                    "customer": name,
-                    "conversation_number": row["hs_conversation_number"],
-                    "conversation_local_id": row["conversation_local_id"],
-                    "replied_at": row["replied_at"],
-                }));
-            }
+    ) && let Ok(rows) = stmt.query_map([campaign_id], |r| {
+        Ok(serde_json::json!({
+            "customer_local_id": r.get::<_, i64>(0)?,
+            "email": r.get::<_, Option<String>>(1)?,
+            "hs_conversation_number": r.get::<_, Option<i64>>(2)?,
+            "replied_at": r.get::<_, Option<String>>(3)?,
+            "first_name": r.get::<_, Option<String>>(4)?,
+            "last_name": r.get::<_, Option<String>>(5)?,
+            "conversation_local_id": r.get::<_, Option<i64>>(6)?,
+        }))
+    }) {
+        for row in rows.flatten() {
+            let name = {
+                let first = row["first_name"].as_str().unwrap_or("");
+                let last = row["last_name"].as_str().unwrap_or("");
+                let joined = format!("{first} {last}").trim().to_string();
+                if !joined.is_empty() {
+                    joined
+                } else if let Some(e) = row["email"].as_str() {
+                    e.to_string()
+                } else {
+                    format!("customer {}", row["customer_local_id"])
+                }
+            };
+            replies.push(serde_json::json!({
+                "customer": name,
+                "conversation_number": row["hs_conversation_number"],
+                "conversation_local_id": row["conversation_local_id"],
+                "replied_at": row["replied_at"],
+            }));
         }
     }
     let reply_rate = if c.sent > 0 {
@@ -1895,14 +1898,14 @@ pub async fn send_batch(
                     SendOutcome::FailedRetryable(_) => counts.retryable += 1,
                     SendOutcome::Unknown(_) => counts.unknown += 1,
                 }
-                if let SendOutcome::FailedRetryable(msg) = &o {
-                    if attempt_no >= SEND_MAX_ATTEMPTS {
-                        counts.retryable -= 1;
-                        counts.failed_permanent += 1;
-                        o = SendOutcome::FailedPermanent(format!(
-                            "{msg} (attempts exhausted: {attempt_no})"
-                        ));
-                    }
+                if let SendOutcome::FailedRetryable(msg) = &o
+                    && attempt_no >= SEND_MAX_ATTEMPTS
+                {
+                    counts.retryable -= 1;
+                    counts.failed_permanent += 1;
+                    o = SendOutcome::FailedPermanent(format!(
+                        "{msg} (attempts exhausted: {attempt_no})"
+                    ));
                 }
                 o
             }

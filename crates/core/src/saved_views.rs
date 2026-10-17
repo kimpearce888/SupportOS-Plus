@@ -78,10 +78,10 @@ pub fn resolve_timezone(explicit: Option<&str>, stored_setting: Option<&str>) ->
             return candidate.to_string();
         }
     }
-    if let Ok(tz) = std::env::var("TZ") {
-        if is_valid_timezone(&tz) {
-            return tz;
-        }
+    if let Ok(tz) = std::env::var("TZ")
+        && is_valid_timezone(&tz)
+    {
+        return tz;
     }
     "UTC".to_string()
 }
@@ -197,19 +197,17 @@ pub fn resolve_date_range(input: &DateRangeInput<'_>) -> Option<DateRange> {
     let with_time_bounds = |from: i64, to: i64, kind: DateRangeKind, label: &str| -> DateRange {
         let mut f = from;
         let mut t = to;
-        if let Some(from_min) = parse_time_of_day(input.from_time) {
-            if let Some((fy, fmo, fd, _, _)) = wall_parts(f, &tz) {
-                if let Some(inst) = local_instant_ms(&tz, fy, fmo, fd, from_min) {
-                    f = inst;
-                }
-            }
+        if let Some(from_min) = parse_time_of_day(input.from_time)
+            && let Some((fy, fmo, fd, _, _)) = wall_parts(f, &tz)
+            && let Some(inst) = local_instant_ms(&tz, fy, fmo, fd, from_min)
+        {
+            f = inst;
         }
-        if let Some(to_min) = parse_time_of_day(input.to_time) {
-            if let Some((ly, lmo, ld, _, _)) = wall_parts(t - 1, &tz) {
-                if let Some(inst) = local_instant_ms(&tz, ly, lmo, ld, to_min) {
-                    t = inst;
-                }
-            }
+        if let Some(to_min) = parse_time_of_day(input.to_time)
+            && let Some((ly, lmo, ld, _, _)) = wall_parts(t - 1, &tz)
+            && let Some(inst) = local_instant_ms(&tz, ly, lmo, ld, to_min)
+        {
+            t = inst;
         }
         DateRange {
             from: iso_utc(f),
@@ -1695,14 +1693,12 @@ impl<'a> ViewEngine<'a> {
                 if lowered.is_empty() {
                     return Ok(Fragment::empty());
                 }
-                let tag_exists = |names: &[String]| {
-                    Fragment {
+                let tag_exists = |names: &[String]| Fragment {
                     sql: format!(
                         "EXISTS (SELECT 1 FROM conversation_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.conversation_id = c.id AND LOWER(t.name) IN ({}))",
                         placeholders(names.len()).join(",")
                     ),
                     params: names.iter().map(|n| text(n)).collect(),
-                }
                 };
                 if mode == "any" {
                     return Ok(tag_exists(&lowered));
@@ -1731,24 +1727,46 @@ impl<'a> ViewEngine<'a> {
                 let base = "cf.field_id = ?";
                 match op.as_str() {
                     "is_empty" => Ok(Fragment {
-                        sql: format!("NOT EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND cf.value IS NOT NULL AND cf.value <> '')"),
+                        sql: format!(
+                            "NOT EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND cf.value IS NOT NULL AND cf.value <> '')"
+                        ),
                         params: vec![integer(*field_local_id)],
                     }),
                     "is_not_empty" => Ok(Fragment {
-                        sql: format!("EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND cf.value IS NOT NULL AND cf.value <> '')"),
+                        sql: format!(
+                            "EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND cf.value IS NOT NULL AND cf.value <> '')"
+                        ),
                         params: vec![integer(*field_local_id)],
                     }),
                     "equals" => Ok(Fragment {
-                        sql: format!("EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND LOWER(cf.value) = LOWER(?))"),
-                        params: vec![integer(*field_local_id), text(value.as_deref().unwrap_or(""))],
+                        sql: format!(
+                            "EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND LOWER(cf.value) = LOWER(?))"
+                        ),
+                        params: vec![
+                            integer(*field_local_id),
+                            text(value.as_deref().unwrap_or("")),
+                        ],
                     }),
                     "not_equals" => Ok(Fragment {
-                        sql: format!("NOT EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND LOWER(cf.value) = LOWER(?))"),
-                        params: vec![integer(*field_local_id), text(value.as_deref().unwrap_or(""))],
+                        sql: format!(
+                            "NOT EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND LOWER(cf.value) = LOWER(?))"
+                        ),
+                        params: vec![
+                            integer(*field_local_id),
+                            text(value.as_deref().unwrap_or("")),
+                        ],
                     }),
                     "contains" => Ok(Fragment {
-                        sql: format!("EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND cf.value LIKE ? ESCAPE '\\')"),
-                        params: vec![integer(*field_local_id), text(&format!("%{}%", escape_like(value.as_deref().unwrap_or(""))))],
+                        sql: format!(
+                            "EXISTS (SELECT 1 FROM conversation_fields cf WHERE cf.conversation_id = c.id AND {base} AND cf.value LIKE ? ESCAPE '\\')"
+                        ),
+                        params: vec![
+                            integer(*field_local_id),
+                            text(&format!(
+                                "%{}%",
+                                escape_like(value.as_deref().unwrap_or(""))
+                            )),
+                        ],
                     }),
                     other => Err(ViewCompileError::new(format!(
                         "Unsupported custom_field operator: {other}"
@@ -1764,24 +1782,46 @@ impl<'a> ViewEngine<'a> {
                 let cust_join = "cp.customer_id = c.customer_local_id";
                 match op.as_str() {
                     "is_empty" => Ok(Fragment {
-                        sql: format!("c.customer_local_id IS NULL OR NOT EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND cp.value IS NOT NULL AND cp.value <> '')"),
+                        sql: format!(
+                            "c.customer_local_id IS NULL OR NOT EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND cp.value IS NOT NULL AND cp.value <> '')"
+                        ),
                         params: vec![integer(*definition_id)],
                     }),
                     "is_not_empty" => Ok(Fragment {
-                        sql: format!("EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND cp.value IS NOT NULL AND cp.value <> '')"),
+                        sql: format!(
+                            "EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND cp.value IS NOT NULL AND cp.value <> '')"
+                        ),
                         params: vec![integer(*definition_id)],
                     }),
                     "equals" => Ok(Fragment {
-                        sql: format!("EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND LOWER(cp.value) = LOWER(?))"),
-                        params: vec![integer(*definition_id), text(value.as_deref().unwrap_or(""))],
+                        sql: format!(
+                            "EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND LOWER(cp.value) = LOWER(?))"
+                        ),
+                        params: vec![
+                            integer(*definition_id),
+                            text(value.as_deref().unwrap_or("")),
+                        ],
                     }),
                     "not_equals" => Ok(Fragment {
-                        sql: format!("NOT EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND LOWER(cp.value) = LOWER(?))"),
-                        params: vec![integer(*definition_id), text(value.as_deref().unwrap_or(""))],
+                        sql: format!(
+                            "NOT EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND LOWER(cp.value) = LOWER(?))"
+                        ),
+                        params: vec![
+                            integer(*definition_id),
+                            text(value.as_deref().unwrap_or("")),
+                        ],
                     }),
                     "contains" => Ok(Fragment {
-                        sql: format!("EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND cp.value LIKE ? ESCAPE '\\')"),
-                        params: vec![integer(*definition_id), text(&format!("%{}%", escape_like(value.as_deref().unwrap_or(""))))],
+                        sql: format!(
+                            "EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND cp.value LIKE ? ESCAPE '\\')"
+                        ),
+                        params: vec![
+                            integer(*definition_id),
+                            text(&format!(
+                                "%{}%",
+                                escape_like(value.as_deref().unwrap_or(""))
+                            )),
+                        ],
                     }),
                     "gt" | "gte" | "lt" | "lte" => {
                         let n = value
@@ -1800,7 +1840,9 @@ impl<'a> ViewEngine<'a> {
                             _ => "<=",
                         };
                         Ok(Fragment {
-                            sql: format!("EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND CAST(cp.value AS REAL) {op_sql} ?)"),
+                            sql: format!(
+                                "EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND CAST(cp.value AS REAL) {op_sql} ?)"
+                            ),
                             params: vec![integer(*definition_id), real(n)],
                         })
                     }
@@ -2130,7 +2172,9 @@ impl<'a> ViewEngine<'a> {
                         }
                     };
                     return Ok(Fragment {
-                        sql: format!("EXISTS (SELECT 1 FROM ai_attributes aa WHERE aa.conversation_id = c.id AND aa.attribute = ? AND aa.superseded_at IS NULL AND CAST(aa.value AS REAL) {op_sql} ?)"),
+                        sql: format!(
+                            "EXISTS (SELECT 1 FROM ai_attributes aa WHERE aa.conversation_id = c.id AND aa.attribute = ? AND aa.superseded_at IS NULL AND CAST(aa.value AS REAL) {op_sql} ?)"
+                        ),
                         params: vec![text(attr), real(n)],
                     });
                 }

@@ -1,4 +1,5 @@
-use leptos::*;
+use leptos::prelude::*;
+use leptos::task::*;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -162,12 +163,12 @@ pub fn affected_customer_name(c: &AffectedCustomer) -> String {
 
 #[component]
 pub fn FrictionTab() -> impl IntoView {
-    let overview = create_rw_signal(None::<FrictionOverview>);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let notice = create_rw_signal(None::<(String, String)>);
-    let days = create_rw_signal(30i64);
-    let rebuilding = create_rw_signal(false);
+    let overview = RwSignal::new(None::<FrictionOverview>);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let notice = RwSignal::new(None::<(String, String)>);
+    let days = RwSignal::new(30i64);
+    let rebuilding = RwSignal::new(false);
 
     let load = {
         move |days: i64| {
@@ -271,22 +272,22 @@ pub fn FrictionTab() -> impl IntoView {
                     } else {
                         "spp-alert spp-alert--error"
                     };
-                    view! { <div class=class><div class="spp-text-sm">{message}</div></div> }.into_view()
+                    view! { <div class=class><div class="spp-text-sm">{message}</div></div> }.into_any()
                 } else {
-                    ().into_view()
+                    ().into_any()
                 }
             }}
             {move || {
                 let o = overview.clone().get().unwrap_or_default();
                 if loading.get() {
-                    return ().into_view();
+                    return ().into_any();
                 }
                 let all_zero = o.kinds.iter().all(|k| k.conversations == 0);
                 view! {
                     {if all_zero {
                         view! {
                             <EmptyState message="No friction findings yet. Findings appear after conversations are analyzed. Press Rebuild to cover existing history." />
-                        }.into_view()
+                        }.into_any()
                     } else {
                         o.kinds
                             .iter()
@@ -306,9 +307,9 @@ pub fn FrictionTab() -> impl IntoView {
                                                         <span class="spp-badge spp-badge--warn">
                                             {format!(" {} high", k.high_severity)}
                                                         </span>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                             </span>
                                         </div>
@@ -354,9 +355,9 @@ pub fn FrictionTab() -> impl IntoView {
                                                                                             })
                                                                                             .collect::<Vec<_>>()}
                                                                                     </div>
-                                                                                }.into_view()
+                                                                                }.into_any()
                                                                             } else {
-                                                                                ().into_view()
+                                                                                ().into_any()
                                                                             }}
                                                                         </td>
                                                                     </tr>
@@ -365,15 +366,15 @@ pub fn FrictionTab() -> impl IntoView {
                                                             .collect::<Vec<_>>()}
                                                     </tbody>
                                                 </table>
-                                            }.into_view()
+                                            }.into_any()
                                         } else {
-                                            ().into_view()
+                                            ().into_any()
                                         }}
                                     </div>
                                 }
                             })
                             .collect::<Vec<_>>()
-                            .into_view()
+                            .into_any()
                     }}
                     {if !o.customers_most_affected.is_empty() {
                         view! {
@@ -399,9 +400,9 @@ pub fn FrictionTab() -> impl IntoView {
                                         .collect::<Vec<_>>()}
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     } else {
-                        ().into_view()
+                        ().into_any()
                     }}
                     <div class="spp-alert spp-alert--info spp-mt-12">
                         {o.notes
@@ -409,7 +410,7 @@ pub fn FrictionTab() -> impl IntoView {
                             .map(|n| view! { <div class="spp-text-sm">{n.clone()}</div> })
                             .collect::<Vec<_>>()}
                     </div>
-                }.into_view()
+                }.into_any()
             }}
         </div>
     }

@@ -143,12 +143,12 @@ pub fn process_event(conn: &Connection, row_id: i64, event_type: &str, raw: &str
         _ => {}
     }
 
-    if let Some((kind, payload)) = enqueued {
-        if let Err(e) = jobs::enqueue(conn, kind, &payload.to_string()) {
-            tracing::error!(error = %e, kind, "failed to enqueue webhook job");
-            let _ = webhook::set_webhook_event_state(conn, row_id, "failed", Some(&e.to_string()));
-            return;
-        }
+    if let Some((kind, payload)) = enqueued
+        && let Err(e) = jobs::enqueue(conn, kind, &payload.to_string())
+    {
+        tracing::error!(error = %e, kind, "failed to enqueue webhook job");
+        let _ = webhook::set_webhook_event_state(conn, row_id, "failed", Some(&e.to_string()));
+        return;
     }
 
     let _ = webhook::set_webhook_event_state(conn, row_id, "processed", None);

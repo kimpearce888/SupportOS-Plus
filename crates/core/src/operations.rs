@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::catalog::OperationsTileKey;
 use crate::error::{Error, Result};
@@ -38,7 +38,9 @@ pub fn tile_fragment(
 ) -> Option<(String, Vec<rusqlite::types::Value>)> {
     let sql: String = match key {
         "unassigned" => {
-            format!("{NOT_DELETED} AND c.status IN ('active','pending') AND c.assignee_local_id IS NULL")
+            format!(
+                "{NOT_DELETED} AND c.status IN ('active','pending') AND c.assignee_local_id IS NULL"
+            )
         }
         "needs_first_response" => {
             format!("{NOT_DELETED} AND ({RESPONSE_STATE_SQL}) = 'needs_first_response'")
@@ -170,11 +172,7 @@ fn sanitize_scope(mailbox_ids: Option<&[i64]>) -> Option<Vec<i64>> {
         .filter(|id| *id > 0)
         .take(50)
         .collect();
-    if ids.is_empty() {
-        None
-    } else {
-        Some(ids)
-    }
+    if ids.is_empty() { None } else { Some(ids) }
 }
 
 pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<OperationsSnapshot> {

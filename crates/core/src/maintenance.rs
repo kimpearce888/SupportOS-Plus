@@ -61,11 +61,10 @@ pub fn compute_trends(conn: &Connection) -> Result<()> {
                    AND julianday(c.created_at) <  julianday('now', '-14 days')) AS previous
              FROM issue_clusters ic",
         )?;
-        let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .filter_map(|r| r.ok())
-            .collect();
-        rows
+            .collect()
     };
     let tx = conn.unchecked_transaction()?;
     for (id, recent, previous) in clusters {

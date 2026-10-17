@@ -1,5 +1,5 @@
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::hooks::*;
 
 pub const MAX_HITS: usize = 12;
 
@@ -62,22 +62,23 @@ pub fn response_is_current(issued_generation: u64, latest_generation: u64) -> bo
 }
 
 #[component]
-pub fn CommandPalette<F>(#[prop(into)] open: MaybeSignal<bool>, on_close: F) -> impl IntoView
+pub fn CommandPalette<F>(#[prop(into)] open: Signal<bool>, on_close: F) -> impl IntoView
 where
     F: Fn() + 'static,
 {
-    let query = create_rw_signal(String::new());
-    let hits = create_rw_signal(Vec::<PaletteHit>::new());
-    let selected = create_rw_signal(0usize);
-    let searching = create_rw_signal(false);
-    let generation = create_rw_signal(0u64);
+    let query = RwSignal::new(String::new());
+    let hits = RwSignal::new(Vec::<PaletteHit>::new());
+    let selected = RwSignal::new(0usize);
+    let searching = RwSignal::new(false);
+    let generation = RwSignal::new(0u64);
 
-    let close_handler = StoredValue::new(std::sync::Arc::new(on_close) as std::sync::Arc<dyn Fn()>);
+    let close_handler =
+        StoredValue::new_local(std::sync::Arc::new(on_close) as std::sync::Arc<dyn Fn()>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let q = query.get();
-        let gen = generation.get() + 1;
-        generation.set(gen);
+        let req_id = generation.get() + 1;
+        generation.set(req_id);
         if q.trim().is_empty() {
             hits.set(Vec::new());
             selected.set(0);
@@ -87,7 +88,7 @@ where
         searching.set(true);
         set_timeout(
             move || {
-                if !response_is_current(gen, generation.get_untracked()) {
+                if !response_is_current(req_id, generation.get_untracked()) {
                     return;
                 }
                 wasm_bindgen_futures::spawn_local(async move {
@@ -95,7 +96,7 @@ where
                     let result =
                         crate::api::post_json::<serde_json::Value>("/api/search", Some(&body))
                             .await;
-                    if !response_is_current(gen, generation.get_untracked()) {
+                    if !response_is_current(req_id, generation.get_untracked()) {
                         return;
                     }
                     match result {
@@ -120,7 +121,7 @@ where
         );
     });
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         if open.get() {
             query.set(String::new());
             hits.set(Vec::new());
@@ -129,16 +130,16 @@ where
         }
     });
 
-    let go = StoredValue::new({
+    let go = StoredValue::new_local({
         let navigate = use_navigate();
-        std::rc::Rc::new(move |hit: Option<PaletteHit>| {
-            if let Some(hit) = hit {
-                if !hit.href.is_empty() {
-                    close_handler.with_value(|f| f());
-                    navigate(&hit.href, Default::default());
-                }
+        std::sync::Arc::new(move |hit: Option<PaletteHit>| {
+            if let Some(hit) = hit
+                && !hit.href.is_empty()
+            {
+                close_handler.with_value(|f| f());
+                navigate(&hit.href, Default::default());
             }
-        }) as std::rc::Rc<dyn Fn(Option<PaletteHit>)>
+        }) as std::sync::Arc<dyn Fn(Option<PaletteHit>) + Send + Sync>
     });
 
     view! {
@@ -212,9 +213,9 @@ where
                                                         <div class="spp-command-palette__item-desc">
                                                             {snippet}
                                                         </div>
-                                                    }.into_view()
+                                                    }.into_any()
                                                 } else {
-                                                    ().into_view()
+                                                    ().into_any()
                                                 }}
                                             </div>
                                         }
@@ -232,7 +233,7 @@ where
                                             {format!("No results for \u{201c}{q}\u{201d}")}
                                         </p>
                                     </div>
-                                }.into_view()
+                                }.into_any()
                             } else if q.trim().is_empty() {
                                 view! {
                                     <p class="spp-command-palette__hint">
@@ -240,9 +241,9 @@ where
                                         <span class="spp-kbd">"↵"</span> " open · "
                                         <span class="spp-kbd">"↑↓"</span> " navigate"
                                     </p>
-                                }.into_view()
+                                }.into_any()
                             } else {
-                                ().into_view()
+                                ().into_any()
                             }
                         }}
                     </div>
@@ -258,9 +259,9 @@ where
                                         {format!("{n} results")}
                                     </span>
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         } else {
-                            ().into_view()
+                            ().into_any()
                         }
                     }}
                 </div>

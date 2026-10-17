@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use crate::ai_pipeline;
@@ -86,7 +86,7 @@ pub async fn chat(State(state): State<AppState>, Json(body): Json<Value>) -> Res
         _ => {
             return validation_422(
                 "question must be a non-empty string of at most 4000 characters.",
-            )
+            );
         }
     };
     let conversation_id = body.get("conversationId").and_then(Value::as_i64);

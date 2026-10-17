@@ -1,12 +1,12 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 
 use super::super::server::AppState;
-use crate::custom_objects::{self, FieldInput, LinkInput, LINK_TARGET_KINDS};
+use crate::custom_objects::{self, FieldInput, LINK_TARGET_KINDS, LinkInput};
 
 fn bad_request(issues: &[String]) -> Response {
     let joined: String = issues.join("; ").chars().take(300).collect();
@@ -515,7 +515,7 @@ pub async fn create_link(
         _ => {
             return bad_request(&[
                 "Body must be { links: [{ targetKind, targetLocalId, note? }] }.".to_string(),
-            ])
+            ]);
         }
     };
     let mut issues = Vec::new();

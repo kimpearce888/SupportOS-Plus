@@ -1,7 +1,7 @@
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use axum::response::IntoResponse;
@@ -125,7 +125,9 @@ pub async fn health_detailed(
         Err(_) => (
             false,
             Vec::new(),
-            json!(format!("LM Studio is not reachable at {lmstudio_base}. Start LM Studio, load a model, and enable the local server (Developer tab > Start Server).")),
+            json!(format!(
+                "LM Studio is not reachable at {lmstudio_base}. Start LM Studio, load a model, and enable the local server (Developer tab > Start Server)."
+            )),
         ),
     };
     let last_inference: Option<String> = {
@@ -485,7 +487,7 @@ pub async fn demo_simulate_incoming(
                     "statusCode": 422, "error": "ValidationError",
                     "message": format!("Expected string, received {}", zod_type_name(v))
                 })),
-            )
+            );
         }
     };
     let text = match body.get("body") {
@@ -501,7 +503,7 @@ pub async fn demo_simulate_incoming(
                     "statusCode": 422, "error": "ValidationError",
                     "message": "body must be a string of at most 50000 characters."
                 })),
-            )
+            );
         }
     };
     let positive_int = |v: Option<&Value>| -> Result<Option<i64>, (StatusCode, Value)> {
@@ -545,7 +547,7 @@ pub async fn demo_simulate_incoming(
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"ok": false, "message": "No provider available."})),
-            )
+            );
         }
     };
     let created = match provider
@@ -566,7 +568,7 @@ pub async fn demo_simulate_incoming(
                 Json(
                     json!({"ok": false, "message": format!("Failed to create conversation: {e}")}),
                 ),
-            )
+            );
         }
     };
     {
@@ -640,7 +642,7 @@ pub async fn demo_simulate_rating(
                     "statusCode": 422, "error": "ValidationError",
                     "message": format!("Expected 'great' | 'okay' | 'not-good', received {}", zod_type_name(v))
                 })),
-            )
+            );
         }
     };
     let comments = body
@@ -654,7 +656,7 @@ pub async fn demo_simulate_rating(
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"ok": false, "message": "No provider available."})),
-            )
+            );
         }
     };
     let Some(hs) = provider.submit_rating(conversation_remote_id, &rating, comments.as_deref())
@@ -678,7 +680,7 @@ pub async fn demo_simulate_rating(
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"ok": false, "message": format!("Failed to persist rating: {e}")})),
-                )
+                );
             }
         }
     };
@@ -731,7 +733,7 @@ pub async fn demo_simulate_webhook(
                     "ok": false,
                     "message": "Invalid simulation request: event must be one of the supported convo.* types."
                 })),
-            )
+            );
         }
     };
     let requested_remote = match body.get("conversationRemoteId") {
@@ -760,7 +762,7 @@ pub async fn demo_simulate_webhook(
                     "ok": false,
                     "message": "Invalid simulation request: replyText must be a string."
                 })),
-            )
+            );
         }
     };
 
@@ -770,7 +772,7 @@ pub async fn demo_simulate_webhook(
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"ok": false, "message": "No provider available."})),
-            )
+            );
         }
     };
 
@@ -990,7 +992,7 @@ pub async fn attachment_file(
                     "message": "Invalid attachment id."
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
     let att = {
@@ -1027,7 +1029,7 @@ pub async fn attachment_file(
                     "message": "Attachment file is no longer readable on disk."
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
     let root = state.data_dir.join("attachments");

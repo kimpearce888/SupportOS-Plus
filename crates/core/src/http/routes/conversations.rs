@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use super::parse_json_body;
@@ -463,7 +463,7 @@ pub async fn status(
             return zod_422(
                 "status",
                 &format!("Expected string, received {}", zod_type_name(v)),
-            )
+            );
         }
     };
     crate::conversation_ops::op_change_status(&state, conversation_id, &new_status).await
@@ -515,7 +515,7 @@ pub async fn priority(
             return zod_422(
                 "priority",
                 &format!("Expected string, received {}", zod_type_name(v)),
-            )
+            );
         }
     };
     let mut conn = state.conn_lock();
@@ -638,7 +638,7 @@ pub async fn set_state(
             return zod_422(
                 "reason",
                 &format!("Expected string, received {}", zod_type_name(v)),
-            )
+            );
         }
     };
     let mut conn = state.conn_lock();
@@ -908,7 +908,7 @@ fn parse_reply_body(
             return Err(zod_422(
                 "statusAfter",
                 &format!("Expected string, received {}", zod_type_name(v)),
-            ))
+            ));
         }
     };
     let assign_to = parse_optional_int(body, "assignTo")?;
@@ -927,7 +927,7 @@ fn parse_reply_body(
             return Err(zod_422(
                 "originalAiText",
                 &format!("Expected string, received {}", zod_type_name(v)),
-            ))
+            ));
         }
     };
     match body.get("attachmentIds") {
@@ -943,7 +943,7 @@ fn parse_reply_body(
             return Err(zod_422(
                 "attachmentIds",
                 &format!("Expected array, received {}", zod_type_name(v)),
-            ))
+            ));
         }
     }
     Ok((
@@ -1154,7 +1154,7 @@ pub async fn create_ticket_state(
             return crate::conversation_ops::zod_422(
                 "color",
                 "Expected string, received non-string",
-            )
+            );
         }
     };
     let sort_order = match body.get("sort_order") {
@@ -1165,13 +1165,13 @@ pub async fn create_ticket_state(
                 return crate::conversation_ops::zod_422(
                     "sort_order",
                     "Number must be greater than or equal to 0",
-                )
+                );
             }
             None => {
                 return crate::conversation_ops::zod_422(
                     "sort_order",
                     "Expected number, received non-number",
-                )
+                );
             }
         },
     };
@@ -1882,7 +1882,7 @@ pub async fn bulk_route(State(state): State<AppState>, body: Option<Json<Value>>
                         "Expected number, received {}",
                         if v.is_string() { "string" } else { "object" }
                     ),
-                )
+                );
             }
         }
     }
@@ -1915,7 +1915,7 @@ pub async fn refresh_route(State(state): State<AppState>, Path(id): Path<String>
                         "message": "Conversation not found locally."
                     })),
                 )
-                    .into_response()
+                    .into_response();
             }
         }
     };

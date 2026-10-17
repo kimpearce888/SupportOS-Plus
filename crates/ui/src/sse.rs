@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
-use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
 
 pub const EVENT_NAMES: [&str; 7] = [
     "hello",

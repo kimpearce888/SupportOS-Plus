@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use regex::Regex;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::Result;
 
@@ -126,12 +126,11 @@ pub fn build_mention_directory(conn: &Connection) -> Result<MentionDirectory> {
             "SELECT id, first_name, last_name, mention, email FROM users
              WHERE deleted_at IS NULL",
         )?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for (id, first, last, mention, email) in users {
         let display = [first.clone(), last.clone()]
@@ -171,10 +170,9 @@ pub fn build_mention_directory(conn: &Connection) -> Result<MentionDirectory> {
     }
     let teams: Vec<(i64, String)> = {
         let mut stmt = conn.prepare("SELECT id, name FROM teams")?;
-        let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
+
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
     };
     for (id, name) in teams {
         let key = name.trim().to_lowercase();
@@ -263,16 +261,15 @@ pub fn parse_mentions(body: &str, directory: &MentionDirectory) -> Result<Vec<Pa
                 let raw = &window[..len];
                 let candidate = raw.trim().to_lowercase();
                 let candidate = candidate.split_whitespace().collect::<Vec<_>>().join(" ");
-                if !candidate.is_empty() {
-                    if let Some(tid) = directory.team_by_name.get(&candidate) {
-                        if !seen_teams.contains(tid) {
-                            let next_char = window[len..].chars().next();
-                            let boundary_ok = next_char.is_none_or(|c| !is_token_char(c));
-                            if boundary_ok {
-                                matched = Some((*tid, len, raw.trim().to_string()));
-                                break;
-                            }
-                        }
+                if !candidate.is_empty()
+                    && let Some(tid) = directory.team_by_name.get(&candidate)
+                    && !seen_teams.contains(tid)
+                {
+                    let next_char = window[len..].chars().next();
+                    let boundary_ok = next_char.is_none_or(|c| !is_token_char(c));
+                    if boundary_ok {
+                        matched = Some((*tid, len, raw.trim().to_string()));
+                        break;
                     }
                 }
                 len -= 1;

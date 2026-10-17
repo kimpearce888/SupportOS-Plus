@@ -4,12 +4,11 @@ use wasm_bindgen_futures::JsFuture;
 
 pub fn api_base() -> String {
     #[cfg(target_arch = "wasm32")]
-    if let Some(w) = web_sys::window() {
-        if let Ok(Some(v)) = w.local_storage() {
-            if let Ok(Some(base)) = v.get_item("spp.api_base") {
-                return base.trim_end_matches('/').to_string();
-            }
-        }
+    if let Some(w) = web_sys::window()
+        && let Ok(Some(v)) = w.local_storage()
+        && let Ok(Some(base)) = v.get_item("spp.api_base")
+    {
+        return base.trim_end_matches('/').to_string();
     }
     "http://127.0.0.1:3000".to_string()
 }
@@ -104,16 +103,13 @@ async fn request_json<T: DeserializeOwned>(
         .map_err(|_| format!("{method} {path}: fetch did not return a Response"))?;
     if !response.ok() {
         let status = response.status();
-        if let Ok(text_promise) = response.text() {
-            if let Ok(text) = JsFuture::from(text_promise).await {
-                if let Some(text) = text.as_string() {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(m) = v.get("message").and_then(|m| m.as_str()) {
-                            return Err(m.to_string());
-                        }
-                    }
-                }
-            }
+        if let Ok(text_promise) = response.text()
+            && let Ok(text) = JsFuture::from(text_promise).await
+            && let Some(text) = text.as_string()
+            && let Ok(v) = serde_json::from_str::<serde_json::Value>(&text)
+            && let Some(m) = v.get("message").and_then(|m| m.as_str())
+        {
+            return Err(m.to_string());
         }
         return Err(format!("{method} {path} -> HTTP {status}"));
     }

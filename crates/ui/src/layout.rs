@@ -1,5 +1,5 @@
-use leptos::*;
-use leptos_router::{Outlet, A};
+use leptos::prelude::*;
+use leptos_router::components::{A, Outlet};
 
 use crate::state::{Theme, UiState};
 
@@ -87,11 +87,11 @@ pub fn LayoutShell() -> impl IntoView {
                                 Theme::Light => view! {
                                     <span aria-hidden="true">"☾"</span>
                                 }
-                                .into_view(),
+                                .into_any(),
                                 Theme::Dark => view! {
                                     <span aria-hidden="true">"☀"</span>
                                 }
-                                .into_view(),
+                                .into_any(),
                             }}
                             <span class="spp-nav__label">
                                 {move || match ui.theme.get() {
@@ -124,18 +124,18 @@ fn NavItem(
     to: &'static str,
     icon: &'static str,
     label: &'static str,
-    #[prop(optional, into)] count: Option<MaybeSignal<Option<u32>>>,
+    #[prop(optional, into)] count: Option<Signal<Option<u32>>>,
 ) -> impl IntoView {
     view! {
-        <A href=to class="spp-nav__link" active_class="spp-nav__link--active">
+        <A href=to attr:class="spp-nav__link">
             <span class="spp-nav__icon" aria-hidden="true">{icon}</span>
             <span class="spp-nav__label">{label}</span>
             {move || match count.as_ref().and_then(|c| c.get().and_then(crate::state::badge_text)) {
                 Some(text) => view! {
                     <span class="spp-nav__count">{text}</span>
                 }
-                .into_view(),
-                None => ().into_view(),
+                .into_any(),
+                None => ().into_any(),
             }}
         </A>
     }

@@ -1,9 +1,9 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::ai_provider::{ChatMessage, LocalAiProvider};
-use crate::catalog::{AiAttributeKey, AttributeValueType, AI_ATTRIBUTE_SCHEMA_VERSION};
+use crate::catalog::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValueType};
 use crate::error::{Error, Result};
 
 pub const M033_SQL: &str = r#"
@@ -814,23 +814,21 @@ pub fn finish_computation(
     if let Some((run_id, cached_value)) = cached {
         extracted = Some(cached_value);
         ai_run_id = Some(run_id);
-    } else if let (Some(_), Some(raw)) = (&prompt, fresh_output) {
-        if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
-            if parsed
-                .get("attributes")
-                .is_some_and(|a| a.as_array().is_some())
-            {
-                let run_id = store_extraction_run(conn, &input_hash, model, &raw)?;
-                extracted = Some(parsed);
-                ai_run_id = Some(run_id);
-            }
-        }
+    } else if let (Some(_), Some(raw)) = (&prompt, fresh_output)
+        && let Ok(parsed) = serde_json::from_str::<Value>(&raw)
+        && parsed
+            .get("attributes")
+            .is_some_and(|a| a.as_array().is_some())
+    {
+        let run_id = store_extraction_run(conn, &input_hash, model, &raw)?;
+        extracted = Some(parsed);
+        ai_run_id = Some(run_id);
     }
 
-    if let Some(Value::Object(map)) = extracted {
-        if let Some(Value::Array(attrs)) = map.get("attributes") {
-            merge_extraction(&mut records, attrs, ai_run_id);
-        }
+    if let Some(Value::Object(map)) = extracted
+        && let Some(Value::Array(attrs)) = map.get("attributes")
+    {
+        merge_extraction(&mut records, attrs, ai_run_id);
     }
 
     save_snapshot(conn, conversation_id, &records, ai_run_id)?;

@@ -1,8 +1,8 @@
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::server::AppState;
 use crate::translation;
@@ -127,7 +127,7 @@ pub async fn translate(State(state): State<AppState>, body: Option<Json<Value>>)
         Some(Value::Null) => None,
         Some(Value::String(s)) if s.chars().count() <= 8 => Some(s.clone()),
         Some(_) => {
-            return validation_422("from must be a language code (at most 8 characters) or null.")
+            return validation_422("from must be a language code (at most 8 characters) or null.");
         }
     };
     let to = match body.get("to") {
@@ -145,7 +145,7 @@ pub async fn translate(State(state): State<AppState>, body: Option<Json<Value>>)
         Some(_) => {
             return validation_422(
                 "purpose must be one of 'customer_inbound', 'agent_draft', 'general'.",
-            )
+            );
         }
     };
     if !translation::SUPPORTED_LANGUAGES

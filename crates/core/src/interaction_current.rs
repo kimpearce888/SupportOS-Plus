@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -941,10 +941,8 @@ pub fn record_current_interaction_opts(
     let _ = replace_evidence_rows(conn, conversation_id, &current.signals);
     let _ = crate::interaction_engine::ensure_schema(conn);
     let _ = crate::interaction_engine::record_observations_for(conn, &current);
-    if rebuild_baseline {
-        if let Some(cid) = current.customer_local_id {
-            let _ = crate::interaction_engine::rebuild_baseline(conn, cid);
-        }
+    if rebuild_baseline && let Some(cid) = current.customer_local_id {
+        let _ = crate::interaction_engine::rebuild_baseline(conn, cid);
     }
     Ok(Some(current))
 }
@@ -1173,11 +1171,10 @@ pub fn backfill_all(conn: &Connection) -> Result<usize> {
     let ids: Vec<i64> = {
         let mut stmt =
             conn.prepare("SELECT id FROM conversations WHERE deleted_at IS NULL ORDER BY id")?;
-        let ids = stmt
-            .query_map([], |r| r.get(0))?
+
+        stmt.query_map([], |r| r.get(0))?
             .filter_map(|r| r.ok())
-            .collect();
-        ids
+            .collect()
     };
     let mut written = 0;
     for id in ids {

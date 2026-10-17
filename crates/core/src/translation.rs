@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::error::Result;
@@ -287,20 +287,21 @@ fn clean_for_detection(text: &str) -> String {
                 continue;
             }
         }
-        if chars[i] == '`' && chars[i..].starts_with(&['`', '`', '`']) {
-            if let Some(close) = find_fence_close(&chars, i + 3) {
-                i = close + 3;
-                out.push(' ');
-                continue;
-            }
+        if chars[i] == '`'
+            && chars[i..].starts_with(&['`', '`', '`'])
+            && let Some(close) = find_fence_close(&chars, i + 3)
+        {
+            i = close + 3;
+            out.push(' ');
+            continue;
         }
-        if chars[i] == '@' {
-            if let Some((start, end)) = email_span(&chars, i) {
-                let _ = start;
-                i = end;
-                out.push(' ');
-                continue;
-            }
+        if chars[i] == '@'
+            && let Some((start, end)) = email_span(&chars, i)
+        {
+            let _ = start;
+            i = end;
+            out.push(' ');
+            continue;
         }
         if chars[i].is_ascii_hexdigit() {
             let mut j = i;
@@ -417,40 +418,40 @@ pub fn detect_language(text: &str) -> Value {
         }
     }
     script_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    if let Some(&(code, share, confidence)) = script_scores.first() {
-        if share >= 0.15 {
-            let is_ambiguous_han = code == "zh";
-            let confidence = if is_ambiguous_han {
-                "low"
-            } else if share >= 0.4 {
-                confidence
-            } else {
-                "medium"
-            };
-            let alternatives: Vec<Value> = script_scores[1..3.min(script_scores.len())]
+    if let Some(&(code, share, confidence)) = script_scores.first()
+        && share >= 0.15
+    {
+        let is_ambiguous_han = code == "zh";
+        let confidence = if is_ambiguous_han {
+            "low"
+        } else if share >= 0.4 {
+            confidence
+        } else {
+            "medium"
+        };
+        let alternatives: Vec<Value> = script_scores[1..3.min(script_scores.len())]
                 .iter()
                 .map(|&(c, s, _)| {
                     json!({ "code": c, "name": language_name(c), "score": round_to(s, 2) })
                 })
                 .collect();
-            let note = if is_ambiguous_han {
-                "Han script detected (Chinese/Japanese share it); reported as Chinese with low confidence - confirm before relying on it.".to_string()
-            } else {
-                format!(
-                    "Detected by Unicode script range analysis ({}% of letters).",
-                    (share * 100.0).round() as i64
-                )
-            };
-            return json!({
-                "text": trimmed,
-                "code": code,
-                "name": language_name(code),
-                "confidence": confidence,
-                "method": "script",
-                "alternatives": alternatives,
-                "note": note
-            });
-        }
+        let note = if is_ambiguous_han {
+            "Han script detected (Chinese/Japanese share it); reported as Chinese with low confidence - confirm before relying on it.".to_string()
+        } else {
+            format!(
+                "Detected by Unicode script range analysis ({}% of letters).",
+                (share * 100.0).round() as i64
+            )
+        };
+        return json!({
+            "text": trimmed,
+            "code": code,
+            "name": language_name(code),
+            "confidence": confidence,
+            "method": "script",
+            "alternatives": alternatives,
+            "note": note
+        });
     }
 
     let words = stopwords_from(&cleaned);
@@ -601,10 +602,9 @@ fn conversation_summary(conversation_id: i64, per_message: Vec<(i64, Value)>) ->
         if let (Some(code), Some(conf)) = (
             detection.get("code").and_then(|v| v.as_str()),
             detection.get("confidence").and_then(|v| v.as_str()),
-        ) {
-            if conf != "unknown" {
-                *counts.entry(code.to_string()).or_default() += 1;
-            }
+        ) && conf != "unknown"
+        {
+            *counts.entry(code.to_string()).or_default() += 1;
         }
     }
     let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
@@ -678,7 +678,9 @@ fn purpose_prompt(purpose: &str) -> &'static str {
         "customer_inbound" => {
             "Translate the CUSTOMER support message into the target language for an agent to review."
         }
-        "agent_draft" => "Translate the AGENT draft reply into the target language the customer asked to be served in.",
+        "agent_draft" => {
+            "Translate the AGENT draft reply into the target language the customer asked to be served in."
+        }
         _ => "Translate the text into the target language.",
     }
 }
@@ -749,7 +751,7 @@ pub async fn translate(
 
     let mut hasher = Sha256::new();
     hasher.update(format!("{source_lang}|{to}|{purpose}|{text}"));
-    let cache_key = format!("{:x}", hasher.finalize());
+    let cache_key = crate::crypto::hex(&hasher.finalize());
     let cached: Option<(String, String, String, Option<String>, String)> = conn
         .query_row(
             "SELECT source_lang, target_lang, translated_text, model, purpose

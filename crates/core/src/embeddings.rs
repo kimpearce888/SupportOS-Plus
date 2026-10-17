@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::ai_provider::{EmbedResponse, LocalAiProvider};
 use crate::error::{Error, Result};
@@ -208,12 +208,11 @@ pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
     let mut start: usize = 0;
     while start < units.len() {
         let mut end = (start + max_len).min(units.len());
-        if end < units.len() {
-            if let Some(dot) = last_index_of_dot_space(&units, end) {
-                if dot as f64 > start as f64 + max_len as f64 * 0.5 {
-                    end = dot + 1;
-                }
-            }
+        if end < units.len()
+            && let Some(dot) = last_index_of_dot_space(&units, end)
+            && dot as f64 > start as f64 + max_len as f64 * 0.5
+        {
+            end = dot + 1;
         }
         chunks.push(
             String::from_utf16_lossy(&units[start..end])

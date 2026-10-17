@@ -62,13 +62,13 @@ pub const fn tool_result_max_chars() -> usize {
     TOOL_RESULT_MAX_CHARS
 }
 
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 use crate::ai_lm_studio::{CopilotWireMessage, CopilotWireToolCall, CopilotWireToolFunction};
 use crate::ai_pipeline::{self, AiBackend, LmStudioError};
 use crate::ai_prompts::{
-    build_copilot_context_block, COPILOT_SYSTEM, PROMPT_VERSIONS_COPILOT_CHAT,
+    COPILOT_SYSTEM, PROMPT_VERSIONS_COPILOT_CHAT, build_copilot_context_block,
 };
 use crate::ai_tools;
 
@@ -464,20 +464,20 @@ fn conversation_ref(conn: &Connection, result: &Value) -> Option<(Option<i64>, O
     ) {
         return Some((Some(id), Some(number)));
     }
-    if let Some(arr) = result.as_array() {
-        if let Some(first) = arr.first() {
-            if let Some(cid) = first.get("conversation_id").and_then(Value::as_i64) {
-                return Some((Some(cid), first.get("number").and_then(Value::as_i64)));
-            }
-            if let (Some(id), Some(number)) = (
-                first.get("id").and_then(Value::as_i64),
-                first.get("number").and_then(Value::as_i64),
-            ) {
-                return Some((Some(id), Some(number)));
-            }
-            if let Some(number) = first.get("number").and_then(Value::as_i64) {
-                return Some((id_for_number(number), Some(number)));
-            }
+    if let Some(arr) = result.as_array()
+        && let Some(first) = arr.first()
+    {
+        if let Some(cid) = first.get("conversation_id").and_then(Value::as_i64) {
+            return Some((Some(cid), first.get("number").and_then(Value::as_i64)));
+        }
+        if let (Some(id), Some(number)) = (
+            first.get("id").and_then(Value::as_i64),
+            first.get("number").and_then(Value::as_i64),
+        ) {
+            return Some((Some(id), Some(number)));
+        }
+        if let Some(number) = first.get("number").and_then(Value::as_i64) {
+            return Some((id_for_number(number), Some(number)));
         }
     }
     if let Some(number) = result.get("number").and_then(Value::as_i64) {

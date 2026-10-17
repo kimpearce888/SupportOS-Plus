@@ -1,10 +1,10 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
-use leptos::*;
-use leptos_router::{use_navigate, use_query_map};
+use leptos::prelude::*;
+use leptos_router::hooks::{use_navigate, use_query_map};
 
-use crate::components::state_view::{EmptyState, LoadingState};
 use crate::components::GapsTab;
+use crate::components::state_view::{EmptyState, LoadingState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssuesTab {
@@ -42,8 +42,8 @@ impl IssuesTab {
 #[component]
 pub fn IssueRadarPage() -> impl IntoView {
     let query_map = use_query_map();
-    let tab = create_rw_signal(IssuesTab::Radar);
-    create_effect(move |_| {
+    let tab = RwSignal::new(IssuesTab::Radar);
+    Effect::new(move |_| {
         let m = query_map.get();
         let next = IssuesTab::from_param(crate::url_state::query_str(&m, "tab").as_deref());
         if tab.get_untracked() != next {
@@ -169,15 +169,15 @@ fn confirm_action(message: &str) -> bool {
 
 #[component]
 fn RadarTab() -> impl IntoView {
-    let snapshot = create_rw_signal(serde_json::json!({}));
-    let alerts = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let snapshot = RwSignal::new(serde_json::json!({}));
+    let alerts = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    let sla = create_rw_signal(serde_json::json!({}));
-    let sla_error = create_rw_signal(None::<String>);
+    let sla = RwSignal::new(serde_json::json!({}));
+    let sla_error = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let snapshot = snapshot;
         let alerts = alerts;
         let loading = loading;
@@ -301,7 +301,7 @@ fn RadarTab() -> impl IntoView {
                             </ul>
                         </div>
                     </Show>
-                }.into_view()
+                }.into_any()
             }}
         </Show>
     }
@@ -417,7 +417,7 @@ fn SlaAlertsCard(
                                                     } else {
                                                         "spp-badge"
                                                     }>
-                                                        {state}
+                                                        {state.clone()}
                                                     </span>
                                                 </td>
                                                 <td>{waited.to_string()}</td>
@@ -449,7 +449,7 @@ fn SlaAlertsCard(
                             <p class="spp-muted spp-text-xs">{note_view.clone()}</p>
                         </Show>
                     </div>
-                }.into_view()
+                }.into_any()
             }}
         </Show>
     }
@@ -457,14 +457,14 @@ fn SlaAlertsCard(
 
 #[component]
 fn ClustersTab() -> impl IntoView {
-    let clusters = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let selected = create_rw_signal(None::<i64>);
-    let promoting = create_rw_signal(None::<serde_json::Value>);
+    let clusters = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let selected = RwSignal::new(None::<i64>);
+    let promoting = RwSignal::new(None::<serde_json::Value>);
 
-    let reload = create_rw_signal(0u32);
-    create_effect(move |_| {
+    let reload = RwSignal::new(0u32);
+    Effect::new(move |_| {
         let _ = reload.get();
         loading.set(true);
         error_msg.set(None);
@@ -482,9 +482,11 @@ fn ClustersTab() -> impl IntoView {
         });
     });
 
-    let back_to_list = StoredValue::new(Rc::new(move || selected.set(None)) as Rc<dyn Fn()>);
-    let reload_clusters =
-        StoredValue::new(Rc::new(move || reload.update(|t| *t += 1)) as Rc<dyn Fn()>);
+    let back_to_list =
+        StoredValue::new_local(Arc::new(move || selected.set(None)) as Arc<dyn Fn() + Send + Sync>);
+    let reload_clusters = StoredValue::new_local(
+        Arc::new(move || reload.update(|t| *t += 1)) as Arc<dyn Fn() + Send + Sync>
+    );
 
     view! {
         <Show
@@ -570,9 +572,9 @@ fn ClustersTab() -> impl IntoView {
                                         <td>
                                             <strong>{title}</strong>
                                             {if !summary.is_empty() {
-                                                view! { <div class="spp-muted spp-text-xs">{summary}</div> }.into_view()
+                                                view! { <div class="spp-muted spp-text-xs">{summary}</div> }.into_any()
                                             } else {
-                                                ().into_view()
+                                                ().into_any()
                                             }}
                                         </td>
                                         <td class="spp-table__cell-muted">{category}</td>
@@ -608,8 +610,8 @@ fn ClustersTab() -> impl IntoView {
         <Show when=move || selected.get().is_some() fallback=|| ()>
             {move || {
                 let id = selected.get().unwrap_or_default();
-                let on_back = back_to_list.with_value(Rc::clone);
-                let reload_fn = reload_clusters.with_value(Rc::clone);
+                let on_back = back_to_list.with_value(Arc::clone);
+                let reload_fn = reload_clusters.with_value(Arc::clone);
                 view! {
                     <ClusterDetail
                         id=id
@@ -626,8 +628,8 @@ fn ClustersTab() -> impl IntoView {
                 view! {
                     <KnownIssueEditor
                         seed=cluster
-                        on_close=Rc::new(move || promoting.set(None))
-                        on_saved=Rc::new(move || reload.update(|t| *t += 1))
+                        on_close=Arc::new(move || promoting.set(None))
+                        on_saved=Arc::new(move || reload.update(|t| *t += 1))
                     />
                 }
             }}
@@ -636,17 +638,21 @@ fn ClustersTab() -> impl IntoView {
 }
 
 #[component]
-fn ClusterDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> impl IntoView {
-    let cluster = create_rw_signal(serde_json::json!({}));
-    let conversations = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let promoting = create_rw_signal(false);
+fn ClusterDetail(
+    id: i64,
+    on_back: Arc<dyn Fn() + Send + Sync>,
+    reload: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let cluster = RwSignal::new(serde_json::json!({}));
+    let conversations = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let promoting = RwSignal::new(false);
 
-    let on_back_stored = StoredValue::new(on_back);
-    let reload_stored = StoredValue::new(reload);
+    let on_back_stored = StoredValue::new_local(on_back);
+    let reload_stored = StoredValue::new_local(reload);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let id = id;
         loading.set(true);
         error_msg.set(None);
@@ -693,10 +699,10 @@ fn ClusterDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> impl I
                 let provenance = field(&c, "provenance");
                 let known_issue_id = c.get("known_issue_id").and_then(|v| v.as_i64());
                 let ai_generated = c.get("ai_generated").and_then(|v| v.as_i64()).unwrap_or(0) == 1;
-                let on_back_click = on_back_stored.with_value(Rc::clone);
+                let on_back_click = on_back_stored.with_value(Arc::clone);
                 let do_delete_row = {
-                    let on_back = on_back_stored.with_value(Rc::clone);
-                    let reload = reload_stored.with_value(Rc::clone);
+                    let on_back = on_back_stored.with_value(Arc::clone);
+                    let reload = reload_stored.with_value(Arc::clone);
                     move |ev: leptos::ev::MouseEvent| {
                         ev.stop_propagation();
                         let c = cluster.get_untracked();
@@ -707,8 +713,8 @@ fn ClusterDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> impl I
                             return;
                         }
                         let id = int_field(&c, "id");
-                        let on_back = Rc::clone(&on_back);
-                        let reload = Rc::clone(&reload);
+                        let on_back = Arc::clone(&on_back);
+                        let reload = Arc::clone(&reload);
                         wasm_bindgen_futures::spawn_local(async move {
                             let path = format!("/api/issues/clusters/{id}");
                             match crate::api::delete_json::<serde_json::Value>(&path).await {
@@ -733,9 +739,9 @@ fn ClusterDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> impl I
                             <h3 class="spp-card__title">
                                 {format!("Cluster #{id}: {title}")}
                                 {if ai_generated {
-                                    view! { <span class="spp-badge spp-badge--ai">"AI-generated"</span> }.into_view()
+                                    view! { <span class="spp-badge spp-badge--ai">"AI-generated"</span> }.into_any()
                                 } else {
-                                    ().into_view()
+                                    ().into_any()
                                 }}
                             </h3>
                             <div class="spp-flex">
@@ -825,7 +831,7 @@ fn ClusterDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> impl I
                             </table>
                         </Show>
                     </div>
-                }.into_view()
+                }.into_any()
             }}
         </Show>
 
@@ -835,8 +841,8 @@ fn ClusterDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> impl I
                 view! {
                     <KnownIssueEditor
                         seed=c
-                        on_close=Rc::new(move || promoting.set(false))
-                        on_saved=Rc::new(move || reload_stored.with_value(|f| f()))
+                        on_close=Arc::new(move || promoting.set(false))
+                        on_saved=Arc::new(move || reload_stored.with_value(|f| f()))
                     />
                 }
             }}
@@ -856,15 +862,15 @@ const KNOWN_PROVENANCES: [&str; 2] = ["human_local", "ai_generated"];
 
 #[component]
 fn KnownTab() -> impl IntoView {
-    let known = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let selected = create_rw_signal(None::<i64>);
-    let creating = create_rw_signal(None::<serde_json::Value>);
-    let editing = create_rw_signal(None::<serde_json::Value>);
+    let known = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let selected = RwSignal::new(None::<i64>);
+    let creating = RwSignal::new(None::<serde_json::Value>);
+    let editing = RwSignal::new(None::<serde_json::Value>);
 
-    let reload = create_rw_signal(0u32);
-    create_effect(move |_| {
+    let reload = RwSignal::new(0u32);
+    Effect::new(move |_| {
         let _ = reload.get();
         loading.set(true);
         error_msg.set(None);
@@ -882,9 +888,11 @@ fn KnownTab() -> impl IntoView {
         });
     });
 
-    let back_to_list = StoredValue::new(Rc::new(move || selected.set(None)) as Rc<dyn Fn()>);
-    let reload_known =
-        StoredValue::new(Rc::new(move || reload.update(|t| *t += 1)) as Rc<dyn Fn()>);
+    let back_to_list =
+        StoredValue::new_local(Arc::new(move || selected.set(None)) as Arc<dyn Fn() + Send + Sync>);
+    let reload_known = StoredValue::new_local(
+        Arc::new(move || reload.update(|t| *t += 1)) as Arc<dyn Fn() + Send + Sync>
+    );
 
     view! {
         <Show
@@ -997,9 +1005,9 @@ fn KnownTab() -> impl IntoView {
                                         <td>
                                             <strong>{title}</strong>
                                             {if !symptoms.is_empty() {
-                                                view! { <div class="spp-muted spp-text-xs">{symptoms}</div> }.into_view()
+                                                view! { <div class="spp-muted spp-text-xs">{symptoms}</div> }.into_any()
                                             } else {
-                                                ().into_view()
+                                                ().into_any()
                                             }}
                                         </td>
                                         <td>
@@ -1045,8 +1053,8 @@ fn KnownTab() -> impl IntoView {
         <Show when=move || selected.get().is_some() fallback=|| ()>
             {move || {
                 let id = selected.get().unwrap_or_default();
-                let on_back = back_to_list.with_value(Rc::clone);
-                let reload_fn = reload_known.with_value(Rc::clone);
+                let on_back = back_to_list.with_value(Arc::clone);
+                let reload_fn = reload_known.with_value(Arc::clone);
                 view! {
                     <KnownIssueDetail id=id on_back=on_back reload=reload_fn />
                 }
@@ -1059,8 +1067,8 @@ fn KnownTab() -> impl IntoView {
                 view! {
                     <KnownIssueEditor
                         seed=seed
-                        on_close=Rc::new(move || creating.set(None))
-                        on_saved=Rc::new(move || reload.update(|t| *t += 1))
+                        on_close=Arc::new(move || creating.set(None))
+                        on_saved=Arc::new(move || reload.update(|t| *t += 1))
                     />
                 }
             }}
@@ -1072,8 +1080,8 @@ fn KnownTab() -> impl IntoView {
                 view! {
                     <KnownIssueEditor
                         existing=existing
-                        on_close=Rc::new(move || editing.set(None))
-                        on_saved=Rc::new(move || reload.update(|t| *t += 1))
+                        on_close=Arc::new(move || editing.set(None))
+                        on_saved=Arc::new(move || reload.update(|t| *t += 1))
                     />
                 }
             }}
@@ -1082,23 +1090,27 @@ fn KnownTab() -> impl IntoView {
 }
 
 #[component]
-fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> impl IntoView {
-    let issue = create_rw_signal(serde_json::json!({}));
-    let conversations = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let impact = create_rw_signal(serde_json::json!({}));
-    let link_input = create_rw_signal(String::new());
-    let ref_system = create_rw_signal(String::new());
-    let ref_reference_id = create_rw_signal(String::new());
-    let ref_url = create_rw_signal(String::new());
-    let ref_title = create_rw_signal(String::new());
-    let ref_status = create_rw_signal(String::new());
-    let ref_notes = create_rw_signal(String::new());
-    let editing = create_rw_signal(false);
+fn KnownIssueDetail(
+    id: i64,
+    on_back: Arc<dyn Fn() + Send + Sync>,
+    reload: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let issue = RwSignal::new(serde_json::json!({}));
+    let conversations = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let impact = RwSignal::new(serde_json::json!({}));
+    let link_input = RwSignal::new(String::new());
+    let ref_system = RwSignal::new(String::new());
+    let ref_reference_id = RwSignal::new(String::new());
+    let ref_url = RwSignal::new(String::new());
+    let ref_title = RwSignal::new(String::new());
+    let ref_status = RwSignal::new(String::new());
+    let ref_notes = RwSignal::new(String::new());
+    let editing = RwSignal::new(false);
 
-    let refresh = create_rw_signal(0u32);
-    create_effect(move |_| {
+    let refresh = RwSignal::new(0u32);
+    Effect::new(move |_| {
         let _ = refresh.get();
         loading.set(true);
         error_msg.set(None);
@@ -1127,7 +1139,7 @@ fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> imp
         });
     });
 
-    let reload_stored = StoredValue::new(reload);
+    let reload_stored = StoredValue::new_local(reload);
 
     let do_unlink = move |conversation_id: i64| {
         wasm_bindgen_futures::spawn_local(async move {
@@ -1214,10 +1226,10 @@ fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> imp
         });
     };
 
-    let on_back_stored = StoredValue::new(on_back);
-    let do_unlink_stored = StoredValue::new(do_unlink);
-    let do_link_stored = StoredValue::new(do_link);
-    let do_add_ref_stored = StoredValue::new(do_add_ref);
+    let on_back_stored = StoredValue::new_local(on_back);
+    let do_unlink_stored = StoredValue::new_local(do_unlink);
+    let do_link_stored = StoredValue::new_local(do_link);
+    let do_add_ref_stored = StoredValue::new_local(do_add_ref);
 
     view! {
         <ListStates loading=loading error_msg=error_msg empty="Known issue not found." />
@@ -1238,7 +1250,7 @@ fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> imp
                 let impact_v = impact.get();
                 let impact_card = impact_v.clone();
                 let has_impact = value_loaded(&impact_v);
-                let on_back_click = on_back_stored.with_value(Rc::clone);
+                let on_back_click = on_back_stored.with_value(Arc::clone);
                 let do_link_row = do_link_stored.with_value(Clone::clone);
                 let do_add_ref_row = do_add_ref_stored.with_value(Clone::clone);
                 let do_unlink_source = do_unlink_stored.with_value(Clone::clone);
@@ -1267,7 +1279,7 @@ fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> imp
                                 "investigating" | "identified" => "spp-badge spp-badge--warn",
                                 _ => "spp-badge",
                             }>
-                                {status}
+                                {status.clone()}
                             </span>
                             <span class="spp-badge">{format!("provenance: {provenance}")}</span>
                         </div>
@@ -1381,13 +1393,13 @@ fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> imp
                                     {refs_rows.iter().map(|r| {
                                         let url = field(r, "url");
                                         let link_view = if url.is_empty() {
-                                            view! { <span>{field(r, "reference_id")}</span> }.into_view()
+                                            view! { <span>{field(r, "reference_id")}</span> }.into_any()
                                         } else {
                                             view! {
                                                 <a class="spp-text-xs" href=url target="_blank" rel="noopener noreferrer">
                                                     {field(r, "reference_id")}
                                                 </a>
-                                            }.into_view()
+                                            }.into_any()
                                         };
                                         view! {
                                             <tr>
@@ -1458,7 +1470,7 @@ fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> imp
                             </div>
                         </form>
                     </div>
-                }.into_view()
+                }.into_any()
             }}
         </Show>
 
@@ -1468,8 +1480,8 @@ fn KnownIssueDetail(id: i64, on_back: Rc<dyn Fn()>, reload: Rc<dyn Fn()>) -> imp
                 view! {
                     <KnownIssueEditor
                         existing=existing
-                        on_close=Rc::new(move || editing.set(false))
-                        on_saved=Rc::new(move || {
+                        on_close=Arc::new(move || editing.set(false))
+                        on_saved=Arc::new(move || {
                             refresh.update(|t| *t += 1);
                             reload_stored.with_value(|f| f());
                         })
@@ -1592,8 +1604,8 @@ fn ImpactCard(impact: serde_json::Value) -> impl IntoView {
 fn KnownIssueEditor(
     #[prop(optional)] existing: Option<serde_json::Value>,
     #[prop(optional)] seed: Option<serde_json::Value>,
-    on_close: Rc<dyn Fn()>,
-    on_saved: Rc<dyn Fn()>,
+    on_close: Arc<dyn Fn() + Send + Sync>,
+    on_saved: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let edit_row = existing.unwrap_or_default();
     let is_edit = int_field(&edit_row, "id") > 0;
@@ -1612,35 +1624,35 @@ fn KnownIssueEditor(
         field(&seed, "summary")
     };
 
-    let title = create_rw_signal(prefill("title"));
-    let symptoms = create_rw_signal(if is_edit {
+    let title = RwSignal::new(prefill("title"));
+    let symptoms = RwSignal::new(if is_edit {
         prefill("symptoms")
     } else {
         seed_symptoms
     });
-    let product = create_rw_signal(prefill("product"));
-    let feature = create_rw_signal(prefill("feature"));
-    let known_cause = create_rw_signal(if is_edit {
+    let product = RwSignal::new(prefill("product"));
+    let feature = RwSignal::new(prefill("feature"));
+    let known_cause = RwSignal::new(if is_edit {
         prefill("known_cause")
     } else {
         String::new()
     });
-    let workaround = create_rw_signal(if is_edit {
+    let workaround = RwSignal::new(if is_edit {
         prefill("workaround")
     } else {
         String::new()
     });
-    let customer_safe_explanation = create_rw_signal(if is_edit {
+    let customer_safe_explanation = RwSignal::new(if is_edit {
         prefill("customer_safe_explanation")
     } else {
         String::new()
     });
-    let internal_explanation = create_rw_signal(if is_edit {
+    let internal_explanation = RwSignal::new(if is_edit {
         prefill("internal_explanation")
     } else {
         String::new()
     });
-    let status = create_rw_signal({
+    let status = RwSignal::new({
         let s = prefill("status");
         if KNOWN_STATUSES.contains(&s.as_str()) {
             s
@@ -1648,9 +1660,9 @@ fn KnownIssueEditor(
             "investigating".to_string()
         }
     });
-    let provenance = create_rw_signal("human_local".to_string());
-    let submitting = create_rw_signal(false);
-    let on_close_view = Rc::clone(&on_close);
+    let provenance = RwSignal::new("human_local".to_string());
+    let submitting = RwSignal::new(false);
+    let on_close_view = Arc::clone(&on_close);
 
     let seed_conversation_ids: Vec<i64> = if is_edit {
         Vec::new()
@@ -1675,8 +1687,8 @@ fn KnownIssueEditor(
         submitting.set(true);
         let is_edit = is_edit;
         let id = int_field(&edit_row, "id");
-        let on_close = Rc::clone(&on_close);
-        let on_saved = Rc::clone(&on_saved);
+        let on_close = Arc::clone(&on_close);
+        let on_saved = Arc::clone(&on_saved);
         let seed_ids = seed_conversation_ids.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let result = if is_edit {
@@ -1886,21 +1898,21 @@ const REUSE_RANGES: [(u32, &str); 4] = [
 #[component]
 fn ReuseTab() -> impl IntoView {
     let query_map = use_query_map();
-    let location = leptos_router::use_location();
+    let location = leptos_router::hooks::use_location();
     let navigate = use_navigate();
 
-    let days = create_memo(move |_| {
+    let days = Memo::new(move |_| {
         let m = query_map.get();
         crate::url_state::query_pos_int(&m, "days")
             .map(|d| (d as u32).clamp(1, 3650))
             .unwrap_or(90)
     });
 
-    let rows = create_rw_signal(Vec::<serde_json::Value>::new());
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
+    let rows = RwSignal::new(Vec::<serde_json::Value>::new());
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let days = days.get();
         let rows = rows;
         let loading = loading;
@@ -2004,16 +2016,16 @@ fn ReuseTab() -> impl IntoView {
                                     <td class="spp-table__cell-muted">{resolution}</td>
                                     <td>
                                         {if saved_reply.is_empty() {
-                                            view! { <span class="spp-muted">"—"</span> }.into_view()
+                                            view! { <span class="spp-muted">"—"</span> }.into_any()
                                         } else {
-                                            view! { <span class="spp-badge spp-badge--ok">{saved_reply}</span> }.into_view()
+                                            view! { <span class="spp-badge spp-badge--ok">{saved_reply}</span> }.into_any()
                                         }}
                                     </td>
                                     <td>
                                         {if knowledge_doc.is_empty() {
-                                            view! { <span class="spp-muted">"—"</span> }.into_view()
+                                            view! { <span class="spp-muted">"—"</span> }.into_any()
                                         } else {
-                                            view! { <span class="spp-badge spp-badge--ok">{knowledge_doc}</span> }.into_view()
+                                            view! { <span class="spp-badge spp-badge--ok">{knowledge_doc}</span> }.into_any()
                                         }}
                                     </td>
                                 </tr>

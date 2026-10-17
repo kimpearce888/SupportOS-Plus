@@ -25,8 +25,8 @@ aes-gcm.workspace = true
 scrypt.workspace = true
 rand.workspace = true
 subtle.workspace = true
-sha2 = "0.10"
-base64 = "0.22"
+sha2 = "0.11"
+base64 = "0.23"
 axum.workspace = true
 tower-http.workspace = true
 regex.workspace = true
@@ -36,10 +36,10 @@ url = { workspace = true }
 futures-util = { workspace = true }
 tokio-stream = { workspace = true }
 supportos-plusplus-catalog = { workspace = true }
-ammonia = "4.2.0"
-pdf-extract = "0.12.1"
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
-quick-xml = "0.42.0"
+ammonia = "4.2"
+pdf-extract = "0.12"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+quick-xml = "0.42"
 
 [dependencies.qdrant-edge]
 version = "=0.8.0"

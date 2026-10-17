@@ -1,9 +1,9 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::interaction_current::{
-    sanitize_signals, CurrentInteraction, InteractionSignal, MessageStats,
+    CurrentInteraction, InteractionSignal, MessageStats, sanitize_signals,
 };
 
 struct ForbiddenPattern {
@@ -1975,12 +1975,12 @@ pub fn build_card(
                 return Ok(None);
             };
             let mut c = computed;
-            if let Some((ai_signals, _, _, _)) = ai_enrichment {
-                if !ai_signals.is_empty() {
-                    let merged = merge_signals(&c.signals, ai_signals);
-                    c.signals = sanitize_signals(merged).signals;
-                    c.sources = "heuristic+ai".to_string();
-                }
+            if let Some((ai_signals, _, _, _)) = ai_enrichment
+                && !ai_signals.is_empty()
+            {
+                let merged = merge_signals(&c.signals, ai_signals);
+                c.signals = sanitize_signals(merged).signals;
+                c.sources = "heuristic+ai".to_string();
             }
             c
         }

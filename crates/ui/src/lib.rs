@@ -3,8 +3,11 @@
 #![warn(clippy::all)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
-use leptos::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_router::NavigateOptions;
+use leptos_router::components::*;
+use leptos_router::hooks::*;
+use leptos_router::path;
 
 pub mod api;
 pub mod components;
@@ -41,35 +44,35 @@ fn app_view() -> impl IntoView {
     view! {
         <Router>
             <AppEffects />
-            <Routes>
-                <Route path="/onboarding" view=pages::OnboardingPage />
-                <Route path="/" view=layout::LayoutShell>
-                    <Route path="/" view=pages::DashboardPage />
-                    <Route path="/inbox" view=InboxListRoute />
-                    <Route path="/inbox/conversation/:id" view=InboxRoute />
-                    <Route path="/search" view=pages::SearchPage />
-                    <Route path="/customers" view=pages::CustomerSearchPage />
-                    <Route path="/customers/:id" view=CustomerProfileRoute />
-                    <Route path="/organizations" view=pages::OrganizationsPage />
-                    <Route path="/organizations/:id" view=OrganizationDetailRoute />
-                    <Route path="/ai" view=pages::AiCenterPage />
-                    <Route path="/issues" view=pages::IssueRadarPage />
-                    <Route path="/incidents" view=pages::IncidentsPage />
-                    <Route path="/incidents/:id" view=IncidentDetailRoute />
-                    <Route path="/custom-objects" view=pages::CustomObjectsPage />
-                    <Route path="/connectors" view=pages::ConnectorsPage />
-                    <Route path="/graph" view=pages::SupportGraphPage />
-                    <Route path="/knowledge" view=pages::KnowledgePage />
-                    <Route path="/docs" view=pages::DocsPage />
-                    <Route path="/reports" view=pages::ReportsPage />
-                    <Route path="/outreach" view=pages::OutreachPage />
-                    <Route path="/operations" view=pages::OperationsPage />
-                    <Route path="/notifications" view=pages::NotificationsPage />
-                    <Route path="/automation" view=pages::AutomationPage />
-                    <Route path="/sync-health" view=pages::SyncHealthPage />
-                    <Route path="/settings" view=pages::SettingsPage />
-                    <Route path="/*any" view=not_found_from_params />
-                </Route>
+            <Routes fallback=not_found_fallback>
+                <Route path=path!("/onboarding") view=pages::OnboardingPage />
+                <ParentRoute path=path!("/") view=layout::LayoutShell>
+                    <Route path=path!("") view=pages::DashboardPage />
+                    <Route path=path!("inbox") view=InboxListRoute />
+                    <Route path=path!("inbox/conversation/:id") view=InboxRoute />
+                    <Route path=path!("search") view=pages::SearchPage />
+                    <Route path=path!("customers") view=pages::CustomerSearchPage />
+                    <Route path=path!("customers/:id") view=CustomerProfileRoute />
+                    <Route path=path!("organizations") view=pages::OrganizationsPage />
+                    <Route path=path!("organizations/:id") view=OrganizationDetailRoute />
+                    <Route path=path!("ai") view=pages::AiCenterPage />
+                    <Route path=path!("issues") view=pages::IssueRadarPage />
+                    <Route path=path!("incidents") view=pages::IncidentsPage />
+                    <Route path=path!("incidents/:id") view=IncidentDetailRoute />
+                    <Route path=path!("custom-objects") view=pages::CustomObjectsPage />
+                    <Route path=path!("connectors") view=pages::ConnectorsPage />
+                    <Route path=path!("graph") view=pages::SupportGraphPage />
+                    <Route path=path!("knowledge") view=pages::KnowledgePage />
+                    <Route path=path!("docs") view=pages::DocsPage />
+                    <Route path=path!("reports") view=pages::ReportsPage />
+                    <Route path=path!("outreach") view=pages::OutreachPage />
+                    <Route path=path!("operations") view=pages::OperationsPage />
+                    <Route path=path!("notifications") view=pages::NotificationsPage />
+                    <Route path=path!("automation") view=pages::AutomationPage />
+                    <Route path=path!("sync-health") view=pages::SyncHealthPage />
+                    <Route path=path!("settings") view=pages::SettingsPage />
+                    <Route path=path!("*any") view=not_found_from_params />
+                </ParentRoute>
             </Routes>
             <toasts::Toasts />
             <components::CommandPalette
@@ -104,7 +107,7 @@ fn AppEffects() -> impl IntoView {
     {
         let pathname = location.pathname;
         let navigate = navigate.clone();
-        create_effect(move |_| {
+        Effect::new(move |_| {
             if ui.onboarding_completed.get() == Some(false) && pathname.get() != "/onboarding" {
                 navigate(
                     "/onboarding",
@@ -170,7 +173,7 @@ fn InboxRoute() -> impl IntoView {
     let params = use_params_map();
     view! {
         {move || {
-            let raw = params.with(|p| p.get("id").cloned().unwrap_or_default());
+            let raw = params.with(|p| p.get("id").unwrap_or_default());
             match raw.parse::<i64>() {
                 Ok(id) => {
                     view! { <pages::InboxPage conversation_id=id /> }
@@ -188,14 +191,10 @@ fn IncidentDetailRoute() -> impl IntoView {
     let params = use_params_map();
     view! {
         {move || {
-            let raw = params.with(|p| p.get("id").cloned().unwrap_or_default());
+            let raw = params.with(|p| p.get("id").unwrap_or_default());
             match raw.parse::<i64>() {
-                Ok(id) => {
-                    view! { <pages::IncidentDetailPage incident_id=id /> }
-                }
-                Err(_) => {
-                    view! { <pages::IncidentsPage /> }
-                }
+                Ok(id) => view! { <pages::IncidentDetailPage incident_id=id /> }.into_any(),
+                Err(_) => view! { <pages::IncidentsPage /> }.into_any(),
             }
         }}
     }
@@ -206,7 +205,7 @@ fn CustomerProfileRoute() -> impl IntoView {
     let params = use_params_map();
     view! {
         {move || {
-            let raw = params.with(|p| p.get("id").cloned().unwrap_or_default());
+            let raw = params.with(|p| p.get("id").unwrap_or_default());
             let id = raw.parse::<i64>().unwrap_or(0);
             view! { <pages::CustomerProfilePage customer_id=id /> }
         }}
@@ -218,18 +217,22 @@ fn OrganizationDetailRoute() -> impl IntoView {
     let params = use_params_map();
     view! {
         {move || {
-            let raw = params.with(|p| p.get("id").cloned().unwrap_or_default());
+            let raw = params.with(|p| p.get("id").unwrap_or_default());
             let id = raw.parse::<i64>().unwrap_or(0);
             view! { <pages::OrganizationDetailPage organization_id=id /> }
         }}
     }
 }
 
+fn not_found_fallback() -> impl IntoView {
+    view! { <pages::NotFoundPage path=|| "/".to_string() /> }
+}
+
 fn not_found_from_params() -> impl IntoView {
     let params = use_params_map();
     let path = move || {
         params.with(|p| {
-            let any = p.get("any").cloned().unwrap_or_default();
+            let any = p.get("any").unwrap_or_default();
             if any.is_empty() {
                 "/".to_string()
             } else {

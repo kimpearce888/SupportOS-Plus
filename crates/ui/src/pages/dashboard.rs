@@ -1,7 +1,7 @@
-use std::rc::Rc;
-
-use leptos::*;
-use leptos_router::{use_location, use_navigate, use_query_map, A};
+use leptos::prelude::*;
+use leptos_router::components::A;
+use leptos_router::hooks::{use_location, use_navigate, use_query_map};
+use std::sync::Arc;
 
 use crate::components::state_view::{EmptyState, LoadingState};
 
@@ -18,7 +18,7 @@ const CHANNELS: [(&str, &str); 3] = [
     ("chat", "Chat (Beacon)"),
 ];
 
-type SetParamFn = Rc<dyn Fn(&str, Option<&str>)>;
+type SetParamFn = Arc<dyn Fn(&str, Option<&str>) + Send + Sync>;
 
 #[component]
 pub fn DashboardPage() -> impl IntoView {
@@ -26,13 +26,13 @@ pub fn DashboardPage() -> impl IntoView {
     let location = use_location();
     let navigate = use_navigate();
 
-    let days = create_memo(move |_| {
+    let days = Memo::new(move |_| {
         let m = query_map.get();
         crate::url_state::query_pos_int(&m, "days")
             .map(|d| (d as u32).clamp(1, 3650))
             .unwrap_or(30)
     });
-    let mailbox_ids = create_memo(move |_| {
+    let mailbox_ids = Memo::new(move |_| {
         let m = query_map.get();
         crate::url_state::query_str(&m, "mailboxes")
             .map(|raw| {
@@ -42,7 +42,7 @@ pub fn DashboardPage() -> impl IntoView {
             })
             .unwrap_or_default()
     });
-    let channel = create_memo(move |_| {
+    let channel = Memo::new(move |_| {
         let m = query_map.get();
         match crate::url_state::query_str(&m, "channel").as_deref() {
             Some("email") => Some("email".to_string()),
@@ -54,7 +54,7 @@ pub fn DashboardPage() -> impl IntoView {
     let set_param: SetParamFn = {
         let navigate = navigate.clone();
         let pathname = location.pathname;
-        Rc::new(move |key: &str, value: Option<&str>| {
+        Arc::new(move |key: &str, value: Option<&str>| {
             let m = query_map.get_untracked();
             let mut pairs: Vec<crate::url_state::Param> = Vec::new();
             for k in ["days", "mailboxes", "channel"] {
@@ -67,10 +67,10 @@ pub fn DashboardPage() -> impl IntoView {
             crate::url_state::replace_query(&navigate, &pathname.get_untracked(), &pairs);
         })
     };
-    let set_param_stored = StoredValue::new(set_param);
+    let set_param_stored = StoredValue::new_local(set_param);
 
-    let toggle_mailbox_stored = StoredValue::new({
-        Rc::new(move |id: i64| {
+    let toggle_mailbox_stored = StoredValue::new_local({
+        Arc::new(move |id: i64| {
             let mut next: Vec<i64> = mailbox_ids.get_untracked();
             if next.contains(&id) {
                 next.retain(|m| *m != id);
@@ -92,17 +92,17 @@ pub fn DashboardPage() -> impl IntoView {
                     },
                 )
             });
-        }) as Rc<dyn Fn(i64)>
+        }) as Arc<dyn Fn(i64) + Send + Sync>
     });
 
-    let metrics = create_rw_signal(None::<serde_json::Value>);
-    let metrics_loading = create_rw_signal(true);
-    let metrics_error = create_rw_signal(None::<String>);
-    let mailboxes = create_rw_signal(Vec::<serde_json::Value>::new());
-    let health = create_rw_signal(None::<serde_json::Value>);
-    let radar = create_rw_signal(Vec::<serde_json::Value>::new());
+    let metrics = RwSignal::new(None::<serde_json::Value>);
+    let metrics_loading = RwSignal::new(true);
+    let metrics_error = RwSignal::new(None::<String>);
+    let mailboxes = RwSignal::new(Vec::<serde_json::Value>::new());
+    let health = RwSignal::new(None::<serde_json::Value>);
+    let radar = RwSignal::new(Vec::<serde_json::Value>::new());
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let days = days.get();
         let mailbox_ids = mailbox_ids.get();
         let channel = channel.get();
@@ -350,7 +350,7 @@ pub fn DashboardPage() -> impl IntoView {
                                 } else {
                                     ""
                                 }}
-                                <A href="/sync-health" class="spp-dashboard__banner-link">"Open Sync Health"</A>
+                                <A href="/sync-health" attr:class="spp-dashboard__banner-link">"Open Sync Health"</A>
                             </span>
                         }
                     }}
@@ -372,7 +372,7 @@ pub fn DashboardPage() -> impl IntoView {
             >
                 {move || {
                     let Some(data) = metrics.get() else {
-                        return view! { <div></div> }.into_view();
+                        return view! { <div></div> }.into_any();
                     };
                     let active = data.get("active_conversations").and_then(|v| v.as_i64()).unwrap_or(0);
                     let pending = data.get("pending_conversations").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -400,19 +400,19 @@ pub fn DashboardPage() -> impl IntoView {
                         .max(1);
                     view! {
                         <div class="spp-dashboard-grid">
-                            <A href="/inbox?view=active" class="spp-kpi-card spp-kpi-card--link">
+                            <A href="/inbox?view=active" attr:class="spp-kpi-card spp-kpi-card--link">
                                 <span class="spp-kpi-card__label">"Active"</span>
                                 <span class="spp-kpi-card__value">{fmt_u64(Some(active))}</span>
                             </A>
-                            <A href="/inbox?view=pending" class="spp-kpi-card spp-kpi-card--link">
+                            <A href="/inbox?view=pending" attr:class="spp-kpi-card spp-kpi-card--link">
                                 <span class="spp-kpi-card__label">"Pending"</span>
                                 <span class="spp-kpi-card__value">{fmt_u64(Some(pending))}</span>
                             </A>
-                            <A href="/inbox?view=closed" class="spp-kpi-card spp-kpi-card--link">
+                            <A href="/inbox?view=closed" attr:class="spp-kpi-card spp-kpi-card--link">
                                 <span class="spp-kpi-card__label">"Closed (in range)"</span>
                                 <span class="spp-kpi-card__value">{fmt_u64(Some(closed))}</span>
                             </A>
-                            <A href="/inbox?view=unassigned" class="spp-kpi-card spp-kpi-card--link">
+                            <A href="/inbox?view=unassigned" attr:class="spp-kpi-card spp-kpi-card--link">
                                 <span class="spp-kpi-card__label">"Unassigned"</span>
                                 <span class="spp-kpi-card__value">{fmt_u64(Some(unassigned))}</span>
                             </A>
@@ -448,7 +448,7 @@ pub fn DashboardPage() -> impl IntoView {
                             <div class="spp-card">
                                 <h3 class="spp-card__title">"New conversations per day (local)"</h3>
                                 {if daily_new.is_empty() {
-                                    view! { <EmptyState message="No conversations in range" /> }.into_view()
+                                    view! { <EmptyState message="No conversations in range" /> }.into_any()
                                 } else {
                                     view! {
                                         <div class="spp-barchart" role="img" aria-label="New conversations per day">
@@ -477,7 +477,7 @@ pub fn DashboardPage() -> impl IntoView {
                                                     .unwrap_or_default()}
                                             </span>
                                         </div>
-                                    }.into_view()
+                                    }.into_any()
                                 }}
                             </div>
                             <div class="spp-card">
@@ -523,7 +523,7 @@ pub fn DashboardPage() -> impl IntoView {
                                                         let href = href.clone();
                                                         let label = label.clone();
                                                         view! {
-                                                            <A href=href class="spp-badge">
+                                                            <A href=href attr:class="spp-badge">
                                                                 {label}
                                                             </A>
                                                         }
@@ -533,7 +533,7 @@ pub fn DashboardPage() -> impl IntoView {
                                         }
                                     }).collect::<Vec<_>>()}
                                 </Show>
-                                <A href="/issues" class="spp-dashboard__banner-link">"Open Issues screen →"</A>
+                                <A href="/issues" attr:class="spp-dashboard__banner-link">"Open Issues screen →"</A>
                             </div>
                         </div>
 
@@ -544,7 +544,7 @@ pub fn DashboardPage() -> impl IntoView {
                                     let data = metrics.get().unwrap_or_default();
                                     let rows = data.get("channel_metrics").and_then(|v| v.as_array()).cloned().unwrap_or_default();
                                     if rows.is_empty() {
-                                        view! { <EmptyState message="No conversations in range" /> }.into_view()
+                                        view! { <EmptyState message="No conversations in range" /> }.into_any()
                                     } else {
                                         rows.iter().map(|c| {
                                             let channel = c.get("channel").and_then(|v| v.as_str()).unwrap_or("email").to_string();
@@ -559,7 +559,7 @@ pub fn DashboardPage() -> impl IntoView {
                                             view! {
                                                 <div class="spp-dashboard__channel-row">
                                                     <div class="spp-flex spp-flex--between">
-                                                        <A href={format!("/inbox?view=all&channel={}", crate::url_state::encode_value(&channel))} class="spp-badge">
+                                                        <A href={format!("/inbox?view=all&channel={}", crate::url_state::encode_value(&channel))} attr:class="spp-badge">
                                                             {label}
                                                         </A>
                                                         <span class="spp-badge">{count.to_string()}</span>
@@ -569,7 +569,7 @@ pub fn DashboardPage() -> impl IntoView {
                                                     </div>
                                                 </div>
                                             }
-                                        }).collect::<Vec<_>>().into_view()
+                                        }).collect::<Vec<_>>().into_any()
                                     }
                                 }}
                                 <p class="spp-muted spp-text-xs">
@@ -587,7 +587,7 @@ pub fn DashboardPage() -> impl IntoView {
                                         .unwrap_or(1)
                                         .max(1);
                                     if rows.is_empty() {
-                                        view! { <EmptyState message="No mailboxes yet" /> }.into_view()
+                                        view! { <EmptyState message="No mailboxes yet" /> }.into_any()
                                     } else {
                                         rows.iter().map(move |m| {
                                             let mailbox_id = m.get("mailbox_id").and_then(|v| v.as_i64()).unwrap_or_default();
@@ -636,7 +636,7 @@ pub fn DashboardPage() -> impl IntoView {
                                                     </button>
                                                 </div>
                                             }
-                                        }).collect::<Vec<_>>().into_view()
+                                        }).collect::<Vec<_>>().into_any()
                                     }
                                 }}
                             </div>
@@ -668,7 +668,7 @@ pub fn DashboardPage() -> impl IntoView {
                         <p class="spp-muted spp-text-xs">
                             "All metrics are local calculations from the synchronized mirror; definitions and limitations are listed in Reports → Metric definitions. AI-derived numbers are labeled as AI-derived. Ratings update in real time over Server-Sent Events (/api/events)."
                         </p>
-                    }.into_view()
+                    }.into_any()
                 }}
             </Show>
         </div>
@@ -689,7 +689,7 @@ fn NameCountList(data: serde_json::Value, key: &'static str, link: &'static str)
     };
     view! {
         {if rows.is_empty() {
-            view! { <span class="spp-muted spp-text-xs">{if key == "by_tag" { "No tags yet" } else { "Unassigned work only" } }</span> }.into_view()
+            view! { <span class="spp-muted spp-text-xs">{if key == "by_tag" { "No tags yet" } else { "Unassigned work only" } }</span> }.into_any()
         } else {
             rows.iter().map(|r| {
                 let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("—").to_string();
@@ -702,14 +702,14 @@ fn NameCountList(data: serde_json::Value, key: &'static str, link: &'static str)
                 view! {
                     <div class="spp-flex spp-flex--between spp-dashboard__name-row">
                         {if href.is_empty() {
-                            view! { <span>{name}</span> }.into_view()
+                            view! { <span>{name}</span> }.into_any()
                         } else {
-                            view! { <A href=href class="spp-dashboard__name-link">{name}</A> }.into_view()
+                            view! { <A href=href attr:class="spp-dashboard__name-link">{name}</A> }.into_any()
                         }}
                         <span class="spp-badge">{count.to_string()}</span>
                     </div>
                 }
-            }).collect::<Vec<_>>().into_view()
+            }).collect::<Vec<_>>().into_any()
         }}
     }
 }

@@ -1,5 +1,5 @@
-use rusqlite::{params, Connection};
-use serde_json::{json, Value};
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
 
 use crate::ai_lm_studio::ChatTool;
 use crate::catalog::GraphNodeKind;
@@ -334,23 +334,24 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
                 limit,
             )
             .unwrap_or_default();
-            json!(hits
-                .iter()
-                .map(|h| {
-                    let number: i64 = h
-                        .title
-                        .split(' ')
-                        .next()
-                        .map(|w| w.trim_start_matches('#'))
-                        .and_then(|w| w.parse().ok())
-                        .unwrap_or(h.id);
-                    json!({
-                        "number": number,
-                        "title": h.title,
-                        "snippet": red_chars(conn, &h.snippet, 300),
+            json!(
+                hits.iter()
+                    .map(|h| {
+                        let number: i64 = h
+                            .title
+                            .split(' ')
+                            .next()
+                            .map(|w| w.trim_start_matches('#'))
+                            .and_then(|w| w.parse().ok())
+                            .unwrap_or(h.id);
+                        json!({
+                            "number": number,
+                            "title": h.title,
+                            "snippet": red_chars(conn, &h.snippet, 300),
+                        })
                     })
-                })
-                .collect::<Vec<_>>())
+                    .collect::<Vec<_>>()
+            )
         }
         "search_knowledge" => {
             let q: String = args
@@ -361,13 +362,14 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
                 .take(200)
                 .collect();
             let hits = crate::search::search_knowledge(conn, &q, None, limit).unwrap_or_default();
-            json!(hits
-                .iter()
-                .map(|h| json!({
-                    "title": h.title,
-                    "snippet": red_chars(conn, &h.snippet, 300),
-                }))
-                .collect::<Vec<_>>())
+            json!(
+                hits.iter()
+                    .map(|h| json!({
+                        "title": h.title,
+                        "snippet": red_chars(conn, &h.snippet, 300),
+                    }))
+                    .collect::<Vec<_>>()
+            )
         }
         "search_known_issues" => {
             let q: String = args
@@ -378,14 +380,15 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
                 .take(200)
                 .collect();
             let hits = crate::search::search_known_issues(conn, &q, limit).unwrap_or_default();
-            json!(hits
-                .iter()
-                .map(|h| json!({
-                    "id": h.id,
-                    "title": h.title,
-                    "snippet": red_chars(conn, &h.snippet, 300),
-                }))
-                .collect::<Vec<_>>())
+            json!(
+                hits.iter()
+                    .map(|h| json!({
+                        "id": h.id,
+                        "title": h.title,
+                        "snippet": red_chars(conn, &h.snippet, 300),
+                    }))
+                    .collect::<Vec<_>>()
+            )
         }
         "search_saved_replies" => {
             let q: String = args
@@ -396,14 +399,15 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
                 .take(200)
                 .collect();
             let hits = crate::search::search_saved_replies(conn, &q, limit).unwrap_or_default();
-            json!(hits
-                .iter()
-                .map(|h| json!({
-                    "id": h.id,
-                    "title": h.title,
-                    "snippet": red_chars(conn, &h.snippet, 300),
-                }))
-                .collect::<Vec<_>>())
+            json!(
+                hits.iter()
+                    .map(|h| json!({
+                        "id": h.id,
+                        "title": h.title,
+                        "snippet": red_chars(conn, &h.snippet, 300),
+                    }))
+                    .collect::<Vec<_>>()
+            )
         }
         "get_conversation" => {
             let Some(num) = args.get("number").and_then(Value::as_i64) else {
@@ -634,15 +638,17 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
             let similar =
                 crate::ai_evidence::find_similar(conn, id, limit.clamp(1, 10) as usize, &[])
                     .unwrap_or_default();
-            json!(similar
-                .iter()
-                .map(|s| json!({
-                    "conversation_id": s.conversation_id,
-                    "number": s.number,
-                    "subject": s.subject,
-                    "resolution": red_chars(conn, &s.resolution, 400),
-                }))
-                .collect::<Vec<_>>())
+            json!(
+                similar
+                    .iter()
+                    .map(|s| json!({
+                        "conversation_id": s.conversation_id,
+                        "number": s.number,
+                        "subject": s.subject,
+                        "resolution": red_chars(conn, &s.resolution, 400),
+                    }))
+                    .collect::<Vec<_>>()
+            )
         }
         "get_issue_clusters" => {
             let q: String = args
@@ -876,30 +882,32 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
                     .map(|rows| rows.filter_map(|t| t.ok()).collect::<Vec<_>>())
                 })
                 .unwrap_or_default();
-            json!(rows
-                .into_iter()
-                .filter(|r| {
-                    q.is_empty()
-                        || format!(
-                            "{} {} {}",
-                            r["code"].as_str().unwrap_or(""),
-                            r["title"].as_str().unwrap_or(""),
-                            r["product"].as_str().unwrap_or("")
-                        )
-                        .to_lowercase()
-                        .contains(&q)
-                })
-                .take(limit as usize)
-                .map(|mut r| {
-                    let conversations = r["conversation_count"].as_i64().unwrap_or(0);
-                    let customers = r["customer_count"].as_i64().unwrap_or(0);
-                    r["affected_conversations"] = json!(conversations);
-                    r["affected_customers"] = json!(customers);
-                    r["note"] =
-                        json!("Affected customers are distinct customers, never ticket counts.");
-                    r
-                })
-                .collect::<Vec<_>>())
+            json!(
+                rows.into_iter()
+                    .filter(|r| {
+                        q.is_empty()
+                            || format!(
+                                "{} {} {}",
+                                r["code"].as_str().unwrap_or(""),
+                                r["title"].as_str().unwrap_or(""),
+                                r["product"].as_str().unwrap_or("")
+                            )
+                            .to_lowercase()
+                            .contains(&q)
+                    })
+                    .take(limit as usize)
+                    .map(|mut r| {
+                        let conversations = r["conversation_count"].as_i64().unwrap_or(0);
+                        let customers = r["customer_count"].as_i64().unwrap_or(0);
+                        r["affected_conversations"] = json!(conversations);
+                        r["affected_customers"] = json!(customers);
+                        r["note"] = json!(
+                            "Affected customers are distinct customers, never ticket counts."
+                        );
+                        r
+                    })
+                    .collect::<Vec<_>>()
+            )
         }
         "search_custom_objects" => {
             let q: String = args

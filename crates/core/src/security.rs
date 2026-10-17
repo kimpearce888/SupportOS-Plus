@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const DANGEROUS_CSS: &str = r"(?i)(url\s*\(|@import|expression\s*\(|position\s*:\s*(fixed|absolute)|behavior\s*:|-moz-binding|javascript\s*:)";
 
@@ -399,7 +399,7 @@ pub fn check_url_literal(raw_url: &str) -> SsrfCheckResult {
             return SsrfCheckResult::refused(
                 format!("protocol \"{other}:\" is not allowed (http/https only)"),
                 None,
-            )
+            );
         }
     }
     let host_raw = match parsed.host_str() {
@@ -484,7 +484,7 @@ pub fn validate_ssrf_full(raw_url: &str) -> crate::error::Result<()> {
         Err(_) => {
             return Err(crate::error::Error::Config(format!(
                 "SSRF guard: host \"{host}\" does not resolve"
-            )))
+            )));
         }
         Ok(addrs) => {
             let list: Vec<std::net::SocketAddr> = addrs.collect();

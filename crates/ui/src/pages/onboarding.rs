@@ -1,5 +1,6 @@
-use leptos::*;
-use leptos_router::{use_navigate, NavigateOptions};
+use leptos::prelude::*;
+use leptos_router::NavigateOptions;
+use leptos_router::hooks::use_navigate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardingStep {
@@ -69,22 +70,22 @@ impl OnboardingStep {
 
 #[component]
 pub fn OnboardingPage() -> impl IntoView {
-    let first_run_done = create_rw_signal(None::<bool>);
-    let step = create_rw_signal(OnboardingStep::Welcome);
-    let loading = create_rw_signal(true);
-    let error_msg = create_rw_signal(None::<String>);
-    let action_msg = create_rw_signal(None::<String>);
-    let status = create_rw_signal(serde_json::Value::Null);
-    let lm_check = create_rw_signal(None::<serde_json::Value>);
-    let lm_checking = create_rw_signal(false);
-    let qdrant_check = create_rw_signal(None::<serde_json::Value>);
-    let qdrant_checking = create_rw_signal(false);
-    let syncing = create_rw_signal(false);
+    let first_run_done = RwSignal::new(None::<bool>);
+    let step = RwSignal::new(OnboardingStep::Welcome);
+    let loading = RwSignal::new(true);
+    let error_msg = RwSignal::new(None::<String>);
+    let action_msg = RwSignal::new(None::<String>);
+    let status = RwSignal::new(serde_json::Value::Null);
+    let lm_check = RwSignal::new(None::<serde_json::Value>);
+    let lm_checking = RwSignal::new(false);
+    let qdrant_check = RwSignal::new(None::<serde_json::Value>);
+    let qdrant_checking = RwSignal::new(false);
+    let syncing = RwSignal::new(false);
 
     let ui = use_context::<crate::state::UiState>();
     let navigate = use_navigate();
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         let first_run_done = first_run_done;
         let step = step;
         let status = status;
@@ -97,14 +98,13 @@ pub fn OnboardingPage() -> impl IntoView {
                         .get("completed")
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
-                    if !done {
-                        if let Some(resume) = data
+                    if !done
+                        && let Some(resume) = data
                             .get("step")
                             .and_then(|v| v.as_str())
                             .and_then(OnboardingStep::parse)
-                        {
-                            step.set(resume);
-                        }
+                    {
+                        step.set(resume);
                     }
                     first_run_done.set(Some(done));
                     if let Some(ui) = ui {
@@ -232,7 +232,7 @@ pub fn OnboardingPage() -> impl IntoView {
         });
     };
 
-    create_effect(move |prev: Option<Option<bool>>| {
+    Effect::new(move |prev: Option<Option<bool>>| {
         let done = first_run_done.get();
         if prev.is_some() && done == Some(true) {
             navigate("/", NavigateOptions::default());
@@ -279,7 +279,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                 <p>"To connect Help Scout, go to Settings → Help Scout credentials."</p>
                                 <p>"To configure AI, go to the AI Center."</p>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     } else {
                         view! {
                             <div class="spp-onboarding-wizard">
@@ -305,7 +305,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                 <div class="spp-onboarding-panel">
                                     <Show
                                         when=move || step.get() == OnboardingStep::Welcome
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <div class="spp-onboarding__choices">
                                             <div class="spp-onboarding__choice">
@@ -342,7 +342,7 @@ pub fn OnboardingPage() -> impl IntoView {
 
                                     <Show
                                         when=move || step.get() == OnboardingStep::HelpScout
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <h3>"Step 2 — Connect Help Scout"</h3>
                                         <p>
@@ -372,7 +372,7 @@ pub fn OnboardingPage() -> impl IntoView {
 
                                     <Show
                                         when=move || step.get() == OnboardingStep::LmStudio
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <h3>"Step 3 — Local AI (LM Studio)"</h3>
                                         <p>
@@ -382,7 +382,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                         <button class="spp-button" on:click=check_lm>
                                             {move || if lm_checking.get() { "Checking…" } else { "Run live check" }.to_string()}
                                         </button>
-                                        <Show when=move || lm_check.get().is_some() fallback=|| ().into_view()>
+                                        <Show when=move || lm_check.get().is_some() fallback=|| ().into_any()>
                                             <div class="spp-onboarding-check spp-onboarding-check--detail">
                                                 {move || {
                                                     let v = lm_check.get().unwrap_or_default();
@@ -405,7 +405,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                                             {state_label.clone()}
                                                         </span>
                                                         <p class="spp-onboarding-check__message">{message.clone()}</p>
-                                                        <Show when=move || has_models fallback=|| ().into_view()>
+                                                        <Show when=move || has_models fallback=|| ().into_any()>
                                                             <p class="spp-muted spp-text-xs">
                                                                 {models_display.clone()}
                                                             </p>
@@ -418,7 +418,7 @@ pub fn OnboardingPage() -> impl IntoView {
 
                                     <Show
                                         when=move || step.get() == OnboardingStep::Qdrant
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <h3>"Step 4 — Vector store (Qdrant)"</h3>
                                         <p>
@@ -428,7 +428,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                         <button class="spp-button" on:click=check_qdrant>
                                             {move || if qdrant_checking.get() { "Checking…" } else { "Run live check" }.to_string()}
                                         </button>
-                                        <Show when=move || qdrant_check.get().is_some() fallback=|| ().into_view()>
+                                        <Show when=move || qdrant_check.get().is_some() fallback=|| ().into_any()>
                                             <div class="spp-onboarding-check spp-onboarding-check--detail">
                                                 {move || {
                                                     let v = qdrant_check.get().unwrap_or_default();
@@ -447,7 +447,7 @@ pub fn OnboardingPage() -> impl IntoView {
 
                                     <Show
                                         when=move || step.get() == OnboardingStep::FirstSync
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <h3>"Step 5 — First sync"</h3>
                                         <p>
@@ -471,7 +471,7 @@ pub fn OnboardingPage() -> impl IntoView {
 
                                     <Show
                                         when=move || step.get() == OnboardingStep::Finish
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <h3>"Step 6 — Finish"</h3>
                                         <p>
@@ -500,7 +500,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                 <div class="spp-onboarding-nav">
                                     <Show
                                         when=move || step.get().prev().is_some()
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <button
                                             class="spp-button spp-button--ghost"
@@ -515,7 +515,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                     </Show>
                                     <Show
                                         when=move || step.get().next().is_some()
-                                        fallback=|| ().into_view()
+                                        fallback=|| ().into_any()
                                     >
                                         <button
                                             class="spp-button spp-button--primary"
@@ -530,7 +530,7 @@ pub fn OnboardingPage() -> impl IntoView {
                                     </Show>
                                 </div>
                             </div>
-                        }.into_view()
+                        }.into_any()
                     }
                 }}
             </Show>

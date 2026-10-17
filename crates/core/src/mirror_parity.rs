@@ -111,17 +111,16 @@ fn capture_child(conn: &Connection, name: &str, parent: &str) -> Result<ChildRow
     let rows: Vec<Vec<rusqlite::types::Value>> = {
         let mut stmt = conn.prepare(&format!("SELECT * FROM {name}"))?;
         let n = columns.len();
-        let rows = stmt
-            .query_map([], |r| {
-                let mut row: Vec<rusqlite::types::Value> = Vec::with_capacity(n);
-                for i in 0..n {
-                    row.push(r.get(i)?);
-                }
-                Ok(row)
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        rows
+
+        stmt.query_map([], |r| {
+            let mut row: Vec<rusqlite::types::Value> = Vec::with_capacity(n);
+            for i in 0..n {
+                row.push(r.get(i)?);
+            }
+            Ok(row)
+        })?
+        .filter_map(|r| r.ok())
+        .collect()
     };
     Ok(ChildRows {
         name: name.to_string(),

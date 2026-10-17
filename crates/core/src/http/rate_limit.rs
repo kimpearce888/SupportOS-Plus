@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use axum::http::{header, HeaderValue, Method, Request, StatusCode};
+use axum::http::{HeaderValue, Method, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 pub const RATE_LIMIT_MAX: u32 = 300;
