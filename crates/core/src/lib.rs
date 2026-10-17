@@ -1,0 +1,106 @@
+#![forbid(unsafe_code)]
+#![deny(rust_2018_idioms)]
+#![warn(clippy::all, missing_docs)]
+#![allow(
+    clippy::module_name_repetitions,
+    clippy::missing_errors_doc,
+    missing_docs
+)]
+
+pub use spp_catalog;
+
+pub mod activity;
+pub mod ai_analysis;
+pub mod ai_attributes;
+pub mod ai_center;
+pub mod ai_evidence;
+pub mod ai_features;
+pub mod ai_lm_studio;
+pub mod ai_pipeline;
+pub mod ai_prompts;
+pub mod ai_provider;
+pub mod ai_tools;
+pub mod api_queue;
+pub mod audit;
+pub mod automation;
+pub mod backup;
+pub mod backup_service;
+pub mod bootstrap;
+pub mod business_hours;
+pub mod coaching;
+pub mod config;
+pub mod connectors;
+pub mod conversation_ops;
+pub mod copilot;
+pub mod custom_objects;
+pub mod customer_events;
+pub mod customers;
+pub mod data_tools;
+pub mod db;
+pub mod db_breadth;
+pub mod demo;
+pub mod embeddings;
+pub mod encrypted_sync;
+pub mod error;
+pub mod events;
+pub mod helpscout;
+pub mod helpscout_real;
+pub mod http;
+pub mod hybrid_search;
+pub mod inbox;
+pub mod incident_workspace;
+pub mod intelligence;
+pub mod intelligence_features;
+pub mod interaction_current;
+pub mod interaction_engine;
+pub mod issue_impact;
+pub mod jobs;
+pub mod knowledge_store;
+pub mod logging;
+pub mod loopback;
+pub mod maintenance;
+pub mod mentions;
+pub mod migrations;
+pub mod mirror_parity;
+pub mod mirror_readouts;
+pub mod mirror_tables;
+pub mod notification_prefs;
+pub mod notification_sweep;
+pub mod notifications;
+pub mod oauth;
+pub mod oauth_state;
+pub mod operations;
+pub mod outreach;
+pub mod people_store;
+pub mod perf_guards;
+pub mod quality;
+pub mod reports;
+pub mod response_state_sql;
+pub mod runner;
+pub mod saved_views;
+pub mod search;
+pub mod security;
+pub mod segment;
+pub mod settings;
+pub mod side_threads;
+pub mod sla;
+pub mod support_graph;
+pub mod sync;
+pub mod sync_engine;
+pub mod sync_schema;
+pub mod ticket_ops;
+pub mod ticket_states;
+pub mod translation;
+pub mod vectorstore;
+pub mod vectorstore_contract;
+pub mod vectorstore_qdrant;
+pub mod webhook;
+pub mod webhook_handler;
+pub mod workers;
+pub mod workload;
+
+pub use error::{Error, Result};
+
+pub mod catalog {
+    pub use spp_catalog::*;
+}

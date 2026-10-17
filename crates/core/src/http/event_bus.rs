@@ -1,0 +1,127 @@
+use std::sync::Arc;
+
+use tokio::sync::broadcast;
+
+use crate::events::{ConversationUpdatedEvent, ServerEvent};
+
+#[derive(Clone)]
+pub struct EventBus {
+    tx: Arc<broadcast::Sender<ServerEvent>>,
+}
+
+impl EventBus {
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        let (tx, _) = broadcast::channel(capacity);
+        Self { tx: Arc::new(tx) }
+    }
+
+    #[must_use]
+    pub fn default_capacity() -> usize {
+        256
+    }
+
+    pub fn emit(&self, event: &ServerEvent) -> usize {
+        self.tx.send(event.clone()).unwrap_or(0)
+    }
+
+    #[must_use]
+    pub fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
+        self.tx.subscribe()
+    }
+
+    #[must_use]
+    pub fn subscriber_count(&self) -> usize {
+        self.tx.receiver_count()
+    }
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new(Self::default_capacity())
+    }
+}
+
+impl crate::events::EventEmitter for EventBus {
+    fn emit(&self, event: &ServerEvent) -> Result<(), String> {
+        let _ = EventBus::emit(self, event);
+        Ok(())
+    }
+}
+
+pub fn notify_conversation_updated(bus: &EventBus, event: &ConversationUpdatedEvent) {
+    bus.emit(&ServerEvent::ConversationUpdated(event.clone()));
+}
+
+pub fn notify_sync_completed(bus: &EventBus, kind: &str, processed: u32, errors: u32) {
+    bus.emit(&ServerEvent::sync_completed(kind, processed, errors));
+}
+
+pub fn notify_rating_received(
+    bus: &EventBus,
+    rating: Option<&str>,
+    conversation_id: Option<i64>,
+    conversation_number: Option<i64>,
+    customer_id: Option<i64>,
+    customer_name: Option<&str>,
+    comments: Option<&str>,
+) {
+    bus.emit(&ServerEvent::rating_received(
+        rating.map(String::from),
+        conversation_id,
+        conversation_number,
+        customer_id,
+        customer_name.map(String::from),
+        comments.map(String::from),
+    ));
+}
+
+pub fn notify_ratings_refreshed(bus: &EventBus, processed: u32, fresh: u32) {
+    bus.emit(&ServerEvent::ratings_refreshed(processed, fresh));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn notify_campaign_updated(
+    bus: &EventBus,
+    campaign_id: i64,
+    status: &str,
+    sent: u32,
+    failed: u32,
+    unknown: u32,
+    remaining: u32,
+) {
+    bus.emit(&ServerEvent::campaign_updated(
+        campaign_id,
+        status,
+        sent,
+        failed,
+        unknown,
+        remaining,
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn notify_notification_received(
+    bus: &EventBus,
+    id: i64,
+    kind: &str,
+    severity: &str,
+    title: &str,
+    conversation_id: Option<i64>,
+    conversation_number: Option<i64>,
+    customer_id: Option<i64>,
+    target_user_local_id: Option<i64>,
+    unread_count: u32,
+) {
+    bus.emit(&ServerEvent::notification_received(
+        id,
+        kind,
+        severity,
+        title,
+        conversation_id,
+        conversation_number,
+        customer_id,
+        target_user_local_id,
+        unread_count,
+    ));
+}

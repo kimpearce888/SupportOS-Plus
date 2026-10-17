@@ -1,0 +1,15 @@
+[package]
+name = "supportos-plusplus-catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "SupportOS++ closed-vocabulary catalog — single source of truth for DB, validation, UI. WASM-safe (no I/O deps)."
+
+[lib]
+name = "spp_catalog"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }

@@ -1,0 +1,67 @@
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/catalog",
+    "crates/core",
+    "crates/ui",
+    "crates/xtask",
+    "crates/app/src-tauri",
+]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = ["kimpearce888"]
+repository = "https://github.com/kimpearce888/SupportOS-PlusPlus"
+homepage = "https://github.com/kimpearce888/SupportOS-PlusPlus"
+
+[workspace.dependencies]
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1.0"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
+
+tokio = { version = "1", features = ["full"] }
+
+rusqlite = { version = "0.32", features = ["bundled", "blob", "limits"] }
+
+aes-gcm = "0.10"
+scrypt = "0.11"
+rand = "0.8"
+subtle = "2.5"
+
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "tower-log", "macros", "json", "query"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "catch-panic"] }
+
+regex = "1"
+
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+futures-util = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+url = "2"
+
+supportos-plusplus-catalog = { path = "crates/catalog" }
+supportos-plusplus-core = { path = "crates/core" }
+supportos-plusplus-ui = { path = "crates/ui" }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "unwind"
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = 0
+incremental = false
