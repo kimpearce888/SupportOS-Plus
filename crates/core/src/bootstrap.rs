@@ -13,7 +13,6 @@ fn apply_m007_full(conn: &Connection) -> Result<()> {
 }
 
 fn apply_runtime_guards(conn: &Connection) -> Result<()> {
-    crate::webhook::ensure_webhook_events_table(conn)?;
     crate::saved_views::ensure_inbox_views_table(conn)?;
     crate::oauth_state::ensure_oauth_states_table(conn)?;
     crate::jobs::ensure_jobs_table(conn)?;
@@ -207,6 +206,22 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m047_conversations_reference_shape",
         apply: crate::mirror_parity::apply_m047,
     },
+    // The webhook_events schema used to be re-ensured on every insert; it
+    // now lives here, in its own numbered step (migration-map row 6).
+    BootStep {
+        version: 39,
+        label: "m048_webhook_events_schema",
+        apply: crate::webhook::apply_m048_webhook_events,
+    },
+    // The secrets table gets its first writer: the plaintext webhook_secret
+    // moves out of application_settings into the encrypted envelope
+    // (migration-map row 13). Requires settings::init_master_key to have run
+    // (see the app shell); skips with a warning otherwise.
+    BootStep {
+        version: 40,
+        label: "m049_secret_envelope",
+        apply: crate::settings::apply_m049_secret_envelope,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {
@@ -236,6 +251,19 @@ fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {
 
 pub fn apply_all(conn: &mut Connection) -> Result<()> {
     crate::db::ensure_migrations_table(conn)?;
+    // The secrets master key is anchored next to the database file and must
+    // exist before the migration steps run: m049 seals the legacy plaintext
+    // webhook_secret into the encrypted envelope. In-memory databases (tests,
+    // tooling) have no file to anchor a key next to; m049 then skips with a
+    // warning and tests install a key explicitly where needed.
+    if let Some(db_path) = crate::db::db_file_path(conn) {
+        let key_path = db_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."))
+            .join("secrets.key");
+        crate::settings::init_master_key(&key_path)?;
+    }
     crate::migrations::run_all(conn)?;
     apply_boot_steps(conn, BOOT_STEPS)
 }

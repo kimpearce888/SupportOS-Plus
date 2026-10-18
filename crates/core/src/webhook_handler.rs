@@ -5,10 +5,18 @@ use crate::webhook;
 
 #[derive(Debug, PartialEq)]
 pub enum WebhookProcessResult {
-    Accepted { row_id: i64 },
-    Duplicate { row_id: i64 },
+    Accepted {
+        row_id: i64,
+    },
+    Duplicate {
+        row_id: i64,
+    },
     SignatureInvalid,
     BadRequest,
+    /// No webhook secret is configured and demo mode is off. Unsigned events
+    /// are hard-rejected in this state (migration-map row 1): accepting them
+    /// would let anyone with loopback access inject fake Help Scout events.
+    SecretNotConfigured,
 }
 
 pub fn process_webhook(
@@ -17,6 +25,7 @@ pub fn process_webhook(
     body: &[u8],
     provided_signature: Option<&str>,
     event_type: &str,
+    demo_mode: bool,
 ) -> WebhookProcessResult {
     if body.is_empty() {
         return WebhookProcessResult::BadRequest;
@@ -25,7 +34,14 @@ pub fn process_webhook(
         return WebhookProcessResult::BadRequest;
     }
 
-    if !secret.is_empty() {
+    if secret.is_empty() {
+        if !demo_mode {
+            return WebhookProcessResult::SecretNotConfigured;
+        }
+        // Demo mode: unsigned events flow through the real persistence + job
+        // pipeline so the demo exercises delivery end-to-end. Production
+        // configurations must always set a secret.
+    } else {
         let valid = match provided_signature {
             Some(sig) => webhook::verify_signature(secret, body, sig).is_ok(),
             None => false,
@@ -185,7 +201,11 @@ mod tests {
     use rusqlite::Connection;
 
     fn fresh_conn() -> Connection {
-        Connection::open_in_memory().expect("in-memory connection")
+        // The data path no longer self-ensures schema (row 6): tests open the
+        // database the way the app does — through the full migration runner.
+        let mut conn = Connection::open_in_memory().expect("in-memory connection");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
     }
 
     fn signed(secret: &[u8], body: &[u8]) -> String {
@@ -199,7 +219,8 @@ mod tests {
         let body = br#"{"objectID":123}"#;
         let sig = signed(secret, body);
 
-        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created") {
+        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created", false)
+        {
             WebhookProcessResult::Accepted { row_id } => row_id,
             other => panic!("expected Accepted, got {other:?}"),
         };
@@ -227,7 +248,7 @@ mod tests {
     #[test]
     fn rejects_empty_body() {
         let conn = fresh_conn();
-        let result = process_webhook(&conn, b"secret", b"", None, "convo.created");
+        let result = process_webhook(&conn, b"secret", b"", None, "convo.created", false);
         assert!(matches!(result, WebhookProcessResult::BadRequest));
     }
 
@@ -236,7 +257,7 @@ mod tests {
         let conn = fresh_conn();
         let body = b"not-json";
         let sig = signed(b"secret", body);
-        let result = process_webhook(&conn, b"secret", body, Some(&sig), "convo.created");
+        let result = process_webhook(&conn, b"secret", body, Some(&sig), "convo.created", false);
         assert!(matches!(result, WebhookProcessResult::BadRequest));
     }
 
@@ -249,6 +270,7 @@ mod tests {
             br#"{"id":1}"#,
             Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
             "convo.created",
+            false,
         );
         assert!(matches!(result, WebhookProcessResult::SignatureInvalid));
     }
@@ -256,18 +278,46 @@ mod tests {
     #[test]
     fn rejects_missing_signature_when_secret_set() {
         let conn = fresh_conn();
-        let result = process_webhook(&conn, b"secret", br#"{"id":1}"#, None, "convo.created");
+        let result = process_webhook(
+            &conn,
+            b"secret",
+            br#"{"id":1}"#,
+            None,
+            "convo.created",
+            false,
+        );
         assert!(matches!(result, WebhookProcessResult::SignatureInvalid));
     }
 
-    // CHARACTERIZATION of current behavior: an empty secret skips signature
-    // verification entirely. Plan item 6 (migration-map row 1) changes this to
-    // a hard reject outside demo mode; this test flips with it deliberately.
+    // CHARACTERIZATION of current behavior, kept deliberately: in demo mode
+    // an empty secret lets unsigned events through so the demo webhook tools
+    // can exercise the full pipeline without a real Help Scout secret.
+    // Outside demo mode the empty secret is a hard reject (row 1) — see
+    // `empty_secret_hard_rejects_outside_demo_mode` below.
     #[test]
-    fn empty_secret_skips_verification_current_behavior() {
+    fn empty_secret_allows_unsigned_events_in_demo_mode() {
         let conn = fresh_conn();
-        let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created");
+        let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created", true);
         assert!(matches!(result, WebhookProcessResult::Accepted { .. }));
+    }
+
+    #[test]
+    fn empty_secret_hard_rejects_outside_demo_mode() {
+        let conn = fresh_conn();
+        let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created", false);
+        assert!(matches!(result, WebhookProcessResult::SecretNotConfigured));
+
+        // A provided (unverifiable) signature does not rescue an unconfigured
+        // secret: there is nothing to verify it against.
+        let result = process_webhook(
+            &conn,
+            b"",
+            br#"{"id":1}"#,
+            Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            "convo.created",
+            false,
+        );
+        assert!(matches!(result, WebhookProcessResult::SecretNotConfigured));
     }
 
     #[test]
@@ -277,11 +327,12 @@ mod tests {
         let body = br#"{"objectID":7}"#;
         let sig = signed(secret, body);
 
-        let first_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created") {
-            WebhookProcessResult::Accepted { row_id } => row_id,
-            other => panic!("expected first Accepted, got {other:?}"),
-        };
-        let second = process_webhook(&conn, secret, body, Some(&sig), "convo.created");
+        let first_id =
+            match process_webhook(&conn, secret, body, Some(&sig), "convo.created", false) {
+                WebhookProcessResult::Accepted { row_id } => row_id,
+                other => panic!("expected first Accepted, got {other:?}"),
+            };
+        let second = process_webhook(&conn, secret, body, Some(&sig), "convo.created", false);
         assert!(matches!(
             second,
             WebhookProcessResult::Duplicate { row_id } if row_id == first_id

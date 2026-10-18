@@ -9,6 +9,17 @@ use crate::error::{Error, Result};
 
 pub const IMPORT_DIR_NAME: &str = "knowledge-import";
 
+/// Hard cap on a single imported file, checked before the file is read into
+/// memory (migration-map row 4a). 64 MiB is ~10x a large text-heavy document.
+pub const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
+/// Hard cap on PDF input handed to the text extractor — the PDF parser is the
+/// most CPU-expensive path in the importer and must not be fed arbitrary
+/// multi-hundred-MiB payloads.
+pub const MAX_PDF_INPUT_BYTES: u64 = 32 * 1024 * 1024;
+/// Hard cap on a single decompressed DOCX zip entry (`word/document.xml`),
+/// checked against both the declared and the actually-read size.
+pub const MAX_DOCX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+
 #[must_use]
 pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
     let clean: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -701,6 +712,17 @@ fn import_one_file(
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "imported".to_string());
+    // Size cap before the read (row 4a): the file is fully buffered in
+    // memory, so an oversized import must fail before allocation, not after.
+    let file_len = std::fs::metadata(abs)
+        .map_err(|e| Error::Validation(format!("Import failed: {e}")))?
+        .len();
+    if file_len > MAX_IMPORT_FILE_BYTES {
+        return Err(Error::Validation(format!(
+            "File is too large to import: {file_len} bytes \
+             (the limit is {MAX_IMPORT_FILE_BYTES} bytes)."
+        )));
+    }
     let raw = std::fs::read(abs).map_err(|e| Error::Validation(format!("Import failed: {e}")))?;
     let text = String::from_utf8_lossy(&raw).to_string();
 
@@ -746,6 +768,14 @@ fn import_one_file(
 }
 
 fn parse_pdf_text(raw: &[u8]) -> Result<String> {
+    // Input cap before the extractor runs (row 4a).
+    if u64::try_from(raw.len()).unwrap_or(u64::MAX) > MAX_PDF_INPUT_BYTES {
+        return Err(Error::Validation(format!(
+            "PDF input is too large to parse: {} bytes \
+             (the limit is {MAX_PDF_INPUT_BYTES} bytes).",
+            raw.len()
+        )));
+    }
     pdf_extract::extract_text_from_mem(raw).map_err(|_| {
         Error::Validation(
             "PDF parsing is unavailable or failed for this file. Supported best with text-based PDFs."
@@ -761,12 +791,28 @@ fn parse_docx_text(raw: &[u8]) -> Result<String> {
         zip::ZipArchive::new(std::io::Cursor::new(raw)).map_err(|_| docx_unavailable())?;
     let mut xml = String::new();
     {
-        let mut document = archive
+        let document = archive
             .by_name("word/document.xml")
             .map_err(|_| docx_unavailable())?;
-        document
+        // Declared uncompressed size is checked first (row 4a) ...
+        if document.size() > MAX_DOCX_ENTRY_BYTES {
+            return Err(Error::Validation(format!(
+                "DOCX document entry is too large: {} bytes \
+                 (the limit is {MAX_DOCX_ENTRY_BYTES} bytes).",
+                document.size()
+            )));
+        }
+        // ... but zip declarations can lie, so the read itself is bounded by
+        // take() and the produced length re-checked afterwards.
+        let mut limited = document.take(MAX_DOCX_ENTRY_BYTES + 1);
+        limited
             .read_to_string(&mut xml)
             .map_err(|_| docx_unavailable())?;
+        if xml.len() as u64 > MAX_DOCX_ENTRY_BYTES {
+            return Err(Error::Validation(format!(
+                "DOCX document entry expanded beyond the {MAX_DOCX_ENTRY_BYTES}-byte limit."
+            )));
+        }
     }
     let mut out = String::new();
     let mut in_text = false;
@@ -1074,5 +1120,93 @@ fn extract_html_title(html: &str) -> Option<String> {
         None
     } else {
         Some(title.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    fn fresh_conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory connection");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn import_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-import-test-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_millis()
+        ));
+        std::fs::create_dir_all(dir.join(IMPORT_DIR_NAME)).expect("import root");
+        dir
+    }
+
+    #[test]
+    fn import_rejects_oversized_files_before_reading() {
+        let conn = fresh_conn();
+        let data_dir = import_dir("file-cap");
+        let file = data_dir.join(IMPORT_DIR_NAME).join("huge.txt");
+        // One byte over the cap; written as a single sparse-ish write.
+        let payload = vec![b'a'; MAX_IMPORT_FILE_BYTES as usize + 1];
+        std::fs::write(&file, &payload).expect("write huge file");
+
+        let err = import_file(&conn, &data_dir, "huge.txt", None, "internal")
+            .expect_err("oversized import must be rejected");
+        assert!(err.to_string().contains("too large to import"), "{err}");
+
+        // Under the cap (tiny file) the same pipeline succeeds.
+        let ok_file = data_dir.join(IMPORT_DIR_NAME).join("small.txt");
+        std::fs::write(&ok_file, b"hello world").expect("write small file");
+        let out = import_file(&conn, &data_dir, "small.txt", None, "internal")
+            .expect("small import works");
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn pdf_input_over_the_cap_is_rejected_before_parsing() {
+        let junk = vec![b'%'; MAX_PDF_INPUT_BYTES as usize + 1];
+        let err = parse_pdf_text(&junk).expect_err("oversized PDF input must be rejected");
+        // The size guard fires before the extractor: the message names the
+        // input cap, not a generic parse failure.
+        assert!(err.to_string().contains("too large to parse"), "{err}");
+
+        // Small junk still reaches the parser and fails there instead.
+        let err = parse_pdf_text(b"%not-a-real-pdf").expect_err("junk pdf fails");
+        assert!(!err.to_string().contains("too large"), "{err}");
+    }
+
+    fn build_docx(xml: &str) -> Vec<u8> {
+        let mut buf = std::io::Cursor::new(Vec::new());
+        let mut writer = zip::ZipWriter::new(&mut buf);
+        let options: zip::write::SimpleFileOptions = Default::default();
+        writer
+            .start_file("word/document.xml", options)
+            .expect("start entry");
+        writer.write_all(xml.as_bytes()).expect("write entry");
+        writer.finish().expect("finish zip");
+        buf.into_inner()
+    }
+
+    #[test]
+    fn docx_text_extraction_still_works_small_entries() {
+        // Regression guard for the take() refactor: a normal document parses.
+        let xml =
+            "<w:document><w:body><w:p><w:r><w:t>hello docx</w:t></w:r></w:p></w:body></w:document>";
+        let text = parse_docx_text(&build_docx(xml)).expect("parse small docx");
+        assert!(text.contains("hello docx"), "{text}");
+    }
+
+    #[test]
+    fn docx_declared_entry_size_is_capped() {
+        // The declared uncompressed size of word/document.xml exceeds the
+        // cap, so the import is refused before the entry is decompressed.
+        // (Deflate squeezes 64 MiB of spaces down to a tiny zip.)
+        let xml = " ".repeat(MAX_DOCX_ENTRY_BYTES as usize + 1);
+        let zip_bytes = build_docx(&xml);
+        let err = parse_docx_text(&zip_bytes).expect_err("oversized docx entry must be rejected");
+        assert!(err.to_string().contains("too large"), "{err}");
     }
 }

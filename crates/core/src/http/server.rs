@@ -74,7 +74,7 @@ impl AppState {
     {
         let db_path: Option<std::path::PathBuf> = {
             let conn = lock_or_recover(&self.conn);
-            db_file_path(&conn)
+            crate::db::db_file_path(&conn)
         };
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || -> std::result::Result<T, String> {
@@ -97,21 +97,6 @@ impl AppState {
         .map_err(|e| e.to_string())
         .and_then(|r| r)
     }
-}
-
-fn db_file_path(conn: &rusqlite::Connection) -> Option<std::path::PathBuf> {
-    let mut stmt = conn.prepare("PRAGMA database_list").ok()?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?))
-        })
-        .ok()?;
-    for (name, file) in rows.flatten() {
-        if name == "main" {
-            return file.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
-        }
-    }
-    None
 }
 
 pub struct HttpServer {

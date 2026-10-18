@@ -1,6 +1,6 @@
 use base64::Engine as _;
 use hmac::{Hmac, KeyInit, Mac};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use sha1::Sha1;
 
 use crate::error::{Error, Result};
@@ -36,14 +36,24 @@ pub struct WebhookEventRecord {
     pub processing_state: String,
 }
 
-pub fn ensure_webhook_events_table(conn: &Connection) -> Result<()> {
-    let old_schema: Option<String> = conn
+/// Numbered migration (boot step m048): creates the `webhook_events`
+/// table and index, upgrading legacy tables that stored the raw body.
+///
+/// The schema is created here — at boot, inside its own migration — and is
+/// deliberately NOT ensured per-insert: data-path functions assume a database
+/// opened through `bootstrap::apply_all` and surface real errors instead of
+/// silently rebuilding schema mid-write.
+pub fn apply_m048_webhook_events(conn: &Connection) -> Result<()> {
+    // Tables from the pre-migration era stored the raw body and no event hash.
+    // They are dropped rather than migrated: their events were re-delivered by
+    // Help Scout on retry anyway, and the hash column is now NOT NULL.
+    let old_schema = conn
         .query_row(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='webhook_events'",
             [],
-            |r| r.get(0),
+            |r| r.get::<_, String>(0),
         )
-        .ok();
+        .optional()?;
     if let Some(schema) = old_schema
         && schema.contains("body")
         && !schema.contains("event_hash")
@@ -79,7 +89,6 @@ pub fn insert_webhook_event(
     event_id: Option<&str>,
 ) -> Result<(i64, bool)> {
     use sha2::{Digest, Sha256};
-    ensure_webhook_events_table(conn)?;
     let mut hasher = Sha256::new();
     hasher.update(format!("{event_type}:{payload}"));
     let hash = hex::encode(hasher.finalize());
@@ -90,7 +99,7 @@ pub fn insert_webhook_event(
             params![hash],
             |r| r.get(0),
         )
-        .ok();
+        .optional()?;
     if let Some(id) = existing {
         return Ok((id, true));
     }
@@ -131,7 +140,6 @@ pub fn get_pending_webhook_events(
     conn: &Connection,
     limit: u32,
 ) -> Result<Vec<WebhookEventRecord>> {
-    ensure_webhook_events_table(conn)?;
     let mut stmt = conn.prepare(
         "SELECT id, event_id, event_type, payload FROM webhook_events
           WHERE processing_state IN ('pending','failed') AND attempts < 5
@@ -152,14 +160,13 @@ pub fn get_pending_webhook_events(
 }
 
 pub fn persist_event(conn: &Connection, event_id: &str, body: &str) -> Result<bool> {
-    ensure_webhook_events_table(conn)?;
     let existing: Option<i64> = conn
         .query_row(
             "SELECT id FROM webhook_events WHERE event_id = ?1",
             params![event_id],
             |r| r.get(0),
         )
-        .ok();
+        .optional()?;
     if existing.is_some() {
         return Ok(false);
     }

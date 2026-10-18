@@ -108,6 +108,10 @@ pub fn run() {
 fn open_db_with_all_migrations(
     path: &std::path::Path,
 ) -> spp_core::error::Result<rusqlite::Connection> {
+    // bootstrap::apply_all also initializes the secrets master key
+    // (<data_dir>/secrets.key) before running migration steps, so the
+    // plaintext webhook_secret can be sealed into the encrypted envelope
+    // (m049) on first boot.
     let mut conn = spp_core::db::open(path)?;
     spp_core::bootstrap::apply_all(&mut conn)?;
     tracing::info!("All migrations applied successfully");

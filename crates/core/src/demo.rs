@@ -90,6 +90,9 @@ fn simulate_webhook_event(conn: &Connection) -> DemoToolResult {
         &body_bytes,
         Some(&signature),
         "convo.created",
+        // Demo tool: the secret is always set here (demo default), and the
+        // tool itself is gated on demo mode above.
+        true,
     );
 
     match result {
@@ -108,6 +111,9 @@ fn simulate_webhook_event(conn: &Connection) -> DemoToolResult {
         },
         webhook_handler::WebhookProcessResult::BadRequest => DemoToolResult::Failed {
             message: "Bad request: simulated webhook body was empty or invalid.".into(),
+        },
+        webhook_handler::WebhookProcessResult::SecretNotConfigured => DemoToolResult::Failed {
+            message: "No webhook secret is configured for the simulation.".into(),
         },
     }
 }

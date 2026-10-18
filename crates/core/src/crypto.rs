@@ -39,6 +39,41 @@ pub fn random_salt() -> [u8; SALT_LEN] {
     salt
 }
 
+/// Persists a raw master key to `path`, creating the parent directory if
+/// needed and restricting file permissions to owner-only (0600 on unix).
+///
+/// Refuses to clobber an existing file: keys are created once and must never
+/// silently rotate, or every stored secret would become undecryptable.
+pub fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()> {
+    if path.exists() {
+        return Err(Error::Config(format!(
+            "refusing to overwrite existing key file at {}",
+            path.display()
+        )));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(Error::Io)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(Error::Io)?;
+        f.write_all(key).map_err(Error::Io)?;
+        f.sync_all().map_err(Error::Io)?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, key).map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
 /// Encrypts `plaintext` under `key` with a freshly generated nonce.
 /// Returns `(nonce, ciphertext)` — the caller stores both in its envelope.
 pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<([u8; NONCE_LEN], Vec<u8>)> {

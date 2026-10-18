@@ -138,10 +138,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
         })
         .unwrap_or_default();
 
-    let secret_configured = crate::settings::get_string(&conn, "webhook_secret")
-        .ok()
-        .flatten()
-        .is_some()
+    let secret_configured = crate::settings::has_secret(&conn, "webhook_secret").unwrap_or(false)
         || std::env::var("HELPSCOUT_WEBHOOK_SECRET")
             .map(|s| !s.is_empty())
             .unwrap_or(false);
@@ -393,9 +390,10 @@ pub async fn register_webhook(State(state): State<AppState>, Json(body): Json<Va
     }
     let secret = {
         let conn = state.conn_lock();
-        crate::settings::get_string(&conn, "webhook_secret")
+        crate::settings::get_secret(&conn, "webhook_secret")
             .ok()
             .flatten()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default()
     };
     let secret = if secret.is_empty() {

@@ -841,9 +841,11 @@ pub async fn demo_simulate_webhook(
 
     let secret = {
         let conn = state.conn.lock().unwrap_or_else(|p| p.into_inner());
-        crate::settings::get_string(&conn, "webhook_secret")
+        crate::settings::get_secret(&conn, "webhook_secret")
             .ok()
             .flatten()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "demo_webhook_secret".into())
     };
     let signature = crate::webhook::compute_signature(secret.as_bytes(), &envelope_bytes);
@@ -854,6 +856,8 @@ pub async fn demo_simulate_webhook(
         &envelope_bytes,
         Some(&signature),
         &event,
+        // Demo simulator route: the secret is always set (demo default).
+        true,
     );
 
     let event_id = format!("demo_wh_{}", chrono::Utc::now().timestamp_millis());
@@ -892,6 +896,14 @@ pub async fn demo_simulate_webhook(
             Json(json!({
                 "ok": false,
                 "message": "Simulated webhook payload was rejected.",
+                "event_id": event_id,
+            })),
+        ),
+        crate::webhook_handler::WebhookProcessResult::SecretNotConfigured => (
+            StatusCode::OK,
+            Json(json!({
+                "ok": false,
+                "message": "No webhook secret is configured; the simulation was not delivered.",
                 "event_id": event_id,
             })),
         ),

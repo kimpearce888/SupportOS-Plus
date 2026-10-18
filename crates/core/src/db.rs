@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
@@ -55,4 +55,22 @@ pub fn apply_migration(conn: &mut Connection, version: u32, label: &str, sql: &s
     )?;
     tx.commit()?;
     Ok(())
+}
+
+/// Filesystem path of the connection's `main` database, or `None` for
+/// in-memory or temporary databases.
+#[must_use]
+pub fn db_file_path(conn: &Connection) -> Option<PathBuf> {
+    let mut stmt = conn.prepare("PRAGMA database_list").ok()?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?))
+        })
+        .ok()?;
+    for (name, file) in rows.flatten() {
+        if name == "main" {
+            return file.filter(|p| !p.is_empty()).map(PathBuf::from);
+        }
+    }
+    None
 }

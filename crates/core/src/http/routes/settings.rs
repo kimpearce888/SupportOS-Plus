@@ -117,6 +117,16 @@ pub async fn update_settings(
             }),
             "retention_days" => value.is_null() || is_int_in(value, 1, 3650),
             "backup_interval_hours" => value.is_null() || is_int_in(value, 1, 720),
+            // The webhook secret is stored encrypted (migration-map row 13);
+            // an empty string or null clears it. Help Scout secrets are 32-64
+            // chars; 16 is a defensive floor that still admits test values.
+            "webhook_secret" => {
+                value.is_null()
+                    || value.as_str().is_some_and(|s| {
+                        let n = s.chars().count();
+                        s.is_empty() || (16..=256).contains(&n)
+                    })
+            }
             "log_level" => matches!(
                 value.as_str(),
                 Some("debug") | Some("info") | Some("warn") | Some("error")
@@ -139,31 +149,65 @@ pub async fn update_settings(
         obj.get("qdrant_enabled").and_then(|v| v.as_bool()),
     );
     let interval_changed = obj.contains_key("sync_interval_minutes");
+    let mut secret_store_error: Option<String> = None;
     {
         let conn = state.conn.lock().unwrap_or_else(|p| p.into_inner());
         for (key, value) in obj {
-            let res = match value {
-                Value::Bool(b) => {
-                    let b = if key == "automatic_reply_sending" {
-                        false
-                    } else {
-                        *b
-                    };
-                    crate::settings::set_bool(&conn, key, b)
+            let res = if key == "webhook_secret" {
+                // Secrets never go through set_string: they are sealed into
+                // the encrypted envelope, and clearing removes the row.
+                match value {
+                    Value::String(s) if !s.is_empty() => {
+                        crate::settings::set_secret(&conn, "webhook_secret", s.as_bytes())
+                    }
+                    Value::String(_) | Value::Null => {
+                        crate::settings::delete_secret(&conn, "webhook_secret").map(|_| ())
+                    }
+                    _ => Ok(()),
                 }
-                Value::Number(_) => {
-                    crate::settings::set_i64(&conn, key, value.as_i64().unwrap_or(0))
+            } else {
+                match value {
+                    Value::Bool(b) => {
+                        let b = if key == "automatic_reply_sending" {
+                            false
+                        } else {
+                            *b
+                        };
+                        crate::settings::set_bool(&conn, key, b)
+                    }
+                    Value::Number(_) => {
+                        crate::settings::set_i64(&conn, key, value.as_i64().unwrap_or(0))
+                    }
+                    Value::String(s) => crate::settings::set_string(&conn, key, s),
+                    Value::Null => crate::settings::set_string(&conn, key, ""),
+                    _ => Ok(()),
                 }
-                Value::String(s) => crate::settings::set_string(&conn, key, s),
-                Value::Null => crate::settings::set_string(&conn, key, ""),
-                _ => Ok(()),
             };
-            let _ = res;
+            if let Err(e) = res
+                && key == "webhook_secret"
+                && secret_store_error.is_none()
+            {
+                // A failed secret write must not be silently dropped: the
+                // webhook would fall back to hard-rejecting events with no
+                // visible explanation.
+                secret_store_error = Some(e.to_string());
+            }
         }
         let entry = crate::audit::AuditEntry::user("settings_updated").with_after_state(json!({
             "keys": obj.keys().cloned().collect::<Vec<_>>(),
         }));
         let _ = crate::audit::audit(&conn, &entry);
+    }
+
+    if let Some(detail) = secret_store_error {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "ok": false,
+                "message": "The webhook secret could not be stored securely.",
+                "detail": detail,
+            })),
+        );
     }
 
     if qdrant_patch.0.is_some() || qdrant_patch.1.is_some() {
