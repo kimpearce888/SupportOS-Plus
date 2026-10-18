@@ -26,18 +26,19 @@ jobs:
       - name: Cache cargo state
         uses: Swatinem/rust-cache@v2
 
-      # NOTE: clippy/test are scoped to catalog/core/xtask. The ui crate needs
-      # the wasm32 target and the app crate needs WebKitGTK system deps; both
-      # go away at the Phase 4 cutover, at which point this becomes
-      # --workspace. See ai/plan.md (item 25).
+      # NOTE: clippy/test are scoped to catalog/core/xtask/app-shell. The ui
+      # crate needs the wasm32 target and the app (tauri) crate needs
+      # WebKitGTK system deps; both go away at the Phase 4 cutover, at
+      # which point this becomes --workspace. See ai/plan.md (item 13).
+      # The egui app-shell needs no system deps to build or test.
       - name: Format check
         run: cargo fmt --all --check
 
-      - name: Clippy (catalog, core, xtask)
-        run: cargo clippy -p supportos-plusplus-catalog -p supportos-plusplus-core -p supportos-plusplus-xtask --all-targets -- -D warnings
+      - name: Clippy (catalog, core, xtask, app-shell)
+        run: cargo clippy -p supportos-plusplus-catalog -p supportos-plusplus-core -p supportos-plusplus-xtask -p supportos-plusplus-app-shell --all-targets -- -D warnings
 
-      - name: Test (core)
-        run: cargo test -p supportos-plusplus-core
+      - name: Test (core, app-shell)
+        run: cargo test -p supportos-plusplus-core -p supportos-plusplus-app-shell
 
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2

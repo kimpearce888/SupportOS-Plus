@@ -1,0 +1,26 @@
+[package]
+name = "supportos-plusplus-app-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "SupportOS++ native desktop shell: eframe/egui (decision D1), theme from the settings table, flock single-instance, background-task bridge."
+
+[lib]
+name = "spp_shell"
+path = "src/lib.rs"
+
+[[bin]]
+name = "supportos-plusplus"
+path = "src/main.rs"
+
+[dependencies]
+eframe.workspace = true
+supportos-plusplus-core.workspace = true
+libc = "0.2"
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true

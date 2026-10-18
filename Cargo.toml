@@ -1,11 +1,11 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/app-shell",
     "crates/catalog",
     "crates/core",
     "crates/ui",
     "crates/xtask",
-    "crates/app/src-tauri",
     "crates/app/src-tauri",
 ]
 
@@ -50,7 +50,7 @@ tower-http = { version = "0.7", features = ["cors", "trace", "catch-panic"] }
 
 regex = "1"
 
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
 
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }

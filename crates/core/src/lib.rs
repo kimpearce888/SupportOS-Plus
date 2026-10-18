@@ -74,6 +74,7 @@ pub mod people_store;
 pub mod quality;
 pub mod reports;
 pub mod response_state_sql;
+pub mod richtext;
 pub mod runner;
 pub mod saved_views;
 pub mod search;
