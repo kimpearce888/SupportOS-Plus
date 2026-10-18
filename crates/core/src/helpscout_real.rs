@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -140,23 +140,23 @@ impl Default for RateLimitState {
 pub struct HsRateLimiter {
     state: Mutex<RateLimitState>,
     send_timestamps: Mutex<Vec<i64>>,
-    conn: Option<Arc<Mutex<Connection>>>,
+    db: Option<crate::db::DbHandle>,
 }
 
 impl HsRateLimiter {
-    pub fn new(conn: Option<Arc<Mutex<Connection>>>) -> Self {
+    pub fn new(db: Option<crate::db::DbHandle>) -> Self {
         let limiter = Self {
             state: Mutex::new(RateLimitState::default()),
             send_timestamps: Mutex::new(Vec::new()),
-            conn,
+            db,
         };
         limiter.load();
         limiter
     }
 
     fn load(&self) {
-        let Some(conn) = &self.conn else { return };
-        let Ok(conn) = conn.lock() else { return };
+        let Some(db) = &self.db else { return };
+        let conn = db.write_guard();
         let _ = apply_m043(&conn);
         let Ok(row) = conn.query_row(
             "SELECT limit_per_minute, remaining, retry_after_sec, updated_at
@@ -181,8 +181,8 @@ impl HsRateLimiter {
     }
 
     fn persist(&self, state: &RateLimitState) {
-        let Some(conn) = &self.conn else { return };
-        let Ok(conn) = conn.lock() else { return };
+        let Some(db) = &self.db else { return };
+        let conn = db.write_guard();
         let _ = conn.execute(
             "INSERT INTO hs_rate_limit (id, limit_per_minute, remaining, retry_after_sec, updated_at)
              VALUES (1, ?1, ?2, ?3, ?4)
@@ -376,7 +376,7 @@ fn urlencode(s: &str) -> String {
 pub struct RealHelpScoutProvider {
     client: reqwest::Client,
     api_base: String,
-    conn: Arc<Mutex<Connection>>,
+    db: crate::db::DbHandle,
     pub credentials: HsCredentials,
     pub limiter: Arc<HsRateLimiter>,
     pub queue: Arc<ApiQueue>,
@@ -385,11 +385,11 @@ pub struct RealHelpScoutProvider {
 
 impl RealHelpScoutProvider {
     #[must_use]
-    pub fn new(conn: Arc<Mutex<Connection>>, credentials: HsCredentials) -> Self {
-        let limiter = Arc::new(HsRateLimiter::new(Some(conn.clone())));
+    pub fn new(db: crate::db::DbHandle, credentials: HsCredentials) -> Self {
+        let limiter = Arc::new(HsRateLimiter::new(Some(db.clone())));
         let queue = ApiQueue::new(Arc::clone(&limiter), DEFAULT_CONCURRENCY);
         let docs_queue = ApiQueue::new(
-            Arc::new(HsRateLimiter::new(Some(conn.clone()))),
+            Arc::new(HsRateLimiter::new(Some(db.clone()))),
             DEFAULT_CONCURRENCY,
         );
         Self {
@@ -398,7 +398,7 @@ impl RealHelpScoutProvider {
                 .build()
                 .unwrap_or_default(),
             api_base: credentials.api_base.trim_end_matches('/').to_string(),
-            conn,
+            db,
             limiter,
             queue,
             docs_queue,
@@ -410,8 +410,8 @@ impl RealHelpScoutProvider {
         self.queue.set_concurrency(n);
     }
 
-    fn conn_lock(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+    fn conn_lock(&self) -> crate::db::DbWriteGuard<'_> {
+        self.db.write_guard()
     }
 
     async fn docs_request(&self, path: &str) -> Result<Value> {

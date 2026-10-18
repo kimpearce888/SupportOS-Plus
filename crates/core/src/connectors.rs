@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, params};
 use serde_json::{Map, Value, json};
@@ -469,12 +468,12 @@ fn sqlite_now() -> String {
 }
 
 pub async fn refresh(
-    conn: &Arc<Mutex<Connection>>,
+    conn: &crate::db::DbHandle,
     connector_id: i64,
     data_dir: &Path,
 ) -> std::result::Result<RefreshResult, Error> {
     let record = {
-        let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let c = conn.write_guard();
         get(&c, connector_id)?
     };
     let Some(connector) = record else {
@@ -490,7 +489,7 @@ pub async fn refresh(
         Ok(result) => Ok(result),
         Err(e) => {
             let message = e.to_string().chars().take(500).collect::<String>();
-            let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+            let c = conn.write_guard();
             record_sync(&c, connector_id, "error", None, Some(&message), None)?;
             Ok(RefreshResult {
                 ok: false,
@@ -504,7 +503,7 @@ pub async fn refresh(
 }
 
 async fn refresh_inner(
-    conn: &Arc<Mutex<Connection>>,
+    conn: &crate::db::DbHandle,
     connector: &Value,
     data_dir: &Path,
 ) -> Result<RefreshResult> {
@@ -514,7 +513,7 @@ async fn refresh_inner(
     let connector_id = connector.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
     let keys: Vec<String> = rows.iter().map(|r| r.0.clone()).collect();
     let pruned = {
-        let mut c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let mut c = conn.write_guard();
         let tx = c.transaction()?;
         for (row_key, data) in &rows {
             tx.execute(

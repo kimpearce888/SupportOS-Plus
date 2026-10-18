@@ -1,5 +1,7 @@
-#![forbid(unsafe_code)]
-#![deny(rust_2018_idioms)]
+// `deny` rather than `forbid`: vectorstore_sqlitevec registers the
+// sqlite-vec extension via rusqlite FFI (`sqlite3_auto_extension`) — the
+// single place unsafe code is allowed, and only there.
+#![deny(unsafe_code, rust_2018_idioms)]
 #![warn(clippy::all, missing_docs)]
 #![allow(
     clippy::module_name_repetitions,
@@ -59,6 +61,7 @@ pub mod issue_impact;
 pub mod jobs;
 pub mod knowledge_store;
 pub mod logging;
+pub mod loopback;
 pub mod maintenance;
 pub mod mentions;
 pub mod migrations;
@@ -93,7 +96,7 @@ pub mod ticket_ops;
 pub mod ticket_states;
 pub mod translation;
 pub mod vectorstore;
-pub mod vectorstore_qdrant;
+pub mod vectorstore_sqlitevec;
 pub mod webhook;
 pub mod webhook_handler;
 pub mod workers;

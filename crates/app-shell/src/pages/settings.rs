@@ -2,12 +2,12 @@
 //!
 //! Tabs (web: `SettingsTab`): Synchronization & AI (the
 //! `application_settings` keys behind `/api/settings`), Help Scout
-//! connection (`/api/oauth/status` + disconnect), LM Studio (the
-//! `/api/settings/lmstudio` keys), Qdrant (`/api/settings/qdrant`),
-//! Business hours (the `mailbox_business_hours` table behind
-//! `/api/settings/business-hours`), and Backups & export
-//! (`backup_service::{backup,list_backups,restore,export_json,
-//! export_conversations_csv}` — the `/api/backups/*` routes).
+//! connection (OAuth status/disconnect/connect — the loopback listener
+//! serves the callback), LM Studio (the `/api/settings/lmstudio` keys),
+//! Vector index (the sqlite-vec store, decision D4), Business hours (the
+//! `mailbox_business_hours` table behind `/api/settings/business-hours`),
+//! and Backups & export (`backup_service::{backup,list_backups,restore,
+//! export_json,export_conversations_csv}` — the `/api/backups/*` routes).
 
 use std::path::PathBuf;
 
@@ -22,7 +22,7 @@ enum Tab {
     General,
     HelpScout,
     LmStudio,
-    Qdrant,
+    VectorIndex,
     Hours,
     Backups,
 }
@@ -32,7 +32,7 @@ impl Tab {
         Self::General,
         Self::HelpScout,
         Self::LmStudio,
-        Self::Qdrant,
+        Self::VectorIndex,
         Self::Hours,
         Self::Backups,
     ];
@@ -42,7 +42,7 @@ impl Tab {
             Self::General => "Sync & AI",
             Self::HelpScout => "Help Scout",
             Self::LmStudio => "LM Studio",
-            Self::Qdrant => "Qdrant",
+            Self::VectorIndex => "Vector index",
             Self::Hours => "Business hours",
             Self::Backups => "Backups & export",
         }
@@ -220,6 +220,9 @@ impl GeneralSettings {
 pub struct HelpScoutStatus {
     pub demo_mode: bool,
     pub configured: bool,
+    /// Help Scout client credentials are available in the environment, so
+    /// the OAuth connect flow can start.
+    pub credentials: bool,
 }
 
 /// Load the connection status from the local mirror.
@@ -236,6 +239,7 @@ pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
     HelpScoutStatus {
         demo_mode,
         configured: tokens > 0,
+        credentials: spp_core::helpscout_real::HsCredentials::from_env().is_configured(),
     }
 }
 
@@ -359,10 +363,12 @@ pub struct SettingsPage {
     tab: Tab,
     general: Option<GeneralSettings>,
     helpscout: Option<HelpScoutStatus>,
+    authorize_url: Option<String>,
     lmstudio_base_url: String,
     lmstudio_chat_model: String,
     lmstudio_embedding_model: String,
-    qdrant_url: String,
+    /// Cached sqlite-vec store path shown on the Vector index tab.
+    vector_store_path: String,
     hours: Vec<BusinessHoursRow>,
     hours_edit: Option<BusinessHoursRow>,
     backups: Vec<serde_json::Value>,
@@ -378,10 +384,11 @@ impl SettingsPage {
             tab: Tab::General,
             general: None,
             helpscout: None,
+            authorize_url: None,
             lmstudio_base_url: String::new(),
             lmstudio_chat_model: String::new(),
             lmstudio_embedding_model: String::new(),
-            qdrant_url: String::new(),
+            vector_store_path: String::new(),
             hours: Vec::new(),
             hours_edit: None,
             backups: Vec::new(),
@@ -436,14 +443,6 @@ impl SettingsPage {
             self.lmstudio_chat_model = chat;
             self.lmstudio_embedding_model = embed;
         }
-        if self.qdrant_url.is_empty() {
-            self.qdrant_url = db.with_read(|conn| {
-                spp_core::settings::get_string(conn, "qdrant_url")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default()
-            });
-        }
         if self.tab == Tab::Backups {
             self.reload_backups();
         }
@@ -486,15 +485,6 @@ impl SettingsPage {
         });
         match result {
             Ok(()) => self.message = Some("LM Studio settings saved".into()),
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
-    fn save_qdrant(&mut self, db: &DbHandle) {
-        let url = self.qdrant_url.trim().to_string();
-        let result = db.with_write(|conn| spp_core::settings::set_string(conn, "qdrant_url", &url));
-        match result {
-            Ok(()) => self.message = Some("Qdrant settings saved".into()),
             Err(e) => self.error = Some(e.to_string()),
         }
     }
@@ -605,7 +595,7 @@ impl SettingsPage {
             Tab::General => self.general_ui(ui, db),
             Tab::HelpScout => self.helpscout_ui(ui, db),
             Tab::LmStudio => self.lmstudio_ui(ui, db),
-            Tab::Qdrant => self.qdrant_ui(ui, db),
+            Tab::VectorIndex => self.vector_index_ui(ui, db),
             Tab::Hours => self.hours_ui(ui, db),
             Tab::Backups => self.backups_ui(ui, db),
         }
@@ -710,6 +700,30 @@ impl SettingsPage {
         if status.configured && ui.button("disconnect").clicked() {
             self.disconnect_helpscout(db);
         }
+        if !status.configured && status.credentials && ui.button("connect via OAuth").clicked() {
+            self.begin_oauth(db);
+        }
+        if let Some(url) = &self.authorize_url {
+            ui.hyperlink_to("open the Help Scout authorization page", url);
+        }
+    }
+
+    /// Start the browser OAuth flow: issue a single-use state and show the
+    /// authorization URL (the loopback listener serves the callback).
+    fn begin_oauth(&mut self, db: &DbHandle) {
+        let creds = spp_core::helpscout_real::HsCredentials::from_env();
+        let redirect_uri = creds.redirect_uri.clone();
+        match spp_core::loopback::begin_oauth(db, &creds, &redirect_uri) {
+            Ok(url) => {
+                self.message = Some(
+                    "Authorization URL ready. Complete the flow in the browser; the loopback \
+                     listener stores the token."
+                        .into(),
+                );
+                self.authorize_url = Some(url);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
     }
 
     fn lmstudio_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -733,19 +747,32 @@ impl SettingsPage {
         }
     }
 
-    fn qdrant_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("Qdrant (local vector store, optional)");
-        egui::Grid::new("settings-qdrant")
+    fn vector_index_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        ui.strong("Vector index (sqlite-vec, built-in)");
+        if self.vector_store_path.is_empty() {
+            // Reuse the lazy-load slot to remember where the store lives.
+            self.vector_store_path = db
+                .file_path()
+                .and_then(|p| p.parent().map(|d| d.join("vectors").join("vectors.db")))
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+        }
+        egui::Grid::new("settings-vector-index")
             .num_columns(2)
             .show(ui, |ui| {
-                ui.label("url:");
-                ui.text_edit_singleline(&mut self.qdrant_url);
+                ui.label("store:");
+                ui.monospace(if self.vector_store_path.is_empty() {
+                    "(unknown data directory)".to_string()
+                } else {
+                    self.vector_store_path.clone()
+                });
                 ui.end_row();
             });
-        ui.weak("Leave empty to use the built-in sqlite-vec path.");
-        if ui.button("save").clicked() {
-            self.save_qdrant(db);
-        }
+        ui.weak(
+            "Dense vectors live in SQLite next to the application database (decision D4: the \
+             chunk count is far below the 100k gate). The index follows the qdrant_enabled \
+             setting; searches fall back to FTS5 when disabled.",
+        );
     }
 
     fn hours_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {

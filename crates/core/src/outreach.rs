@@ -1,6 +1,6 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::error::Result;
 
@@ -1775,12 +1775,12 @@ fn datetime_now() -> String {
 }
 
 pub async fn send_batch(
-    conn: &Arc<Mutex<Connection>>,
+    conn: &crate::db::DbHandle,
     provider: &Arc<dyn crate::helpscout::HelpScoutProvider>,
     campaign_id: i64,
 ) -> serde_json::Value {
     let (campaign, mailbox_local_id, tags, subject, body, batch) = {
-        let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let c = conn.write_guard();
         let _ = skip_ineligible_recipients(&c, campaign_id);
         let Some(camp) = get_outreach_campaign(&c, campaign_id).unwrap_or_default() else {
             return serde_json::json!({ "ok": false, "message": "Campaign not found." });
@@ -1812,7 +1812,7 @@ pub async fn send_batch(
     }
 
     let Some(mailbox_local_id) = mailbox_local_id else {
-        let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let c = conn.write_guard();
         for row in &batch {
             record_outcome(
                 &c,
@@ -1833,7 +1833,7 @@ pub async fn send_batch(
         let attempt_no = row.attempts + 1;
 
         let Some(customer_remote_id) = row.customer_remote_id else {
-            let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+            let c = conn.write_guard();
             record_outcome(
                 &c,
                 campaign_id,
@@ -1849,7 +1849,7 @@ pub async fn send_batch(
         };
 
         let rendered = {
-            let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+            let c = conn.write_guard();
             let matching_tickets: Vec<serde_json::Value> =
                 serde_json::from_str::<serde_json::Value>(&row.snapshot)
                     .ok()
@@ -1913,7 +1913,7 @@ pub async fn send_batch(
 
         let error_or_remote: Option<&str> = match &outcome {
             SendOutcome::Sent { remote_id, .. } => {
-                let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+                let c = conn.write_guard();
                 record_outcome(
                     &c,
                     campaign_id,
@@ -1927,7 +1927,7 @@ pub async fn send_batch(
             SendOutcome::FailedPermanent(m)
             | SendOutcome::FailedRetryable(m)
             | SendOutcome::Unknown(m) => {
-                let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+                let c = conn.write_guard();
                 record_outcome(&c, campaign_id, &row, attempt_no, &outcome, Some(m));
                 None
             }
@@ -1936,7 +1936,7 @@ pub async fn send_batch(
     }
 
     if !sent_remote_ids.is_empty() {
-        let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let c = conn.write_guard();
         for rid in &sent_remote_ids {
             let _ = crate::jobs::enqueue_on(
                 &c,
@@ -1998,9 +1998,9 @@ fn count_remaining_for_send(conn: &Connection, campaign_id: i64) -> i64 {
     .unwrap_or(0)
 }
 
-fn finalize_if_drained(conn: &Arc<Mutex<Connection>>, campaign_id: i64) -> serde_json::Value {
+fn finalize_if_drained(conn: &crate::db::DbHandle, campaign_id: i64) -> serde_json::Value {
     let (remaining, sent, failed, skipped, unknown, status) = {
-        let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let c = conn.write_guard();
         let remaining = count_remaining_for_send(&c, campaign_id);
         let camp = get_outreach_campaign(&c, campaign_id)
             .ok()
@@ -2012,7 +2012,7 @@ fn finalize_if_drained(conn: &Arc<Mutex<Connection>>, campaign_id: i64) -> serde
     };
 
     if remaining > 0 {
-        let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let c = conn.write_guard();
         let _ = crate::jobs::enqueue_on(
             &c,
             "outreach",
@@ -2030,7 +2030,7 @@ fn finalize_if_drained(conn: &Arc<Mutex<Connection>>, campaign_id: i64) -> serde
     }
 
     {
-        let c = conn.lock().unwrap_or_else(|p| p.into_inner());
+        let c = conn.write_guard();
         if status != "completed" && status != "cancelled" && status != "paused" {
             update_status(&c, campaign_id, "completed");
             let _ = c.execute(

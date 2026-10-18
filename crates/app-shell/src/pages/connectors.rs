@@ -212,7 +212,7 @@ impl ConnectorsPage {
     /// Refresh one connector on a background thread (the async route
     /// handler, minus HTTP).
     pub fn refresh(&mut self, db: &DbHandle, id: i64) {
-        let conn = db.shared();
+        let db = db.clone();
         let data_dir = self.data_dir.clone().unwrap_or_else(std::env::temp_dir);
         std::thread::Builder::new()
             .name("spp-connector-refresh".to_string())
@@ -222,7 +222,7 @@ impl ConnectorsPage {
                     .build();
                 if let Ok(rt) = runtime {
                     rt.block_on(async move {
-                        let _ = spp_core::connectors::refresh(&conn, id, &data_dir).await;
+                        let _ = spp_core::connectors::refresh(&db, id, &data_dir).await;
                     });
                 }
             })

@@ -42,5 +42,7 @@ pdf-extract = "0.12"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 quick-xml = "0.42"
 
-[dependencies.qdrant-edge]
-version = "=0.8.0"
+# D4 gate passed (0 chunks): sqlite-vec is the vector store; qdrant-edge is
+# gone. Exact pin per the D4 decision ("sqlite-vec alpha" risk row).
+[dependencies.sqlite-vec]
+version = "=0.1.9"

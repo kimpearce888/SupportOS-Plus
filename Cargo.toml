@@ -10,7 +10,10 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.85"
+# MSRV = the pinned toolchain (rust-toolchain.toml, D1/D5: stability
+# first). Older compilers are never tested, so claiming 1.85 would be
+# dishonest.
+rust-version = "1.99"
 license = "MIT"
 authors = ["kimpearce888"]
 repository = "https://github.com/kimpearce888/SupportOS-PlusPlus"
@@ -58,7 +61,6 @@ url = "2"
 
 supportos-plusplus-catalog = { path = "crates/catalog" }
 supportos-plusplus-core = { path = "crates/core" }
-supportos-plusplus-ui = { path = "crates/ui" }
 
 [profile.release]
 codegen-units = 1

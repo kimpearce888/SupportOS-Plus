@@ -211,7 +211,7 @@ mod tests {
 
     fn fake_engine(db: &DbHandle) -> Arc<SyncEngine> {
         Arc::new(SyncEngine::new(
-            db.shared(),
+            db.clone(),
             Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_demo()),
         ))
     }

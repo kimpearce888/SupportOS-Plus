@@ -2,8 +2,7 @@
 # Docs: https://embarkstudios.github.io/cargo-deny/
 
 [graph]
-# Check the dependency graph for the native Linux target. WASM-only deps of
-# the ui crate drop out of the graph until the Phase 4 cutover.
+# Check the dependency graph for the native Linux target.
 targets = [{ triple = "x86_64-unknown-linux-gnu" }]
 
 [advisories]
@@ -12,14 +11,13 @@ targets = [{ triple = "x86_64-unknown-linux-gnu" }]
 # Current entries are "unmaintained" notices (not vulnerabilities); most
 # disappear at the Phase 4 cutover when the Leptos/Tauri trees are deleted.
 ignore = [
-    { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained; pulled via xtask dependency tree; not a vulnerability" },
-    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; pulled via leptos/tachys; disappears at the Phase 4 cutover" },
-    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; pulled via tauri/gtk; disappears at the Phase 4 cutover" },
-    { id = "RUSTSEC-2021-0127", reason = "serde_cbor unmaintained; pulled via xtask dependency tree; not a vulnerability" },
-    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; pulled via the tauri/gtk tree; disappears at the Phase 4 cutover" },
-    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); pulled via the tauri/zbus tree; disappears at the Phase 4 cutover" },
-    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained; pulled via the tauri/zbus tree; disappears at the Phase 4 cutover" },
-    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained; pulled via the tauri/zbus tree; disappears at the Phase 4 cutover" },
+    # Batch 7 note: the leptos/tauri trees and qdrant-edge are gone, so the
+    # bincode/paste/proc-macro-error/serde_cbor entries were dropped with
+    # them. The egui/accesskit tree still pulls the crates below.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; pulled via epaint (egui font parsing)" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); pulled via accesskit_unix (Linux accessibility bus)" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained; pulled via accesskit_unix (Linux accessibility bus)" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained; pulled via accesskit_unix (Linux accessibility bus)" },
 ]
 
 [licenses]

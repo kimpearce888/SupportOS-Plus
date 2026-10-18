@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::FutureExt;
@@ -16,12 +16,12 @@ use crate::sync_engine::SyncEngine;
 pub const RATINGS_REFRESH_DEFAULT_SECONDS: i64 = 30;
 
 pub struct WorkerManager {
-    conn: Arc<Mutex<Connection>>,
+    db: crate::db::DbHandle,
     engine: Option<Arc<SyncEngine>>,
     provider: Arc<dyn HelpScoutProvider>,
     bus: EventBus,
     data_dir: PathBuf,
-    qdrant: Option<Arc<crate::vectorstore_qdrant::EmbeddedQdrant>>,
+    qdrant: Option<Arc<crate::vectorstore_sqlitevec::VectorIndex>>,
     running: AtomicBool,
     stopped: AtomicBool,
     processing: AtomicBool,
@@ -35,15 +35,15 @@ pub struct WorkerManager {
 impl WorkerManager {
     #[must_use]
     pub fn new(
-        conn: Arc<Mutex<Connection>>,
+        db: crate::db::DbHandle,
         engine: Option<Arc<SyncEngine>>,
         provider: Arc<dyn HelpScoutProvider>,
         bus: EventBus,
         data_dir: PathBuf,
-        qdrant: Option<Arc<crate::vectorstore_qdrant::EmbeddedQdrant>>,
+        qdrant: Option<Arc<crate::vectorstore_sqlitevec::VectorIndex>>,
     ) -> Self {
         Self {
-            conn,
+            db,
             engine,
             provider,
             bus,
@@ -64,8 +64,8 @@ impl WorkerManager {
         self.running.load(Ordering::SeqCst)
     }
 
-    fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+    fn lock(&self) -> crate::db::DbWriteGuard<'_> {
+        self.db.write_guard()
     }
 
     fn spawn(&self, task: impl std::future::Future<Output = ()> + Send + 'static) {
@@ -404,11 +404,11 @@ impl WorkerManager {
     }
 
     async fn maintenance(&self) {
-        let conn = self.conn.clone();
+        let db_handle = self.db.clone();
         let data_dir = self.data_dir.clone();
         let bus = self.bus.clone();
         let result = tokio::task::spawn_blocking(move || -> Result<()> {
-            let conn = conn.lock().unwrap_or_else(|p| p.into_inner());
+            let conn = db_handle.write_guard();
             crate::maintenance::compute_trends(&conn)?;
             let _ = crate::maintenance::refresh_products(&conn);
             let _ = crate::notification_sweep::sweep(&conn, Some(&bus));
@@ -519,7 +519,7 @@ impl WorkerManager {
         };
         let data_dir = self.data_dir.clone();
         for id in due {
-            match crate::connectors::refresh(&self.conn, id, &data_dir).await {
+            match crate::connectors::refresh(&self.db, id, &data_dir).await {
                 Ok(result) if !result.ok => {
                     tracing::warn!(
                         operation = "connector_refresh",
@@ -732,7 +732,7 @@ impl WorkerManager {
                 "outreach_send_batch" => {
                     if let Some(campaign_id) = num("campaignId") {
                         let summary = crate::outreach::send_batch(
-                            &self.conn,
+                            &self.db,
                             &self.provider,
                             campaign_id,
                         )
@@ -1042,9 +1042,9 @@ impl WorkerManager {
             );
             return Ok(());
         }
-        let conn_arc = self.conn.clone();
+        let db = self.db.clone();
         let (result, note_text, remote_id) = tokio::task::spawn_blocking(move || {
-            let conn = conn_arc.lock().unwrap_or_else(|p| p.into_inner());
+            let conn = db.write_guard();
             tokio::runtime::Handle::current().block_on(async {
                 let remote: Option<i64> = conn
                     .query_row(
@@ -1531,15 +1531,15 @@ fn upsert_rating_row(
 }
 
 pub fn start_workers(
-    conn: Arc<Mutex<Connection>>,
+    db: crate::db::DbHandle,
     engine: Option<Arc<SyncEngine>>,
     provider: Arc<dyn HelpScoutProvider>,
     bus: EventBus,
     data_dir: PathBuf,
-    qdrant: Option<Arc<crate::vectorstore_qdrant::EmbeddedQdrant>>,
+    qdrant: Option<Arc<crate::vectorstore_sqlitevec::VectorIndex>>,
 ) -> Arc<WorkerManager> {
     let manager = Arc::new(WorkerManager::new(
-        conn, engine, provider, bus, data_dir, qdrant,
+        db, engine, provider, bus, data_dir, qdrant,
     ));
     manager.start();
     manager

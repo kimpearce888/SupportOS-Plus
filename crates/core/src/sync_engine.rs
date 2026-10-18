@@ -1,5 +1,5 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
@@ -789,7 +789,7 @@ fn soft_delete_by_remote_id(conn: &Connection, remote_id: i64) -> Result<()> {
 }
 
 pub struct SyncEngine {
-    conn: Arc<Mutex<Connection>>,
+    db: crate::db::DbHandle,
     provider: Arc<dyn HelpScoutProvider>,
     running: AtomicBool,
     cancel_requested: AtomicBool,
@@ -798,9 +798,9 @@ pub struct SyncEngine {
 
 impl SyncEngine {
     #[must_use]
-    pub fn new(conn: Arc<Mutex<Connection>>, provider: Arc<dyn HelpScoutProvider>) -> Self {
+    pub fn new(db: crate::db::DbHandle, provider: Arc<dyn HelpScoutProvider>) -> Self {
         Self {
-            conn,
+            db,
             provider,
             running: AtomicBool::new(false),
             cancel_requested: AtomicBool::new(false),
@@ -830,8 +830,8 @@ impl SyncEngine {
         self.cancel_requested.load(Ordering::SeqCst)
     }
 
-    fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|p| p.into_inner())
+    fn lock(&self) -> crate::db::DbWriteGuard<'_> {
+        self.db.write_guard()
     }
 
     fn emit_sync_completed(&self, kind: &str, processed: i64, errors: i64) {

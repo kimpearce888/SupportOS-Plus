@@ -709,7 +709,7 @@ fn mark_chunk_failed(conn: &Connection, table: &str, chunk_id: i64) -> Result<()
 fn embed_pending_chunks(
     conn: &Connection,
     table: &str,
-    qdrant: Option<&crate::vectorstore_qdrant::EmbeddedQdrant>,
+    qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     let pending = list_pending_chunks(conn, table)?;
     if pending.is_empty() {
@@ -744,7 +744,7 @@ fn embed_pending_chunks(
     if table == "knowledge_chunks" {
         if qdrant_connected && vectors.first().is_some_and(|v| !v.is_empty()) {
             let dim = vectors[0].len();
-            let points: Vec<crate::vectorstore_qdrant::VectorPoint> = pending
+            let points: Vec<crate::vectorstore_sqlitevec::VectorPoint> = pending
                 .iter()
                 .enumerate()
                 .map(|(i, chunk)| {
@@ -786,7 +786,7 @@ fn embed_pending_chunks(
         }
     }
     if qdrant_connected {
-        let points: Vec<crate::vectorstore_qdrant::VectorPoint> = pending
+        let points: Vec<crate::vectorstore_sqlitevec::VectorPoint> = pending
             .iter()
             .enumerate()
             .filter_map(|(i, chunk)| {
@@ -811,7 +811,7 @@ fn vector_point(
     chunk: &PendingChunk,
     vector: &[f32],
     model: &str,
-) -> crate::vectorstore_qdrant::VectorPoint {
+) -> crate::vectorstore_sqlitevec::VectorPoint {
     let mut payload = serde_json::json!({
         "entity_type": entity_type_for(table),
         "entity_id": chunk.entity_id,
@@ -828,7 +828,7 @@ fn vector_point(
             .expect("payload is an object")
             .insert("number".to_string(), chunk.number.into());
     }
-    crate::vectorstore_qdrant::VectorPoint {
+    crate::vectorstore_sqlitevec::VectorPoint {
         id: chunk.id,
         vector: vector.to_vec(),
         payload,
@@ -854,21 +854,21 @@ fn set_chunk_state(
 
 pub fn embed_pending_knowledge(
     conn: &Connection,
-    qdrant: Option<&crate::vectorstore_qdrant::EmbeddedQdrant>,
+    qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     embed_pending_chunks(conn, "knowledge_chunks", qdrant)
 }
 
 pub fn embed_pending_docs(
     conn: &Connection,
-    qdrant: Option<&crate::vectorstore_qdrant::EmbeddedQdrant>,
+    qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     embed_pending_chunks(conn, "docs_chunks", qdrant)
 }
 
 pub fn embed_pending_conversation_chunks(
     conn: &Connection,
-    qdrant: Option<&crate::vectorstore_qdrant::EmbeddedQdrant>,
+    qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     embed_pending_chunks(conn, "conversation_chunks", qdrant)
 }

@@ -15,7 +15,18 @@ enum Cmd {
     Dev,
     Lint,
     VerifyIcons,
+    /// Build the release shell and pack it into a type-2 AppImage.
     Package {
+        /// Output directory (default: target/appimage).
+        #[arg(long, default_value = "target/appimage")]
+        out: String,
+        /// Path to an existing appimagetool (downloaded when absent).
+        #[arg(long, env = "APPIMAGETOOL")]
+        appimagetool: Option<String>,
+        /// Skip the cargo release build (the binary already exists).
+        #[arg(long)]
+        skip_build: bool,
+        /// Extra arguments forwarded to `cargo build`.
         #[arg(last = true)]
         args: Vec<String>,
     },
@@ -45,12 +56,9 @@ enum Cmd {
     },
     /// Count vector-store chunks and evaluate the D4 sqlite-vec gate (< 100k = GO).
     VectorCount {
-        /// App data directory hosting the embedded qdrant store.
+        /// App data directory hosting the sqlite-vec vector store.
         #[arg(long, default_value_t = default_data_dir_str())]
         data_dir: String,
-        /// Qdrant URL identifying the embedded store directory.
-        #[arg(long, default_value_t = default_qdrant_url())]
-        url: String,
         /// Optional SQLite database path for a chunk-row cross-check.
         #[arg(long)]
         db: Option<String>,
@@ -63,13 +71,18 @@ fn main() -> anyhow::Result<()> {
         Cmd::Dev => run_dev(),
         Cmd::Lint => run_lint(),
         Cmd::VerifyIcons => run_verify_icons(),
-        Cmd::Package { args } => run_package(&args),
+        Cmd::Package {
+            out,
+            appimagetool,
+            skip_build,
+            args,
+        } => run_package(&out, appimagetool.as_deref(), skip_build, &args),
         Cmd::Migrate { db } => run_migrate(&db),
         Cmd::Backup { db, backups_dir } => run_backup(&db, &backups_dir),
         Cmd::Restore { db, backup } => run_restore(&db, &backup),
         Cmd::Seed { db } => run_seed(&db),
         Cmd::Healthcheck { db } => run_healthcheck(&db),
-        Cmd::VectorCount { data_dir, url, db } => run_vector_count(&data_dir, &url, db.as_deref()),
+        Cmd::VectorCount { data_dir, db } => run_vector_count(&data_dir, db.as_deref()),
     }
 }
 
@@ -128,17 +141,22 @@ fn run_verify_icons() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_package(extra_args: &[String]) -> anyhow::Result<()> {
-    // Phase 4 cutover: the Tauri bundler is gone; package builds the
-    // native shell in release mode. AppImage packaging via this command
-    // is the next plan item (row 7).
-    let mut cmd = Command::new("cargo");
-    cmd.args(["build", "--release", "-p", "supportos-plusplus-app-shell"]);
-    for arg in extra_args {
-        cmd.arg(arg);
-    }
-    let status = cmd.current_dir(workspace_root()).status()?;
-    anyhow::ensure!(status.success(), "release build failed");
+fn run_package(
+    out_dir: &str,
+    appimagetool: Option<&str>,
+    skip_build: bool,
+    extra_args: &[String],
+) -> anyhow::Result<()> {
+    // Row 7: the Tauri bundler (deb/msi/nsis/dmg/app) is gone; the Linux
+    // desktop artifact is a single type-2 AppImage via appimagetool.
+    let out = spp_xtask::package::package(spp_xtask::package::PackageOptions {
+        workspace_root: workspace_root(),
+        out_dir: workspace_root().join(out_dir),
+        appimagetool: appimagetool.map(std::path::PathBuf::from),
+        extra_cargo_args: extra_args.to_vec(),
+        skip_build,
+    })?;
+    println!("package: AppImage at {}", out.display());
     Ok(())
 }
 
@@ -221,22 +239,20 @@ fn default_data_dir_str() -> String {
         .into_owned()
 }
 
-fn default_qdrant_url() -> String {
-    spp_core::config::load_env_config().qdrant.url
-}
-
 const D4_GATE_CHUNKS: usize = 100_000;
 
-fn run_vector_count(data_dir: &str, url: &str, db: Option<&str>) -> anyhow::Result<()> {
+fn run_vector_count(data_dir: &str, db: Option<&str>) -> anyhow::Result<()> {
     let dir = std::path::Path::new(data_dir);
-    let store_dir = spp_core::vectorstore_qdrant::embedded_store_dir(dir, url);
+    let store_dir = spp_core::vectorstore_sqlitevec::store_dir(dir);
     println!("vector-count: data dir      {}", dir.display());
-    println!("vector-count: qdrant url     {url}");
-    println!("vector-count: embedded store {}", store_dir.display());
+    println!(
+        "vector-count: sqlite-vec    {}",
+        store_dir.join("vectors.db").display()
+    );
 
-    let qdrant = spp_core::vectorstore_qdrant::EmbeddedQdrant::new(dir, url, true);
+    let index = spp_core::vectorstore_sqlitevec::VectorIndex::new(dir, true);
     let total = if store_dir.exists() {
-        match qdrant.try_point_count()? {
+        match index.try_point_count()? {
             Some(n) => n,
             None => {
                 println!("vector-count: collection 'supportos_vectors' not found (0 points)");
@@ -244,17 +260,17 @@ fn run_vector_count(data_dir: &str, url: &str, db: Option<&str>) -> anyhow::Resu
             }
         }
     } else {
-        println!("vector-count: embedded store directory not found (0 points)");
+        println!("vector-count: sqlite-vec store directory not found (0 points)");
         0
     };
     println!("vector-count: total points  {total}");
 
     if total > 0 {
         let knowledge =
-            qdrant.count_by_entity(spp_core::embeddings::entity_type_for("knowledge_chunks"));
-        let docs = qdrant.count_by_entity(spp_core::embeddings::entity_type_for("docs_chunks"));
+            index.count_by_entity(spp_core::embeddings::entity_type_for("knowledge_chunks"));
+        let docs = index.count_by_entity(spp_core::embeddings::entity_type_for("docs_chunks"));
         let conversations =
-            qdrant.count_by_entity(spp_core::embeddings::entity_type_for("conversation_chunks"));
+            index.count_by_entity(spp_core::embeddings::entity_type_for("conversation_chunks"));
         println!("vector-count:   knowledge_chunk     {knowledge}");
         println!("vector-count:   docs_chunk          {docs}");
         println!("vector-count:   conversation_chunk  {conversations}");
@@ -301,9 +317,14 @@ fn run_vector_count(data_dir: &str, url: &str, db: Option<&str>) -> anyhow::Resu
     }
 
     if total < D4_GATE_CHUNKS {
-        println!("vector-count: D4 gate -> {total} < {D4_GATE_CHUNKS} chunks: sqlite-vec GO");
+        println!(
+            "vector-count: D4 gate -> {total} < {D4_GATE_CHUNKS} chunks: sqlite-vec confirmed (swap landed)"
+        );
     } else {
-        println!("vector-count: D4 gate -> {total} >= {D4_GATE_CHUNKS} chunks: keep qdrant-edge");
+        println!(
+            "vector-count: D4 gate -> {total} >= {D4_GATE_CHUNKS} chunks: above gate — revisit D4 \
+             (the VectorStore seam stays swappable)"
+        );
     }
     Ok(())
 }

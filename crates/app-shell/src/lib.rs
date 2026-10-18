@@ -62,27 +62,63 @@ pub fn open_db(path: &Path) -> spp_core::error::Result<DbHandle> {
     Ok(DbHandle::new(conn))
 }
 
-/// Build the shared sync engine the way the Tauri shell did: demo mode
-/// or real Help Scout credentials decide the provider.
+/// Provider + engine built together.
+///
+/// The loopback listener needs the *real* provider handle (OAuth code
+/// exchange, `get_me`) while the sync engine drives the provider behind the
+/// `HelpScoutProvider` trait, so the boot code hands both out of one
+/// construction.
+pub struct BootServices {
+    /// The real provider when Help Scout credentials are configured,
+    /// `None` in demo mode.
+    pub real: Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
+    /// The provider the sync engine drives (real or demo).
+    pub provider: Arc<dyn spp_core::helpscout::HelpScoutProvider>,
+    /// The shared sync engine.
+    pub engine: Arc<SyncEngine>,
+}
+
+/// Build the boot services the way the Tauri shell did: demo mode or real
+/// Help Scout credentials decide the provider.
 ///
 /// # Panics
 /// Never; a missing provider degrades to the demo provider.
 #[must_use]
-pub fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
+pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
     let demo_mode = db
         .with_read(|conn| spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false))
         || std::env::var("LOCAL_DEMO_MODE").as_deref() == Ok("true");
     let credentials = spp_core::helpscout_real::HsCredentials::from_env();
     let use_real = !demo_mode && credentials.is_configured();
-    let provider: Arc<dyn spp_core::helpscout::HelpScoutProvider> = if use_real {
-        Arc::new(spp_core::helpscout_real::RealHelpScoutProvider::new(
-            db.shared(),
+    let (real, provider): (
+        Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
+        Arc<dyn spp_core::helpscout::HelpScoutProvider>,
+    ) = if use_real {
+        let real = Arc::new(spp_core::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
             credentials,
-        ))
+        ));
+        let as_trait: Arc<dyn spp_core::helpscout::HelpScoutProvider> = real.clone();
+        (Some(real), as_trait)
     } else {
-        Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_demo())
+        (
+            None,
+            Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_demo()),
+        )
     };
-    Arc::new(SyncEngine::new(db.shared(), provider).with_bus(bus.clone()))
+    let engine = Arc::new(SyncEngine::new(db.clone(), provider.clone()).with_bus(bus.clone()));
+    BootServices {
+        real,
+        provider,
+        engine,
+    }
+}
+
+/// Build only the shared sync engine (convenience over
+/// [`build_boot_services`] for tests).
+#[must_use]
+pub fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
+    build_boot_services(db, bus).engine
 }
 
 /// Run the native shell window. Blocks until the window is closed.
