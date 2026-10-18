@@ -15,10 +15,15 @@
 
 pub mod app;
 pub mod bridge;
+pub mod chart;
+pub mod mention;
+pub mod pages;
 // The only unsafe code in this crate: two libc::flock FFI calls that hold
 // and release the single-instance advisory lock.
 #[allow(unsafe_code)]
 pub mod single_instance;
+#[cfg(test)]
+mod testsupport;
 pub mod theme;
 
 use std::path::{Path, PathBuf};

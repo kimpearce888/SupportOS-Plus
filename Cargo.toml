@@ -43,7 +43,10 @@ subtle = "2.6"
 egui = { version = "=0.37" }
 eframe = { version = "=0.37" }
 egui_extras = { version = "=0.37" }
-egui_plot = { version = "=0.37" }
+# NOTE: egui_plot 0.37 builds against egui 0.36 (no release targets 0.37
+# yet — releases lag one minor). Re-pin and adopt it once it catches up;
+# until then the shell renders its charts with the egui painter
+# (crates/app-shell/src/chart.rs).
 
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "tower-log", "macros", "json", "query"] }
 tower-http = { version = "0.7", features = ["cors", "trace", "catch-panic"] }

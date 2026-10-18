@@ -473,7 +473,9 @@ pub async fn why_contacting(
     )
 }
 
-fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
+/// Public so the native shell can render the same view data without an
+/// HTTP round-trip (pure `&Connection` computation, no axum types).
+pub fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
     let Ok(mut stmt) = conn.prepare(
         "SELECT json_extract(a.response_json, '$.issue_cluster_candidate') AS category,
                 a.conversation_id
@@ -525,7 +527,9 @@ pub async fn top_questions(
     (StatusCode::OK, Json(json!({ "questions": questions })))
 }
 
-fn top_questions_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
+/// Public so the native shell can render the same view data without an
+/// HTTP round-trip (pure `&Connection` computation, no axum types).
+pub fn top_questions_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
     let mut out: Vec<Value> = grouped_questions(conn, days)
         .into_iter()
         .map(|(question, ids)| {
@@ -667,7 +671,9 @@ fn radar_alert(
     })
 }
 
-fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
+/// Public so the native shell can render the same view data without an
+/// HTTP round-trip (pure `&Connection` computation, no axum types).
+pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
     let mut alerts: Vec<Value> = Vec::new();
     let clusters = radar_clusters(conn);
 

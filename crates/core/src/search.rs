@@ -316,7 +316,9 @@ pub fn fts_query_or(q: &str, max_tokens: usize) -> String {
         .join(" OR ")
 }
 
-pub(crate) fn tokenize(q: &str, min_chars: usize, max_tokens: usize) -> Vec<String> {
+/// Tokenize a search query. Public so the native shell's docs search builds
+/// the exact same FTS patterns as the HTTP route.
+pub fn tokenize(q: &str, min_chars: usize, max_tokens: usize) -> Vec<String> {
     let cleaned: String = q
         .chars()
         .map(|c| {
