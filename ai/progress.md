@@ -5,4 +5,8 @@
 
 ## Active items
 
-(none — batch 4 completed and verified; waiting for the user to say `continue` per Rule 8)
+1. Port: dashboard page
+2. Port: inbox page (mention widget, richtext, live updates)
+3. Port: customers page
+4. Port: knowledge/docs pages
+5. Port: reports page (egui_plot)
