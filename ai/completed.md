@@ -51,3 +51,67 @@
 clean (catalog/core/xtask, all targets) · `cargo test` 32/32 (15 new characterization tests +
 17 pre-existing) · `cargo deny check advisories licenses` ok · GitHub Actions run
 `39112162370` → success.
+
+### Batch 2 — 2026-10-18 (commit `89f88b9`, CI run `39120945826`: success)
+
+**6. Characterization tests: `hybrid_search` (RRF fusion vectors)**
+- Work: 12 tests in `crates/core/src/hybrid_search.rs` — RRF constants pinned (k = 60 on both
+  fusion paths), dense-only RRF math and order (1/61, 1/62, 1/63 exactly), item hit by both
+  lists outranks single-list items, top-k truncation, payload prefers the dense source,
+  custom-k variant, `merge_doc_hits` semantics (FTS+semantic label fusion, duplicate-id
+  dedupe, tie-break by article id, list position not the rank field), cosine-similarity edge
+  cases.
+- Verification: `cargo test -p supportos-plusplus-core` — 61/61 pass locally and in CI.
+
+**7. Characterization tests: SLA edge cases**
+- Work: 13 new tests in `crates/core/src/business_hours.rs` — `parse_instant_ms` format matrix
+  (date-only, explicit offset, space-separated naive, whitespace-trimmed, fractional seconds)
+  and rejection matrix (blank, garbage, month 13, hour 25), equal bounds → 0.0, reversed range
+  rejected, overnight windows unsupported (characterizes CURRENT behavior), weekend fully
+  outside hours → 0.0 not None, DST transitions count real elapsed minutes, spans > 400 days
+  rejected, `start_minute` clamped, out-of-range days dropped, SLA boundary inclusive, verdict
+  matrix, timezone validation.
+- Verification: `cargo test -p supportos-plusplus-core` — 61/61 pass locally and in CI.
+
+**8. Add `xtask vector-count` command; record chunk count (D4 gate)**
+- Work: `VectorCount` subcommand in `crates/xtask/src/bin/xtask.rs` — resolves the embedded
+  qdrant store directory (new public `embedded_store_dir`, previously a private
+  `EmbeddedQdrant::dir_for`), exact point count via new `EmbeddedQdrant::try_point_count`
+  (`Ok(None)` when the collection does not exist yet), per-entity breakdown via new
+  `count_by_entity` (knowledge / docs / conversation chunks), optional SQLite cross-check
+  (row counts + `embedding_state = 'indexed'`), and the D4 gate verdict
+  (< 100,000 chunks → sqlite-vec GO). `embeddings::entity_type_for` made public and
+  documented. 2 unit tests over a seeded temp store.
+- Verification: `cargo run -p supportos-plusplus-xtask -- vector-count` runs clean on an empty
+  data dir (graceful "store not found → 0 points" path, prints `D4 gate -> 0 < 100000 chunks:
+  sqlite-vec GO`); unit tests pass (61/61); CI green.
+- Recorded count: 0 points (no production data yet) — re-run on seeded data before the
+  Phase 5 swap (plan item 25).
+
+**9. Pin toolchain to exact version; pin egui `=0.37` in workspace**
+- Work: `rust-toolchain.toml` channel `stable` → `1.99.1` (exact pin; upgrades become
+  deliberate, never silent). Workspace `Cargo.toml` gains `egui`/`eframe`/`egui_extras`/
+  `egui_plot` all pinned `=0.37` (decision D1; first consumed by `crates/app-shell` in
+  Phase 2). CI switched from `dtolnay/rust-toolchain@stable` to `rustup toolchain install`
+  so `rust-toolchain.toml` is the single source of truth. `Cargo.lock` regenerated
+  (egui tree + hmac/sha1/hex). wasm32 target retained until the Phase 4 cutover.
+- Verification: local fmt/clippy/test all on 1.99.1; CI installed the pinned toolchain and
+  ran green on it.
+
+**10. Row 2: replace hand-rolled HMAC/SHA-1/base64/hex with crates**
+- Work: `crates/core/src/webhook.rs` — `compute_signature`/`verify_signature` now use
+  `Hmac<Sha1>` (`hmac` 0.13 + `sha1` 0.11). Verification uses `Mac::verify_slice`
+  (constant-time tag comparison) against the base64-decoded provided signature; invalid
+  base64 → `Error::WebhookSignature`. ~120 lines of hand-rolled SHA-1, base64, and hex
+  helper code deleted. Core gains direct `hmac`, `sha1`, `hex` deps (base64 was already
+  direct).
+- Verification: 4 new tests — RFC 2202 vectors (tests 1, 2, and 6 with a key longer than the
+  64-byte block), the classic HMAC-SHA1 digest vector, determinism, and valid/tampered-body/
+  wrong-key/invalid-encoding rejection. 61/61 pass locally and in CI.
+
+**Batch verification summary:** `cargo fmt --all --check` clean · `cargo clippy --all-targets
+-- -D warnings` clean (catalog/core/xtask, forced fresh run after touching all changed
+inputs) · `cargo test -p supportos-plusplus-core` 61/61 (29 new + 32 pre-existing) ·
+`cargo run -p supportos-plusplus-xtask -- vector-count` executes and prints the D4 gate
+verdict · `cargo deny check advisories licenses` ok · GitHub Actions run `39120945826` →
+success on commit `89f88b9`.
