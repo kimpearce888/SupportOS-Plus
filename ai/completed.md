@@ -115,3 +115,70 @@ inputs) · `cargo test -p supportos-plusplus-core` 61/61 (29 new + 32 pre-existi
 `cargo run -p supportos-plusplus-xtask -- vector-count` executes and prints the D4 gate
 verdict · `cargo deny check advisories licenses` ok · GitHub Actions run `39120945826` →
 success on commit `89f88b9`.
+
+### Batch 3 — 2026-10-18 (commit `cc3a288`, CI run `39126901850`: success)
+
+**11. Row 1: empty webhook secret → hard reject outside demo mode**
+- Work: `webhook_handler::process_webhook` gains a `demo_mode` parameter and a new
+  `WebhookProcessResult::SecretNotConfigured` variant. An empty secret outside demo mode
+  returns it immediately (HTTP 403 on the webhook route with an explanatory message);
+  inside demo mode unsigned events still flow so the simulation tools exercise the pipeline.
+  Callers updated: http/routes/webhook.rs (passes `state.demo_mode`), demo.rs and the
+  `/api/demo/simulate-webhook` route (demo tools, secret always set there).
+- Verification: `empty_secret_hard_rejects_outside_demo_mode` (incl. provided-signature case)
+  and `empty_secret_allows_unsigned_events_in_demo_mode`; 68/68 tests locally and in CI.
+
+**12. Row 5: replace `query_row(...).ok()` with `.optional()?`**
+- Work: the three sites in `webhook.rs` (legacy schema probe, insert-duplicate lookup,
+  persist_event lookup) now use rusqlite's `OptionalExtension::optional()?`, so genuine DB
+  errors propagate instead of being silently treated as "row not found". The same fix was
+  applied to `settings::get_string` — required because the m049 migration reads it and a
+  swallowed error would silently skip secret migration.
+- Verification: clippy `-D warnings` clean; 68/68 tests; behavior unchanged for happy paths.
+
+**13. Row 6: webhook DDL to a numbered migration; no per-insert ensure**
+- Work: `ensure_webhook_events_table` renamed to `apply_m048_webhook_events` (legacy-body
+  schema drop + CREATE TABLE/INDEX) and wired as dedicated boot step v39 `m048`;
+  removed from the v32 `runtime_table_guards` bundle. `insert_webhook_event`,
+  `persist_event`, and `get_pending_webhook_events` no longer call it — schema comes from
+  the migration runner, real errors surface. Test fixtures now open databases through
+  `bootstrap::apply_all` exactly like the app.
+- Verification: 68/68 tests (webhook persistence/dedup/drain suite runs on a
+  migration-opened connection); CI green.
+
+**14. Row 13: encrypted secrets envelope + webhook_secret boot migration**
+- Work: `settings::set_secret`/`get_secret` seal values as `0x01 || nonce || AES-256-GCM
+  ciphertext` (via `core::crypto`) under a per-installation master key stored at
+  `<data_dir>/secrets.key` (0600, create-new, never overwritten). `bootstrap::apply_all`
+  initializes the key before migrations run (db file path discovered via
+  `PRAGMA database_list`; in-memory DBs skip). New boot step v40 `m049` moves the legacy
+  plaintext `webhook_secret` from `application_settings` into the envelope and deletes the
+  plaintext row (idempotent; skips with a warning when no key). Readers switched to the
+  envelope: webhook route, sync status (`has_secret`), webhook registration, demo simulator
+  (demo-default fallback). Settings PATCH now accepts `webhook_secret` (null/empty clears,
+  16-256 chars) and routes it to `set_secret`; a failed secret write returns 500 instead of
+  being silently dropped. `db::db_file_path` moved to `db.rs` as shared infrastructure.
+- Verification: `secrets_envelope_lifecycle` covers no-key failure, 0600 key creation,
+  round-trip, plaintext-never-in-table, delete/redaction, wrong-installation-key error,
+  corrupt-envelope error, m049 migration + idempotency, fresh-boot key, malformed key file;
+  68/68 tests; CI green.
+- Known limitation (by design): a sync bundle imported into a different installation
+  carries envelope rows the new master key cannot open; those reads error and callers fall
+  back to env/default — the secret must be re-entered once.
+
+**15. Row 4a: byte caps — file import, zip declared size + Read::take, PDF input**
+- Work: `knowledge_store.rs` gains `MAX_IMPORT_FILE_BYTES` (64 MiB, checked via metadata
+  before `std::fs::read`), `MAX_PDF_INPUT_BYTES` (32 MiB, checked before the CPU-heavy
+  extractor), `MAX_DOCX_ENTRY_BYTES` (64 MiB, checked against the zip entry's declared
+  uncompressed size AND enforced via `Read::take(cap+1)` plus a produced-length re-check,
+  because declared sizes can lie). HTTP manual-paste imports remain bounded by the existing
+  axum `DefaultBodyLimit`.
+- Verification: 4 new tests — oversized file rejected pre-read (small file still imports),
+  PDF over cap rejected by the size guard (small junk still reaches the parser), small-DOCX
+  extraction regression for the take() refactor, and a 64 MiB+1 declared-size docx entry
+  rejected. 68/68 tests; CI green.
+
+**Batch verification summary:** `cargo fmt --all --check` clean · `cargo clippy --all-targets
+-- -D warnings` clean (catalog/core/xtask) · `cargo test -p supportos-plusplus-core` 68/68
+(7 net new) · `cargo deny check advisories licenses` ok · `xtask vector-count` still runs
+after the bootstrap changes · GitHub Actions run `39126901850` → success on `cc3a288`.
