@@ -259,3 +259,92 @@ after the bootstrap changes · GitHub Actions run `39126901850` → success on `
 app-shell) · `cargo deny check advisories licenses` ok (OFL-1.1 and Ubuntu-font-1.0 added
 for epaint's bundled fonts) · `xtask vector-count` smoke ok · GitHub Actions run
 `39132228740` → success on `8875597`.
+
+### Batch 5 — 2026-10-18 (commit `a1b4e31`, CI run `39139669523`: success)
+
+**21. Port: dashboard page**
+- Work: `app-shell/src/pages/dashboard.rs` — typed port of the `/api/analytics/dashboard`
+  SQL (same predicates, same `round_min` rounding, no JSON layer, no HTTP hop): headline
+  counts (new/active/pending/closed/unassigned/backlog), replies_sent, first-response and
+  resolution averages, ratings split, by_mailbox/by_tag/by_agent/by_team breakdowns,
+  daily_new series, by_channel, channel_metrics, and the mailbox comparison table. Reads
+  are pure — the HTTP route's `daily_metrics` write-on-read cache upsert is deliberately
+  not reproduced in the native page. View keeps the web information architecture: 7/30/90/
+  365-day range buttons, mailbox chips (All + per-mailbox toggle), All/Email/Chat channel
+  filter, metric cards, per-day line chart, breakdown grids, and the issue-radar panel via
+  the promoted `issue_radar_impl`.
+- Verification: 5 tests — counts/breakdowns/daily series over a 4-conversation fixture
+  (incl. replies_sent=1, rating split, by_mailbox ordering, first-response Some), mailbox
+  and channel scope filters (by_channel intentionally ignores the channel filter, matching
+  the route), daily_new chart-point mapping, radar on empty store, mailbox listing.
+
+**22. Port: inbox page (mention widget, richtext, live updates)**
+- Work: `app-shell/src/pages/inbox.rs` + `app-shell/src/mention.rs`. List and detail read
+  through the typed core functions the `/api/conversations` routes call
+  (`inbox::list_conversations` / `get_conversation`), so the native page shows exactly what
+  the web page showed. Thread bodies render through `richtext::html_to_spans` with full
+  style mapping (bold/italic/underline/strikethrough/code/quote/heading sizes/links).
+  Composer keeps the web features: reply/internal-note tabs, cc/bcc fields, Ctrl+Enter
+  send, and the `@`-mention autocomplete popup (`caret_query`/`filter_matches`/
+  `apply_completion` ported with byte-offset semantics + egui char-index conversion).
+  Mutations are local-first through the durable outbound pipeline: the same
+  `outbound_jobs` rows `op_send_reply`/`op_add_note` create (kinds `create_reply`/
+  `create_note`/`update_status`/`assign`, the `reply:{remote}:{send}:{sha256-24}`
+  duplicate-send key, audit entries, `queued` status — provider execution lands with the
+  loopback/worker batch), local row changes via the typed `ticket_ops::execute` for
+  status/assign, notes insert the local thread row (what sync brings back) plus
+  `Mentioned` notifications (the same records the notification sweep creates, dedup
+  `n:mention:{thread}:{user}`), AI-evaluation-mode guards reject every mutation, and
+  every success emits `ConversationUpdated` on the bus for the live-update loop.
+- Verification: 7 tests — filter-bar mapping, reply-key format contract, reply job +
+  duplicate-send protection + distinct-text retry, note thread row + job + mention
+  notification + bus event, status change writes locally and queues `update_status`,
+  eval-mode blocks everything (zero jobs created), users/tags listing.
+
+**23. Port: customers page**
+- Work: `app-shell/src/pages/customers.rs` — search surface (query + Enter/button, results
+  grid) and profile surface (back nav, contact card, support health, event-mix bars,
+  interaction profile, timeline, conversations) fed by the same core functions the
+  `/api/customers` routes call: `people_store::list_customers_summary` /
+  `get_customer_detail` / `customer_support_health`, `customer_events::list_for_customer` +
+  `kind_counts`, `interaction_engine::build_profile`, and `inbox::list_conversations` with
+  a customer filter. View models (`row_from_summary`, `contact_from_detail` (nested
+  `customer` object), `health_from_report`, `event_row`) map the actual JSON shapes.
+- Verification: 6 tests — summary row mapping, contact/health extraction from the real
+  detail/report shapes, event-row fallbacks, per-customer conversation filter, search +
+  profile flow through core against the seeded DB, empty-DB search stays empty without
+  error.
+
+**24. Port: knowledge/docs pages**
+- Work: `app-shell/src/pages/knowledge.rs` — four tabs. Documents/sources/freshness act
+  through `spp_core::knowledge_store` (`list_documents`, `list_sources`,
+  `freshness_report`, `mark_reviewed`, `mark_verified`, `delete_document`). The help-center
+  tab ports the `/api/docs/*` route SQL as typed queries: stats, collections, article list
+  with collection/status filters, FTS search building the same quoted-prefix pattern from
+  the (now public) core tokenizer, and the article reader with full text. Deferred-action
+  pattern keeps immediate-mode borrows sound.
+- Verification: 6 tests — stats counting, collection/status filters, FTS search finds by
+  token and returns empty (not error) for no-match and too-short tokens, article detail
+  (summary + text, missing id), knowledge document actions round-trip (upsert → review →
+  delete with list refresh).
+
+**25. Port: reports page**
+- Work: `app-shell/src/pages/reports.rs` — overview/SLA/why-contacting/top-questions/
+  issue-radar tabs over the same data the `/api/reports/*` routes serve: overview from the
+  dashboard port, typed `sla::sla_report` (per-mailbox first-response/resolution met/
+  missed, waiting stats, unconfigured list), and the promoted `why_contacting_impl` /
+  `top_questions_impl` / `issue_radar_impl`. Charts (per-day line, per-mailbox SLA bars)
+  render through the new `app-shell/src/chart.rs` native painter with tested scaling math —
+  egui_plot 0.37 builds against egui 0.36 and no 0.37-compatible release exists yet, so
+  the workspace `egui_plot =0.37` pin was dropped with a re-adoption note in the workspace
+  manifest (single-egui-version integrity preserved).
+- Verification: 4 tests (reports) + 3 (chart) + 5 (mention) + 4 (pages/mod invalidation
+  map) + 5 (app.rs routing) — SLA report loads on a fixture, overview/lists load and
+  reload on range change, row-shape mapping, chart scaling (bottom-left origin, degenerate
+  inputs, descending series), invalidation dedup across overlapping events.
+
+**Batch verification summary:** `cargo fmt --all --check` clean · `cargo clippy --all-targets
+-- -D warnings` clean (catalog/core/xtask/app-shell, forced fresh) · `cargo test` 144/144
+(94 core + 50 app-shell; 39 new this batch) · `cargo deny check advisories licenses` ok ·
+`xtask vector-count` smoke ok (D4: 0 points, sqlite-vec GO unchanged) · GitHub Actions run
+`39139669523` → success on `a1b4e31`.
