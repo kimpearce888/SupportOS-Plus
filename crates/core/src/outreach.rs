@@ -1386,8 +1386,8 @@ pub fn save_segment_v2(
         }
     }
     conn.execute(
-        "INSERT INTO saved_segments (name, description, condition_tree, version)
-         VALUES (?1, ?2, ?3, 1)",
+        "INSERT INTO saved_segments (name, criteria_json, description, condition_tree, version)
+         VALUES (?1, '[]', ?2, ?3, 1)",
         params![name, description, definition_json],
     )?;
     Ok(conn.last_insert_rowid())

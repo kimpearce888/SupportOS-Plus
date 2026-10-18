@@ -8,8 +8,8 @@ use rusqlite::Connection;
 use std::panic::AssertUnwindSafe;
 
 use crate::error::{Error, Result};
+use crate::eventing::EventBus;
 use crate::helpscout::HelpScoutProvider;
-use crate::http::EventBus;
 use crate::jobs;
 use crate::sync_engine::SyncEngine;
 
@@ -370,7 +370,7 @@ impl WorkerManager {
                 };
                 if inserted {
                     fresh += 1;
-                    crate::http::event_bus::notify_rating_received(
+                    crate::eventing::notify_rating_received(
                         &self.bus,
                         r.rating.as_deref(),
                         conv_local,
@@ -382,7 +382,7 @@ impl WorkerManager {
                 }
             }
             if fresh > 0 {
-                crate::http::event_bus::notify_ratings_refreshed(
+                crate::eventing::notify_ratings_refreshed(
                     &self.bus,
                     ratings.len() as u32,
                     fresh as u32,
@@ -658,7 +658,7 @@ impl WorkerManager {
                                 )
                             };
                             if inserted {
-                                crate::http::event_bus::notify_rating_received(
+                                crate::eventing::notify_rating_received(
                                     &self.bus,
                                     r.rating.as_deref(),
                                     conv_local,

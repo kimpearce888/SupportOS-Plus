@@ -453,7 +453,7 @@ pub fn mailboxes(conn: &Connection) -> Vec<(i64, String)> {
 /// Issue-radar alerts (same data the web page polled every 2 minutes).
 #[must_use]
 pub fn radar_alerts(conn: &Connection) -> Vec<serde_json::Value> {
-    spp_core::http::routes::analytics::issue_radar_impl(conn)
+    spp_core::analytics::issue_radar_impl(conn)
 }
 
 /// Chart-ready `[[x, y]]` pairs: x = day index, y = new conversations.

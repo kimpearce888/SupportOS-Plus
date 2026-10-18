@@ -3,7 +3,6 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
 
 const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -169,8 +168,8 @@ fn check_icns(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn verify_icons(tauri_dir: &Path) -> Result<()> {
-    let icons = tauri_dir.join("icons");
+pub fn verify_icons(shell_dir: &Path) -> Result<()> {
+    let icons = shell_dir.join("icons");
 
     for (name, size) in [
         ("32x32.png", 32u32),
@@ -184,20 +183,8 @@ pub fn verify_icons(tauri_dir: &Path) -> Result<()> {
     check_ico(&icons.join("icon.ico"))?;
     check_icns(&icons.join("icon.icns"))?;
 
-    let conf: Value = serde_json::from_str(&fs::read_to_string(tauri_dir.join("tauri.conf.json"))?)
-        .context("parsing tauri.conf.json")?;
-    let icon_paths = conf
-        .get("bundle")
-        .and_then(|b| b.get("icon"))
-        .and_then(Value::as_array)
-        .with_context(|| "tauri.conf.json has no bundle.icon array")?;
-    for p in icon_paths {
-        let p = p.as_str().context("bundle.icon entries must be strings")?;
-        let full = tauri_dir.join(p);
-        if !full.is_file() {
-            bail!("bundle.icon lists {} but {} is missing", p, full.display());
-        }
-    }
-
+    // The Phase 4 cutover removed tauri.conf.json; the icon set itself is
+    // the contract now (AppImage/desktop-integration packaging consumes
+    // it in a later plan item).
     Ok(())
 }

@@ -140,6 +140,13 @@ impl DbHandle {
     pub fn is_shared_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.conn, &other.conn)
     }
+
+    /// The underlying shared connection (used by background engines such
+    /// as the sync engine that predate the facade).
+    #[must_use]
+    pub fn shared(&self) -> Arc<Mutex<Connection>> {
+        Arc::clone(&self.conn)
+    }
 }
 
 #[cfg(test)]

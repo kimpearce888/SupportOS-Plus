@@ -1,0 +1,531 @@
+//! Sync Health page (port of the web `pages/sync_health.rs`).
+//!
+//! Status cards (engine state, last successful checkpoint, webhook queue
+//! counts), the checkpoint table, recent runs, and the sync actions —
+//! initial / incremental / reconcile / cancel, run in-process through the
+//! shared `SyncEngine` (the `/api/sync/*` route logic without the HTTP
+//! hop), plus the demo tools from `/api/demo/*` (`demo::run_demo_tool`).
+//!
+//! The run/status queries are typed ports of the `/api/sync/status` SQL.
+
+use std::sync::Arc;
+
+use eframe::egui;
+use rusqlite::Connection;
+use spp_core::db::DbHandle;
+use spp_core::sync_engine::SyncEngine;
+
+/// One sync checkpoint row (typed port of the status route SQL).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CheckpointRow {
+    pub resource: String,
+    pub last_success_at: Option<String>,
+    pub records_processed: i64,
+    pub records_failed: i64,
+    pub last_error: Option<String>,
+    pub retry_count: i64,
+    pub status: String,
+}
+
+/// One sync run row (typed port of the status route SQL).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunRow {
+    pub id: i64,
+    pub kind: String,
+    pub state: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub resources_done: i64,
+    pub resources_total: i64,
+    pub records_processed: i64,
+    pub errors: i64,
+}
+
+/// Webhook queue counters (typed port of the status route SQL).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WebhookQueue {
+    pub total: i64,
+    pub pending: i64,
+    pub processed: i64,
+    pub failed: i64,
+    pub duplicates: i64,
+}
+
+/// The full sync health status model.
+#[derive(Debug, Clone, Default)]
+pub struct SyncStatus {
+    pub state: String,
+    pub last_success: Option<String>,
+    pub checkpoints: Vec<CheckpointRow>,
+    pub runs: Vec<RunRow>,
+    pub webhooks: WebhookQueue,
+}
+
+/// Load the status model (typed port of `/api/sync/status`).
+#[must_use]
+pub fn load_status(conn: &Connection) -> SyncStatus {
+    let state = spp_core::sync_engine::get_state(conn);
+    let last_success = spp_core::sync_engine::last_successful_sync(conn);
+
+    let checkpoints = conn
+        .prepare(
+            "SELECT resource, last_success_at, records_processed, records_failed,
+                    last_error, retry_count, status
+               FROM sync_checkpoints ORDER BY resource",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| {
+                Ok(CheckpointRow {
+                    resource: r.get(0)?,
+                    last_success_at: r.get(1)?,
+                    records_processed: r.get(2)?,
+                    records_failed: r.get(3)?,
+                    last_error: r.get(4)?,
+                    retry_count: r.get(5)?,
+                    status: r.get(6)?,
+                })
+            })
+            .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default();
+
+    let runs = conn
+        .prepare(
+            "SELECT id, kind, state, started_at, finished_at, resources_done,
+                    resources_total, records_processed, errors
+               FROM sync_runs ORDER BY id DESC LIMIT 10",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| {
+                Ok(RunRow {
+                    id: r.get(0)?,
+                    kind: r.get(1)?,
+                    state: r.get(2)?,
+                    started_at: r.get(3)?,
+                    finished_at: r.get(4)?,
+                    resources_done: r.get(5)?,
+                    resources_total: r.get(6)?,
+                    records_processed: r.get(7)?,
+                    errors: r.get(8)?,
+                })
+            })
+            .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default();
+
+    let webhooks = conn
+        .query_row(
+            "SELECT COUNT(*),
+                    SUM(CASE WHEN processing_state = 'pending' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN processing_state = 'processed' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN processing_state = 'failed' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN processing_state = 'duplicate' THEN 1 ELSE 0 END)
+               FROM webhook_events",
+            [],
+            |r| {
+                Ok(WebhookQueue {
+                    total: r.get(0)?,
+                    pending: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    processed: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                    failed: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                    duplicates: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                })
+            },
+        )
+        .unwrap_or_default();
+
+    SyncStatus {
+        state,
+        last_success,
+        checkpoints,
+        runs,
+        webhooks,
+    }
+}
+
+/// Which sync action a button dispatches (web: `/api/sync/{action}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncAction {
+    Initial,
+    Incremental,
+    Reconcile,
+    Cancel,
+}
+
+impl SyncAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Initial => "Run initial sync",
+            Self::Incremental => "Run incremental sync",
+            Self::Reconcile => "Run reconcile",
+            Self::Cancel => "Cancel running sync",
+        }
+    }
+}
+
+/// Demo tools (port of the web page's demo buttons → `/api/demo/*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DemoToolAction {
+    WebhookEvent,
+    CsatRating,
+    IncomingMessage,
+}
+
+impl DemoToolAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::WebhookEvent => "Simulate webhook event",
+            Self::CsatRating => "Simulate CSAT rating",
+            Self::IncomingMessage => "Simulate incoming message",
+        }
+    }
+
+    fn tool(self) -> spp_core::demo::DemoTool {
+        match self {
+            Self::WebhookEvent => spp_core::demo::DemoTool::SimulatedWebhookEvent,
+            Self::CsatRating => spp_core::demo::DemoTool::SimulatedCsatRating,
+            Self::IncomingMessage => spp_core::demo::DemoTool::SimulatedIncomingMessage,
+        }
+    }
+}
+
+/// The interactive sync health page state.
+pub struct SyncHealthPage {
+    status: Option<SyncStatus>,
+    message: Option<String>,
+}
+
+impl SyncHealthPage {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            status: None,
+            message: None,
+        }
+    }
+
+    /// Live-update invalidation.
+    pub fn invalidate(&mut self) {
+        self.status = None;
+    }
+
+    fn reload(&mut self, db: &DbHandle) {
+        self.status = Some(db.with_read(load_status));
+    }
+
+    /// Run one sync action in the background (the web route spawned a
+    /// tokio task; the shell runs a detached thread with its own
+    /// single-threaded runtime — the 2-thread runtime slim is a later
+    /// plan item).
+    pub fn run_sync_action(&mut self, db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) {
+        if action != SyncAction::Cancel && engine.is_running() {
+            self.message = Some("A sync is already running.".into());
+            return;
+        }
+        let engine = Arc::clone(engine);
+        let db = db.clone();
+        std::thread::Builder::new()
+            .name("spp-sync-action".to_string())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                let result = runtime
+                    .map_err(|e| spp_core::Error::Config(e.to_string()))
+                    .and_then(|rt| {
+                        rt.block_on(async move {
+                            match action {
+                                SyncAction::Initial => engine
+                                    .initial_sync()
+                                    .await
+                                    .map(|_| "Initial sync completed.".to_string()),
+                                SyncAction::Incremental => engine
+                                    .incremental_sync()
+                                    .await
+                                    .map(|_| "Incremental sync completed.".to_string()),
+                                SyncAction::Reconcile => engine
+                                    .reconcile()
+                                    .await
+                                    .map(|_| "Reconcile completed.".to_string()),
+                                SyncAction::Cancel => {
+                                    engine.request_cancellation();
+                                    Ok("Cancellation requested.".to_string())
+                                }
+                            }
+                        })
+                    });
+                if let Err(e) = result {
+                    db.with_write(|conn| {
+                        let _ = spp_core::jobs::log_error(
+                            conn,
+                            "sync",
+                            &format!("{} failed: {e}", action_label_static(action)),
+                        );
+                    });
+                }
+            })
+            .ok();
+        self.message = Some(format!("{} (started in background)", action.label()));
+    }
+
+    /// Run one demo tool synchronously (writes are local and fast).
+    pub fn run_demo_tool(&mut self, db: &DbHandle, action: DemoToolAction) {
+        let result = db.with_write(|conn| spp_core::demo::run_demo_tool(conn, action.tool()));
+        self.message = Some(match result {
+            spp_core::demo::DemoToolResult::Success { message } => message,
+            spp_core::demo::DemoToolResult::DemoModeRequired => {
+                "Demo mode is off — enable it in onboarding.".into()
+            }
+            spp_core::demo::DemoToolResult::Failed { message } => message,
+        });
+        self.status = None;
+    }
+
+    /// Render the page. `engine` is the shared sync engine; `None` mirrors
+    /// the web route's ServiceUnavailable response.
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, engine: Option<&Arc<SyncEngine>>) {
+        if self.status.is_none() {
+            self.reload(db);
+        }
+
+        ui.heading("Sync Health");
+        if let Some(message) = &self.message {
+            ui.label(format!("status: {message}"));
+        }
+        ui.separator();
+
+        let status = self.status.clone().unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.strong("state:");
+            ui.monospace(status.state.as_str());
+            ui.strong("last success:");
+            ui.monospace(
+                status
+                    .last_success
+                    .clone()
+                    .unwrap_or_else(|| "(never)".into()),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label(format!(
+                "webhook queue: {} total · {} pending · {} processed · {} failed · {} duplicates",
+                status.webhooks.total,
+                status.webhooks.pending,
+                status.webhooks.processed,
+                status.webhooks.failed,
+                status.webhooks.duplicates
+            ));
+        });
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            for action in [
+                SyncAction::Initial,
+                SyncAction::Incremental,
+                SyncAction::Reconcile,
+                SyncAction::Cancel,
+            ] {
+                if ui.button(action.label()).clicked() {
+                    match engine {
+                        Some(engine) => {
+                            self.run_sync_action(db, engine, action);
+                            self.status = None;
+                        }
+                        None => {
+                            self.message =
+                                Some("The sync engine is not available in this build.".into());
+                        }
+                    }
+                }
+            }
+        });
+        ui.separator();
+
+        ui.strong("Checkpoints");
+        if status.checkpoints.is_empty() {
+            ui.weak("(no checkpoints yet — run an initial sync)");
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("sync-checkpoints")
+                .show(ui, |ui| {
+                    egui::Grid::new("sync-checkpoint-table")
+                        .num_columns(6)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for header in [
+                                "resource",
+                                "status",
+                                "processed",
+                                "failed",
+                                "retries",
+                                "last success",
+                            ] {
+                                ui.strong(header);
+                            }
+                            ui.end_row();
+                            for cp in &status.checkpoints {
+                                ui.monospace(cp.resource.as_str());
+                                ui.label(cp.status.as_str());
+                                ui.monospace(cp.records_processed.to_string());
+                                ui.monospace(cp.records_failed.to_string());
+                                ui.monospace(cp.retry_count.to_string());
+                                ui.monospace(
+                                    cp.last_success_at.clone().unwrap_or_else(|| "—".into()),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                });
+        }
+        ui.separator();
+
+        ui.strong("Recent runs");
+        if status.runs.is_empty() {
+            ui.weak("(no runs recorded)");
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("sync-runs")
+                .show(ui, |ui| {
+                    egui::Grid::new("sync-run-table")
+                        .num_columns(7)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for header in [
+                                "id",
+                                "kind",
+                                "state",
+                                "started",
+                                "resources",
+                                "records",
+                                "errors",
+                            ] {
+                                ui.strong(header);
+                            }
+                            ui.end_row();
+                            for run in &status.runs {
+                                ui.monospace(run.id.to_string());
+                                ui.label(run.kind.as_str());
+                                ui.label(run.state.as_str());
+                                ui.monospace(run.started_at.as_str());
+                                ui.monospace(format!(
+                                    "{}/{}",
+                                    run.resources_done, run.resources_total
+                                ));
+                                ui.monospace(run.records_processed.to_string());
+                                ui.monospace(run.errors.to_string());
+                                ui.end_row();
+                            }
+                        });
+                });
+        }
+        ui.separator();
+
+        ui.strong("Demo tools");
+        ui.weak("Write simulated Help Scout activity into the local database.");
+        for action in [
+            DemoToolAction::WebhookEvent,
+            DemoToolAction::CsatRating,
+            DemoToolAction::IncomingMessage,
+        ] {
+            if ui.button(action.label()).clicked() {
+                self.run_demo_tool(db, action);
+            }
+        }
+    }
+}
+
+impl Default for SyncHealthPage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn action_label_static(action: SyncAction) -> &'static str {
+    action.label()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{i64_field, opt_str_field, str_field};
+    use super::*;
+    use crate::testsupport::fixture;
+
+    #[test]
+    fn status_loads_from_seeded_checkpoints_and_runs() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            spp_core::sync_engine::start_run(conn, "initial").expect("run");
+        });
+        let status = db.with_read(load_status);
+        assert_eq!(status.state, "NEW", "the unsynced default state");
+        assert_eq!(status.runs.len(), 1);
+        assert_eq!(status.runs[0].kind, "initial");
+        assert_eq!(status.webhooks.total, 0);
+        assert!(status.checkpoints.is_empty());
+        assert!(status.last_success.is_none());
+    }
+
+    #[test]
+    fn webhook_queue_counters_count_states() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            for (state, hash, event_id) in [
+                ("pending", "h1", Some("a".to_string())),
+                ("processed", "h2", Some("b".to_string())),
+                ("processed", "h3", Some("c".to_string())),
+                ("failed", "h4", Some("d".to_string())),
+                ("duplicate", "h5", None),
+            ] {
+                conn.execute(
+                    "INSERT INTO webhook_events (event_hash, event_id, event_type, payload, received_at, processing_state, attempts)
+                     VALUES (?1, ?2, 'convo.created', '{}', strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?3, 0)",
+                    rusqlite::params![hash, event_id, state],
+                )
+                .expect("webhook event");
+            }
+        });
+        let status = db.with_read(load_status);
+        assert_eq!(status.webhooks.total, 5);
+        assert_eq!(status.webhooks.pending, 1);
+        assert_eq!(status.webhooks.processed, 2);
+        assert_eq!(status.webhooks.failed, 1);
+        assert_eq!(status.webhooks.duplicates, 1);
+    }
+
+    #[test]
+    fn demo_tools_require_demo_mode() {
+        let db = fixture(Vec::new());
+        let mut page = SyncHealthPage::new();
+        page.run_demo_tool(&db, DemoToolAction::WebhookEvent);
+        assert!(
+            page.message
+                .clone()
+                .unwrap_or_default()
+                .contains("Demo mode is off")
+        );
+
+        db.with_write(|conn| {
+            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
+        });
+        page.run_demo_tool(&db, DemoToolAction::WebhookEvent);
+        assert!(
+            !page
+                .message
+                .clone()
+                .unwrap_or_default()
+                .contains("Demo mode is off")
+        );
+    }
+
+    #[test]
+    fn json_field_helpers_read_checkpoint_shaped_rows() {
+        let v = serde_json::json!({
+            "state": "idle",
+            "last_success": null,
+            "total": 5,
+        });
+        assert_eq!(str_field(&v, "state"), "idle");
+        assert_eq!(opt_str_field(&v, "last_success"), None);
+        assert_eq!(i64_field(&v, "total"), 5);
+    }
+}

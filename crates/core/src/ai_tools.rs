@@ -1334,7 +1334,7 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
             let human: Vec<Value> = notes
                 .iter()
                 .filter(|(k, v, ..)| {
-                    if crate::http::routes::memory::is_quarantined(k, v.as_deref()) {
+                    if crate::ai_memory_guard::is_quarantined(k, v.as_deref()) {
                         quarantined += 1;
                         false
                     } else {

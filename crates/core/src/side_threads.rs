@@ -374,7 +374,7 @@ fn unknown_user_ids(conn: &Connection, ids: &[i64]) -> Vec<i64> {
 
 pub fn create_side_thread_full(
     conn: &Connection,
-    bus: Option<&crate::http::EventBus>,
+    bus: Option<&crate::eventing::EventBus>,
     conversation_id: i64,
     input: &CreateSideThreadInput,
 ) -> Result<i64> {
@@ -477,7 +477,7 @@ fn insert_participants_unchecked(
 
 pub fn add_side_thread_message(
     conn: &Connection,
-    bus: Option<&crate::http::EventBus>,
+    bus: Option<&crate::eventing::EventBus>,
     thread_id: i64,
     body: &str,
     author_user_id: Option<i64>,
@@ -491,7 +491,7 @@ pub fn add_side_thread_message(
 
 fn insert_side_thread_message_unchecked(
     conn: &Connection,
-    bus: Option<&crate::http::EventBus>,
+    bus: Option<&crate::eventing::EventBus>,
     thread_id: i64,
     body: &str,
     author_user_id: Option<i64>,

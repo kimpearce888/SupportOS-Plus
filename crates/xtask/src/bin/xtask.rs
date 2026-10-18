@@ -11,9 +11,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Run the native shell (egui) in debug mode.
     Dev,
-    TrunkServe,
-    TrunkBuild,
     Lint,
     VerifyIcons,
     Package {
@@ -62,8 +61,6 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Dev => run_dev(),
-        Cmd::TrunkServe => run_trunk("serve"),
-        Cmd::TrunkBuild => run_trunk_release_build(),
         Cmd::Lint => run_lint(),
         Cmd::VerifyIcons => run_verify_icons(),
         Cmd::Package { args } => run_package(&args),
@@ -88,36 +85,14 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn run_dev() -> anyhow::Result<()> {
-    let tauri_dir = workspace_root()
-        .join("crates")
-        .join("app")
-        .join("src-tauri");
     let status = Command::new("cargo")
-        .arg("tauri")
-        .arg("dev")
-        .current_dir(tauri_dir)
+        .args(["run", "-p", "supportos-plusplus-app-shell"])
+        .current_dir(workspace_root())
         .status()?;
-    anyhow::ensure!(status.success(), "cargo tauri dev failed");
-    Ok(())
-}
-
-fn run_trunk(mode: &str) -> anyhow::Result<()> {
-    let ui_dir = workspace_root().join("crates").join("ui");
-    let status = Command::new("trunk")
-        .arg(mode)
-        .current_dir(ui_dir)
-        .status()?;
-    anyhow::ensure!(status.success(), "trunk {mode} failed");
-    Ok(())
-}
-
-fn run_trunk_release_build() -> anyhow::Result<()> {
-    let ui_dir = workspace_root().join("crates").join("ui");
-    let status = Command::new("trunk")
-        .args(["build", "--release"])
-        .current_dir(ui_dir)
-        .status()?;
-    anyhow::ensure!(status.success(), "trunk build --release failed");
+    anyhow::ensure!(
+        status.success(),
+        "cargo run -p supportos-plusplus-app-shell failed"
+    );
     Ok(())
 }
 
@@ -147,27 +122,23 @@ fn run_lint() -> anyhow::Result<()> {
 }
 
 fn run_verify_icons() -> anyhow::Result<()> {
-    let tauri_dir = workspace_root()
-        .join("crates")
-        .join("app")
-        .join("src-tauri");
-    spp_xtask::icons::verify_icons(&tauri_dir)?;
-    println!("icon set verified: png/ico/icns structures and the bundle.icon list are consistent");
+    let shell_dir = workspace_root().join("crates").join("app-shell");
+    spp_xtask::icons::verify_icons(&shell_dir)?;
+    println!("icon set verified: png/ico/icns structures are consistent");
     Ok(())
 }
 
 fn run_package(extra_args: &[String]) -> anyhow::Result<()> {
-    let tauri_dir = workspace_root()
-        .join("crates")
-        .join("app")
-        .join("src-tauri");
+    // Phase 4 cutover: the Tauri bundler is gone; package builds the
+    // native shell in release mode. AppImage packaging via this command
+    // is the next plan item (row 7).
     let mut cmd = Command::new("cargo");
-    cmd.arg("tauri").arg("build");
+    cmd.args(["build", "--release", "-p", "supportos-plusplus-app-shell"]);
     for arg in extra_args {
         cmd.arg(arg);
     }
-    let status = cmd.current_dir(tauri_dir).status()?;
-    anyhow::ensure!(status.success(), "cargo tauri build failed");
+    let status = cmd.current_dir(workspace_root()).status()?;
+    anyhow::ensure!(status.success(), "release build failed");
     Ok(())
 }
 

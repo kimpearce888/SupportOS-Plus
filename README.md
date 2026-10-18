@@ -1,6 +1,6 @@
 # SupportOS++
 
-> **Independent Rust/Tauri 2 desktop reimplementation of [supportos](https://github.com/kimpearce888/supportos).**
+> **Independent Rust/egui desktop reimplementation of [supportos](https://github.com/kimpearce888/supportos).**
 > Local-first. No telemetry. No cloud AI.
 
 SupportOS++ is a ground-up rewrite of the SupportOS support-desk platform in pure
@@ -19,13 +19,17 @@ A single Cargo workspace, split by concern:
 | Crate | Role |
 |---|---|
 | `crates/catalog` | Shared type catalog re-exported by every other crate |
-| `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, AI providers, embedded vector store. **No UI, no Tauri deps.** |
-| `crates/ui` | Leptos 0.8/WASM frontend; depends on `core` types only |
-| `crates/app/src-tauri` | Tauri 2 desktop shell; serves the WASM bundle and bridges to `core` |
+| `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, AI providers, embedded vector store. No UI deps. |
+| `crates/app-shell` | Native desktop shell (eframe/egui) — every page renders in-process against `core`, no HTTP hop |
 | `crates/xtask` | Developer entry point — `dev` / `lint` / `verify-icons` / `package` / db ops (`migrate`/`backup`/`restore`/`seed`/`healthcheck`) |
 
 ## Key design decisions
 
+- **Native egui shell.** The Phase 4 cutover replaced the Leptos/WASM frontend
+  and the Tauri 2 webview shell with a single eframe/egui desktop app — no
+  browser engine, no CSP plumbing, no wasm target. Pages query the core
+  directly through the `DbHandle` facade; live updates flow over the in-process
+  `EventBus` and wake the render loop on demand.
 - **Embedded vector engine.** [`qdrant-edge`](https://crates.io/crates/qdrant-edge) runs in-process
   for semantic docs search — no separate Qdrant server to install or babysit.
 - **SQLite everywhere.** `rusqlite` (bundled) for tickets, conversations and docs;
@@ -33,8 +37,6 @@ A single Cargo workspace, split by concern:
 - **One crypto module.** All encrypted artifacts (`.sosync` sync bundles, settings
   exports) share `core::crypto`: scrypt key derivation + AES-256-GCM sealing,
   written once and tested.
-- **Loopback-only HTTP.** An `axum` listener bound to `127.0.0.1` bridges the webview
-  and the Rust core — no network exposure, ever.
 - **Local AI adapters.** LM Studio, Ollama and generic OpenAI-compatible endpoints
   via `reqwest` with SSE streaming — pointed at `localhost` services only.
 - **Hardened input handling.** `ammonia` HTML sanitization, bounded NFA regex
@@ -43,16 +45,14 @@ A single Cargo workspace, split by concern:
 
 ## Building
 
-Requires a stable Rust toolchain (1.85+ for edition 2024) with the
-`wasm32-unknown-unknown` target and the Tauri 2 prerequisites for your platform.
+Requires the pinned Rust toolchain (see `rust-toolchain.toml`); no extra system
+dependencies — the egui shell needs no webkit, no wasm target.
 
 ```sh
-rustup target add wasm32-unknown-unknown
-
 cargo xtask dev
 cargo xtask lint
 cargo xtask package
-cargo test          # unit tests (crypto round-trips, HMAC vectors, SLA math)
+cargo test          # unit tests (crypto round-trips, HMAC vectors, SLA math, page models)
 ```
 
 ## License

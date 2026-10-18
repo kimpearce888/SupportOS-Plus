@@ -1,8 +1,10 @@
 //! SupportOS++ native shell entry point.
 //!
 //! Boot order: logging → single-instance lock → database with all boot
-//! migrations → core event bus → eframe window. Everything heavy lives
-//! in the library so it stays unit-testable without a window.
+//! migrations → core event bus → shared sync engine (demo provider unless
+//! Help Scout credentials are configured, mirroring the Tauri boot) →
+//! eframe window. Everything heavy lives in the library so it stays
+//! unit-testable without a window.
 
 fn main() {
     spp_core::logging::init();
@@ -32,11 +34,13 @@ fn main() {
     };
     tracing::info!(path = %db_path.display(), "database ready (all migrations applied)");
 
-    let bus = spp_core::http::EventBus::default();
+    let bus = spp_core::eventing::EventBus::default();
+    let sync = spp_shell::build_sync_engine(&db, &bus);
     let options = spp_shell::ShellOptions {
         db,
         bus,
         data_dir: app_config.data_dir.clone(),
+        sync: Some(sync),
     };
 
     if let Err(e) = spp_shell::run(options) {

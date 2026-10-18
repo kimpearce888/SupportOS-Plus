@@ -68,7 +68,9 @@ pub fn seed_mailboxes(conn: &rusqlite::Connection) {
     .expect("mailboxes");
 }
 
-/// Two customers: Kim (id 9) and Ada C. (id 10).
+/// Two customers: Kim (id 9) and Ada C. (id 10), each with a primary
+/// `customer_emails` row (the store the segment engine and outreach
+/// validation read).
 pub fn seed_customers(conn: &rusqlite::Connection) {
     conn.execute(
         "INSERT INTO customers (id, remote_id, first_name, last_name, email)
@@ -77,10 +79,19 @@ pub fn seed_customers(conn: &rusqlite::Connection) {
         [],
     )
     .expect("customers");
+    conn.execute(
+        "INSERT INTO customer_emails (customer_id, value, type)
+         VALUES (9, 'kim@example.com', 'work'),
+                (10, 'adac@example.com', 'work')",
+        [],
+    )
+    .expect("customer emails");
 }
 
 /// Insert one conversation with now-relative timestamps (so day-range
-/// queries always include the seeded rows).
+/// queries always include the seeded rows). An `assignee_id` of 0 seeds
+/// an unassigned conversation (NULL assignee, matching the operations
+/// tiles' `assignee_local_id IS NULL` predicate).
 #[allow(clippy::too_many_arguments)]
 pub fn seed_conversation(
     conn: &rusqlite::Connection,
@@ -96,7 +107,9 @@ pub fn seed_conversation(
         "INSERT INTO conversations (id, remote_id, number, subject, preview, status, type,
              mailbox_local_id, assignee_local_id, customer_local_id, priority,
              created_at, updated_at, closed_at, first_customer_message_at, local_created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'none',
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                 CASE WHEN ?9 = 0 THEN NULL ELSE ?9 END,
+                 ?10, 'none',
                  strftime('%Y-%m-%dT%H:%M:%fZ','now'),
                  strftime('%Y-%m-%dT%H:%M:%fZ','now'),
                  CASE WHEN ?11 = 'closed'

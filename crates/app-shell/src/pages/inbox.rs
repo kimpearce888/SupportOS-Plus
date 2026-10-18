@@ -26,7 +26,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use spp_core::conversation_ops::{create_outbound_job_keyed, set_outbound_status};
 use spp_core::db::DbHandle;
-use spp_core::http::EventBus;
+use spp_core::eventing::EventBus;
 use spp_core::inbox::{ConversationDetail, ConversationListItem, InboxFilters};
 use spp_core::ticket_ops::{OperationResult, TicketOperation};
 
@@ -74,12 +74,21 @@ pub struct FilterBar {
     pub tag: Option<String>,
     pub query: Option<String>,
     pub number: Option<i64>,
+    /// Operations-tile drill-down (`unassigned`, `customer_waiting`, …).
+    /// The web operations tiles linked `/inbox?view={tile}` which the route
+    /// read as a status filter (a dead-end query); the port applies the
+    /// tile's real conversation fragment instead — the same SQL the
+    /// `/api/conversations?ops=` path compiles.
+    pub ops: Option<String>,
 }
 
 /// Map the filter bar to the core `InboxFilters`.
+///
+/// The operations-tile fragment needs the waiting-threshold setting, so
+/// the bar compiles against a connection (same as the HTTP route).
 #[must_use]
-pub fn filters_from_bar(bar: &FilterBar) -> InboxFilters {
-    InboxFilters {
+pub fn filters_from_bar(bar: &FilterBar, conn: &rusqlite::Connection) -> InboxFilters {
+    let mut filters = InboxFilters {
         status: bar
             .view
             .unwrap_or(ViewFilter::All)
@@ -97,7 +106,18 @@ pub fn filters_from_bar(bar: &FilterBar) -> InboxFilters {
         offset: Some(0),
         extra_where: None,
         extra_params: Vec::new(),
+    };
+    if let Some(ops) = bar.ops.as_deref().filter(|s| !s.is_empty())
+        && spp_core::operations::is_conversation_ops_tile(ops)
+        && let Some((frag_sql, frag_params)) = spp_core::operations::tile_fragment(
+            ops,
+            spp_core::operations::waiting_threshold_minutes(conn),
+        )
+    {
+        filters.extra_where = Some(frag_sql);
+        filters.extra_params = frag_params;
     }
+    filters
 }
 
 /// Composer mode (web: reply vs internal note tabs).
@@ -299,8 +319,10 @@ impl InboxPage {
         if self.mailboxes.is_empty() {
             self.reload_refs(db);
         }
-        let filters = filters_from_bar(&self.bar);
-        let result = db.with_read(|conn| spp_core::inbox::list_conversations(conn, &filters));
+        let result = db.with_read(|conn| {
+            let filters = filters_from_bar(&self.bar, conn);
+            spp_core::inbox::list_conversations(conn, &filters)
+        });
         match result {
             Ok((items, total)) => {
                 self.list = items;
@@ -421,6 +443,16 @@ impl InboxPage {
         }
 
         ui.heading("Inbox");
+        if let Some(ops) = self.bar.ops.clone() {
+            ui.horizontal(|ui| {
+                ui.label("Operations filter:");
+                ui.monospace(ops);
+                if ui.button("clear ×").clicked() {
+                    self.bar.ops = None;
+                    self.reload_list(db);
+                }
+            });
+        }
         ui.separator();
 
         ui.horizontal(|ui| {
@@ -982,7 +1014,7 @@ fn mutate(
 mod tests {
     use super::*;
     use crate::testsupport::fixture;
-    use spp_core::http::EventBus;
+    use spp_core::eventing::EventBus;
 
     fn seeded() -> (crate::testsupport::ConvSeed, i64, i64, i64, i64) {
         (
@@ -996,6 +1028,7 @@ mod tests {
 
     #[test]
     fn filters_from_bar_maps_every_field() {
+        let db = fixture(Vec::new());
         let bar = FilterBar {
             view: Some(ViewFilter::Active),
             mailbox: Some(2),
@@ -1003,8 +1036,9 @@ mod tests {
             tag: Some("bug".into()),
             query: Some("export".into()),
             number: Some(42),
+            ops: None,
         };
-        let filters = filters_from_bar(&bar);
+        let filters = db.with_read(|conn| filters_from_bar(&bar, conn));
         assert_eq!(filters.status.as_deref(), Some("active"));
         assert_eq!(filters.mailbox_id, Some(2));
         assert_eq!(filters.channel.as_deref(), Some("email"));
@@ -1013,6 +1047,35 @@ mod tests {
         assert_eq!(filters.number, Some(42));
         assert_eq!(filters.limit, Some(50));
         assert_eq!(ViewFilter::All.status(), None);
+    }
+
+    #[test]
+    fn ops_tile_filter_drills_into_unassigned_conversations() {
+        let db = fixture(vec![seeded().0]);
+        // Seed an unassigned conversation for the drill to find.
+        db.with_write(|conn| {
+            crate::testsupport::seed_conversation(conn, 2, "Orphan", "active", "email", 1, 0, 10);
+        });
+        let bar = FilterBar {
+            ops: Some("unassigned".into()),
+            ..FilterBar::default()
+        };
+        let (items, total) = db
+            .with_read(|conn| {
+                let filters = filters_from_bar(&bar, conn);
+                spp_core::inbox::list_conversations(conn, &filters)
+            })
+            .expect("ops list");
+        assert_eq!(total, 1, "only the unassigned conversation matches");
+        assert_eq!(items[0].id, 2);
+
+        // Unknown tile keys must not smuggle SQL into the where clause.
+        let bad = FilterBar {
+            ops: Some("' OR 1=1 --".into()),
+            ..FilterBar::default()
+        };
+        let filters = db.with_read(|conn| filters_from_bar(&bad, conn));
+        assert!(filters.extra_where.is_none());
     }
 
     #[test]

@@ -793,7 +793,7 @@ pub struct SyncEngine {
     provider: Arc<dyn HelpScoutProvider>,
     running: AtomicBool,
     cancel_requested: AtomicBool,
-    pub bus: Option<crate::http::EventBus>,
+    pub bus: Option<crate::eventing::EventBus>,
 }
 
 impl SyncEngine {
@@ -809,7 +809,7 @@ impl SyncEngine {
     }
 
     #[must_use]
-    pub fn with_bus(mut self, bus: crate::http::EventBus) -> Self {
+    pub fn with_bus(mut self, bus: crate::eventing::EventBus) -> Self {
         self.bus = Some(bus);
         self
     }

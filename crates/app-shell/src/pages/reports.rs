@@ -101,9 +101,9 @@ impl ReportsPage {
             (
                 Some(load_dashboard(conn, &DashboardScope::days(self.days))),
                 spp_core::sla::sla_report(conn, &from, &to, None).ok(),
-                spp_core::http::routes::analytics::why_contacting_impl(conn, self.days),
-                spp_core::http::routes::analytics::top_questions_impl(conn, self.days),
-                spp_core::http::routes::analytics::issue_radar_impl(conn),
+                spp_core::analytics::why_contacting_impl(conn, self.days),
+                spp_core::analytics::top_questions_impl(conn, self.days),
+                spp_core::analytics::issue_radar_impl(conn),
             )
         });
         self.overview = overview;

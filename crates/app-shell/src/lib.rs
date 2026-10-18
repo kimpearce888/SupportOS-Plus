@@ -17,7 +17,9 @@ pub mod app;
 pub mod bridge;
 pub mod chart;
 pub mod mention;
+pub mod overlays;
 pub mod pages;
+pub mod palette;
 // The only unsafe code in this crate: two libc::flock FFI calls that hold
 // and release the single-instance advisory lock.
 #[allow(unsafe_code)]
@@ -25,11 +27,14 @@ pub mod single_instance;
 #[cfg(test)]
 mod testsupport;
 pub mod theme;
+pub mod toasts;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use spp_core::db::DbHandle;
-use spp_core::http::EventBus;
+use spp_core::eventing::EventBus;
+use spp_core::sync_engine::SyncEngine;
 
 use crate::app::ShellApp;
 
@@ -42,6 +47,8 @@ pub struct ShellOptions {
     pub bus: EventBus,
     /// Application data directory (lock file, vector store, logs).
     pub data_dir: PathBuf,
+    /// Shared sync engine, built by the boot code (demo or real provider).
+    pub sync: Option<Arc<SyncEngine>>,
 }
 
 /// Open the database and apply all boot migrations, returning a handle.
@@ -53,6 +60,29 @@ pub fn open_db(path: &Path) -> spp_core::error::Result<DbHandle> {
     let mut conn = spp_core::db::open(path)?;
     spp_core::bootstrap::apply_all(&mut conn)?;
     Ok(DbHandle::new(conn))
+}
+
+/// Build the shared sync engine the way the Tauri shell did: demo mode
+/// or real Help Scout credentials decide the provider.
+///
+/// # Panics
+/// Never; a missing provider degrades to the demo provider.
+#[must_use]
+pub fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
+    let demo_mode = db
+        .with_read(|conn| spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false))
+        || std::env::var("LOCAL_DEMO_MODE").as_deref() == Ok("true");
+    let credentials = spp_core::helpscout_real::HsCredentials::from_env();
+    let use_real = !demo_mode && credentials.is_configured();
+    let provider: Arc<dyn spp_core::helpscout::HelpScoutProvider> = if use_real {
+        Arc::new(spp_core::helpscout_real::RealHelpScoutProvider::new(
+            db.shared(),
+            credentials,
+        ))
+    } else {
+        Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_demo())
+    };
+    Arc::new(SyncEngine::new(db.shared(), provider).with_bus(bus.clone()))
 }
 
 /// Run the native shell window. Blocks until the window is closed.

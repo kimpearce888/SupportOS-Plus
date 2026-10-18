@@ -18,8 +18,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use eframe::egui;
+use spp_core::eventing::EventBus;
 use spp_core::events::ServerEvent;
-use spp_core::http::EventBus;
 use tokio::sync::broadcast::error::RecvError;
 
 /// Bridge between the core event bus and the eframe event loop.

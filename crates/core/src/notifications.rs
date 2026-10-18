@@ -256,7 +256,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<NotificationRecord>> {
 
 pub fn record_notification(
     conn: &Connection,
-    bus: Option<&crate::http::EventBus>,
+    bus: Option<&crate::eventing::EventBus>,
     input: &NotificationInput<'_>,
 ) -> Result<Option<NotificationRecord>> {
     if !pref_for(conn, input.notification_type)? {
@@ -267,7 +267,7 @@ pub fn record_notification(
     };
     if let Some(bus) = bus {
         let unread = unread_count(conn, me_user_local_id(conn)?)?;
-        crate::http::event_bus::notify_notification_received(
+        crate::eventing::notify_notification_received(
             bus,
             created.id,
             created.notification_type.as_str(),
