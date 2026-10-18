@@ -39,6 +39,12 @@ scrypt = "0.12"
 rand = "0.10"
 subtle = "2.6"
 
+# --- egui stack (decision D1): exact pins, first consumed by crates/app-shell in Phase 2 ---
+egui = { version = "=0.37" }
+eframe = { version = "=0.37" }
+egui_extras = { version = "=0.37" }
+egui_plot = { version = "=0.37" }
+
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "tower-log", "macros", "json", "query"] }
 tower-http = { version = "0.7", features = ["cors", "trace", "catch-panic"] }
 

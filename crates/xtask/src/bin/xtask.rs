@@ -44,6 +44,18 @@ enum Cmd {
         #[arg(long, default_value = "./data/supportos.db")]
         db: String,
     },
+    /// Count vector-store chunks and evaluate the D4 sqlite-vec gate (< 100k = GO).
+    VectorCount {
+        /// App data directory hosting the embedded qdrant store.
+        #[arg(long, default_value_t = default_data_dir_str())]
+        data_dir: String,
+        /// Qdrant URL identifying the embedded store directory.
+        #[arg(long, default_value_t = default_qdrant_url())]
+        url: String,
+        /// Optional SQLite database path for a chunk-row cross-check.
+        #[arg(long)]
+        db: Option<String>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -60,6 +72,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Restore { db, backup } => run_restore(&db, &backup),
         Cmd::Seed { db } => run_seed(&db),
         Cmd::Healthcheck { db } => run_healthcheck(&db),
+        Cmd::VectorCount { data_dir, url, db } => run_vector_count(&data_dir, &url, db.as_deref()),
     }
 }
 
@@ -227,6 +240,99 @@ fn run_seed(db_path: &str) -> anyhow::Result<()> {
             "seed: demo data already present in {} (no changes)",
             path.display()
         );
+    }
+    Ok(())
+}
+
+fn default_data_dir_str() -> String {
+    spp_core::config::default_data_dir()
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn default_qdrant_url() -> String {
+    spp_core::config::load_env_config().qdrant.url
+}
+
+const D4_GATE_CHUNKS: usize = 100_000;
+
+fn run_vector_count(data_dir: &str, url: &str, db: Option<&str>) -> anyhow::Result<()> {
+    let dir = std::path::Path::new(data_dir);
+    let store_dir = spp_core::vectorstore_qdrant::embedded_store_dir(dir, url);
+    println!("vector-count: data dir      {}", dir.display());
+    println!("vector-count: qdrant url     {url}");
+    println!("vector-count: embedded store {}", store_dir.display());
+
+    let qdrant = spp_core::vectorstore_qdrant::EmbeddedQdrant::new(dir, url, true);
+    let total = if store_dir.exists() {
+        match qdrant.try_point_count()? {
+            Some(n) => n,
+            None => {
+                println!("vector-count: collection 'supportos_vectors' not found (0 points)");
+                0
+            }
+        }
+    } else {
+        println!("vector-count: embedded store directory not found (0 points)");
+        0
+    };
+    println!("vector-count: total points  {total}");
+
+    if total > 0 {
+        let knowledge =
+            qdrant.count_by_entity(spp_core::embeddings::entity_type_for("knowledge_chunks"));
+        let docs = qdrant.count_by_entity(spp_core::embeddings::entity_type_for("docs_chunks"));
+        let conversations =
+            qdrant.count_by_entity(spp_core::embeddings::entity_type_for("conversation_chunks"));
+        println!("vector-count:   knowledge_chunk     {knowledge}");
+        println!("vector-count:   docs_chunk          {docs}");
+        println!("vector-count:   conversation_chunk  {conversations}");
+    }
+
+    let db_path = db.map(String::from).unwrap_or_else(|| {
+        dir.join("supportos-plusplus.db")
+            .to_string_lossy()
+            .into_owned()
+    });
+    let db_file = std::path::Path::new(&db_path);
+    if db_file.exists() {
+        let conn = spp_core::db::open(db_file)?;
+        let rows = |table: &str| -> i64 {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap_or(0)
+        };
+        let indexed = |table: &str| -> i64 {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE embedding_state = 'indexed'"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        };
+        println!("vector-count: sqlite cross-check {}", db_file.display());
+        println!(
+            "vector-count:   conversation_chunks rows {} (indexed {})",
+            rows("conversation_chunks"),
+            indexed("conversation_chunks")
+        );
+        println!(
+            "vector-count:   docs_chunks rows {} (indexed {})",
+            rows("docs_chunks"),
+            indexed("docs_chunks")
+        );
+        println!(
+            "vector-count:   knowledge_chunks rows {} (indexed {})",
+            rows("knowledge_chunks"),
+            indexed("knowledge_chunks")
+        );
+    } else {
+        println!("vector-count: sqlite cross-check skipped ({db_path} not found)");
+    }
+
+    if total < D4_GATE_CHUNKS {
+        println!("vector-count: D4 gate -> {total} < {D4_GATE_CHUNKS} chunks: sqlite-vec GO");
+    } else {
+        println!("vector-count: D4 gate -> {total} >= {D4_GATE_CHUNKS} chunks: keep qdrant-edge");
     }
     Ok(())
 }

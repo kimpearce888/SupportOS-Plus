@@ -296,4 +296,175 @@ mod tests {
         let minutes = wall_minutes_between("2024-06-05T10:00:00Z", "2024-06-05T11:30:00Z");
         assert!((minutes.unwrap() - 90.0).abs() < 1e-9);
     }
+
+    // --- edge cases added in Batch 2 (characterization) ---
+
+    fn all_day_every_day(tz: &str) -> BusinessHoursConfig {
+        BusinessHoursConfig {
+            timezone: tz.to_string(),
+            days: vec![0, 1, 2, 3, 4, 5, 6],
+            start_minute: 0,
+            end_minute: 1440,
+        }
+    }
+
+    #[test]
+    fn parse_instant_accepts_supported_formats() {
+        let midnight = parse_instant_ms("2024-06-05").expect("date-only");
+        assert_eq!(midnight, parse_instant_ms("2024-06-05T00:00:00Z").unwrap());
+        // RFC 3339 with an explicit offset is normalized to UTC
+        assert_eq!(
+            parse_instant_ms("2024-06-05T10:00:00+02:00").unwrap(),
+            parse_instant_ms("2024-06-05T08:00:00Z").unwrap()
+        );
+        // space-separated naive timestamps are treated as UTC
+        assert_eq!(
+            parse_instant_ms("2024-06-05 10:00:00").unwrap(),
+            parse_instant_ms("2024-06-05T10:00:00").unwrap()
+        );
+        // leading/trailing whitespace is trimmed
+        assert_eq!(
+            parse_instant_ms("  2024-06-05T10:00:00Z  ").unwrap(),
+            parse_instant_ms("2024-06-05T10:00:00Z").unwrap()
+        );
+        // fractional seconds are preserved
+        assert_eq!(
+            parse_instant_ms("2024-06-05T10:00:00.250Z").unwrap(),
+            parse_instant_ms("2024-06-05T10:00:00Z").unwrap() + 250
+        );
+    }
+
+    #[test]
+    fn parse_instant_rejects_unsupported_input() {
+        assert_eq!(parse_instant_ms(""), None);
+        assert_eq!(parse_instant_ms("   "), None);
+        assert_eq!(parse_instant_ms("not-a-timestamp"), None);
+        assert_eq!(parse_instant_ms("2024-13-01"), None);
+        assert_eq!(parse_instant_ms("2024-06-05T25:00:00Z"), None);
+    }
+
+    #[test]
+    fn equal_bounds_report_zero_minutes() {
+        let cfg = nine_to_five_utc();
+        let v = business_minutes_between("2024-06-05T10:00:00Z", "2024-06-05T10:00:00Z", &cfg);
+        assert_eq!(v, Some(0.0));
+    }
+
+    #[test]
+    fn fully_outside_hours_weekend_is_zero_not_none() {
+        let cfg = nine_to_five_utc();
+        // Saturday 10:00 -> Sunday 10:00 UTC has no business window at all
+        let v = business_minutes_between("2024-06-08T10:00:00Z", "2024-06-09T10:00:00Z", &cfg);
+        assert_eq!(v, Some(0.0));
+    }
+
+    #[test]
+    fn overnight_window_config_is_currently_unsupported() {
+        // Characterizes CURRENT behavior: end <= start yields None, so 20:00->04:00
+        // overnight windows are rejected rather than wrapped.
+        let cfg = BusinessHoursConfig {
+            timezone: "UTC".to_string(),
+            days: vec![0, 1, 2, 3, 4, 5, 6],
+            start_minute: 1200,
+            end_minute: 240,
+        };
+        assert!(
+            business_minutes_between("2024-06-05T20:00:00Z", "2024-06-06T04:00:00Z", &cfg)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn empty_days_list_returns_none() {
+        let cfg = BusinessHoursConfig {
+            timezone: "UTC".to_string(),
+            days: vec![],
+            start_minute: 540,
+            end_minute: 1020,
+        };
+        assert!(
+            business_minutes_between("2024-06-05T10:00:00Z", "2024-06-05T12:00:00Z", &cfg)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn out_of_range_day_entries_are_dropped() {
+        // days = [6 (Sat), 7 (invalid), -1 (invalid)]: only Saturday stays active
+        let cfg = BusinessHoursConfig {
+            timezone: "UTC".to_string(),
+            days: vec![6, 7, -1],
+            start_minute: 540,
+            end_minute: 1020,
+        };
+        let v = business_minutes_between("2024-06-08T10:00:00Z", "2024-06-08T11:00:00Z", &cfg);
+        assert!((v.unwrap() - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn start_minute_below_zero_is_clamped() {
+        // start_minute -60 clamps to 0, so the window is 00:00..02:00
+        let cfg = BusinessHoursConfig {
+            timezone: "UTC".to_string(),
+            days: vec![0, 1, 2, 3, 4, 5, 6],
+            start_minute: -60,
+            end_minute: 120,
+        };
+        // Wed 23:30 -> Thu 01:00 overlaps only Thu 00:00..01:00 = 60 minutes
+        let v = business_minutes_between("2024-06-05T23:30:00Z", "2024-06-06T01:00:00Z", &cfg);
+        assert!((v.unwrap() - 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dst_transitions_count_real_elapsed_minutes() {
+        // 24h window in America/New_York across the DST boundaries:
+        // 2024-03-10 (spring forward) has 23 real hours, 2024-11-03 (fall back) has 25.
+        let cfg = all_day_every_day("America/New_York");
+        let spring = business_minutes_between("2024-03-10T05:00:00Z", "2024-03-11T04:00:00Z", &cfg);
+        assert!((spring.unwrap() - 1380.0).abs() < 1e-6);
+        let fall = business_minutes_between("2024-11-03T04:00:00Z", "2024-11-04T05:00:00Z", &cfg);
+        assert!((fall.unwrap() - 1500.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn non_utc_timezone_windows_follow_local_time() {
+        // Asia/Dhaka is UTC+6 with no DST: 09:00..17:00 local == 03:00..11:00 UTC
+        let cfg = BusinessHoursConfig {
+            timezone: "Asia/Dhaka".to_string(),
+            days: vec![0, 1, 2, 3, 4, 5, 6],
+            start_minute: 540,
+            end_minute: 1020,
+        };
+        let v = business_minutes_between("2024-06-05T03:00:00Z", "2024-06-05T05:00:00Z", &cfg);
+        assert!((v.unwrap() - 120.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn spans_over_400_days_are_rejected() {
+        let cfg = all_day_every_day("UTC");
+        // exactly 400 days is still computed (2024 is a leap year: 366 + 34 days)
+        let exact = business_minutes_between("2024-01-01T00:00:00Z", "2025-02-04T00:00:00Z", &cfg);
+        assert!((exact.unwrap() - 400.0 * 1440.0).abs() < 1e-6);
+        // one day more is rejected
+        let over = business_minutes_between("2024-01-01T00:00:00Z", "2025-02-05T00:00:00Z", &cfg);
+        assert!(over.is_none());
+    }
+
+    #[test]
+    fn sla_status_boundary_is_inclusive() {
+        assert_eq!(sla_status(Some(60.0), Some(60)), SlaVerdict::Met);
+        assert_eq!(sla_status(Some(60.5), Some(60)), SlaVerdict::Missed);
+        assert_eq!(sla_status(Some(0.0), Some(0)), SlaVerdict::Met);
+        assert_eq!(sla_status(Some(0.0), None), SlaVerdict::NoTarget);
+    }
+
+    #[test]
+    fn wall_minutes_edges() {
+        assert_eq!(
+            wall_minutes_between("2024-06-05T10:00:00Z", "2024-06-05T10:00:00Z"),
+            Some(0.0)
+        );
+        assert!(wall_minutes_between("2024-06-05T11:00:00Z", "2024-06-05T10:00:00Z").is_none());
+        assert!(wall_minutes_between("2024-06-05", "2024-06-06").is_some());
+    }
 }

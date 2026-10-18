@@ -188,3 +188,220 @@ pub fn hybrid_search(
 
     Ok(fuse_results(&dense_results, &sparse_results, top_k))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sp(id: &str, score: f32, tag: &str) -> ScoredPoint {
+        ScoredPoint {
+            id: id.to_string(),
+            score,
+            payload: serde_json::json!({ "tag": tag }),
+        }
+    }
+
+    #[test]
+    fn rrf_constants_are_pinned() {
+        // Characterization: both fusion paths use the classic RRF k = 60.
+        assert_eq!(RRF_K, 60);
+        assert_eq!(DOC_RRF_K, 60);
+    }
+
+    #[test]
+    fn fuse_results_with_empty_inputs_is_empty() {
+        assert!(fuse_results(&[], &[], 10).is_empty());
+    }
+
+    #[test]
+    fn fuse_results_dense_only_rrf_math_and_order() {
+        let dense = vec![sp("a", 0.9, "d"), sp("b", 0.8, "d"), sp("c", 0.7, "d")];
+        let out = fuse_results(&dense, &[], 10);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].id, "a");
+        assert_eq!(out[1].id, "b");
+        assert_eq!(out[2].id, "c");
+        assert!((out[0].rrf_score - 1.0 / 61.0).abs() < 1e-12);
+        assert!((out[1].rrf_score - 1.0 / 62.0).abs() < 1e-12);
+        assert!((out[2].rrf_score - 1.0 / 63.0).abs() < 1e-12);
+        assert_eq!(out[0].dense_score, Some(0.9));
+        assert_eq!(out[0].sparse_score, None);
+        assert_eq!(out[0].payload["tag"], "d");
+    }
+
+    #[test]
+    fn fuse_results_item_hit_by_both_lists_outranks_single_list() {
+        // "a" is rank 0 in dense only: 1/61.
+        // "b" is rank 1 in dense plus rank 0 in sparse: 1/62 + 1/61 > 1/61.
+        let dense = vec![sp("a", 0.9, "d"), sp("b", 0.8, "d")];
+        let sparse = vec![sp("b", 5.0, "s")];
+        let out = fuse_results(&dense, &sparse, 10);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].id, "b");
+        assert_eq!(out[1].id, "a");
+        assert!((out[0].rrf_score - (1.0 / 62.0 + 1.0 / 61.0)).abs() < 1e-12);
+        assert_eq!(out[0].dense_score, Some(0.8));
+        assert_eq!(out[0].sparse_score, Some(5.0));
+    }
+
+    #[test]
+    fn fuse_results_truncates_to_top_k() {
+        let dense: Vec<ScoredPoint> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| sp(id, 1.0 - i as f32, "d"))
+            .collect();
+        let out = fuse_results(&dense, &[], 3);
+        assert_eq!(out.len(), 3);
+        assert_eq!(
+            out.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn fuse_results_payload_prefers_dense_source() {
+        let dense = vec![sp("a", 0.9, "dense")];
+        let sparse = vec![sp("a", 7.0, "sparse"), sp("z", 6.0, "sparse")];
+        let out = fuse_results(&dense, &sparse, 10);
+        let a = out.iter().find(|r| r.id == "a").expect("a present");
+        assert_eq!(a.payload["tag"], "dense");
+        let z = out.iter().find(|r| r.id == "z").expect("z present");
+        assert_eq!(z.payload["tag"], "sparse");
+        assert_eq!(z.dense_score, None);
+        assert_eq!(z.sparse_score, Some(6.0));
+    }
+
+    #[test]
+    fn fuse_results_with_custom_k_uses_it() {
+        let dense = vec![sp("a", 0.9, "d")];
+        let out = fuse_results_with_k(&dense, &[], 5, 1);
+        assert_eq!(out.len(), 1);
+        // k = 1, rank 1: 1 / (1 + 1)
+        assert!((out[0].rrf_score - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn merge_doc_hits_fuses_fts_and_semantic_with_labels() {
+        let fts = vec![
+            FtsDocHit {
+                article_id: 1,
+                rank: 0,
+            },
+            FtsDocHit {
+                article_id: 2,
+                rank: 1,
+            },
+        ];
+        let semantic = vec![
+            SemanticDocHit {
+                article_id: 2,
+                score: 0.9,
+            },
+            SemanticDocHit {
+                article_id: 3,
+                score: 0.8,
+            },
+        ];
+        let merged = merge_doc_hits(&fts, &semantic, 10);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].article_id, 2);
+        let id2 = (1.0_f64 / 61.0 + 1.0 / 62.0) * 10_000.0;
+        assert!((merged[0].score - id2.round() / 10_000.0).abs() < 1e-12);
+        assert_eq!(merged[0].why, vec!["fts", "semantic"]);
+        assert_eq!(merged[1].article_id, 1);
+        assert_eq!(merged[1].why, vec!["fts"]);
+        assert_eq!(merged[2].article_id, 3);
+        assert_eq!(merged[2].why, vec!["semantic"]);
+    }
+
+    #[test]
+    fn merge_doc_hits_uses_list_position_not_rank_field() {
+        // Characterization: the `rank` field is ignored; enumerate() position drives RRF.
+        let fts = vec![
+            FtsDocHit {
+                article_id: 1,
+                rank: 9,
+            },
+            FtsDocHit {
+                article_id: 2,
+                rank: 0,
+            },
+        ];
+        let merged = merge_doc_hits(&fts, &[], 10);
+        assert_eq!(merged.len(), 2);
+        let first = (1.0_f64 / 61.0 * 10_000.0).round() / 10_000.0;
+        let second = (1.0_f64 / 62.0 * 10_000.0).round() / 10_000.0;
+        assert!((merged[0].score - first).abs() < 1e-12);
+        assert!((merged[1].score - second).abs() < 1e-12);
+    }
+
+    #[test]
+    fn merge_doc_hits_tie_breaks_by_article_id() {
+        let fts = vec![FtsDocHit {
+            article_id: 5,
+            rank: 0,
+        }];
+        let semantic = vec![SemanticDocHit {
+            article_id: 3,
+            score: 1.0,
+        }];
+        // Both accumulate exactly 1/61: tie -> lower article_id sorts first.
+        let merged = merge_doc_hits(&fts, &semantic, 10);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].article_id, 3);
+        assert_eq!(merged[1].article_id, 5);
+        assert!((merged[0].score - merged[1].score).abs() < 1e-12);
+    }
+
+    #[test]
+    fn merge_doc_hits_empty_input_and_limit() {
+        assert!(merge_doc_hits(&[], &[], 10).is_empty());
+        let fts: Vec<FtsDocHit> = (1..=5)
+            .map(|article_id| FtsDocHit {
+                article_id,
+                rank: 0,
+            })
+            .collect();
+        let merged = merge_doc_hits(&fts, &[], 3);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(
+            merged.iter().map(|m| m.article_id).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn merge_doc_hits_dedupes_repeated_ids_and_labels() {
+        let fts = vec![
+            FtsDocHit {
+                article_id: 7,
+                rank: 0,
+            },
+            FtsDocHit {
+                article_id: 7,
+                rank: 1,
+            },
+        ];
+        let merged = merge_doc_hits(&fts, &[], 10);
+        assert_eq!(merged.len(), 1);
+        let expected = (1.0_f64 / 61.0 + 1.0 / 62.0) * 10_000.0;
+        assert!((merged[0].score - expected.round() / 10_000.0).abs() < 1e-12);
+        assert_eq!(merged[0].why, vec!["fts"]);
+    }
+
+    #[test]
+    fn cosine_similarity_edge_cases() {
+        assert!((cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]) - 1.0).abs() < 1e-6);
+        assert!((cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]) - 0.0).abs() < 1e-6);
+        assert!((cosine_similarity(&[1.0, 0.0], &[-1.0, 0.0]) - (-1.0)).abs() < 1e-6);
+        assert!(
+            (cosine_similarity(&[1.0, 0.0], &[1.0, 1.0]) - std::f32::consts::FRAC_1_SQRT_2).abs()
+                < 1e-6
+        );
+        assert_eq!(cosine_similarity(&[], &[]), 0.0);
+        assert_eq!(cosine_similarity(&[1.0], &[1.0, 2.0]), 0.0);
+        assert_eq!(cosine_similarity(&[0.0, 0.0], &[1.0, 2.0]), 0.0);
+        assert_eq!(cosine_similarity(&[1.0, 2.0], &[0.0, 0.0]), 0.0);
+    }
+}

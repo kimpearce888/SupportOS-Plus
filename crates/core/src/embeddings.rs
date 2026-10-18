@@ -626,7 +626,10 @@ struct PendingChunk {
     number: Option<i64>,
 }
 
-fn entity_type_for(table: &str) -> &'static str {
+/// Payload `entity_type` value stored in the vector store for chunks of the
+/// given chunk table name.
+#[must_use]
+pub fn entity_type_for(table: &str) -> &'static str {
     match table {
         "knowledge_chunks" => "knowledge_chunk",
         "docs_chunks" => "docs_chunk",

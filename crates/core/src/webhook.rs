@@ -1,154 +1,30 @@
+use base64::Engine as _;
+use hmac::{Hmac, KeyInit, Mac};
 use rusqlite::{Connection, params};
-use subtle::ConstantTimeEq;
+use sha1::Sha1;
 
 use crate::error::{Error, Result};
 
 pub const HELPSCOUT_SIGNATURE_HEADER: &str = "X-Helpscout-Signature";
 
+type HmacSha1 = Hmac<Sha1>;
+
 #[must_use]
 pub fn compute_signature(secret: &[u8], body: &[u8]) -> String {
-    use std::io::Write;
-    let block_size = 64;
-    let key: Vec<u8> = if secret.len() > block_size {
-        sha1(secret).to_vec()
-    } else {
-        secret.to_vec()
-    };
-    let mut padded = key.clone();
-    padded.resize(block_size, 0);
-    let i_pad: Vec<u8> = padded.iter().map(|b| b ^ 0x36).collect();
-    let o_pad: Vec<u8> = padded.iter().map(|b| b ^ 0x5c).collect();
-
-    let mut inner = Vec::with_capacity(i_pad.len() + body.len());
-    inner.write_all(&i_pad).ok();
-    inner.write_all(body).ok();
-    let inner_hash = sha1(&inner);
-
-    let mut outer = Vec::with_capacity(o_pad.len() + inner_hash.len());
-    outer.write_all(&o_pad).ok();
-    outer.write_all(&inner_hash).ok();
-    let outer_hash = sha1(&outer);
-
-    base64_std(&outer_hash)
+    let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(body);
+    base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
 }
 
 pub fn verify_signature(secret: &[u8], body: &[u8], provided_signature: &str) -> Result<()> {
-    let expected = compute_signature(secret, body);
-    if expected.len() != provided_signature.len() {
-        return Err(Error::WebhookSignature);
-    }
-    let expected_bytes = expected.as_bytes();
-    let provided_bytes = provided_signature.as_bytes();
-    if expected_bytes.ct_eq(provided_bytes).into() {
-        Ok(())
-    } else {
-        Err(Error::WebhookSignature)
-    }
-}
-
-fn sha1(data: &[u8]) -> [u8; 20] {
-    let mut state: [u32; 5] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
-
-    let bit_len: u64 = (data.len() as u64).wrapping_mul(8);
-    let mut padded = data.to_vec();
-    padded.push(0x80);
-    while padded.len() % 64 != 56 {
-        padded.push(0);
-    }
-    padded.extend_from_slice(&bit_len.to_be_bytes());
-
-    for chunk in padded.chunks(64) {
-        let mut w = [0u32; 80];
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..16 {
-            let j = i * 4;
-            w[i] = u32::from_be_bytes([chunk[j], chunk[j + 1], chunk[j + 2], chunk[j + 3]]);
-        }
-        #[allow(clippy::needless_range_loop)]
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-
-        let mut a = state[0];
-        let mut b = state[1];
-        let mut c = state[2];
-        let mut d = state[3];
-        let mut e = state[4];
-
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..80 {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5a827999),
-                20..=39 => (b ^ c ^ d, 0x6ed9eba1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8f1bbcdc),
-                _ => (b ^ c ^ d, 0xca62c1d6),
-            };
-            let temp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(w[i]);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        state[0] = state[0].wrapping_add(a);
-        state[1] = state[1].wrapping_add(b);
-        state[2] = state[2].wrapping_add(c);
-        state[3] = state[3].wrapping_add(d);
-        state[4] = state[4].wrapping_add(e);
-    }
-
-    let mut out = [0u8; 20];
-    for (i, word) in state.iter().enumerate() {
-        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
-    }
-    out
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(hex_digit(b >> 4));
-        out.push(hex_digit(b & 0x0f));
-    }
-    out
-}
-
-fn base64_std(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(ALPHABET[(triple >> 18) as usize & 0x3f] as char);
-        out.push(ALPHABET[(triple >> 12) as usize & 0x3f] as char);
-        if chunk.len() > 1 {
-            out.push(ALPHABET[(triple >> 6) as usize & 0x3f] as char);
-        } else {
-            out.push('=');
-        }
-        if chunk.len() > 2 {
-            out.push(ALPHABET[triple as usize & 0x3f] as char);
-        } else {
-            out.push('=');
-        }
-    }
-    out
-}
-
-fn hex_digit(n: u8) -> char {
-    match n {
-        0..=9 => (b'0' + n) as char,
-        10..=15 => (b'a' + (n - 10)) as char,
-        _ => unreachable!("hex_digit got {n} (must be 0..15)"),
-    }
+    let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(body);
+    let provided = base64::engine::general_purpose::STANDARD
+        .decode(provided_signature)
+        .map_err(|_| Error::WebhookSignature)?;
+    // Mac::verify_slice compares the tag in constant time.
+    mac.verify_slice(&provided)
+        .map_err(|_| Error::WebhookSignature)
 }
 
 #[derive(Debug, Clone)]
@@ -206,7 +82,7 @@ pub fn insert_webhook_event(
     ensure_webhook_events_table(conn)?;
     let mut hasher = Sha256::new();
     hasher.update(format!("{event_type}:{payload}"));
-    let hash = hex_lower(&hasher.finalize());
+    let hash = hex::encode(hasher.finalize());
 
     let existing: Option<i64> = conn
         .query_row(
@@ -293,7 +169,7 @@ pub fn persist_event(conn: &Connection, event_id: &str, body: &str) -> Result<bo
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(format!("legacy:{event_id}:{body}"));
-    let hash = hex_lower(&hasher.finalize());
+    let hash = hex::encode(hasher.finalize());
     conn.execute(
         "INSERT INTO webhook_events (event_id, event_hash, event_type, received_at, payload, processing_state)
          VALUES (?1, ?2, 'unknown', ?3, ?4, 'pending')",
@@ -336,12 +212,36 @@ pub fn pending_event_ids(conn: &Connection) -> Result<Vec<String>> {
 mod tests {
     use super::*;
 
+    fn b64_of_hex(hex_str: &str) -> String {
+        use base64::Engine;
+        let bytes = hex::decode(hex_str).expect("valid hex");
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
     #[test]
     fn signature_matches_hmac_sha1_test_vector() {
         // RFC 2202-style vector: HMAC-SHA1("key", "The quick brown fox jumps
         // over the lazy dog") = de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9
         let sig = compute_signature(b"key", b"The quick brown fox jumps over the lazy dog");
         assert_eq!(sig, "3nybhbi3iqa8ino29wqQcBydtNk=");
+    }
+
+    #[test]
+    fn signature_matches_rfc2202_vectors() {
+        // RFC 2202 test 1: key = 0x0b x 20, data = "Hi There"
+        let sig = compute_signature(&[0x0b; 20], b"Hi There");
+        assert_eq!(sig, b64_of_hex("b617318655057264e28bc0b6fb378c8ef146be00"));
+
+        // RFC 2202 test 2: key = "Jefe"
+        let sig = compute_signature(b"Jefe", b"what do ya want for nothing?");
+        assert_eq!(sig, b64_of_hex("effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"));
+
+        // RFC 2202 test 6: key longer than the 64-byte block size (key is hashed first).
+        // Digest cross-verified against Python stdlib hmac (hashlib.sha1).
+        let long_key = [0xaa; 131];
+        let data = b"Test Using Larger Than Block-Size Key - Hash Key First";
+        let sig = compute_signature(&long_key, data);
+        assert_eq!(sig, b64_of_hex("90d0dace1c1bdc957339307803160335bde6df2b"));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 [toolchain]
-channel = "stable"
+# Exact pin (D1/D5: stability first). Upgrade deliberately, never silently.
+channel = "1.99.1"
 components = ["rustfmt", "clippy", "rust-analyzer"]
 targets = ["wasm32-unknown-unknown"]
 profile = "default"

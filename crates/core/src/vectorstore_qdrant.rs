@@ -527,6 +527,27 @@ pub struct Health {
     pub error: Option<String>,
 }
 
+/// Directory the embedded qdrant store uses for a given data dir and URL.
+///
+/// The URL is folded into the directory name so that stores configured for
+/// different qdrant URLs never share state.
+#[must_use]
+pub fn embedded_store_dir(data_dir: &std::path::Path, url: &str) -> PathBuf {
+    let safe: String = url
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    data_dir
+        .join("qdrant")
+        .join(format!("{safe}-{:08x}", fnv1a(url)))
+}
+
 pub struct EmbeddedQdrant {
     data_dir: PathBuf,
     inner: Mutex<EmbeddedInner>,
@@ -566,22 +587,6 @@ impl EmbeddedQdrant {
         }
     }
 
-    fn dir_for(data_dir: &std::path::Path, url: &str) -> PathBuf {
-        let safe: String = url
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        data_dir
-            .join("qdrant")
-            .join(format!("{safe}-{:08x}", fnv1a(url)))
-    }
-
     fn store<'a>(
         inner: &'a mut EmbeddedInner,
         data_dir: &std::path::Path,
@@ -590,7 +595,7 @@ impl EmbeddedQdrant {
             return None;
         }
         if inner.store.is_none() {
-            match QdrantEdgeVectorStore::new(Self::dir_for(data_dir, &inner.url)) {
+            match QdrantEdgeVectorStore::new(embedded_store_dir(data_dir, &inner.url)) {
                 Ok(s) => {
                     inner.store = Some(s);
                     inner.last_error = None;
@@ -642,6 +647,26 @@ impl EmbeddedQdrant {
             collections,
             error: None,
         }
+    }
+
+    /// Exact point count of the `supportos_vectors` collection.
+    ///
+    /// Returns `Ok(None)` when the collection does not exist yet, and an error
+    /// when the embedded store itself cannot be opened.
+    pub fn try_point_count(&self) -> Result<Option<usize>> {
+        let mut inner = self.inner.lock().expect("mutex poisoned");
+        let Some(store) = Self::store(&mut inner, &self.data_dir) else {
+            return Err(Error::Config(format!(
+                "qdrant storage unavailable: {}",
+                inner
+                    .last_error
+                    .clone()
+                    .unwrap_or_else(|| "qdrant disabled".to_string())
+            )));
+        };
+        Ok(store
+            .collection_info(QDRANT_COLLECTION)?
+            .map(|info| info.point_count))
     }
 
     pub fn ensure_collection(&self, dimension: usize) -> bool {
@@ -775,4 +800,66 @@ fn fnv1a(s: &str) -> u32 {
         hash = hash.wrapping_mul(0x0100_0193);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-qdrant-test-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_millis()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn seed_points(data_dir: &std::path::Path) {
+        let store_dir = embedded_store_dir(data_dir, DEFAULT_QDRANT_URL);
+        let store = QdrantEdgeVectorStore::new(&store_dir).expect("open store");
+        store
+            .create_collection(QDRANT_COLLECTION, Some(2))
+            .expect("create collection");
+        let entities = [
+            "knowledge_chunk",
+            "docs_chunk",
+            "conversation_chunk",
+            "knowledge_chunk",
+        ];
+        for (id, entity) in entities.iter().enumerate() {
+            store
+                .upsert(
+                    QDRANT_COLLECTION,
+                    Point {
+                        id: (id + 1).to_string(),
+                        dense: Some(vec![0.1, 0.2]),
+                        sparse: None,
+                        payload: serde_json::json!({ "entity_type": entity }),
+                    },
+                )
+                .expect("upsert");
+        }
+    }
+
+    #[test]
+    fn try_point_count_and_entity_breakdown() {
+        let data_dir = temp_dir("count");
+        seed_points(&data_dir);
+        let embedded = EmbeddedQdrant::new(&data_dir, DEFAULT_QDRANT_URL, true);
+        assert_eq!(embedded.try_point_count().expect("count"), Some(4));
+        assert_eq!(embedded.count_by_entity("knowledge_chunk"), 2);
+        assert_eq!(embedded.count_by_entity("docs_chunk"), 1);
+        assert_eq!(embedded.count_by_entity("conversation_chunk"), 1);
+    }
+
+    #[test]
+    fn try_point_count_is_none_before_any_collection_exists() {
+        let data_dir = temp_dir("empty");
+        let store_dir = embedded_store_dir(&data_dir, DEFAULT_QDRANT_URL);
+        std::fs::create_dir_all(&store_dir).expect("create store dir");
+        let embedded = EmbeddedQdrant::new(&data_dir, DEFAULT_QDRANT_URL, true);
+        assert_eq!(embedded.try_point_count().expect("count"), None);
+    }
 }
