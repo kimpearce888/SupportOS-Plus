@@ -6,6 +6,4 @@
 
 ## Items
 
-1. tokio feature slim + 2-thread runtime (row 12)
-2. Landlock + seccomp sandbox for pdf/zip parsing (Linux, feature-flagged)
-3. CI: AppImage build + smoke-test job
+(none — the plan is exhausted; the final batch is tracked in `progress.md`)
