@@ -182,3 +182,80 @@ success on commit `89f88b9`.
 -- -D warnings` clean (catalog/core/xtask) · `cargo test -p supportos-plusplus-core` 68/68
 (7 net new) · `cargo deny check advisories licenses` ok · `xtask vector-count` still runs
 after the bootstrap changes · GitHub Actions run `39126901850` → success on `cc3a288`.
+
+### Batch 4 — 2026-10-18 (commit `8875597`, CI run `39132228740`: success)
+
+**16. Row 16 remainder: workspace reqwest 0.12 → 0.13 (dedupe lockfile)**
+- Work: workspace `reqwest` bumped to 0.13.5 with features `json`, `rustls`, `form`.
+  0.13 renamed `rustls-tls` → `rustls` (now the aws-lc-rs provider plus
+  `rustls-platform-verifier` roots instead of the old ring/webpki-roots setup) and moved
+  `RequestBuilder::form` behind the `form` feature — the only call-site break, fixed in
+  `helpscout_real.rs`. `Cargo.lock` now contains a single reqwest entry shared by core,
+  xtask, and tauri 2.12.4; the xtask `blocking` feature carried over unchanged.
+- Verification: `Cargo.lock` has exactly one `name = "reqwest"` (0.13.5); clippy
+  `-D warnings` clean on catalog/core/xtask/app-shell (all targets, xtask binary included);
+  94/94 core tests; `cargo deny` ok; `xtask vector-count` links and runs on the new tree.
+
+**17. `crates/app-shell`: eframe shell, settings-table theme, flock single-instance**
+- Work: new workspace crate `crates/app-shell` (lib `spp_shell` + bin `supportos-plusplus`)
+  on the pinned eframe 0.37. Implements the new `App::logic`/`App::ui` split; `ui` renders
+  a CentralPanel placeholder home (identity/version, theme toggle, database path + schema
+  version, live bridge counters). Theme persists in the settings table under `"theme"`
+  (`"light"` default, matching the old API's default; no migration per D5 — localStorage
+  does not exist natively). Single-instance via `flock(2)` (`LOCK_EX|LOCK_NB`) on
+  `<data_dir>/instance.lock` through `libc` — the only unsafe code in the crate, module
+  `#[allow]`ed against the crate-level `deny(unsafe_code)`; a second process exits with a
+  clear message and code 1. `open_db` mirrors the Tauri shell boot (`db::open` +
+  `bootstrap::apply_all`). Workspace members list deduplicated (`app/src-tauri` was listed
+  twice). CI clippy/test scope extended to app-shell — egui needs no system packages to
+  build, link, or run headless tests.
+- Verification: 11/11 app-shell tests — theme default/unknown-fallback/roundtrip/apply
+  (asserted via `ctx.theme()`), flock second-acquire rejected + re-acquire after release,
+  `open_db` idempotent with schema ≥ v40 and correct file path; CI run green.
+
+**18. `DbHandle` facade over `Arc<Mutex<Connection>>` (D3 seam)**
+- Work: `core::db::DbHandle` — a `Clone` facade over `Arc<Mutex<Connection>>` offering
+  `with_read`/`with_write` closure access (the shape the post-cutover pool will provide),
+  a poison-recovering `lock` mirroring `http::server::lock_or_recover`, `from_shared` to
+  adopt the HTTP `AppState` Arc during the side-by-side port period, and `file_path`. All
+  app-shell code binds to `DbHandle` exclusively, never to the raw Arc — per D3, ported UI
+  code must not change when the pool lands.
+- Verification: 8 tests — with_read/with_write roundtrips, transaction inside with_write,
+  clones share the connection, from_shared adoption, in-memory → no path / file-backed →
+  path, mutex-poison recovery via `catch_unwind`.
+
+**19. `core::richtext`: HTML → styled spans, fixture tests**
+- Work: new core module converts possibly-untrusted HTML into toolkit-agnostic spans.
+  Pipeline: ammonia sanitize (converter's tag whitelist; scripty tags removed with
+  content; https/http/mailto hrefs only; no link_rel injection) → quick-xml 0.42 event
+  parser with a style snapshot stack. `SpanStyle` covers bold, italic, underline,
+  strikethrough, code, quote, heading level, and link href. Emission policy: newlines live
+  only in plain default-styled separator spans (`"\n"` / `"\n\n"`), never inside styled
+  runs; whitespace collapses to single spaces outside `<pre>`; `<ul>/<ol>` items get
+  bullet/number prefixes; entities (incl. numeric and `&nbsp;`) are decoded; unknown tags
+  degrade to plain text; `javascript:` hrefs are stripped by the sanitizer.
+- Verification: 18 fixture tests — nesting, entity decoding, link href with `&amp;`
+  decoded, javascript-scheme stripping, script content dropped, heading levels, `pre`
+  whitespace preservation, inline code, unordered/ordered lists, blockquote, block-boundary
+  whitespace collapse, unknown-tag fallback, br handling, empty/whitespace-only input.
+
+**20. Background task bridge → `request_repaint`**
+- Work: `app-shell`'s `TaskBridge` runs a dedicated OS thread that blocks on the core
+  `EventBus` broadcast receiver (`blocking_recv`; `Lagged` logs a warning and continues,
+  `Closed` exits), pushes each event into a poison-recovering queue, and then fires an
+  injected repaint callback — production wiring is `egui::Context::request_repaint`.
+  Push-before-repaint ordering guarantees a woken frame observes the triggering event.
+  `ShellApp::logic` drains the queue once per frame — and eframe also calls `logic` while
+  the window is hidden whenever a repaint was requested, which is exactly when background
+  events matter. This is the native mapping of the old SSE/EventBus/CORS layer
+  (migration map row 10).
+- Verification: 3 tests — events flow with one repaint callback per event
+  (counter-injected callback, deterministic), bridge survives a capacity-1 burst (exercises
+  the `Lagged` path) and still delivers afterwards, and the production `spawn` with a real
+  `egui::Context` delivers end-to-end.
+
+**Batch verification summary:** `cargo fmt --all --check` clean · `cargo clippy --all-targets
+-- -D warnings` clean (catalog/core/xtask/app-shell) · `cargo test` 105/105 (94 core + 11
+app-shell) · `cargo deny check advisories licenses` ok (OFL-1.1 and Ubuntu-font-1.0 added
+for epaint's bundled fonts) · `xtask vector-count` smoke ok · GitHub Actions run
+`39132228740` → success on `8875597`.
