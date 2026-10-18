@@ -743,3 +743,154 @@ fn prune_old_bundles(bundles_dir: &Path, keep: usize) {
         let _ = fs::remove_file(path);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-sync-test-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_millis()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    // snapshot_info() counts conversations/customers unconditionally, so every
+    // test database needs those tables to be exportable.
+    fn schema_db(path: &Path) -> Connection {
+        let conn = Connection::open(path).expect("file db");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS widget (id INTEGER PRIMARY KEY, name TEXT);
+             CREATE TABLE IF NOT EXISTS conversations (id INTEGER PRIMARY KEY);
+             CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY);
+             CREATE TABLE IF NOT EXISTS application_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+             );",
+        )
+        .expect("schema");
+        conn
+    }
+
+    #[test]
+    fn export_rejects_short_passphrase() {
+        let dir = temp_dir("short");
+        let conn = Connection::open_in_memory().expect("memory db");
+        let result = export_bundle(&conn, &dir, "short");
+        assert!(!result.ok);
+        assert!(result.message.contains("at least 8 characters"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_then_verify_round_trip() {
+        let dir = temp_dir("roundtrip");
+        let src = dir.join("a.db");
+        let conn = schema_db(&src);
+        conn.execute("INSERT INTO widget (name) VALUES ('alpha')", [])
+            .expect("seed");
+
+        let exported = export_bundle(&conn, &dir, "correct horse battery");
+        assert!(exported.ok, "export failed: {}", exported.message);
+        let bundle = PathBuf::from(exported.path.expect("bundle path"));
+        assert!(bundle.exists());
+
+        // The bundle carries the SOSYNC magic and never leaks the plaintext
+        // SQLite header into the file.
+        let raw = fs::read(&bundle).expect("bundle bytes");
+        assert!(raw.starts_with(MAGIC));
+        assert!(
+            !raw.windows(16)
+                .any(|w| w == b"SQLite format 3\0".as_slice())
+        );
+
+        // The right passphrase verifies against the same schema.
+        let ok = verify_bundle(&conn, &dir, &bundle, "correct horse battery");
+        assert_eq!(ok["ok"], json!(true), "verify: {}", ok["message"]);
+
+        // A wrong passphrase is rejected without touching anything.
+        let wrong = verify_bundle(&conn, &dir, &bundle, "a wrong passphrase");
+        assert_eq!(wrong["ok"], json!(false));
+        assert!(
+            wrong["message"]
+                .as_str()
+                .unwrap()
+                .contains("Wrong passphrase")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_rejects_tampered_ciphertext() {
+        let dir = temp_dir("tamper");
+        let src = dir.join("a.db");
+        let conn = schema_db(&src);
+        let exported = export_bundle(&conn, &dir, "passphrase-ok");
+        assert!(exported.ok, "export failed: {}", exported.message);
+        let bundle = PathBuf::from(exported.path.expect("bundle path"));
+
+        let mut raw = fs::read(&bundle).expect("bundle bytes");
+        let last = raw.len() - 1;
+        raw[last] ^= 0xFF;
+        fs::write(&bundle, raw).expect("rewrite tampered");
+
+        let result = verify_bundle(&conn, &dir, &bundle, "passphrase-ok");
+        assert_eq!(result["ok"], json!(false));
+        assert!(result["message"].as_str().unwrap().contains("modified"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_round_trip_restores_data_with_safety_backup() {
+        let dir = temp_dir("import");
+        let src = dir.join("a.db");
+        let conn_a = schema_db(&src);
+        for name in ["alpha", "beta"] {
+            conn_a
+                .execute("INSERT INTO widget (name) VALUES (?1)", [name])
+                .expect("seed a");
+        }
+        let exported = export_bundle(&conn_a, &dir, "passphrase-ok");
+        assert!(exported.ok, "export failed: {}", exported.message);
+        let bundle = PathBuf::from(exported.path.expect("bundle path"));
+
+        // Second device: same schema, different local data.
+        let dst = dir.join("b.db");
+        let conn_b = schema_db(&dst);
+        conn_b
+            .execute("INSERT INTO widget (name) VALUES ('local-only')", [])
+            .expect("seed b");
+
+        let imported = import_bundle(&conn_b, &dst, &dir, &bundle, "passphrase-ok");
+        assert!(imported.ok, "import failed: {}", imported.message);
+        assert_eq!(imported.require_restart, Some(true));
+
+        // A fresh connection sees the imported data...
+        let check = Connection::open(&dst).expect("reopened db");
+        let names: Vec<String> = {
+            let mut stmt = check
+                .prepare("SELECT name FROM widget ORDER BY name")
+                .expect("select");
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .expect("query map");
+            rows.flatten().collect()
+        };
+        assert_eq!(names, vec!["alpha".to_string(), "beta".to_string()]);
+
+        // ...and a safety backup of the pre-import state exists.
+        let has_safety_backup = fs::read_dir(&dir)
+            .expect("read dir")
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().contains(".pre-import-"));
+        assert!(has_safety_backup);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

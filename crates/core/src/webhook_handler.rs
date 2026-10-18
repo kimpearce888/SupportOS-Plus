@@ -178,3 +178,132 @@ fn positive_number(v: Option<&serde_json::Value>) -> Option<i64> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn fresh_conn() -> Connection {
+        Connection::open_in_memory().expect("in-memory connection")
+    }
+
+    fn signed(secret: &[u8], body: &[u8]) -> String {
+        crate::webhook::compute_signature(secret, body)
+    }
+
+    #[test]
+    fn accepts_valid_signature_and_persists_processed_event() {
+        let conn = fresh_conn();
+        let secret = b"top-secret";
+        let body = br#"{"objectID":123}"#;
+        let sig = signed(secret, body);
+
+        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created") {
+            WebhookProcessResult::Accepted { row_id } => row_id,
+            other => panic!("expected Accepted, got {other:?}"),
+        };
+
+        let state: String = conn
+            .query_row(
+                "SELECT processing_state FROM webhook_events WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| r.get(0),
+            )
+            .expect("event row");
+        assert_eq!(state, "processed");
+
+        // convo.created with objectID enqueues a sync job
+        let jobs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM jobs WHERE type = 'sync_conversation'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("jobs table readable");
+        assert_eq!(jobs, 1);
+    }
+
+    #[test]
+    fn rejects_empty_body() {
+        let conn = fresh_conn();
+        let result = process_webhook(&conn, b"secret", b"", None, "convo.created");
+        assert!(matches!(result, WebhookProcessResult::BadRequest));
+    }
+
+    #[test]
+    fn rejects_non_json_body() {
+        let conn = fresh_conn();
+        let body = b"not-json";
+        let sig = signed(b"secret", body);
+        let result = process_webhook(&conn, b"secret", body, Some(&sig), "convo.created");
+        assert!(matches!(result, WebhookProcessResult::BadRequest));
+    }
+
+    #[test]
+    fn rejects_wrong_signature() {
+        let conn = fresh_conn();
+        let result = process_webhook(
+            &conn,
+            b"secret",
+            br#"{"id":1}"#,
+            Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            "convo.created",
+        );
+        assert!(matches!(result, WebhookProcessResult::SignatureInvalid));
+    }
+
+    #[test]
+    fn rejects_missing_signature_when_secret_set() {
+        let conn = fresh_conn();
+        let result = process_webhook(&conn, b"secret", br#"{"id":1}"#, None, "convo.created");
+        assert!(matches!(result, WebhookProcessResult::SignatureInvalid));
+    }
+
+    // CHARACTERIZATION of current behavior: an empty secret skips signature
+    // verification entirely. Plan item 6 (migration-map row 1) changes this to
+    // a hard reject outside demo mode; this test flips with it deliberately.
+    #[test]
+    fn empty_secret_skips_verification_current_behavior() {
+        let conn = fresh_conn();
+        let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created");
+        assert!(matches!(result, WebhookProcessResult::Accepted { .. }));
+    }
+
+    #[test]
+    fn duplicate_event_returns_same_row() {
+        let conn = fresh_conn();
+        let secret = b"secret";
+        let body = br#"{"objectID":7}"#;
+        let sig = signed(secret, body);
+
+        let first_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created") {
+            WebhookProcessResult::Accepted { row_id } => row_id,
+            other => panic!("expected first Accepted, got {other:?}"),
+        };
+        let second = process_webhook(&conn, secret, body, Some(&sig), "convo.created");
+        assert!(matches!(
+            second,
+            WebhookProcessResult::Duplicate { row_id } if row_id == first_id
+        ));
+    }
+
+    #[test]
+    fn drain_pending_processes_stored_events() {
+        let conn = fresh_conn();
+        for id in 1..=2 {
+            let payload = format!(r#"{{"objectID":{id}}}"#);
+            crate::webhook::insert_webhook_event(&conn, "convo.created", &payload, None)
+                .expect("insert pending event");
+        }
+        assert_eq!(
+            crate::webhook::pending_event_count(&conn).expect("pending count"),
+            2
+        );
+        assert_eq!(drain_pending(&conn), 2);
+        assert_eq!(
+            crate::webhook::pending_event_count(&conn).expect("pending count"),
+            0
+        );
+    }
+}

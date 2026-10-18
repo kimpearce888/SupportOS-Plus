@@ -377,3 +377,160 @@ fn try_export_csv(conn: &Connection, backups_dir: &Path) -> Result<Value> {
         "path": target.to_string_lossy(),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-backup-test-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_millis()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    fn conn_with_settings() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory connection");
+        conn.execute_batch(
+            "CREATE TABLE application_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO application_settings (key, value) VALUES ('theme', 'dark');
+            INSERT INTO application_settings (key, value) VALUES ('api_token', 'hunter2');
+            INSERT INTO application_settings (key, value) VALUES ('webhook_secret', 's3cr3t');",
+        )
+        .expect("settings schema");
+        conn
+    }
+
+    #[test]
+    fn backup_creates_verified_db_and_redacted_sidecar() {
+        let dir = temp_dir("backup");
+        let conn = conn_with_settings();
+
+        let result = backup(&conn, &dir);
+        assert!(result.ok, "backup failed: {}", result.message);
+        assert_eq!(result.verified, Some(true));
+        let db_path = PathBuf::from(result.path.expect("backup path"));
+        assert!(db_path.exists());
+
+        // The .db backup is a full copy: all three settings rows survive.
+        let check =
+            Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .expect("open backup");
+        let rows: i64 = check
+            .query_row("SELECT COUNT(*) FROM application_settings", [], |r| {
+                r.get(0)
+            })
+            .expect("count settings");
+        assert_eq!(rows, 3);
+
+        // The .settings.json sidecar redacts secret-like keys (token/secret/password).
+        let sidecar = db_path.with_extension("settings.json");
+        let raw = fs::read_to_string(&sidecar).expect("sidecar readable");
+        let parsed: Value = serde_json::from_str(&raw).expect("sidecar JSON");
+        let settings = parsed["settings"].as_array().expect("settings array");
+        assert_eq!(settings.len(), 1, "only non-secret keys are exported");
+        assert_eq!(settings[0]["key"], "theme");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_backup_rejects_non_database_files() {
+        let dir = temp_dir("verify");
+        let junk = dir.join("junk.db");
+        fs::write(&junk, b"this is not a sqlite database at all").expect("write junk");
+        assert!(!verify_backup(&junk));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_swaps_database_and_removes_wal_shm() {
+        let dir = temp_dir("restore");
+        let source = dir.join("source.db");
+        let conn = Connection::open(&source).expect("source db");
+        conn.execute_batch(
+            "CREATE TABLE marker (id INTEGER PRIMARY KEY, note TEXT);
+             INSERT INTO marker (note) VALUES ('restorable');",
+        )
+        .expect("source data");
+        let backup_path = dir.join("backup.db");
+        conn.execute_batch(&format!(
+            "VACUUM INTO '{}'",
+            backup_path.to_string_lossy().replace('\'', "''")
+        ))
+        .expect("vacuum into");
+
+        let target = dir.join("target.db");
+        // Pre-existing WAL/SHM files must be cleaned up by the restore.
+        fs::write(dir.join("target.db-wal"), b"stale").expect("wal");
+        fs::write(dir.join("target.db-shm"), b"stale").expect("shm");
+
+        let result = restore(&target, &backup_path);
+        assert_eq!(result["ok"], json!(true));
+        assert!(target.exists());
+        assert!(!dir.join("target.db-wal").exists());
+        assert!(!dir.join("target.db-shm").exists());
+
+        let check =
+            Connection::open_with_flags(&target, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .expect("restored db");
+        let note: String = check
+            .query_row("SELECT note FROM marker", [], |r| r.get(0))
+            .expect("marker row");
+        assert_eq!(note, "restorable");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_reports_missing_backup() {
+        let dir = temp_dir("restore-missing");
+        let result = restore(&dir.join("new.db"), &dir.join("nope.db"));
+        assert_eq!(result["ok"], json!(false));
+        assert!(result["message"].as_str().unwrap().contains("not found"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_keeps_newest_and_removes_sidecars() {
+        let dir = temp_dir("prune");
+        let mut kept_name = String::new();
+        for (i, mtime) in [100_u64, 200, 300].into_iter().enumerate() {
+            let name = format!("supportos-backup-{i}.db");
+            let path = dir.join(&name);
+            fs::write(&path, b"x").expect("write backup");
+            let file = fs::File::options().write(true).open(&path).expect("open");
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(mtime))
+                .expect("mtime");
+            let sidecar = dir.join(format!("supportos-backup-{i}.settings.json"));
+            fs::write(&sidecar, b"{}").expect("write sidecar");
+            if i == 2 {
+                kept_name = name;
+            }
+        }
+
+        let removed = prune_backups(&dir, 1);
+        assert_eq!(removed, 2);
+
+        let remaining: Vec<String> = fs::read_dir(&dir)
+            .expect("read dir")
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".db"))
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(remaining, vec![kept_name]);
+        // Sidecars of pruned backups are removed; the kept one survives.
+        assert!(dir.join("supportos-backup-2.settings.json").exists());
+        assert!(!dir.join("supportos-backup-0.settings.json").exists());
+        assert!(!dir.join("supportos-backup-1.settings.json").exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

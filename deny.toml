@@ -1,0 +1,50 @@
+# cargo-deny configuration (cargo-deny 0.20+ schema)
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Check the dependency graph for the native Linux target. WASM-only deps of
+# the ui crate drop out of the graph until the Phase 4 cutover.
+targets = [{ triple = "x86_64-unknown-linux-gnu" }]
+
+[advisories]
+# Advisory IDs / yanked crate versions that must be ignored land here, each
+# with a reason. Anything ignored shows up as a note in the report.
+# Current entries are "unmaintained" notices (not vulnerabilities); most
+# disappear at the Phase 4 cutover when the Leptos/Tauri trees are deleted.
+ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained; pulled via xtask dependency tree; not a vulnerability" },
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; pulled via leptos/tachys; disappears at the Phase 4 cutover" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; pulled via tauri/gtk; disappears at the Phase 4 cutover" },
+    { id = "RUSTSEC-2021-0127", reason = "serde_cbor unmaintained; pulled via xtask dependency tree; not a vulnerability" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained; pulled via the tauri/gtk tree; disappears at the Phase 4 cutover" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6); pulled via the tauri/zbus tree; disappears at the Phase 4 cutover" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained; pulled via the tauri/zbus tree; disappears at the Phase 4 cutover" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained; pulled via the tauri/zbus tree; disappears at the Phase 4 cutover" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "BSL-1.0",
+    "CC0-1.0",
+]
+
+[licenses.private]
+# Workspace members are not published; their licenses are MIT via the
+# workspace manifest, so skipping private-crate noise is safe.
+ignore = true
+
+[bans]
+# Duplicate versions are a warning for now — the reqwest 0.12/0.13 dedupe is
+# a tracked plan item; this becomes "deny" after that lands.
+multiple-versions = "warn"

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test, deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo state
+        uses: Swatinem/rust-cache@v2
+
+      # NOTE: clippy/test are scoped to catalog/core/xtask. The ui crate needs
+      # the wasm32 target and the app crate needs WebKitGTK system deps; both
+      # go away at the Phase 4 cutover, at which point this becomes
+      # --workspace. See ai/plan.md (item 25).
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (catalog, core, xtask)
+        run: cargo clippy -p supportos-plusplus-catalog -p supportos-plusplus-core -p supportos-plusplus-xtask --all-targets -- -D warnings
+
+      - name: Test (core)
+        run: cargo test -p supportos-plusplus-core
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Deny (advisories, licenses)
+        run: cargo deny check advisories licenses
