@@ -348,3 +348,90 @@ for epaint's bundled fonts) · `xtask vector-count` smoke ok · GitHub Actions r
 (94 core + 50 app-shell; 39 new this batch) · `cargo deny check advisories licenses` ok ·
 `xtask vector-count` smoke ok (D4: 0 points, sqlite-vec GO unchanged) · GitHub Actions run
 `39139669523` → success on `a1b4e31`.
+
+### Batch 6 — 2026-10-19 (commit `8e7ea0c`, CI run `39168057253`: success)
+
+**26. Port: operations page**
+- Work: `app-shell/src/pages/operations.rs` — tiles tab renders the 16 operations tiles
+  from `spp_core::operations::snapshot` (the `/api/operations/center` SQL) grouped by
+  severity band; clicking a conversation tile raises `NavRequest::InboxTile`, which the
+  shell resolves by switching to the inbox with the tile's real `tile_fragment` as an
+  `ops` filter (the web tile links produced `c.status = 'unassigned'` dead-end queries —
+  the port wires the same fragment the `/api/conversations?ops=` path compiles, incl.
+  the waiting-threshold binding and unknown-key rejection). Workload tab ports
+  `workload::snapshot` (agents, capacity, pressure) with functional per-agent capacity
+  +/− (the web buttons were no-ops) persisted through `workload::set_capacity_model`,
+  plus suggested assignees. `DbHandle::shared()` added for engine adoption.
+- Verification: 5 tests — snapshot→tile views with unassigned counts, severity grouping
+  (FailedJobs/Urgent warnings, Unassigned info, SlaBreached the only critical), workload
+  reload + capacity round-trip, drill-tile set, 16-key metadata coverage; the inbox ops
+  filter has its own SQL drill-down test (only unassigned match; SQL-injection key
+  rejected).
+
+**27. Port: remaining 17 pages**
+- Work: 16 new page models + views in `app-shell/src/pages/`: ai_center (settings status
+  + background LM-Studio test, analytics SQL, attribute catalog + distributions, ai_runs
+  table), automation (rules CRUD with trigger/action validation + pending approvals with
+  approve/reject), connectors (list/rows/create/delete + background refresh), custom
+  objects (type builder + object CRUD against the typed core API), incidents (list
+  filters, create validation, detail workspace: conversations/customers/notes/releases,
+  link + note), issue_radar (issue_radar alerts + SLA alerts, clusters, known-issue
+  create with link/refresh/FTS), notifications (all/mentions/unread tabs, mark-read
+  toggles, mark-all), onboarding (status route logic + demo-mode enable + engine-backed
+  initial sync), organizations (list/filter/create + detail), outreach (campaign create
+  with segment snapshot + queue/pause/resume/cancel/retry + report, v2 segments, DNC),
+  search (FTS scopes), settings (general settings round-trip, Help Scout status +
+  disconnect, LM Studio, Qdrant, business hours per mailbox, backups + JSON/CSV export),
+  support_graph (graph_search + neighbors), sync_health (status SQL port, engine-backed
+  sync actions, demo tools). not_found needs no model (the sidebar can't 404).
+- Verification: 49 new page tests across the 16 models (round-trips, validation
+  rejections, filter narrowing, seeding→reload flows). Fixed a real core bug found by
+  the outreach tests: `save_segment_v2` never wrote the NOT NULL `criteria_json`
+  column, so every v2 segment insert failed — now writes the legacy `'[]'` placeholder.
+- Work (support): `testsupport.rs` seeds `customer_emails` rows (the segment engine and
+  outreach validation read them) and maps assignee 0 → NULL (unassigned conversations).
+
+**28. Port: command palette, overlays, toasts**
+- Work: `app-shell/src/palette.rs` — Ctrl/Cmd+K overlay running the local search engine
+  per keystroke (the web's 200ms debounce + generation racing is unnecessary in-process),
+  arrow-key selection with `move_selection` clamping, `MAX_HITS = 12` cap, Enter/click
+  resolving the web href contract (`/inbox/conversation/{id}`, `/customers/{id}`,
+  `/knowledge`, `/issues`) into `NavRequest`. `app-shell/src/toasts.rs` — the toast stack
+  with the web's per-kind timeouts (success/info 4s, warning 6s, error 10s) and expiry
+  on the render clock. `app-shell/src/overlays.rs` — `ConfirmDialog` port with
+  `DialogOutcome {Open, Confirmed, Cancelled}` (Escape/close/cancel never confirm).
+- Verification: 11 tests — hit capping, selection clamping, href→page mapping (all four
+  web href shapes + rejects), palette search against seeded FTS data, hit JSON parsing,
+  toast push/expiry/kind timeouts/wire names, dialog builders and outcome lifecycle.
+
+**29. Event bus → repaint wiring across all ported pages**
+- Work: `pages::invalidated_pages` extended to the full web `keys_for_event` map:
+  sync → inbox/dashboard/operations/sync-health/notifications (+knowledge on incremental
+  rows), conversation → inbox/dashboard/operations/notifications, notification →
+  inbox/notifications/operations, campaign → outreach, ratings → dashboard/customers.
+  `ShellApp::apply_invalidations` routes each key to its page's `invalidate()`;
+  `PageKey` grew to 21 entries with the web nav order; `ShellApp` wires every page,
+  the shared `SyncEngine` (built at boot via `build_sync_engine`, demo/real provider
+  choice mirroring the Tauri boot), the palette, toasts, and dialog slot.
+- Verification: app.rs tests — dedup across a two-event batch, 21 labels, campaign →
+  outreach exactly, notification fan-out coverage; the bridge tests already pin the
+  EventBus → repaint wake path.
+
+**30. Cutover: delete axum router + Leptos + Tauri + wasm32 target + CSP plumbing**
+- Work: deleted `crates/core/src/http/` (axum router, routes, server, rate limiter),
+  `crates/ui/` (Leptos), `crates/app/src-tauri` (Tauri 2 + CSP conf), and the
+  wasm32-unknown-unknown target from `rust-toolchain.toml`. Promoted the survivors into
+  core modules: `analytics.rs` (why_contacting/top_questions/issue_radar impls + the
+  radar engine, ~690 lines), `eventing.rs` (EventBus — all 40+ `crate::http::EventBus`
+  call sites re-pointed), `ai_memory_guard.rs` (the memory quarantine word lists and
+  matcher, + new tests). `conversation_ops.rs` trimmed to its pure SQL operations
+  (attachment persistence, outbound jobs, tags, eval-mode guards — the axum Response
+  wrappers and AppState handlers deleted). CI now runs `--workspace` clippy/test;
+  xtask `dev`/`package`/`verify-icons` re-pointed to the app-shell (icons preserved
+  under `crates/app-shell/icons/`); workspace `axum`/`tower-http` deps and the ui/app
+  members removed; `cargo update` pruned the lockfile (−68KB); README rewritten for the
+  egui architecture. axum survives only transitively via qdrant-edge/tonic.
+- Verification: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --
+  -D warnings`, and `cargo test --workspace` (227 tests: 131 app-shell + 96 core) all
+  green locally; CI run `39168057253` on `8e7ea0c` green with the workspace-wide steps
+  (fmt, clippy, test, cargo-deny advisories+licenses).

@@ -5,8 +5,4 @@
 
 ## Active items
 
-1. Port: operations page
-2. Port: remaining 17 pages
-3. Port: command palette, overlays, toasts
-4. Event bus → repaint wiring across all ported pages
-5. Cutover: delete axum router + Leptos + Tauri + wasm32 target + CSP plumbing
+(none — batch 6 completed and verified; waiting for the user to say `continue` per Rule 8)
