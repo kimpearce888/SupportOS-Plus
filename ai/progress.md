@@ -5,8 +5,4 @@
 
 ## Active items
 
-1. Create minimal loopback listener (webhook + OAuth callback only)
-2. AppImage packaging via `xtask package`; drop deb/msi/nsis/dmg/app targets
-3. Pin final toolchain; drop wasm32 target (row 15 complete)
-4. DB pool inside `DbHandle`: writer thread + 2 WAL readers; migrate remaining lock sites
-5. sqlite-vec swap behind `VectorStore` (per D4 gate outcome); remove qdrant-edge if GO
+(none — batch 7 completed and verified; 3 plan items remain for the final batch)

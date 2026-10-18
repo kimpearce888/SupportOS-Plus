@@ -435,3 +435,98 @@ for epaint's bundled fonts) · `xtask vector-count` smoke ok · GitHub Actions r
   -D warnings`, and `cargo test --workspace` (227 tests: 131 app-shell + 96 core) all
   green locally; CI run `39168057253` on `8e7ea0c` green with the workspace-wide steps
   (fmt, clippy, test, cargo-deny advisories+licenses).
+### Batch 7 — 2026-10-19 (commit `790a56f`, CI run `39174410019`: success)
+
+**31. Create minimal loopback listener (webhook + OAuth callback only)**
+- Work: `crates/core/src/loopback.rs` — a 127.0.0.1-only hand-rolled HTTP/1.1 server with
+  exactly two routes. `POST /webhook` resolves the secret (env `HELPSCOUT_WEBHOOK_SECRET`
+  → encrypted envelope) and feeds `webhook_handler::process_webhook`, mapping the results
+  onto the old axum route's status codes (200/200-duplicate/401/403/400). `GET
+  /oauth/callback` ports the old route's flow onto the single-use `oauth_states` table
+  (state consumed exactly once, code exchange + `get_me`, `me_remote_id` + audit
+  persistence, success/fail HTML pages with the original copy). `begin_oauth` issues a
+  state and returns the authorize URL; the Settings page gained a "connect via OAuth"
+  entry showing it as a hyperlink. Boot order in `main.rs`: port from the localhost
+  redirect URI, then `SPP_LOOPBACK_PORT`, then OS-assigned (logged); the listener degrades
+  to a warning without blocking the shell. Requests are size-capped (16 KiB headers,
+  1 MiB body) and served on per-connection threads so the OAuth exchange cannot head-of-
+  line-block webhook bursts.
+- Verification: 13 loopback tests — route dispatch (404/405/healthz/root), webhook status
+  mapping incl. duplicate no-reenqueue, 401/403/400 paths with a stored secret, OAuth
+  demo/error/missing-param/state-mismatch/replay/success/exchange-failure pages,
+  `me_remote_id` + audit assertions, redirect-URI port extraction, `begin_oauth`
+  single-use state. CI run `39174410019` green.
+
+**32. AppImage packaging via `xtask package`; drop deb/msi/nsis/dmg/app targets**
+- Work: `crates/xtask/src/package.rs` — `stage_appdir` builds the AppDir layout (release
+  binary at `usr/bin`, `.desktop` entry at the root and under `usr/share/applications`,
+  hicolor icons 32/128/256/1024 from the checked-in set, root icon + `.DirIcon`, `AppRun`
+  sh shim); `package` drives the release build, staging, and `appimagetool` (resolution:
+  `APPIMAGETOOL` env/flag → `target/tools/` cache → download from the official continuous
+  release), run with `ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1` so FUSE-less
+  builders work. The `xtask package` CLI gained `--out`, `--appimagetool`, `--skip-build`
+  and cargo arg passthrough. deb/msi/nsis/dmg/app targets remain deleted with the Tauri
+  tree; README documents the AppImage as the only desktop packaging target.
+- Verification: 2 stage tests (full layout, executable AppRun, desktop content, root
+  entry; clear failure without the release binary) + end-to-end run in this environment:
+  `cargo xtask package` produced `target/appimage/SupportOs-Plus-x86_64.AppImage` (10.4 MB
+  type-2 AppImage) and `--appimage-extract` verified the squashfs layout (AppRun, desktop,
+  icons, `usr/bin/supportos-plusplus`). CI run `39174410019` green.
+
+**33. Pin final toolchain; drop wasm32 target (row 15 complete)**
+- Work: `rust-toolchain.toml` stays the single source of truth (channel `1.99.1`, no
+  wasm32 target — removed with the Phase 4 cutover; CI installs the toolchain from the
+  file). Workspace `rust-version` aligned from `1.85` to `1.99` (MSRV = the pin; older
+  compilers are never tested). Dead `supportos-plusplus-ui` workspace path dependency
+  removed (the crates/ui directory is gone). `deny.toml` advisory ignore list pruned: the
+  bincode/paste/proc-macro-error/serde_cbor entries left with the leptos/tauri/qdrant
+  trees; the ttf-parser/zvariant/zbus_names/zvariant_derive entries kept with corrected
+  provenance (epaint / accesskit_unix).
+- Verification: repo-wide grep finds no wasm32/toolchain leftovers (CI workflow, xtask,
+  README); `cargo build`/`test`/`clippy` all run under the pinned toolchain; lockfile
+  pruned of the stale trees. CI run `39174410019` green (toolchain install from
+  rust-toolchain.toml + all steps).
+
+**34. DB pool inside `DbHandle`: writer thread + 2 WAL readers; migrate remaining lock sites**
+- Work: `crates/core/src/db.rs` — `DbHandle` now holds a lane: file-backed databases get
+  an exclusive writer connection plus 2 WAL reader connections on the same file; in-memory
+  databases (tests, tooling) keep the single shared connection (each `:memory:` DB is
+  private, so pooling would see nothing — the reader pool degrades gracefully when a
+  reader cannot be opened). `with_read` takes an idle reader (try-lock sweep, then FIFO
+  blocking), `with_write` takes the writer lane, and the new `write_guard()` returns a
+  Deref/DerefMut RAII guard that replaces the old `lock()` for scoped access. The "writer
+  thread" is realized as the writer lane: SQLite WAL already serializes writers, and an OS
+  writer thread would force `'static` bounds on every write closure (hundreds of sites)
+  for no additional concurrency — documented in the module. All remaining raw lock sites
+  migrated to `DbHandle`: `SyncEngine`, `RealHelpScoutProvider`, `HsRateLimiter`,
+  `WorkerManager`/`start_workers`, `connectors::refresh`, `outreach::send_batch`, plus the
+  four app-shell `.shared()` call sites; `DbHandle::lock`/`from_shared`/`shared` deleted.
+- Verification: db.rs tests grew to 10 — pool sizing (2 readers file-backed, 0 in-memory),
+  readers see committed writer state, concurrent second read while a reader is held, poison
+  recovery, DerefMut transactions through the guard. Full suite green: 253 tests (131
+  app-shell + 120 core + 2 xtask), fmt clean, clippy `--workspace --all-targets -D
+  warnings` clean. CI run `39174410019` green.
+
+**35. sqlite-vec swap behind `VectorStore` (per D4 gate outcome); remove qdrant-edge if GO**
+- Work: D4 gate confirmed GO (0 chunks < 100k) — `vectorstore_qdrant.rs` deleted and the
+  `qdrant-edge` dependency removed from the workspace (tonic/prost trees pruned from the
+  lockfile). New `crates/core/src/vectorstore_sqlitevec.rs`: `SqliteVecStore` implements
+  the full `VectorStore` trait over `vec0` virtual tables (`point_id INTEGER PRIMARY KEY,
+  embedding FLOAT[dim] distance_metric=cosine`) in `<data_dir>/vectors/vectors.db`, with a
+  `vec_meta` dimension pin (dim change = explicit rebuild + re-embed), a `vec_payload`
+  companion table (JSON payload + `entity_type`/`entity_id` columns for the delete/count
+  pipelines), KNN search with over-fetch + payload post-filter, snapshot/restore in the
+  same wire format as the qdrant adapter, and sparse search pinned to the FTS5 lane by
+  design. `VectorIndex` keeps the facade surface the worker pipeline consumed (lazy open,
+  enable flag, `health`/`try_point_count`/`ensure_collection`/`upsert`/`search`/
+  `delete_by_entity`/`count_by_entity`). The sqlite-vec extension registers via
+  `sqlite3_auto_extension` (the only unsafe code in spp_core; crate lint downgraded
+  forbid→deny for that one module). `xtask vector-count` re-pointed at the new store
+  (the `--url` flag dropped); the Settings "Qdrant" tab became the sqlite-vec store info
+  page.
+- Verification: 11 sqlite-vec tests — vec_version availability, upsert/delete/count
+  roundtrip with idempotent re-upsert, dimension mismatch error + explicit rebuild, KNN
+  cosine ordering, payload post-filter, sparse-empty pin, snapshot/restore roundtrip,
+  delete_by_entity both halves, generic Filter count scan, facade disabled/enabled health
+  + full pipeline. CI run `39174410019` green (incl. cargo-deny advisories+licenses for
+  the new sqlite-vec dependency).
