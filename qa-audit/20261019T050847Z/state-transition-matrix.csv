@@ -1,0 +1,14 @@
+state,transition,trigger,expected_outcome,observed_result,verification,durable_state_check
+(fresh data dir),first-use boot,AppImage start,49 migrations + dashboard,as expected on every boot,GUI logs + screenshots (S-A),DB file created; migrations recorded in schema_version
+dashboard,any other page,sidebar click at label center,navigates,PASS 17/21; FAIL 4 rows (DEFECT-01),nav-sweep A; hitbox-scan,page key held in ShellApp (in-memory per session)
+dead rows (Inbox/Reports/Search/Shell),target page,sidebar click at x<=20,navigates,PASS all 4 (workaround),K3 dead-row xsweep,page key in memory
+page,command palette,click ⌘K button or Ctrl/Cmd+K,overlay opens,PASS (button path),K1/K3 step records,palette open flag (in-memory)
+palette open,palette typing,click input + type,query renders + search runs,PASS,K3-20/30,query string in palette state
+palette open,palette closed,Escape,overlay closes,PASS (with X focus),K1/K3 escape diffs,open flag cleared
+palette open,palette hit selected,click hit row,nav to href page,BLOCKED (empty DB: no hits),coverage-gaps §2,nav request applied by shell
+palette open,palette hit confirmed by keyboard,Enter,nav per web port,NO-OP as read (lost_focus required) — DEFECT-02,K3 enter step,none
+theme setting,toggle,Shell page Theme button,persist to DB,NOT RUN (GUI); unit tests cover store/apply,settings unit tests,DB-backed settings row
+oauth tokens,acquire/refresh,connect flow or token expiry,single-row store (id=1) survives refresh,PASS (tests): re-save regression covered,it_helpscout + it_loopback,tokens + audit rows persisted encrypted
+sync cursors,initial→incremental,sync engine runs,mirror tables updated,PASS (tests): row-by-row assertions,it_sync,cursor rows in DB
+webhook events,dedup window,repeat POST same event,stored once,PASS (tests),it_loopback,webhook_events table
+secrets,envelope encrypt/decrypt,settings::set_secret,get master key from per-profile file,PASS (tests + observed per-profile keys),crypto/settings tests,secrets.key + encrypted values in DB

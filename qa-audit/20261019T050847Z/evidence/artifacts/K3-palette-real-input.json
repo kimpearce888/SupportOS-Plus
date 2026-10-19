@@ -1,0 +1,85 @@
+{
+ "session": "K3-palette-real-input",
+ "steps": [
+  {
+   "step": "boot",
+   "window": "(0, 0, 1180, 760)"
+  },
+  {
+   "step": "focus-set"
+  },
+  {
+   "step": "palette-open",
+   "diff": 0.03591015625
+  },
+  {
+   "step": "input-click",
+   "focus_diff": 0.002111328125
+  },
+  {
+   "step": "typed",
+   "typed_diff": 0.0016806640625
+  },
+  {
+   "step": "enter",
+   "enter_diff": 0.00059765625
+  },
+  {
+   "step": "escape",
+   "close_diff": 0.044498046875
+  },
+  {
+   "step": "dead-row-xsweep",
+   "probes": [
+    {
+     "row": "Inbox",
+     "y": 87,
+     "x": 10,
+     "nav_diff": 0.0359
+    },
+    {
+     "row": "Inbox",
+     "y": 87,
+     "x": 45,
+     "nav_diff": 0.0
+    },
+    {
+     "row": "Reports",
+     "y": 201,
+     "x": 10,
+     "nav_diff": 0.0224
+    },
+    {
+     "row": "Reports",
+     "y": 201,
+     "x": 45,
+     "nav_diff": 0.0
+    },
+    {
+     "row": "Search",
+     "y": 386,
+     "x": 10,
+     "nav_diff": 0.0133
+    },
+    {
+     "row": "Search",
+     "y": 386,
+     "x": 45,
+     "nav_diff": 0.0
+    },
+    {
+     "row": "Shell",
+     "y": 523,
+     "x": 10,
+     "nav_diff": 0.0194
+    },
+    {
+     "row": "Shell",
+     "y": 523,
+     "x": 45,
+     "nav_diff": 0.0
+    }
+   ]
+  }
+ ]
+}

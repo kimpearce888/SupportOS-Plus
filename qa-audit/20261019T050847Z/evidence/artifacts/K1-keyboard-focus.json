@@ -1,0 +1,23 @@
+{
+ "session": "K1-keyboard-focus",
+ "steps": [
+  {
+   "step": "focus-set",
+   "win_name": "SupportOs-Plus"
+  },
+  {
+   "step": "palette-click",
+   "y": 558,
+   "diff": 0.0359,
+   "attempt": 0
+  },
+  {
+   "step": "typed",
+   "diff": 0.0
+  },
+  {
+   "step": "escape",
+   "diff": 0.0355
+  }
+ ]
+}

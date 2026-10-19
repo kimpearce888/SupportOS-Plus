@@ -1,0 +1,19 @@
+feature,workflow,steps_covered,result,evidence
+navigation,sidebar click to page,click each of 21 rows at label center,PARTIAL-DEFECT: 17/21 navigate; Inbox/Reports/Search/Shell ignore label-center clicks (DEFECT-01),nav-sweep-A.json; hitbox-scan.json
+navigation,sidebar click at far-left edge,click dead rows at x=10,PASS: all 4 dead rows navigate correctly (workaround),K3-palette-real-input.json dead-row-xsweep; K3-60-dead-*.png
+navigation,page render on entry,visit all 21 pages,PASS: all pages render their controls,A01..A21; K3-60-dead-*.png screenshots
+command palette,open via sidebar button,click ⌘K search button,PASS: overlay opens (3.6% pixel diff),K1/K3 palette-open steps
+command palette,type query,click input rect x310-597 y115-146 then type,PASS: caret + glyphs render; query runs; (no hits) on empty DB,K3-20/30 screenshots
+command palette,confirm via Enter,press Enter with hits present,BLOCKED-ENV: empty DB yields no hits; code path requires lost_focus (DEFECT-02),palette.rs:210; K3 enter step
+command palette,close via Escape,press Escape,PASS: overlay closes (3.5-4.5% diff),K1/K3 escape steps
+command palette,open via Ctrl/Cmd+K,keyboard shortcut,NOT RUN (K1 early attempt ambiguous; no WM focus at the time),coverage-gaps.md §4
+first use,boot fresh profile,start AppImage with empty SPP_DATA_DIR,PASS: 49 migrations then dashboard; loopback armed; workers start,logs/*.log (every session)
+background workers,auto-sync timer + backup + ratings + job/webhook/embedding/maintenance,passive observation across ~20 boots,PASS: all workers start; backup created; ratings pushed,logs/*.log
+webhook ingress,HMAC-SHA1 verified POST /webhook,real TCP loopback POSTs,PASS (tests): signature verify; dedup; job enqueue; burst,it_loopback
+oauth flow,authorization-code exchange,begin_oauth → GET /oauth/callback → token exchange → persistence,PASS (tests): full flow vs mock token endpoint incl. refresh re-save,it_loopback; it_helpscout
+helpscout sync,initial + incremental + single-conversation,fixture dataset over TCP,PASS (tests): row-by-row mirror assertions,it_sync
+lm studio,model listing/availability/timeouts/errors/recovery,client vs mock server,PASS (tests); live inference not claimed,it_lm_studio
+search,query across tickets/customers/knowledge/issues,typed palette query on empty DB,PARTIAL: pipeline runs (no hits on empty DB); scoped search covered by unit tests,K3-30; search unit tests
+settings,theme toggle + persistence,NOT RUN in GUI; covered by unit tests (theme store/load),NOT RUN (GUI),settings unit tests
+backups,automatic backup on boot,passive observation,PASS: backup file created each fresh boot,logs + qa-profile-* artifacts
+operations demo,simulate incoming message → job → conversation,PASS (tests): enqueue path covered; GUI tile click not exercised,demo unit tests; coverage-gaps.md §1
