@@ -105,6 +105,8 @@ impl ShellApp {
         let sync = options.sync;
         let mut settings = SettingsPage::new();
         settings.set_backups_dir(options.data_dir.join("backups"));
+        // Worker handle for restart-on-interval-change (see save_general).
+        settings.set_workers(options.workers);
         let mut connectors = ConnectorsPage::new();
         connectors.set_data_dir(options.data_dir);
         Self {

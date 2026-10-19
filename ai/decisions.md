@@ -136,3 +136,20 @@ tests are the port insurance. Theme/sidebar: no migration (defaults + re-pick).
 - 2026-10-18 — Initial plan approved and committed (plan.md @ `cd5a8cb`).
 - 2026-10-18 — Narrative moved here from plan.md; plan.md restructured into the TODO list
   required by rule.md. No content discarded (Rule 6: zero items lost in the restructure).
+- 2026-10-19 — Final batch (36-39) design notes:
+  - **Worker host (36):** `app-shell::workers_host` owns a std thread hosting a
+    fixed 2-worker-thread multi-thread tokio runtime; `main` starts it at boot and
+    the settings page restarts it on sync-interval change (old settings-route
+    behavior). Tests keep the host out of `ShellApp` so page tests stay timer-free.
+  - **tokio slim (37):** features `rt, rt-multi-thread, time, sync` — exactly the
+    port's call sites; net/io arrive via reqwest's own dependency (unification),
+    fs/process/signal have zero call sites.
+  - **Sandbox (38):** `core::sandbox` (Linux, `--features sandbox`): Landlock
+    deny-all (BestEffort) + seccomp allow-list with `EPERM` mismatch instead of
+    kill — a killed thread cannot notify its channel (caller would hang to the
+    timeout), while EPERM still blocks every escape path; `write` pinned to fds
+    1/2. Off by default; CI clippy+tests it on a Landlock-enforcing kernel.
+  - **CI smoke (39):** `appimage` job builds via `xtask package` and runs the
+    artifact with `APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1` — the env flag makes
+    the binary verify logging, lock, migrations, boot services, workers and the
+    loopback listener, then exit 0 headless.

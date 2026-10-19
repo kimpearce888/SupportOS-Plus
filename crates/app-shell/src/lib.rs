@@ -20,6 +20,7 @@ pub mod mention;
 pub mod overlays;
 pub mod pages;
 pub mod palette;
+pub mod workers_host;
 // The only unsafe code in this crate: two libc::flock FFI calls that hold
 // and release the single-instance advisory lock.
 #[allow(unsafe_code)]
@@ -28,6 +29,8 @@ pub mod single_instance;
 mod testsupport;
 pub mod theme;
 pub mod toasts;
+
+use crate::workers_host::WorkersHost;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -49,6 +52,10 @@ pub struct ShellOptions {
     pub data_dir: PathBuf,
     /// Shared sync engine, built by the boot code (demo or real provider).
     pub sync: Option<Arc<SyncEngine>>,
+    /// The background worker host started by `main` (job drain, webhook
+    /// drain, embedding pass, maintenance). `None` in tests, where the
+    /// background timers must not run.
+    pub workers: Option<Arc<WorkersHost>>,
 }
 
 /// Open the database and apply all boot migrations, returning a handle.

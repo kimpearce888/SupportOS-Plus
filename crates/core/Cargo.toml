@@ -46,3 +46,15 @@ quick-xml = "0.42"
 # gone. Exact pin per the D4 decision ("sqlite-vec alpha" risk row).
 [dependencies.sqlite-vec]
 version = "=0.1.9"
+
+# Plan row: "Landlock + seccomp sandbox for pdf/zip parsing (Linux,
+# feature-flagged)". Off by default: the sandbox hardens untrusted
+# document parsing and is exercised in CI (`--features sandbox`).
+[features]
+sandbox = ["dep:landlock", "dep:seccompiler", "dep:libc"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { version = "0.4", optional = true }
+seccompiler = { version = "0.5", optional = true }
+# Syscall numbers + errno constants for the sandbox allow-list.
+libc = { version = "0.2", optional = true }

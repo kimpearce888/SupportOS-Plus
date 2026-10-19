@@ -38,6 +38,16 @@ jobs:
       - name: Test (workspace)
         run: cargo test --workspace
 
+      # Landlock + seccomp sandbox (plan row): the sandboxed pdf/zip
+      # parsing paths only compile on Linux with the feature on, so they
+      # need their own clippy/test pass (ubuntu-latest kernels also
+      # actually enforce Landlock, exercising the real restriction).
+      - name: Clippy (sandbox feature)
+        run: cargo clippy -p supportos-plusplus-core --all-targets --features sandbox -- -D warnings
+
+      - name: Test (sandbox feature)
+        run: cargo test -p supportos-plusplus-core --features sandbox
+
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
@@ -45,3 +55,44 @@ jobs:
 
       - name: Deny (advisories, licenses)
         run: cargo deny check advisories licenses
+
+  appimage:
+    name: AppImage build + smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        # rust-toolchain.toml is the single source of truth for the exact
+        # toolchain version; `rustup toolchain install` reads it directly.
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+          rustc --version
+
+      - name: Cache cargo state
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the AppImage (xtask package)
+        # Builds the release binary, stages the AppDir (desktop entry,
+        # hicolor icons, AppRun) and packs the type-2 AppImage; appimagetool
+        # is downloaded (and cached under target/tools) by the xtask itself.
+        run: cargo run -p supportos-plusplus-xtask -- package
+
+      - name: Smoke test (boot chain inside the AppImage)
+        # APPIMAGE_EXTRACT_AND_RUN self-extracts and executes AppRun —
+        # that validates the packaging (paths, icons, entry). SPP_SMOKE=1
+        # makes the binary verify logging, single-instance lock, all boot
+        # migrations, boot services, background workers and the loopback
+        # listener, then exit 0 without opening a window (a GUI cannot run
+        # on a headless runner).
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 \
+            ./target/appimage/SupportOs-Plus-x86_64.AppImage
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SupportOs-Plus-x86_64.AppImage
+          path: target/appimage/SupportOs-Plus-x86_64.AppImage
+          if-no-files-found: error

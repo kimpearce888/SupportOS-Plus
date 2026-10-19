@@ -31,7 +31,13 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
 
-tokio = { version = "1", features = ["full"] }
+# Plan row 12 ("tokio full → slim"): the port uses exactly rt (spawn,
+# spawn_blocking, runtime builders, handles), rt-multi-thread (the
+# 2-thread background worker runtime), time (interval/sleep timers) and
+# sync (broadcast event bus, oneshot channels). net/io come in through
+# reqwest's own dependency via feature unification; fs/process/signal
+# have zero call sites.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync"] }
 
 rusqlite = { version = "0.40", features = ["bundled", "blob", "limits"] }
 

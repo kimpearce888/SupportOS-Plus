@@ -3,9 +3,11 @@
 //! Boot order: logging → single-instance lock → database with all boot
 //! migrations → core event bus → boot services (sync engine + provider,
 //! demo unless Help Scout credentials are configured, mirroring the Tauri
-//! boot) → minimal loopback listener (webhook ingress + OAuth callback) →
-//! eframe window. Everything heavy lives in the library so it stays
-//! unit-testable without a window.
+//! boot) → background worker host (job drain, webhook drain, embedding
+//! pass, maintenance timers on a dedicated 2-thread runtime) → minimal
+//! loopback listener (webhook ingress + OAuth callback) → eframe window.
+//! Everything heavy lives in the library so it stays unit-testable
+//! without a window.
 
 fn main() {
     spp_core::logging::init();
@@ -37,6 +39,38 @@ fn main() {
 
     let bus = spp_core::eventing::EventBus::default();
     let boot = spp_shell::build_boot_services(&db, &bus);
+
+    // Background workers (cutover gap fix): job drain, webhook drain,
+    // embedding batches and maintenance timers must run for the whole
+    // session. The vector index rides along (enabled by default, store
+    // opened lazily) so the embedding pass has somewhere to write.
+    let vector_index = {
+        let enabled = db
+            .with_read(|conn| spp_core::settings::get_bool(conn, "qdrant_enabled", true))
+            .unwrap_or(true);
+        std::sync::Arc::new(spp_core::vectorstore_sqlitevec::VectorIndex::new(
+            app_config.data_dir.clone(),
+            enabled,
+        ))
+    };
+    let workers = match spp_shell::workers_host::WorkersHost::start(
+        db.clone(),
+        Some(boot.engine.clone()),
+        boot.provider.clone(),
+        bus.clone(),
+        app_config.data_dir.clone(),
+        Some(vector_index),
+    ) {
+        Ok(host) => host,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to start background workers");
+            eprintln!("SupportOs-Plus: failed to start background workers: {e}");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!("background workers started (job, webhook, embedding, maintenance timers)");
+    // Stopped cleanly when main returns and the host drops.
+    let _workers = workers;
 
     // Minimal loopback listener (webhook ingress + OAuth callback only).
     // Port preference: the localhost port baked into the redirect URI
@@ -81,7 +115,19 @@ fn main() {
         bus,
         data_dir: app_config.data_dir.clone(),
         sync: Some(boot.engine),
+        workers: Some(std::sync::Arc::new(_workers)),
     };
+
+    // CI smoke hook (AppImage job): verifies the full boot chain —
+    // migrations, boot services, background workers, loopback listener —
+    // without opening a window, then exits 0. Never active in normal runs.
+    if std::env::var("SPP_SMOKE").as_deref() == Ok("1") {
+        tracing::info!(
+            operation = "smoke",
+            "SPP_SMOKE=1: boot chain verified, exiting"
+        );
+        return;
+    }
 
     if let Err(e) = spp_shell::run(options) {
         tracing::error!(error = %e, "shell failed");

@@ -737,7 +737,7 @@ fn import_one_file(
             vec![(title, body, "html".to_string())]
         }
         "pdf" => {
-            let text = parse_pdf_text(&raw)?;
+            let text = sandbox_parse("pdf", raw, parse_pdf_text)?;
             if text.trim().is_empty() {
                 return Err(Error::Validation(
                     "No text could be extracted from this PDF (it may be scanned images)."
@@ -747,7 +747,7 @@ fn import_one_file(
             vec![(base, text, "txt".to_string())]
         }
         "docx" => {
-            let text = parse_docx_text(&raw)?;
+            let text = sandbox_parse("docx", raw, parse_docx_text)?;
             vec![(base, text, "txt".to_string())]
         }
         other => {
@@ -765,6 +765,27 @@ fn import_one_file(
         out.push(import_result(id, &title, changed));
     }
     Ok(out)
+}
+
+/// Route an untrusted-document parse through the sandbox when compiled
+/// with `--features sandbox` (Linux): Landlock deny-all + seccomp
+/// allow-list on a dedicated thread (see [`crate::sandbox`]). The bytes
+/// are moved in — the sandboxed parser must not touch the filesystem.
+/// Without the feature the parse runs inline, exactly as before.
+fn sandbox_parse(
+    label: &'static str,
+    raw: Vec<u8>,
+    parse: fn(&[u8]) -> Result<String>,
+) -> Result<String> {
+    #[cfg(all(target_os = "linux", feature = "sandbox"))]
+    {
+        crate::sandbox::run_sandboxed(label, move || parse(&raw))?
+    }
+    #[cfg(not(all(target_os = "linux", feature = "sandbox")))]
+    {
+        let _ = label;
+        parse(&raw)
+    }
 }
 
 fn parse_pdf_text(raw: &[u8]) -> Result<String> {
@@ -1208,5 +1229,28 @@ mod tests {
         let zip_bytes = build_docx(&xml);
         let err = parse_docx_text(&zip_bytes).expect_err("oversized docx entry must be rejected");
         assert!(err.to_string().contains("too large"), "{err}");
+    }
+
+    #[cfg(all(target_os = "linux", feature = "sandbox"))]
+    #[test]
+    fn docx_and_pdf_parse_inside_the_sandbox() {
+        // End-to-end through the same routing the import path uses: the
+        // zip container + deflate + quick-xml (docx) and the pdf error
+        // path must all work under Landlock deny-all + the seccomp
+        // allow-list.
+        let xml = "<w:document><w:body><w:p><w:r><w:t>hello sandbox</w:t></w:r></w:p></w:body></w:document>";
+        let text =
+            sandbox_parse("docx", build_docx(xml), parse_docx_text).expect("sandboxed docx parse");
+        assert!(text.contains("hello sandbox"), "{text}");
+
+        // Junk PDF: the parse fails the same way it does unsandboxed —
+        // a parser error, not a sandbox/restriction error.
+        let err = sandbox_parse("pdf", vec![b'%'; 64], parse_pdf_text)
+            .expect_err("junk pdf fails inside the sandbox too");
+        assert!(
+            err.to_string()
+                .contains("PDF parsing is unavailable or failed"),
+            "{err}"
+        );
     }
 }

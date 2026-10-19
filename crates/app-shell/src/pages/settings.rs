@@ -373,6 +373,10 @@ pub struct SettingsPage {
     hours_edit: Option<BusinessHoursRow>,
     backups: Vec<serde_json::Value>,
     backups_dir: Option<PathBuf>,
+    /// Background worker host: restarts the timers when the sync
+    /// interval changes (the old settings-route behavior). Absent in
+    /// tests, where background timers must not run.
+    workers: Option<std::sync::Arc<crate::workers_host::WorkersHost>>,
     message: Option<String>,
     error: Option<String>,
 }
@@ -393,6 +397,7 @@ impl SettingsPage {
             hours_edit: None,
             backups: Vec::new(),
             backups_dir: None,
+            workers: None,
             message: None,
             error: None,
         }
@@ -401,6 +406,14 @@ impl SettingsPage {
     /// Backups directory (set by the shell at boot).
     pub fn set_backups_dir(&mut self, dir: PathBuf) {
         self.backups_dir = Some(dir);
+    }
+
+    /// Install the background worker host (restart-on-interval-change).
+    pub fn set_workers(
+        &mut self,
+        workers: Option<std::sync::Arc<crate::workers_host::WorkersHost>>,
+    ) {
+        self.workers = workers;
     }
 
     /// Live-update invalidation.
@@ -464,9 +477,27 @@ impl SettingsPage {
         let Some(general) = self.general.clone() else {
             return;
         };
+        // The workers arm the auto-sync timer from this setting at start;
+        // capture the pre-save value so a change can restart the timers
+        // (mirrors the old PUT /api/settings stop/start behavior).
+        let interval_before = db.with_read(|conn| {
+            spp_core::settings::get_i64(conn, "sync_interval_minutes", 5).unwrap_or(5)
+        });
         let result = db.with_write(|conn| general.save(conn));
         match result {
-            Ok(()) => self.message = Some("settings saved".into()),
+            Ok(()) => {
+                if interval_before != general.sync_interval_minutes
+                    && let Some(workers) = self.workers.clone()
+                {
+                    tracing::info!(
+                        before = interval_before,
+                        after = general.sync_interval_minutes,
+                        "sync interval changed: restarting background workers"
+                    );
+                    workers.restart();
+                }
+                self.message = Some("settings saved".into())
+            }
             Err(e) => self.error = Some(e.to_string()),
         }
     }

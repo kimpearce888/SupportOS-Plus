@@ -81,6 +81,10 @@ pub mod reports;
 pub mod response_state_sql;
 pub mod richtext;
 pub mod runner;
+/// Landlock + seccomp sandbox for untrusted document parsing.
+/// Linux-only and feature-flagged (`--features sandbox`).
+#[cfg(all(target_os = "linux", feature = "sandbox"))]
+pub mod sandbox;
 pub mod saved_views;
 pub mod search;
 pub mod security;
