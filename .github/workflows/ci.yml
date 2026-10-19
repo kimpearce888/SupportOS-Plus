@@ -73,6 +73,13 @@ jobs:
       - name: Cache cargo state
         uses: Swatinem/rust-cache@v2
 
+      - name: Install the libraries the AppImage bundles
+        # The AppImage bundles libxkbcommon/-x11/libxcb-xkb from the
+        # build host (winit dlopens them at window creation; not every
+        # target host ships the X11 flavor), so the build host must have
+        # them. Desktop machines do; runners must install them.
+        run: sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1
+
       - name: Build the AppImage (xtask package)
         # Builds the release binary (sandbox feature on), stages the
         # AppDir (desktop entry, hicolor icons, AppRun) and packs the

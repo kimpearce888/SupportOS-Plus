@@ -135,9 +135,13 @@ cargo test            # unit tests (crypto round-trips, HMAC vectors, SLA math, 
 `xtask package` stages the AppDir (release binary, `.desktop` entry, hicolor
 icons, `AppRun`) and runs `appimagetool` — located via `APPIMAGETOOL`, cached
 under `target/tools/`, or downloaded from the official continuous release.
-`xtask deb` stages the same payload for dpkg and packs it with `dpkg-deb
---root-owner-group`. The Tauri-era msi/nsis/dmg/app targets are gone; the two
-Linux packages are the complete packaging surface.
+The AppImage bundles the X11 keyboard libraries (`libxkbcommon`,
+`libxkbcommon-x11`, `libxcb-xkb`) from the build host so it also opens windows
+on GUI-less systems, so the build host must have `libxkbcommon0
+libxkbcommon-x11-0 libxcb-xkb1` installed (every desktop machine has them; CI
+installs them explicitly). `xtask deb` stages the same payload for dpkg and
+packs it with `dpkg-deb --root-owner-group`. The Tauri-era msi/nsis/dmg/app
+targets are gone; the two Linux packages are the complete packaging surface.
 
 ## Verification
 
