@@ -431,7 +431,7 @@ fn malformed_success_body_is_a_parse_error() {
 ///
 /// ```text
 /// SPP_LM_STUDIO_URL=http://127.0.0.1:1234 \
-///   cargo test -p supportos-plusplus-core it_lm_studio::live -- --ignored --nocapture
+///   cargo test -p supportos-plus-core it_lm_studio::live -- --ignored --nocapture
 /// ```
 ///
 /// It performs a real inference round-trip and asserts only what a real

@@ -1,4 +1,4 @@
-//! SupportOS++ native shell entry point.
+//! SupportOS+ (SupportOS-Plus) native shell entry point.
 //!
 //! Boot order: logging → single-instance lock → database with all boot
 //! migrations → core event bus → boot services (sync engine + provider,
@@ -13,6 +13,10 @@ fn main() {
     spp_core::logging::init();
     tracing::info!("SupportOS-Plus native shell starting");
 
+    // One-time upgrade from the pre-1.0.0 data layout (whole-directory
+    // move + database rename); no-op on fresh installs and repeat runs.
+    spp_core::config::migrate_legacy_data_dir();
+
     let app_config = spp_core::config::AppConfig::default();
     tracing::info!(?app_config.data_dir, "data directory");
 
@@ -26,7 +30,7 @@ fn main() {
     // Held for the whole process lifetime; releasing is automatic on exit.
     let _lock = lock;
 
-    let db_path = app_config.data_dir.join("supportos-plusplus.db");
+    let db_path = app_config.data_dir.join(spp_core::config::DB_FILE_NAME);
     let db = match spp_shell::open_db(&db_path) {
         Ok(db) => db,
         Err(e) => {

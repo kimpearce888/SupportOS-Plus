@@ -8,7 +8,7 @@
 //! the numbers:
 //!
 //! ```text
-//! cargo test -p supportos-plusplus-core bench -- --ignored --nocapture
+//! cargo test -p supportos-plus-core bench -- --ignored --nocapture
 //! ```
 //!
 //! Individually:

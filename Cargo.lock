@@ -4509,8 +4509,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "supportos-plusplus-app-shell"
-version = "0.2.0"
+name = "supportos-plus-app-shell"
+version = "1.0.0"
 dependencies = [
  "eframe",
  "hex",
@@ -4518,21 +4518,21 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "sha2 0.11.1",
- "supportos-plusplus-core",
+ "supportos-plus-core",
  "tokio",
  "tracing",
 ]
 
 [[package]]
-name = "supportos-plusplus-catalog"
-version = "0.2.0"
+name = "supportos-plus-catalog"
+version = "1.0.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
-name = "supportos-plusplus-core"
-version = "0.2.0"
+name = "supportos-plus-core"
+version = "1.0.0"
 dependencies = [
  "aes-gcm",
  "ammonia",
@@ -4559,7 +4559,7 @@ dependencies = [
  "sha2 0.11.1",
  "sqlite-vec",
  "subtle",
- "supportos-plusplus-catalog",
+ "supportos-plus-catalog",
  "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
@@ -4570,15 +4570,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "supportos-plusplus-xtask"
-version = "0.2.0"
+name = "supportos-plus-xtask"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
  "reqwest",
  "serde",
  "serde_json",
- "supportos-plusplus-core",
+ "supportos-plus-core",
 ]
 
 [[package]]

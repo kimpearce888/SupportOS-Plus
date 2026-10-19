@@ -59,24 +59,24 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Clippy (sandbox feature)
-        run: cargo clippy -p supportos-plusplus-core --all-targets --features sandbox -- -D warnings
+        run: cargo clippy -p supportos-plus-core --all-targets --features sandbox -- -D warnings
 
       - name: Test (workspace)
         run: cargo test --workspace
 
       - name: Test (sandbox feature)
-        run: cargo test -p supportos-plusplus-core --features sandbox
+        run: cargo test -p supportos-plus-core --features sandbox
 
       # The release build carries the Landlock + seccomp parse sandbox
       # in both packages, exactly as `xtask package`/`xtask deb` enable it.
       - name: Release build (sandbox feature on)
-        run: cargo build --release -p supportos-plusplus-app-shell --features supportos-plusplus-core/sandbox
+        run: cargo build --release -p supportos-plus-app-shell --features supportos-plus-core/sandbox
 
       - name: Package the AppImage
-        run: cargo run -p supportos-plusplus-xtask -- package --skip-build
+        run: cargo run -p supportos-plus-xtask -- package --skip-build
 
       - name: Package the .deb
-        run: cargo run -p supportos-plusplus-xtask -- deb --skip-build
+        run: cargo run -p supportos-plus-xtask -- deb --skip-build
 
       - name: Stage dist/ (versioned names + SHA-256 checksums)
         run: |
@@ -137,17 +137,17 @@ jobs:
       - name: Package metadata + installed files
         run: |
           dpkg -s supportos-plus | sed -n '1,12p'
-          test -x /usr/bin/supportos-plusplus
-          test -f /usr/share/applications/supportos-plusplus.desktop
+          test -x /usr/bin/supportos-plus
+          test -f /usr/share/applications/supportos-plus.desktop
           for s in 32x32 128x128 256x256 1024x1024; do
-            test -f "/usr/share/icons/hicolor/$s/apps/supportos-plusplus.png" \
+            test -f "/usr/share/icons/hicolor/$s/apps/supportos-plus.png" \
               || { echo "missing $s icon"; exit 1; }
           done
 
       - name: Validate the desktop entry
         run: |
           apt-get install -y --no-install-recommends desktop-file-utils
-          desktop-file-validate /usr/share/applications/supportos-plusplus.desktop
+          desktop-file-validate /usr/share/applications/supportos-plus.desktop
 
       - name: Smoke test (full boot chain, no display needed)
         # SPP_SMOKE=1 verifies logging, single-instance lock, all boot
@@ -155,7 +155,34 @@ jobs:
         # listener, then exits 0 without opening a window. It also
         # performs first-run initialization (the SQLite database under
         # $XDG_DATA_HOME) exactly as a real launch would.
-        run: SPP_SMOKE=1 /usr/bin/supportos-plusplus
+        run: SPP_SMOKE=1 /usr/bin/supportos-plus
+
+      - name: Upgrade from 0.2.x migrates the data directory in place
+        # Simulates a real v0.2.0 user: legacy data under
+        # ~/.local/share/supportos-plusplus with the old database file
+        # name, then boots the upgraded binary. The one-time migration
+        # moves the whole directory and renames the database inside it;
+        # a zero-byte file is a valid empty SQLite database, so the boot
+        # chain completes normally on the migrated store.
+        run: |
+          NEW_DIR="$HOME/.local/share/supportos-plus"
+          LEGACY="$HOME/.local/share/supportos-plusplus"
+          test -f "$NEW_DIR/supportos-plus.db" \
+            || { echo "fresh-install smoke did not initialize data"; exit 1; }
+          rm -rf "$NEW_DIR"
+          mkdir -p "$LEGACY/vectors"
+          : > "$LEGACY/supportos-plusplus.db"
+          head -c 32 /dev/zero > "$LEGACY/secrets.key"
+          : > "$LEGACY/vectors/vectors.db"
+          SPP_SMOKE=1 /usr/bin/supportos-plus
+          test -f "$NEW_DIR/supportos-plus.db" \
+            || { echo "database was not migrated/renamed"; exit 1; }
+          test -f "$NEW_DIR/secrets.key" \
+            || { echo "secrets.key was not preserved"; exit 1; }
+          test -f "$NEW_DIR/vectors/vectors.db" \
+            || { echo "vector store was not moved"; exit 1; }
+          test ! -e "$LEGACY" \
+            || { echo "legacy dir not consumed by the whole-dir rename"; exit 1; }
 
       - name: GUI launch under Xvfb (declared dependencies only)
         # The only test-env additions are the virtual display and the
@@ -169,7 +196,7 @@ jobs:
             xvfb xauth libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers
           set +e
           timeout --signal=TERM 25s xvfb-run -a -s "-screen 0 1280x800x24" \
-            /usr/bin/supportos-plusplus
+            /usr/bin/supportos-plus
           rc=$?
           set -e
           # 124 = the timeout fired with the app still alive: window
@@ -179,18 +206,18 @@ jobs:
       - name: Reinstall (dpkg file-replacement / upgrade mechanics)
         run: |
           apt-get install -y --reinstall ./dist/supportos-plus_*_amd64.deb
-          SPP_SMOKE=1 /usr/bin/supportos-plusplus
+          SPP_SMOKE=1 /usr/bin/supportos-plus
 
       - name: Uninstall keeps user data; record fully cleared
         run: |
-          DATA_DIR="$HOME/.local/share/supportos-plusplus"
-          test -f "$DATA_DIR/supportos-plusplus.db" \
-            || { echo "expected first-run DB under $DATA_DIR"; exit 1; }
+          DATA_DIR="$HOME/.local/share/supportos-plus"
+          test -f "$DATA_DIR/supportos-plus.db" \
+            || { echo "expected DB under $DATA_DIR"; exit 1; }
           apt-get remove -y supportos-plus
-          test ! -e /usr/bin/supportos-plusplus
-          test ! -e /usr/share/applications/supportos-plusplus.desktop
-          test -f "$DATA_DIR/supportos-plusplus.db" \
-            && echo "user data survived uninstall"
+          test ! -e /usr/bin/supportos-plus
+          test ! -e /usr/share/applications/supportos-plus.desktop
+          test -f "$DATA_DIR/supportos-plus.db" \
+            && echo "user data survived uninstall (and the 0.2.x upgrade migration)"
           # The package ships no conffiles: after removal dpkg may already
           # consider it fully gone, in which case there is nothing left to
           # purge and apt-get purge would fail with 'unable to locate'.
@@ -300,8 +327,12 @@ jobs:
             echo
             echo 'APT downloads and resolves every declared dependency automatically.'
             echo 'Launch from the desktop application menu as **SupportOS+**, or run'
-            echo '`supportos-plusplus`. The first run initializes the local database'
-            echo '(`$XDG_DATA_HOME/supportos-plusplus`) by itself — nothing to configure.'
+            echo '`supportos-plus`. The first run initializes the local database'
+            echo '(`$XDG_DATA_HOME/supportos-plus`) by itself — nothing to configure.'
+            echo
+            echo 'Upgrading from 0.2.x: your existing data moves automatically from'
+            echo 'the pre-1.0.0 `supportos-plusplus` directory on first launch — no'
+            echo 'manual steps, nothing lost.'
             echo
             echo '**AppImage** — any modern x86_64 desktop (glibc >= 2.35):'
             echo
@@ -326,8 +357,10 @@ jobs:
             echo "  including the Landlock/seccomp parse-sandbox feature"
             echo "- .deb installed through APT on clean ubuntu:22.04, ubuntu:24.04 and"
             echo "  debian:12 containers: dependency resolution, desktop entry + icons,"
-            echo "  boot-chain smoke, GUI launch under Xvfb with only declared"
-            echo "  dependencies, reinstall, uninstall (user data preserved), purge"
+            echo "  boot-chain smoke, a 0.2.x-to-1.0.0 data-directory upgrade"
+            echo "  (in-place migration, database preserved), GUI launch under Xvfb with"
+            echo "  only declared dependencies, reinstall, uninstall (user data"
+            echo "  preserved), purge"
             echo "- AppImage: boot-chain smoke + GUI launch under Xvfb"
             echo "- SHA-256 checksums in \`SHA256SUMS.txt\`; every download link checked live"
           } > body.md

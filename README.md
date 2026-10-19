@@ -16,8 +16,9 @@ Releases: <https://github.com/kimpearce888/SupportOS-Plus/releases>
 **Naming layers** (applied where each is allowed): `SupportOS+` is the display
 name — window title, desktop menu entry, release title. `SupportOS-Plus` is the
 product identifier — repository, window/app ID, artifact base name.
-`supportos-plus` is the Debian package name. The internal crate and binary
-identifier remains `supportos-plusplus` (Cargo names cannot carry `+`).
+`supportos-plus` is the Debian package name and, since 1.0.0, also the
+installed command and internal crate identifier. (Pre-1.0.0 builds shipped
+the command `supportos-plusplus`; see the upgrade note below.)
 
 ---
 
@@ -47,7 +48,7 @@ sudo apt install ./supportos-plus_<version>_amd64.deb
 APT downloads and resolves every declared dependency automatically — the
 package's `Depends` set covers the full X11/GL/Wayland client-library surface
 the GUI loads at runtime. Launch **SupportOS+** from the desktop application
-menu, or run `supportos-plusplus`.
+menu, or run `supportos-plus`.
 
 ### AppImage
 
@@ -61,10 +62,16 @@ desktop entry (AppImageLauncher integrates it into the menu). Only the host
 display server and GL/Vulkan driver are used from the system.
 
 **First run** initializes itself: the SQLite database is created (all
-migrations applied) under `~/.local/share/supportos-plusplus/` (override with
+migrations applied) under `~/.local/share/supportos-plus/` (override with
 `SPP_DATA_DIR`), background workers start, a loopback listener serves Help
 Scout webhooks and the OAuth callback on `127.0.0.1`, and the shell boots into
 demo mode unless Help Scout credentials are configured. No setup steps.
+
+**Upgrading from 0.2.x:** the first 1.0.0 launch moves your existing data from
+the old `~/.local/share/supportos-plusplus/` directory to the new location
+(and renames the database inside it) automatically — one atomic directory
+rename, nothing lost, no manual steps. Downgrading back to 0.2.x afterwards
+is not supported.
 
 **Checksums:** every release ships `SHA256SUMS.txt` covering both packages;
 `sha256sum -c SHA256SUMS.txt` after download.

@@ -43,10 +43,10 @@ jobs:
       # need their own clippy/test pass (ubuntu-latest kernels also
       # actually enforce Landlock, exercising the real restriction).
       - name: Clippy (sandbox feature)
-        run: cargo clippy -p supportos-plusplus-core --all-targets --features sandbox -- -D warnings
+        run: cargo clippy -p supportos-plus-core --all-targets --features sandbox -- -D warnings
 
       - name: Test (sandbox feature)
-        run: cargo test -p supportos-plusplus-core --features sandbox
+        run: cargo test -p supportos-plus-core --features sandbox
 
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
@@ -85,7 +85,7 @@ jobs:
         # AppDir (desktop entry, hicolor icons, AppRun) and packs the
         # type-2 AppImage; appimagetool is downloaded (and cached under
         # target/tools) by the xtask itself.
-        run: cargo run -p supportos-plusplus-xtask -- package
+        run: cargo run -p supportos-plus-xtask -- package
 
       - name: Smoke test (boot chain inside the AppImage)
         # APPIMAGE_EXTRACT_AND_RUN self-extracts and executes AppRun —
@@ -102,7 +102,7 @@ jobs:
         # Stages the dpkg tree (control metadata, absolute-path desktop
         # entry, hicolor icons) and packs it with dpkg-deb from the same
         # release binary as the AppImage.
-        run: cargo run -p supportos-plusplus-xtask -- deb --skip-build
+        run: cargo run -p supportos-plus-xtask -- deb --skip-build
 
       - name: Inspect the .deb (control metadata)
         run: dpkg-deb -I target/deb/supportos-plus_*_amd64.deb
@@ -112,7 +112,7 @@ jobs:
         # it; SPP_SMOKE=1 then exercises the same boot chain as above.
         run: |
           dpkg-deb -x target/deb/supportos-plus_*_amd64.deb /tmp/deb-payload
-          SPP_SMOKE=1 /tmp/deb-payload/usr/bin/supportos-plusplus
+          SPP_SMOKE=1 /tmp/deb-payload/usr/bin/supportos-plus
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4

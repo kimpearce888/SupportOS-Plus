@@ -1,5 +1,5 @@
 [package]
-name = "supportos-plusplus-core"
+name = "supportos-plus-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -36,7 +36,7 @@ reqwest = { workspace = true }
 url = { workspace = true }
 futures-util = { workspace = true }
 tokio-stream = { workspace = true }
-supportos-plusplus-catalog = { workspace = true }
+supportos-plus-catalog = { workspace = true }
 ammonia = "4.2"
 pdf-extract = "0.12"
 zip = { version = "9", default-features = false, features = ["deflate"] }

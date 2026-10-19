@@ -116,12 +116,12 @@ fn workspace_root() -> std::path::PathBuf {
 
 fn run_dev() -> anyhow::Result<()> {
     let status = Command::new("cargo")
-        .args(["run", "-p", "supportos-plusplus-app-shell"])
+        .args(["run", "-p", "supportos-plus-app-shell"])
         .current_dir(workspace_root())
         .status()?;
     anyhow::ensure!(
         status.success(),
-        "cargo run -p supportos-plusplus-app-shell failed"
+        "cargo run -p supportos-plus-app-shell failed"
     );
     Ok(())
 }
@@ -307,7 +307,7 @@ fn run_vector_count(data_dir: &str, db: Option<&str>) -> anyhow::Result<()> {
     }
 
     let db_path = db.map(String::from).unwrap_or_else(|| {
-        dir.join("supportos-plusplus.db")
+        dir.join(spp_core::config::DB_FILE_NAME)
             .to_string_lossy()
             .into_owned()
     });
