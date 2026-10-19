@@ -108,7 +108,11 @@ impl ShellApp {
         // Worker handle for restart-on-interval-change (see save_general).
         settings.set_workers(options.workers);
         let mut connectors = ConnectorsPage::new();
-        connectors.set_data_dir(options.data_dir);
+        connectors.set_data_dir(options.data_dir.clone());
+        // The knowledge import panel reads the `knowledge-import` watch
+        // folder under the data dir (route parity).
+        let mut knowledge = KnowledgePage::new();
+        knowledge.set_data_dir(options.data_dir);
         Self {
             db: options.db,
             bus: options.bus,
@@ -123,7 +127,7 @@ impl ShellApp {
             dashboard: DashboardPage::new(),
             inbox: InboxPage::new(),
             customers: CustomersPage::new(),
-            knowledge: KnowledgePage::new(),
+            knowledge,
             reports: ReportsPage::new(),
             operations: OperationsPage::new(),
             ai_center: AiCenterPage::new(),

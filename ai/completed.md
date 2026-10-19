@@ -597,3 +597,75 @@ for epaint's bundled fonts) · `xtask vector-count` smoke ok · GitHub Actions r
 The plan is now exhausted: 39 of 39 items completed across 8 batches (7 × five + this
 final four-item batch: three planned items plus the user-directed WorkerManager boot
 gap). `plan.md` is empty, `progress.md` is empty.
+
+### Batch 9 (audit fixes) — 2026-10-19 (items 40-44, from the read-only audit)
+
+**40. Enable the `sandbox` feature in the shipped AppImage build (audit P1-1)**
+- Work (two halves — the audit fix exposed a deeper gap): (a) `xtask package` now passes
+  `--features supportos-plusplus-core/sandbox` to the release build (Linux-gated),
+  `crates/xtask/src/package.rs:56-62`; (b) the audit's strings test showed LTO stripped
+  the sandbox right back out because **the knowledge file-import UI was never ported** —
+  `import_file` had zero callers app-wide. Ported the web `ImportKnowledgeModal` as an
+  "Import documents" collapsible panel on the knowledge page
+  (`pages/knowledge.rs`): watch-folder listing (`importable_files`) with per-file Import
+  buttons, paste-import form (title/visibility/source/content with route-parity
+  validation: `internal_only`/`customer_safe`, blank-source → "Manual import"), and the
+  route's side effects (embeddings job enqueue + `knowledge_imported` audit row).
+  `KnowledgePage::set_data_dir` mirrors the connectors/settings setter pattern.
+- Verification: 5 new tests (file roundtrip incl. job+audit rows, path-escape rejection,
+  manual validation/roundtrip, listing filter, page-state updates) — 13/13 knowledge
+  tests, 138/138 app-shell, 260/260 workspace, 125/125 with `--features sandbox`; fmt +
+  clippy `-D warnings` clean. Shipped-binary proof: 0 → 15 sandbox strings in the release
+  binary and the AppImage's inner binary ("landlock layer applied", "seccomp layer
+  applied (compute allow-list, EPERM on mismatch)", "spp-sandbox-"). AppImage smoke
+  exit 0. **Runtime proof** (real GUI, Xvfb + llvmpipe, xdotool-driven): placed a
+  hand-built `sample.pdf` in `<data_dir>/knowledge-import/`, clicked Knowledge → Import
+  documents → Import; the log shows `landlock layer applied` (status "not enforced
+  (kernel without Landlock)" — correct BestEffort degradation on this 5.10 kernel) and
+  `seccomp layer applied`, the PDF parsed inside the restricted thread, the document
+  landed in `knowledge_documents` (`sample`/`internal_only`), the audit row was written,
+  and the background worker drained the enqueued `embed_knowledge_chunks` job
+  (completed). Screenshot evidence: green "Imported 1 document(s) from file." in the UI.
+- CI: the `appimage` job builds through the same xtask → the shipped artifact now
+  compiles the sandbox in by construction.
+
+**41. `Cargo.toml` repository/homepage URLs (audit P2-3)**
+- Work: workspace `repository`/`homepage` corrected from
+  `github.com/kimpearce888/SupportOS-PlusPlus` to `.../SupportOs-Plus` (the real remote).
+- Verification: `cargo metadata --no-deps` parses cleanly and all four crates resolve the
+  new URL; repo-wide grep finds zero remaining stale references in code/manifests/CI.
+
+**42. README runtime-dependency honesty (audit P2-4)**
+- Work: the Building section now states the actual runtime needs (X11/Wayland session,
+  `libxkbcommon-x11`, a GL or Vulkan implementation — Mesa, with llvmpipe/lavapipe
+  software rendering confirmed working) while keeping the true claim of no build-time
+  system packages; the hardening bullet now documents the Landlock+seccomp sandbox being
+  compiled into the shipped AppImage with its degradation behavior.
+- Verification: every claim in the new text was proven empirically during the audit (the
+  binary panicked without `libxkbcommon-x11`/`libxcb-xkb`; wgpu failed until Mesa; the
+  full UI rendered under llvmpipe) and re-proven in this batch's GUI import run.
+
+**43. Remove the dead `Error::NotImplemented` variant (audit P2-5)**
+- Work: variant deleted from `crates/core/src/error.rs` (defined, never constructed).
+- Verification: `rg NotImplemented` → 0 references in the workspace; clippy
+  `-D warnings` clean; 120/120 core tests pass.
+
+**44. Align `decisions.md` "all 24 pages" wording (audit P2-6)**
+- Work: goal 3 now states the real mapping — every file of the original's 24-page tree is
+  covered: 20 egui pages + the command palette overlay (`palette.rs`) + the native Shell
+  page (21 `PageKey`s), with `docs.rs` folded into the knowledge help-center tab and
+  `not_found.rs` unreachable natively. The historical stack table (line 35, facts about
+  the original) is untouched.
+- Verification: counted from the tree — `PageKey` has 21 variants, 20 page module files,
+  and the mapping matches the original's `ui/src/pages` listing at `286edd4`.
+
+**Batch verification summary:** `cargo fmt --all --check` clean · clippy
+`--workspace --all-targets -- -D warnings` clean · `cargo test --workspace` 260/260
+(138 app-shell incl. 5 new import tests + 120 core + 2 xtask) · core `--features sandbox`
+125/125 · final AppImage rebuilt via the updated xtask (11.4 MB, 15 sandbox strings,
+"Import documents" present, smoke exit 0) · startup baseline: ~10 ms boot chain, 40–100 ms
+AppImage self-extract+boot.
+
+Items 45 (real-service verification — blocked on user-provided Help Scout credentials)
+and 46 (optional performance pass) remain in `plan.md` awaiting user input; they were
+never silently dropped.

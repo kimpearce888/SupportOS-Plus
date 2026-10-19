@@ -47,13 +47,20 @@ A single Cargo workspace, split by concern:
 - **Local AI adapters.** LM Studio, Ollama and generic OpenAI-compatible endpoints
   via `reqwest` with SSE streaming — pointed at `localhost` services only.
 - **Hardened input handling.** `ammonia` HTML sanitization, bounded NFA regex
-  (no ReDoS surface), SSRF-guarded URL parsing for connectors.
+  (no ReDoS surface), SSRF-guarded URL parsing for connectors, and a
+  Landlock + seccomp sandbox around pdf/docx parsing — compiled into the
+  shipped AppImage (kernels without Landlock degrade to seccomp-only,
+  logged).
 - **Small release binaries.** LTO + `opt-level = "s"` + stripped symbols.
 
 ## Building
 
-Requires the pinned Rust toolchain (see `rust-toolchain.toml`); no extra system
-dependencies — the egui shell needs no webkit, no wasm target.
+Requires the pinned Rust toolchain (see `rust-toolchain.toml`) and no build-time
+system packages — the egui shell needs no webkit and no wasm target. At runtime
+a machine needs the usual Linux desktop graphics stack: an X11 (or Wayland)
+session, `libxkbcommon-x11`, and a GL or Vulkan implementation (Mesa;
+software rendering via llvmpipe/lavapipe works fine on GPU-less and headless
+setups).
 
 ```sh
 cargo xtask dev

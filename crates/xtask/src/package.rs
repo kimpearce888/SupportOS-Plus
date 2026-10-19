@@ -53,6 +53,13 @@ pub fn package(opts: PackageOptions) -> anyhow::Result<PathBuf> {
         let mut cmd = Command::new("cargo");
         cmd.args(["build", "--release", "-p", "supportos-plusplus-app-shell"])
             .current_dir(&opts.workspace_root);
+        // The shipped artifact must carry the pdf/zip parse sandbox
+        // (Landlock + seccomp, audit item 40): the feature is opt-in at
+        // the Cargo level, so packaging enables it explicitly. It only
+        // exists on Linux targets, and the AppImage is Linux-only.
+        if cfg!(target_os = "linux") {
+            cmd.args(["--features", "supportos-plusplus-core/sandbox"]);
+        }
         for arg in &opts.extra_cargo_args {
             cmd.arg(arg);
         }

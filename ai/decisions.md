@@ -18,8 +18,11 @@ Goals, in priority order:
    critical path without an isolation seam.
 2. **Easily maintainable** — one language (Rust), no UI DSL, no codegen step, small dependency
    tree, solo-maintainer scale.
-3. **Full feature parity** — all 24 pages, real-time updates, hybrid search, AI features,
-   webhooks, encrypted sync.
+3. **Full feature parity** — every page of the original's 24-file `ui/src/pages` tree: 20 egui
+   pages plus the command palette overlay (`palette.rs`) and the native Shell page (21
+   `PageKey`s); `docs.rs` folded into the knowledge page's help-center tab and `not_found.rs`
+   is unreachable natively (the sidebar cannot 404). Real-time updates, hybrid search, AI
+   features, webhooks, encrypted sync.
 4. **Future development friendly** — every risky choice sits behind a trait or facade so it is
    reversible at runtime cost, not rewrite cost. CI enforces license/advisory hygiene
    automatically.

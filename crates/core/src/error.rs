@@ -26,9 +26,6 @@ pub enum Error {
     #[error("oauth state reused or unknown")]
     OauthStateInvalid,
 
-    #[error("not implemented: {0}")]
-    NotImplemented(&'static str),
-
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 

@@ -5,7 +5,13 @@
 //! through `spp_core::knowledge_store` directly. The help-center docs tab
 //! ports the `/api/docs/*` route SQL as typed queries (collections, stats,
 //! article list with collection/status filters, FTS search using the same
-//! tokenizer the route uses, and the article reader).
+//! tokenizer the route uses, and the article reader). The import panel
+//! ports the web `ImportKnowledgeModal`: paste-import plus the
+//! `knowledge-import` watch folder, with the route's embeddings-job and
+//! audit side effects — reaching this panel is also what makes the
+//! pdf/docx parse sandbox live in the shipped binary.
+
+use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use rusqlite::Connection;
@@ -13,6 +19,97 @@ use serde_json::Value;
 use spp_core::db::DbHandle;
 
 use super::{i64_field, str_field};
+
+/// Importable visibility values (route parity).
+const VISIBILITIES: [(&str, &str); 2] = [
+    ("internal_only", "internal-only (never in customer drafts)"),
+    (
+        "customer_safe",
+        "customer-safe (may support customer drafts)",
+    ),
+];
+
+/// Import one file from the `knowledge-import` watch folder (port of
+/// `POST /api/knowledge/import-file`): the core import plus the route's
+/// side effects — an embeddings backfill job and a `knowledge_imported`
+/// audit entry.
+///
+/// # Errors
+/// Propagates the core `import_file` failures (path outside the watch
+/// folder, missing file, unsupported type, oversized input).
+pub fn run_file_import(db: &DbHandle, data_dir: &Path, file: &str) -> spp_core::Result<usize> {
+    db.with_write(|conn| {
+        let results =
+            spp_core::knowledge_store::import_file(conn, data_dir, file, None, "internal_only")?;
+        post_import_side_effects(conn, &results, "file");
+        Ok(results.len())
+    })
+}
+
+/// Paste-import one Markdown document (port of `POST /api/knowledge/import`).
+///
+/// # Errors
+/// `Validation` when the title/content is blank or the visibility is
+/// unknown; otherwise the core `import_manual` failure.
+pub fn run_manual_import(
+    db: &DbHandle,
+    source_name: &str,
+    title: &str,
+    content: &str,
+    visibility: &str,
+) -> spp_core::Result<usize> {
+    if title.trim().is_empty() || content.trim().is_empty() {
+        return Err(spp_core::error::Error::Validation(
+            "A title and content are required.".to_string(),
+        ));
+    }
+    if !VISIBILITIES.iter().any(|(v, _)| *v == visibility) {
+        return Err(spp_core::error::Error::Validation(format!(
+            "visibility must be {} or {}.",
+            VISIBILITIES[0].0, VISIBILITIES[1].0
+        )));
+    }
+    let source = if source_name.trim().is_empty() {
+        "Manual import"
+    } else {
+        source_name.trim()
+    };
+    let documents = vec![serde_json::json!({
+        "title": title,
+        "content": content,
+        "format": "markdown",
+    })];
+    db.with_write(|conn| {
+        let results =
+            spp_core::knowledge_store::import_manual(conn, source, &documents, visibility)?;
+        post_import_side_effects(conn, &results, "manual");
+        Ok(results.len())
+    })
+}
+
+/// Route-parity side effects after a successful import: enqueue the
+/// embeddings backfill and write the audit row. Fire-and-forget exactly
+/// like the original routes (`let _ = ...`).
+fn post_import_side_effects(conn: &Connection, results: &[Value], mode: &str) {
+    let _ = spp_core::jobs::enqueue_on(conn, "embeddings", "embed_knowledge_chunks", "{}", 4, 2);
+    let after = serde_json::json!({
+        "imported": results.len(),
+        "mode": mode,
+    });
+    let _ = spp_core::jobs::audit_entry(
+        conn,
+        "user",
+        "knowledge_imported",
+        None,
+        None,
+        Some(&after.to_string()),
+        None,
+        None,
+        false,
+        None,
+        None,
+    );
+}
 
 /// Which tab is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +323,32 @@ pub fn article_detail(conn: &Connection, id: i64) -> Option<(DocArticle, String)
     Some((summary, text.unwrap_or_default()))
 }
 
+/// Import-panel state (port of the web `ImportKnowledgeModal`).
+#[derive(Debug, Default)]
+pub struct ImportPanel {
+    /// Paste-import fields.
+    title: String,
+    content: String,
+    /// Defaults to the route's "Manual import" when left blank.
+    source_name: String,
+    /// One of the [`VISIBILITIES`] values.
+    visibility: String,
+    /// Watch-folder listing; `None` until the panel is first opened
+    /// (the modal fetched `/api/knowledge/importable` on open).
+    files: Option<Vec<String>>,
+    /// The watch-folder path, for display.
+    import_dir: Option<String>,
+}
+
+impl ImportPanel {
+    fn new() -> Self {
+        Self {
+            visibility: "internal_only".to_string(),
+            ..Self::default()
+        }
+    }
+}
+
 /// The interactive knowledge page state.
 pub struct KnowledgePage {
     tab: Tab,
@@ -242,6 +365,9 @@ pub struct KnowledgePage {
     reader: Option<i64>,
     reader_text: Option<(DocArticle, String)>,
     status_message: Option<String>,
+    error: Option<String>,
+    data_dir: Option<PathBuf>,
+    import: ImportPanel,
 }
 
 impl KnowledgePage {
@@ -262,6 +388,67 @@ impl KnowledgePage {
             reader: None,
             reader_text: None,
             status_message: None,
+            error: None,
+            data_dir: None,
+            import: ImportPanel::new(),
+        }
+    }
+
+    /// Install the data directory (the import panel needs it for the
+    /// `knowledge-import` watch folder). Mirrors the other path-consuming
+    /// pages (`settings.set_backups_dir`, `connectors.set_data_dir`).
+    pub fn set_data_dir(&mut self, data_dir: PathBuf) {
+        self.data_dir = Some(data_dir);
+    }
+
+    /// (Re-)load the watch-folder listing (the modal's on-open fetch).
+    fn reload_importable(&mut self) {
+        let Some(dir) = self.data_dir.clone() else {
+            return;
+        };
+        let v = spp_core::knowledge_store::importable_files(&dir);
+        self.import.files = v.get("files").and_then(Value::as_array).map(|a| {
+            a.iter()
+                .filter_map(|f| f.as_str().map(str::to_string))
+                .collect()
+        });
+        self.import.import_dir = v.get("dir").and_then(Value::as_str).map(str::to_string);
+    }
+
+    /// Import one file from the watch folder and refresh the page state.
+    pub fn import_file_action(&mut self, db: &DbHandle, file: &str) {
+        let Some(dir) = self.data_dir.clone() else {
+            self.error = Some("Import is unavailable (no data directory).".to_string());
+            return;
+        };
+        match run_file_import(db, &dir, file) {
+            Ok(n) => {
+                self.status_message = Some(format!("Imported {n} document(s) from file."));
+                self.documents.clear();
+                self.sources.clear();
+            }
+            Err(e) => self.error = Some(format!("Import failed: {e}")),
+        }
+        self.reload_importable();
+    }
+
+    /// Paste-import the edited document and refresh the page state.
+    pub fn manual_import_action(&mut self, db: &DbHandle) {
+        match run_manual_import(
+            db,
+            &self.import.source_name,
+            &self.import.title,
+            &self.import.content,
+            &self.import.visibility,
+        ) {
+            Ok(n) => {
+                self.status_message = Some(format!("Imported {n} document(s)."));
+                self.import.title.clear();
+                self.import.content.clear();
+                self.documents.clear();
+                self.sources.clear();
+            }
+            Err(e) => self.error = Some(format!("Import failed: {e}")),
         }
     }
 
@@ -332,6 +519,93 @@ impl KnowledgePage {
         self.documents.clear();
     }
 
+    /// The import panel (web `ImportKnowledgeModal`): paste-import plus
+    /// the watch folder. Deferred actions keep the immediate-mode borrows
+    /// sound.
+    fn import_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let mut file_action: Option<String> = None;
+        let mut manual_submit = false;
+        let mut refresh = false;
+        egui::CollapsingHeader::new("Import documents")
+            .default_open(false)
+            .show(ui, |ui| {
+                if self.import.files.is_none() {
+                    self.reload_importable();
+                }
+                ui.strong("Import from the knowledge-import folder");
+                let dir = self
+                    .import
+                    .import_dir
+                    .clone()
+                    .unwrap_or_else(|| "<data dir>/knowledge-import".to_string());
+                ui.weak(format!(
+                    "Copy documents into {dir} (supported: .md .txt .csv .json .html .pdf .docx). \
+                     For safety, file imports must live inside that folder."
+                ));
+                if ui.button("Refresh").clicked() {
+                    refresh = true;
+                }
+                let files = self.import.files.clone().unwrap_or_default();
+                if files.is_empty() {
+                    ui.weak("(no importable files in the folder)");
+                }
+                for file in files {
+                    ui.horizontal(|ui| {
+                        ui.monospace(file.clone());
+                        if ui.button("Import").clicked() {
+                            file_action = Some(file);
+                        }
+                    });
+                }
+                ui.separator();
+                ui.strong("Paste a document");
+                egui::Grid::new("knowledge-import-form")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Title");
+                        ui.text_edit_singleline(&mut self.import.title);
+                        ui.end_row();
+                        ui.label("Visibility");
+                        ui.horizontal(|ui| {
+                            for (value, label) in VISIBILITIES {
+                                let selected = self.import.visibility == value;
+                                if ui.selectable_label(selected, label).clicked() {
+                                    self.import.visibility = value.to_string();
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Source name");
+                        ui.text_edit_singleline(&mut self.import.source_name);
+                        ui.end_row();
+                        ui.label("Content (Markdown)");
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.import.content)
+                                .desired_rows(4)
+                                .desired_width(f32::INFINITY),
+                        );
+                        ui.end_row();
+                    });
+                let ready =
+                    !self.import.title.trim().is_empty() && !self.import.content.trim().is_empty();
+                if ui
+                    .add_enabled(ready, egui::Button::new("Import document"))
+                    .clicked()
+                {
+                    manual_submit = true;
+                }
+            });
+        if refresh {
+            self.reload_importable();
+        }
+        if let Some(file) = file_action {
+            self.import_file_action(db, &file);
+        }
+        if manual_submit {
+            self.manual_import_action(db);
+        }
+    }
+
     /// Open the help-center article reader.
     pub fn open_article(&mut self, db: &DbHandle, id: i64) {
         self.reader = Some(id);
@@ -353,6 +627,9 @@ impl KnowledgePage {
         if let Some(msg) = &self.status_message {
             ui.colored_label(egui::Color32::GREEN, msg.clone());
         }
+        if let Some(err) = &self.error {
+            ui.colored_label(egui::Color32::RED, err.clone());
+        }
         ui.separator();
 
         match self.tab {
@@ -368,6 +645,7 @@ impl KnowledgePage {
             self.reload_all(db);
         }
         ui.weak("Local knowledge documents used by search and AI answers");
+        self.import_ui(ui, db);
         if self.documents.is_empty() {
             ui.weak("(no documents)");
             return;
@@ -751,5 +1029,149 @@ mod tests {
         page.delete_document(&db, doc_id);
         page.reload_all(&db);
         assert!(page.documents.is_empty());
+    }
+
+    // --- Import panel (web ImportKnowledgeModal port) ---
+
+    fn temp_data_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-knowledge-import-{label}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("knowledge-import")).expect("temp data dir");
+        dir
+    }
+
+    fn write_import_file(dir: &Path, name: &str, body: &str) {
+        std::fs::write(dir.join("knowledge-import").join(name), body).expect("seed file");
+    }
+
+    #[test]
+    fn file_import_roundtrip_enqueues_embeddings_and_audits() {
+        let db = empty_db();
+        let dir = temp_data_dir("roundtrip");
+        write_import_file(&dir, "note.md", "# Runbook\n\nRestart the worker.");
+
+        let count = run_file_import(&db, &dir, "note.md").expect("import succeeds");
+        assert_eq!(count, 1);
+
+        let documents = db.with_read(|conn| spp_core::knowledge_store::list_documents(conn, None));
+        assert_eq!(documents.len(), 1);
+        assert_eq!(str_field(&documents[0], "title"), "note");
+        assert_eq!(str_field(&documents[0], "visibility"), "internal_only");
+
+        // Route-parity side effects: embeddings backfill job + audit row.
+        let (job, audit) = db.with_read(|conn| {
+            let job = conn
+                .query_row(
+                    "SELECT type FROM jobs WHERE queue = 'embeddings' ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .unwrap_or_default();
+            let audit = conn
+                .query_row(
+                    "SELECT actor, action FROM audit_log ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                )
+                .unwrap_or_default();
+            (job, audit)
+        });
+        assert_eq!(job, "embed_knowledge_chunks");
+        assert_eq!(
+            audit,
+            ("user".to_string(), "knowledge_imported".to_string())
+        );
+    }
+
+    #[test]
+    fn file_import_rejects_paths_outside_the_watch_folder() {
+        let db = empty_db();
+        let dir = temp_data_dir("escape");
+
+        let err = run_file_import(&db, &dir, "../escape.md").expect_err("escape must be rejected");
+        assert!(err.to_string().contains("knowledge-import"));
+
+        let documents = db.with_read(|conn| spp_core::knowledge_store::list_documents(conn, None));
+        assert!(documents.is_empty());
+    }
+
+    #[test]
+    fn manual_import_validates_and_roundtrips() {
+        let db = empty_db();
+        let dir = temp_data_dir("manual");
+
+        // Route parity: blank title/content rejected; visibility validated.
+        assert!(run_manual_import(&db, "", "", "content", "internal_only").is_err());
+        assert!(run_manual_import(&db, "", "t", " ", "internal_only").is_err());
+        assert!(run_manual_import(&db, "", "t", "c", "secret").is_err());
+
+        let count = run_manual_import(
+            &db,
+            "  ",
+            "Escalation guide",
+            "First, stay calm.",
+            "customer_safe",
+        )
+        .expect("manual import succeeds");
+        assert_eq!(count, 1);
+
+        let documents = db.with_read(|conn| spp_core::knowledge_store::list_documents(conn, None));
+        assert_eq!(documents.len(), 1);
+        assert_eq!(str_field(&documents[0], "title"), "Escalation guide");
+        assert_eq!(str_field(&documents[0], "visibility"), "customer_safe");
+        // Blank source name fell back to the route default.
+        let sources = db.with_read(spp_core::knowledge_store::list_sources);
+        let names: Vec<String> = sources.iter().map(|s| str_field(s, "name")).collect();
+        assert!(names.iter().any(|n| n == "Manual import"), "{names:?}");
+        let _ = dir; // temp dir unused beyond scoping
+    }
+
+    #[test]
+    fn import_panel_lists_only_importable_files() {
+        let dir = temp_data_dir("listing");
+        write_import_file(&dir, "alpha.md", "a");
+        write_import_file(&dir, "zeta.txt", "z");
+        std::fs::write(dir.join("knowledge-import").join("virus.exe"), b"x").expect("seed");
+
+        let mut page = KnowledgePage::new();
+        page.set_data_dir(dir.clone());
+        page.reload_importable();
+
+        let files = page.import.files.clone().expect("files loaded");
+        assert_eq!(files, vec!["alpha.md".to_string(), "zeta.txt".to_string()]);
+        assert!(
+            page.import
+                .import_dir
+                .as_deref()
+                .is_some_and(|d| d.contains("knowledge-import"))
+        );
+    }
+
+    #[test]
+    fn import_file_action_updates_page_state() {
+        let db = empty_db();
+        let dir = temp_data_dir("action");
+        write_import_file(&dir, "note.md", "hello");
+
+        let mut page = KnowledgePage::new();
+        page.set_data_dir(dir);
+        page.reload_all(&db);
+        assert!(page.documents.is_empty());
+
+        page.import_file_action(&db, "note.md");
+        assert_eq!(
+            page.status_message.as_deref(),
+            Some("Imported 1 document(s) from file.")
+        );
+        assert!(page.error.is_none());
+        page.reload_all(&db);
+        assert_eq!(page.documents.len(), 1);
+
+        // Error path surfaces as the page error, not a crash.
+        page.import_file_action(&db, "../escape.md");
+        assert!(page.error.is_some_and(|e| e.contains("knowledge-import")));
     }
 }
