@@ -1,0 +1,46 @@
+{
+  "audit_id": "20261019T050847Z",
+  "specification": "Universal Human-Behavior QA Audit — Any Application or Repository (user-supplied Google Doc)",
+  "audit_started_utc": "2026-10-19T05:08:47Z",
+  "audit_status": "IN_PROGRESS",
+  "target": {
+    "repository_url": "https://github.com/kimpearce888/SupportOs-Plus",
+    "branch_audited": "main",
+    "target_commit": "19dfb35a714822ed94b6b5144eabb222997cc2ca",
+    "target_commit_subject": "ai: Rule 4 - item 46 verified (performance pass); plan exhausted 46/46",
+    "working_tree_at_start": "clean",
+    "remote_sync_at_start": "local main == origin/main (0 ahead, 0 behind)",
+    "ci_at_start": "run 39201357186 on 19dfb35 — both jobs success (AppImage build+smoke; fmt/clippy/test/deny)"
+  },
+  "environment": {
+    "os": "Debian GNU/Linux 13 (trixie), kernel 5.10.134-013.15.kangaroo.al8.x86_64",
+    "cpu": "2 vCPU",
+    "memory_mib": "4041 total",
+    "disk": "9.9G root fs, 83% used at audit start",
+    "rustc": "1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo": "1.99.1 (5f94df478 2026-08-27)",
+    "display": "Xvfb virtual display + llvmpipe software GL",
+    "input_injection": "python-xlib XTEST extension (real keyboard/mouse events)",
+    "capture": "ffmpeg x11grab (screenshots PNG + videos MP4)",
+    "http_client": "curl, python3 urllib",
+    "note": "xdotool unavailable in this environment (no root); XTEST via python-xlib substitutes"
+  },
+  "counts": {
+    "scenarios_total": null,
+    "scenarios_pass": null,
+    "scenarios_fail": null,
+    "scenarios_blocked": null,
+    "scenarios_not_run": null,
+    "scenarios_inconclusive": null,
+    "controls_total": null,
+    "defects_total": null,
+    "evidence_files": null
+  },
+  "limitations": [],
+  "artifact_inventory": [],
+  "notes": [
+    "Counts and inventory are finalized in the last commit of this branch.",
+    "The working tree was clean at audit start; no uncommitted user changes existed to preserve.",
+    "Product code is NOT modified on this branch; all additions live under qa-audit/ only."
+  ]
+}
