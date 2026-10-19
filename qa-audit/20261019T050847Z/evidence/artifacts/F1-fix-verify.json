@@ -1,0 +1,120 @@
+{
+ "session": "F1-fix-verify",
+ "steps": [
+  {
+   "step": "boot",
+   "window": "(0, 0, 1180, 760)"
+  },
+  {
+   "step": "x-focus-set"
+  },
+  {
+   "step": "palette-open",
+   "diff": 0.0
+  },
+  {
+   "step": "palette-typed-noclick",
+   "diff": 0.0,
+   "bbox": "None"
+  },
+  {
+   "step": "defect03-verdict",
+   "passed": false
+  },
+  {
+   "step": "escape-close",
+   "diff": 0.0
+  },
+  {
+   "step": "nav",
+   "row": "Inbox",
+   "x": 75,
+   "y": 90,
+   "diff": 0.0387
+  },
+  {
+   "step": "nav-verdict",
+   "row": "Inbox",
+   "hit": "(90, 0.0387)"
+  },
+  {
+   "step": "nav",
+   "row": "Reports",
+   "x": 75,
+   "y": 215,
+   "diff": 0.0246
+  },
+  {
+   "step": "nav-verdict",
+   "row": "Reports",
+   "hit": "(215, 0.0246)"
+  },
+  {
+   "step": "nav",
+   "row": "Search",
+   "x": 75,
+   "y": 415,
+   "diff": 0.0162
+  },
+  {
+   "step": "nav-verdict",
+   "row": "Search",
+   "hit": "(415, 0.0162)"
+  },
+  {
+   "step": "nav",
+   "row": "Shell",
+   "x": 75,
+   "y": 565,
+   "diff": 0.0337
+  },
+  {
+   "step": "nav-verdict",
+   "row": "Shell",
+   "hit": "(565, 0.0337)"
+  },
+  {
+   "step": "nav",
+   "row": "Organizations",
+   "x": 75,
+   "y": 165,
+   "diff": 0.0171
+  },
+  {
+   "step": "nav-verdict",
+   "row": "Organizations",
+   "hit": "(165, 0.0171)"
+  },
+  {
+   "step": "nav",
+   "row": "Knowledge",
+   "x": 75,
+   "y": 190,
+   "diff": 0.0191
+  },
+  {
+   "step": "nav-verdict",
+   "row": "Knowledge",
+   "hit": "(190, 0.0191)"
+  },
+  {
+   "step": "nav",
+   "row": "Settings",
+   "x": 75,
+   "y": 515,
+   "diff": 0.0226
+  },
+  {
+   "step": "nav-verdict",
+   "row": "Settings",
+   "hit": "(515, 0.0226)"
+  },
+  {
+   "step": "nav",
+   "row": "Inbox",
+   "x": 130,
+   "y": 90,
+   "diff": 0.0249
+  }
+ ]
+}

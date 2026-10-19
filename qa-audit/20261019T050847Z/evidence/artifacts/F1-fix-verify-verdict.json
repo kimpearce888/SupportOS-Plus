@@ -1,0 +1,39 @@
+{
+ "palette_focus": false,
+ "escape_close": false,
+ "rows": {
+  "Inbox": [
+   90,
+   0.0387
+  ],
+  "Reports": [
+   215,
+   0.0246
+  ],
+  "Search": [
+   415,
+   0.0162
+  ],
+  "Shell": [
+   565,
+   0.0337
+  ],
+  "Organizations": [
+   165,
+   0.0171
+  ],
+  "Knowledge": [
+   190,
+   0.0191
+  ],
+  "Settings": [
+   515,
+   0.0226
+  ]
+ },
+ "x130": [
+  90,
+  0.0249
+ ],
+ "pass": false
+}

@@ -1,0 +1,41 @@
+{
+ "session": "F2-palette-focus",
+ "steps": [
+  {
+   "step": "boot",
+   "window": "(0, 0, 1180, 760)"
+  },
+  {
+   "step": "x-focus-set"
+  },
+  {
+   "step": "button-click",
+   "y": 601,
+   "diff": 0.0
+  },
+  {
+   "step": "button-click",
+   "y": 595,
+   "diff": 0.0
+  },
+  {
+   "step": "button-click",
+   "y": 607,
+   "diff": 0.0
+  },
+  {
+   "step": "button-click",
+   "y": 589,
+   "diff": 0.0
+  },
+  {
+   "step": "button-click",
+   "y": 613,
+   "diff": 0.0
+  },
+  {
+   "step": "abort",
+   "reason": "palette never opened via button band"
+  }
+ ]
+}
