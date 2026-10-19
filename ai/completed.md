@@ -740,3 +740,62 @@ never silently dropped.
     error reporting, and recovery are verified against a mock OpenAI-compatible server.
   - No production credentials, no mandatory cloud dependencies, no cloud fallbacks were
     added: all fixtures and credentials are generated in-test.
+
+**46. Performance pass**
+- Work: the `#[ignore]`d measurement harness in `crates/core/src/bench.rs` (procedures
+  documented in its module doc) plus this entry's recorded measurements. Two bench-harness
+  bugs were found and fixed while making the harness actually runnable (both bench-only;
+  the production provider is unaffected — verified against `helpscout_real.rs`'s HAL
+  round-trip): (1) `LocalBenchProvider` parsed its own HAL-style `"/N"` next-cursor with a
+  plain integer `parse()`, which fails and silently restarts at page 0 **forever** — the
+  full bench never completed a single phase before this fix; (2) the seeding skipped the
+  app's post-sync `rebuild_search_index` job step, so the FTS search phase found 0 hits
+  and panicked. Also added seeding progress output and `bench_diagnose_write_path`
+  (write-path isolation diagnostic).
+- Reproducible procedures: `cargo test -p supportos-plusplus-core bench -- --ignored
+  --nocapture` (full DB suite, ~1 min); `bench_boot_migrations_on_fresh_db`; startup and
+  max-RSS measured on the smoke path (`SPP_SMOKE=1`, AppImage with
+  `APPIMAGE_EXTRACT_AND_RUN=1`) via repeated wall-clock runs plus a getrusage-based peak
+  RSS reader (`/usr/bin/time -v` where available; a python
+  `resource.getrusage(RUSAGE_CHILDREN)` wrapper where not). Environment note: the
+  container disk was 97% full when the first audit attempts ran; freed to ~80%
+  (leaked test artifacts) before all measurements below.
+- **Actual measurements** (dataset: 3 000 conversations × 3 threads, 5 000 customers,
+  100 tags, 50 users, 3 mailboxes, 3 000 × 384-dim vectors; DB = 28.4 MiB + 9.7 MiB WAL;
+  two full bench runs, both green, 58.99 s / 59.69 s total):
+  - Startup: release binary 10–17 ms (smoke boot chain); AppImage self-extract + boot
+    37–41 ms; `db::open` + all migrations 914 ms cold / 4.1–4.2 ms warm.
+  - Memory (peak RSS): 15.2–15.8 MiB release-binary boot; 15.0–15.6 MiB AppImage boot;
+    84.0 MiB during the full large-dataset bench.
+  - DB operations: customers ingest 6 240–6 547/s (5 000 in 0.76–0.80 s); conversations
+    + threads ingest 212–218/s (3 000 × 3 in 13.6–14.2 s); post-sync FTS rebuild
+    9.4–9.7 s for 3 000 conversations; `interaction_current::backfill_all` 14.4–14.7 s;
+    incremental re-walk (no changes) 19.7 s (153 conv/s).
+  - Responsiveness (the query paths that bound UI latency; interactive GUI behavior was
+    previously verified in batch 9's Xvfb drive): inbox list page 6.6 ms unfiltered /
+    4.2–4.3 ms status filter / 17.5–18.1 ms tag filter / 15.7–17.1 ms deep page
+    (offset 2000); conversation detail 188–210 µs; FTS search all scopes 98.6–102.6 ms
+    (40 hits); vector KNN top-20 7.3–7.6 ms; `count_by_entity` 440–444 µs; vector upsert
+    5 316–5 469 points/s.
+  - Write-path diagnostic: raw INSERTs 60 608/s; `upsert_customer` direct 6 597/s;
+    via `DbHandle::with_write` 6 680/s; guard per 50-row page 6 799/s — the DbHandle
+    pool adds ~zero overhead.
+- Confirmed bottlenecks found and fixed: the two bench-harness bugs above, plus (via
+  item 45's tests) the production OAuth token-save `CHECK (id = 1)` failure and the
+  LM Studio non-2xx error opacity. **No production DB bottleneck was confirmed at this
+  scale**: PRAGMAs are already WAL + `synchronous=NORMAL` + 5 s busy timeout; the write
+  path sustains 6.2 k customers/s; every read path is interactive (< 18 ms inbox pages,
+  < 103 ms FTS, < 8 ms KNN). Conversation ingest at ~215/s is dominated by per-conversation
+  thread fetching + tag joins — a background-sync cost, not a UI one (a 50k-conversation
+  account's initial sync would take ≈ 4 min one-time; incremental syncs only re-walk
+  changed rows).
+- Verification: full bench green twice (all assertions: inbox < 5 s, FTS < 5 s,
+  re-walk < 300 s, DB size sanity); boot-migration bench green; `cargo test --workspace`
+  304/304 (+4 ignored: 2 bench measurements, 1 env-gated live LM Studio, 1 diagnostic);
+  fmt + clippy `-D warnings` clean; AppImage smoke exit 0 (re-verified during the
+  audit pass); **CI run `39200697607` on `fccbdfc` and run `39200713478` on `87a3d81`:
+  both jobs success each**.
+
+The plan is now fully exhausted: 46 of 46 items completed across 10 batches. `plan.md`
+empty, `progress.md` empty. The one remaining untestable item is documented above under
+item 45 (real Help Scout account verification requires external credentials).

@@ -6,7 +6,7 @@
 
 ## Items
 
-(none — the plan is exhausted. Items 45-46 are the final batch, now in
-`progress.md` with their user-directed re-scoping: no user-provided
-credentials, local mock-server integration tests + local performance
-measurement instead.)
+(none — the plan is exhausted: all 46 items completed and verified across
+10 batches. The final batch (items 45-46, local mock-server integration
+tests + local performance measurement) is recorded in `completed.md`
+under its user-directed re-scoping: no user-provided credentials.)
