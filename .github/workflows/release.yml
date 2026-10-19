@@ -34,13 +34,18 @@ jobs:
       - name: Install pinned Rust toolchain
         # rust-toolchain.toml is the single source of truth for the exact
         # toolchain version; `rustup toolchain install` reads it directly.
+        # GITHUB_PATH only affects later steps, so the env file is sourced
+        # in-step as well.
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
             | sh -s -- -y --profile default --default-toolchain none
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          . "$HOME/.cargo/env"
           rustup toolchain install
           rustup show active-toolchain
           rustc --version
+
+      - name: Put cargo on PATH for later steps
+        run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Format check
         run: cargo fmt --all --check
