@@ -80,6 +80,10 @@ jobs:
 
       - name: Stage dist/ (versioned names + SHA-256 checksums)
         run: |
+          # checkout@v4 registers its safe-directory exception under a
+          # temporary HOME; this shell (different HOME in the container)
+          # needs its own exception before using git in the workspace.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           VERSION=$(awk -F'"' '/^version =/{print $2; exit}' Cargo.toml)
           mkdir -p dist
           cp target/appimage/SupportOS-Plus-x86_64.AppImage \
