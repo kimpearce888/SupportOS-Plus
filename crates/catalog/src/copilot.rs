@@ -95,7 +95,7 @@ impl CopilotTool {
             Self::GetSimilarConversations => "Find similar conversations via vector search.",
             Self::GetIssueClusters => "Get clusters of similar issues.",
             Self::GetAiAnalysis => "Get AI analysis for a conversation.",
-            Self::GetSupportosMetadata => "Get SupportOS++ version and configuration metadata.",
+            Self::GetSupportosMetadata => "Get SupportOS+ version and configuration metadata.",
             Self::GetAiAttributes => "Get AI-derived attributes for a conversation.",
             Self::SearchIncidents => "Search incidents by status or severity.",
             Self::SearchCustomObjects => "Search custom object types.",

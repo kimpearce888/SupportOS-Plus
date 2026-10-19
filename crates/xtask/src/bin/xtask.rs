@@ -3,7 +3,7 @@ use std::process::Command;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "xtask", version, about = "SupportOS++ developer entry point", long_about = None)]
+#[command(name = "xtask", version, about = "SupportOS+ developer entry point", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -23,6 +23,18 @@ enum Cmd {
         /// Path to an existing appimagetool (downloaded when absent).
         #[arg(long, env = "APPIMAGETOOL")]
         appimagetool: Option<String>,
+        /// Skip the cargo release build (the binary already exists).
+        #[arg(long)]
+        skip_build: bool,
+        /// Extra arguments forwarded to `cargo build`.
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+    /// Build the release shell and pack it into a .deb package.
+    Deb {
+        /// Output directory (default: target/deb).
+        #[arg(long, default_value = "target/deb")]
+        out: String,
         /// Skip the cargo release build (the binary already exists).
         #[arg(long)]
         skip_build: bool,
@@ -77,6 +89,11 @@ fn main() -> anyhow::Result<()> {
             skip_build,
             args,
         } => run_package(&out, appimagetool.as_deref(), skip_build, &args),
+        Cmd::Deb {
+            out,
+            skip_build,
+            args,
+        } => run_deb(&out, skip_build, &args),
         Cmd::Migrate { db } => run_migrate(&db),
         Cmd::Backup { db, backups_dir } => run_backup(&db, &backups_dir),
         Cmd::Restore { db, backup } => run_restore(&db, &backup),
@@ -157,6 +174,19 @@ fn run_package(
         skip_build,
     })?;
     println!("package: AppImage at {}", out.display());
+    Ok(())
+}
+
+fn run_deb(out_dir: &str, skip_build: bool, extra_args: &[String]) -> anyhow::Result<()> {
+    // Debian policy naming: <package>_<version>_<arch>.deb, produced by
+    // `dpkg-deb --root-owner-group` from the staged tree.
+    let out = spp_xtask::package::package_deb(spp_xtask::package::DebOptions {
+        workspace_root: workspace_root(),
+        out_dir: workspace_root().join(out_dir),
+        extra_cargo_args: extra_args.to_vec(),
+        skip_build,
+    })?;
+    println!("deb: package at {}", out.display());
     Ok(())
 }
 

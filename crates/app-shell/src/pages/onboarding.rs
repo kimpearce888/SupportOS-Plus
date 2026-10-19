@@ -126,7 +126,7 @@ impl OnboardingPage {
             self.reload(db);
         }
 
-        ui.heading("Welcome to SupportOs-Plus");
+        ui.heading("Welcome to SupportOS+");
         ui.weak(
             "Connect Help Scout, or start in demo mode with a simulated account. \
              Everything stays in your local database.",

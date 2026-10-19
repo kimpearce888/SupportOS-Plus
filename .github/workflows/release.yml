@@ -1,0 +1,343 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build + test + package (ubuntu:22.04, glibc 2.35 baseline)
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - name: Install build essentials
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential curl ca-certificates git
+
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        # rust-toolchain.toml is the single source of truth for the exact
+        # toolchain version; `rustup toolchain install` reads it directly.
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile default --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup toolchain install
+          rustup show active-toolchain
+          rustc --version
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Clippy (sandbox feature)
+        run: cargo clippy -p supportos-plusplus-core --all-targets --features sandbox -- -D warnings
+
+      - name: Test (workspace)
+        run: cargo test --workspace
+
+      - name: Test (sandbox feature)
+        run: cargo test -p supportos-plusplus-core --features sandbox
+
+      # The release build carries the Landlock + seccomp parse sandbox
+      # in both packages, exactly as `xtask package`/`xtask deb` enable it.
+      - name: Release build (sandbox feature on)
+        run: cargo build --release -p supportos-plusplus-app-shell --features supportos-plusplus-core/sandbox
+
+      - name: Package the AppImage
+        run: cargo run -p supportos-plusplus-xtask -- package --skip-build
+
+      - name: Package the .deb
+        run: cargo run -p supportos-plusplus-xtask -- deb --skip-build
+
+      - name: Stage dist/ (versioned names + SHA-256 checksums)
+        run: |
+          VERSION=$(awk -F'"' '/^version =/{print $2; exit}' Cargo.toml)
+          mkdir -p dist
+          cp target/appimage/SupportOS-Plus-x86_64.AppImage \
+             "dist/SupportOS-Plus-${VERSION}-x86_64.AppImage"
+          cp target/deb/supportos-plus_*_amd64.deb \
+             "dist/supportos-plus_${VERSION}_amd64.deb"
+          cd dist
+          sha256sum SupportOS-Plus-* supportos-plus_* > SHA256SUMS.txt
+          {
+            echo "product: SupportOS+ (SupportOS-Plus)"
+            echo "version: ${VERSION}"
+            echo "commit: $(git rev-parse HEAD)"
+            echo "built-on: ubuntu:22.04 container (glibc 2.35 baseline)"
+            echo "built-at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > BUILD-INFO.txt
+          cat SHA256SUMS.txt BUILD-INFO.txt
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+  verify-deb:
+    name: "verify .deb on ${{ matrix.container }}"
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        container: [ubuntu:22.04, ubuntu:24.04, debian:12]
+    container: ${{ matrix.container }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Integrity check (uploaded checksums)
+        run: cd dist && sha256sum -c SHA256SUMS.txt
+
+      - name: Install via APT (dependency resolution)
+        # Installing the local .deb through APT must resolve and fetch
+        # every declared dependency from the distribution repository —
+        # no manual dependency handling, no terminal-only steps.
+        run: |
+          apt-get update
+          apt-get install -y ./dist/supportos-plus_*_amd64.deb
+
+      - name: Package metadata + installed files
+        run: |
+          dpkg -s supportos-plus | sed -n '1,12p'
+          test -x /usr/bin/supportos-plusplus
+          test -f /usr/share/applications/supportos-plusplus.desktop
+          for s in 32x32 128x128 256x256 1024x1024; do
+            test -f "/usr/share/icons/hicolor/$s/apps/supportos-plusplus.png" \
+              || { echo "missing $s icon"; exit 1; }
+          done
+
+      - name: Validate the desktop entry
+        run: |
+          apt-get install -y --no-install-recommends desktop-file-utils
+          desktop-file-validate /usr/share/applications/supportos-plusplus.desktop
+
+      - name: Smoke test (full boot chain, no display needed)
+        # SPP_SMOKE=1 verifies logging, single-instance lock, all boot
+        # migrations, boot services, background workers and the loopback
+        # listener, then exits 0 without opening a window. It also
+        # performs first-run initialization (the SQLite database under
+        # $XDG_DATA_HOME) exactly as a real launch would.
+        run: SPP_SMOKE=1 /usr/bin/supportos-plusplus
+
+      - name: GUI launch under Xvfb (declared dependencies only)
+        # The only test-env additions are the virtual display and the
+        # software GL driver — the "host display/driver" class; every
+        # client library must come from the .deb's own Depends set.
+        run: |
+          apt-get install -y --no-install-recommends \
+            xvfb libgl1-mesa-dri libgl1-mesa-glx mesa-vulkan-drivers
+          set +e
+          timeout --signal=TERM 25s xvfb-run -a -s "-screen 0 1280x800x24" \
+            /usr/bin/supportos-plusplus
+          rc=$?
+          set -e
+          # 124 = the timeout fired with the app still alive: window
+          # created, render loop running, no library missing.
+          test "$rc" -eq 124
+
+      - name: Reinstall (dpkg file-replacement / upgrade mechanics)
+        run: |
+          apt-get install -y --reinstall ./dist/supportos-plus_*_amd64.deb
+          SPP_SMOKE=1 /usr/bin/supportos-plusplus
+
+      - name: Uninstall keeps user data, purge clears the record
+        run: |
+          DATA_DIR="$HOME/.local/share/supportos-plusplus"
+          test -f "$DATA_DIR/supportos-plusplus.db" \
+            || { echo "expected first-run DB under $DATA_DIR"; exit 1; }
+          apt-get remove -y supportos-plus
+          test ! -e /usr/bin/supportos-plusplus
+          test ! -e /usr/share/applications/supportos-plusplus.desktop
+          test -f "$DATA_DIR/supportos-plusplus.db" \
+            && echo "user data survived uninstall"
+          apt-get purge -y supportos-plus
+          if dpkg -s supportos-plus >/dev/null 2>&1; then
+            echo "package still known after purge"; exit 1
+          fi
+
+  verify-appimage:
+    name: verify AppImage (ubuntu-latest, glibc newer)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Integrity check (uploaded checksums)
+        run: |
+          chmod +x dist/SupportOS-Plus-*-x86_64.AppImage
+          cd dist && sha256sum -c SHA256SUMS.txt
+
+      - name: Smoke test (boot chain inside the AppImage)
+        # APPIMAGE_EXTRACT_AND_RUN self-extracts and executes AppRun —
+        # validating paths, icons and entry without FUSE.
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 \
+            dist/SupportOS-Plus-*-x86_64.AppImage
+
+      - name: GUI launch under Xvfb (self-contained runtime)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgl1-mesa-dri libgl1-mesa-glx mesa-vulkan-drivers
+          set +e
+          APPIMAGE_EXTRACT_AND_RUN=1 timeout --signal=TERM 25s \
+            xvfb-run -a -s "-screen 0 1280x800x24" \
+            dist/SupportOS-Plus-*-x86_64.AppImage
+          rc=$?
+          set -e
+          test "$rc" -eq 124
+
+  release:
+    name: publish the GitHub Release
+    needs: [verify-deb, verify-appimage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Resolve tag + version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${{ inputs.tag }}"
+          fi
+          case "$TAG" in
+            v*) ;;
+            *) echo "tag must look like v0.2.0, got: '$TAG'"; exit 1 ;;
+          esac
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Verify artifacts match this exact source commit
+        run: |
+          SHA=$(git rev-parse HEAD)
+          grep -q "commit: $SHA" dist/BUILD-INFO.txt \
+            || { echo "BUILD-INFO commit mismatch"; exit 1; }
+          grep -q "version: $VERSION" dist/BUILD-INFO.txt \
+            || { echo "BUILD-INFO version mismatch"; exit 1; }
+
+      - name: Compose release notes
+        run: |
+          {
+            echo "Install-ready Linux packages for **SupportOS+** (SupportOS-Plus) $VERSION."
+            echo
+            echo "Built and verified by CI from commit $(git rev-parse HEAD) on ubuntu:22.04"
+            echo "(glibc 2.35 baseline); artifacts are byte-identical to the files tested below."
+            echo
+            echo "## Downloads"
+            echo
+            echo "| File | SHA-256 |"
+            echo "|---|---|"
+            sha256sum dist/SupportOS-Plus-* dist/supportos-plus_* \
+              | while read -r sum f; do
+                  echo "| \`$(basename "$f")\` | \`$sum\` |"
+                done
+            echo
+            echo "## Install"
+            echo
+            echo '**.deb** — Ubuntu 22.04 LTS / 24.04 LTS, Debian 12+ (x86_64):'
+            echo
+            echo '```sh'
+            echo "sudo apt install ./supportos-plus_${VERSION}_amd64.deb"
+            echo '```'
+            echo
+            echo 'APT downloads and resolves every declared dependency automatically.'
+            echo 'Launch from the desktop application menu as **SupportOS+**, or run'
+            echo '`supportos-plusplus`. The first run initializes the local database'
+            echo '(`$XDG_DATA_HOME/supportos-plusplus`) by itself — nothing to configure.'
+            echo
+            echo '**AppImage** — any modern x86_64 desktop (glibc >= 2.35):'
+            echo
+            echo '```sh'
+            echo "chmod +x SupportOS-Plus-${VERSION}-x86_64.AppImage"
+            echo "./SupportOS-Plus-${VERSION}-x86_64.AppImage"
+            echo '```'
+            echo
+            echo 'Runs without installation; bundles everything except the host display'
+            echo 'server and GL/Vulkan driver. Use AppImageLauncher for desktop-menu'
+            echo 'integration, or launch it directly.'
+            echo
+            echo "## System requirements"
+            echo
+            echo "- CPU: x86_64 (amd64); OS: glibc 2.35+ (Ubuntu 22.04 LTS+, Debian 12+)"
+            echo "- A desktop session (X11 or Wayland); Mesa or any GPU driver"
+            echo "- ~200 MB free disk space; no compilation, no dev tools, no manual setup"
+            echo
+            echo "## Verified in CI for this release"
+            echo
+            echo "- fmt + clippy (\`-D warnings\`) + the full workspace test suite,"
+            echo "  including the Landlock/seccomp parse-sandbox feature"
+            echo "- .deb installed through APT on clean ubuntu:22.04, ubuntu:24.04 and"
+            echo "  debian:12 containers: dependency resolution, desktop entry + icons,"
+            echo "  boot-chain smoke, GUI launch under Xvfb with only declared"
+            echo "  dependencies, reinstall, uninstall (user data preserved), purge"
+            echo "- AppImage: boot-chain smoke + GUI launch under Xvfb"
+            echo "- SHA-256 checksums in \`SHA256SUMS.txt\`; every download link checked live"
+          } > body.md
+
+      - name: Create the release + upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/SupportOS-Plus-*-x86_64.AppImage \
+              dist/supportos-plus_*_amd64.deb dist/SHA256SUMS.txt \
+              dist/BUILD-INFO.txt --clobber
+          else
+            gh release create "$TAG" --target "$(git rev-parse HEAD)" \
+              --title "SupportOS+ ${VERSION}" --notes-file body.md \
+              dist/SupportOS-Plus-*-x86_64.AppImage \
+              dist/supportos-plus_*_amd64.deb \
+              dist/SHA256SUMS.txt dist/BUILD-INFO.txt
+          fi
+
+      - name: Verify the published release (links + checksums)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" --json tagName,isDraft,targetCommitish,assets
+          test "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "false"
+          cd dist
+          # Every browser_download_url must answer and match the recorded checksum.
+          gh release view "$TAG" --json assets -q '.assets[].browser_download_url' \
+            | while read -r url; do
+                echo "checking $url"
+                name=$(basename "$url")
+                curl -fsSL --retry 2 -o "/tmp/$name" "$url"
+                expected=$(sha256sum "$name" | awk '{print $1}')
+                actual=$(sha256sum "/tmp/$name" | awk '{print $1}')
+                test "$expected" = "$actual" || { echo "checksum mismatch for $name"; exit 1; }
+                echo "verified $name"
+              done

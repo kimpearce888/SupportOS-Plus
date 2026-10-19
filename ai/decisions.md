@@ -201,3 +201,43 @@ tests are the port insurance. Theme/sidebar: no migration (defaults + re-pick).
     main and deleted (local + remote) per maintainer instruction;
     single-branch main restored. Workspace after remediation: 306
     tests green, clippy/fmt clean, AppImage rebuilt.
+- 2026-10-19 — Release engineering batch (maintainer: audit the repo with
+  build-relevant code as the only source of truth; rename to SupportOS-Plus /
+  SupportOS+ where allowed; build, test and publish install-ready .deb +
+  .AppImage via GitHub Actions):
+  - **Audit:** README claims re-verified against source (crates, pages,
+    data dir, boot chain, packaging). Naming layers defined: SupportOS+
+    display name (window title, desktop Name, release title), SupportOS-Plus
+    identifier (repo, app_id/StartupWMClass, artifact base), supportos-plus
+    Debian package, supportos-plusplus internal crate/binary identifier
+    (Cargo names cannot carry +). GitHub repo renamed
+    SupportOs-Plus -> SupportOS-Plus (API PATCH; old URL redirects).
+  - **Packaging:** `xtask deb` added (stage_deb + package_deb, unit-tested
+    like stage_appdir): dpkg-deb --root-owner-group, policy-format control
+    (Package/Version/Arch/Installed-Size/Depends/Homepage/Description), no
+    maintainer scripts (system trigger providers own the caches; user data
+    under XDG_DATA_HOME is never package-owned), standard modes (0755/0644)
+    stamped independent of build umask. Depends declares the GUI toolkit's
+    runtime dlopen set (libxkbcommon/x11/GL/EGL/wayland client libs) since
+    ldd cannot see them — APT resolves everything on minimal systems; the
+    GL driver stays host-provided. Bug found by local dry-run: Rust `\n\`
+    string continuation eats the leading spaces Debian requires on
+    Description continuation lines — dpkg-deb rejected the control;
+    description is now built explicitly (deb_description()).
+  - **CI:** AppImage path renamed SupportOS-Plus-x86_64.AppImage; the job now
+    also builds the .deb (dpkg-deb -I + payload extraction + SPP_SMOKE) and
+    uploads both as artifacts.
+  - **Release workflow** (.github/workflows/release.yml, tag v* or manual):
+    build+full tests on ubuntu:22.04 (glibc 2.35 baseline, broadest compat);
+    SHA256SUMS + BUILD-INFO with the source commit; clean-container
+    verification of the .deb on ubuntu:22.04/24.04 and debian:12 (APT
+    dependency resolution, desktop-file-validate, boot smoke, GUI launch
+    under Xvfb with only declared deps, reinstall, uninstall keeps user
+    data, purge); AppImage smoke + GUI launch; release job refuses to
+    publish unless BUILD-INFO matches the tag commit and version, then
+    creates the versioned GitHub Release with both packages + checksums and
+    re-downloads every asset to verify links and SHA-256.
+  - **Verification protocol:** nothing claimed ready unless built and tested;
+    first-release upgrade coverage is via reinstall (file-replacement
+    mechanics) — a true prior-version upgrade activates from the next
+    release onward.

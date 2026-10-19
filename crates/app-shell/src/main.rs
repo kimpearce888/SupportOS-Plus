@@ -11,7 +11,7 @@
 
 fn main() {
     spp_core::logging::init();
-    tracing::info!("SupportOs-Plus native shell starting");
+    tracing::info!("SupportOS-Plus native shell starting");
 
     let app_config = spp_core::config::AppConfig::default();
     tracing::info!(?app_config.data_dir, "data directory");
@@ -19,7 +19,7 @@ fn main() {
     let lock = match spp_shell::single_instance::acquire(&app_config.data_dir) {
         Ok(lock) => lock,
         Err(e) => {
-            eprintln!("SupportOs-Plus: {e}");
+            eprintln!("SupportOS-Plus: {e}");
             std::process::exit(1);
         }
     };
@@ -31,7 +31,7 @@ fn main() {
         Ok(db) => db,
         Err(e) => {
             tracing::error!(error = %e, path = %db_path.display(), "failed to open SQLite DB");
-            eprintln!("SupportOs-Plus: failed to open SQLite DB: {e}");
+            eprintln!("SupportOS-Plus: failed to open SQLite DB: {e}");
             std::process::exit(1);
         }
     };
@@ -64,7 +64,7 @@ fn main() {
         Ok(host) => host,
         Err(e) => {
             tracing::error!(error = %e, "failed to start background workers");
-            eprintln!("SupportOs-Plus: failed to start background workers: {e}");
+            eprintln!("SupportOS-Plus: failed to start background workers: {e}");
             std::process::exit(1);
         }
     };
@@ -131,7 +131,7 @@ fn main() {
 
     if let Err(e) = spp_shell::run(options) {
         tracing::error!(error = %e, "shell failed");
-        eprintln!("SupportOs-Plus: shell failed: {e}");
+        eprintln!("SupportOS-Plus: shell failed: {e}");
         std::process::exit(1);
     }
 }
