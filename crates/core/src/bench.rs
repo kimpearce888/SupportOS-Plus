@@ -11,13 +11,24 @@
 //! cargo test -p supportos-plusplus-core bench -- --ignored --nocapture
 //! ```
 //!
-//! Assertions use deliberately generous bounds (order-of-magnitude
-//! regression guards, not machine-jitter guards). The measurements
-//! recorded in `completed.md` (final batch) come from this exact
-//! procedure on the development machine. Process startup time and max
-//! RSS of the real binary are measured separately with the release
-//! binary + AppImage smoke path — that procedure and its numbers are
-//! documented alongside these.
+//! Individually:
+//! - `bench_db_operations_on_large_dataset` — the full DB suite (~1 min:
+//!   seed 5 000 customers + 3 000 conversations × 3 threads, then time
+//!   inbox pages, detail, FTS, backfill, re-walk, vector upsert/KNN).
+//! - `bench_boot_migrations_on_fresh_db` — cold vs warm `db::open` +
+//!   `apply_all`.
+//! - `bench_diagnose_write_path` — write-path isolation (raw inserts vs
+//!   `upsert_customer` vs `DbHandle::with_write`), for locating future
+//!   regressions.
+//!
+//! Process startup time and max RSS of the real binary are measured
+//! separately against the release binary and the packaged AppImage on
+//! the smoke path (`SPP_SMOKE=1`, `APPIMAGE_EXTRACT_AND_RUN=1`): wall
+//! time via repeated `time` runs, peak RSS via any getrusage-based tool
+//! (`/usr/bin/time -v` where available; a python
+//! `resource.getrusage(RUSAGE_CHILDREN)` wrapper otherwise). The numbers
+//! recorded in `completed.md` (final batch) come from these exact
+//! procedures on the development machine.
 //!
 //! Scale (a solo-support-desk "realistically large" dataset):
 //! 3 000 conversations × 3 threads, 5 000 customers, 100 tags, 50 users,
@@ -282,15 +293,26 @@ impl crate::helpscout::HelpScoutProvider for LocalBenchProvider {
         &self,
         query: &ConversationQuery,
     ) -> crate::error::Result<Page<HsConversation>> {
+        // The cursor is the HAL-style "/N" next path, mirroring the real
+        // provider's `hal_next_path` shape; strip the slash before parsing
+        // it back into a page number (the old `c.parse()` on "/N" failed
+        // and silently restarted at page 0 forever).
         let page_no: usize = query
             .cursor
             .as_deref()
-            .and_then(|c| c.parse().ok())
+            .and_then(|c| c.trim_start_matches('/').parse().ok())
             .unwrap_or(0);
         let offset = page_no * PAGE_SIZE;
         let items: Vec<HsConversation> = (offset..(offset + PAGE_SIZE).min(N_CONVERSATIONS))
             .map(sample_conversation)
             .collect();
+        if page_no.is_multiple_of(10) {
+            println!(
+                "[bench] seeding conversations: page {}/{}",
+                page_no + 1,
+                N_CONVERSATIONS / PAGE_SIZE
+            );
+        }
         let next_cursor = if offset + PAGE_SIZE < N_CONVERSATIONS {
             Some((page_no + 1).to_string())
         } else {
@@ -309,12 +331,19 @@ impl crate::helpscout::HelpScoutProvider for LocalBenchProvider {
         let page_no: usize = query
             .cursor
             .as_deref()
-            .and_then(|c| c.parse().ok())
+            .and_then(|c| c.trim_start_matches('/').parse().ok())
             .unwrap_or(0);
         let offset = page_no * PAGE_SIZE;
         let items: Vec<HsCustomer> = (offset..(offset + PAGE_SIZE).min(N_CUSTOMERS))
             .map(sample_customer)
             .collect();
+        if page_no.is_multiple_of(20) {
+            println!(
+                "[bench] seeding customers: page {}/{}",
+                page_no + 1,
+                N_CUSTOMERS / PAGE_SIZE
+            );
+        }
         let next_cursor = if offset + PAGE_SIZE < N_CUSTOMERS {
             Some((page_no + 1).to_string())
         } else {
@@ -382,6 +411,88 @@ fn timeit<T>(label: &str, f: impl FnOnce() -> T) -> (std::time::Duration, T) {
     (elapsed, out)
 }
 
+/// Diagnostic: isolate where the ingest write path spends time.
+/// (a) raw single-row INSERTs in one transaction, (b) upsert_customer
+/// directly on a connection, (c) upsert_customer through DbHandle's
+/// write guard, (d) upsert_customer through SyncEngine::lock per page.
+#[test]
+#[ignore = "diagnostic; run with --ignored --nocapture"]
+fn bench_diagnose_write_path() {
+    let dir = temp_bench_dir("diag");
+    let _guard = TempDirGuard(dir.clone());
+    let db_path = dir.join("diag.db");
+    let mut conn = crate::db::open(&db_path).expect("open");
+    crate::bootstrap::apply_all(&mut conn).expect("migrations");
+
+    // (a) raw inserts, one transaction for all rows.
+    {
+        let tx = conn.transaction().expect("tx");
+        let started = Instant::now();
+        for i in 0..500 {
+            tx.execute(
+                "INSERT INTO tags (remote_id, name, color) VALUES (?1, ?2, '#000000')
+                 ON CONFLICT(remote_id) DO UPDATE SET name = excluded.name",
+                rusqlite::params![i, format!("tag-{i}")],
+            )
+            .expect("insert");
+        }
+        tx.commit().expect("commit");
+        println!(
+            "[diag] (a) 500 raw INSERTs, one tx: {:.1?} ({:.0}/s)",
+            started.elapsed(),
+            500.0 / started.elapsed().as_secs_f64()
+        );
+    }
+
+    // (b) upsert_customer directly on the connection (per-row tx).
+    {
+        let started = Instant::now();
+        for i in 0..500 {
+            crate::sync::upsert_customer(&conn, &sample_customer(i)).expect("upsert");
+        }
+        println!(
+            "[diag] (b) 500 upsert_customer on conn: {:.1?} ({:.0}/s)",
+            started.elapsed(),
+            500.0 / started.elapsed().as_secs_f64()
+        );
+    }
+
+    // (c) through the DbHandle write guard.
+    let db = DbHandle::new(conn);
+    {
+        let started = Instant::now();
+        for i in 500..1000 {
+            db.with_write(|c| crate::sync::upsert_customer(c, &sample_customer(i)))
+                .expect("upsert via handle");
+        }
+        println!(
+            "[diag] (c) 500 upsert_customer via with_write: {:.1?} ({:.0}/s)",
+            started.elapsed(),
+            500.0 / started.elapsed().as_secs_f64()
+        );
+    }
+
+    // (d) guard acquired once per 50-row page, like sync_customers.
+    {
+        let started = Instant::now();
+        for page in 0..10 {
+            let items: Vec<_> = (page * 50..page * 50 + 50).map(sample_customer).collect();
+            db.with_write(|c| -> crate::error::Result<()> {
+                for cust in &items {
+                    crate::sync::upsert_customer(c, cust).expect("upsert");
+                }
+                Ok(())
+            })
+            .expect("page upserts");
+        }
+        println!(
+            "[diag] (d) 500 upserts, guard per 50-row page: {:.1?} ({:.0}/s)",
+            started.elapsed(),
+            500.0 / started.elapsed().as_secs_f64()
+        );
+    }
+}
+
 /// Seed the reference data + customers + conversations through the real
 /// sync-engine write path and return the handle.
 fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
@@ -432,6 +543,21 @@ fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
         "[bench]   -> {:.0} conversations/s (incl. thread fetch + upsert + FTS + tags)",
         N_CONVERSATIONS as f64 / t_convs.as_secs_f64()
     );
+
+    // The app populates FTS after an initial sync via the
+    // `rebuild_search_index` worker job; mirror that exact step so the
+    // seeded data is searchable (the earlier version skipped this and the
+    // search phase found 0 hits).
+    let (t_fts_build, n) = timeit(
+        "post-sync FTS rebuild (rebuild_search_index job path)",
+        || {
+            db.with_write(|c| crate::search::rebuild_indexes(c))
+                .expect("fts rebuild")
+        },
+    );
+    println!("[bench]   -> FTS indexed {n} conversations");
+    assert!(n > 0, "the FTS rebuild must index the seeded corpus");
+    let _ = t_fts_build;
 
     db
 }
