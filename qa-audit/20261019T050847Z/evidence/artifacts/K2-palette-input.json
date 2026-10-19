@@ -1,0 +1,31 @@
+{
+ "session": "K2-palette-input",
+ "steps": [
+  {
+   "step": "boot",
+   "window": "(0, 0, 1180, 760)"
+  },
+  {
+   "step": "palette-open",
+   "diff": 0.03591015625
+  },
+  {
+   "step": "path-A-single-click",
+   "focus_diff": 0.0004521484375,
+   "typed_diff": 0.0
+  },
+  {
+   "step": "path-B-tab",
+   "tab_diff": 0.0,
+   "typed_diff": 0.0
+  },
+  {
+   "step": "path-C-dclick",
+   "typed_diff": 0.0
+  },
+  {
+   "step": "escape",
+   "close_diff": 0.0
+  }
+ ]
+}

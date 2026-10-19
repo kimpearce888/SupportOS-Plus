@@ -208,14 +208,14 @@ class Session:
         """Fraction of pixels differing beyond tol (0..1)."""
         import numpy as np
         ia, ib = Session._pair(a, b)
-        return float(((ia - ib).abs() > tol).any(axis=2).mean())
+        return float((np.abs(ia - ib) > tol).any(axis=2).mean())
 
     @staticmethod
     def diff_bbox(a, b, tol: int = 12):
         """Bounding box (x0,y0,x1,y1) of differing pixels, or None."""
         import numpy as np
         ia, ib = Session._pair(a, b)
-        m = ((ia - ib).abs() > tol).any(axis=2)
+        m = (np.abs(ia - ib) > tol).any(axis=2)
         if not m.any():
             return None
         ys, xs = np.where(m)

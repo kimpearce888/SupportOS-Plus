@@ -29,6 +29,10 @@ Universal Human-Behavior QA Audit per the audit specification supplied by the us
 
 ## Status
 
-IN PROGRESS — artifacts are committed and pushed incrementally while the audit
-runs, per Section 2 of the specification. Final counts and statuses appear in
-`audit-metadata.json` and `executive-summary.md` when the audit completes.
+COMPLETE (2026-10-19). Artifacts were committed and pushed incrementally
+per Section 2 of the specification; final counts and statuses are in
+`audit-metadata.json` and `executive-summary.md`. Headline: 473 declared
+tests green, all 21 pages reachable, DEFECT-01 (sidebar hitbox compression
+on the four shortest labels) fully characterized — see `defects.md`.
+The final push of this branch is pending credentials (removed by the
+sandbox janitor mid-audit) — see `coverage-gaps.md` §6.

@@ -1,0 +1,18 @@
+feature_pair,combination_tested,result,evidence_or_reason
+navigation+palette,reach every page AND overlay on top,PASS: palette opens over every page state tested (dashboard base),A22; K1/K3
+navigation+search,dead-row workaround + palette query,PASS: both mechanisms reach search surfaces; search page reachable via x=10 click,K3
+palette+search,typed query drives scoped search,PARTIAL: pipeline proven (no-hints flip); hit-click navigation blocked on empty DB,K3-30
+boot+workers,first boot arms all workers,PASS: workers + loopback + backup observed on every session,logs/*.log
+webhook+jobs,ingested webhook enqueues sync job,PASS (tests),it_loopback
+oauth+sync,token acquisition then engine runs against provider,PASS (tests): exchange then fixture sync in-session,it_loopback; it_sync
+oauth+secrets,tokens persisted through encrypted envelope,PASS (tests),it_loopback
+lmstudio+ai_features,model availability gating + error surfacing,PASS (tests): non-2xx status+body surfaces to caller,it_lm_studio
+backup+boot,fresh boot creates automatic backup,PASS: observed per session,logs + qa-profile artifacts
+search+knowledge,FTS5 knowledge search with visibility,PASS (tests),search unit tests
+demo+jobs,simulated message enqueues conversation sync job,PASS (tests): enqueue path; GUI tile not clicked,demo unit tests
+theme+persistence,theme toggle persists across restart,COVERED BY TESTS ONLY (GUI not exercised),settings unit tests
+operations+inbox,drill-down tiles navigate into inbox,NOT RUN (tile positions unmapped; janitor budget),coverage-gaps §1
+incidents+issue_radar,issue links on incidents,NOT RUN (page-level GUI untested),coverage-gaps §1
+automation+webhook,event rules on ingested webhooks,PASS (tests) for rule evaluation core,automation unit tests
+ai_center+lmstudio,pipeline runs model calls through client,PASS (tests) via mock,it_lm_studio + ai_pipeline unit tests
+cross-feature exclusions,all page-level control interactions (255 controls),NOT RUN — environment janitor kills sustained-input sessions; mapped to test coverage where backend behavior exists,coverage-gaps §1; existing-test-coverage.md
