@@ -58,6 +58,21 @@ const ICON_SIZES: &[(&str, &str)] = &[
 const APPIMAGETOOL_URL: &str = "https://github.com/AppImage/appimagetool/releases/download/\
                                 continuous/appimagetool-x86_64.AppImage";
 
+/// Host libraries that must ship inside the AppImage. winit loads the
+/// X11 keyboard stack via `dlopen` at window creation
+/// (`xkbcommon-dl`), and not every Linux host ships the X11 flavor
+/// (GUI-less servers, runners, containers), which would leave the
+/// packaged app unable to open a window on exactly those machines the
+/// AppImage exists for. The trio is MIT/X11-licensed, glibc-free and a
+/// few hundred KiB — safe and cheap to redistribute inside the image.
+/// Found on the build host via `ldconfig -p` and copied into
+/// `usr/lib`; `AppRun` puts that directory on `LD_LIBRARY_PATH`.
+const BUNDLED_HOST_LIBS: &[&str] = &[
+    "libxkbcommon.so.0",
+    "libxkbcommon-x11.so.0",
+    "libxcb-xkb.so.1",
+];
+
 /// dpkg architecture for the current build host.
 ///
 /// # Errors
@@ -137,6 +152,7 @@ pub fn package(opts: PackageOptions) -> anyhow::Result<PathBuf> {
 
     let appdir = opts.out_dir.join(format!("{BINARY_NAME}.AppDir"));
     stage_appdir(&opts.workspace_root, &appdir)?;
+    ensure_host_libs_bundled(&appdir)?;
 
     let tool = resolve_appimagetool(&opts.workspace_root, opts.appimagetool.as_deref())?;
     let output = opts.out_dir.join(format!("{PRODUCT_ID}-x86_64.AppImage"));
@@ -287,10 +303,12 @@ pub fn stage_appdir(workspace_root: &Path, appdir: &Path) -> anyhow::Result<()> 
     copy_or_link(&root_icon, &dir_icon)?;
 
     // AppRun shim: resolve the real AppDir even when symlinked from
-    // $HOME/.local/bin after extraction.
+    // $HOME/.local/bin after extraction; put the bundled keyboard libs
+    // ahead of the host lookup path.
     let apprun = format!(
         "#!/bin/sh\n\
          HERE=\"$(dirname \"$(readlink -f \"$0\")\")\"\n\
+         export LD_LIBRARY_PATH=\"$HERE/usr/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\"\n\
          exec \"$HERE/usr/bin/{BINARY_NAME}\" \"$@\"\n"
     );
     let apprun_path = appdir.join("AppRun");
@@ -471,6 +489,51 @@ fn make_executable(_path: &Path) -> anyhow::Result<()> {
     anyhow::bail!("desktop packaging is Linux-only")
 }
 
+/// Parse an `ldconfig -p` cache and find the exact library name.
+/// Cache lines look like `\t<name> (flags) => <path>`; only the first
+/// token is the library name, and the entry is only valid when the
+/// path exists on disk.
+fn find_lib_in_ldconfig(cache: &str, name: &str) -> Option<PathBuf> {
+    cache.lines().find_map(|line| {
+        let (key, path) = line.split_once("=>")?;
+        let cached_name = key.split_whitespace().next()?;
+        if cached_name != name {
+            return None;
+        }
+        let path = path.trim();
+        Path::new(path).is_file().then(|| PathBuf::from(path))
+    })
+}
+
+/// Copy [`BUNDLED_HOST_LIBS`] from the build host into the AppDir so
+/// the AppImage is self-contained on GUI-less hosts.
+///
+/// # Errors
+/// Fails with an apt-oriented hint when the build host itself lacks a
+/// library — shipping an AppImage that cannot open a window would be
+/// worse than failing the build.
+fn ensure_host_libs_bundled(appdir: &Path) -> anyhow::Result<()> {
+    let out = Command::new("ldconfig")
+        .arg("-p")
+        .output()
+        .map_err(|e| anyhow::anyhow!("cannot run ldconfig -p: {e}"))?;
+    anyhow::ensure!(out.status.success(), "ldconfig -p failed");
+    let cache = String::from_utf8_lossy(&out.stdout);
+    let lib_dir = appdir.join("usr").join("lib");
+    fs::create_dir_all(&lib_dir)?;
+    for lib in BUNDLED_HOST_LIBS {
+        let path = find_lib_in_ldconfig(&cache, lib).ok_or_else(|| {
+            anyhow::anyhow!(
+                "host library {lib} not found — install \
+                 libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1 on the build host \
+                 so the AppImage can bundle them"
+            )
+        })?;
+        fs::copy(&path, lib_dir.join(lib))?;
+    }
+    Ok(())
+}
+
 /// Locate appimagetool: explicit override → cached download → fresh
 /// download into the cache.
 fn resolve_appimagetool(
@@ -590,9 +653,30 @@ mod tests {
             assert!(mode & 0o111 != 0, "AppRun must be executable");
         }
 
-        // AppRun must reference the real binary path.
+        // AppRun must reference the real binary path and prepend the
+        // bundled library directory.
         let apprun = fs::read_to_string(appdir.join("AppRun")).expect("AppRun");
         assert!(apprun.contains(&format!("usr/bin/{BINARY_NAME}")));
+        assert!(apprun.contains("export LD_LIBRARY_PATH=\"$HERE/usr/lib"));
+    }
+
+    #[test]
+    fn ldconfig_parse_matches_exact_library_names_only() {
+        let root = temp_root("ldcache");
+        let lib_a = root.join("libxkbcommon.so.0");
+        fs::write(&lib_a, b"fake lib").expect("fake lib file");
+        let cache = format!(
+            "\tlibxkbcommon.so (libc6,x86-64) => /nowhere/libxkbcommon.so\n\
+             \tlibxkbcommon.so.0 (libc6,x86-64) => {}\n\
+             \tlibxkbcommon-x11.so.0 (libc6,x86-64) => /nowhere/libxkbcommon-x11.so.0\n",
+            lib_a.display()
+        );
+        let found = find_lib_in_ldconfig(&cache, "libxkbcommon.so.0").expect("exact match");
+        assert_eq!(found, lib_a);
+        // No fuzzy prefix matching and no hits for entries whose path
+        // does not exist on disk.
+        assert!(find_lib_in_ldconfig(&cache, "libxkbcommon.so").is_none());
+        assert!(find_lib_in_ldconfig(&cache, "libxkbcommon-x11.so.0").is_none());
     }
 
     #[test]
