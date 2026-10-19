@@ -664,7 +664,8 @@ gap). `plan.md` is empty, `progress.md` is empty.
 (138 app-shell incl. 5 new import tests + 120 core + 2 xtask) · core `--features sandbox`
 125/125 · final AppImage rebuilt via the updated xtask (11.4 MB, 15 sandbox strings,
 "Import documents" present, smoke exit 0) · startup baseline: ~10 ms boot chain, 40–100 ms
-AppImage self-extract+boot.
+AppImage self-extract+boot · CI run `39187268977` on `810dd3e`: **both jobs success**
+(fmt/clippy/test/sandbox/deny and AppImage build + smoke test, every step green).
 
 Items 45 (real-service verification — blocked on user-provided Help Scout credentials)
 and 46 (optional performance pass) remain in `plan.md` awaiting user input; they were
