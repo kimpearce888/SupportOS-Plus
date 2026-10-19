@@ -1,0 +1,9 @@
+{
+ "session": "B1-sidebar-scan",
+ "steps": [
+  {
+   "step": "boot",
+   "window": "(0, 0, 1180, 760)"
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "session": "harness-selftest",
+ "steps": [
+  {
+   "step": "boot",
+   "window": "(0, 0, 1180, 760)",
+   "log": "{\"timestamp\":\"2026-10-19T09:53:14.585169Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"Guessed window scale factor: 1\"},\"target\":\"winit::platform_impl::linux::x11::window\"} | {\"timestamp\":\"2026-10-19T09:53:14.599517Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"Automatic backup created\",\"operation\":\"backup\"},\"targe"
+  }
+ ]
+}
