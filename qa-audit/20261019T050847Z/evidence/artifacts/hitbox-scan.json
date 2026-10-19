@@ -1,0 +1,836 @@
+[
+{
+"click_y": 44,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": true
+},
+{
+"click_y": 48,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 52,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 56,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 60,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 64,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 68,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 72,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 76,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 80,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 84,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 88,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 92,
+"sel_mid": 62,
+"item": "Dashboard",
+"changed": false
+},
+{
+"click_y": 96,
+"sel_mid": 108,
+"item": "Operations",
+"changed": true
+},
+{
+"click_y": 100,
+"sel_mid": 108,
+"item": "Operations",
+"changed": false
+},
+{
+"click_y": 104,
+"sel_mid": 108,
+"item": "Operations",
+"changed": false
+},
+{
+"click_y": 108,
+"sel_mid": 108,
+"item": "Operations",
+"changed": false
+},
+{
+"click_y": 112,
+"sel_mid": 108,
+"item": "Operations",
+"changed": false
+},
+{
+"click_y": 116,
+"sel_mid": 108,
+"item": "Operations",
+"changed": false
+},
+{
+"click_y": 120,
+"sel_mid": 108,
+"item": "Operations",
+"changed": false
+},
+{
+"click_y": 124,
+"sel_mid": 131,
+"item": "Customers",
+"changed": true
+},
+{
+"click_y": 128,
+"sel_mid": 131,
+"item": "Customers",
+"changed": false
+},
+{
+"click_y": 132,
+"sel_mid": 131,
+"item": "Customers",
+"changed": false
+},
+{
+"click_y": 136,
+"sel_mid": 131,
+"item": "Customers",
+"changed": false
+},
+{
+"click_y": 140,
+"sel_mid": 131,
+"item": "Customers",
+"changed": false
+},
+{
+"click_y": 144,
+"sel_mid": 154,
+"item": "Organizations",
+"changed": true
+},
+{
+"click_y": 148,
+"sel_mid": 154,
+"item": "Organizations",
+"changed": false
+},
+{
+"click_y": 152,
+"sel_mid": 154,
+"item": "Organizations",
+"changed": false
+},
+{
+"click_y": 156,
+"sel_mid": 154,
+"item": "Organizations",
+"changed": false
+},
+{
+"click_y": 160,
+"sel_mid": 154,
+"item": "Organizations",
+"changed": false
+},
+{
+"click_y": 164,
+"sel_mid": 154,
+"item": "Organizations",
+"changed": false
+},
+{
+"click_y": 168,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": true
+},
+{
+"click_y": 172,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 176,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 180,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 184,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 188,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 192,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 196,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 200,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 204,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 208,
+"sel_mid": 177,
+"item": "Knowledge",
+"changed": false
+},
+{
+"click_y": 212,
+"sel_mid": 223,
+"item": "Issue Radar",
+"changed": true
+},
+{
+"click_y": 216,
+"sel_mid": 223,
+"item": "Issue Radar",
+"changed": false
+},
+{
+"click_y": 220,
+"sel_mid": 223,
+"item": "Issue Radar",
+"changed": false
+},
+{
+"click_y": 224,
+"sel_mid": 223,
+"item": "Issue Radar",
+"changed": false
+},
+{
+"click_y": 228,
+"sel_mid": 223,
+"item": "Issue Radar",
+"changed": false
+},
+{
+"click_y": 232,
+"sel_mid": 223,
+"item": "Issue Radar",
+"changed": false
+},
+{
+"click_y": 236,
+"sel_mid": 246,
+"item": "Incidents",
+"changed": true
+},
+{
+"click_y": 240,
+"sel_mid": 246,
+"item": "Incidents",
+"changed": false
+},
+{
+"click_y": 244,
+"sel_mid": 246,
+"item": "Incidents",
+"changed": false
+},
+{
+"click_y": 248,
+"sel_mid": 246,
+"item": "Incidents",
+"changed": false
+},
+{
+"click_y": 252,
+"sel_mid": 246,
+"item": "Incidents",
+"changed": false
+},
+{
+"click_y": 256,
+"sel_mid": 246,
+"item": "Incidents",
+"changed": false
+},
+{
+"click_y": 260,
+"sel_mid": 269,
+"item": "Custom Objects",
+"changed": true
+},
+{
+"click_y": 264,
+"sel_mid": 269,
+"item": "Custom Objects",
+"changed": false
+},
+{
+"click_y": 268,
+"sel_mid": 269,
+"item": "Custom Objects",
+"changed": false
+},
+{
+"click_y": 272,
+"sel_mid": 269,
+"item": "Custom Objects",
+"changed": false
+},
+{
+"click_y": 276,
+"sel_mid": 269,
+"item": "Custom Objects",
+"changed": false
+},
+{
+"click_y": 280,
+"sel_mid": 269,
+"item": "Custom Objects",
+"changed": false
+},
+{
+"click_y": 284,
+"sel_mid": 292,
+"item": "Automation",
+"changed": true
+},
+{
+"click_y": 288,
+"sel_mid": 292,
+"item": "Automation",
+"changed": false
+},
+{
+"click_y": 292,
+"sel_mid": 292,
+"item": "Automation",
+"changed": false
+},
+{
+"click_y": 296,
+"sel_mid": 292,
+"item": "Automation",
+"changed": false
+},
+{
+"click_y": 300,
+"sel_mid": 292,
+"item": "Automation",
+"changed": false
+},
+{
+"click_y": 304,
+"sel_mid": 292,
+"item": "Automation",
+"changed": false
+},
+{
+"click_y": 308,
+"sel_mid": 315,
+"item": "AI Center",
+"changed": true
+},
+{
+"click_y": 312,
+"sel_mid": 315,
+"item": "AI Center",
+"changed": false
+},
+{
+"click_y": 316,
+"sel_mid": 315,
+"item": "AI Center",
+"changed": false
+},
+{
+"click_y": 320,
+"sel_mid": 315,
+"item": "AI Center",
+"changed": false
+},
+{
+"click_y": 324,
+"sel_mid": 315,
+"item": "AI Center",
+"changed": false
+},
+{
+"click_y": 328,
+"sel_mid": 338,
+"item": "Outreach",
+"changed": true
+},
+{
+"click_y": 332,
+"sel_mid": 338,
+"item": "Outreach",
+"changed": false
+},
+{
+"click_y": 336,
+"sel_mid": 338,
+"item": "Outreach",
+"changed": false
+},
+{
+"click_y": 340,
+"sel_mid": 338,
+"item": "Outreach",
+"changed": false
+},
+{
+"click_y": 344,
+"sel_mid": 338,
+"item": "Outreach",
+"changed": false
+},
+{
+"click_y": 348,
+"sel_mid": 338,
+"item": "Outreach",
+"changed": false
+},
+{
+"click_y": 352,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": true
+},
+{
+"click_y": 356,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 360,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 364,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 368,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 372,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 376,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 380,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 384,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 388,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 392,
+"sel_mid": 361,
+"item": "Notifications",
+"changed": false
+},
+{
+"click_y": 396,
+"sel_mid": 407,
+"item": "Support Graph",
+"changed": true
+},
+{
+"click_y": 400,
+"sel_mid": 407,
+"item": "Support Graph",
+"changed": false
+},
+{
+"click_y": 404,
+"sel_mid": 407,
+"item": "Support Graph",
+"changed": false
+},
+{
+"click_y": 408,
+"sel_mid": 407,
+"item": "Support Graph",
+"changed": false
+},
+{
+"click_y": 412,
+"sel_mid": 407,
+"item": "Support Graph",
+"changed": false
+},
+{
+"click_y": 416,
+"sel_mid": 407,
+"item": "Support Graph",
+"changed": false
+},
+{
+"click_y": 420,
+"sel_mid": 430,
+"item": "Connectors",
+"changed": true
+},
+{
+"click_y": 424,
+"sel_mid": 430,
+"item": "Connectors",
+"changed": false
+},
+{
+"click_y": 428,
+"sel_mid": 430,
+"item": "Connectors",
+"changed": false
+},
+{
+"click_y": 432,
+"sel_mid": 430,
+"item": "Connectors",
+"changed": false
+},
+{
+"click_y": 436,
+"sel_mid": 430,
+"item": "Connectors",
+"changed": false
+},
+{
+"click_y": 440,
+"sel_mid": 430,
+"item": "Connectors",
+"changed": false
+},
+{
+"click_y": 444,
+"sel_mid": 453,
+"item": "Sync Health",
+"changed": true
+},
+{
+"click_y": 448,
+"sel_mid": 453,
+"item": "Sync Health",
+"changed": false
+},
+{
+"click_y": 452,
+"sel_mid": 453,
+"item": "Sync Health",
+"changed": false
+},
+{
+"click_y": 456,
+"sel_mid": 453,
+"item": "Sync Health",
+"changed": false
+},
+{
+"click_y": 460,
+"sel_mid": 453,
+"item": "Sync Health",
+"changed": false
+},
+{
+"click_y": 464,
+"sel_mid": 453,
+"item": "Sync Health",
+"changed": false
+},
+{
+"click_y": 468,
+"sel_mid": 476,
+"item": "Settings",
+"changed": true
+},
+{
+"click_y": 472,
+"sel_mid": 476,
+"item": "Settings",
+"changed": false
+},
+{
+"click_y": 476,
+"sel_mid": 476,
+"item": "Settings",
+"changed": false
+},
+{
+"click_y": 480,
+"sel_mid": 476,
+"item": "Settings",
+"changed": false
+},
+{
+"click_y": 484,
+"sel_mid": 476,
+"item": "Settings",
+"changed": false
+},
+{
+"click_y": 488,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": true
+},
+{
+"click_y": 492,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 496,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 500,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 504,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 508,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 512,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 516,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 520,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 524,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 528,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 532,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 536,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 540,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 544,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 548,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 552,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 556,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 560,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 564,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 568,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 572,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 576,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 580,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 584,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 588,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 592,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+},
+{
+"click_y": 596,
+"sel_mid": 499,
+"item": "Onboarding",
+"changed": false
+}
+]

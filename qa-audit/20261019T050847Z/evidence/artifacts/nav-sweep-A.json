@@ -1,0 +1,155 @@
+{
+ "session": "A-first-use-attempt2",
+ "datadir": "/home/z/my-project/SupportOS-PlusPlus/qa-audit/20261019T050847Z/evidence/artifacts/qa-profile-A",
+ "pages": [
+  {
+   "page": "Dashboard",
+   "click_y": 63,
+   "shot": "A01-nav-Dashboard",
+   "diff_pct": 0.0,
+   "retried": false
+  },
+  {
+   "page": "Inbox",
+   "click_y": 87,
+   "shot": "A02-nav-Inbox",
+   "diff_pct": 0.0,
+   "retried": true
+  },
+  {
+   "page": "Operations",
+   "click_y": 109,
+   "shot": "A03-nav-Operations",
+   "diff_pct": 3.2,
+   "retried": false
+  },
+  {
+   "page": "Customers",
+   "click_y": 132,
+   "shot": "A04-nav-Customers",
+   "diff_pct": 1.8,
+   "retried": false
+  },
+  {
+   "page": "Organizations",
+   "click_y": 155,
+   "shot": "A05-nav-Organizations",
+   "diff_pct": 1.1,
+   "retried": false
+  },
+  {
+   "page": "Knowledge",
+   "click_y": 179,
+   "shot": "A06-nav-Knowledge",
+   "diff_pct": 1.3,
+   "retried": false
+  },
+  {
+   "page": "Reports",
+   "click_y": 201,
+   "shot": "A07-nav-Reports",
+   "diff_pct": 0.1,
+   "retried": true
+  },
+  {
+   "page": "Issue Radar",
+   "click_y": 224,
+   "shot": "A08-nav-Issue-Radar",
+   "diff_pct": 1.3,
+   "retried": false
+  },
+  {
+   "page": "Incidents",
+   "click_y": 248,
+   "shot": "A09-nav-Incidents",
+   "diff_pct": 1.2,
+   "retried": false
+  },
+  {
+   "page": "Custom Objects",
+   "click_y": 270,
+   "shot": "A10-nav-Custom-Objects",
+   "diff_pct": 0.9,
+   "retried": false
+  },
+  {
+   "page": "Automation",
+   "click_y": 294,
+   "shot": "A11-nav-Automation",
+   "diff_pct": 1.0,
+   "retried": false
+  },
+  {
+   "page": "AI Center",
+   "click_y": 316,
+   "shot": "A12-nav-AI-Center",
+   "diff_pct": 1.8,
+   "retried": false
+  },
+  {
+   "page": "Outreach",
+   "click_y": 339,
+   "shot": "A13-nav-Outreach",
+   "diff_pct": 1.2,
+   "retried": false
+  },
+  {
+   "page": "Notifications",
+   "click_y": 362,
+   "shot": "A14-nav-Notifications",
+   "diff_pct": 0.9,
+   "retried": false
+  },
+  {
+   "page": "Search",
+   "click_y": 386,
+   "shot": "A15-nav-Search",
+   "diff_pct": 0.1,
+   "retried": true
+  },
+  {
+   "page": "Support Graph",
+   "click_y": 409,
+   "shot": "A16-nav-Support-Graph",
+   "diff_pct": 1.2,
+   "retried": false
+  },
+  {
+   "page": "Connectors",
+   "click_y": 431,
+   "shot": "A17-nav-Connectors",
+   "diff_pct": 1.3,
+   "retried": false
+  },
+  {
+   "page": "Sync Health",
+   "click_y": 454,
+   "shot": "A18-nav-Sync-Health",
+   "diff_pct": 2.1,
+   "retried": false
+  },
+  {
+   "page": "Settings",
+   "click_y": 478,
+   "shot": "A19-nav-Settings",
+   "diff_pct": 2.8,
+   "retried": false
+  },
+  {
+   "page": "Onboarding",
+   "click_y": 501,
+   "shot": "A20-nav-Onboarding",
+   "diff_pct": 2.3,
+   "retried": false
+  },
+  {
+   "page": "Shell",
+   "click_y": 523,
+   "shot": "A21-nav-Shell",
+   "diff_pct": 0.1,
+   "retried": true
+  }
+ ],
+ "palette_button_diff_pct": 2.2,
+ "palette_nav_diff_pct": 0.0
+}
