@@ -357,7 +357,7 @@ jobs:
             echo "  including the Landlock/seccomp parse-sandbox feature"
             echo "- .deb installed through APT on clean ubuntu:22.04, ubuntu:24.04 and"
             echo "  debian:12 containers: dependency resolution, desktop entry + icons,"
-            echo "  boot-chain smoke, a 0.2.x-to-1.0.0 data-directory upgrade"
+            echo "  boot-chain smoke, a 0.2.x-to-1.x data-directory upgrade"
             echo "  (in-place migration, database preserved), GUI launch under Xvfb with"
             echo "  only declared dependencies, reinstall, uninstall (user data"
             echo "  preserved), purge"

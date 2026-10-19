@@ -4,6 +4,40 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-10-20
+
+Interface refresh: the entire application now ships a shadcn/ui-inspired
+design system. Presentation only — behavior, data model, on-disk layout
+and the 0.2.x upgrade path are untouched.
+
+### Changed
+
+- **Complete visual redesign** on a new in-repo design system
+  (`app-shell/src/design.rs`, zero new dependencies): zinc light and dark
+  token sets (WCAG-AA contrast, unit-tested), a modern type scale, and a
+  card / badge / chip / button / metric / table component family with
+  status-tone color mapping replacing hard-coded colors.
+- **Lucide-style icon set** — 42 stroke icons drawn with the egui painter
+  (`app-shell/src/icons.rs`), mapped per page; no icon-font dependency.
+- **Redesigned shell**: full-height grouped sidebar (Workspace /
+  Customers & knowledge / Insights / Automation & AI / System) with brand
+  block and command-palette trigger row; app header with search and theme
+  toggle; sun/moon switch pinned at the sidebar bottom.
+- **All 21 pages restyled**, plus the command palette, toasts and
+  confirmation dialogs; dark mode is now a fully designed theme instead
+  of the built-in palette swap.
+
+### Fixed
+
+- Page content no longer vanishes below the fold: every page scrolls
+  vertically as a whole (the two-pane inbox scrolls its detail column).
+- Uniform 32 px control heights for design-system buttons; palette and
+  dialog open without fade-in ghosting; chart annotations no longer clip
+  their card frame; long ISO timestamps no longer overflow chart cards;
+  inbox preview/time collision fixed with compact time rendering;
+  operations tiles re-spaced; duplicate hero empty states removed from
+  the incidents page.
+
 ## [1.0.0] — 2026-10-20
 
 First stable release. No functional or schema changes since 0.2.0 — this
@@ -62,5 +96,6 @@ verified end-to-end by the tag-triggered release pipeline.
 - CI: fmt + clippy (`-D warnings`) + tests + cargo-deny on every push,
   plus a package job that builds and smoke-boots both formats.
 
+[1.1.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.0.0
 [0.2.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v0.2.0
