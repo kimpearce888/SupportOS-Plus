@@ -70,7 +70,10 @@ impl Theme {
         }
     }
 
-    /// Apply the theme to an egui context.
+    /// Apply the theme to an egui context: selects the stored mode. The
+    /// full shadcn-style zinc visuals for both modes are installed once at
+    /// shell boot by [`crate::design::install`]; this only switches between
+    /// the two pre-styled themes.
     pub fn apply(self, ctx: &egui::Context) {
         ctx.set_theme(match self {
             Self::Light => egui::Theme::Light,

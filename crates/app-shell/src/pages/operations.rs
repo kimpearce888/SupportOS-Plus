@@ -1,5 +1,9 @@
 //! Operations Center page (port of the web `pages/operations.rs`).
 //!
+//! Redesigned with the shadcn-style design system (`crate::design`):
+//! severity-toned card tiles, a striped workload table and section cards —
+//! presentation only, all tile navigation and capacity behavior intact.
+//!
 //! Two tabs, same as the web page:
 //! * **Tiles** — the 16 operations tiles from `spp_core::operations::snapshot`
 //!   (the SQL behind `/api/operations/center`), grouped by severity. Tiles
@@ -19,6 +23,8 @@ use spp_core::db::DbHandle;
 use spp_core::workload::{CapacityModel, WorkloadSnapshot};
 
 use super::NavRequest;
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
 
 /// Report tabs (web: the `active_tab` signal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,11 +61,13 @@ impl Severity {
         }
     }
 
-    fn color(self) -> egui::Color32 {
+    /// Theme-aware value color for the tile counters (redesign: token
+    /// tones replace the raw RED/YELLOW/LIGHT_BLUE).
+    fn count_color(self, t: &design::Tokens) -> egui::Color32 {
         match self {
-            Self::Critical => egui::Color32::RED,
-            Self::Warning => egui::Color32::YELLOW,
-            Self::Info => egui::Color32::LIGHT_BLUE,
+            Self::Critical => t.destructive_text,
+            Self::Warning => t.warning_foreground,
+            Self::Info => t.info_foreground,
         }
     }
 }
@@ -269,22 +277,26 @@ impl OperationsPage {
         self.ensure_loaded(db);
 
         let mut nav = None;
-        ui.heading("Operations Center");
-        ui.weak(
-            "16 tiles cover the team's current workload, SLA risk, and system health. \
-             Click a tile to filter the inbox.",
+        design::page_header(
+            ui,
+            "Operations Center",
+            Some(
+                "16 tiles cover the team's current workload, SLA risk, and system health. \
+                 Click a tile to filter the inbox.",
+            ),
+            |_| {},
         );
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
                     self.tab = tab;
                 }
             }
         });
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         match self.tab {
             Tab::Tiles => nav = self.tiles_ui(ui),
@@ -300,22 +312,31 @@ impl OperationsPage {
         };
         let tiles = tiles_from_snapshot(snapshot);
         if tiles.is_empty() {
-            ui.weak("No operations data yet. Run a sync or try demo mode to populate tiles.");
+            design::empty_state(
+                ui,
+                Icon::Activity,
+                "No operations data yet",
+                "Run a sync or try demo mode to populate tiles.",
+            );
             return None;
         }
 
         let threshold = snapshot.waiting_threshold_minutes;
-        ui.weak(format!(
-            "generated {} · waiting threshold {threshold} min",
-            snapshot.generated_at
-        ));
-        ui.separator();
+        design::hint_text(
+            ui,
+            &format!(
+                "generated {} · waiting threshold {threshold} min",
+                snapshot.generated_at
+            ),
+        );
+        ui.add_space(4.0);
 
         let mut nav = None;
         let groups = group_tiles(&tiles);
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (band, group) in groups {
-                ui.strong(band.label());
+                design::section_title(ui, band.label());
+                ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                     for tile in group {
@@ -331,7 +352,7 @@ impl OperationsPage {
                 ui.add_space(6.0);
             }
         });
-        ui.weak("(tiles marked with an arrow drill into the inbox)");
+        design::hint_text(ui, "(tiles marked with an arrow drill into the inbox)");
         nav
     }
 
@@ -346,86 +367,135 @@ impl OperationsPage {
             return;
         };
 
-        ui.strong("Team Workload");
-        ui.weak(format!(
-            "generated {} · unassigned work {}",
-            workload.generated_at, workload.unassigned_work
-        ));
-        ui.separator();
-
         let suggestions = self.suggestions.clone();
-        egui::ScrollArea::vertical().show_rows(ui, 24.0, workload.agents.len(), |ui, range| {
-            egui::Grid::new("ops-workload-table")
-                .num_columns(7)
-                .striped(true)
-                .show(ui, |ui| {
-                    for header in [
-                        "Agent", "Open", "Waiting", "Capacity", "Load", "Pressure", "Actions",
-                    ] {
-                        ui.strong(header);
-                    }
-                    ui.end_row();
-                    for agent in &workload.agents[range] {
-                        ui.label(agent.display_name.as_str());
-                        ui.monospace(agent.open_workload.to_string());
-                        ui.monospace(agent.customer_waiting_workload.to_string());
-                        ui.monospace(agent.capacity.to_string());
-                        ui.monospace(format!("{:.0}%", agent.pressure * 100.0));
-                        ui.monospace(format!("{:.2}", agent.weighted_load));
-                        ui.horizontal(|ui| {
-                            let mut new_model = model.clone();
-                            if ui.button("+").on_hover_text("Increase capacity").clicked() {
-                                let res = db.with_write(|conn| {
-                                    adjust_capacity(conn, &mut new_model, agent.user_local_id, 1)
+        let agents = workload.agents.clone();
+        design::card_titled(
+            ui,
+            "Team Workload",
+            Some(&format!(
+                "generated {} · unassigned work {}",
+                workload.generated_at, workload.unassigned_work
+            )),
+            |ui| {
+                egui::ScrollArea::vertical().show_rows(ui, 24.0, agents.len(), |ui, range| {
+                    design::table(
+                        ui,
+                        "ops-workload-table",
+                        &[
+                            "Agent", "Open", "Waiting", "Capacity", "Load", "Pressure", "Actions",
+                        ],
+                        28.0,
+                        |ui| {
+                            let t = design::tokens(ui);
+                            for agent in &agents[range] {
+                                ui.label(
+                                    egui::RichText::new(agent.display_name.as_str())
+                                        .size(13.0)
+                                        .color(t.foreground),
+                                );
+                                design::td_num(ui, &agent.open_workload.to_string());
+                                design::td_num(ui, &agent.customer_waiting_workload.to_string());
+                                design::td_num(ui, &agent.capacity.to_string());
+                                design::td_num(ui, &format!("{:.0}%", agent.pressure * 100.0));
+                                design::td_num(ui, &format!("{:.2}", agent.weighted_load));
+                                ui.horizontal(|ui| {
+                                    let mut new_model = model.clone();
+                                    if design::button(ui, "+", ButtonVariant::Outline)
+                                        .on_hover_text("Increase capacity")
+                                        .clicked()
+                                    {
+                                        let res = db.with_write(|conn| {
+                                            adjust_capacity(
+                                                conn,
+                                                &mut new_model,
+                                                agent.user_local_id,
+                                                1,
+                                            )
+                                        });
+                                        if let Err(e) = res {
+                                            self.error = Some(e);
+                                        } else {
+                                            self.capacity = Some(new_model);
+                                            self.workload = None;
+                                        }
+                                    }
+                                    if design::button(ui, "−", ButtonVariant::Outline)
+                                        .on_hover_text("Decrease capacity")
+                                        .clicked()
+                                    {
+                                        let mut new_model = model.clone();
+                                        let res = db.with_write(|conn| {
+                                            adjust_capacity(
+                                                conn,
+                                                &mut new_model,
+                                                agent.user_local_id,
+                                                -1,
+                                            )
+                                        });
+                                        if let Err(e) = res {
+                                            self.error = Some(e);
+                                        } else {
+                                            self.capacity = Some(new_model);
+                                            self.workload = None;
+                                        }
+                                    }
                                 });
-                                if let Err(e) = res {
-                                    self.error = Some(e);
-                                } else {
-                                    self.capacity = Some(new_model);
-                                    self.workload = None;
-                                }
+                                ui.end_row();
                             }
-                            if ui.button("−").on_hover_text("Decrease capacity").clicked() {
-                                let mut new_model = model.clone();
-                                let res = db.with_write(|conn| {
-                                    adjust_capacity(conn, &mut new_model, agent.user_local_id, -1)
-                                });
-                                if let Err(e) = res {
-                                    self.error = Some(e);
-                                } else {
-                                    self.capacity = Some(new_model);
-                                    self.workload = None;
-                                }
-                            }
-                        });
-                        ui.end_row();
-                    }
+                        },
+                    );
                 });
-        });
-        ui.separator();
-
-        ui.strong("Suggested Assignees");
-        ui.weak(
-            "Agents with the lowest load are suggested for new assignments. \
-             Use the +/− buttons to adjust individual capacity.",
+            },
         );
+        ui.add_space(10.0);
+
         if suggestions.is_empty() {
-            ui.weak("(no unassigned conversations waiting)");
+            design::card_titled(
+                ui,
+                "Suggested Assignees",
+                Some(
+                    "Agents with the lowest load are suggested for new assignments. \
+                     Use the +/− buttons to adjust individual capacity.",
+                ),
+                |ui| {
+                    design::empty_state(
+                        ui,
+                        Icon::Users,
+                        "No unassigned conversations waiting",
+                        "Suggestions appear when active work has no assignee.",
+                    );
+                },
+            );
             return;
         }
-        egui::ScrollArea::vertical().show_rows(ui, 20.0, suggestions.len(), |ui, range| {
-            for s in &suggestions[range] {
-                let subject = s.subject.clone().unwrap_or_default();
-                ui.label(format!(
-                    "#{} {subject} → {} ({})",
-                    s.conversation_number.unwrap_or(s.conversation_id),
-                    s.suggested_display_name
-                        .clone()
-                        .unwrap_or_else(|| "(any)".into()),
-                    s.reason
-                ));
-            }
-        });
+        design::card_titled(
+            ui,
+            "Suggested Assignees",
+            Some(
+                "Agents with the lowest load are suggested for new assignments. \
+                 Use the +/− buttons to adjust individual capacity.",
+            ),
+            |ui| {
+                let t = design::tokens(ui);
+                egui::ScrollArea::vertical().show_rows(ui, 20.0, suggestions.len(), |ui, range| {
+                    for s in &suggestions[range] {
+                        let subject = s.subject.clone().unwrap_or_default();
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "#{} {subject} → {} ({})",
+                                s.conversation_number.unwrap_or(s.conversation_id),
+                                s.suggested_display_name
+                                    .clone()
+                                    .unwrap_or_else(|| "(any)".into()),
+                                s.reason
+                            ))
+                            .size(13.0)
+                            .color(t.foreground),
+                        );
+                    }
+                });
+            },
+        );
     }
 }
 
@@ -436,36 +506,52 @@ impl Default for OperationsPage {
 }
 
 /// One tile card; returns whether it was clicked.
+///
+/// Redesigned as a shadcn-style card tile: severity-toned counter, muted
+/// drill hint, full-card hitbox for the inbox drill-down (same action as
+/// the web tile's `<A>` link).
 fn tile_ui(ui: &mut egui::Ui, tile: &TileView) -> bool {
     let band = tile_severity(tile.key);
-    let color = band.color();
-    let frame = egui::Frame::new()
-        .fill(ui.visuals().faint_bg_color)
-        .corner_radius(6.0)
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .outer_margin(2.0);
+    let t = design::tokens(ui);
+    let count_color = band.count_color(t);
     let mut clicked = false;
     let drills = tile_drills_into_inbox(tile.key);
-    frame
-        .show(ui, |ui| {
-            ui.set_min_size(egui::vec2(150.0, 52.0));
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    ui.colored_label(color, tile.count_label());
-                    ui.label(tile_label(tile.key));
-                });
-                if drills {
-                    ui.weak("open in inbox →");
-                }
+    let card = design::card(ui, |ui| {
+        // Wider min-width keeps tile labels on one line; the wrapped row
+        // breaks into two tidy rows on narrow windows.
+        ui.set_min_width(196.0);
+        ui.set_min_height(52.0);
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(tile.count_label())
+                        .size(20.0)
+                        .strong()
+                        .color(count_color),
+                );
+                ui.label(
+                    egui::RichText::new(tile_label(tile.key))
+                        .size(13.0)
+                        .color(t.foreground),
+                );
             });
-        })
-        .response
-        .on_hover_text(tile_description(tile.key));
+            if drills {
+                ui.label(
+                    egui::RichText::new("open in inbox →")
+                        .small()
+                        .color(t.muted_foreground),
+                );
+            }
+        });
+    });
+    let card_rect = card.response.rect;
+    card.response.on_hover_text(tile_description(tile.key));
     if drills {
-        // The whole card acts as the web tile's <A> link.
+        // The whole card acts as the web tile's <A> link: the hitbox is
+        // the card's own rect (full-card semantics).
         if ui
             .interact(
-                ui.max_rect(),
+                card_rect,
                 egui::Id::unique(tile.key.as_str()),
                 egui::Sense::click(),
             )

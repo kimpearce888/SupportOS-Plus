@@ -1,5 +1,10 @@
 //! Automation page (port of the web `pages/automation.rs`).
 //!
+//! Redesigned with the shadcn-style design system (`crate::design`):
+//! striped rule table with chips and destructive deletes, card-wrapped
+//! approval queue, and a warning hint on the high-impact rule creator —
+//! presentation only, all rule/approval behavior intact.
+//!
 //! The rules table (name, trigger, action, enabled toggle, delete —
 //! `spp_core::automation::{list_rules,set_rule_enabled,delete_rule}`), the
 //! new-rule form (`create_rule`) with trigger/action kinds and their
@@ -10,6 +15,9 @@
 use eframe::egui;
 use spp_core::automation::{Action, AutomationRule, Trigger};
 use spp_core::db::DbHandle;
+
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
 
 /// Trigger kinds offered by the new-rule form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,122 +339,195 @@ impl AutomationPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Automation");
-        ui.weak(
-            "Rules trigger actions when conversations match certain conditions. \
-             Actions that need review park in the approvals queue.",
+        design::page_header(
+            ui,
+            "Automation",
+            Some(
+                "Rules trigger actions when conversations match certain conditions. \
+                 Actions that need review park in the approvals queue.",
+            ),
+            |ui| {
+                if design::button_with_icon(ui, Icon::Plus, "New Rule", ButtonVariant::Primary)
+                    .clicked()
+                {
+                    self.show_new_rule = !self.show_new_rule;
+                }
+            },
         );
-        ui.horizontal(|ui| {
-            if ui.button("New Rule").clicked() {
-                self.show_new_rule = !self.show_new_rule;
-            }
-        });
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         if self.show_new_rule {
             self.new_rule_ui(ui, db);
-            ui.separator();
+            ui.add_space(10.0);
         }
 
-        ui.strong(format!("{} rule(s)", self.rules.len()));
+        let rules = self.rules.clone();
         let mut toggled: Option<(i64, bool)> = None;
         let mut deleted: Option<i64> = None;
-        egui::ScrollArea::vertical()
-            .id_salt("automation-rules")
-            .show(ui, |ui| {
-                egui::Grid::new("automation-rule-table")
-                    .num_columns(4)
-                    .striped(true)
+        design::card_titled(
+            ui,
+            "Rules",
+            Some(&format!("{} rule(s)", rules.len())),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("automation-rules")
                     .show(ui, |ui| {
-                        for header in ["name", "when", "then", ""] {
-                            ui.strong(header);
-                        }
-                        ui.end_row();
-                        for rule in &self.rules {
-                            let id = rule.id.unwrap_or(0);
-                            ui.label(rule.name.as_str());
-                            ui.label(trigger_description(&rule.trigger));
-                            let mut action = action_description(&rule.action);
-                            if rule.action.requires_approval() {
-                                action.push_str(" (needs approval)");
-                            }
-                            ui.label(action);
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .selectable_label(
-                                        rule.enabled,
-                                        if rule.enabled { "enabled" } else { "disabled" },
-                                    )
-                                    .clicked()
-                                {
-                                    toggled = Some((id, !rule.enabled));
+                        design::table(
+                            ui,
+                            "automation-rule-table",
+                            &["name", "when", "then", ""],
+                            26.0,
+                            |ui| {
+                                let t = design::tokens(ui);
+                                for rule in &rules {
+                                    let id = rule.id.unwrap_or(0);
+                                    ui.label(
+                                        egui::RichText::new(rule.name.as_str())
+                                            .size(13.0)
+                                            .strong()
+                                            .color(t.foreground),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(trigger_description(&rule.trigger))
+                                            .size(13.0)
+                                            .color(t.foreground),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        let action = action_description(&rule.action);
+                                        ui.label(
+                                            egui::RichText::new(action)
+                                                .size(13.0)
+                                                .color(t.foreground),
+                                        );
+                                        if rule.action.requires_approval() {
+                                            Icon::AlertTriangle.show(
+                                                ui,
+                                                13.0,
+                                                t.warning_foreground,
+                                            );
+                                            ui.label(
+                                                egui::RichText::new("(needs approval)")
+                                                    .small()
+                                                    .color(t.warning_foreground),
+                                            );
+                                        }
+                                    });
+                                    ui.horizontal(|ui| {
+                                        if design::chip(
+                                            ui,
+                                            rule.enabled,
+                                            if rule.enabled { "enabled" } else { "disabled" },
+                                        )
+                                        .clicked()
+                                        {
+                                            toggled = Some((id, !rule.enabled));
+                                        }
+                                        if design::button(ui, "delete", ButtonVariant::Destructive)
+                                            .clicked()
+                                        {
+                                            deleted = Some(id);
+                                        }
+                                    });
+                                    ui.end_row();
                                 }
-                                if ui.button("delete").clicked() {
-                                    deleted = Some(id);
-                                }
-                            });
-                            ui.end_row();
-                        }
+                            },
+                        );
                     });
-            });
+            },
+        );
         if let Some((id, enabled)) = toggled {
             self.toggle_rule(db, id, enabled);
         }
         if let Some(id) = deleted {
             self.delete_rule(db, id);
         }
-        ui.separator();
+        ui.add_space(10.0);
 
-        ui.strong(format!("{} pending approval(s)", self.approvals.len()));
-        if self.approvals.is_empty() {
-            ui.weak("(no approvals waiting)");
-            return;
-        }
+        let approvals = self.approvals.clone();
+        let approvals_empty = approvals.is_empty();
         let mut decided: Option<(i64, bool)> = None;
-        egui::ScrollArea::vertical()
-            .id_salt("automation-approvals")
-            .show(ui, |ui| {
-                for approval in &self.approvals {
-                    ui.group(|ui| {
-                        ui.label(format!(
-                            "rule #{} on conversation #{} · {}",
-                            approval.rule_id, approval.conversation_id, approval.proposed_action
-                        ));
-                        ui.horizontal(|ui| {
-                            if ui.button("approve").clicked() {
-                                decided = Some((approval.id, true));
-                            }
-                            if ui.button("reject").clicked() {
-                                decided = Some((approval.id, false));
-                            }
-                        });
-                    });
+        design::card_titled(
+            ui,
+            "Pending approvals",
+            Some(&format!("{} pending approval(s)", approvals.len())),
+            |ui| {
+                if approvals_empty {
+                    design::empty_state(
+                        ui,
+                        Icon::Clock,
+                        "No approvals waiting",
+                        "Actions that need review will park here.",
+                    );
+                    return;
                 }
-            });
+                let t = design::tokens(ui);
+                egui::ScrollArea::vertical()
+                    .id_salt("automation-approvals")
+                    .show(ui, |ui| {
+                        for approval in &approvals {
+                            design::card(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "rule #{} on conversation #{} · {}",
+                                        approval.rule_id,
+                                        approval.conversation_id,
+                                        approval.proposed_action
+                                    ))
+                                    .size(13.0)
+                                    .color(t.foreground),
+                                );
+                                ui.horizontal(|ui| {
+                                    if design::button(ui, "approve", ButtonVariant::Primary)
+                                        .clicked()
+                                    {
+                                        decided = Some((approval.id, true));
+                                    }
+                                    if design::button(ui, "reject", ButtonVariant::Destructive)
+                                        .clicked()
+                                    {
+                                        decided = Some((approval.id, false));
+                                    }
+                                });
+                            });
+                        }
+                    });
+            },
+        );
         if let Some((id, approve)) = decided {
             self.decide(db, id, approve);
         }
     }
 
     fn new_rule_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("New Rule");
-        egui::Grid::new("automation-new-rule")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("name:");
-                ui.text_edit_singleline(&mut self.new_name);
+        let t = design::tokens(ui);
+        design::card(ui, |ui| {
+            design::section_title(ui, "New Rule");
+            ui.horizontal(|ui| {
+                Icon::AlertTriangle.show(ui, 14.0, t.warning_foreground);
+                ui.label(
+                    egui::RichText::new(
+                        "enabled rules act on conversations automatically — actions that \
+                         need review park in the approvals queue",
+                    )
+                    .small()
+                    .color(t.warning_foreground),
+                );
+            });
+            design::form_grid(ui, "automation-new-rule", |ui| {
+                design::field_label(ui, "name:");
+                ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_name).hint_text("rule name"),
+                );
                 ui.end_row();
 
-                ui.label("trigger:");
+                design::field_label(ui, "trigger:");
                 ui.horizontal(|ui| {
                     for kind in TriggerKind::ALL {
-                        if ui
-                            .selectable_label(self.trigger_kind == kind, kind.label())
-                            .clicked()
-                        {
+                        if design::chip(ui, self.trigger_kind == kind, kind.label()).clicked() {
                             self.trigger_kind = kind;
                         }
                     }
@@ -455,29 +536,41 @@ impl AutomationPage {
 
                 match self.trigger_kind {
                     TriggerKind::StatusChanged => {
-                        ui.label("from → to:");
+                        design::field_label(ui, "from → to:");
                         ui.horizontal(|ui| {
-                            ui.text_edit_singleline(&mut self.trigger_from);
-                            ui.label("→");
-                            ui.text_edit_singleline(&mut self.trigger_to);
+                            ui.add_sized(
+                                [100.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.trigger_from)
+                                    .hint_text("from status"),
+                            );
+                            ui.label(
+                                egui::RichText::new("→")
+                                    .size(13.0)
+                                    .color(t.muted_foreground),
+                            );
+                            ui.add_sized(
+                                [100.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.trigger_to)
+                                    .hint_text("to status"),
+                            );
                         });
                         ui.end_row();
                     }
                     TriggerKind::TagAdded => {
-                        ui.label("tag:");
-                        ui.text_edit_singleline(&mut self.trigger_tag);
+                        design::field_label(ui, "tag:");
+                        ui.add_sized(
+                            [180.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.trigger_tag).hint_text("tag"),
+                        );
                         ui.end_row();
                     }
                     TriggerKind::SlaRisk => {}
                 }
 
-                ui.label("action:");
+                design::field_label(ui, "action:");
                 ui.horizontal(|ui| {
                     for kind in ActionKind::ALL {
-                        if ui
-                            .selectable_label(self.action_kind == kind, kind.label())
-                            .clicked()
-                        {
+                        if design::chip(ui, self.action_kind == kind, kind.label()).clicked() {
                             self.action_kind = kind;
                         }
                     }
@@ -486,35 +579,55 @@ impl AutomationPage {
 
                 match self.action_kind {
                     ActionKind::Assign => {
-                        ui.label("assignee id:");
-                        ui.text_edit_singleline(&mut self.action_assignee);
+                        design::field_label(ui, "assignee id:");
+                        ui.add_sized(
+                            [180.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.action_assignee)
+                                .hint_text("numeric user id"),
+                        );
                         ui.end_row();
                     }
                     ActionKind::AddTag => {
-                        ui.label("tag:");
-                        ui.text_edit_singleline(&mut self.action_tag);
+                        design::field_label(ui, "tag:");
+                        ui.add_sized(
+                            [180.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.action_tag).hint_text("tag"),
+                        );
                         ui.end_row();
                     }
                     ActionKind::SendNote => {
-                        ui.label("note body:");
-                        ui.text_edit_singleline(&mut self.action_note);
+                        design::field_label(ui, "note body:");
+                        ui.add_sized(
+                            [260.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.action_note)
+                                .hint_text("note body"),
+                        );
                         ui.end_row();
                     }
                     ActionKind::ChangeStatus => {
-                        ui.label("status:");
-                        ui.text_edit_singleline(&mut self.action_status);
+                        design::field_label(ui, "status:");
+                        ui.add_sized(
+                            [180.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.action_status)
+                                .hint_text("new status"),
+                        );
                         ui.end_row();
                     }
                     ActionKind::SetPriority => {
-                        ui.label("priority:");
-                        ui.text_edit_singleline(&mut self.action_priority);
+                        design::field_label(ui, "priority:");
+                        ui.add_sized(
+                            [180.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.action_priority)
+                                .hint_text("new priority"),
+                        );
                         ui.end_row();
                     }
                 }
             });
-        if ui.button("Create Rule").clicked() {
-            self.create_rule(db);
-        }
+            if design::button(ui, "Create Rule", ButtonVariant::Primary).clicked() {
+                self.create_rule(db);
+            }
+        });
     }
 }
 

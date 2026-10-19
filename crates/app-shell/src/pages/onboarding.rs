@@ -1,5 +1,9 @@
 //! Onboarding page (port of the web `pages/onboarding.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! Status from the `/api/onboarding` route logic (first-run flag,
 //! conversation count, Help Scout credential presence, sync state) and the
 //! action buttons: enable demo mode (`/api/demo/enable`), run the initial
@@ -13,6 +17,7 @@ use rusqlite::Connection;
 use spp_core::db::DbHandle;
 use spp_core::sync_engine::SyncEngine;
 
+use crate::design::{self, ButtonVariant};
 use crate::pages::sync_health::SyncAction;
 
 /// Onboarding status (typed port of the `/api/onboarding` route).
@@ -126,49 +131,54 @@ impl OnboardingPage {
             self.reload(db);
         }
 
-        ui.heading("Welcome to SupportOS+");
-        ui.weak(
-            "Connect Help Scout, or start in demo mode with a simulated account. \
-             Everything stays in your local database.",
+        design::page_header(
+            ui,
+            "Welcome to SupportOS+",
+            Some(
+                "Connect Help Scout, or start in demo mode with a simulated account. \
+                 Everything stays in your local database.",
+            ),
+            |_| {},
         );
-        ui.separator();
 
         let status = self.status.clone().unwrap_or_default();
-        egui::Grid::new("onboarding-status")
-            .num_columns(2)
-            .spacing([16.0, 6.0])
-            .show(ui, |ui| {
-                ui.strong("step");
-                ui.monospace(status.step.as_str());
+        design::card_titled(ui, "Setup status", None, |ui| {
+            design::form_grid(ui, "onboarding-status", |ui| {
+                let t = design::tokens(ui);
+                design::field_label(ui, "step:");
+                ui.monospace(egui::RichText::new(status.step.as_str()).color(t.foreground));
                 ui.end_row();
-                ui.strong("onboarding complete");
-                ui.monospace(status.completed.to_string());
+                design::field_label(ui, "onboarding complete:");
+                ui.monospace(egui::RichText::new(status.completed.to_string()).color(t.foreground));
                 ui.end_row();
-                ui.strong("demo mode");
-                ui.monospace(status.demo_mode.to_string());
+                design::field_label(ui, "demo mode:");
+                ui.monospace(egui::RichText::new(status.demo_mode.to_string()).color(t.foreground));
                 ui.end_row();
-                ui.strong("conversations");
-                ui.monospace(status.conversations.to_string());
+                design::field_label(ui, "conversations:");
+                ui.monospace(
+                    egui::RichText::new(status.conversations.to_string()).color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("Help Scout credentials");
-                ui.monospace(status.hs_configured.to_string());
+                design::field_label(ui, "Help Scout credentials:");
+                ui.monospace(
+                    egui::RichText::new(status.hs_configured.to_string()).color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("sync state");
-                ui.monospace(status.sync_state.as_str());
+                design::field_label(ui, "sync state:");
+                ui.monospace(egui::RichText::new(status.sync_state.as_str()).color(t.foreground));
                 ui.end_row();
             });
-        ui.separator();
+        });
 
         if let Some(message) = &self.message {
-            ui.label(format!("status: {message}"));
-            ui.separator();
+            design::success_text(ui, &format!("status: {message}"));
         }
 
         ui.horizontal(|ui| {
-            if ui.button("Enable demo mode").clicked() {
+            if design::button(ui, "Enable demo mode", ButtonVariant::Primary).clicked() {
                 self.enable_demo_mode(db);
             }
-            if ui.button("Run initial sync").clicked() {
+            if design::button(ui, "Run initial sync", ButtonVariant::Outline).clicked() {
                 match engine {
                     Some(engine) => {
                         if engine.is_running() {
@@ -188,12 +198,12 @@ impl OnboardingPage {
                     }
                 }
             }
-            if ui.button("Mark complete").clicked() {
+            if design::button(ui, "Mark complete", ButtonVariant::Outline).clicked() {
                 self.complete(db);
             }
         });
         if !status.completed {
-            ui.weak("Onboarding is not marked complete yet.");
+            design::hint_text(ui, "Onboarding is not marked complete yet.");
         }
     }
 }

@@ -1,5 +1,9 @@
 //! Sync Health page (port of the web `pages/sync_health.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! Status cards (engine state, last successful checkpoint, webhook queue
 //! counts), the checkpoint table, recent runs, and the sync actions —
 //! initial / incremental / reconcile / cancel, run in-process through the
@@ -14,6 +18,9 @@ use eframe::egui;
 use rusqlite::Connection;
 use spp_core::db::DbHandle;
 use spp_core::sync_engine::SyncEngine;
+
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
 
 /// One sync checkpoint row (typed port of the status route SQL).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -288,35 +295,47 @@ impl SyncHealthPage {
             self.reload(db);
         }
 
-        ui.heading("Sync Health");
+        design::page_header(
+            ui,
+            "Sync Health",
+            Some("engine state, checkpoints, and recent runs"),
+            |_| {},
+        );
         if let Some(message) = &self.message {
-            ui.label(format!("status: {message}"));
+            design::success_text(ui, &format!("status: {message}"));
         }
-        ui.separator();
+        ui.add_space(8.0);
 
         let status = self.status.clone().unwrap_or_default();
-        ui.horizontal(|ui| {
-            ui.strong("state:");
-            ui.monospace(status.state.as_str());
-            ui.strong("last success:");
-            ui.monospace(
-                status
-                    .last_success
-                    .clone()
-                    .unwrap_or_else(|| "(never)".into()),
+        design::card_titled(ui, "Engine", None, |ui| {
+            let t = design::tokens(ui);
+            ui.horizontal(|ui| {
+                design::field_label(ui, "state:");
+                ui.monospace(egui::RichText::new(status.state.as_str()).color(t.foreground));
+                design::field_label(ui, "last success:");
+                ui.monospace(
+                    egui::RichText::new(
+                        status
+                            .last_success
+                            .clone()
+                            .unwrap_or_else(|| "(never)".into()),
+                    )
+                    .color(t.foreground),
+                );
+            });
+            design::hint_text(
+                ui,
+                &format!(
+                    "webhook queue: {} total · {} pending · {} processed · {} failed · {} duplicates",
+                    status.webhooks.total,
+                    status.webhooks.pending,
+                    status.webhooks.processed,
+                    status.webhooks.failed,
+                    status.webhooks.duplicates
+                ),
             );
         });
-        ui.horizontal(|ui| {
-            ui.label(format!(
-                "webhook queue: {} total · {} pending · {} processed · {} failed · {} duplicates",
-                status.webhooks.total,
-                status.webhooks.pending,
-                status.webhooks.processed,
-                status.webhooks.failed,
-                status.webhooks.duplicates
-            ));
-        });
-        ui.separator();
+        ui.add_space(8.0);
 
         ui.horizontal(|ui| {
             for action in [
@@ -325,7 +344,12 @@ impl SyncHealthPage {
                 SyncAction::Reconcile,
                 SyncAction::Cancel,
             ] {
-                if ui.button(action.label()).clicked() {
+                let variant = match action {
+                    SyncAction::Initial => ButtonVariant::Primary,
+                    SyncAction::Cancel => ButtonVariant::Destructive,
+                    _ => ButtonVariant::Outline,
+                };
+                if design::button(ui, action.label(), variant).clicked() {
                     match engine {
                         Some(engine) => {
                             self.run_sync_action(db, engine, action);
@@ -339,58 +363,77 @@ impl SyncHealthPage {
                 }
             }
         });
-        ui.separator();
+        ui.add_space(8.0);
 
-        ui.strong("Checkpoints");
-        if status.checkpoints.is_empty() {
-            ui.weak("(no checkpoints yet — run an initial sync)");
-        } else {
-            egui::ScrollArea::vertical()
-                .id_salt("sync-checkpoints")
-                .show(ui, |ui| {
-                    egui::Grid::new("sync-checkpoint-table")
-                        .num_columns(6)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for header in [
+        design::card_titled(ui, "Checkpoints", None, |ui| {
+            if status.checkpoints.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::HeartPulse,
+                    "(no checkpoints yet — run an initial sync)",
+                    "The checkpoint table fills after the first successful sync.",
+                );
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt("sync-checkpoints")
+                    .show(ui, |ui| {
+                        design::table(
+                            ui,
+                            "sync-checkpoint-table",
+                            &[
                                 "resource",
                                 "status",
                                 "processed",
                                 "failed",
                                 "retries",
                                 "last success",
-                            ] {
-                                ui.strong(header);
-                            }
-                            ui.end_row();
-                            for cp in &status.checkpoints {
-                                ui.monospace(cp.resource.as_str());
-                                ui.label(cp.status.as_str());
-                                ui.monospace(cp.records_processed.to_string());
-                                ui.monospace(cp.records_failed.to_string());
-                                ui.monospace(cp.retry_count.to_string());
-                                ui.monospace(
-                                    cp.last_success_at.clone().unwrap_or_else(|| "—".into()),
-                                );
-                                ui.end_row();
-                            }
-                        });
-                });
-        }
-        ui.separator();
+                            ],
+                            26.0,
+                            |ui| {
+                                let t = design::tokens(ui);
+                                for cp in &status.checkpoints {
+                                    ui.monospace(
+                                        egui::RichText::new(cp.resource.as_str())
+                                            .size(13.0)
+                                            .color(t.foreground),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(cp.status.as_str())
+                                            .size(13.0)
+                                            .color(t.foreground),
+                                    );
+                                    design::td_num(ui, &cp.records_processed.to_string());
+                                    design::td_num(ui, &cp.records_failed.to_string());
+                                    design::td_num(ui, &cp.retry_count.to_string());
+                                    design::td_num(
+                                        ui,
+                                        &cp.last_success_at.clone().unwrap_or_else(|| "—".into()),
+                                    );
+                                    ui.end_row();
+                                }
+                            },
+                        );
+                    });
+            }
+        });
+        ui.add_space(8.0);
 
-        ui.strong("Recent runs");
-        if status.runs.is_empty() {
-            ui.weak("(no runs recorded)");
-        } else {
-            egui::ScrollArea::vertical()
-                .id_salt("sync-runs")
-                .show(ui, |ui| {
-                    egui::Grid::new("sync-run-table")
-                        .num_columns(7)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for header in [
+        design::card_titled(ui, "Recent runs", None, |ui| {
+            if status.runs.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::Activity,
+                    "(no runs recorded)",
+                    "Runs appear here after the first sync.",
+                );
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt("sync-runs")
+                    .show(ui, |ui| {
+                        design::table(
+                            ui,
+                            "sync-run-table",
+                            &[
                                 "id",
                                 "kind",
                                 "state",
@@ -398,39 +441,54 @@ impl SyncHealthPage {
                                 "resources",
                                 "records",
                                 "errors",
-                            ] {
-                                ui.strong(header);
-                            }
-                            ui.end_row();
-                            for run in &status.runs {
-                                ui.monospace(run.id.to_string());
-                                ui.label(run.kind.as_str());
-                                ui.label(run.state.as_str());
-                                ui.monospace(run.started_at.as_str());
-                                ui.monospace(format!(
-                                    "{}/{}",
-                                    run.resources_done, run.resources_total
-                                ));
-                                ui.monospace(run.records_processed.to_string());
-                                ui.monospace(run.errors.to_string());
-                                ui.end_row();
-                            }
-                        });
-                });
-        }
-        ui.separator();
-
-        ui.strong("Demo tools");
-        ui.weak("Write simulated Help Scout activity into the local database.");
-        for action in [
-            DemoToolAction::WebhookEvent,
-            DemoToolAction::CsatRating,
-            DemoToolAction::IncomingMessage,
-        ] {
-            if ui.button(action.label()).clicked() {
-                self.run_demo_tool(db, action);
+                            ],
+                            26.0,
+                            |ui| {
+                                let t = design::tokens(ui);
+                                for run in &status.runs {
+                                    design::td_num(ui, &run.id.to_string());
+                                    ui.label(
+                                        egui::RichText::new(run.kind.as_str())
+                                            .size(13.0)
+                                            .color(t.foreground),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(run.state.as_str())
+                                            .size(13.0)
+                                            .color(t.foreground),
+                                    );
+                                    design::td_num(ui, run.started_at.as_str());
+                                    design::td_num(
+                                        ui,
+                                        &format!("{}/{}", run.resources_done, run.resources_total),
+                                    );
+                                    design::td_num(ui, &run.records_processed.to_string());
+                                    design::td_num(ui, &run.errors.to_string());
+                                    ui.end_row();
+                                }
+                            },
+                        );
+                    });
             }
-        }
+        });
+        ui.add_space(8.0);
+
+        design::card_titled(
+            ui,
+            "Demo tools",
+            Some("Write simulated Help Scout activity into the local database."),
+            |ui| {
+                for action in [
+                    DemoToolAction::WebhookEvent,
+                    DemoToolAction::CsatRating,
+                    DemoToolAction::IncomingMessage,
+                ] {
+                    if design::button(ui, action.label(), ButtonVariant::Outline).clicked() {
+                        self.run_demo_tool(db, action);
+                    }
+                }
+            },
+        );
     }
 }
 

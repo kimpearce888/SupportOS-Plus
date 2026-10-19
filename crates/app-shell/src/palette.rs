@@ -118,6 +118,9 @@ pub struct CommandPalette {
     /// the palette used to open unfocused and silently swallowed
     /// keystrokes until the user clicked inside the input.
     wants_focus: bool,
+    /// Deferred Enter handling: the query row renders inside a nested
+    /// closure, so the take flag is stored here and read after the row.
+    palette_take: bool,
 }
 
 impl CommandPalette {
@@ -129,6 +132,7 @@ impl CommandPalette {
             hits: Vec::new(),
             selected: 0,
             wants_focus: false,
+            palette_take: false,
         }
     }
 
@@ -204,52 +208,90 @@ impl CommandPalette {
         }
         let mut nav = None;
         let mut query_changed = false;
+        let frame_tokens = crate::design::tokens_for(ctx);
+        let frame_fill = frame_tokens.card;
+        let frame_border = frame_tokens.border;
+        let icon_muted = frame_tokens.muted_foreground;
         egui::Window::new("Command Palette")
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 80.0))
-            .fixed_size([560.0, 320.0])
+            .fixed_size([560.0, 360.0])
             .collapsible(false)
             .resizable(false)
+            .fade_in(false)
+            .title_bar(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(frame_fill)
+                    .stroke(egui::Stroke::new(1.0, frame_border))
+                    .corner_radius(12)
+                    .inner_margin(egui::Margin::same(12))
+                    .shadow(egui::Shadow {
+                        offset: [0, 8],
+                        blur: 32,
+                        spread: 0,
+                        color: egui::Color32::from_black_alpha(60),
+                    }),
+            )
             .show(ctx, |ui| {
-                let response = ui.text_edit_singleline(&mut self.query);
-                if self.wants_focus {
-                    // DEFECT-03: open with the keyboard already in the
-                    // query field, like the web palette auto-focus.
-                    response.request_focus();
-                    self.wants_focus = false;
-                }
-                if response.changed() {
-                    query_changed = true;
-                }
-                let take = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                ui.separator();
+                // Query row with a leading search icon.
+                ui.horizontal(|ui| {
+                    let (id, rect) = ui.allocate_space(egui::vec2(17.0, 17.0));
+                    crate::icons::Icon::Search.paint_at(ui.painter(), rect, icon_muted);
+                    ui.advance_cursor_after_rect(rect);
+                    let _ = id;
+                    let mut query = self.query.clone();
+                    let response = ui.add_sized(
+                        [ui.available_width(), 30.0],
+                        egui::TextEdit::singleline(&mut query)
+                            .hint_text("search tickets, customers, knowledge, issues…"),
+                    );
+                    if self.wants_focus {
+                        // DEFECT-03: open with the keyboard already in the
+                        // query field, like the web palette auto-focus.
+                        response.request_focus();
+                        self.wants_focus = false;
+                    }
+                    if response.changed() {
+                        self.query = query.clone();
+                        query_changed = true;
+                    }
+                    let take =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    self.palette_take = take;
+                });
+                let take = self.palette_take;
+                ui.add_space(6.0);
                 let hits = take_hits(&self.hits);
                 if hits.is_empty() {
-                    if self.query.trim().is_empty() {
-                        ui.weak("Type to search tickets, customers, knowledge, and issues.");
-                    } else {
-                        ui.weak("(no hits)");
-                    }
+                    crate::design::empty_state(
+                        ui,
+                        crate::icons::Icon::Search,
+                        if self.query.trim().is_empty() {
+                            "Type to search"
+                        } else {
+                            "No hits"
+                        },
+                        if self.query.trim().is_empty() {
+                            "Search tickets, customers, knowledge, and issues."
+                        } else {
+                            "Nothing matches — try a shorter query."
+                        },
+                    );
                 } else {
-                    egui::ScrollArea::vertical().show_rows(ui, 30.0, hits.len(), |ui, range| {
-                        for (idx, hit) in hits[range.clone()].iter().enumerate() {
-                            let global_idx = range.start + idx;
-                            let selected = self.selected == global_idx;
-                            if ui
-                                .selectable_label(
-                                    selected,
-                                    format!("{} · {}", hit.scope, hit.title),
-                                )
-                                .clicked()
-                            {
-                                nav = href_to_nav(&hit.href);
-                                self.open = false;
+                    egui::ScrollArea::vertical()
+                        .id_salt("palette-hits")
+                        .show_rows(ui, 40.0, hits.len(), |ui, range| {
+                            for (idx, hit) in hits[range.clone()].iter().enumerate() {
+                                let global_idx = range.start + idx;
+                                let selected = self.selected == global_idx;
+                                if palette_hit_row(ui, hit, selected).clicked() {
+                                    nav = href_to_nav(&hit.href);
+                                    self.open = false;
+                                }
                             }
-                            if !hit.snippet.is_empty() {
-                                ui.weak(format!("   {}", hit.snippet));
-                            }
-                        }
-                    });
-                    ui.weak("↑ ↓ to move · Enter to open · Esc to close");
+                        });
+                    ui.add_space(4.0);
+                    crate::design::hint_text(ui, "↑ ↓ to move · Enter to open · Esc to close");
                 }
                 if take && let Some(hit) = hits.get(self.selected) {
                     nav = href_to_nav(&hit.href);
@@ -268,6 +310,117 @@ impl CommandPalette {
         }
         nav
     }
+}
+
+/// One full-width palette hit row (scope badge + title + muted snippet).
+fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui::Response {
+    let t = crate::design::tokens(ui);
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 40.0));
+    let response = ui.interact(
+        rect,
+        auto_id.with(("palette-hit", hit.scope.as_str(), hit.id)),
+        egui::Sense::click(),
+    );
+    let fill = if selected {
+        t.selection
+    } else if response.hovered() {
+        t.accent
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(8), fill);
+    }
+    let title = egui::WidgetText::from(
+        egui::RichText::new(hit.title.as_str())
+            .size(13.5)
+            .strong()
+            .color(if selected {
+                t.selection_foreground
+            } else {
+                t.foreground
+            }),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        rect.width() - 96.0,
+        egui::TextStyle::Button,
+    );
+    let scope_galley = egui::WidgetText::from(
+        egui::RichText::new(hit.scope.as_str())
+            .size(11.0)
+            .strong()
+            .color(t.info_foreground),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Small,
+    );
+    // Scope badge on the left, title next, snippet muted below.
+    let scope_w = scope_galley.size().x + 16.0;
+    let badge_rect = egui::Rect::from_min_max(
+        egui::pos2(
+            rect.min.x + 8.0,
+            rect.center().y - scope_galley.size().y / 2.0 - 3.0,
+        ),
+        egui::pos2(
+            rect.min.x + 8.0 + scope_w,
+            rect.center().y + scope_galley.size().y / 2.0 + 3.0,
+        ),
+    );
+    ui.painter()
+        .rect_filled(badge_rect, egui::CornerRadius::same(6), t.info_soft);
+    ui.painter().galley(
+        egui::pos2(
+            badge_rect.min.x + 8.0,
+            badge_rect.center().y - scope_galley.size().y / 2.0,
+        ),
+        scope_galley,
+        t.info_foreground,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            badge_rect.max.x + 10.0,
+            rect.center().y - title.size().y / 2.0,
+        ),
+        title,
+        if selected {
+            t.selection_foreground
+        } else {
+            t.foreground
+        },
+    );
+    if !hit.snippet.is_empty() {
+        let snippet = egui::WidgetText::from(
+            egui::RichText::new(hit.snippet.as_str())
+                .small()
+                .color(t.muted_foreground),
+        )
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            rect.width() - 16.0,
+            egui::TextStyle::Small,
+        );
+        ui.painter().galley(
+            egui::pos2(rect.min.x + 8.0, rect.max.y - snippet.size().y - 6.0),
+            snippet,
+            t.muted_foreground,
+        );
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::Role::Button,
+            ui.is_enabled(),
+            selected,
+            hit.title.clone(),
+        )
+    });
+    response
 }
 
 impl Default for CommandPalette {

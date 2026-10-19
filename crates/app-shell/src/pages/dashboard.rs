@@ -17,6 +17,8 @@ use rusqlite::Connection;
 use spp_core::db::DbHandle;
 
 use crate::chart;
+use crate::design::{self, BadgeTone};
+use crate::icons::Icon;
 
 /// Date ranges offered by the web page.
 pub const RANGES: [(i64, &str); 4] = [
@@ -513,57 +515,63 @@ impl DashboardPage {
             self.reload(db);
         }
 
-        ui.heading("Dashboard");
-        ui.weak("Local metrics · sources labeled Help Scout / local / AI-derived everywhere");
+        design::page_header(
+            ui,
+            "Dashboard",
+            Some("Local metrics · sources labeled Help Scout / local / AI-derived everywhere"),
+            |_| {},
+        );
 
-        ui.horizontal(|ui| {
-            for (d, label) in RANGES {
-                if ui.selectable_label(self.scope.days == d, label).clicked() {
-                    self.scope.days = d;
-                    self.reload(db);
-                }
-            }
-        });
-
-        ui.horizontal(|ui| {
-            ui.strong("Channel:");
-            for (value, label) in CHANNELS {
-                let selected = self.scope.channel.as_deref() == Some(value)
-                    || (value.is_empty() && self.scope.channel.is_none());
-                if ui.selectable_label(selected, label).clicked() {
-                    self.scope.channel = if value.is_empty() {
-                        None
-                    } else {
-                        Some(value.to_string())
-                    };
-                    self.reload(db);
-                }
-            }
-        });
-
-        ui.horizontal(|ui| {
-            ui.strong("Mailboxes:");
-            let all = self.scope.mailbox_ids.is_empty();
-            if ui.selectable_label(all, "All").clicked() {
-                self.scope.mailbox_ids.clear();
-                self.reload(db);
-            }
-            for (id, name) in self.mailboxes.clone() {
-                let selected = self.scope.mailbox_ids.contains(&id);
-                if ui.selectable_label(selected, name.as_str()).clicked() {
-                    if selected {
-                        self.scope.mailbox_ids.retain(|m| m != &id);
-                    } else {
-                        self.scope.mailbox_ids.push(id);
+        // Scope filters.
+        design::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                design::field_label(ui, "Range");
+                for (d, label) in RANGES {
+                    if design::chip(ui, self.scope.days == d, label).clicked() {
+                        self.scope.days = d;
+                        self.reload(db);
                     }
+                }
+            });
+            ui.horizontal(|ui| {
+                design::field_label(ui, "Channel");
+                for (value, label) in CHANNELS {
+                    let selected = self.scope.channel.as_deref() == Some(value)
+                        || (value.is_empty() && self.scope.channel.is_none());
+                    if design::chip(ui, selected, label).clicked() {
+                        self.scope.channel = if value.is_empty() {
+                            None
+                        } else {
+                            Some(value.to_string())
+                        };
+                        self.reload(db);
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                design::field_label(ui, "Mailboxes");
+                let all = self.scope.mailbox_ids.is_empty();
+                if design::chip(ui, all, "All").clicked() {
+                    self.scope.mailbox_ids.clear();
                     self.reload(db);
                 }
-            }
+                for (id, name) in self.mailboxes.clone() {
+                    let selected = self.scope.mailbox_ids.contains(&id);
+                    if design::chip(ui, selected, name.as_str()).clicked() {
+                        if selected {
+                            self.scope.mailbox_ids.retain(|m| m != &id);
+                        } else {
+                            self.scope.mailbox_ids.push(id);
+                        }
+                        self.reload(db);
+                    }
+                }
+            });
         });
-        ui.separator();
+        ui.add_space(10.0);
 
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
 
         let data = match &self.data {
@@ -574,59 +582,105 @@ impl DashboardPage {
             }
         };
 
-        // Metric cards.
+        // Metric cards — responsive column count.
+        let width = ui.available_width();
+        let cols = if width < 640.0 {
+            2
+        } else if width < 980.0 {
+            3
+        } else {
+            4
+        };
+        let metrics: [(&str, i64); 12] = [
+            ("New", data.new_conversations),
+            ("Active", data.active_conversations),
+            ("Pending", data.pending_conversations),
+            ("Closed", data.closed_conversations),
+            ("Unassigned", data.unassigned),
+            ("Backlog (7d stale)", data.backlog),
+            ("Replies sent", data.replies_sent),
+            (
+                "First response avg",
+                data.first_response_avg_min.unwrap_or(0),
+            ),
+            ("Great ratings", data.ratings_great),
+            ("Okay ratings", data.ratings_okay),
+            ("Not-good ratings", data.ratings_not_good),
+            ("Resolution avg", data.resolution_avg_min.unwrap_or(0)),
+        ];
         egui::Grid::new("dashboard-metrics")
-            .num_columns(4)
-            .spacing([16.0, 8.0])
+            .num_columns(cols)
+            .spacing(egui::vec2(10.0, 10.0))
             .show(ui, |ui| {
-                metric(ui, "New", data.new_conversations);
-                metric(ui, "Active", data.active_conversations);
-                metric(ui, "Pending", data.pending_conversations);
-                metric(ui, "Closed", data.closed_conversations);
-                metric(ui, "Unassigned", data.unassigned);
-                metric(ui, "Backlog (7d stale)", data.backlog);
-                metric(ui, "Replies sent", data.replies_sent);
-                metric(
+                for row in metrics.chunks(cols) {
+                    for (label, value) in row {
+                        let unit = if label.contains("avg") { "min" } else { "" };
+                        design::metric_card(
+                            ui,
+                            label,
+                            &value.to_string(),
+                            if unit.is_empty() { None } else { Some(unit) },
+                        );
+                    }
+                    ui.end_row();
+                }
+            });
+        ui.add_space(10.0);
+
+        // Per-day chart.
+        let points = daily_new_points(data);
+        let range_hint = format!(
+            "{} → {} · {} points",
+            iso_date_only(&data.range_from),
+            iso_date_only(&data.range_to),
+            points.len()
+        );
+        design::card_titled(ui, "New conversations per day", Some(&range_hint), |ui| {
+            if points.is_empty() {
+                design::empty_state(
                     ui,
-                    "First response avg",
-                    data.first_response_avg_min.unwrap_or(0),
+                    Icon::BarChart,
+                    "no conversations in range",
+                    "Nothing was created in the selected period.",
                 );
-                ui.end_row();
-                metric(ui, "Great ratings", data.ratings_great);
-                metric(ui, "Okay ratings", data.ratings_okay);
-                metric(ui, "Not-good ratings", data.ratings_not_good);
-                metric(ui, "Resolution avg", data.resolution_avg_min.unwrap_or(0));
+            } else {
+                chart::line_chart(ui, "dashboard-daily-new", &points, "new conversations");
+            }
+        });
+        ui.add_space(10.0);
+
+        // Breakdown panels — two columns, one on narrow windows.
+        let breakdown_cols = if width < 760.0 { 1 } else { 2 };
+        egui::Grid::new("dashboard-breakdowns")
+            .num_columns(breakdown_cols)
+            .spacing(egui::vec2(10.0, 10.0))
+            .show(ui, |ui| {
+                for row in [
+                    ("By mailbox", &data.by_mailbox, false),
+                    ("By tag", &data.by_tag, false),
+                    ("By channel", &data.by_channel, false),
+                    ("By agent", &data.by_agent, false),
+                    ("By team", &data.by_team, false),
+                ]
+                .chunks(breakdown_cols)
+                {
+                    for (title, rows, _) in row {
+                        breakdown(ui, title, rows);
+                    }
+                    ui.end_row();
+                }
+                // The channel-metrics table pairs with the last breakdown.
+                channel_metrics_table(ui, &data.channel_metrics);
+                if breakdown_cols == 2 {
+                    // Placeholder keeps the grid balanced.
+                    ui.label("");
+                }
                 ui.end_row();
             });
-        ui.separator();
-
-        ui.strong("New conversations per day");
-        let points = daily_new_points(data);
-        if points.is_empty() {
-            ui.weak("no conversations in range");
-        } else {
-            chart::line_chart(ui, "dashboard-daily-new", &points, "new conversations");
-            ui.weak(format!(
-                "range {} → {} ({} points)",
-                data.range_from,
-                data.range_to,
-                points.len()
-            ));
-        }
-        ui.separator();
-
-        ui.columns(2, |cols| {
-            breakdown(&mut cols[0], "By mailbox", &data.by_mailbox);
-            breakdown(&mut cols[0], "By channel", &data.by_channel);
-            breakdown(&mut cols[0], "By team", &data.by_team);
-            breakdown(&mut cols[1], "By tag", &data.by_tag);
-            breakdown(&mut cols[1], "By agent", &data.by_agent);
-            channel_metrics_table(&mut cols[1], &data.channel_metrics);
-        });
-        ui.separator();
+        ui.add_space(10.0);
 
         comparison_table(ui, &data.mailbox_comparison);
-        ui.separator();
+        ui.add_space(10.0);
 
         radar_panel(ui, &self.radar);
     }
@@ -638,140 +692,188 @@ impl Default for DashboardPage {
     }
 }
 
-fn metric(ui: &mut egui::Ui, label: &str, value: i64) {
-    ui.strong(label);
-    ui.label(format!("{value}"));
+/// Trim an ISO timestamp down to its date (`YYYY-MM-DD`).
+fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
+    match iso.split_once('T') {
+        Some((date, _)) => std::borrow::Cow::Borrowed(date),
+        None => std::borrow::Cow::Borrowed(iso),
+    }
 }
 
 fn breakdown(ui: &mut egui::Ui, title: &str, rows: &[NameCount]) {
-    ui.strong(title);
-    if rows.is_empty() {
-        ui.weak("(none)");
-        return;
-    }
-    egui::Grid::new(format!("breakdown-{title}"))
-        .num_columns(2)
-        .striped(true)
-        .show(ui, |ui| {
-            for row in rows {
-                ui.label(row.name.as_str());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.monospace(row.count.to_string());
-                });
-                ui.end_row();
-            }
-        });
-}
-
-fn channel_metrics_table(ui: &mut egui::Ui, rows: &[ChannelMetric]) {
-    ui.strong("Channel metrics");
-    if rows.is_empty() {
-        ui.weak("(none)");
-        return;
-    }
-    egui::Grid::new("channel-metrics")
-        .num_columns(4)
-        .striped(true)
-        .show(ui, |ui| {
-            ui.strong("channel");
-            ui.strong("count");
-            ui.strong("first resp (min)");
-            ui.strong("resolution (min)");
-            ui.end_row();
-            for row in rows {
-                ui.label(row.channel.as_str());
-                ui.monospace(row.count.to_string());
-                ui.monospace(
-                    row.first_response_avg_min
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "—".into()),
-                );
-                ui.monospace(
-                    row.resolution_avg_min
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "—".into()),
-                );
-                ui.end_row();
-            }
-        });
-}
-
-fn comparison_table(ui: &mut egui::Ui, rows: &[MailboxComparison]) {
-    ui.strong("Mailbox comparison");
-    if rows.is_empty() {
-        ui.weak("(none)");
-        return;
-    }
-    egui::ScrollArea::vertical().show_rows(ui, 20.0, rows.len(), |ui, range| {
-        egui::Grid::new("mailbox-comparison")
-            .num_columns(9)
+    design::card_titled(ui, title, None, |ui| {
+        if rows.is_empty() {
+            design::hint_text(ui, "(none)");
+            return;
+        }
+        egui::Grid::new(egui::IdSalt::new(format!("breakdown-{title}")))
+            .num_columns(2)
             .striped(true)
+            .spacing(egui::vec2(12.0, 2.0))
+            .min_row_height(20.0)
             .show(ui, |ui| {
-                for header in [
-                    "mailbox",
-                    "new",
-                    "active",
-                    "closed",
-                    "backlog",
-                    "first resp (min)",
-                    "resolution (min)",
-                    "great",
-                    "ratings",
-                ] {
-                    ui.strong(header);
-                }
-                ui.end_row();
-                for row in &rows[range] {
-                    ui.label(row.name.as_str());
-                    ui.monospace(row.new_conversations.to_string());
-                    ui.monospace(row.active_conversations.to_string());
-                    ui.monospace(row.closed_conversations.to_string());
-                    ui.monospace(row.backlog.to_string());
-                    ui.monospace(
-                        row.first_response_avg_min
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into()),
+                let t = design::tokens(ui);
+                for row in rows {
+                    ui.label(
+                        egui::RichText::new(row.name.as_str())
+                            .size(13.0)
+                            .color(t.foreground),
                     );
-                    ui.monospace(
-                        row.resolution_avg_min
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into()),
-                    );
-                    ui.monospace(row.great_ratings.to_string());
-                    ui.monospace(row.total_ratings.to_string());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.monospace(
+                            egui::RichText::new(row.count.to_string()).color(t.foreground),
+                        );
+                    });
                     ui.end_row();
                 }
             });
     });
 }
 
-fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value]) {
-    ui.strong("Issue radar");
-    ui.weak("AI-derived alerts from local conversation data");
-    if alerts.is_empty() {
-        ui.weak("(no alerts)");
+fn channel_metrics_table(ui: &mut egui::Ui, rows: &[ChannelMetric]) {
+    design::card_titled(ui, "Channel metrics", None, |ui| {
+        if rows.is_empty() {
+            design::hint_text(ui, "(none)");
+            return;
+        }
+        design::table(
+            ui,
+            "channel-metrics",
+            &["channel", "count", "first resp (min)", "resolution (min)"],
+            26.0,
+            |ui| {
+                let t = design::tokens(ui);
+                for row in rows {
+                    ui.label(
+                        egui::RichText::new(row.channel.as_str())
+                            .size(13.0)
+                            .color(t.foreground),
+                    );
+                    design::td_num(ui, &row.count.to_string());
+                    design::td_num(
+                        ui,
+                        &row.first_response_avg_min
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "—".into()),
+                    );
+                    design::td_num(
+                        ui,
+                        &row.resolution_avg_min
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "—".into()),
+                    );
+                    ui.end_row();
+                }
+            },
+        );
+    });
+}
+
+fn comparison_table(ui: &mut egui::Ui, rows: &[MailboxComparison]) {
+    if rows.is_empty() {
         return;
     }
-    egui::ScrollArea::vertical().show_rows(ui, 20.0, alerts.len(), |ui, range| {
-        for alert in &alerts[range] {
-            let title = super::str_field(alert, "title");
-            let severity = super::str_field(alert, "severity");
-            let conversations = alert
-                .get("conversation_ids")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            let color = if severity == "high" {
-                egui::Color32::RED
-            } else {
-                egui::Color32::YELLOW
-            };
-            ui.colored_label(
-                color,
-                format!("{title} · {conversations} conversations · severity {severity}"),
-            );
-        }
+    design::card_titled(ui, "Mailbox comparison", None, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("mailbox-comparison-scroll")
+            .max_height(320.0)
+            .show(ui, |ui| {
+                design::table(
+                    ui,
+                    "mailbox-comparison",
+                    &[
+                        "mailbox",
+                        "new",
+                        "active",
+                        "closed",
+                        "backlog",
+                        "first resp (min)",
+                        "resolution (min)",
+                        "great",
+                        "ratings",
+                    ],
+                    26.0,
+                    |ui| {
+                        let t = design::tokens(ui);
+                        for row in rows {
+                            ui.label(
+                                egui::RichText::new(row.name.as_str())
+                                    .size(13.0)
+                                    .strong()
+                                    .color(t.foreground),
+                            );
+                            design::td_num(ui, &row.new_conversations.to_string());
+                            design::td_num(ui, &row.active_conversations.to_string());
+                            design::td_num(ui, &row.closed_conversations.to_string());
+                            design::td_num(ui, &row.backlog.to_string());
+                            design::td_num(
+                                ui,
+                                &row.first_response_avg_min
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "—".into()),
+                            );
+                            design::td_num(
+                                ui,
+                                &row.resolution_avg_min
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "—".into()),
+                            );
+                            design::td_num(ui, &row.great_ratings.to_string());
+                            design::td_num(ui, &row.total_ratings.to_string());
+                            ui.end_row();
+                        }
+                    },
+                );
+            });
     });
+}
+
+fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value]) {
+    design::card_titled(
+        ui,
+        "Issue radar",
+        Some("AI-derived alerts from local conversation data"),
+        |ui| {
+            if alerts.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::Target,
+                    "(no alerts)",
+                    "No AI-derived alerts for the current data.",
+                );
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("dashboard-radar-scroll")
+                .show(ui, |ui| {
+                    for alert in alerts {
+                        let title = super::str_field(alert, "title");
+                        let severity = super::str_field(alert, "severity");
+                        let conversations = alert
+                            .get("conversation_ids")
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0);
+                        let tone = if severity == "high" {
+                            (BadgeTone::Destructive, "high")
+                        } else {
+                            (BadgeTone::Warning, "medium")
+                        };
+                        ui.horizontal(|ui| {
+                            design::badge(ui, tone.1, tone.0);
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{title} · {conversations} conversations",
+                                ))
+                                .size(13.0)
+                                .color(design::tokens(ui).foreground),
+                            );
+                        });
+                        ui.add_space(2.0);
+                    }
+                });
+        },
+    );
 }
 
 #[cfg(test)]

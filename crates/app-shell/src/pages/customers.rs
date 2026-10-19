@@ -1,6 +1,11 @@
 //! Customers pages (port of the web `pages/customers.rs`): a search page
 //! and a customer profile page.
 //!
+//! Redesigned with the shadcn-style design system (`crate::design`):
+//! striped result tables, status badges, and card-wrapped profile panels;
+//! the AI-derived interaction profile is marked with a Sparkles icon and
+//! an “AI” badge — presentation only.
+//!
 //! Data comes straight from the core functions the `/api/customers`
 //! routes call — `people_store::list_customers_summary` /
 //! `get_customer_detail`, `customer_events::list_for_customer` +
@@ -14,6 +19,8 @@ use serde_json::Value;
 use spp_core::db::DbHandle;
 
 use super::{i64_field, opt_str_field, str_field};
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Which surface is showing.
 #[derive(Debug, Clone, PartialEq)]
@@ -282,12 +289,10 @@ impl CustomersPage {
                 Mode::Profile { customer_id } => self.load_profile(db, customer_id),
             }
         }
-        ui.heading("Customers");
-        ui.separator();
+        design::page_header(ui, "Customers", None, |_| {});
 
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
-            ui.separator();
+            design::error_text(ui, &format!("error: {err}"));
         }
 
         match self.mode {
@@ -299,14 +304,16 @@ impl CustomersPage {
     fn search_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         ui.horizontal(|ui| {
             let mut search = self.search_edit.clone();
-            let response = ui.add(
+            let response = ui.add_sized(
+                [280.0, 30.0],
                 egui::TextEdit::singleline(&mut search)
                     .hint_text("Search customers by name or email…"),
             );
             if response.changed() {
                 self.search_edit = search;
             }
-            if ui.button("search").clicked()
+            if design::button_with_icon(ui, Icon::Search, "search", ButtonVariant::Primary)
+                .clicked()
                 || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
             {
                 let trimmed = self.search_edit.trim();
@@ -318,77 +325,117 @@ impl CustomersPage {
                 self.reload_search(db);
             }
         });
-        ui.separator();
+        ui.add_space(10.0);
 
         if self.rows.is_empty() {
-            ui.weak("No customers loaded yet — search or press Enter.");
+            design::empty_state(
+                ui,
+                Icon::Users,
+                "No customers loaded yet",
+                "Search by name or email and press Enter.",
+            );
             return;
         }
-        ui.strong(format!("{} customers (of {})", self.rows.len(), self.total));
+        let rows = self.rows.clone();
         let mut clicked: Option<i64> = None;
-        egui::ScrollArea::vertical().show_rows(ui, 24.0, self.rows.len(), |ui, range| {
-            egui::Grid::new("customer-results")
-                .num_columns(5)
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.strong("name");
-                    ui.strong("email");
-                    ui.strong("conversations");
-                    ui.strong("last contact");
-                    ui.strong("");
-                    ui.end_row();
-                    for row in self.rows[range].iter().cloned() {
-                        ui.strong(row.display_name.as_str());
-                        ui.label(row.email.as_deref().unwrap_or("—"));
-                        ui.monospace(row.conversation_count.to_string());
-                        ui.label(row.last_contact.as_deref().unwrap_or("—"));
-                        if ui.button("open").clicked() {
-                            clicked = Some(row.id);
-                        }
-                        ui.end_row();
-                    }
+        design::card_titled(
+            ui,
+            &format!("{} customers (of {})", rows.len(), self.total),
+            None,
+            |ui| {
+                let t = design::tokens(ui);
+                egui::ScrollArea::vertical().show_rows(ui, 28.0, rows.len(), |ui, range| {
+                    design::table(
+                        ui,
+                        "customer-results",
+                        &["name", "email", "conversations", "last contact", ""],
+                        26.0,
+                        |ui| {
+                            for row in rows[range].iter().cloned() {
+                                ui.label(
+                                    egui::RichText::new(row.display_name.as_str())
+                                        .size(13.0)
+                                        .strong()
+                                        .color(t.foreground),
+                                );
+                                ui.label(
+                                    egui::RichText::new(row.email.as_deref().unwrap_or("—"))
+                                        .size(13.0)
+                                        .color(t.foreground),
+                                );
+                                design::td_num(ui, &row.conversation_count.to_string());
+                                ui.label(
+                                    egui::RichText::new(row.last_contact.as_deref().unwrap_or("—"))
+                                        .size(13.0)
+                                        .color(t.muted_foreground),
+                                );
+                                if design::button(ui, "open", ButtonVariant::Outline).clicked() {
+                                    clicked = Some(row.id);
+                                }
+                                ui.end_row();
+                            }
+                        },
+                    );
                 });
-        });
+            },
+        );
         if let Some(id) = clicked {
             self.open_profile(db, id);
         }
     }
 
     fn profile_ui(&mut self, ui: &mut egui::Ui, _db: &DbHandle, customer_id: i64) {
-        if ui.button("← back to search").clicked() {
+        if design::button(ui, "← back to search", ButtonVariant::Outline).clicked() {
             self.mode = Mode::Search;
             self.rows.clear();
             return;
         }
         let Some(profile) = self.profile.clone() else {
-            ui.weak(format!("Customer {customer_id} not found."));
+            design::hint_text(ui, &format!("Customer {customer_id} not found."));
             return;
         };
         let contact = contact_from_detail(&profile);
+        let t = design::tokens(ui);
 
-        ui.strong(contact.display_name.as_str());
+        design::section_title(ui, contact.display_name.as_str());
         ui.horizontal(|ui| {
-            ui.label(contact.email.as_deref().unwrap_or("—"));
+            ui.label(
+                egui::RichText::new(contact.email.as_deref().unwrap_or("—"))
+                    .size(13.0)
+                    .color(t.foreground),
+            );
             if let Some(phone) = &contact.phone {
-                ui.label(phone.as_str());
+                ui.label(
+                    egui::RichText::new(phone.as_str())
+                        .size(13.0)
+                        .color(t.foreground),
+                );
             }
             if let Some(company) = &contact.company {
-                ui.weak(company.as_str());
+                ui.label(
+                    egui::RichText::new(company.as_str())
+                        .small()
+                        .color(t.muted_foreground),
+                );
             }
             if let Some(last_seen) = &contact.created_at {
-                ui.weak(format!("last activity {last_seen}"));
+                ui.label(
+                    egui::RichText::new(format!("last activity {last_seen}"))
+                        .small()
+                        .color(t.muted_foreground),
+                );
             }
         });
-        ui.separator();
+        ui.add_space(10.0);
 
         ui.columns(2, |cols| {
             health_and_counts(&mut cols[0], &self.health, &self.kind_counts);
             interaction_summary(&mut cols[1], self.interaction.as_ref());
         });
-        ui.separator();
+        ui.add_space(10.0);
 
         timeline_ui(ui, &self.timeline);
-        ui.separator();
+        ui.add_space(10.0);
 
         conversations_ui(ui, &self.conversations);
     }
@@ -401,116 +448,164 @@ impl Default for CustomersPage {
 }
 
 fn health_and_counts(ui: &mut egui::Ui, health: &Option<Value>, counts: &[(String, i64)]) {
-    ui.strong("Support health");
-    if let Some(report) = health {
-        let h = health_from_report(report);
-        egui::Grid::new("customer-health")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("open conversations");
-                ui.monospace(h.open_conversations.to_string());
+    let t = design::tokens(ui);
+    design::card(ui, |ui| {
+        design::section_title(ui, "Support health");
+        if let Some(report) = health {
+            let h = health_from_report(report);
+            design::form_grid(ui, "customer-health", |ui| {
+                design::field_label(ui, "open conversations:");
+                ui.monospace(
+                    egui::RichText::new(h.open_conversations.to_string()).color(t.foreground),
+                );
                 ui.end_row();
-                ui.label("not-good ratings (90d)");
-                ui.monospace(h.not_good_ratings_90d.to_string());
+                design::field_label(ui, "not-good ratings (90d):");
+                ui.monospace(
+                    egui::RichText::new(h.not_good_ratings_90d.to_string()).color(t.foreground),
+                );
                 ui.end_row();
-                ui.label("SLA breaches");
-                ui.monospace(h.breached_sla.to_string());
+                design::field_label(ui, "SLA breaches:");
+                ui.monospace(egui::RichText::new(h.breached_sla.to_string()).color(t.foreground));
                 ui.end_row();
             });
-    } else {
-        ui.weak("(no health report)");
-    }
-    ui.add_space(6.0);
-    ui.strong("Event mix");
-    if counts.is_empty() {
-        ui.weak("(no events)");
-        return;
-    }
-    let max = counts.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
-    for (kind, count) in counts {
-        let ratio = *count as f32 / max as f32;
-        ui.add(
-            egui::ProgressBar::new(ratio.clamp(0.0, 1.0))
-                .text(format!("{kind}: {count}"))
-                .desired_width(220.0),
-        );
-    }
+        } else {
+            design::hint_text(ui, "(no health report)");
+        }
+        ui.add_space(6.0);
+        design::divider(ui);
+        ui.add_space(6.0);
+        design::section_title(ui, "Event mix");
+        if counts.is_empty() {
+            design::hint_text(ui, "(no events)");
+            return;
+        }
+        let max = counts.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
+        for (kind, count) in counts {
+            let ratio = *count as f32 / max as f32;
+            ui.add(
+                egui::ProgressBar::new(ratio.clamp(0.0, 1.0))
+                    .text(format!("{kind}: {count}"))
+                    .desired_width(220.0),
+            );
+        }
+    });
 }
 
 fn interaction_summary(ui: &mut egui::Ui, interaction: Option<&Value>) {
-    ui.strong("Interaction profile");
-    let Some(profile) = interaction else {
-        ui.weak("(no AI profile yet)");
-        return;
-    };
-    // The profile JSON carries dimension/value pairs; render whatever is
-    // present as key: value lines.
-    if let Some(map) = profile.get("dimensions").and_then(Value::as_object) {
-        for (dimension, value) in map {
-            ui.label(format!(
-                "{dimension}: {}",
-                value.as_str().unwrap_or(&value.to_string())
-            ));
-        }
-    } else if let Some(map) = profile.as_object() {
-        for (key, value) in map {
-            if key == "dimensions" {
-                continue;
+    let t = design::tokens(ui);
+    design::card(ui, |ui| {
+        ui.horizontal(|ui| {
+            Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
+            design::section_title(ui, "Interaction profile");
+            design::badge(ui, "AI", BadgeTone::Info);
+        });
+        let Some(profile) = interaction else {
+            design::hint_text(ui, "(no AI profile yet)");
+            return;
+        };
+        // The profile JSON carries dimension/value pairs; render whatever is
+        // present as key: value lines.
+        if let Some(map) = profile.get("dimensions").and_then(Value::as_object) {
+            for (dimension, value) in map {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{dimension}: {}",
+                        value.as_str().unwrap_or(&value.to_string())
+                    ))
+                    .size(13.0)
+                    .color(t.foreground),
+                );
             }
-            ui.label(format!(
-                "{key}: {}",
-                value.as_str().unwrap_or(&value.to_string())
-            ));
+        } else if let Some(map) = profile.as_object() {
+            for (key, value) in map {
+                if key == "dimensions" {
+                    continue;
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{key}: {}",
+                        value.as_str().unwrap_or(&value.to_string())
+                    ))
+                    .size(13.0)
+                    .color(t.foreground),
+                );
+            }
         }
-    }
+    });
 }
 
 fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
-    ui.strong("Timeline");
-    if events.is_empty() {
-        ui.weak("(no timeline events)");
-        return;
-    }
-    egui::ScrollArea::vertical()
-        .id_salt("customer-timeline")
-        .max_height(220.0)
-        .show_rows(ui, 20.0, events.len(), |ui, range| {
-            for event in &events[range] {
-                ui.horizontal(|ui| {
-                    ui.weak(event.occurred_at.as_str());
-                    ui.strong(event.kind.as_str());
-                    if let Some(number) = event.conversation_number {
-                        ui.monospace(format!("#{number}"));
-                    }
-                    ui.label(event.summary.as_str());
-                });
-            }
-        });
+    let t = design::tokens(ui);
+    design::card_titled(ui, "Timeline", None, |ui| {
+        if events.is_empty() {
+            design::hint_text(ui, "(no timeline events)");
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("customer-timeline")
+            .max_height(220.0)
+            .show_rows(ui, 20.0, events.len(), |ui, range| {
+                for event in &events[range] {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(event.occurred_at.as_str())
+                                .small()
+                                .color(t.muted_foreground),
+                        );
+                        ui.label(
+                            egui::RichText::new(event.kind.as_str())
+                                .size(13.0)
+                                .strong()
+                                .color(t.foreground),
+                        );
+                        if let Some(number) = event.conversation_number {
+                            ui.monospace(
+                                egui::RichText::new(format!("#{number}")).color(t.foreground),
+                            );
+                        }
+                        ui.label(
+                            egui::RichText::new(event.summary.as_str())
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                    });
+                }
+            });
+    });
 }
 
 fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationListItem]) {
-    ui.strong("Conversations");
-    if items.is_empty() {
-        ui.weak("(no conversations)");
-        return;
-    }
-    egui::Grid::new("customer-conversations")
-        .num_columns(4)
-        .striped(true)
-        .show(ui, |ui| {
-            ui.strong("#");
-            ui.strong("subject");
-            ui.strong("status");
-            ui.strong("updated");
-            ui.end_row();
-            for item in items {
-                ui.monospace(item.number.to_string());
-                ui.label(item.subject.as_deref().unwrap_or("(no subject)"));
-                ui.label(item.status.as_str());
-                ui.label(item.updated_at.as_deref().unwrap_or("—"));
-                ui.end_row();
-            }
-        });
+    let t = design::tokens(ui);
+    design::card_titled(ui, "Conversations", None, |ui| {
+        if items.is_empty() {
+            design::hint_text(ui, "(no conversations)");
+            return;
+        }
+        design::table(
+            ui,
+            "customer-conversations",
+            &["#", "subject", "status", "updated"],
+            26.0,
+            |ui| {
+                for item in items {
+                    design::td_num(ui, &item.number.to_string());
+                    ui.label(
+                        egui::RichText::new(item.subject.as_deref().unwrap_or("(no subject)"))
+                            .size(13.0)
+                            .color(t.foreground),
+                    );
+                    let (tone, label) = design::status_tone(item.status.as_str());
+                    design::badge(ui, label, tone);
+                    ui.label(
+                        egui::RichText::new(item.updated_at.as_deref().unwrap_or("—"))
+                            .size(13.0)
+                            .color(t.muted_foreground),
+                    );
+                    ui.end_row();
+                }
+            },
+        );
+    });
 }
 
 #[cfg(test)]

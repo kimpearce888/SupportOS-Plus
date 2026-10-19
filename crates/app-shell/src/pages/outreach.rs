@@ -1,5 +1,9 @@
 //! Outreach page (port of the web `pages/outreach.rs`).
 //!
+//! Redesigned with the shadcn-style design system (`crate::design`):
+//! chip tabs, status-badge campaign cards with destructive lifecycle
+//! actions, and card-wrapped forms — presentation only.
+//!
 //! Campaigns tab — `list_outreach_campaigns` (`/api/outreach/campaigns`)
 //! with the queue/pause/resume/cancel/retry actions
 //! (`outreach::campaign_*`, the `/api/outreach/campaigns/{id}/{action}`
@@ -14,6 +18,8 @@ use spp_core::db::DbHandle;
 use spp_core::segment::{SegmentDefinition, SegmentEngine};
 
 use super::{i64_field, str_field};
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Page tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,21 +330,21 @@ impl OutreachPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Outreach");
+        design::page_header(ui, "Outreach", None, |_| {});
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
                     self.tab = tab;
                 }
             }
         });
         if let Some(message) = &self.message {
-            ui.label(format!("status: {message}"));
+            design::success_text(ui, &format!("status: {message}"));
         }
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         match self.tab {
             Tab::Campaigns => self.campaigns_ui(ui, db),
@@ -349,13 +355,15 @@ impl OutreachPage {
 
     fn campaigns_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         ui.horizontal(|ui| {
-            if ui.button("New Campaign").clicked() {
+            if design::button_with_icon(ui, Icon::Plus, "New Campaign", ButtonVariant::Primary)
+                .clicked()
+            {
                 self.show_new = !self.show_new;
             }
         });
         if self.show_new {
             self.new_campaign_ui(ui, db);
-            ui.separator();
+            ui.add_space(10.0);
         }
 
         let campaigns = self.campaigns.clone();
@@ -366,41 +374,35 @@ impl OutreachPage {
             .show(ui, |ui| {
                 for campaign in &campaigns {
                     let id = i64_field(campaign, "id");
-                    ui.group(|ui| {
+                    design::card(ui, |ui| {
                         ui.horizontal(|ui| {
-                            if ui
-                                .selectable_label(
-                                    self.selected == Some(id),
-                                    format!(
-                                        "{} — {}",
-                                        str_field(campaign, "name"),
-                                        str_field(campaign, "subject")
-                                    ),
-                                )
-                                .clicked()
+                            if design::chip(
+                                ui,
+                                self.selected == Some(id),
+                                &format!(
+                                    "{} — {}",
+                                    str_field(campaign, "name"),
+                                    str_field(campaign, "subject")
+                                ),
+                            )
+                            .clicked()
                             {
                                 picked = Some(id);
                             }
-                            ui.colored_label(
-                                match str_field(campaign, "status").as_str() {
-                                    "draft" => egui::Color32::GRAY,
-                                    "queued" | "running" => egui::Color32::LIGHT_BLUE,
-                                    "paused" => egui::Color32::YELLOW,
-                                    "completed" => egui::Color32::GREEN,
-                                    "cancelled" => egui::Color32::RED,
-                                    _ => egui::Color32::GRAY,
-                                },
-                                str_field(campaign, "status"),
-                            );
+                            let status = str_field(campaign, "status");
+                            design::badge(ui, &status, campaign_status_tone(&status));
                         });
-                        ui.weak(format!(
-                            "{} recipients · {} sent · {} failed · {} replied · mailbox {}",
-                            i64_field(campaign, "recipients"),
-                            i64_field(campaign, "sent"),
-                            i64_field(campaign, "failed"),
-                            i64_field(campaign, "replied"),
-                            str_field(campaign, "mailbox_name")
-                        ));
+                        design::hint_text(
+                            ui,
+                            &format!(
+                                "{} recipients · {} sent · {} failed · {} replied · mailbox {}",
+                                i64_field(campaign, "recipients"),
+                                i64_field(campaign, "sent"),
+                                i64_field(campaign, "failed"),
+                                i64_field(campaign, "replied"),
+                                str_field(campaign, "mailbox_name")
+                            ),
+                        );
                         ui.horizontal(|ui| {
                             for action in [
                                 CampaignAction::Queue,
@@ -409,7 +411,19 @@ impl OutreachPage {
                                 CampaignAction::CancelRemaining,
                                 CampaignAction::RetryFailed,
                             ] {
-                                if ui.button(action.label()).clicked() {
+                                if design::button(
+                                    ui,
+                                    action.label(),
+                                    match action {
+                                        CampaignAction::Queue => ButtonVariant::Primary,
+                                        CampaignAction::CancelRemaining => {
+                                            ButtonVariant::Destructive
+                                        }
+                                        _ => ButtonVariant::Outline,
+                                    },
+                                )
+                                .clicked()
+                                {
                                     acted = Some((id, action));
                                 }
                             }
@@ -417,7 +431,12 @@ impl OutreachPage {
                     });
                 }
                 if campaigns.is_empty() {
-                    ui.weak("(no campaigns)");
+                    design::empty_state(
+                        ui,
+                        Icon::Megaphone,
+                        "No campaigns",
+                        "Create a campaign to reach a saved segment.",
+                    );
                 }
             });
         if let Some(id) = picked {
@@ -429,7 +448,7 @@ impl OutreachPage {
         }
 
         if self.selected.is_some() {
-            ui.separator();
+            ui.add_space(10.0);
             self.report_ui(ui);
         }
     }
@@ -438,10 +457,9 @@ impl OutreachPage {
         let Some(report) = self.report.clone() else {
             return;
         };
-        ui.strong("Campaign report");
-        egui::Grid::new("outreach-report")
-            .num_columns(2)
-            .show(ui, |ui| {
+        let t = design::tokens(ui);
+        design::card_titled(ui, "Campaign report", None, |ui| {
+            design::form_grid(ui, "outreach-report", |ui| {
                 for key in [
                     "total",
                     "sent",
@@ -451,74 +469,107 @@ impl OutreachPage {
                     "unknown",
                     "remaining",
                 ] {
-                    ui.strong(key);
-                    ui.monospace(i64_field(&report, key).to_string());
+                    design::field_label(ui, key);
+                    ui.monospace(
+                        egui::RichText::new(i64_field(&report, key).to_string())
+                            .color(t.foreground),
+                    );
                     ui.end_row();
                 }
             });
+        });
     }
 
     fn new_campaign_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("New Campaign");
-        egui::Grid::new("outreach-new")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("name:");
-                ui.text_edit_singleline(&mut self.new_name);
+        design::card(ui, |ui| {
+            design::section_title(ui, "New Campaign");
+            design::form_grid(ui, "outreach-new", |ui| {
+                design::field_label(ui, "name:");
+                ui.add_sized(
+                    [240.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_name).hint_text("campaign name"),
+                );
                 ui.end_row();
-                ui.label("subject:");
-                ui.text_edit_singleline(&mut self.new_subject);
+                design::field_label(ui, "subject:");
+                ui.add_sized(
+                    [280.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_subject).hint_text("email subject"),
+                );
                 ui.end_row();
-                ui.label("body:");
-                ui.text_edit_multiline(&mut self.new_body);
+                design::field_label(ui, "body:");
+                ui.add_sized(
+                    [320.0, 90.0],
+                    egui::TextEdit::multiline(&mut self.new_body)
+                        .hint_text("email body — {{first_name}} is substituted"),
+                );
                 ui.end_row();
-                ui.label("mailbox id:");
-                ui.text_edit_singleline(&mut self.new_mailbox)
-                    .on_hover_text("local mailbox id (see Settings)");
+                design::field_label(ui, "mailbox id:");
+                ui.add_sized(
+                    [140.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_mailbox),
+                )
+                .on_hover_text("local mailbox id (see Settings)");
                 ui.end_row();
-                ui.label("segment id:");
-                ui.text_edit_singleline(&mut self.new_segment_json)
-                    .on_hover_text("saved segment id — required guard");
+                design::field_label(ui, "segment id:");
+                ui.add_sized(
+                    [140.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_segment_json),
+                )
+                .on_hover_text("saved segment id — required guard");
                 ui.end_row();
             });
-        let segments = self.segments.clone();
-        if !segments.is_empty() {
-            ui.weak(format!(
-                "saved segments: {}",
-                segments
-                    .iter()
-                    .map(|s| format!("#{} {}", i64_field(s, "id"), str_field(s, "name")))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if ui.button("create campaign").clicked() {
-            self.create_campaign(db);
-        }
+            let segments = self.segments.clone();
+            if !segments.is_empty() {
+                design::hint_text(
+                    ui,
+                    &format!(
+                        "saved segments: {}",
+                        segments
+                            .iter()
+                            .map(|s| format!("#{} {}", i64_field(s, "id"), str_field(s, "name")))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                );
+            }
+            if design::button(ui, "create campaign", ButtonVariant::Primary).clicked() {
+                self.create_campaign(db);
+            }
+        });
     }
 
     fn segments_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         ui.horizontal(|ui| {
-            if ui.button("New Segment").clicked() {
+            if design::button_with_icon(ui, Icon::Plus, "New Segment", ButtonVariant::Primary)
+                .clicked()
+            {
                 self.show_new_segment = !self.show_new_segment;
             }
         });
         if self.show_new_segment {
-            egui::Grid::new("outreach-new-segment")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    ui.label("name:");
-                    ui.text_edit_singleline(&mut self.new_segment_name);
+            design::card(ui, |ui| {
+                design::section_title(ui, "New Segment");
+                design::form_grid(ui, "outreach-new-segment", |ui| {
+                    design::field_label(ui, "name:");
+                    ui.add_sized(
+                        [220.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.new_segment_name)
+                            .hint_text("segment name"),
+                    );
                     ui.end_row();
-                    ui.label("criteria (JSON):");
-                    ui.text_edit_multiline(&mut self.new_segment_criteria)
-                        .on_hover_text("segment definition JSON");
+                    design::field_label(ui, "criteria (JSON):");
+                    ui.add_sized(
+                        [320.0, 80.0],
+                        egui::TextEdit::multiline(&mut self.new_segment_criteria),
+                    )
+                    .on_hover_text("segment definition JSON");
                     ui.end_row();
                 });
-            if ui.button("create segment").clicked() {
-                self.create_segment(db);
-            }
-            ui.separator();
+                if design::button(ui, "create segment", ButtonVariant::Primary).clicked() {
+                    self.create_segment(db);
+                }
+            });
+            ui.add_space(10.0);
         }
 
         let segments = self.segments.clone();
@@ -526,20 +577,31 @@ impl OutreachPage {
         egui::ScrollArea::vertical()
             .id_salt("outreach-segments")
             .show(ui, |ui| {
+                let t = design::tokens(ui);
                 for segment in &segments {
                     ui.horizontal(|ui| {
-                        ui.strong(format!(
-                            "#{} {}",
-                            i64_field(segment, "id"),
-                            str_field(segment, "name")
-                        ));
-                        if ui.button("delete").clicked() {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "#{} {}",
+                                i64_field(segment, "id"),
+                                str_field(segment, "name")
+                            ))
+                            .size(13.5)
+                            .strong()
+                            .color(t.foreground),
+                        );
+                        if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
                             deleted = Some(i64_field(segment, "id"));
                         }
                     });
                 }
                 if segments.is_empty() {
-                    ui.weak("(no saved segments)");
+                    design::empty_state(
+                        ui,
+                        Icon::Tag,
+                        "No saved segments",
+                        "Create a segment to target specific customers.",
+                    );
                 }
             });
         if let Some(id) = deleted {
@@ -548,42 +610,73 @@ impl OutreachPage {
     }
 
     fn dnc_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("Do not contact");
-        ui.weak("Customers on this list are excluded from every campaign.");
-        egui::Grid::new("outreach-dnc-new")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("customer id:");
-                ui.text_edit_singleline(&mut self.new_dnc_customer);
-                ui.end_row();
-                ui.label("reason:");
-                ui.text_edit_singleline(&mut self.new_dnc_reason);
-                ui.end_row();
-            });
-        if ui.button("add").clicked() {
-            self.add_dnc(db);
-        }
-        ui.separator();
-
+        let t = design::tokens(ui);
         let dnc = self.dnc.clone();
         let mut removed: Option<i64> = None;
-        egui::ScrollArea::vertical()
-            .id_salt("outreach-dnc")
-            .show(ui, |ui| {
-                for (customer_id, reason, created_at) in &dnc {
-                    ui.horizontal(|ui| {
-                        ui.monospace(format!("customer #{customer_id}"));
-                        ui.weak(reason);
-                        ui.weak(created_at);
-                        if ui.button("remove").clicked() {
-                            removed = Some(*customer_id);
+        design::card_titled(
+            ui,
+            "Do not contact",
+            Some("Customers on this list are excluded from every campaign."),
+            |ui| {
+                design::form_grid(ui, "outreach-dnc-new", |ui| {
+                    design::field_label(ui, "customer id:");
+                    ui.add_sized(
+                        [140.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.new_dnc_customer)
+                            .hint_text("customer id"),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "reason:");
+                    ui.add_sized(
+                        [220.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.new_dnc_reason)
+                            .hint_text("why (optional)"),
+                    );
+                    ui.end_row();
+                });
+                if design::button(ui, "add", ButtonVariant::Primary).clicked() {
+                    self.add_dnc(db);
+                }
+                ui.add_space(6.0);
+                design::divider(ui);
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("outreach-dnc")
+                    .show(ui, |ui| {
+                        for (customer_id, reason, created_at) in &dnc {
+                            ui.horizontal(|ui| {
+                                ui.monospace(
+                                    egui::RichText::new(format!("customer #{customer_id}"))
+                                        .color(t.foreground),
+                                );
+                                ui.label(
+                                    egui::RichText::new(reason.as_str())
+                                        .small()
+                                        .color(t.muted_foreground),
+                                );
+                                ui.label(
+                                    egui::RichText::new(created_at.as_str())
+                                        .small()
+                                        .color(t.muted_foreground),
+                                );
+                                if design::button(ui, "remove", ButtonVariant::Destructive)
+                                    .clicked()
+                                {
+                                    removed = Some(*customer_id);
+                                }
+                            });
+                        }
+                        if dnc.is_empty() {
+                            design::empty_state(
+                                ui,
+                                Icon::X,
+                                "No customers on the list",
+                                "Add a customer id above to exclude them from campaigns.",
+                            );
                         }
                     });
-                }
-                if dnc.is_empty() {
-                    ui.weak("(no customers on the list)");
-                }
-            });
+            },
+        );
         if let Some(customer_id) = removed {
             self.remove_dnc(db, customer_id);
         }
@@ -604,6 +697,18 @@ enum CampaignAction {
     Resume,
     CancelRemaining,
     RetryFailed,
+}
+
+/// Campaign status → badge tone (redesign of the raw GRAY/LIGHT_BLUE/
+/// YELLOW/GREEN/RED label).
+fn campaign_status_tone(status: &str) -> BadgeTone {
+    match status {
+        "queued" | "running" => BadgeTone::Info,
+        "paused" => BadgeTone::Warning,
+        "completed" => BadgeTone::Success,
+        "cancelled" => BadgeTone::Destructive,
+        _ => BadgeTone::Neutral,
+    }
 }
 
 impl CampaignAction {

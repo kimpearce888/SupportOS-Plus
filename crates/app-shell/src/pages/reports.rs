@@ -13,6 +13,8 @@ use spp_core::sla::SlaReport;
 
 use super::{i64_field, str_field};
 use crate::chart;
+use crate::design::{self, BadgeTone};
+use crate::icons::Icon;
 use crate::pages::dashboard::{DashboardData, DashboardScope, load_dashboard};
 
 /// Report tabs.
@@ -123,27 +125,30 @@ impl ReportsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Reports");
-        ui.horizontal(|ui| {
-            ui.label("range:");
-            for (d, label) in crate::pages::dashboard::RANGES {
-                if ui.selectable_label(self.days == d, label).clicked() {
-                    self.days = d;
-                    self.reload(db);
+        design::page_header(
+            ui,
+            "Reports",
+            Some("local analytics over the selected range"),
+            |ui| {
+                for (d, label) in crate::pages::dashboard::RANGES {
+                    if design::chip(ui, self.days == d, label).clicked() {
+                        self.days = d;
+                        self.reload(db);
+                    }
                 }
-            }
-        });
+            },
+        );
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
                     self.tab = tab;
                 }
             }
         });
+        ui.add_space(6.0);
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
 
         let (why, questions) = (self.why_contacting.clone(), self.top_questions.clone());
         match self.tab {
@@ -160,137 +165,206 @@ impl ReportsPage {
             ui.spinner();
             return;
         };
+        let width = ui.available_width();
+        let cols = if width < 640.0 {
+            2
+        } else if width < 980.0 {
+            3
+        } else {
+            4
+        };
+        let facts: [(&str, i64); 8] = [
+            ("New", data.new_conversations),
+            ("Closed", data.closed_conversations),
+            ("Replies sent", data.replies_sent),
+            ("Backlog", data.backlog),
+            ("Great ratings", data.ratings_great),
+            ("Okay ratings", data.ratings_okay),
+            ("Not-good ratings", data.ratings_not_good),
+            ("Unassigned", data.unassigned),
+        ];
         egui::Grid::new("reports-overview")
-            .num_columns(4)
-            .spacing([16.0, 8.0])
+            .num_columns(cols)
+            .spacing(egui::vec2(10.0, 10.0))
             .show(ui, |ui| {
-                for (label, value) in [
-                    ("New", data.new_conversations),
-                    ("Closed", data.closed_conversations),
-                    ("Replies sent", data.replies_sent),
-                    ("Backlog", data.backlog),
-                    ("Great ratings", data.ratings_great),
-                    ("Okay ratings", data.ratings_okay),
-                    ("Not-good ratings", data.ratings_not_good),
-                    ("Unassigned", data.unassigned),
-                ] {
-                    ui.strong(label);
-                    ui.monospace(value.to_string());
+                for row in facts.chunks(cols) {
+                    for (label, value) in row {
+                        design::metric_card(ui, label, &value.to_string(), None);
+                    }
+                    ui.end_row();
                 }
             });
-        ui.separator();
+        ui.add_space(10.0);
 
-        ui.strong("New conversations per day");
-        let points: Vec<chart::Point> = crate::pages::dashboard::daily_new_points(data);
-        if points.is_empty() {
-            ui.weak("(no data in range)");
-            return;
-        }
-        chart::line_chart(ui, "reports-daily-new", &points, "new conversations");
+        design::card_titled(ui, "New conversations per day", None, |ui| {
+            let points: Vec<chart::Point> = crate::pages::dashboard::daily_new_points(data);
+            if points.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::BarChart,
+                    "no data in range",
+                    "Nothing to plot for the selected period.",
+                );
+            } else {
+                chart::line_chart(ui, "reports-daily-new", &points, "new conversations");
+            }
+        });
     }
 
     fn sla_ui(&mut self, ui: &mut egui::Ui) {
         let Some(report) = &self.sla else {
-            ui.weak("(no SLA report)");
+            design::empty_state(
+                ui,
+                Icon::Clock,
+                "no SLA report",
+                "No SLA data is available for the selected range.",
+            );
             return;
         };
         if !report.unconfigured_mailboxes.is_empty() {
-            ui.weak(format!(
-                "unconfigured mailboxes: {}",
-                report.unconfigured_mailboxes.join(", ")
-            ));
-            ui.separator();
+            design::card(ui, |ui| {
+                let t = design::tokens(ui);
+                let (id, rect) = ui.allocate_space(egui::vec2(16.0, 16.0));
+                Icon::AlertCircle.paint_at(ui.painter(), rect, t.warning_foreground);
+                ui.advance_cursor_after_rect(rect);
+                let _ = id;
+                ui.label(
+                    egui::RichText::new(format!(
+                        "unconfigured mailboxes: {}",
+                        report.unconfigured_mailboxes.join(", ")
+                    ))
+                    .small()
+                    .color(t.warning_foreground),
+                );
+            });
+            ui.add_space(8.0);
         }
 
         let bars = sla_first_response_bars(report);
-        ui.strong("First response avg (business minutes)");
-        chart::bar_chart(ui, "reports-sla-bars", &bars, "first response avg");
-        ui.separator();
+        design::card_titled(ui, "First response avg (business minutes)", None, |ui| {
+            if bars.is_empty() {
+                design::hint_text(ui, "(no first-response data in range)");
+            } else {
+                chart::bar_chart(ui, "reports-sla-bars", &bars, "first response avg");
+            }
+        });
+        ui.add_space(10.0);
 
-        egui::ScrollArea::vertical().show_rows(ui, 22.0, report.mailboxes.len(), |ui, range| {
-            egui::Grid::new("reports-sla-table")
-                .num_columns(7)
-                .striped(true)
-                .show(ui, |ui| {
-                    for header in [
-                        "mailbox",
-                        "in range",
-                        "fr met/missed",
-                        "fr avg (min)",
-                        "res met/missed",
-                        "res avg (min)",
-                        "waiting oldest (min)",
-                    ] {
-                        ui.strong(header);
-                    }
-                    ui.end_row();
-                    for row in &report.mailboxes[range] {
-                        ui.label(row.mailbox_name.as_str());
-                        ui.monospace(row.conversations_in_range.to_string());
-                        ui.monospace(format!(
-                            "{}/{}",
-                            row.first_response.met, row.first_response.missed
-                        ));
-                        ui.monospace(
-                            row.first_response
+        design::card(ui, |ui| {
+            design::table(
+                ui,
+                "reports-sla-table",
+                &[
+                    "mailbox",
+                    "in range",
+                    "fr met/missed",
+                    "fr avg (min)",
+                    "res met/missed",
+                    "res avg (min)",
+                    "waiting oldest (min)",
+                ],
+                28.0,
+                |ui| {
+                    let t = design::tokens(ui);
+                    for row in &report.mailboxes {
+                        ui.label(
+                            egui::RichText::new(row.mailbox_name.as_str())
+                                .size(13.0)
+                                .strong()
+                                .color(t.foreground),
+                        );
+                        design::td_num(ui, &row.conversations_in_range.to_string());
+                        design::td_num(
+                            ui,
+                            &format!("{}/{}", row.first_response.met, row.first_response.missed),
+                        );
+                        design::td_num(
+                            ui,
+                            &row.first_response
                                 .avg_business_min
                                 .map(|v| v.to_string())
                                 .unwrap_or_else(|| "—".into()),
                         );
-                        ui.monospace(format!("{}/{}", row.resolution.met, row.resolution.missed));
-                        ui.monospace(
-                            row.resolution
+                        design::td_num(
+                            ui,
+                            &format!("{}/{}", row.resolution.met, row.resolution.missed),
+                        );
+                        design::td_num(
+                            ui,
+                            &row.resolution
                                 .avg_business_min
                                 .map(|v| v.to_string())
                                 .unwrap_or_else(|| "—".into()),
                         );
-                        ui.monospace(
-                            row.waiting
+                        design::td_num(
+                            ui,
+                            &row.waiting
                                 .oldest_business_min
                                 .map(|v| v.to_string())
                                 .unwrap_or_else(|| "—".into()),
                         );
                         ui.end_row();
                     }
-                });
+                },
+            );
         });
     }
 
     fn radar_ui(&mut self, ui: &mut egui::Ui) {
-        if self.radar.is_empty() {
-            ui.weak("(no alerts)");
-            return;
-        }
-        egui::ScrollArea::vertical().show_rows(ui, 20.0, self.radar.len(), |ui, range| {
-            for alert in &self.radar[range] {
-                let title = str_field(alert, "title");
-                let severity = str_field(alert, "severity");
-                let count = alert
-                    .get("conversation_ids")
-                    .and_then(|v| v.as_array())
-                    .map(|a| a.len())
-                    .unwrap_or(0);
-                let color = if severity == "high" {
-                    egui::Color32::RED
-                } else {
-                    egui::Color32::YELLOW
-                };
-                ui.colored_label(
-                    color,
-                    format!("{title} · {count} conversations · {severity}"),
-                );
-            }
-        });
+        design::card_titled(
+            ui,
+            "Issue radar",
+            Some("AI-derived alerts from local conversation data"),
+            |ui| {
+                if self.radar.is_empty() {
+                    design::empty_state(
+                        ui,
+                        Icon::Target,
+                        "(no alerts)",
+                        "No AI-derived alerts for the current data.",
+                    );
+                    return;
+                }
+                for alert in &self.radar {
+                    let title = str_field(alert, "title");
+                    let severity = str_field(alert, "severity");
+                    let count = alert
+                        .get("conversation_ids")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    let tone = if severity == "high" {
+                        (BadgeTone::Destructive, "high")
+                    } else {
+                        (BadgeTone::Warning, "medium")
+                    };
+                    ui.horizontal(|ui| {
+                        design::badge(ui, tone.1, tone.0);
+                        ui.label(
+                            egui::RichText::new(format!("{title} · {count} conversations"))
+                                .size(13.0)
+                                .color(design::tokens(ui).foreground),
+                        );
+                    });
+                    ui.add_space(2.0);
+                }
+            },
+        );
     }
 
     fn list_ui(ui: &mut egui::Ui, rows: &[serde_json::Value], title: &str) {
-        ui.strong(title);
-        if rows.is_empty() {
-            ui.weak("(no data)");
-            return;
-        }
-        egui::ScrollArea::vertical().show_rows(ui, 20.0, rows.len(), |ui, range| {
-            for row in &rows[range] {
+        design::card_titled(ui, title, None, |ui| {
+            if rows.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::BarChart,
+                    "(no data)",
+                    "No rows were returned for this report.",
+                );
+                return;
+            }
+            let t = design::tokens(ui);
+            for row in rows {
                 let question = str_field(row, "question");
                 let label = if question.is_empty() {
                     str_field(row, "category")
@@ -298,11 +372,13 @@ impl ReportsPage {
                     question
                 };
                 let count = i64_field(row, "count");
-                if count > 0 {
-                    ui.label(format!("{} · {}", label, count));
-                } else {
-                    ui.label(label.as_str());
-                }
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(label).size(13.0).color(t.foreground));
+                    if count > 0 {
+                        design::badge(ui, &count.to_string(), BadgeTone::Neutral);
+                    }
+                });
+                ui.add_space(2.0);
             }
         });
     }

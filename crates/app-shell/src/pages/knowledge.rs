@@ -1,6 +1,10 @@
 //! Knowledge & docs pages (port of the web `pages/knowledge.rs` and
 //! `pages/docs.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! The knowledge tabs (documents / sources / freshness) read and act
 //! through `spp_core::knowledge_store` directly. The help-center docs tab
 //! ports the `/api/docs/*` route SQL as typed queries (collections, stats,
@@ -19,6 +23,8 @@ use serde_json::Value;
 use spp_core::db::DbHandle;
 
 use super::{i64_field, str_field};
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Importable visibility values (route parity).
 const VISIBILITIES: [(&str, &str); 2] = [
@@ -532,67 +538,80 @@ impl KnowledgePage {
                 if self.import.files.is_none() {
                     self.reload_importable();
                 }
-                ui.strong("Import from the knowledge-import folder");
+                design::section_title(ui, "Import from the knowledge-import folder");
                 let dir = self
                     .import
                     .import_dir
                     .clone()
                     .unwrap_or_else(|| "<data dir>/knowledge-import".to_string());
-                ui.weak(format!(
-                    "Copy documents into {dir} (supported: .md .txt .csv .json .html .pdf .docx). \
-                     For safety, file imports must live inside that folder."
-                ));
-                if ui.button("Refresh").clicked() {
+                design::hint_text(
+                    ui,
+                    &format!(
+                        "Copy documents into {dir} (supported: .md .txt .csv .json .html .pdf .docx). \
+                         For safety, file imports must live inside that folder."
+                    ),
+                );
+                if design::button_with_icon(ui, Icon::Refresh, "Refresh", ButtonVariant::Outline)
+                    .clicked()
+                {
                     refresh = true;
                 }
                 let files = self.import.files.clone().unwrap_or_default();
                 if files.is_empty() {
-                    ui.weak("(no importable files in the folder)");
+                    design::hint_text(ui, "(no importable files in the folder)");
                 }
                 for file in files {
                     ui.horizontal(|ui| {
-                        ui.monospace(file.clone());
-                        if ui.button("Import").clicked() {
+                        ui.monospace(
+                            egui::RichText::new(file.clone())
+                                .color(design::tokens(ui).foreground),
+                        );
+                        if design::button(ui, "Import", ButtonVariant::Primary).clicked() {
                             file_action = Some(file);
                         }
                     });
                 }
-                ui.separator();
-                ui.strong("Paste a document");
-                egui::Grid::new("knowledge-import-form")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        ui.label("Title");
-                        ui.text_edit_singleline(&mut self.import.title);
-                        ui.end_row();
-                        ui.label("Visibility");
-                        ui.horizontal(|ui| {
-                            for (value, label) in VISIBILITIES {
-                                let selected = self.import.visibility == value;
-                                if ui.selectable_label(selected, label).clicked() {
-                                    self.import.visibility = value.to_string();
-                                }
+                design::divider(ui);
+                design::section_title(ui, "Paste a document");
+                design::form_grid(ui, "knowledge-import-form", |ui| {
+                    design::field_label(ui, "Title");
+                    ui.add_sized(
+                        [260.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.import.title),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "Visibility");
+                    ui.horizontal(|ui| {
+                        for (value, label) in VISIBILITIES {
+                            let selected = self.import.visibility == value;
+                            if design::chip(ui, selected, label).clicked() {
+                                self.import.visibility = value.to_string();
                             }
-                        });
-                        ui.end_row();
-                        ui.label("Source name");
-                        ui.text_edit_singleline(&mut self.import.source_name);
-                        ui.end_row();
-                        ui.label("Content (Markdown)");
-                        ui.add(
-                            egui::TextEdit::multiline(&mut self.import.content)
-                                .desired_rows(4)
-                                .desired_width(f32::INFINITY),
-                        );
-                        ui.end_row();
+                        }
                     });
+                    ui.end_row();
+                    design::field_label(ui, "Source name");
+                    ui.add_sized(
+                        [260.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.import.source_name),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "Content (Markdown)");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.import.content)
+                            .desired_rows(4)
+                            .desired_width(f32::INFINITY),
+                    );
+                    ui.end_row();
+                });
                 let ready =
                     !self.import.title.trim().is_empty() && !self.import.content.trim().is_empty();
-                if ui
-                    .add_enabled(ready, egui::Button::new("Import document"))
-                    .clicked()
-                {
-                    manual_submit = true;
+                if ready {
+                    if design::button(ui, "Import document", ButtonVariant::Primary).clicked() {
+                        manual_submit = true;
+                    }
+                } else {
+                    let _ = ui.add_enabled(false, egui::Button::new("Import document"));
                 }
             });
         if refresh {
@@ -614,23 +633,26 @@ impl KnowledgePage {
 
     /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.heading("Knowledge");
-        ui.separator();
-
+        design::page_header(
+            ui,
+            "Knowledge",
+            Some("local documents, sources, freshness, and the help center"),
+            |_| {},
+        );
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
                     self.tab = tab;
                 }
             }
         });
         if let Some(msg) = &self.status_message {
-            ui.colored_label(egui::Color32::GREEN, msg.clone());
+            design::success_text(ui, msg);
         }
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, err.clone());
+            design::error_text(ui, err);
         }
-        ui.separator();
+        design::divider(ui);
 
         match self.tab {
             Tab::Documents => self.documents_ui(ui, db),
@@ -644,45 +666,64 @@ impl KnowledgePage {
         if self.documents.is_empty() {
             self.reload_all(db);
         }
-        ui.weak("Local knowledge documents used by search and AI answers");
+        design::hint_text(
+            ui,
+            "Local knowledge documents used by search and AI answers",
+        );
         self.import_ui(ui, db);
+        ui.add_space(8.0);
         if self.documents.is_empty() {
-            ui.weak("(no documents)");
+            design::empty_state(
+                ui,
+                Icon::BookOpen,
+                "(no documents)",
+                "Import a document to get started.",
+            );
             return;
         }
         // Actions are deferred out of the borrow of `self.documents`.
         let mut action: Option<(i64, &str)> = None;
         egui::ScrollArea::vertical().show_rows(ui, 24.0, self.documents.len(), |ui, range| {
-            egui::Grid::new("knowledge-documents")
-                .num_columns(5)
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.strong("title");
-                    ui.strong("source");
-                    ui.strong("visibility");
-                    ui.strong("chunks");
-                    ui.strong("actions");
-                    ui.end_row();
+            design::table(
+                ui,
+                "knowledge-documents",
+                &["title", "source", "visibility", "chunks", "actions"],
+                26.0,
+                |ui| {
+                    let t = design::tokens(ui);
                     for doc in self.documents[range].iter() {
                         let id = i64_field(doc, "id");
-                        ui.label(str_field(doc, "title"));
-                        ui.label(format!("#{}", i64_field(doc, "source_id")));
-                        ui.label(str_field(doc, "visibility"));
-                        ui.monospace(i64_field(doc, "chunk_count").to_string());
+                        ui.label(
+                            egui::RichText::new(str_field(doc, "title"))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("#{}", i64_field(doc, "source_id")))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        ui.label(
+                            egui::RichText::new(str_field(doc, "visibility"))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
                         ui.horizontal(|ui| {
-                            if ui.button("reviewed").clicked() {
+                            if design::button(ui, "reviewed", ButtonVariant::Outline).clicked() {
                                 action = Some((id, "reviewed"));
                             }
-                            if ui.button("verify").clicked() {
+                            if design::button(ui, "verify", ButtonVariant::Outline).clicked() {
                                 action = Some((id, "verify"));
                             }
-                            if ui.button("delete").clicked() {
+                            if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
                                 action = Some((id, "delete"));
                             }
                         });
                         ui.end_row();
                     }
-                });
+                },
+            );
         });
         if let Some((id, what)) = action {
             match what {
@@ -698,28 +739,49 @@ impl KnowledgePage {
             self.reload_all(db);
         }
         if self.sources.is_empty() {
-            ui.weak("(no sources)");
+            design::empty_state(
+                ui,
+                Icon::BookOpen,
+                "(no sources)",
+                "Sources appear when documents are imported.",
+            );
             return;
         }
-        egui::Grid::new("knowledge-sources")
-            .num_columns(5)
-            .striped(true)
-            .show(ui, |ui| {
-                ui.strong("name");
-                ui.strong("kind");
-                ui.strong("visibility");
-                ui.strong("documents");
-                ui.strong("created");
-                ui.end_row();
-                for source in &self.sources {
-                    ui.label(str_field(source, "name"));
-                    ui.label(str_field(source, "kind"));
-                    ui.label(str_field(source, "visibility"));
-                    ui.monospace(i64_field(source, "document_count").to_string());
-                    ui.label(str_field(source, "created_at"));
-                    ui.end_row();
-                }
-            });
+        design::card(ui, |ui| {
+            design::table(
+                ui,
+                "knowledge-sources",
+                &["name", "kind", "visibility", "documents", "created"],
+                26.0,
+                |ui| {
+                    let t = design::tokens(ui);
+                    for source in &self.sources {
+                        ui.label(
+                            egui::RichText::new(str_field(source, "name"))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        ui.label(
+                            egui::RichText::new(str_field(source, "kind"))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        ui.label(
+                            egui::RichText::new(str_field(source, "visibility"))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        design::td_num(ui, &i64_field(source, "document_count").to_string());
+                        ui.label(
+                            egui::RichText::new(str_field(source, "created_at"))
+                                .size(13.0)
+                                .color(t.muted_foreground),
+                        );
+                        ui.end_row();
+                    }
+                },
+            );
+        });
     }
 
     fn freshness_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -729,7 +791,11 @@ impl KnowledgePage {
         let Some(report) = self.freshness.clone() else {
             return;
         };
-        ui.weak("Documents by review state (stale / unreviewed / unverified / low usage)");
+        design::hint_text(
+            ui,
+            "Documents by review state (stale / unreviewed / unverified / low usage)",
+        );
+        ui.add_space(8.0);
         for flag in ["stale", "unreviewed_long", "unverified", "low_usage"] {
             let Some(rows) = report
                 .get("flags")
@@ -738,15 +804,21 @@ impl KnowledgePage {
             else {
                 continue;
             };
-            ui.strong(format!("{flag} ({})", rows.len()));
-            for row in rows.iter().take(20) {
-                ui.label(format!(
-                    "  {} · {}",
-                    str_field(row, "title"),
-                    str_field(row, "updated_at")
-                ));
-            }
-            ui.add_space(4.0);
+            design::card_titled(ui, &format!("{flag} ({})", rows.len()), None, |ui| {
+                let t = design::tokens(ui);
+                for row in rows.iter().take(20) {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} · {}",
+                            str_field(row, "title"),
+                            str_field(row, "updated_at")
+                        ))
+                        .size(13.0)
+                        .color(t.foreground),
+                    );
+                }
+            });
+            ui.add_space(8.0);
         }
     }
 
@@ -755,16 +827,23 @@ impl KnowledgePage {
             self.reload_all(db);
         }
 
-        ui.monospace(format!(
-            "collections: {} · articles: {} (published {}, draft {}, internal {}) · views: {}",
-            self.stats.collections,
-            self.stats.articles,
-            self.stats.published,
-            self.stats.draft,
-            self.stats.internal,
-            self.stats.views
-        ));
-        ui.separator();
+        egui::Grid::new("docs-stats")
+            .num_columns(3)
+            .spacing(egui::vec2(10.0, 10.0))
+            .show(ui, |ui| {
+                design::metric_card(ui, "collections", &self.stats.collections.to_string(), None);
+                design::metric_card(
+                    ui,
+                    "articles",
+                    &self.stats.articles.to_string(),
+                    Some(&format!(
+                        "published {} · draft {} · internal {}",
+                        self.stats.published, self.stats.draft, self.stats.internal
+                    )),
+                );
+                design::metric_card(ui, "views", &self.stats.views.to_string(), None);
+            });
+        design::divider(ui);
 
         if let Some(id) = self.reader {
             self.reader_ui(ui, db, id);
@@ -772,7 +851,7 @@ impl KnowledgePage {
         }
 
         ui.horizontal(|ui| {
-            ui.label("collection:");
+            design::field_label(ui, "collection:");
             egui::ComboBox::from_id_salt("docs-collection")
                 .selected_text(
                     self.collection_pick
@@ -790,7 +869,7 @@ impl KnowledgePage {
                         ui.selectable_value(&mut self.collection_pick, Some(id), name);
                     }
                 });
-            ui.label("status:");
+            design::field_label(ui, "status:");
             egui::ComboBox::from_id_salt("docs-status")
                 .selected_text(self.status_pick.clone().unwrap_or_else(|| "Any".into()))
                 .show_ui(ui, |ui| {
@@ -803,7 +882,7 @@ impl KnowledgePage {
                     ui.selectable_value(&mut self.status_pick, Some("draft".into()), "draft");
                     ui.selectable_value(&mut self.status_pick, Some("internal".into()), "internal");
                 });
-            if ui.button("apply").clicked() {
+            if design::button(ui, "apply", ButtonVariant::Outline).clicked() {
                 self.filter.collection = self.collection_pick;
                 self.filter.status = self.status_pick.clone();
                 self.filter.query = None;
@@ -813,12 +892,14 @@ impl KnowledgePage {
         });
         ui.horizontal(|ui| {
             let mut search = self.search_edit.clone();
-            let response =
-                ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search help center…"));
+            let response = ui.add_sized(
+                [320.0, 28.0],
+                egui::TextEdit::singleline(&mut search).hint_text("Search help center…"),
+            );
             if response.changed() {
                 self.search_edit = search;
             }
-            if ui.button("search").clicked() {
+            if design::button(ui, "search", ButtonVariant::Primary).clicked() {
                 let trimmed = self.search_edit.trim();
                 self.filter.query = if trimmed.is_empty() {
                     None
@@ -830,35 +911,53 @@ impl KnowledgePage {
                 self.reload_docs(db);
             }
         });
-        ui.separator();
+        design::divider(ui);
 
         if self.articles.is_empty() {
-            ui.weak("(no articles match)");
+            design::empty_state(
+                ui,
+                Icon::BookOpen,
+                "(no articles match)",
+                "Adjust the collection, status, or search terms.",
+            );
             return;
         }
         let mut open: Option<i64> = None;
         egui::ScrollArea::vertical().show_rows(ui, 26.0, self.articles.len(), |ui, range| {
-            egui::Grid::new("docs-articles")
-                .num_columns(5)
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.strong("article");
-                    ui.strong("collection");
-                    ui.strong("status");
-                    ui.strong("views");
-                    ui.strong("");
-                    ui.end_row();
+            design::table(
+                ui,
+                "docs-articles",
+                &["article", "collection", "status", "views", ""],
+                26.0,
+                |ui| {
+                    let t = design::tokens(ui);
                     for article in self.articles[range].iter().cloned() {
-                        ui.strong(article.name.as_str());
-                        ui.label(article.collection_name.as_deref().unwrap_or("—"));
-                        ui.label(article.status.as_str());
-                        ui.monospace(article.views.to_string());
-                        if ui.button("read").clicked() {
+                        ui.label(
+                            egui::RichText::new(article.name.as_str())
+                                .size(13.0)
+                                .strong()
+                                .color(t.foreground),
+                        );
+                        ui.label(
+                            egui::RichText::new(article.collection_name.as_deref().unwrap_or("—"))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        let tone = match article.status.as_str() {
+                            "published" => BadgeTone::Success,
+                            "draft" => BadgeTone::Neutral,
+                            "internal" => BadgeTone::Info,
+                            _ => BadgeTone::Neutral,
+                        };
+                        design::badge(ui, article.status.as_str(), tone);
+                        design::td_num(ui, &article.views.to_string());
+                        if design::button(ui, "read", ButtonVariant::Outline).clicked() {
                             open = Some(article.id);
                         }
                         ui.end_row();
                     }
-                });
+                },
+            );
         });
         if let Some(id) = open {
             self.open_article(db, id);
@@ -866,27 +965,35 @@ impl KnowledgePage {
     }
 
     fn reader_ui(&mut self, ui: &mut egui::Ui, _db: &DbHandle, id: i64) {
-        if ui.button("← back to list").clicked() {
+        if design::button(ui, "← back to list", ButtonVariant::Ghost).clicked() {
             self.reader = None;
             self.reader_text = None;
             return;
         }
         let Some((article, text)) = self.reader_text.clone() else {
-            ui.weak(format!("Article {id} not found."));
+            design::hint_text(ui, &format!("Article {id} not found."));
             return;
         };
-        ui.strong(article.name.as_str());
-        ui.weak(format!(
-            "{} · {} · updated {}",
-            article.collection_name.as_deref().unwrap_or("—"),
-            article.status,
-            article.updated_at.as_deref().unwrap_or("—")
-        ));
-        ui.separator();
+        design::section_title(ui, article.name.as_str());
+        design::hint_text(
+            ui,
+            &format!(
+                "{} · {} · updated {}",
+                article.collection_name.as_deref().unwrap_or("—"),
+                article.status,
+                article.updated_at.as_deref().unwrap_or("—")
+            ),
+        );
+        design::divider(ui);
         egui::ScrollArea::vertical()
             .id_salt("docs-reader")
             .show(ui, |ui| {
-                ui.label(egui::RichText::new(text).monospace().size(14.0));
+                ui.label(
+                    egui::RichText::new(text)
+                        .monospace()
+                        .size(14.0)
+                        .color(design::tokens(ui).foreground),
+                );
             });
     }
 }
