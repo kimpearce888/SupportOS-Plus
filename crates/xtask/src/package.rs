@@ -18,12 +18,13 @@
 //!   release; run with `APPIMAGE_EXTRACT_AND_RUN=1` so it works on
 //!   FUSE-less builders) / `dpkg-deb --root-owner-group`.
 //!
-//! Naming layers (maintainer instruction, 2026-10-19): `SupportOS+` is the
-//! human display name (window title, desktop entry `Name`, release
-//! title); `SupportOS-Plus` is the product identifier (repository, window
-//! `app_id`/`StartupWMClass`, artifact base name); `supportos-plus` is
-//! the Debian package name; `supportos-plusplus` remains the binary and
-//! crate identifier (Cargo names cannot carry `+`).
+//! Naming layers (maintainer instruction, 2026-10-19; completed for
+//! 1.0.0): `SupportOS+` is the human display name (window title, desktop
+//! entry `Name`, release title); `SupportOS-Plus` is the product
+//! identifier (repository, window `app_id`/`StartupWMClass`, artifact
+//! base name); `supportos-plus` is the Debian package name — and, since
+//! 1.0.0, also the binary and crate identifier (Cargo names cannot carry
+//! `+`, and the hyphenated form matches the package name).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,8 +39,10 @@ pub const PRODUCT_ID: &str = "SupportOS-Plus";
 /// Debian package name (lowercase identifier; `+` is not allowed).
 pub const DEB_PACKAGE: &str = "supportos-plus";
 
-/// The app-shell binary name (crates/app-shell `[[bin]]`).
-pub const BINARY_NAME: &str = "supportos-plusplus";
+/// The app-shell binary name (crates/app-shell `[[bin]]`). Matches the
+/// Debian package name: installing `supportos-plus` provides the
+/// `supportos-plus` command.
+pub const BINARY_NAME: &str = "supportos-plus";
 
 /// Workspace package version (xtask inherits the workspace version).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -131,10 +134,10 @@ pub struct DebOptions {
 /// Linux-only.
 fn release_build(workspace_root: &Path, extra_args: &[String]) -> anyhow::Result<()> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["build", "--release", "-p", "supportos-plusplus-app-shell"])
+    cmd.args(["build", "--release", "-p", "supportos-plus-app-shell"])
         .current_dir(workspace_root);
     if cfg!(target_os = "linux") {
-        cmd.args(["--features", "supportos-plusplus-core/sandbox"]);
+        cmd.args(["--features", "supportos-plus-core/sandbox"]);
     }
     for arg in extra_args {
         cmd.arg(arg);
@@ -247,13 +250,13 @@ fn copy_hicolor_icons(icons_dir: &Path, hicolor_root: &Path) -> anyhow::Result<(
 /// Layout:
 ///
 /// ```text
-/// supportos-plusplus.AppDir/
+/// supportos-plus.AppDir/
 /// ├── AppRun                          (sh shim, execs usr/bin/…)
-/// ├── supportos-plusplus.png          (root icon)
+/// ├── supportos-plus.png              (root icon)
 /// ├── .DirIcon                        -> root icon
-/// ├── usr/bin/supportos-plusplus
-/// ├── usr/share/applications/supportos-plusplus.desktop
-/// └── usr/share/icons/hicolor/<size>/apps/supportos-plusplus.png
+/// ├── usr/bin/supportos-plus
+/// ├── usr/share/applications/supportos-plus.desktop
+/// └── usr/share/icons/hicolor/<size>/apps/supportos-plus.png
 /// ```
 pub fn stage_appdir(workspace_root: &Path, appdir: &Path) -> anyhow::Result<()> {
     let bin_src = workspace_root
@@ -326,10 +329,10 @@ pub fn stage_appdir(workspace_root: &Path, appdir: &Path) -> anyhow::Result<()> 
 /// debroot/
 /// ├── DEBIAN/control
 /// └── usr/
-///     ├── bin/supportos-plusplus
+///     ├── bin/supportos-plus
 ///     └── share/
-///         ├── applications/supportos-plusplus.desktop
-///         └── icons/hicolor/<size>/apps/supportos-plusplus.png
+///         ├── applications/supportos-plus.desktop
+///         └── icons/hicolor/<size>/apps/supportos-plus.png
 /// ```
 ///
 /// No maintainer scripts and no triggers file: the desktop-file and

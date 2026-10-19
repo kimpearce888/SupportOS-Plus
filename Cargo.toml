@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "1.0.0"
 edition = "2024"
 # MSRV = the pinned toolchain (rust-toolchain.toml, D1/D5: stability
 # first). Older compilers are never tested, so claiming 1.85 would be
@@ -65,8 +65,8 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 
 url = "2"
 
-supportos-plusplus-catalog = { path = "crates/catalog" }
-supportos-plusplus-core = { path = "crates/core" }
+supportos-plus-catalog = { path = "crates/catalog" }
+supportos-plus-core = { path = "crates/core" }
 
 [profile.release]
 codegen-units = 1
