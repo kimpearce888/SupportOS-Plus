@@ -563,9 +563,16 @@ impl RealHelpScoutProvider {
         let keep_refresh: Option<String> = refresh_token.map(|s| s.to_string());
         let conn = self.conn_lock();
         ensure_account_row(&conn);
+        // The migrations schema pins `id INTEGER PRIMARY KEY CHECK (id = 1)`,
+        // so the row id must be supplied explicitly as 1. Without it, SQLite
+        // evaluates the CHECK on the auto-assigned rowid (2 for the second
+        // save) *before* the ON CONFLICT(account) arbitration runs, and every
+        // token refresh fails with "CHECK constraint failed: id = 1"
+        // (inherited from the original codebase; caught by the mock-server
+        // integration tests in it_helpscout.rs).
         conn.execute(
-            "INSERT INTO oauth_tokens (account, access_token, refresh_token, token_type, expires_at, obtained_at, scope, revoked)
-             VALUES ('default', ?1, ?2, 'bearer', ?3, datetime('now'), ?4, 0)
+            "INSERT INTO oauth_tokens (id, account, access_token, refresh_token, token_type, expires_at, obtained_at, scope, revoked)
+             VALUES (1, 'default', ?1, ?2, 'bearer', ?3, datetime('now'), ?4, 0)
              ON CONFLICT(account) DO UPDATE SET access_token = excluded.access_token,
                refresh_token = COALESCE(excluded.refresh_token, refresh_token),
                expires_at = excluded.expires_at, obtained_at = datetime('now'),

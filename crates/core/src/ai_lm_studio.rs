@@ -128,9 +128,18 @@ impl OpenAiCompatibleClient {
             .send()
             .await
             .map_err(|e| Error::Config(format!("LM Studio list_models failed: {e}")))?;
-        let body: ModelsResponse = resp
-            .json()
+        let status = resp.status();
+        let text = resp
+            .text()
             .await
+            .map_err(|e| Error::Config(format!("LM Studio list_models read failed: {e}")))?;
+        if !status.is_success() {
+            let snippet: String = text.chars().take(300).collect();
+            return Err(Error::Config(format!(
+                "LM Studio list_models request failed (HTTP {status}): {snippet}"
+            )));
+        }
+        let body: ModelsResponse = serde_json::from_str(&text)
             .map_err(|e| Error::Config(format!("LM Studio list_models parse failed: {e}")))?;
         Ok(body.data.into_iter().map(infer_model_role).collect())
     }
@@ -148,9 +157,18 @@ impl OpenAiCompatibleClient {
             .send()
             .await
             .map_err(|e| Error::Config(format!("LM Studio chat failed: {e}")))?;
-        let body: ChatCompletionResponse = resp
-            .json()
+        let status = resp.status();
+        let text = resp
+            .text()
             .await
+            .map_err(|e| Error::Config(format!("LM Studio chat read failed: {e}")))?;
+        if !status.is_success() {
+            let snippet: String = text.chars().take(300).collect();
+            return Err(Error::Config(format!(
+                "LM Studio chat request failed (HTTP {status}): {snippet}"
+            )));
+        }
+        let body: ChatCompletionResponse = serde_json::from_str(&text)
             .map_err(|e| Error::Config(format!("LM Studio chat parse failed: {e}")))?;
         Ok(parse_chat_response(body))
     }
@@ -291,9 +309,18 @@ impl OpenAiCompatibleClient {
             .send()
             .await
             .map_err(|e| Error::Config(format!("LM Studio embed failed: {e}")))?;
-        let body: EmbeddingResponse = resp
-            .json()
+        let status = resp.status();
+        let body_text = resp
+            .text()
             .await
+            .map_err(|e| Error::Config(format!("LM Studio embed read failed: {e}")))?;
+        if !status.is_success() {
+            let snippet: String = body_text.chars().take(300).collect();
+            return Err(Error::Config(format!(
+                "LM Studio embed request failed (HTTP {status}): {snippet}"
+            )));
+        }
+        let body: EmbeddingResponse = serde_json::from_str(&body_text)
             .map_err(|e| Error::Config(format!("LM Studio embed parse failed: {e}")))?;
         Ok(parse_embed_response(body))
     }

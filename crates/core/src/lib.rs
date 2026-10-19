@@ -106,6 +106,22 @@ pub mod webhook_handler;
 pub mod workers;
 pub mod workload;
 
+// Test-only integration-verification modules (TODO 45 / 46). Declared
+// `#[cfg(test)]` so none of this compiles into release builds; see each
+// file's header for what it covers.
+#[cfg(test)]
+pub mod bench;
+#[cfg(test)]
+pub mod it_helpscout;
+#[cfg(test)]
+pub mod it_lm_studio;
+#[cfg(test)]
+pub mod it_loopback;
+#[cfg(test)]
+pub mod it_sync;
+#[cfg(test)]
+pub mod mockserver;
+
 pub use error::{Error, Result};
 
 pub mod catalog {

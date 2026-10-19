@@ -6,13 +6,7 @@
 
 ## Items
 
-**45. Real-service verification pass (Help Scout, LM Studio)**
-- From the 2026-10-19 audit (P1-2). BLOCKED: requires user-provided Help Scout
-  credentials (API token, or OAuth client id/secret) — none exist in the dev
-  environment. When provided: verify a real sync round-trip, real webhook
-  ingress + HMAC verification against the loopback listener, and the OAuth
-  code exchange. LM Studio coverage requires a running local model server.
-
-**46. Performance pass (optional, user's call)**
-- From the 2026-10-19 audit (P2-7). Startup time and large-DB behavior have
-  never been measured. Start only if the user confirms it matters.
+(none — the plan is exhausted. Items 45-46 are the final batch, now in
+`progress.md` with their user-directed re-scoping: no user-provided
+credentials, local mock-server integration tests + local performance
+measurement instead.)
