@@ -75,8 +75,10 @@ forensic sessions died mid-run and their partial evidence is preserved.
   914 ms cold / 4.1 ms warm, AppImage start 37–38 ms) live in the
   repository ledger (`ai/plan.md`, items 40–46) and were not re-measured.
 - The final `git push` of this branch was blocked by the sandbox janitor
-  removing the git credentials mid-audit (see `coverage-gaps.md` §6);
-  commits are complete locally and push-ready.
+  removing the git credentials mid-audit (see `coverage-gaps.md` §6).
+  Resolved post-audit: credentials were re-supplied, the branch was pushed,
+  then merged fast-forward into `main` and deleted per maintainer
+  instruction (single-branch policy).
 
 ## Verdict
 
@@ -86,6 +88,14 @@ unreachable to mouse users — and is fully characterized to make the fix
 verifiable. The backend surface (data, sync, webhooks, OAuth, AI client,
 workers) is exceptionally well covered by the repository's own
 credential-free integration suite, which this audit re-verified green.
+
+**Post-audit remediation (same day).** DEFECT-01 fixed and GUI-reverified
+(`F1-fix-verify`: all four dead rows navigate at x=75 and x=130);
+DEFECT-03 fixed (headless E2E proof of focus + keystroke delivery; the
+on-screen leg is env-blocked after four janitor-killed attempts F2–F5);
+DEFECT-02 invalidated — egui 0.37 surrenders TextEdit focus on Enter, the
+Enter path works as written and is now covered by a headless E2E test.
+See `defects.md` "Remediation" blocks and `fix-report.md`.
 
 ## Artifact index
 

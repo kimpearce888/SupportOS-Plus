@@ -49,3 +49,20 @@ the AppImage via `APPIMAGE_EXTRACT_AND_RUN=1` against a fresh
   measurement environment.
 - Sandbox janitor kills long-lived processes at unpredictable ages
   (5–180 s observed); every scenario is a self-contained short session.
+
+## Post-audit fix verification (2026-10-19, remediation batch)
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --workspace` | 306 passed, 0 failed, 4 env-gated ignored (140 shell incl. 2 new headless palette E2E; 164 core; 2 xtask) |
+| `cargo test -p supportos-plusplus-app-shell --lib palette` | 7/7 — incl. `palette_takes_focus_on_open_and_keystrokes_reach_the_query` and `palette_enter_confirms_the_selected_hit` |
+| `cargo run --release -p supportos-plusplus-xtask -- package` | AppImage rebuilt from the fixed binary |
+| `python3 fix_verify.py` — session `F1-fix-verify` (AppImage) | DEFECT-01 retest PASS: Inbox/Reports/Search/Shell navigate at x=75 (diffs 3.87/2.46/1.62/3.37%), Inbox at x=130 (2.49%), controls Organizations/Knowledge/Settings unaffected (1.71/1.91/2.26%) |
+| `python3 fix_palette_probe.py F2..F5` | DEFECT-03 GUI leg BLOCKED-ENV: janitor severed each fresh session's X socket within ~8 s of boot (F2 log: "X connection to :93 broken" at +6 s; F3–F5 frozen frames, 0.0000 pixel diffs, no clock animation). Four attempts; headless E2E test + K1's winit key-delivery proof carry the verification |
+
+Headless palette E2E tests drive the real egui event loop via
+`Context::run_pass` (RawInput events: `Event::Text`, `Event::Key`) against
+a seeded fixture DB — focus routing, text-edit event handling, search and
+Enter-confirm are all the production code paths.

@@ -170,3 +170,34 @@ tests are the port insurance. Theme/sidebar: no migration (defaults + re-pick).
   - **Bench (46):** harness + procedures documented in `bench.rs`'s module doc;
     measurements and the two bench-harness bug fixes (cursor infinite loop, missing
     post-sync FTS rebuild step) are recorded in `completed.md` batch 10.
+- 2026-10-19 — Post-audit remediation batch (maintainer: "fix everything
+  and keep only the main branch"):
+  - **DEFECT-01 fix:** sidebar rows are hand-allocated full-width widgets
+    (`nav_row`, app.rs): `allocate_space` + `interact(Sense::click)` +
+    `Style::interact_selectable` paint, a11y button role and interact
+    cursor kept. The sensed rect IS the painted row — immune to egui
+    0.37's atom hit-geometry anomaly on short galleys by construction,
+    instead of depending on toolkit internals. GUI retest F1-fix-verify:
+    all four dead rows navigate at x=75 and x=130.
+  - **DEFECT-02 correction:** not a defect. egui 0.37 single-line
+    TextEdit surrenders focus on Enter (builder.rs:119/:1331);
+    `lost_focus` is live-computed (memory/mod.rs:872) and `key_pressed`
+    is not consumption-filtered (input_state/mod.rs:767), so the audited
+    web-port idiom works as written. Headless E2E
+    `palette_enter_confirms_the_selected_hit` proves it against the
+    original code. Audit record corrected; code unchanged.
+  - **DEFECT-03 fix:** palette `open()` sets `wants_focus`; the first
+    pass calls `request_focus()` on the query field (both open paths
+    route through `open()`). Headless E2E proves focus + keystroke
+    delivery with no click (pre-fix K1/K3: 0-pixel change). The GUI
+    re-verification leg is BLOCKED-ENV: the sandbox janitor severed fresh
+    sessions' X sockets within ~8 s of boot, four attempts (F2–F5),
+    frozen-frame forensics committed with the evidence.
+  - **Headless egui testing seam:** the palette E2E tests drive the real
+    event loop (`Context::run_pass` with `RawInput` events against a
+    seeded fixture DB, `FullOutput::drop_without_applying_deltas()`) —
+    a reusable pattern for focus/keyboard-path proofs without a display.
+  - **Branch policy:** audit branch pushed, merged fast-forward into
+    main and deleted (local + remote) per maintainer instruction;
+    single-branch main restored. Workspace after remediation: 306
+    tests green, clippy/fmt clean, AppImage rebuilt.

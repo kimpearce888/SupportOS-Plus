@@ -276,7 +276,7 @@ impl eframe::App for ShellApp {
                 ui.weak(format!("v{}", env!("CARGO_PKG_VERSION")));
                 ui.separator();
                 for key in PageKey::all() {
-                    if ui.selectable_label(self.page == key, key.label()).clicked() {
+                    if nav_row(ui, self.page, key) {
                         self.page = key;
                     }
                 }
@@ -345,6 +345,56 @@ impl eframe::App for ShellApp {
         // deleting an automation rule).
         self.toasts.ui(ui.ctx());
     }
+}
+
+/// One full-width sidebar navigation row.
+///
+/// DEFECT-01 (qa-audit/20261019T050847Z): with plain `selectable_label`
+/// rows, the four shortest labels (Inbox, Reports, Search, Shell) only
+/// accepted clicks in a left sliver of the painted row while hover
+/// feedback spanned the label — egui 0.37's atom layout decoupled the
+/// click-acceptance rect from the painted row on short galleys. Rows are
+/// now hand-allocated: the sensed rect is exactly the full-width row we
+/// paint, so click and hover geometry cannot diverge, whatever the label
+/// length. Visuals come from `Style::interact_selectable` (the same
+/// selection/hover styling `selectable_label` used) and the button role
+/// is preserved for assistive technologies.
+fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool {
+    let selected = current == key;
+    let galley = egui::WidgetText::from(key.label()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        ui.available_width(),
+        egui::TextStyle::Button,
+    );
+    let padding = ui.spacing().button_padding;
+    let height = ui
+        .spacing()
+        .interact_size
+        .y
+        .max(galley.size().y + 2.0 * padding.y);
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), height));
+    let response = ui.interact(rect, auto_id.with(key.label()), egui::Sense::click());
+    let visuals = ui.style().interact_selectable(&response, selected);
+    ui.painter()
+        .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+    ui.painter().galley(
+        egui::pos2(
+            rect.min.x + padding.x,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        visuals.fg_stroke.color,
+    );
+    if let Some(cursor) = ui.visuals().interact_cursor
+        && response.hovered()
+    {
+        ui.ctx().set_cursor_icon(cursor);
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key.label())
+    });
+    response.clicked()
 }
 
 #[cfg(test)]

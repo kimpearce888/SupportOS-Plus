@@ -113,6 +113,11 @@ pub struct CommandPalette {
     query: String,
     hits: Vec<PaletteHit>,
     selected: usize,
+    /// Set by [`Self::open`] so the next rendered pass requests keyboard
+    /// focus for the query field. DEFECT-03 (qa-audit/20261019T050847Z):
+    /// the palette used to open unfocused and silently swallowed
+    /// keystrokes until the user clicked inside the input.
+    wants_focus: bool,
 }
 
 impl CommandPalette {
@@ -123,6 +128,7 @@ impl CommandPalette {
             query: String::new(),
             hits: Vec::new(),
             selected: 0,
+            wants_focus: false,
         }
     }
 
@@ -138,6 +144,7 @@ impl CommandPalette {
         self.query.clear();
         self.hits.clear();
         self.selected = 0;
+        self.wants_focus = true;
     }
 
     /// Close the palette.
@@ -204,6 +211,12 @@ impl CommandPalette {
             .resizable(false)
             .show(ctx, |ui| {
                 let response = ui.text_edit_singleline(&mut self.query);
+                if self.wants_focus {
+                    // DEFECT-03: open with the keyboard already in the
+                    // query field, like the web palette auto-focus.
+                    response.request_focus();
+                    self.wants_focus = false;
+                }
                 if response.changed() {
                     query_changed = true;
                 }
@@ -359,5 +372,95 @@ mod tests {
         let empty = PaletteHit::from_json(&serde_json::json!({}));
         assert_eq!(empty.id, 0);
         assert!(empty.title.is_empty());
+    }
+
+    /// Headless egui passes for the DEFECT-02/03 proofs: render the
+    /// palette the way the shell does and drive the real event loop.
+    fn seeded_palette_ctx() -> (egui::Context, CommandPalette, DbHandle) {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        db.with_write(|conn| spp_core::search::rebuild_indexes(conn))
+            .expect("rebuild");
+        let ctx = egui::Context::default();
+        let mut palette = CommandPalette::new();
+        palette.open();
+        (ctx, palette, db)
+    }
+
+    #[test]
+    fn palette_takes_focus_on_open_and_keystrokes_reach_the_query() {
+        let (ctx, mut palette, db) = seeded_palette_ctx();
+
+        // Pass 1: the palette renders once; the query field requests focus.
+        ctx.run_pass(egui::RawInput::default(), |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(
+            ctx.memory(|mem| mem.focused().is_some()),
+            "DEFECT-03: the query field must take keyboard focus when the palette opens"
+        );
+
+        // Pass 2: typing lands in the query with no click — proof that the
+        // auto-focus actually delivers keystrokes.
+        let mut typing = egui::RawInput::default();
+        typing.events.push(egui::Event::Text("Export".into()));
+        ctx.run_pass(typing, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(palette.query, "Export");
+        assert!(
+            !palette.hits.is_empty(),
+            "the typed query must produce hits on the seeded fixture"
+        );
+    }
+
+    #[test]
+    fn palette_enter_confirms_the_selected_hit() {
+        let (ctx, mut palette, db) = seeded_palette_ctx();
+
+        ctx.run_pass(egui::RawInput::default(), |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        let mut typing = egui::RawInput::default();
+        typing.events.push(egui::Event::Text("Export".into()));
+        ctx.run_pass(typing, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+
+        // Pass 3: Enter while the field is focused. egui 0.37 single-line
+        // TextEdits surrender focus on Enter, so `lost_focus() && Enter`
+        // (the web-port idiom audited as DEFECT-02) must fire and confirm
+        // the selected hit.
+        let mut enter = egui::RawInput::default();
+        enter.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let mut nav = None;
+        ctx.run_pass(enter, |ctx| {
+            nav = palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+
+        assert!(
+            matches!(nav, Some(NavRequest::Page(crate::pages::PageKey::Inbox))),
+            "DEFECT-02: Enter must confirm the selected palette hit"
+        );
+        assert!(!palette.is_open());
     }
 }
