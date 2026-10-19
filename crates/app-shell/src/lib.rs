@@ -1,4 +1,4 @@
-//! SupportOS++ native desktop shell (decision D1: eframe/egui).
+//! SupportOS+ native desktop shell (decision D1: eframe/egui).
 //!
 //! This crate is the Phase 2 skeleton of the ported UI: an eframe window
 //! whose theme is persisted in the core `settings` table, a flock-based
@@ -134,14 +134,14 @@ pub fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
 /// Returns [`eframe::Error`] when the graphics context cannot be set up.
 pub fn run(options: ShellOptions) -> Result<(), eframe::Error> {
     let viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("SupportOs-Plus")
+        .with_title("SupportOS+")
         .with_inner_size([1180.0, 760.0]);
     let native_options = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
     eframe::run_native(
-        "SupportOs-Plus",
+        "SupportOS-Plus",
         native_options,
         Box::new(move |cc| Ok(Box::new(ShellApp::new(cc, options)))),
     )

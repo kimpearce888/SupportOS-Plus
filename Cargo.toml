@@ -16,8 +16,8 @@ edition = "2024"
 rust-version = "1.99"
 license = "MIT"
 authors = ["kimpearce888"]
-repository = "https://github.com/kimpearce888/SupportOs-Plus"
-homepage = "https://github.com/kimpearce888/SupportOs-Plus"
+repository = "https://github.com/kimpearce888/SupportOS-Plus"
+homepage = "https://github.com/kimpearce888/SupportOS-Plus"
 
 [workspace.dependencies]
 thiserror = "2"

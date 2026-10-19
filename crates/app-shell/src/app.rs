@@ -272,7 +272,7 @@ impl eframe::App for ShellApp {
         egui::Panel::left("spp-nav")
             .default_size(150.0)
             .show(ui, |ui| {
-                ui.heading("SupportOs-Plus");
+                ui.heading("SupportOS+");
                 ui.weak(format!("v{}", env!("CARGO_PKG_VERSION")));
                 ui.separator();
                 for key in PageKey::all() {

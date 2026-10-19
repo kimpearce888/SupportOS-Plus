@@ -56,8 +56,8 @@ jobs:
       - name: Deny (advisories, licenses)
         run: cargo deny check advisories licenses
 
-  appimage:
-    name: AppImage build + smoke test
+  packages:
+    name: AppImage + .deb build, smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,9 +74,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build the AppImage (xtask package)
-        # Builds the release binary, stages the AppDir (desktop entry,
-        # hicolor icons, AppRun) and packs the type-2 AppImage; appimagetool
-        # is downloaded (and cached under target/tools) by the xtask itself.
+        # Builds the release binary (sandbox feature on), stages the
+        # AppDir (desktop entry, hicolor icons, AppRun) and packs the
+        # type-2 AppImage; appimagetool is downloaded (and cached under
+        # target/tools) by the xtask itself.
         run: cargo run -p supportos-plusplus-xtask -- package
 
       - name: Smoke test (boot chain inside the AppImage)
@@ -88,11 +89,34 @@ jobs:
         # on a headless runner).
         run: |
           APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 \
-            ./target/appimage/SupportOs-Plus-x86_64.AppImage
+            ./target/appimage/SupportOS-Plus-x86_64.AppImage
+
+      - name: Build the .deb (xtask deb)
+        # Stages the dpkg tree (control metadata, absolute-path desktop
+        # entry, hicolor icons) and packs it with dpkg-deb from the same
+        # release binary as the AppImage.
+        run: cargo run -p supportos-plusplus-xtask -- deb --skip-build
+
+      - name: Inspect the .deb (control metadata)
+        run: dpkg-deb -I target/deb/supportos-plus_*_amd64.deb
+
+      - name: Smoke test (boot chain inside the extracted .deb payload)
+        # dpkg-deb -x extracts the payload exactly as APT would install
+        # it; SPP_SMOKE=1 then exercises the same boot chain as above.
+        run: |
+          dpkg-deb -x target/deb/supportos-plus_*_amd64.deb /tmp/deb-payload
+          SPP_SMOKE=1 /tmp/deb-payload/usr/bin/supportos-plusplus
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SupportOs-Plus-x86_64.AppImage
-          path: target/appimage/SupportOs-Plus-x86_64.AppImage
+          name: SupportOS-Plus-x86_64.AppImage
+          path: target/appimage/SupportOS-Plus-x86_64.AppImage
+          if-no-files-found: error
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supportos-plus_amd64.deb
+          path: target/deb/supportos-plus_*_amd64.deb
           if-no-files-found: error

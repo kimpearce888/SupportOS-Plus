@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "SupportOS++ native desktop shell: eframe/egui (decision D1), theme from the settings table, flock single-instance, background-task bridge, ported pages."
+description = "SupportOS+ native desktop shell: eframe/egui (decision D1), theme from the settings table, flock single-instance, background-task bridge, ported pages."
 
 [lib]
 name = "spp_shell"

@@ -1,27 +1,89 @@
-# SupportOS++
+# SupportOS+
 
 > **Independent Rust/egui desktop reimplementation of [supportos](https://github.com/kimpearce888/supportos).**
 > Local-first. No telemetry. No cloud AI.
 
-SupportOS++ is a ground-up rewrite of the SupportOS support-desk platform in pure
+SupportOS+ is a ground-up rewrite of the SupportOS support-desk platform in pure
 Rust, trading the original TypeScript/React stack for a single-language workspace
 that compiles to a fast, self-contained desktop binary. Everything the original
 does — unified inbox, real-time conversation sync, semantic docs search, SLA
 reporting — is rebuilt on an embedded, zero-service architecture that never
 leaves your machine.
 
+Repository: <https://github.com/kimpearce888/SupportOS-Plus> ·
+Releases: <https://github.com/kimpearce888/SupportOS-Plus/releases>
+
+**Naming layers** (applied where each is allowed): `SupportOS+` is the display
+name — window title, desktop menu entry, release title. `SupportOS-Plus` is the
+product identifier — repository, window/app ID, artifact base name.
+`supportos-plus` is the Debian package name. The internal crate and binary
+identifier remains `supportos-plusplus` (Cargo names cannot carry `+`).
+
 ---
 
-## Architecture
+## Install
+
+Install-ready Linux packages are published on the
+[Releases](https://github.com/kimpearce888/SupportOS-Plus/releases) page, built
+and verified by CI from the tagged source commit. Both packages carry the same
+release binary, including the Landlock + seccomp parse sandbox.
+
+| Package | File | Target |
+|---|---|---|
+| `.deb` | `supportos-plus_<version>_amd64.deb` | Ubuntu 22.04 LTS / 24.04 LTS, Debian 12+ |
+| `.AppImage` | `SupportOS-Plus-<version>-x86_64.AppImage` | any modern x86_64 desktop (glibc >= 2.35) |
+
+**System requirements:** x86_64 (amd64) Linux with glibc 2.35 or newer, a desktop
+session (X11 or Wayland) and a GL or Vulkan driver (Mesa software rendering
+works on GPU-less machines). ~200 MB free disk space. No compilation, no
+development tools, no Docker, no external services, no manual configuration.
+
+### .deb
+
+```sh
+sudo apt install ./supportos-plus_<version>_amd64.deb
+```
+
+APT downloads and resolves every declared dependency automatically — the
+package's `Depends` set covers the full X11/GL/Wayland client-library surface
+the GUI loads at runtime. Launch **SupportOS+** from the desktop application
+menu, or run `supportos-plusplus`.
+
+### AppImage
+
+```sh
+chmod +x SupportOS-Plus-<version>-x86_64.AppImage
+./SupportOS-Plus-<version>-x86_64.AppImage
+```
+
+Runs without installation; the type-2 AppImage bundles the binary, icons and
+desktop entry (AppImageLauncher integrates it into the menu). Only the host
+display server and GL/Vulkan driver are used from the system.
+
+**First run** initializes itself: the SQLite database is created (all
+migrations applied) under `~/.local/share/supportos-plusplus/` (override with
+`SPP_DATA_DIR`), background workers start, a loopback listener serves Help
+Scout webhooks and the OAuth callback on `127.0.0.1`, and the shell boots into
+demo mode unless Help Scout credentials are configured. No setup steps.
+
+**Checksums:** every release ships `SHA256SUMS.txt` covering both packages;
+`sha256sum -c SHA256SUMS.txt` after download.
+
+## What's inside (from the source)
 
 A single Cargo workspace, split by concern:
 
 | Crate | Role |
 |---|---|
 | `crates/catalog` | Shared type catalog re-exported by every other crate |
-| `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, AI providers, sqlite-vec vector store, loopback listener. No UI deps. |
-| `crates/app-shell` | Native desktop shell (eframe/egui) — every page renders in-process against `core`, no HTTP hop |
-| `crates/xtask` | Developer entry point — `dev` / `lint` / `verify-icons` / `package` / db ops (`migrate`/`backup`/`restore`/`seed`/`healthcheck`) |
+| `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, Help Scout provider (real + demo), AI providers, sqlite-vec vector store, loopback listener. No UI deps. |
+| `crates/app-shell` | Native desktop shell (eframe/egui) — 21 pages render in-process against `core`, no HTTP hop |
+| `crates/xtask` | Developer entry point — `dev` / `lint` / `verify-icons` / `package` / `deb` / db ops (`migrate`/`backup`/`restore`/`seed`/`healthcheck`/`vector-count`) |
+
+The 21 shell pages: Shell, Dashboard, Inbox, Customers, Knowledge, Reports,
+Operations, AI Center, Automation, Connectors, Custom Objects, Incidents,
+Issue Radar, Notifications, Onboarding, Organizations, Outreach, Search,
+Settings, Support Graph, Sync Health.
 
 ## Key design decisions
 
@@ -49,11 +111,11 @@ A single Cargo workspace, split by concern:
 - **Hardened input handling.** `ammonia` HTML sanitization, bounded NFA regex
   (no ReDoS surface), SSRF-guarded URL parsing for connectors, and a
   Landlock + seccomp sandbox around pdf/docx parsing — compiled into the
-  shipped AppImage (kernels without Landlock degrade to seccomp-only,
+  shipped packages (kernels without Landlock degrade to seccomp-only,
   logged).
 - **Small release binaries.** LTO + `opt-level = "s"` + stripped symbols.
 
-## Building
+## Building from source
 
 Requires the pinned Rust toolchain (see `rust-toolchain.toml`) and no build-time
 system packages — the egui shell needs no webkit and no wasm target. At runtime
@@ -65,15 +127,33 @@ setups).
 ```sh
 cargo xtask dev
 cargo xtask lint
-cargo xtask package   # AppImage → target/appimage/SupportOs-Plus-x86_64.AppImage
-cargo test          # unit tests (crypto round-trips, HMAC vectors, SLA math, page models)
+cargo xtask package   # AppImage → target/appimage/SupportOS-Plus-x86_64.AppImage
+cargo xtask deb       # .deb     → target/deb/supportos-plus_<version>_amd64.deb
+cargo test            # unit tests (crypto round-trips, HMAC vectors, SLA math, page models)
 ```
 
 `xtask package` stages the AppDir (release binary, `.desktop` entry, hicolor
 icons, `AppRun`) and runs `appimagetool` — located via `APPIMAGETOOL`, cached
-under `target/tools/`, or downloaded from the official continuous release. It
-is the only desktop packaging target; the Tauri-era deb/msi/nsis/dmg/app
-targets are gone.
+under `target/tools/`, or downloaded from the official continuous release.
+`xtask deb` stages the same payload for dpkg and packs it with `dpkg-deb
+--root-owner-group`. The Tauri-era msi/nsis/dmg/app targets are gone; the two
+Linux packages are the complete packaging surface.
+
+## Verification
+
+- **CI (every push to main):** fmt, clippy (`-D warnings`), the full workspace
+  test suite, the sandbox-feature tests, `cargo-deny` advisories/licenses, plus
+  an AppImage build, a `.deb` build, and boot-chain smoke runs of both
+  packages (`SPP_SMOKE=1` verifies logging, single-instance lock, migrations,
+  boot services, background workers and the loopback listener).
+- **Release pipeline (every tag):** builds both packages on the ubuntu:22.04
+  glibc 2.35 baseline, installs the `.deb` through APT on clean
+  ubuntu:22.04 / ubuntu:24.04 / debian:12 containers (dependency resolution,
+  desktop entry + icons, boot smoke, GUI launch under Xvfb using only the
+  declared dependencies, reinstall, uninstall with user data preserved,
+  purge), launches the AppImage under Xvfb, then publishes the release with
+  SHA-256 checksums and live-verified download links. Nothing is published
+  unless every step passes.
 
 ## License
 

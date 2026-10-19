@@ -27,7 +27,7 @@ impl std::fmt::Display for AcquireError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AlreadyRunning => {
-                write!(f, "another SupportOs-Plus instance is already running")
+                write!(f, "another SupportOS+ instance is already running")
             }
             Self::Io(e) => write!(f, "failed to acquire the instance lock: {e}"),
         }
