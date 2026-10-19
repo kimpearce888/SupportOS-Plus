@@ -152,11 +152,14 @@ jobs:
 
       - name: GUI launch under Xvfb (declared dependencies only)
         # The only test-env additions are the virtual display and the
-        # software GL driver — the "host display/driver" class; every
+        # software GL/Vulkan driver — the "host display/driver" class; every
         # client library must come from the .deb's own Depends set.
+        # xauth is required by xvfb-run (not pulled with
+        # --no-install-recommends); libglx-mesa0 is the Mesa GLX vendor
+        # (libgl1-mesa-glx does not exist on ubuntu:24.04).
         run: |
           apt-get install -y --no-install-recommends \
-            xvfb libgl1-mesa-dri libgl1-mesa-glx mesa-vulkan-drivers
+            xvfb xauth libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers
           set +e
           timeout --signal=TERM 25s xvfb-run -a -s "-screen 0 1280x800x24" \
             /usr/bin/supportos-plusplus
@@ -171,7 +174,7 @@ jobs:
           apt-get install -y --reinstall ./dist/supportos-plus_*_amd64.deb
           SPP_SMOKE=1 /usr/bin/supportos-plusplus
 
-      - name: Uninstall keeps user data, purge clears the record
+      - name: Uninstall keeps user data; record fully cleared
         run: |
           DATA_DIR="$HOME/.local/share/supportos-plusplus"
           test -f "$DATA_DIR/supportos-plusplus.db" \
@@ -181,9 +184,17 @@ jobs:
           test ! -e /usr/share/applications/supportos-plusplus.desktop
           test -f "$DATA_DIR/supportos-plusplus.db" \
             && echo "user data survived uninstall"
-          apt-get purge -y supportos-plus
+          # The package ships no conffiles: after removal dpkg may already
+          # consider it fully gone, in which case there is nothing left to
+          # purge and apt-get purge would fail with 'unable to locate'.
           if dpkg -s supportos-plus >/dev/null 2>&1; then
-            echo "package still known after purge"; exit 1
+            apt-get purge -y supportos-plus
+          else
+            echo "no dpkg record left after remove (conffile-less package)"
+          fi
+          if dpkg-query -W -f='${db:Status-Abbrev}' supportos-plus \
+            >/dev/null 2>&1; then
+            echo "package still known to dpkg after purge"; exit 1
           fi
 
   verify-appimage:
@@ -212,7 +223,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            xvfb libgl1-mesa-dri libgl1-mesa-glx mesa-vulkan-drivers
+            xvfb xauth libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers
           set +e
           APPIMAGE_EXTRACT_AND_RUN=1 timeout --signal=TERM 25s \
             xvfb-run -a -s "-screen 0 1280x800x24" \
