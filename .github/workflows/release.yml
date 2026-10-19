@@ -27,7 +27,9 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential curl ca-certificates git
+            build-essential curl ca-certificates git file
+          # `file` is required by appimagetool (runtime arch detection);
+          # ubuntu-latest runners ship it, bare containers do not.
 
       - uses: actions/checkout@v4
 
