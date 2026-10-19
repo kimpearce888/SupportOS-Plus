@@ -670,3 +670,73 @@ AppImage self-extract+boot · CI run `39187268977` on `810dd3e`: **both jobs suc
 Items 45 (real-service verification — blocked on user-provided Help Scout credentials)
 and 46 (optional performance pass) remain in `plan.md` awaiting user input; they were
 never silently dropped.
+
+### Batch 10 (items 45-46) — 2026-10-19
+
+**45. Integration verification pass — local mock-server suite (Help Scout, LM Studio)**
+- Re-scoping (user-directed, 2026-10-19): no user-provided credentials, no production
+  credentials, no mandatory cloud dependencies, no cloud fallbacks — comprehensive local
+  integration tests against mock servers with generated throwaway credentials.
+- Work: six `#[cfg(test)]`-only modules in `crates/core/src/` (nothing compiles into
+  release builds): `mockserver.rs` (generic in-process HTTP/1.1 server, one thread per
+  connection, bounded reads, per-request recording), `it_helpscout.rs` (24 tests),
+  `it_sync.rs` (5), `it_loopback.rs` (5), `it_lm_studio.rs` (11 + 1 env-gated live),
+  plus the item-46 bench harness. The tests run the **real client stacks end-to-end over
+  TCP**: `RealHelpScoutProvider` (reqwest + ApiQueue + rate limiter + token persistence),
+  `SyncEngine::initial_sync`/`incremental`/`sync_single_conversation`, the
+  `LoopbackServer`, and `OpenAiCompatibleClient`.
+- Two production fixes the new tests forced:
+  1. `helpscout_real.rs` — the `oauth_tokens` save now supplies `id = 1` explicitly. The
+     migration schema pins `id INTEGER PRIMARY KEY CHECK (id = 1)`; the old insert let
+     SQLite auto-assign the rowid, so **every second save (i.e. every token refresh)
+     failed with "CHECK constraint failed: id = 1"** — inherited from the original
+     codebase, caught by `expired_token_refreshes_via_token_endpoint_and_retries`.
+  2. `ai_lm_studio.rs` — non-2xx responses now surface `HTTP {status}` + a body snippet
+     instead of an opaque JSON parse error (required by
+     `server_error_surfaces_http_status_and_body`).
+- Coverage mapping (all checklist items): API behavior —
+  `conversations_threads_and_customers_roundtrip`, `create_conversation_and_thread_roundtrips`,
+  `list_mailboxes_and_dependent_resources_roundtrip`, `get_me_roundtrip_sends_bearer_token`,
+  `docs_api_*`; sync round-trip — `initial_sync_round_trips_the_full_fixture_into_the_mirror`,
+  `initial_sync_is_idempotent_on_rerun`, `incremental_sync_picks_up_changed_conversations`,
+  `sync_single_conversation_updates_and_soft_deletes`, `hard_upstream_failure_is_reported_not_swallowed`;
+  pagination — v2 page-based (`v2_pagination_follows_page_numbers_until_total_pages`,
+  `v2_pagination_stops_on_empty_page_safely`), v3 cursor (`v3_conversation_pagination_follows_hal_next_links`,
+  `v3_customer_pagination_follows_next_cursor_field`, `system_users_follows_next_links`);
+  errors — `error_statuses_map_to_friendly_non_retryable_errors`,
+  `server_error_5xx_is_retried_and_then_recovers`, `invalid_json_from_success_response_is_reported`,
+  `token_endpoint_rejection_is_friendly`, `unreachable_server_reports_offline_friendly_error`;
+  rate limits — `rate_limit_429_is_honored_retried_and_recorded`,
+  `rate_limit_headers_on_success_are_recorded`; webhook ingress + HMAC over real TCP —
+  `signed_webhook_roundtrip_over_tcp`, `webhook_burst_is_served_concurrently`,
+  `webhook_without_configured_secret_hard_rejects_outside_demo_mode`; OAuth
+  authorization-code exchange end-to-end — `authorization_code_exchange_persists_refresh_token`,
+  `client_credentials_login_exchanges_and_persists`,
+  `expired_token_refreshes_via_token_endpoint_and_retries`, `refresh_token_grant_roundtrip`,
+  `revoke_clears_the_token_and_blocks_requests`,
+  `it_loopback::oauth_authorization_code_flow_over_tcp` (loopback callback →
+  `exchange_code` → token persistence → `get_me`),
+  `it_loopback::oauth_callback_reports_token_endpoint_rejection`; LM Studio —
+  `list_models_and_role_inference_roundtrip`, `chat_roundtrip_against_mock_server`,
+  `chat_with_opts_roundtrip_json_mode_and_usage`,
+  `chat_with_tools_roundtrip_parses_tool_calls`, `embed_roundtrip_against_mock_server`,
+  `availability_probe_reflects_server_state`,
+  `connection_refused_reports_cleanly_and_client_recovers`, `malformed_success_body_is_a_parse_error`,
+  `timeout_is_reported_and_does_not_leak_into_later_calls`.
+- Verification: **44 of 44 mock-server integration tests pass** (24 it_helpscout + 11
+  it_lm_studio + 5 it_sync + 5 it_loopback); `cargo test --workspace` 304/304; fmt +
+  clippy `-D warnings` clean; **CI run `39198295485` on commit `5f2ca8d`: both jobs
+  success**.
+- Honest limitation statement (required by the item):
+  - **Not performed — real Help Scout account verification**: requires external
+    credentials (API token or OAuth client id/secret) that do not exist in this
+    environment. The mock-server suite verifies the client stack's behavior against a
+    faithful local mock, not the live `api.helpscout.net`. This remains the one thing
+    only a user with credentials can test.
+  - **Not performed — actual model inference**: probed `127.0.0.1:1234`, `localhost:1234`,
+    `11434` (Ollama), `8080`, `5000`, `8000` — no local model server found.
+    `it_lm_studio::live_roundtrip_when_server_provided` stays env-gated on
+    `SPP_LM_STUDIO_URL` and is honestly reported as ignored; connection handling,
+    error reporting, and recovery are verified against a mock OpenAI-compatible server.
+  - No production credentials, no mandatory cloud dependencies, no cloud fallbacks were
+    added: all fixtures and credentials are generated in-test.

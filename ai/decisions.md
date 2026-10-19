@@ -156,3 +156,17 @@ tests are the port insurance. Theme/sidebar: no migration (defaults + re-pick).
     artifact with `APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1` — the env flag makes
     the binary verify logging, lock, migrations, boot services, workers and the
     loopback listener, then exit 0 headless.
+- 2026-10-19 — Final batch (items 45-46) design notes:
+  - **Mock-server integration suite (45):** all modules are `#[cfg(test)]` (zero release
+    footprint). The mock server mirrors `crate::loopback`'s listener shape (thread per
+    connection, bounded reads) but is generic over handler closures; the real client
+    stacks (reqwest + ApiQueue + rate limiter + `SyncEngine` + `LoopbackServer`) run
+    end-to-end over TCP against it. Real-service verification stays explicitly out of
+    scope: no credentials exist in this environment and none were invented; the live
+    LM Studio test is env-gated on `SPP_LM_STUDIO_URL` and honestly ignored without it.
+  - **Two production fixes from 45:** `oauth_tokens` saves pin `id = 1` (the schema's
+    `CHECK (id = 1)` made every token refresh fail — inherited from the original);
+    `ai_lm_studio` surfaces HTTP status + body on non-2xx instead of a parse error.
+  - **Bench (46):** harness + procedures documented in `bench.rs`'s module doc;
+    measurements and the two bench-harness bug fixes (cursor infinite loop, missing
+    post-sync FTS rebuild step) are recorded in `completed.md` batch 10.
