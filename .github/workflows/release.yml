@@ -340,6 +340,10 @@ jobs:
             gh release upload "$TAG" dist/SupportOS-Plus-*-x86_64.AppImage \
               dist/supportos-plus_*_amd64.deb dist/SHA256SUMS.txt \
               dist/BUILD-INFO.txt --clobber
+            # Re-built artifacts carry fresh tar timestamps; the notes'
+            # checksum table must always match the uploaded bytes.
+            gh release edit "$TAG" --notes-file body.md \
+              --title "SupportOS+ ${VERSION}"
           else
             gh release create "$TAG" --target "$(git rev-parse HEAD)" \
               --title "SupportOS+ ${VERSION}" --notes-file body.md \
@@ -355,9 +359,11 @@ jobs:
           gh release view "$TAG" --json tagName,isDraft,targetCommitish,assets
           test "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "false"
           cd dist
-          # Every browser_download_url must answer and match the recorded checksum.
+          # Every browser_download_url must answer and match the recorded
+          # checksum (skip stray empty lines in the listing).
           gh release view "$TAG" --json assets -q '.assets[].browser_download_url' \
             | while read -r url; do
+                [ -n "$url" ] || continue
                 echo "checking $url"
                 name=$(basename "$url")
                 curl -fsSL --retry 2 -o "/tmp/$name" "$url"
