@@ -1,5 +1,9 @@
 //! Search page (port of the web `pages/search.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! One input, scope selector (`all` / `tickets` / `knowledge` /
 //! `customers`), and the hit list from `spp_core::search::search` —
 //! the FTS5 engine behind `/api/search` (the route's semantic re-ranking
@@ -9,6 +13,9 @@
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::search::{SearchFilters, SearchResponse};
+
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Search scopes (web: the scope radio group).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,15 +112,24 @@ impl SearchPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Search");
+        design::page_header(
+            ui,
+            "Search",
+            Some("conversations, knowledge, and customers in one query"),
+            |_| {},
+        );
         ui.horizontal(|ui| {
             let mut query = self.query_edit.clone();
-            let response = ui.text_edit_singleline(&mut query);
+            let response = ui.add_sized(
+                [320.0, 28.0],
+                egui::TextEdit::singleline(&mut query).hint_text("Search…"),
+            );
             if response.changed() {
                 self.query_edit = query;
             }
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (response.lost_focus() && ui.button("search").clicked())
+            if (response.lost_focus()
+                && design::button(ui, "search", ButtonVariant::Primary).clicked())
                 || (response.lost_focus() && enter)
             {
                 self.query = self.query_edit.clone();
@@ -121,7 +137,7 @@ impl SearchPage {
                 self.error = None;
                 self.reload(db);
             }
-            if ui.button("clear").clicked() {
+            if design::button(ui, "clear", ButtonVariant::Ghost).clicked() {
                 self.query_edit.clear();
                 self.query.clear();
                 self.response = None;
@@ -129,12 +145,9 @@ impl SearchPage {
             }
         });
         ui.horizontal(|ui| {
-            ui.label("scope:");
+            design::hint_text(ui, "scope:");
             for scope in Scope::ALL {
-                if ui
-                    .selectable_label(self.scope == scope, scope.label())
-                    .clicked()
-                {
+                if design::chip(ui, self.scope == scope, scope.label()).clicked() {
                     self.scope = scope;
                     if !self.query.is_empty() {
                         self.reload(db);
@@ -142,49 +155,65 @@ impl SearchPage {
                 }
             }
         });
-        ui.separator();
+        design::divider(ui);
 
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
             return;
         }
         let Some(response) = &self.response else {
             if self.query.is_empty() {
-                ui.weak("Type a query and press Enter to search conversations, knowledge, and customers.");
+                design::empty_state(
+                    ui,
+                    Icon::Search,
+                    "Search across your workspace",
+                    "Type a query and press Enter to search conversations, knowledge, and customers.",
+                );
             } else {
                 ui.spinner();
             }
             return;
         };
 
-        ui.weak(format!(
-            "{} hit{} for {:?}{}",
-            response.total,
-            if response.total == 1 { "" } else { "s" },
-            response.query,
-            if response.used_semantic {
-                " (semantic)"
-            } else {
-                ""
-            }
-        ));
+        design::hint_text(
+            ui,
+            &format!(
+                "{} hit{} for {:?}{}",
+                response.total,
+                if response.total == 1 { "" } else { "s" },
+                response.query,
+                if response.used_semantic {
+                    " (semantic)"
+                } else {
+                    ""
+                }
+            ),
+        );
         if response.hits.is_empty() {
-            ui.weak("(no matches)");
+            design::empty_state(
+                ui,
+                Icon::Search,
+                "(no matches)",
+                "Nothing matched this query in the selected scope.",
+            );
             return;
         }
         let hits = response.hits.clone();
         egui::ScrollArea::vertical().show_rows(ui, 40.0, hits.len(), |ui, range| {
             for hit in &hits[range] {
-                ui.group(|ui| {
+                design::card(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.strong(hit.scope.as_str());
-                        ui.monospace(hit.title.as_str());
+                        design::badge(ui, hit.scope.as_str(), BadgeTone::Neutral);
+                        ui.monospace(
+                            egui::RichText::new(hit.title.as_str())
+                                .color(design::tokens(ui).foreground),
+                        );
                         if !hit.subtitle.is_empty() {
-                            ui.weak(hit.subtitle.as_str());
+                            design::hint_text(ui, hit.subtitle.as_str());
                         }
                     });
                     if !hit.snippet.is_empty() {
-                        ui.weak(hit.snippet.as_str());
+                        design::hint_text(ui, hit.snippet.as_str());
                     }
                 });
             }

@@ -15,6 +15,15 @@ path = "src/lib.rs"
 name = "supportos-plus"
 path = "src/main.rs"
 
+[features]
+default = []
+# Built-in visual verification harness (off in every normal build): runs the
+# real shell headless under Xvfb with the software-GL glow renderer and
+# eframe's __screenshot hook, then exits after saving one PNG. Driven by env
+# vars (SPP_SHOT_PAGE / SPP_SHOT_THEME / SPP_SHOT_W / SPP_SHOT_H /
+# SPP_SHOT_SEED / SPP_SHOT_PALETTE / EFRAME_SCREENSHOT_TO).
+ui-screenshot = ["eframe/glow", "eframe/__screenshot"]
+
 [dependencies]
 eframe.workspace = true
 supportos-plus-core.workspace = true

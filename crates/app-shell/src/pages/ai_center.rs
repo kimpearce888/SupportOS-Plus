@@ -1,5 +1,10 @@
 //! AI Center page (port of the web `pages/ai_center.rs`).
 //!
+//! Redesigned with the shadcn-style design system (`crate::design`):
+//! AI-derived content is marked with a Sparkles icon and an “AI” badge,
+//! while operational state (connection, run statuses) uses the semantic
+//! success/neutral/destructive badge tones — presentation only.
+//!
 //! Tabs (web: Health / Analytics / Attributes / Jobs):
 //! * **Health** — LM Studio settings read from the settings table plus a
 //!   test-connection button that lists models through
@@ -18,6 +23,9 @@ use eframe::egui;
 use spp_core::ai_attributes::AttributeDistribution;
 use spp_core::catalog::AiAttributeKey;
 use spp_core::db::DbHandle;
+
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Page tabs (web: `AiTab`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -313,15 +321,15 @@ impl AiCenterPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("AI Center");
+        design::page_header(ui, "AI Center", None, |_| {});
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
                     self.tab = tab;
                 }
             }
         });
-        ui.separator();
+        design::divider(ui);
 
         match self.tab {
             Tab::Health => self.health_ui(ui, db),
@@ -336,62 +344,89 @@ impl AiCenterPage {
             ui.spinner();
             return;
         };
-        egui::Grid::new("ai-health")
-            .num_columns(2)
-            .spacing([16.0, 6.0])
-            .show(ui, |ui| {
-                ui.strong("AI enabled");
-                ui.monospace(settings.ai_enabled.to_string());
-                ui.end_row();
-                ui.strong("provider");
-                ui.monospace(if settings.ai_enabled {
-                    "lmstudio"
+        let t = design::tokens(ui);
+        design::card(ui, |ui| {
+            design::section_title(ui, "LM Studio settings");
+            design::form_grid(ui, "ai-health", |ui| {
+                design::field_label(ui, "AI enabled:");
+                if settings.ai_enabled {
+                    design::badge(ui, "enabled", BadgeTone::Success);
                 } else {
-                    "disabled"
-                });
+                    design::badge(ui, "disabled", BadgeTone::Neutral);
+                }
                 ui.end_row();
-                ui.strong("base url");
-                ui.monospace(settings.base_url.as_str());
-                ui.end_row();
-                ui.strong("chat model");
+                design::field_label(ui, "provider:");
                 ui.monospace(
-                    settings
-                        .chat_model
-                        .clone()
-                        .unwrap_or_else(|| "(unset)".into()),
+                    egui::RichText::new(if settings.ai_enabled {
+                        "lmstudio"
+                    } else {
+                        "disabled"
+                    })
+                    .color(t.foreground),
                 );
                 ui.end_row();
-                ui.strong("embedding model");
+                design::field_label(ui, "base url:");
+                ui.monospace(egui::RichText::new(settings.base_url.as_str()).color(t.foreground));
+                ui.end_row();
+                design::field_label(ui, "chat model:");
                 ui.monospace(
-                    settings
-                        .embedding_model
-                        .clone()
-                        .unwrap_or_else(|| "(unset)".into()),
+                    egui::RichText::new(
+                        settings
+                            .chat_model
+                            .clone()
+                            .unwrap_or_else(|| "(unset)".into()),
+                    )
+                    .color(t.foreground),
                 );
                 ui.end_row();
-                ui.strong("timeout");
-                ui.monospace(format!("{} ms", settings.timeout_ms));
+                design::field_label(ui, "embedding model:");
+                ui.monospace(
+                    egui::RichText::new(
+                        settings
+                            .embedding_model
+                            .clone()
+                            .unwrap_or_else(|| "(unset)".into()),
+                    )
+                    .color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("concurrency");
-                ui.monospace(settings.concurrency.to_string());
+                design::field_label(ui, "timeout:");
+                ui.monospace(
+                    egui::RichText::new(format!("{} ms", settings.timeout_ms)).color(t.foreground),
+                );
+                ui.end_row();
+                design::field_label(ui, "concurrency:");
+                ui.monospace(
+                    egui::RichText::new(settings.concurrency.to_string()).color(t.foreground),
+                );
                 ui.end_row();
             });
-        ui.separator();
-        ui.weak(
-            "Start LM Studio locally (default http://127.0.0.1:1234) and configure the \
-             models in Settings → Integrations. Attributes stay local and never sync back.",
-        );
-        if let Some(status) = self
-            .connection_status
-            .lock()
-            .ok()
-            .and_then(|guard| guard.clone())
-        {
-            ui.label(format!("connection: {status}"));
-        }
-        if ui.button("test connection").clicked() {
-            self.test_connection();
-        }
+            design::divider(ui);
+            ui.add_space(6.0);
+            design::hint_text(
+                ui,
+                "Start LM Studio locally (default http://127.0.0.1:1234) and configure the \
+                 models in Settings → Integrations. Attributes stay local and never sync back.",
+            );
+            if let Some(status) = self
+                .connection_status
+                .lock()
+                .ok()
+                .and_then(|guard| guard.clone())
+            {
+                let text = format!("connection: {status}");
+                if status.starts_with("connected") {
+                    design::success_text(ui, &text);
+                } else if status.starts_with("offline") {
+                    design::error_text(ui, &text);
+                } else {
+                    design::hint_text(ui, &text);
+                }
+            }
+            if design::button(ui, "test connection", ButtonVariant::Primary).clicked() {
+                self.test_connection();
+            }
+        });
     }
 
     fn analytics_ui(&mut self, ui: &mut egui::Ui) {
@@ -399,117 +434,190 @@ impl AiCenterPage {
             ui.spinner();
             return;
         };
-        egui::Grid::new("ai-analytics")
-            .num_columns(2)
-            .spacing([16.0, 6.0])
-            .show(ui, |ui| {
-                ui.strong("tickets analyzed");
-                ui.monospace(analytics.tickets_analyzed.to_string());
+        let t = design::tokens(ui);
+        design::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
+                design::section_title(ui, "Analytics");
+                design::badge(ui, "AI", BadgeTone::Info);
+            });
+            design::form_grid(ui, "ai-analytics", |ui| {
+                design::field_label(ui, "tickets analyzed:");
+                ui.monospace(
+                    egui::RichText::new(analytics.tickets_analyzed.to_string()).color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("analysis success rate");
-                ui.monospace(format!("{}%", analytics.analysis_success_rate));
+                design::field_label(ui, "analysis success rate:");
+                ui.monospace(
+                    egui::RichText::new(format!("{}%", analytics.analysis_success_rate))
+                        .color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("drafts");
-                ui.monospace(format!(
-                    "{} total · {} accepted · {} rejected",
-                    analytics.draft_count, analytics.drafts_accepted, analytics.drafts_rejected
-                ));
+                design::field_label(ui, "drafts:");
+                ui.monospace(
+                    egui::RichText::new(format!(
+                        "{} total · {} accepted · {} rejected",
+                        analytics.draft_count, analytics.drafts_accepted, analytics.drafts_rejected
+                    ))
+                    .color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("draft edit rate");
-                ui.monospace(format!("{}%", analytics.draft_edit_rate));
+                design::field_label(ui, "draft edit rate:");
+                ui.monospace(
+                    egui::RichText::new(format!("{}%", analytics.draft_edit_rate))
+                        .color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("verification warnings");
-                ui.monospace(analytics.verification_warnings.to_string());
+                design::field_label(ui, "verification warnings:");
+                ui.monospace(
+                    egui::RichText::new(analytics.verification_warnings.to_string())
+                        .color(t.foreground),
+                );
                 ui.end_row();
-                ui.strong("unsupported claim rate");
-                ui.monospace(format!("{}%", analytics.unsupported_claim_rate));
+                design::field_label(ui, "unsupported claim rate:");
+                ui.monospace(
+                    egui::RichText::new(format!("{}%", analytics.unsupported_claim_rate))
+                        .color(t.foreground),
+                );
                 ui.end_row();
             });
-        ui.separator();
+        });
+        ui.add_space(10.0);
         if analytics.failure_patterns.is_empty() {
-            ui.weak("(no failure patterns)");
+            design::hint_text(ui, "(no failure patterns)");
         } else {
-            ui.strong("common failure patterns");
-            for (pattern, count) in &analytics.failure_patterns {
-                ui.label(format!("{pattern} · {count}"));
-            }
+            design::card_titled(ui, "Common failure patterns", None, |ui| {
+                for (pattern, count) in &analytics.failure_patterns {
+                    ui.label(
+                        egui::RichText::new(format!("{pattern} · {count}"))
+                            .size(13.0)
+                            .color(t.foreground),
+                    );
+                }
+            });
         }
     }
 
     fn attributes_ui(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Catalog");
-        ui.weak(
-            "A missing attribute reads as unknown — it is never fabricated. Attributes \
-             are local-only and never written to Help Scout.",
-        );
+        let t = design::tokens(ui);
         let distributions = self.distributions.clone();
-        ui.separator();
-        if distributions.is_empty() {
-            ui.weak("(no attribute data yet — run ticket analysis)");
-            return;
-        }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for dist in &distributions {
-                ui.group(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.strong(dist.label);
-                        ui.monospace(dist.attribute);
-                        ui.weak(format!("{} known / {} unknown", dist.known, dist.unknown));
-                    });
-                    for value in &dist.values {
-                        let share = if dist.known > 0 {
-                            value.count as f64 / dist.known as f64 * 100.0
-                        } else {
-                            0.0
-                        };
-                        ui.monospace(format!(
-                            "  {}: {} ({:.1}%)",
-                            value.value, value.count, share
-                        ));
-                    }
-                });
+        design::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
+                design::section_title(ui, "Catalog");
+                design::badge(ui, "AI", BadgeTone::Info);
+            });
+            design::hint_text(
+                ui,
+                "A missing attribute reads as unknown — it is never fabricated. Attributes \
+                 are local-only and never written to Help Scout.",
+            );
+            ui.add_space(6.0);
+            if distributions.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::Sparkles,
+                    "No attribute data yet",
+                    "Run ticket analysis to populate the distributions.",
+                );
+                return;
             }
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for dist in &distributions {
+                    design::card(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(dist.label)
+                                    .size(13.5)
+                                    .strong()
+                                    .color(t.foreground),
+                            );
+                            ui.monospace(egui::RichText::new(dist.attribute).color(t.foreground));
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} known / {} unknown",
+                                    dist.known, dist.unknown
+                                ))
+                                .small()
+                                .color(t.muted_foreground),
+                            );
+                        });
+                        for value in &dist.values {
+                            let share = if dist.known > 0 {
+                                value.count as f64 / dist.known as f64 * 100.0
+                            } else {
+                                0.0
+                            };
+                            ui.monospace(
+                                egui::RichText::new(format!(
+                                    "  {}: {} ({:.1}%)",
+                                    value.value, value.count, share
+                                ))
+                                .color(t.foreground),
+                            );
+                        }
+                    });
+                }
+            });
         });
     }
 
     fn jobs_ui(&mut self, ui: &mut egui::Ui) {
         let jobs = self.jobs.clone();
         if jobs.is_empty() {
-            ui.weak("(no AI runs recorded)");
+            design::empty_state(
+                ui,
+                Icon::Sparkles,
+                "No AI runs recorded",
+                "Ticket analysis runs will appear here.",
+            );
             return;
         }
-        egui::ScrollArea::vertical().show_rows(ui, 24.0, jobs.len(), |ui, range| {
-            egui::Grid::new("ai-jobs")
-                .num_columns(6)
-                .striped(true)
-                .show(ui, |ui| {
-                    for header in ["id", "type", "status", "conversation", "model", "created"] {
-                        ui.strong(header);
-                    }
-                    ui.end_row();
-                    for job in &jobs[range] {
-                        ui.monospace(job.id.to_string());
-                        ui.label(job.run_type.as_str());
-                        ui.colored_label(
-                            if job.status == "failed" {
-                                egui::Color32::RED
-                            } else if job.status == "completed" {
-                                egui::Color32::GREEN
-                            } else {
-                                egui::Color32::GRAY
-                            },
-                            job.status.as_str(),
-                        );
-                        ui.monospace(
-                            job.conversation_id
-                                .map(|id| format!("#{id}"))
-                                .unwrap_or_else(|| "—".into()),
-                        );
-                        ui.monospace(job.model.clone().unwrap_or_else(|| "—".into()));
-                        ui.monospace(job.created_at.as_str());
-                        ui.end_row();
-                    }
-                });
+        let t = design::tokens(ui);
+        design::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
+                design::section_title(ui, "Recent AI runs");
+                design::badge(ui, "AI", BadgeTone::Info);
+            });
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical().show_rows(ui, 26.0, jobs.len(), |ui, range| {
+                design::table(
+                    ui,
+                    "ai-jobs",
+                    &["id", "type", "status", "conversation", "model", "created"],
+                    26.0,
+                    |ui| {
+                        for job in &jobs[range] {
+                            design::td_num(ui, &job.id.to_string());
+                            ui.label(
+                                egui::RichText::new(job.run_type.as_str())
+                                    .size(13.0)
+                                    .color(t.foreground),
+                            );
+                            design::badge(ui, job.status.as_str(), job_status_tone(&job.status));
+                            ui.monospace(
+                                egui::RichText::new(
+                                    job.conversation_id
+                                        .map(|id| format!("#{id}"))
+                                        .unwrap_or_else(|| "—".into()),
+                                )
+                                .color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(
+                                    job.model.clone().unwrap_or_else(|| "—".into()),
+                                )
+                                .color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(job.created_at.as_str()).color(t.foreground),
+                            );
+                            ui.end_row();
+                        }
+                    },
+                );
+            });
         });
     }
 }
@@ -517,6 +625,16 @@ impl AiCenterPage {
 impl Default for AiCenterPage {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Run-status → badge tone (redesign): running/succeeded and completed
+/// read as success, queued/pending stay neutral, failed is destructive.
+fn job_status_tone(status: &str) -> BadgeTone {
+    match status {
+        "completed" | "succeeded" | "running" => BadgeTone::Success,
+        "failed" => BadgeTone::Destructive,
+        _ => BadgeTone::Neutral,
     }
 }
 

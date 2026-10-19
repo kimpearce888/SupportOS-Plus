@@ -15,6 +15,8 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 
 use super::{i64_field, str_field};
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Page tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -605,22 +607,26 @@ impl SettingsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Settings");
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                    self.reload(db);
+        design::page_header(
+            ui,
+            "Settings",
+            Some("local configuration, persisted in the settings table"),
+            |ui| {
+                for tab in Tab::ALL {
+                    if design::chip(ui, self.tab == tab, tab.label()).clicked() {
+                        self.tab = tab;
+                        self.reload(db);
+                    }
                 }
-            }
-        });
+            },
+        );
         if let Some(message) = &self.message {
-            ui.label(format!("status: {message}"));
+            design::success_text(ui, message);
         }
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        ui.add_space(4.0);
 
         match self.tab {
             Tab::General => self.general_ui(ui, db),
@@ -637,18 +643,17 @@ impl SettingsPage {
             ui.spinner();
             return;
         };
-        ui.strong("Synchronization");
-        egui::Grid::new("settings-general")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("sync interval (minutes):");
+        design::card_titled(ui, "Synchronization", None, |ui| {
+            design::form_grid(ui, "settings-general", |ui| {
+                design::field_label(ui, "sync interval (minutes):");
                 ui.add(egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440));
                 ui.end_row();
-                ui.label("api concurrency:");
+                design::field_label(ui, "api concurrency:");
                 ui.add(egui::DragValue::new(&mut general.api_concurrency).range(1..=8));
                 ui.end_row();
-                ui.label("log level:");
+                design::field_label(ui, "log level:");
                 egui::ComboBox::from_id_salt("settings-log-level")
+                    .width(160.0)
                     .selected_text(general.log_level.clone())
                     .show_ui(ui, |ui| {
                         for level in ["debug", "info", "warn", "error"] {
@@ -656,52 +661,69 @@ impl SettingsPage {
                         }
                     });
                 ui.end_row();
-                ui.label("display timezone:");
-                ui.text_edit_singleline(&mut general.display_timezone);
+                design::field_label(ui, "display timezone:");
+                ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut general.display_timezone),
+                );
                 ui.end_row();
-                ui.label("agent language:");
-                ui.text_edit_singleline(&mut general.agent_language);
+                design::field_label(ui, "agent language:");
+                ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut general.agent_language),
+                );
                 ui.end_row();
             });
-        ui.separator();
-        ui.strong("AI behaviour (safe defaults)");
-        egui::Grid::new("settings-ai")
-            .num_columns(2)
-            .show(ui, |ui| {
-                for (label, value) in [
-                    ("AI enabled", &mut general.ai_enabled),
-                    (
-                        "Automatic analysis",
-                        &mut general.automatic_analysis_enabled,
-                    ),
-                    (
-                        "Automatic internal notes",
-                        &mut general.automatic_note_enabled,
-                    ),
-                    (
-                        "Automatic draft replies",
-                        &mut general.automatic_draft_enabled,
-                    ),
-                    (
-                        "Automatic reply sending",
-                        &mut general.automatic_reply_sending,
-                    ),
-                    ("Automation rules", &mut general.automation_enabled),
-                    (
-                        "Automation write actions",
-                        &mut general.automation_write_actions_enabled,
-                    ),
-                    (
-                        "Attachment auto download",
-                        &mut general.attachment_auto_download,
-                    ),
-                ] {
-                    ui.checkbox(value, label);
-                    ui.end_row();
-                }
-            });
-        ui.separator();
-        if ui.button("save settings").clicked() {
+        });
+        ui.add_space(10.0);
+        design::card_titled(
+            ui,
+            "AI behaviour",
+            Some("safe defaults — review before enabling write actions"),
+            |ui| {
+                egui::Grid::new(egui::IdSalt::new("settings-ai"))
+                    .num_columns(2)
+                    .striped(true)
+                    .spacing(egui::vec2(16.0, 4.0))
+                    .min_row_height(24.0)
+                    .show(ui, |ui| {
+                        for (label, value) in [
+                            ("AI enabled", &mut general.ai_enabled),
+                            (
+                                "Automatic analysis",
+                                &mut general.automatic_analysis_enabled,
+                            ),
+                            (
+                                "Automatic internal notes",
+                                &mut general.automatic_note_enabled,
+                            ),
+                            (
+                                "Automatic draft replies",
+                                &mut general.automatic_draft_enabled,
+                            ),
+                            (
+                                "Automatic reply sending",
+                                &mut general.automatic_reply_sending,
+                            ),
+                            ("Automation rules", &mut general.automation_enabled),
+                            (
+                                "Automation write actions",
+                                &mut general.automation_write_actions_enabled,
+                            ),
+                            (
+                                "Attachment auto download",
+                                &mut general.attachment_auto_download,
+                            ),
+                        ] {
+                            ui.checkbox(value, label);
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(6.0);
+            },
+        );
+        ui.add_space(10.0);
+        if design::button(ui, "save settings", ButtonVariant::Primary).clicked() {
             self.general = Some(general.clone());
             self.save_general(db);
         }
@@ -713,30 +735,70 @@ impl SettingsPage {
             ui.spinner();
             return;
         };
-        ui.strong("Help Scout connection");
-        egui::Grid::new("settings-helpscout")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("demo mode:");
-                ui.monospace(status.demo_mode.to_string());
-                ui.end_row();
-                ui.label("credentials stored:");
-                ui.monospace(status.configured.to_string());
-                ui.end_row();
-            });
-        ui.weak(
-            "Connect through OAuth in the browser flow (the loopback listener serves the \
-             callback) or run in demo mode with the fake provider.",
+        design::card_titled(
+            ui,
+            "Help Scout connection",
+            Some(
+                "OAuth in the browser flow (the loopback listener serves the callback), or run in demo mode with the fake provider",
+            ),
+            |ui| {
+                design::form_grid(ui, "settings-helpscout", |ui| {
+                    design::field_label(ui, "demo mode:");
+                    ui.horizontal(|ui| {
+                        design::badge(
+                            ui,
+                            if status.demo_mode { "on" } else { "off" },
+                            if status.demo_mode {
+                                BadgeTone::Info
+                            } else {
+                                BadgeTone::Neutral
+                            },
+                        );
+                    });
+                    ui.end_row();
+                    design::field_label(ui, "credentials stored:");
+                    ui.horizontal(|ui| {
+                        design::badge(
+                            ui,
+                            if status.configured {
+                                "configured"
+                            } else {
+                                "not configured"
+                            },
+                            if status.configured {
+                                BadgeTone::Success
+                            } else {
+                                BadgeTone::Neutral
+                            },
+                        );
+                    });
+                    ui.end_row();
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if status.configured
+                        && design::button(ui, "disconnect", ButtonVariant::Destructive)
+                            .on_hover_text("drops the stored tokens; local data is fully preserved")
+                            .clicked()
+                    {
+                        self.disconnect_helpscout(db);
+                    }
+                    if !status.configured
+                        && status.credentials
+                        && design::button(ui, "connect via OAuth", ButtonVariant::Primary).clicked()
+                    {
+                        self.begin_oauth(db);
+                    }
+                });
+                if let Some(url) = &self.authorize_url {
+                    ui.add_space(6.0);
+                    ui.hyperlink_to(
+                        egui::RichText::new("open the Help Scout authorization page").size(13.0),
+                        url.clone(),
+                    );
+                }
+            },
         );
-        if status.configured && ui.button("disconnect").clicked() {
-            self.disconnect_helpscout(db);
-        }
-        if !status.configured && status.credentials && ui.button("connect via OAuth").clicked() {
-            self.begin_oauth(db);
-        }
-        if let Some(url) = &self.authorize_url {
-            ui.hyperlink_to("open the Help Scout authorization page", url);
-        }
     }
 
     /// Start the browser OAuth flow: issue a single-use state and show the
@@ -758,178 +820,229 @@ impl SettingsPage {
     }
 
     fn lmstudio_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("LM Studio (local AI gateway)");
-        egui::Grid::new("settings-lmstudio")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("base url:");
-                ui.text_edit_singleline(&mut self.lmstudio_base_url);
-                ui.end_row();
-                ui.label("chat model:");
-                ui.text_edit_singleline(&mut self.lmstudio_chat_model);
-                ui.end_row();
-                ui.label("embedding model:");
-                ui.text_edit_singleline(&mut self.lmstudio_embedding_model);
-                ui.end_row();
-            });
-        ui.weak("Test the connection from the AI Center page.");
-        if ui.button("save").clicked() {
-            self.save_lmstudio(db);
-        }
+        design::card_titled(
+            ui,
+            "LM Studio (local AI gateway)",
+            Some("Test the connection from the AI Center page."),
+            |ui| {
+                design::form_grid(ui, "settings-lmstudio", |ui| {
+                    design::field_label(ui, "base url:");
+                    ui.add_sized(
+                        [320.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.lmstudio_base_url)
+                            .hint_text("http://localhost:1234/v1"),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "chat model:");
+                    ui.add_sized(
+                        [320.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.lmstudio_chat_model),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "embedding model:");
+                    ui.add_sized(
+                        [320.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.lmstudio_embedding_model),
+                    );
+                    ui.end_row();
+                });
+                ui.add_space(8.0);
+                if design::button(ui, "save", ButtonVariant::Primary).clicked() {
+                    self.save_lmstudio(db);
+                }
+            },
+        );
     }
 
     fn vector_index_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("Vector index (sqlite-vec, built-in)");
-        if self.vector_store_path.is_empty() {
-            // Reuse the lazy-load slot to remember where the store lives.
-            self.vector_store_path = db
-                .file_path()
-                .and_then(|p| p.parent().map(|d| d.join("vectors").join("vectors.db")))
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-        }
-        egui::Grid::new("settings-vector-index")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("store:");
-                ui.monospace(if self.vector_store_path.is_empty() {
-                    "(unknown data directory)".to_string()
-                } else {
-                    self.vector_store_path.clone()
+        design::card_titled(
+            ui,
+            "Vector index",
+            Some(
+                "Dense vectors live in SQLite next to the application database (decision D4: the chunk count is far below the 100k gate). The index follows the qdrant_enabled setting; searches fall back to FTS5 when disabled.",
+            ),
+            |ui| {
+                if self.vector_store_path.is_empty() {
+                    // Reuse the lazy-load slot to remember where the store lives.
+                    self.vector_store_path = db
+                        .file_path()
+                        .and_then(|p| p.parent().map(|d| d.join("vectors").join("vectors.db")))
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                }
+                design::form_grid(ui, "settings-vector-index", |ui| {
+                    design::field_label(ui, "store:");
+                    ui.monospace(
+                        egui::RichText::new(if self.vector_store_path.is_empty() {
+                            "(unknown data directory)".to_string()
+                        } else {
+                            self.vector_store_path.clone()
+                        })
+                        .color(design::tokens(ui).foreground),
+                    );
+                    ui.end_row();
                 });
-                ui.end_row();
-            });
-        ui.weak(
-            "Dense vectors live in SQLite next to the application database (decision D4: the \
-             chunk count is far below the 100k gate). The index follows the qdrant_enabled \
-             setting; searches fall back to FTS5 when disabled.",
+            },
         );
     }
 
     fn hours_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("Business hours per mailbox");
-        let hours = self.hours.clone();
-        let mut edit: Option<BusinessHoursRow> = None;
-        egui::ScrollArea::vertical()
-            .id_salt("settings-hours")
-            .show(ui, |ui| {
-                for row in &hours {
-                    ui.horizontal(|ui| {
-                        ui.strong(row.name.as_str());
-                        if row.configured {
-                            ui.weak(format!(
-                                "{} · {} · {}-{} · fr {}m · res {}m",
-                                row.timezone,
-                                row.days,
-                                minutes_label(row.start_minute),
-                                minutes_label(row.end_minute),
-                                row.first_response_target_min,
-                                row.resolution_target_min
-                            ));
-                        } else {
-                            ui.weak("(not configured)");
-                        }
-                        if ui.button("edit").clicked() {
-                            edit = Some(row.clone());
-                        }
-                    });
-                }
-                if hours.is_empty() {
-                    ui.weak("(no mailboxes synced yet)");
-                }
-            });
-        if let Some(row) = edit {
-            self.hours_edit = Some(row);
-        }
+        design::card_titled(ui, "Business hours per mailbox", None, |ui| {
+            let hours = self.hours.clone();
+            let mut edit: Option<BusinessHoursRow> = None;
+            egui::ScrollArea::vertical()
+                .id_salt("settings-hours")
+                .show(ui, |ui| {
+                    for row in &hours {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(row.name.as_str())
+                                    .size(13.5)
+                                    .strong()
+                                    .color(design::tokens(ui).foreground),
+                            );
+                            if row.configured {
+                                design::badge(ui, "configured", BadgeTone::Success);
+                                design::hint_text(
+                                    ui,
+                                    &format!(
+                                        "{} · {} · {}-{} · fr {}m · res {}m",
+                                        row.timezone,
+                                        row.days,
+                                        minutes_label(row.start_minute),
+                                        minutes_label(row.end_minute),
+                                        row.first_response_target_min,
+                                        row.resolution_target_min
+                                    ),
+                                );
+                            } else {
+                                design::badge(ui, "not configured", BadgeTone::Neutral);
+                            }
+                            if design::button(ui, "edit", ButtonVariant::Outline).clicked() {
+                                edit = Some(row.clone());
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                    if hours.is_empty() {
+                        design::hint_text(ui, "(no mailboxes synced yet)");
+                    }
+                });
+            if let Some(row) = edit {
+                self.hours_edit = Some(row);
+            }
+        });
 
         let Some(mut row) = self.hours_edit.clone() else {
             return;
         };
-        ui.separator();
-        ui.strong(format!("Edit: {}", row.name));
-        egui::Grid::new("settings-hours-edit")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("timezone:");
-                ui.text_edit_singleline(&mut row.timezone);
+        ui.add_space(10.0);
+        design::card_titled(ui, &format!("Edit: {}", row.name), None, |ui| {
+            design::form_grid(ui, "settings-hours-edit", |ui| {
+                design::field_label(ui, "timezone:");
+                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.timezone));
                 ui.end_row();
-                ui.label("days (0=Sun…6=Sat):");
-                ui.text_edit_singleline(&mut row.days);
+                design::field_label(ui, "days (0=Sun…6=Sat):");
+                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.days));
                 ui.end_row();
-                ui.label("start (minutes):");
+                design::field_label(ui, "start (minutes):");
                 ui.add(egui::DragValue::new(&mut row.start_minute).range(0..=1440));
                 ui.end_row();
-                ui.label("end (minutes):");
+                design::field_label(ui, "end (minutes):");
                 ui.add(egui::DragValue::new(&mut row.end_minute).range(0..=1440));
                 ui.end_row();
-                ui.label("first response target (min):");
+                design::field_label(ui, "first response target (min):");
                 ui.add(egui::DragValue::new(&mut row.first_response_target_min).range(1..=10_000));
                 ui.end_row();
-                ui.label("resolution target (min):");
+                design::field_label(ui, "resolution target (min):");
                 ui.add(egui::DragValue::new(&mut row.resolution_target_min).range(1..=100_000));
                 ui.end_row();
             });
-        ui.horizontal(|ui| {
-            if ui.button("save hours").clicked() {
-                let result = db.with_write(|conn| save_business_hours(conn, &row));
-                match result {
-                    Ok(()) => {
-                        self.message = Some("business hours saved".into());
-                        self.hours_edit = None;
-                        self.reload(db);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if design::button(ui, "save hours", ButtonVariant::Primary).clicked() {
+                    let result = db.with_write(|conn| save_business_hours(conn, &row));
+                    match result {
+                        Ok(()) => {
+                            self.message = Some("business hours saved".into());
+                            self.hours_edit = None;
+                            self.reload(db);
+                        }
+                        Err(e) => self.error = Some(e.to_string()),
                     }
-                    Err(e) => self.error = Some(e.to_string()),
                 }
-            }
-            if ui.button("cancel").clicked() {
-                self.hours_edit = None;
-            }
+                if design::button(ui, "cancel", ButtonVariant::Ghost).clicked() {
+                    self.hours_edit = None;
+                }
+            });
         });
-        self.hours_edit = Some(row);
+        if self.hours_edit.is_some() {
+            self.hours_edit = Some(row);
+        }
     }
 
     fn backups_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("Backups & export");
-        ui.horizontal(|ui| {
-            if ui.button("create backup").clicked() {
-                self.create_backup(db);
-            }
-            if ui.button("export JSON").clicked() {
-                self.export_json(db);
-            }
-            if ui.button("export conversations CSV").clicked() {
-                self.export_csv(db);
-            }
-        });
-        ui.separator();
-        let backups = self.backups.clone();
-        if backups.is_empty() {
-            ui.weak("(no backups yet)");
-            return;
-        }
-        let mut restored: Option<String> = None;
-        egui::ScrollArea::vertical()
-            .id_salt("settings-backups")
-            .show(ui, |ui| {
-                for backup in &backups {
-                    ui.horizontal(|ui| {
-                        ui.monospace(str_field(backup, "file"));
-                        ui.weak(format!("{} bytes", i64_field(backup, "size_bytes")));
-                        if let Some(created) = backup.get("created_at").and_then(|a| a.as_str()) {
-                            ui.weak(created);
-                        }
-                        if ui.button("restore").clicked()
-                            && let Some(dir) = &self.backups_dir
-                        {
-                            let path = dir.join(str_field(backup, "file"));
-                            restored = Some(path.display().to_string());
-                        }
-                    });
+        design::card_titled(ui, "Backups & export", None, |ui| {
+            ui.horizontal(|ui| {
+                if design::button_with_icon(
+                    ui,
+                    Icon::Download,
+                    "create backup",
+                    ButtonVariant::Primary,
+                )
+                .clicked()
+                {
+                    self.create_backup(db);
+                }
+                if design::button(ui, "export JSON", ButtonVariant::Secondary).clicked() {
+                    self.export_json(db);
+                }
+                if design::button(ui, "export conversations CSV", ButtonVariant::Secondary)
+                    .clicked()
+                {
+                    self.export_csv(db);
                 }
             });
-        if let Some(path) = restored {
-            self.restore_backup(db, &path);
-        }
+            ui.add_space(8.0);
+            let backups = self.backups.clone();
+            if backups.is_empty() {
+                design::hint_text(ui, "(no backups yet)");
+                return;
+            }
+            let mut restored: Option<String> = None;
+            egui::ScrollArea::vertical()
+                .id_salt("settings-backups")
+                .show(ui, |ui| {
+                    let t = design::tokens(ui);
+                    for backup in &backups {
+                        ui.horizontal(|ui| {
+                            ui.monospace(
+                                egui::RichText::new(str_field(backup, "file")).color(t.foreground),
+                            );
+                            design::hint_text(
+                                ui,
+                                &format!("{} bytes", i64_field(backup, "size_bytes")),
+                            );
+                            if let Some(created) = backup.get("created_at").and_then(|a| a.as_str())
+                            {
+                                design::hint_text(ui, created);
+                            }
+                            if design::button(ui, "restore", ButtonVariant::Outline)
+                                .on_hover_text("restores the database file — restart the app after")
+                                .clicked()
+                                && let Some(dir) = &self.backups_dir
+                            {
+                                let path = dir.join(str_field(backup, "file"));
+                                restored = Some(path.display().to_string());
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                });
+            if let Some(path) = restored {
+                self.restore_backup(db, &path);
+            }
+        });
     }
 }
 

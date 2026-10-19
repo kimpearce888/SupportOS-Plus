@@ -16,6 +16,8 @@
 pub mod app;
 pub mod bridge;
 pub mod chart;
+pub mod design;
+pub mod icons;
 pub mod mention;
 pub mod overlays;
 pub mod pages;
@@ -133,13 +135,36 @@ pub fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
 /// # Errors
 /// Returns [`eframe::Error`] when the graphics context cannot be set up.
 pub fn run(options: ShellOptions) -> Result<(), eframe::Error> {
-    let viewport = eframe::egui::ViewportBuilder::default()
+    #[cfg_attr(
+        not(feature = "ui-screenshot"),
+        expect(unused_mut, reason = "only mutated by the ui-screenshot harness")
+    )]
+    let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title("SupportOS+")
         .with_inner_size([1180.0, 760.0]);
-    let native_options = eframe::NativeOptions {
+    #[cfg(feature = "ui-screenshot")]
+    {
+        // Screenshot harness: window size from the environment.
+        if let (Ok(w), Ok(h)) = (std::env::var("SPP_SHOT_W"), std::env::var("SPP_SHOT_H"))
+            && let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>())
+        {
+            viewport = viewport.with_inner_size([w, h]);
+        }
+    }
+    #[cfg_attr(
+        not(feature = "ui-screenshot"),
+        expect(unused_mut, reason = "only mutated by the ui-screenshot harness")
+    )]
+    let mut native_options = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
+    #[cfg(feature = "ui-screenshot")]
+    {
+        // The harness runs headless (Xvfb + llvmpipe software GL); the
+        // glow renderer needs no GPU and the __screenshot hook rides on it.
+        native_options.renderer = eframe::Renderer::Glow;
+    }
     eframe::run_native(
         "SupportOS-Plus",
         native_options,

@@ -9,6 +9,9 @@
 
 use eframe::egui;
 
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
+
 /// What the user did with a dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogOutcome {
@@ -67,30 +70,72 @@ impl ConfirmDialog {
     pub fn ui(&mut self, ctx: &egui::Context) -> DialogOutcome {
         let mut outcome = DialogOutcome::Open;
         let mut open = true;
+        let mut close_clicked = false;
+        let t = design::tokens_for(ctx);
         egui::Window::new(self.title.clone())
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .fixed_size([420.0, 160.0])
+            .fixed_size([440.0, 172.0])
             .collapsible(false)
             .resizable(false)
-            .open(&mut open)
+            .fade_in(false)
+            .title_bar(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(t.card)
+                    .stroke(egui::Stroke::new(1.0, t.border))
+                    .corner_radius(12)
+                    .inner_margin(egui::Margin::same(18))
+                    .shadow(egui::Shadow {
+                        offset: [0, 8],
+                        blur: 32,
+                        spread: 0,
+                        color: egui::Color32::from_black_alpha(60),
+                    }),
+            )
             .show(ctx, |ui| {
-                ui.label(self.message.clone());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let confirm_color = if self.danger {
-                        egui::Color32::RED
-                    } else {
-                        ui.visuals().hyperlink_color
-                    };
-                    let confirm = egui::Button::new(self.confirm_label.clone())
-                        .fill(confirm_color.gamma_multiply(0.3));
-                    if ui.add(confirm).clicked() {
-                        outcome = DialogOutcome::Confirmed;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        outcome = DialogOutcome::Cancelled;
-                    }
+                // Header: title + close affordance.
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(self.title.as_str())
+                            .size(15.5)
+                            .strong()
+                            .color(t.foreground),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if design::icon_button(ui, Icon::X, ButtonVariant::Ghost, "close").clicked()
+                        {
+                            close_clicked = true;
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(self.message.clone())
+                        .size(13.5)
+                        .color(t.foreground),
+                );
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::RIGHT), |ui| {
+                    ui.add_space(10.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let confirm_variant = if self.danger {
+                            ButtonVariant::Destructive
+                        } else {
+                            ButtonVariant::Primary
+                        };
+                        if design::button(ui, self.confirm_label.as_str(), confirm_variant)
+                            .clicked()
+                        {
+                            outcome = DialogOutcome::Confirmed;
+                        }
+                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                            outcome = DialogOutcome::Cancelled;
+                        }
+                    });
                 });
             });
+        if close_clicked {
+            open = false;
+        }
         if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             // Window close button / Escape cancel, never confirm.
             if outcome == DialogOutcome::Open {

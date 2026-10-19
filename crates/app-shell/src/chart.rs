@@ -11,6 +11,8 @@
 
 use eframe::egui;
 
+use crate::design::{self, Tokens};
+
 /// One chart point in data space.
 pub type Point = [f64; 2];
 
@@ -58,37 +60,54 @@ pub fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egui::Pos2
 }
 
 /// Draw a line chart into the available space, returns the drawn rect.
+///
+/// Restyled for the shadcn design system: card background, hairline
+/// gridlines, the theme accent for the series plus a soft area fill, and
+/// endpoint dots with the first/last values annotated under the frame.
 pub fn line_chart(ui: &mut egui::Ui, _id: &str, points: &[Point], label: &str) -> egui::Rect {
+    let t = design::tokens(ui);
     let (rect, _response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 160.0),
+        egui::vec2(ui.available_width(), 180.0),
         egui::Sense::hover(),
     );
-    ui.painter().rect_stroke(
-        rect,
-        4.0,
-        ui.visuals().widgets.noninteractive.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
-    let stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(52, 120, 198));
+    paint_frame(ui, rect, t);
     if let Some(scaled) = scale_points(points, rect) {
-        ui.painter().add(egui::Shape::line(scaled, stroke));
-        // Endpoints annotation: first/last value under the frame.
+        paint_grid(ui, rect, t);
+        // Soft area fill under the line.
+        let mut area = vec![egui::pos2(scaled[0].x, rect.max.y - 8.0)];
+        area.extend_from_slice(&scaled);
+        area.push(egui::pos2(scaled[scaled.len() - 1].x, rect.max.y - 8.0));
+        ui.painter().add(egui::Shape::convex_polygon(
+            area,
+            t.chart_accent.gamma_multiply(0.16),
+            egui::Stroke::NONE,
+        ));
+        let endpoints = [scaled[0], scaled[scaled.len() - 1]];
+        ui.painter().add(egui::Shape::line(
+            scaled,
+            egui::Stroke::new(2.0, t.chart_accent),
+        ));
+        // Endpoint dots.
+        for point in endpoints {
+            ui.painter().circle_filled(point, 3.0, t.chart_accent);
+        }
+        // Endpoints annotation below the frame, inside the card padding.
         let first = points.first().map(|p| p[1]).unwrap_or_default();
         let last = points.last().map(|p| p[1]).unwrap_or_default();
         ui.painter().text(
-            rect.left_bottom() + egui::vec2(8.0, -2.0),
-            egui::Align2::LEFT_BOTTOM,
+            rect.left_bottom() + egui::vec2(4.0, 12.0),
+            egui::Align2::LEFT_TOP,
             format!("{label} · {first} → {last}"),
-            egui::FontId::proportional(11.0),
-            ui.visuals().weak_text_color(),
+            egui::FontId::proportional(11.5),
+            t.muted_foreground,
         );
     } else {
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             "(not enough data to plot)",
-            egui::FontId::proportional(12.0),
-            ui.visuals().weak_text_color(),
+            egui::FontId::proportional(12.5),
+            t.muted_foreground,
         );
     }
     rect
@@ -97,26 +116,23 @@ pub fn line_chart(ui: &mut egui::Ui, _id: &str, points: &[Point], label: &str) -
 /// Draw a bar chart (one bar per `(index, value)`) into the available
 /// space, returns the drawn rect.
 pub fn bar_chart(ui: &mut egui::Ui, _id: &str, bars: &[Point], label: &str) -> egui::Rect {
+    let t = design::tokens(ui);
     let (rect, _response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 160.0),
+        egui::vec2(ui.available_width(), 180.0),
         egui::Sense::hover(),
     );
-    ui.painter().rect_stroke(
-        rect,
-        4.0,
-        ui.visuals().widgets.noninteractive.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
+    paint_frame(ui, rect, t);
     if bars.is_empty() {
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             "(no data to plot)",
-            egui::FontId::proportional(12.0),
-            ui.visuals().weak_text_color(),
+            egui::FontId::proportional(12.5),
+            t.muted_foreground,
         );
         return rect;
     }
+    paint_grid(ui, rect, t);
     let max = bars
         .iter()
         .map(|b| b[1])
@@ -128,7 +144,6 @@ pub fn bar_chart(ui: &mut egui::Ui, _id: &str, bars: &[Point], label: &str) -> e
         egui::pos2(rect.max.x - inset, rect.max.y - inset),
     );
     let bar_width = (plot_area.width() / bars.len() as f32 * 0.6).max(6.0);
-    let color = egui::Color32::from_rgb(210, 120, 40);
     let baseline = plot_area.max.y;
     for (i, bar) in bars.iter().enumerate() {
         let height = (bar[1] / max) as f32 * plot_area.height();
@@ -137,16 +152,42 @@ pub fn bar_chart(ui: &mut egui::Ui, _id: &str, bars: &[Point], label: &str) -> e
             egui::pos2(center_x - bar_width / 2.0, baseline - height),
             egui::pos2(center_x + bar_width / 2.0, baseline),
         );
-        ui.painter().rect_filled(bar_rect, 2.0, color);
+        ui.painter()
+            .rect_filled(bar_rect, egui::CornerRadius::same(3), t.chart_accent);
     }
     ui.painter().text(
-        rect.left_bottom() + egui::vec2(8.0, -2.0),
-        egui::Align2::LEFT_BOTTOM,
+        rect.left_bottom() + egui::vec2(4.0, 12.0),
+        egui::Align2::LEFT_TOP,
         format!("{label} · max {max:.0}"),
-        egui::FontId::proportional(11.0),
-        ui.visuals().weak_text_color(),
+        egui::FontId::proportional(11.5),
+        t.muted_foreground,
     );
     rect
+}
+
+/// Card-like chart frame (rounded, hairline border).
+fn paint_frame(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(8), t.card);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(8),
+        egui::Stroke::new(1.0, t.border),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// Three faint horizontal gridlines inside the chart area.
+fn paint_grid(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
+    let inset = 8.0;
+    for i in 1..=3u16 {
+        let y = rect.min.y + inset + (rect.height() - 2.0 * inset) * f32::from(i) / 4.0;
+        ui.painter().hline(
+            rect.min.x + inset..=rect.max.x - inset,
+            y,
+            egui::Stroke::new(1.0, t.faint),
+        );
+    }
 }
 
 #[cfg(test)]

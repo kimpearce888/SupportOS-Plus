@@ -1,5 +1,9 @@
 //! Support Graph page (port of the web `pages/support_graph.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! Search box → `spp_core::support_graph::graph_search` (the `/api/graph/search`
 //! SQL) listing node references; picking one loads its neighborhood via
 //! `neighbors_json` (the `/api/graph/neighbors/{kind}/{id}` SQL, direction
@@ -9,6 +13,9 @@
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::support_graph::GraphNodeRef;
+
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
 
 /// Parsed neighborhood view of one graph node.
 #[derive(Debug, Clone, Default)]
@@ -155,25 +162,30 @@ impl SupportGraphPage {
             self.reload_stats(db);
         }
 
-        ui.heading("Support Graph");
-        if let Some(stats) = &self.stats {
-            ui.weak(format!(
+        let subtitle = if let Some(stats) = &self.stats {
+            format!(
                 "{} conversation links · {} customer links · {} human edges",
                 super::i64_field(stats, "conversation_links"),
                 super::i64_field(stats, "customer_links"),
                 super::i64_field(stats, "human_edges")
-            ));
-        }
-        ui.separator();
-
+            )
+        } else {
+            "linked customers, conversations, and users".to_string()
+        };
+        design::page_header(ui, "Support Graph", Some(subtitle.as_str()), |_| {});
         ui.horizontal(|ui| {
             let mut query = self.query_edit.clone();
-            let response = ui.text_edit_singleline(&mut query);
+            let response = ui.add_sized(
+                [320.0, 28.0],
+                egui::TextEdit::singleline(&mut query).hint_text("Search the graph…"),
+            );
             if response.changed() {
                 self.query_edit = query;
             }
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui.button("search").clicked() || (response.lost_focus() && enter) {
+            if design::button(ui, "search", ButtonVariant::Primary).clicked()
+                || (response.lost_focus() && enter)
+            {
                 self.query = self.query_edit.clone();
                 self.selected = None;
                 self.neighborhood = None;
@@ -182,17 +194,22 @@ impl SupportGraphPage {
         });
 
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         if self.query.is_empty() {
-            ui.weak("Search customers, conversations, organizations, users, or incidents by name, subject, or number.");
+            design::empty_state(
+                ui,
+                Icon::ShareGraph,
+                "Search the graph",
+                "Search customers, conversations, organizations, users, or incidents by name, subject, or number.",
+            );
             return;
         }
 
         let results = self.results.clone();
-        ui.strong(format!("{} node(s)", results.len()));
+        design::section_title(ui, &format!("{} node(s)", results.len()));
         let mut clicked: Option<(String, i64)> = None;
         egui::ScrollArea::vertical()
             .id_salt("graph-results")
@@ -203,14 +220,11 @@ impl SupportGraphPage {
                     let label = super::str_field(node, "label");
                     let sub = super::opt_str_field(node, "sublabel");
                     let selected = self.selected == Some((kind.clone(), id));
-                    if ui
-                        .selectable_label(selected, format!("{kind}: {label}"))
-                        .clicked()
-                    {
+                    if design::chip(ui, selected, &format!("{kind}: {label}")).clicked() {
                         clicked = Some((kind.clone(), id));
                     }
                     if let Some(sub) = sub {
-                        ui.weak(format!("   {sub}"));
+                        design::hint_text(ui, &format!("   {sub}"));
                     }
                 }
             });
@@ -218,36 +232,52 @@ impl SupportGraphPage {
             self.selected = Some((kind.clone(), id));
             self.load_neighborhood(db, &kind, id);
         }
-        ui.separator();
+        design::divider(ui);
 
         let neighborhood = self.neighborhood.clone();
         if let Some(neighborhood) = neighborhood {
-            ui.strong("Neighborhood");
-            if let Some(center) = neighborhood.center {
-                ui.label(format!("{} #{}", center.kind, center.local_id));
-                if !center.label.is_empty() {
-                    ui.weak(center.label);
-                }
-            }
-            if neighborhood.edges.is_empty() {
-                ui.weak("(no edges)");
-                return;
-            }
-            egui::ScrollArea::vertical()
-                .id_salt("graph-edges")
-                .show_rows(ui, 20.0, neighborhood.edges.len(), |ui, range| {
-                    for (relation, origin, target) in &neighborhood.edges[range] {
-                        ui.label(format!(
-                            "{relation}{} {}",
-                            if origin.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" ({origin})")
-                            },
-                            Neighborhood::target_label(target)
-                        ));
+            design::card_titled(ui, "Neighborhood", None, |ui| {
+                if let Some(center) = &neighborhood.center {
+                    ui.label(
+                        egui::RichText::new(format!("{} #{}", center.kind, center.local_id))
+                            .size(13.0)
+                            .strong()
+                            .color(design::tokens(ui).foreground),
+                    );
+                    if !center.label.is_empty() {
+                        design::hint_text(ui, &center.label);
                     }
-                });
+                }
+                if neighborhood.edges.is_empty() {
+                    design::empty_state(
+                        ui,
+                        Icon::ShareGraph,
+                        "(no edges)",
+                        "This node has no links yet.",
+                    );
+                } else {
+                    egui::ScrollArea::vertical()
+                        .id_salt("graph-edges")
+                        .show_rows(ui, 20.0, neighborhood.edges.len(), |ui, range| {
+                            let t = design::tokens(ui);
+                            for (relation, origin, target) in &neighborhood.edges[range] {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{relation}{} {}",
+                                        if origin.is_empty() {
+                                            String::new()
+                                        } else {
+                                            format!(" ({origin})")
+                                        },
+                                        Neighborhood::target_label(target)
+                                    ))
+                                    .size(13.0)
+                                    .color(t.foreground),
+                                );
+                            }
+                        });
+                }
+            });
         }
     }
 }

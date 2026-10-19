@@ -2,11 +2,13 @@
 //!
 //! `App::logic` drains the background-task bridge and marks the affected
 //! ported pages dirty (the same invalidation map the web UI used);
-//! `App::ui` renders the sidebar navigation plus the active page — the
-//! full Phase 3 surface — and keeps the Phase 2 shell diagnostics (theme
-//! toggle persisted in the settings table, database status, live bridge
-//! counters) on the Shell page. Global overlays: the command palette
-//! (Ctrl/Cmd+K) and the toast stack.
+//! `App::ui` renders the redesigned shadcn-style shell — full-height
+//! sidebar with grouped navigation and icons, an application header with
+//! the command-palette trigger and theme switch, and the active page —
+//! and keeps the Phase 2 shell diagnostics (theme toggle persisted in the
+//! settings table, database status, live bridge counters) on the Shell
+//! page. Global overlays: the command palette (Ctrl/Cmd+K) and the toast
+//! stack.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,6 +20,8 @@ use spp_core::sync_engine::SyncEngine;
 
 use crate::ShellOptions;
 use crate::bridge::TaskBridge;
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
 use crate::overlays::{ConfirmDialog, DialogOutcome};
 use crate::pages::NavRequest;
 use crate::pages::PageKey;
@@ -92,6 +96,7 @@ impl ShellApp {
     /// degrade to defaults instead of refusing to start.
     #[must_use]
     pub fn new(cc: &eframe::CreationContext<'_>, options: ShellOptions) -> Self {
+        design::install(&cc.egui_ctx);
         let theme = Theme::load(&options.db);
         theme.apply(&cc.egui_ctx);
         let bridge = TaskBridge::spawn(&options.bus, &cc.egui_ctx);
@@ -113,7 +118,12 @@ impl ShellApp {
         // folder under the data dir (route parity).
         let mut knowledge = KnowledgePage::new();
         knowledge.set_data_dir(options.data_dir);
-        Self {
+        // `mut` is only needed by the (feature-gated) screenshot harness.
+        #[cfg_attr(
+            not(feature = "ui-screenshot"),
+            expect(unused_mut, reason = "only mutated by the ui-screenshot harness")
+        )]
+        let mut app = Self {
             db: options.db,
             bus: options.bus,
             sync,
@@ -147,7 +157,10 @@ impl ShellApp {
             palette: CommandPalette::new(),
             toasts: Toasts::new(),
             dialog: None,
-        }
+        };
+        #[cfg(feature = "ui-screenshot")]
+        app.apply_screenshot_env(&cc.egui_ctx);
+        app
     }
 
     /// Apply an invalidation batch to the ported pages.
@@ -194,36 +207,32 @@ impl ShellApp {
     }
 
     fn shell_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Shell");
-        ui.weak("native shell diagnostics (Phase 2 surface)");
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label("Theme:");
-            if ui
-                .button(format!("switch to {}", self.theme.toggle().label()))
-                .clicked()
-            {
-                self.theme = self.theme.toggle();
-                if let Err(e) = self.theme.store(&self.db) {
-                    tracing::warn!(error = %e, "failed to persist the theme setting");
+        design::page_header(
+            ui,
+            "Shell",
+            Some("native shell diagnostics (Phase 2 surface)"),
+            |ui| {
+                if ui
+                    .add(egui::Button::new(format!(
+                        "switch to {}",
+                        self.theme.toggle().label()
+                    )))
+                    .clicked()
+                {
+                    self.theme = self.theme.toggle();
+                    if let Err(e) = self.theme.store(&self.db) {
+                        tracing::warn!(error = %e, "failed to persist the theme setting");
+                    }
+                    self.theme.apply(ui.ctx());
                 }
-                self.theme.apply(ui.ctx());
-            }
-        });
-        ui.separator();
+            },
+        );
 
         let db_display = self
             .db_path
             .as_ref()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "<in-memory>".to_string());
-        ui.monospace(format!("database: {db_display}"));
-        ui.monospace(format!("schema: v{}", self.schema_version));
-        ui.monospace(format!("background events: {}", self.events_seen));
-        if let Some(last) = &self.last_event {
-            ui.monospace(format!("last event: {last}"));
-        }
         let sync_kind = self
             .sync
             .as_ref()
@@ -235,14 +244,139 @@ impl ShellApp {
                 }
             })
             .unwrap_or("unavailable");
-        ui.monospace(format!("sync engine: {sync_kind}"));
-
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            ui.weak("all pages ported: dashboard, inbox, operations, customers, organizations,");
-            ui.weak("knowledge/docs, reports, issue radar, incidents, custom objects,");
-            ui.weak("automation, AI center, outreach, notifications, search, support graph,");
-            ui.weak("connectors, sync health, settings, onboarding");
+        design::card_titled(ui, "Runtime", None, |ui| {
+            egui::Grid::new("shell-diagnostics")
+                .num_columns(2)
+                .spacing(egui::vec2(16.0, 6.0))
+                .show(ui, |ui| {
+                    for (label, value) in [
+                        ("database", db_display),
+                        ("schema", format!("v{}", self.schema_version)),
+                        ("background events", self.events_seen.to_string()),
+                        ("last event", self.last_event.clone().unwrap_or_default()),
+                        ("sync engine", sync_kind.to_string()),
+                    ] {
+                        design::field_label(ui, label);
+                        ui.monospace(
+                            egui::RichText::new(value).color(design::tokens(ui).foreground),
+                        );
+                        ui.end_row();
+                    }
+                });
         });
+        ui.add_space(8.0);
+        design::hint_text(
+            ui,
+            "all pages ported: dashboard, inbox, operations, customers, organizations, knowledge/docs, \
+             reports, issue radar, incidents, custom objects, automation, AI center, outreach, \
+             notifications, search, support graph, connectors, sync health, settings, onboarding",
+        );
+    }
+
+    /// The redesigned full-height sidebar: brand, command-palette trigger,
+    /// grouped icon navigation, and the theme switch pinned to the bottom.
+    fn sidebar_ui(&mut self, ui: &mut egui::Ui) {
+        let t = design::tokens(ui);
+        // Brand block.
+        ui.horizontal(|ui| {
+            let (id, rect) = ui.allocate_space(egui::vec2(28.0, 28.0));
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::same(7), t.primary);
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "S+",
+                egui::FontId::proportional(13.0),
+                t.primary_foreground,
+            );
+            ui.advance_cursor_after_rect(rect);
+            let _ = id;
+            ui.label(
+                egui::RichText::new("SupportOS+")
+                    .size(15.5)
+                    .strong()
+                    .color(t.foreground),
+            );
+        });
+        ui.label(
+            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                .small()
+                .color(t.muted_foreground),
+        );
+        ui.add_space(10.0);
+
+        // Command-palette trigger (bordered, full width).
+        if palette_trigger(ui).clicked() {
+            self.palette.open();
+        }
+        ui.add_space(12.0);
+
+        // Grouped navigation over the full page surface.
+        egui::ScrollArea::vertical()
+            .id_salt("spp-nav-scroll")
+            .show(ui, |ui| {
+                for (group, keys) in NAV_GROUPS {
+                    ui.label(
+                        egui::RichText::new(*group)
+                            .small()
+                            .strong()
+                            .color(t.muted_foreground),
+                    );
+                    ui.add_space(2.0);
+                    for key in keys.iter() {
+                        if nav_row(ui, self.page, *key) {
+                            self.page = *key;
+                        }
+                    }
+                    ui.add_space(8.0);
+                }
+            });
+
+        // Theme switch pinned to the bottom of the sidebar.
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            ui.separator();
+            let next = self.theme.toggle();
+            if theme_row(ui, next) {
+                self.theme = next;
+                if let Err(e) = self.theme.store(&self.db) {
+                    tracing::warn!(error = %e, "failed to persist the theme setting");
+                }
+                self.theme.apply(ui.ctx());
+            }
+        });
+    }
+
+    /// The application header above the page content: command-palette
+    /// trigger and the theme switch on the right, nothing else (each page
+    /// owns its own title header).
+    fn header_ui(&mut self, ui: &mut egui::Ui) {
+        let t = design::tokens(ui);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let toggle = if self.theme == Theme::Dark {
+                (Icon::Sun, "switch to light theme")
+            } else {
+                (Icon::Moon, "switch to dark theme")
+            };
+            if design::icon_button(ui, toggle.0, ButtonVariant::Ghost, toggle.1).clicked() {
+                self.theme = self.theme.toggle();
+                if let Err(e) = self.theme.store(&self.db) {
+                    tracing::warn!(error = %e, "failed to persist the theme setting");
+                }
+                self.theme.apply(ui.ctx());
+            }
+            if design::button_with_icon(ui, Icon::Search, "Search  ⌘K", ButtonVariant::Outline)
+                .on_hover_text("command palette (Ctrl/Cmd+K)")
+                .clicked()
+            {
+                self.palette.open();
+            }
+        });
+        let rect = ui.max_rect();
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            egui::Stroke::new(1.0, t.border),
+        );
     }
 }
 
@@ -269,26 +403,34 @@ impl eframe::App for ShellApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let t = design::tokens(ui);
+        // Full-height sidebar with the theme's elevated sidebar surface.
         egui::Panel::left("spp-nav")
-            .default_size(150.0)
-            .show(ui, |ui| {
-                ui.heading("SupportOS+");
-                ui.weak(format!("v{}", env!("CARGO_PKG_VERSION")));
-                ui.separator();
-                for key in PageKey::all() {
-                    if nav_row(ui, self.page, key) {
-                        self.page = key;
-                    }
-                }
-                ui.separator();
-                if ui
-                    .button("⌘K search")
-                    .on_hover_text("command palette (Ctrl/Cmd+K)")
-                    .clicked()
-                {
-                    self.palette.open();
-                }
-            });
+            .exact_size(216.0)
+            .show_separator_line(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(t.sidebar)
+                    .inner_margin(egui::Margin {
+                        left: 10,
+                        right: 10,
+                        top: 14,
+                        bottom: 10,
+                    }),
+            )
+            .show(ui, |ui| self.sidebar_ui(ui));
+
+        // Application header over the page area (right-side global
+        // controls + a bottom hairline).
+        egui::Panel::top("spp-header")
+            .exact_size(52.0)
+            .show_separator_line(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(t.background)
+                    .inner_margin(egui::Margin::symmetric(20, 0)),
+            )
+            .show(ui, |ui| self.header_ui(ui));
 
         // Global overlays first so they layer above the page content.
         if let Some(nav) = self.palette.ui(ui.ctx(), &self.db) {
@@ -312,31 +454,68 @@ impl eframe::App for ShellApp {
         let bus = self.bus.clone();
         let sync = self.sync.clone();
         let mut nav: Option<NavRequest> = None;
-        egui::CentralPanel::default().show(ui, |ui| match self.page {
-            PageKey::Dashboard => self.dashboard.ui(ui, &self.db),
-            PageKey::Inbox => self.inbox.ui(ui, &self.db, &bus),
-            PageKey::Customers => self.customers.ui(ui, &self.db),
-            PageKey::Knowledge => self.knowledge.ui(ui, &self.db),
-            PageKey::Reports => self.reports.ui(ui, &self.db),
-            PageKey::Operations => {
-                nav = self.operations.ui(ui, &self.db);
-            }
-            PageKey::AiCenter => self.ai_center.ui(ui, &self.db),
-            PageKey::Automation => self.automation.ui(ui, &self.db),
-            PageKey::Connectors => self.connectors.ui(ui, &self.db),
-            PageKey::CustomObjects => self.custom_objects.ui(ui, &self.db),
-            PageKey::Incidents => self.incidents.ui(ui, &self.db),
-            PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
-            PageKey::Notifications => self.notifications.ui(ui, &self.db),
-            PageKey::Onboarding => self.onboarding.ui(ui, &self.db, sync.as_ref()),
-            PageKey::Organizations => self.organizations.ui(ui, &self.db),
-            PageKey::Outreach => self.outreach.ui(ui, &self.db),
-            PageKey::Search => self.search.ui(ui, &self.db),
-            PageKey::Settings => self.settings.ui(ui, &self.db),
-            PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
-            PageKey::SyncHealth => self.sync_health.ui(ui, &self.db, sync.as_ref()),
-            PageKey::Shell => self.shell_ui(ui),
-        });
+        // Every page scrolls vertically as a whole (shadcn app-body
+        // behavior) so no content is unreachable at small window sizes —
+        // except the Inbox, whose two panes manage their own scrolling.
+        if self.page == PageKey::Inbox {
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.background)
+                        .inner_margin(egui::Margin::symmetric(22, 14)),
+                )
+                .show(ui, |ui| self.inbox.ui(ui, &self.db, &bus));
+            nav = None;
+        } else {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::new().fill(t.background))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("spp-page-scroll")
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.add_space(2.0);
+                            egui::Frame::new()
+                                .fill(egui::Color32::TRANSPARENT)
+                                .inner_margin(egui::Margin::symmetric(22, 14))
+                                .show(ui, |ui| match self.page {
+                                    PageKey::Dashboard => self.dashboard.ui(ui, &self.db),
+                                    PageKey::Customers => self.customers.ui(ui, &self.db),
+                                    PageKey::Knowledge => self.knowledge.ui(ui, &self.db),
+                                    PageKey::Reports => self.reports.ui(ui, &self.db),
+                                    PageKey::Operations => {
+                                        nav = self.operations.ui(ui, &self.db);
+                                    }
+                                    PageKey::AiCenter => self.ai_center.ui(ui, &self.db),
+                                    PageKey::Automation => self.automation.ui(ui, &self.db),
+                                    PageKey::Connectors => self.connectors.ui(ui, &self.db),
+                                    PageKey::CustomObjects => {
+                                        self.custom_objects.ui(ui, &self.db);
+                                    }
+                                    PageKey::Incidents => self.incidents.ui(ui, &self.db),
+                                    PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
+                                    PageKey::Notifications => {
+                                        self.notifications.ui(ui, &self.db);
+                                    }
+                                    PageKey::Onboarding => {
+                                        self.onboarding.ui(ui, &self.db, sync.as_ref());
+                                    }
+                                    PageKey::Organizations => {
+                                        self.organizations.ui(ui, &self.db);
+                                    }
+                                    PageKey::Outreach => self.outreach.ui(ui, &self.db),
+                                    PageKey::Search => self.search.ui(ui, &self.db),
+                                    PageKey::Settings => self.settings.ui(ui, &self.db),
+                                    PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
+                                    PageKey::SyncHealth => {
+                                        self.sync_health.ui(ui, &self.db, sync.as_ref());
+                                    }
+                                    PageKey::Shell => self.shell_ui(ui),
+                                    PageKey::Inbox => unreachable!("inbox handled above"),
+                                });
+                        });
+                });
+        }
         if let Some(nav) = nav {
             self.apply_nav(nav);
         }
@@ -347,7 +526,50 @@ impl eframe::App for ShellApp {
     }
 }
 
-/// One full-width sidebar navigation row.
+/// Sidebar navigation groups (the web nav order, partitioned into labeled
+/// sections: work queues first, reference pages last).
+const NAV_GROUPS: &[(&str, &[PageKey])] = &[
+    (
+        "Workspace",
+        &[PageKey::Dashboard, PageKey::Inbox, PageKey::Operations],
+    ),
+    (
+        "Customers & knowledge",
+        &[
+            PageKey::Customers,
+            PageKey::Organizations,
+            PageKey::Knowledge,
+        ],
+    ),
+    (
+        "Insights",
+        &[PageKey::Reports, PageKey::IssueRadar, PageKey::Incidents],
+    ),
+    (
+        "Automation & AI",
+        &[
+            PageKey::CustomObjects,
+            PageKey::Automation,
+            PageKey::AiCenter,
+            PageKey::Outreach,
+        ],
+    ),
+    (
+        "System",
+        &[
+            PageKey::Notifications,
+            PageKey::Search,
+            PageKey::SupportGraph,
+            PageKey::Connectors,
+            PageKey::SyncHealth,
+            PageKey::Settings,
+            PageKey::Onboarding,
+            PageKey::Shell,
+        ],
+    ),
+];
+
+/// One full-width sidebar navigation row with a leading icon.
 ///
 /// DEFECT-01 (qa-audit/20261019T050847Z): with plain `selectable_label`
 /// rows, the four shortest labels (Inbox, Reports, Search, Shell) only
@@ -356,36 +578,65 @@ impl eframe::App for ShellApp {
 /// click-acceptance rect from the painted row on short galleys. Rows are
 /// now hand-allocated: the sensed rect is exactly the full-width row we
 /// paint, so click and hover geometry cannot diverge, whatever the label
-/// length. Visuals come from `Style::interact_selectable` (the same
-/// selection/hover styling `selectable_label` used) and the button role
-/// is preserved for assistive technologies.
+/// length. The row paints the shadcn-style active/hover surfaces and the
+/// button role is preserved for assistive technologies.
 fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool {
     let selected = current == key;
-    let galley = egui::WidgetText::from(key.label()).into_galley(
-        ui,
-        Some(egui::TextWrapMode::Extend),
-        ui.available_width(),
-        egui::TextStyle::Button,
-    );
-    let padding = ui.spacing().button_padding;
-    let height = ui
-        .spacing()
-        .interact_size
-        .y
-        .max(galley.size().y + 2.0 * padding.y);
-    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), height));
+    let t = design::tokens(ui);
+    let fg = if selected {
+        t.selection_foreground
+    } else {
+        t.foreground
+    };
+    let galley = egui::WidgetText::from(egui::RichText::new(key.label()).size(13.5).color(fg))
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        );
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 32.0));
     let response = ui.interact(rect, auto_id.with(key.label()), egui::Sense::click());
-    let visuals = ui.style().interact_selectable(&response, selected);
-    ui.painter()
-        .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+    let fill = if selected {
+        t.selection
+    } else if response.hovered() || response.has_focus() {
+        t.accent
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(6), fill);
+    }
+    let icon_size = 16.0;
+    let icon_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + 10.0, rect.center().y - icon_size / 2.0),
+        egui::pos2(
+            rect.min.x + 10.0 + icon_size,
+            rect.center().y + icon_size / 2.0,
+        ),
+    );
+    Icon::for_page(key).paint_at(
+        ui.painter(),
+        icon_rect,
+        if selected { fg } else { t.muted_foreground },
+    );
     ui.painter().galley(
         egui::pos2(
-            rect.min.x + padding.x,
+            icon_rect.max.x + 9.0,
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,
-        visuals.fg_stroke.color,
+        fg,
     );
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(8),
+            egui::Stroke::new(2.0, t.ring),
+            egui::StrokeKind::Outside,
+        );
+    }
     if let Some(cursor) = ui.visuals().interact_cursor
         && response.hovered()
     {
@@ -395,6 +646,370 @@ fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool {
         egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key.label())
     });
     response.clicked()
+}
+
+/// The sidebar's full-width command-palette trigger row (bordered).
+fn palette_trigger(ui: &mut egui::Ui) -> egui::Response {
+    let t = design::tokens(ui);
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 34.0));
+    let response = ui
+        .interact(
+            rect,
+            auto_id.with("spp-nav-palette-trigger"),
+            egui::Sense::click(),
+        )
+        .on_hover_text("command palette (Ctrl/Cmd+K)");
+    let fill = if response.hovered() || response.has_focus() {
+        t.accent
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(7), fill);
+    }
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(7),
+        egui::Stroke::new(1.0, t.border),
+        egui::StrokeKind::Inside,
+    );
+    let icon_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + 10.0, rect.center().y - 8.0),
+        egui::pos2(rect.min.x + 26.0, rect.center().y + 8.0),
+    );
+    Icon::Search.paint_at(ui.painter(), icon_rect, t.muted_foreground);
+    ui.painter().text(
+        egui::pos2(icon_rect.max.x + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "Search…",
+        egui::FontId::proportional(13.5),
+        t.muted_foreground,
+    );
+    let kbd = "⌘K";
+    let kbd_font = egui::FontId::proportional(11.0);
+    let kbd_width = 26.0;
+    let kbd_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.max.x - kbd_width - 8.0, rect.center().y - 9.0),
+        egui::pos2(rect.max.x - 8.0, rect.center().y + 9.0),
+    );
+    ui.painter()
+        .rect_filled(kbd_rect, egui::CornerRadius::same(4), t.muted);
+    ui.painter().text(
+        kbd_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        kbd,
+        kbd_font,
+        t.muted_foreground,
+    );
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(9),
+            egui::Stroke::new(2.0, t.ring),
+            egui::StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            ui.is_enabled(),
+            "search (command palette)".to_owned(),
+        )
+    });
+    response
+}
+
+/// The sidebar's bottom theme-switch row (sun/moon icon + label).
+fn theme_row(ui: &mut egui::Ui, next: Theme) -> bool {
+    let t = design::tokens(ui);
+    let (icon, label) = match next {
+        Theme::Dark => (Icon::Moon, "switch to dark theme"),
+        Theme::Light => (Icon::Sun, "switch to light theme"),
+    };
+    let galley = egui::WidgetText::from(
+        egui::RichText::new(label)
+            .size(13.0)
+            .color(t.muted_foreground),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 30.0));
+    let response = ui.interact(rect, auto_id.with("spp-nav-theme"), egui::Sense::click());
+    let fill = if response.hovered() || response.has_focus() {
+        t.accent
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(6), fill);
+    }
+    let icon_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + 10.0, rect.center().y - 8.0),
+        egui::pos2(rect.min.x + 26.0, rect.center().y + 8.0),
+    );
+    icon.paint_at(ui.painter(), icon_rect, t.muted_foreground);
+    ui.painter().galley(
+        egui::pos2(
+            icon_rect.max.x + 9.0,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        t.muted_foreground,
+    );
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            egui::CornerRadius::same(8),
+            egui::Stroke::new(2.0, t.ring),
+            egui::StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label.to_owned())
+    });
+    response.clicked()
+}
+
+/// Visual verification harness (only compiled with the `ui-screenshot`
+/// feature, which no normal build enables): the shell renders one frame
+/// headless under Xvfb with software GL and eframe's `__screenshot` hook
+/// saves a PNG. Environment knobs:
+///
+/// * `SPP_SHOT_PAGE` — the page to open (any `PageKey::label`, lowercased).
+/// * `SPP_SHOT_THEME` — `light` or `dark`.
+/// * `SPP_SHOT_SEED` — `1` seeds a small demo dataset so pages render data.
+/// * `SPP_SHOT_PALETTE` — `1` opens the command palette overlay.
+#[cfg(feature = "ui-screenshot")]
+impl ShellApp {
+    fn apply_screenshot_env(&mut self, ctx: &egui::Context) {
+        if let Ok(theme) = std::env::var("SPP_SHOT_THEME") {
+            let theme = if theme.eq_ignore_ascii_case("dark") {
+                Theme::Dark
+            } else {
+                Theme::Light
+            };
+            self.theme = theme;
+            theme.apply(ctx);
+        }
+        if let Ok(page) = std::env::var("SPP_SHOT_PAGE") {
+            for key in PageKey::all() {
+                if key.label().eq_ignore_ascii_case(&page) {
+                    self.page = key;
+                    break;
+                }
+            }
+        }
+        if std::env::var("SPP_SHOT_SEED").as_deref() == Ok("1")
+            && let Err(e) = self.db.with_write(seed_demo_for_screenshots)
+        {
+            tracing::warn!(error = %e, "screenshot seed failed");
+        }
+        if std::env::var("SPP_SHOT_PALETTE").as_deref() == Ok("1") {
+            self.palette.open();
+        }
+    }
+}
+
+/// Seed a compact demo dataset so the screenshots show real rows, badges,
+/// charts and thread entries (feature-gated; never runs in normal builds).
+#[cfg(feature = "ui-screenshot")]
+fn seed_demo_for_screenshots(conn: &mut rusqlite::Connection) -> spp_core::error::Result<()> {
+    use spp_core::error::Result;
+    let seed_conv = |conn: &rusqlite::Connection,
+                     id: i64,
+                     remote: i64,
+                     subject: &str,
+                     status: &str,
+                     channel: &str,
+                     mailbox: i64,
+                     assignee: i64,
+                     customer: i64,
+                     days_ago: i64|
+     -> Result<()> {
+        conn.execute(
+            "INSERT INTO conversations (id, remote_id, number, subject, preview, status, type,
+                 mailbox_local_id, assignee_local_id, customer_local_id, priority,
+                 created_at, updated_at, closed_at, first_customer_message_at, local_created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                 CASE WHEN ?9 = 0 THEN NULL ELSE ?9 END,
+                 ?10, 'none',
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now', printf('-%d day', ?11)),
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now', printf('-%d day', ?11)),
+                 CASE WHEN ?6 = 'closed'
+                      THEN strftime('%Y-%m-%dT%H:%M:%fZ','now', printf('-%d day', ?11)) ELSE NULL END,
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now', printf('-%d day', ?11)),
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now', printf('-%d day', ?11)))",
+            rusqlite::params![
+                id,
+                remote,
+                500 + id,
+                subject,
+                format!("{subject} preview"),
+                status,
+                channel,
+                mailbox,
+                assignee,
+                customer,
+                days_ago,
+            ],
+        )?;
+        Ok(())
+    };
+    conn.execute(
+        "INSERT INTO users (id, remote_id, first_name, last_name, email, mention)
+         VALUES (5, 505, 'Ada', 'Lovelace', 'ada@example.com', 'ada'),
+                (6, 506, 'Grace', 'Hopper', 'grace@example.com', NULL)",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO mailboxes (id, remote_id, name, email)
+         VALUES (1, 101, 'Support', 'support@example.com'),
+                (2, 102, 'Billing', 'billing@example.com')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO customers (id, remote_id, first_name, last_name, email)
+         VALUES (9, 909, 'Kim', 'Pearce', 'kim@example.com'),
+                (10, 910, 'Ada', 'Customer', 'adac@example.com')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO customer_emails (customer_id, value, type)
+         VALUES (9, 'kim@example.com', 'work'),
+                (10, 'adac@example.com', 'work')",
+        [],
+    )?;
+    seed_conv(
+        conn,
+        1,
+        1001,
+        "Export to CSV fails on large files",
+        "active",
+        "email",
+        1,
+        5,
+        9,
+        0,
+    )?;
+    seed_conv(
+        conn,
+        2,
+        1002,
+        "Billing after trial period",
+        "pending",
+        "email",
+        2,
+        6,
+        10,
+        0,
+    )?;
+    seed_conv(
+        conn,
+        3,
+        1003,
+        "Cannot sign in with SSO",
+        "active",
+        "chat",
+        1,
+        5,
+        9,
+        1,
+    )?;
+    seed_conv(
+        conn,
+        4,
+        1004,
+        "Feature request: dark mode",
+        "closed",
+        "email",
+        1,
+        6,
+        10,
+        2,
+    )?;
+    seed_conv(
+        conn,
+        5,
+        1005,
+        "Refund for duplicate charge",
+        "pending",
+        "chat",
+        2,
+        0,
+        9,
+        3,
+    )?;
+    conn.execute(
+        "INSERT INTO conversation_threads (conversation_id, type, body_text, from_type, state,
+             created_by_customer_id, created_at)
+         VALUES (1, 'customer_message', '<p>Hi! Exporting to CSV fails with a 500 error whenever the file is over 10&nbsp;MB. This started yesterday.</p>', 'customer', 'published', 9,
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                (1, 'reply', '<p>Thanks for the report — we reproduced it and a fix is rolling out today. <b>Workaround:</b> split the export into two files.</p>', 'user', 'published', NULL,
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                (1, 'note', '<p>@ada triaged: the streaming writer buffers the whole file. Fix in release 1.0.1.</p>', 'user', 'published', NULL,
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO ratings (conversation_id, rating, remote_created_at)
+         VALUES (1, 'great', strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                (2, 'okay', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO tags (remote_id, name, slug) VALUES (1, 'bug', 'bug'), (2, 'billing', 'billing')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO conversation_tags (conversation_id, tag_id) VALUES (1, 1), (2, 2)",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO docs_collections (id, remote_id, name, slug)
+         VALUES (1, 1, 'Guides', 'guides')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO docs_articles (collection_local_id, number, name, status, text, preview,
+             views, words, remote_created_at, remote_updated_at)
+         VALUES (1, 1, 'Exporting your data', 'published', 'How to export conversations to CSV and JSON.', 'How to export conversations…', 42, 7,
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day'),
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                (1, 2, 'Troubleshooting sign-in', 'draft', 'Common SSO sign-in problems and fixes.', 'Common SSO sign-in problems…', 3, 5,
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now','-2 day'),
+                 strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [],
+    )?;
+    let _ = spp_core::notifications::record_notification(
+        conn,
+        None,
+        &spp_core::notifications::NotificationInput {
+            notification_type: spp_core::catalog::NotificationType::Mentioned,
+            title: "Ada mentioned you on #501".into(),
+            body: Some("@ada triaged: the streaming writer buffers the whole file.".into()),
+            dedup_key: "shot:n1".into(),
+            ..Default::default()
+        },
+    );
+    let _ = spp_core::notifications::record_notification(
+        conn,
+        None,
+        &spp_core::notifications::NotificationInput {
+            notification_type: spp_core::catalog::NotificationType::Mentioned,
+            title: "Sync completed".into(),
+            body: Some("Incremental sync finished: 5 conversations, 0 errors.".into()),
+            dedup_key: "shot:n2".into(),
+            ..Default::default()
+        },
+    );
+    let _ = spp_core::search::rebuild_indexes(conn);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -429,6 +1044,13 @@ mod tests {
         for key in PageKey::all() {
             assert!(!key.label().is_empty());
         }
+        // The redesigned sidebar groups every page exactly once, in the
+        // canonical order.
+        let mut grouped = Vec::new();
+        for (_, keys) in NAV_GROUPS {
+            grouped.extend_from_slice(keys);
+        }
+        assert_eq!(grouped, PageKey::all());
     }
 
     #[test]

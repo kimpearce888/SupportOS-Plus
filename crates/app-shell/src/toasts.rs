@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
+use crate::design;
+use crate::icons::Icon;
+
 /// Toast severity (web: `ToastKind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToastKind {
@@ -40,12 +43,14 @@ impl ToastKind {
         }
     }
 
-    fn color(self) -> egui::Color32 {
+    /// Icon + tint for the redesign (shadcn toast look: leading icon,
+    /// strong message, muted detail).
+    fn visuals(self, t: &design::Tokens) -> (Icon, egui::Color32) {
         match self {
-            Self::Success => egui::Color32::GREEN,
-            Self::Error => egui::Color32::RED,
-            Self::Warning => egui::Color32::YELLOW,
-            Self::Info => egui::Color32::LIGHT_BLUE,
+            Self::Success => (Icon::Check, t.success_foreground),
+            Self::Error => (Icon::AlertCircle, t.destructive_text),
+            Self::Warning => (Icon::AlertTriangle, t.warning_foreground),
+            Self::Info => (Icon::Info, t.info_foreground),
         }
     }
 }
@@ -122,21 +127,48 @@ impl Toasts {
             .resizable(false)
             .interactable(false)
             .show(ctx, |ui| {
+                let t = design::tokens_for(ctx);
                 let stack = self.stack.clone();
                 for toast in &stack {
+                    let (icon, tint) = toast.kind.visuals(t);
                     let frame = egui::Frame::new()
-                        .fill(ui.visuals().extreme_bg_color)
-                        .corner_radius(6.0)
-                        .inner_margin(egui::Margin::symmetric(10, 6))
-                        .outer_margin(4.0);
+                        .fill(t.card)
+                        .stroke(egui::Stroke::new(1.0, t.border))
+                        .corner_radius(10)
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .shadow(egui::Shadow {
+                            offset: [0, 4],
+                            blur: 16,
+                            spread: 0,
+                            color: egui::Color32::from_black_alpha(48),
+                        });
                     frame.show(ui, |ui| {
-                        ui.colored_label(
-                            toast.kind.color(),
-                            format!("{} {}", toast.kind.as_str(), toast.message),
-                        );
-                        if let Some(detail) = &toast.detail {
-                            ui.weak(detail);
-                        }
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            let (id, rect) = ui.allocate_space(egui::vec2(17.0, 17.0));
+                            icon.paint_at(ui.painter(), rect, tint);
+                            ui.advance_cursor_after_rect(rect);
+                            let _ = id;
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} {}",
+                                        toast.kind.as_str(),
+                                        toast.message
+                                    ))
+                                    .size(13.0)
+                                    .strong()
+                                    .color(t.foreground),
+                                );
+                                if let Some(detail) = &toast.detail {
+                                    ui.label(
+                                        egui::RichText::new(detail.as_str())
+                                            .small()
+                                            .color(t.muted_foreground),
+                                    );
+                                }
+                            });
+                        });
                     });
                 }
             });

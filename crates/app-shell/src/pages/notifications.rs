@@ -1,5 +1,9 @@
 //! Notifications page (port of the web `pages/notifications.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! All-notifications + mentions tabs (web: the two list endpoints
 //! `/api/notifications` and `/api/notifications/mentions`), per-row
 //! mark-read toggles, mark-all-read, and the unread badge in the header —
@@ -8,6 +12,9 @@
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::notifications::{ListOptions, NotificationRecord};
+
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Notification list tabs (web: `active_tab`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,24 +137,23 @@ impl NotificationsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Notifications");
-        ui.horizontal(|ui| {
-            ui.weak(format!("{} total · {} unread", self.total, self.unread));
-            if ui.button("mark all read").clicked() {
+        let subtitle = format!("{} total · {} unread", self.total, self.unread);
+        design::page_header(ui, "Notifications", Some(subtitle.as_str()), |ui| {
+            if design::button(ui, "mark all read", ButtonVariant::Ghost).clicked() {
                 self.mark_all_read(db);
             }
         });
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
                     self.tab = tab;
                 }
             }
         });
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         let rows: Vec<NotificationRecord> = match self.tab {
             Tab::All => self.records.clone(),
@@ -160,36 +166,54 @@ impl NotificationsPage {
             Tab::Mentions => self.mentions.clone(),
         };
         if rows.is_empty() {
-            ui.weak("(no notifications)");
+            design::empty_state(
+                ui,
+                Icon::Bell,
+                "(no notifications)",
+                "Nothing here for this tab yet.",
+            );
             return;
         }
 
         let mut toggled: Option<i64> = None;
         egui::ScrollArea::vertical().show_rows(ui, 44.0, rows.len(), |ui, range| {
             for record in &rows[range] {
-                ui.group(|ui| {
+                design::card(ui, |ui| {
                     ui.horizontal(|ui| {
                         let unread = record.read_at.is_none();
                         let dot = if unread { "●" } else { " " };
-                        ui.colored_label(
-                            if record.severity == "error" {
-                                egui::Color32::RED
-                            } else {
-                                egui::Color32::LIGHT_BLUE
-                            },
-                            format!("{dot} {}", record.notification_type.as_str()),
+                        let tone = if record.severity == "error" {
+                            BadgeTone::Destructive
+                        } else {
+                            BadgeTone::Info
+                        };
+                        design::badge(
+                            ui,
+                            &format!("{dot} {}", record.notification_type.as_str()),
+                            tone,
                         );
-                        ui.monospace(record.created_at.as_str());
-                        if ui
-                            .button(if unread { "mark read" } else { "unread" })
-                            .clicked()
+                        ui.monospace(
+                            egui::RichText::new(record.created_at.as_str())
+                                .small()
+                                .color(design::tokens(ui).muted_foreground),
+                        );
+                        if design::button(
+                            ui,
+                            if unread { "mark read" } else { "unread" },
+                            ButtonVariant::Ghost,
+                        )
+                        .clicked()
                         {
                             toggled = Some(record.id);
                         }
                     });
-                    ui.label(record.title.as_str());
+                    ui.label(
+                        egui::RichText::new(record.title.as_str())
+                            .size(13.0)
+                            .color(design::tokens(ui).foreground),
+                    );
                     if let Some(body) = &record.body {
-                        ui.weak(body.as_str());
+                        design::hint_text(ui, body.as_str());
                     }
                 });
             }

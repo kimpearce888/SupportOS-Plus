@@ -1,5 +1,9 @@
 //! Organizations page (port of the web `pages/organizations.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! Left: the organization list from `spp_core::people_store::list_organizations`
 //! (the `/api/organizations` SQL) with a name filter and create form
 //! (`create_organization`). Right: the selected organization's detail from
@@ -10,6 +14,8 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 
 use super::{i64_field, str_field};
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
 
 /// The interactive organizations page state.
 pub struct OrganizationsPage {
@@ -119,22 +125,30 @@ impl OrganizationsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Organizations");
+        design::page_header(
+            ui,
+            "Organizations",
+            Some("customer organizations, their domains, and their members"),
+            |_| {},
+        );
         ui.horizontal(|ui| {
             let mut filter = self.filter_edit.clone();
-            let response = ui.text_edit_singleline(&mut filter);
+            let response = ui.add_sized(
+                [260.0, 28.0],
+                egui::TextEdit::singleline(&mut filter).hint_text("Filter by name…"),
+            );
             if response.changed() {
                 self.filter_edit = filter;
             }
-            if ui.button("filter").clicked() {
+            if design::button(ui, "filter", ButtonVariant::Outline).clicked() {
                 self.filter = self.filter_edit.clone();
                 self.reload(db);
             }
         });
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         ui.columns(2, |columns| {
             // Left: list + create form.
@@ -143,37 +157,48 @@ impl OrganizationsPage {
             egui::ScrollArea::vertical()
                 .id_salt("org-list")
                 .show(&mut columns[0], |ui| {
-                    ui.strong(format!("{} organization(s)", orgs.len()));
+                    design::section_title(ui, &format!("{} organization(s)", orgs.len()));
                     for org in &orgs {
                         let id = i64_field(org, "id");
                         let name = str_field(org, "name");
                         let customers = i64_field(org, "customer_count");
                         let convs = i64_field(org, "conversation_count");
                         let selected = self.selected == Some(id);
-                        if ui
-                            .selectable_label(
-                                selected,
-                                format!("{name} · {customers} customers · {convs} conversations"),
-                            )
-                            .clicked()
+                        if design::chip(
+                            ui,
+                            selected,
+                            &format!("{name} · {customers} customers · {convs} conversations"),
+                        )
+                        .clicked()
                         {
                             pick = Some(id);
                         }
                     }
-                    ui.separator();
-                    ui.strong("New organization");
-                    ui.text_edit_singleline(&mut self.new_name);
-                    ui.text_edit_singleline(&mut self.new_domains)
+                    ui.add_space(10.0);
+                    design::card_titled(ui, "New organization", None, |ui| {
+                        ui.add_sized(
+                            [ui.available_width(), 28.0],
+                            egui::TextEdit::singleline(&mut self.new_name).hint_text("Name"),
+                        );
+                        ui.add_sized(
+                            [ui.available_width(), 28.0],
+                            egui::TextEdit::singleline(&mut self.new_domains)
+                                .hint_text("acme.com, acme.io"),
+                        )
                         .on_hover_text("comma-separated domains");
+                    });
                 });
             if let Some(id) = pick {
                 self.selected = Some(id);
                 self.reload_detail(db, id);
             }
-            if columns[0]
-                .button("create organization")
-                .on_hover_text("create with the name + domains above")
-                .clicked()
+            if design::button(
+                &mut columns[0],
+                "create organization",
+                ButtonVariant::Primary,
+            )
+            .on_hover_text("create with the name + domains above")
+            .clicked()
             {
                 self.create(db);
             }
@@ -184,36 +209,45 @@ impl OrganizationsPage {
                 .id_salt("org-detail")
                 .show(&mut columns[1], |ui| {
                     let Some(org) = detail else {
-                        ui.weak("Select an organization to see its customers.");
+                        design::empty_state(
+                            ui,
+                            Icon::Building,
+                            "Select an organization",
+                            "Its members, domains, and conversation counts appear here.",
+                        );
                         return;
                     };
-                    ui.heading(str_field(&org, "name"));
+                    design::section_title(ui, &str_field(&org, "name"));
                     let domains = org
                         .get("domains")
                         .and_then(|d| d.as_str())
                         .map(|d| d.to_string())
                         .unwrap_or_default();
                     if !domains.is_empty() {
-                        ui.monospace(domains);
+                        ui.monospace(
+                            egui::RichText::new(domains).color(design::tokens(ui).foreground),
+                        );
                     }
-                    ui.separator();
+                    design::divider(ui);
                     let members = org
                         .get("customers")
                         .and_then(|c| c.as_array())
                         .cloned()
                         .unwrap_or_default();
-                    ui.strong(format!("{} member(s)", members.len()));
+                    design::hint_text(ui, &format!("{} member(s)", members.len()));
+                    let t = design::tokens(ui);
                     for member in &members {
                         let first = str_field(member, "first_name");
                         let last = str_field(member, "last_name");
                         let email = str_field(member, "email");
                         let title = super::opt_str_field(member, "job_title");
                         let line = format!("{first} {last} · {email}");
-                        if let Some(t) = title {
-                            ui.label(format!("{line} ({t})"));
+                        let line = if let Some(job) = title {
+                            format!("{line} ({job})")
                         } else {
-                            ui.label(line);
-                        }
+                            line
+                        };
+                        ui.label(egui::RichText::new(line).size(13.0).color(t.foreground));
                     }
                 });
         });

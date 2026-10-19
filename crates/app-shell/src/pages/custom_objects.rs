@@ -1,5 +1,9 @@
 //! Custom Objects page (port of the web `pages/custom_objects.rs`).
 //!
+//! Redesigned with the shadcn-style design system (`crate::design`): card
+//! sections, chip type selectors, a form-grid creator and destructive
+//! delete buttons — presentation only, all CRUD behavior intact.
+//!
 //! Two panes (web: type sidebar + object table): a type list / create
 //! form (`custom_objects::{list_types,create_type,delete_type}`) and the
 //! selected type's object table (`list_objects`, the
@@ -12,6 +16,8 @@ use spp_core::custom_objects::{FieldInput, LinkInput, TypeDetail};
 use spp_core::db::DbHandle;
 
 use super::{i64_field, str_field};
+use crate::design::{self, ButtonVariant};
+use crate::icons::Icon;
 
 /// Field types offered by the type builder (web: the field type select).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -315,32 +321,33 @@ impl CustomObjectsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Custom Objects");
-        if let Some(report) = &self.report {
+        let subtitle = self.report.as_ref().map(|report| {
             let type_count = report
                 .get("types")
                 .and_then(|t| t.as_array())
                 .map_or(0, std::vec::Vec::len);
-            ui.weak(format!(
+            format!(
                 "{} type(s) · {} object(s) · {} link(s)",
                 type_count,
                 i64_field(report, "total_objects"),
                 i64_field(report, "total_links")
-            ));
-        }
-        ui.horizontal(|ui| {
-            if ui.button("New Type").clicked() {
+            )
+        });
+        design::page_header(ui, "Custom Objects", subtitle.as_deref(), |ui| {
+            if design::button_with_icon(ui, Icon::Plus, "New Type", ButtonVariant::Primary)
+                .clicked()
+            {
                 self.show_new_type = !self.show_new_type;
             }
         });
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         if self.show_new_type {
             self.new_type_ui(ui, db);
-            ui.separator();
+            ui.add_space(10.0);
         }
 
         ui.columns(2, |columns| {
@@ -350,28 +357,34 @@ impl CustomObjectsPage {
             egui::ScrollArea::vertical()
                 .id_salt("co-types")
                 .show(&mut columns[0], |ui| {
-                    ui.strong("Types");
+                    design::section_title(ui, "Types");
+                    ui.add_space(4.0);
                     for t in &types {
                         ui.horizontal(|ui| {
-                            if ui
-                                .selectable_label(
-                                    self.selected_type == Some(t.id),
-                                    format!("{} ({})", t.name, t.object_count),
-                                )
-                                .clicked()
+                            if design::chip(
+                                ui,
+                                self.selected_type == Some(t.id),
+                                &format!("{} ({})", t.name, t.object_count),
+                            )
+                            .clicked()
                             {
                                 picked = Some(t.id);
                             }
-                            if ui.button("delete").clicked() {
+                            if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
                                 deleted_type = Some(t.id);
                             }
                         });
                         if let Some(desc) = &t.description {
-                            ui.weak(format!("   {desc}"));
+                            design::hint_text(ui, desc);
                         }
                     }
                     if types.is_empty() {
-                        ui.weak("(no types yet — create one)");
+                        design::empty_state(
+                            ui,
+                            Icon::Boxes,
+                            "No types yet",
+                            "Create a type to start storing objects.",
+                        );
                     }
                 });
             if let Some(id) = picked {
@@ -387,153 +400,208 @@ impl CustomObjectsPage {
 
     fn objects_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let Some(type_id) = self.selected_type else {
-            ui.weak("Select a type to see its objects.");
+            design::empty_state(
+                ui,
+                Icon::Boxes,
+                "Select a type",
+                "Pick a type on the left to see its objects.",
+            );
             return;
         };
         let Some(t) = self.types.iter().find(|t| t.id == type_id) else {
             return;
         };
-        ui.strong(format!("{} objects ({})", t.name, self.objects_total));
+        design::section_title(ui, &format!("{} objects ({})", t.name, self.objects_total));
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
             let mut q = self.object_query.clone();
-            let response = ui.text_edit_singleline(&mut q);
+            let response = ui.add_sized(
+                [220.0, 28.0],
+                egui::TextEdit::singleline(&mut q).hint_text("search objects…"),
+            );
             if response.changed() {
                 self.object_query = q;
             }
-            if ui.button("search").clicked() {
+            if design::button_with_icon(ui, Icon::Search, "search", ButtonVariant::Primary)
+                .clicked()
+            {
                 self.reload_objects(db);
             }
         });
-        ui.separator();
+        ui.add_space(6.0);
 
         let objects = self.objects.clone();
         let mut deleted: Option<i64> = None;
         egui::ScrollArea::vertical()
             .id_salt("co-objects")
             .show(ui, |ui| {
+                let tokens = design::tokens(ui);
                 for object in &objects {
-                    ui.group(|ui| {
+                    design::card(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.strong(str_field(object, "title"));
-                            if ui.button("delete").clicked() {
+                            ui.label(
+                                egui::RichText::new(str_field(object, "title"))
+                                    .size(13.5)
+                                    .strong()
+                                    .color(tokens.foreground),
+                            );
+                            if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
                                 deleted = Some(i64_field(object, "id"));
                             }
                         });
                         if let Some(props) = object.get("properties").and_then(|p| p.as_object()) {
                             for (key, value) in props {
-                                ui.monospace(format!(
-                                    "{key}: {}",
-                                    value.as_str().unwrap_or_default()
-                                ));
+                                ui.monospace(
+                                    egui::RichText::new(format!(
+                                        "{key}: {}",
+                                        value.as_str().unwrap_or_default()
+                                    ))
+                                    .color(tokens.foreground),
+                                );
                             }
                         }
                     });
                 }
                 if objects.is_empty() {
-                    ui.weak("(no objects)");
+                    design::empty_state(
+                        ui,
+                        Icon::Boxes,
+                        "No objects",
+                        "Create one below or adjust the search.",
+                    );
                 }
             });
         if let Some(id) = deleted {
             self.delete_object(db, id);
         }
-        ui.separator();
+        ui.add_space(10.0);
 
-        ui.strong("New object");
-        ui.text_edit_singleline(&mut self.new_object_title);
         let keys: Vec<String> = self
             .new_object_fields
             .iter()
             .map(|(k, _)| k.clone())
             .collect();
-        for (idx, key) in keys.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.monospace(format!("{key}:"));
-                ui.text_edit_singleline(&mut self.new_object_fields[idx].1);
-            });
-        }
-        if !self.new_object_fields.is_empty() && ui.button("create object").clicked() {
-            self.create_object(db);
-        }
+        let has_fields = !keys.is_empty();
+        design::card_titled(ui, "New object", None, |ui| {
+            ui.add_sized(
+                [ui.available_width(), 28.0],
+                egui::TextEdit::singleline(&mut self.new_object_title).hint_text("object title"),
+            );
+            for (idx, key) in keys.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    design::field_label(ui, &format!("{key}:"));
+                    ui.add_sized(
+                        [180.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.new_object_fields[idx].1),
+                    );
+                });
+            }
+            if has_fields && design::button(ui, "create object", ButtonVariant::Primary).clicked() {
+                self.create_object(db);
+            }
+        });
     }
 
     fn new_type_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("New Type");
-        egui::Grid::new("co-new-type")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("name:");
-                ui.text_edit_singleline(&mut self.new_type_name);
+        design::card(ui, |ui| {
+            design::section_title(ui, "New Type");
+            design::form_grid(ui, "co-new-type", |ui| {
+                design::field_label(ui, "name:");
+                ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_type_name).hint_text("type name"),
+                );
                 ui.end_row();
-                ui.label("description:");
-                ui.text_edit_singleline(&mut self.new_type_description);
+                design::field_label(ui, "description:");
+                ui.add_sized(
+                    [260.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_type_description)
+                        .hint_text("what this type collects"),
+                );
                 ui.end_row();
             });
-        ui.separator();
-        ui.strong("Fields");
-        let mut remove: Option<usize> = None;
-        for (idx, draft) in self.new_fields.clone().iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.monospace(format!("{}. {}", idx + 1, draft.key));
-                if ui.button("remove").clicked() {
-                    remove = Some(idx);
-                }
-            });
-        }
-        if let Some(idx) = remove {
-            self.new_fields.remove(idx);
-        }
-        ui.horizontal(|ui| {
-            if ui.button("+ add field").clicked() {
-                self.new_fields.push(FieldDraft {
-                    key: String::new(),
-                    label: String::new(),
-                    field_type: FieldType::Text,
-                    required: false,
-                    options: String::new(),
+            ui.add_space(6.0);
+            design::divider(ui);
+            ui.add_space(6.0);
+            design::section_title(ui, "Fields");
+            let tokens = design::tokens(ui);
+            let mut remove: Option<usize> = None;
+            for (idx, draft) in self.new_fields.clone().iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.monospace(
+                        egui::RichText::new(format!("{}. {}", idx + 1, draft.key))
+                            .color(tokens.foreground),
+                    );
+                    if design::button(ui, "remove", ButtonVariant::Destructive).clicked() {
+                        remove = Some(idx);
+                    }
                 });
             }
-        });
-        for (idx, draft) in self.new_fields.clone().iter().enumerate() {
-            let mut key = draft.key.clone();
-            let mut label = draft.label.clone();
-            let mut options = draft.options.clone();
-            ui.push_id(format!("co-field-{idx}"), |ui| {
-                egui::Grid::new(format!("co-field-grid-{idx}"))
-                    .num_columns(5)
-                    .show(ui, |ui| {
-                        ui.label("key:");
-                        ui.text_edit_singleline(&mut key);
-                        ui.label("label:");
-                        ui.text_edit_singleline(&mut label);
-                        ui.label("type:");
-                        ui.horizontal(|ui| {
-                            for field_type in FieldType::ALL {
-                                if ui
-                                    .selectable_label(
+            if let Some(idx) = remove {
+                self.new_fields.remove(idx);
+            }
+            ui.horizontal(|ui| {
+                if design::button(ui, "+ add field", ButtonVariant::Outline).clicked() {
+                    self.new_fields.push(FieldDraft {
+                        key: String::new(),
+                        label: String::new(),
+                        field_type: FieldType::Text,
+                        required: false,
+                        options: String::new(),
+                    });
+                }
+            });
+            for (idx, draft) in self.new_fields.clone().iter().enumerate() {
+                let mut key = draft.key.clone();
+                let mut label = draft.label.clone();
+                let mut options = draft.options.clone();
+                ui.push_id(format!("co-field-{idx}"), |ui| {
+                    egui::Grid::new(format!("co-field-grid-{idx}"))
+                        .num_columns(5)
+                        .show(ui, |ui| {
+                            design::field_label(ui, "key:");
+                            ui.add_sized(
+                                [120.0, 28.0],
+                                egui::TextEdit::singleline(&mut key).hint_text("key"),
+                            );
+                            design::field_label(ui, "label:");
+                            ui.add_sized(
+                                [120.0, 28.0],
+                                egui::TextEdit::singleline(&mut label).hint_text("label"),
+                            );
+                            design::field_label(ui, "type:");
+                            ui.horizontal(|ui| {
+                                for field_type in FieldType::ALL {
+                                    if design::chip(
+                                        ui,
                                         self.new_fields[idx].field_type == field_type,
                                         field_type.as_str(),
                                     )
                                     .clicked()
-                                {
-                                    self.new_fields[idx].field_type = field_type;
+                                    {
+                                        self.new_fields[idx].field_type = field_type;
+                                    }
                                 }
-                            }
-                        });
-                        ui.checkbox(&mut self.new_fields[idx].required, "required");
-                        if self.new_fields[idx].field_type == FieldType::Select {
-                            ui.text_edit_singleline(&mut options)
+                            });
+                            ui.checkbox(&mut self.new_fields[idx].required, "required");
+                            if self.new_fields[idx].field_type == FieldType::Select {
+                                ui.add_sized(
+                                    [180.0, 28.0],
+                                    egui::TextEdit::singleline(&mut options),
+                                )
                                 .on_hover_text("comma-separated options");
-                        }
-                        ui.end_row();
-                    });
-            });
-            self.new_fields[idx].key = key;
-            self.new_fields[idx].label = label;
-            self.new_fields[idx].options = options;
-        }
-        if ui.button("create type").clicked() {
-            self.create_type(db);
-        }
+                            }
+                            ui.end_row();
+                        });
+                });
+                self.new_fields[idx].key = key;
+                self.new_fields[idx].label = label;
+                self.new_fields[idx].options = options;
+            }
+            if design::button(ui, "create type", ButtonVariant::Primary).clicked() {
+                self.create_type(db);
+            }
+        });
     }
 }
 

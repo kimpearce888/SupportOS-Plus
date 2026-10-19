@@ -1,5 +1,9 @@
 //! Connectors page (port of the web `pages/connectors.rs`).
 //!
+//! Redesigned with the shadcn-style design system (`crate::design`):
+//! health badges on a striped connector table, card-wrapped rows viewer
+//! and a form-grid creator — presentation only, refresh behavior intact.
+//!
 //! Connector table (`connectors::list` — `/api/connectors`), a rows viewer
 //! for the selected connector (`connectors::list_rows` —
 //! `/api/connectors/{id}/rows`), the create form (`connectors::create`),
@@ -12,6 +16,8 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 
 use super::{i64_field, opt_str_field, str_field};
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Connector kinds offered by the create form (web: kind select).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +52,17 @@ pub fn health_color(health: &str) -> egui::Color32 {
         "stale" => egui::Color32::YELLOW,
         "error" => egui::Color32::RED,
         _ => egui::Color32::GRAY,
+    }
+}
+
+/// Health → badge tone for the redesigned table (the badge equivalent
+/// of [`health_color`]; display text stays the raw health value).
+fn health_tone(health: &str) -> BadgeTone {
+    match health {
+        "ok" => BadgeTone::Success,
+        "stale" => BadgeTone::Warning,
+        "error" => BadgeTone::Destructive,
+        _ => BadgeTone::Neutral,
     }
 }
 
@@ -234,27 +251,32 @@ impl ConnectorsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Connectors");
-        ui.weak(
-            "Attach external data sources (HTTP endpoints, CSV files inside the data \
-             directory) as read-only tables; the AI tools can query them when allowed.",
+        design::page_header(
+            ui,
+            "Connectors",
+            Some(
+                "Attach external data sources (HTTP endpoints, CSV files inside the data \
+                 directory) as read-only tables; the AI tools can query them when allowed.",
+            ),
+            |ui| {
+                if design::button_with_icon(ui, Icon::Plus, "New Connector", ButtonVariant::Primary)
+                    .clicked()
+                {
+                    self.show_new = !self.show_new;
+                }
+            },
         );
-        ui.horizontal(|ui| {
-            if ui.button("New Connector").clicked() {
-                self.show_new = !self.show_new;
-            }
-        });
         if let Some(message) = &self.message {
-            ui.label(format!("status: {message}"));
+            design::success_text(ui, &format!("status: {message}"));
         }
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         if self.show_new {
             self.new_connector_ui(ui, db);
-            ui.separator();
+            ui.add_space(10.0);
         }
 
         let connectors = self.connectors.clone();
@@ -264,14 +286,13 @@ impl ConnectorsPage {
         egui::ScrollArea::vertical()
             .id_salt("connector-list")
             .show(ui, |ui| {
-                egui::Grid::new("connector-table")
-                    .num_columns(6)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        for header in ["name", "kind", "health", "refresh", "last sync", ""] {
-                            ui.strong(header);
-                        }
-                        ui.end_row();
+                design::table(
+                    ui,
+                    "connector-table",
+                    &["name", "kind", "health", "refresh", "last sync", ""],
+                    26.0,
+                    |ui| {
+                        let t = design::tokens(ui);
                         for record in &connectors {
                             let id = i64_field(record, "id");
                             let name = str_field(record, "name");
@@ -280,30 +301,41 @@ impl ConnectorsPage {
                             let refresh_method = str_field(record, "refresh_method");
                             let last_sync =
                                 opt_str_field(record, "last_sync_at").unwrap_or_else(|| "—".into());
-                            if ui
-                                .selectable_label(self.selected == Some(id), name)
-                                .clicked()
-                            {
+                            if design::chip(ui, self.selected == Some(id), &name).clicked() {
                                 picked = Some(id);
                             }
-                            ui.monospace(kind);
-                            ui.colored_label(health_color(&health), health);
-                            ui.label(refresh_method);
-                            ui.monospace(last_sync);
+                            ui.monospace(egui::RichText::new(kind).color(t.foreground));
+                            design::badge(ui, &health, health_tone(&health));
+                            ui.label(
+                                egui::RichText::new(refresh_method)
+                                    .size(13.0)
+                                    .color(t.foreground),
+                            );
+                            ui.monospace(egui::RichText::new(last_sync).color(t.foreground));
                             ui.horizontal(|ui| {
-                                if ui.button("rows").clicked() {
+                                if design::button(ui, "rows", ButtonVariant::Outline).clicked() {
                                     picked = Some(id);
                                 }
-                                if ui.button("refresh").clicked() {
+                                if design::button_with_icon(
+                                    ui,
+                                    Icon::Refresh,
+                                    "refresh",
+                                    ButtonVariant::Outline,
+                                )
+                                .clicked()
+                                {
                                     refreshed = Some(id);
                                 }
-                                if ui.button("delete").clicked() {
+                                if design::button(ui, "delete", ButtonVariant::Destructive)
+                                    .clicked()
+                                {
                                     deleted = Some(id);
                                 }
                             });
                             ui.end_row();
                         }
-                    });
+                    },
+                );
             });
         if let Some(id) = picked {
             self.selected = Some(id);
@@ -317,54 +349,72 @@ impl ConnectorsPage {
         }
 
         if self.selected.is_some() {
-            ui.separator();
+            ui.add_space(10.0);
             self.rows_ui(ui, db);
         }
     }
 
     fn rows_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong(format!("Rows ({})", self.rows_total));
-        ui.horizontal(|ui| {
-            let mut q = self.rows_query.clone();
-            let response = ui.text_edit_singleline(&mut q);
-            if response.changed() {
-                self.rows_query = q;
-            }
-            if ui.button("search").clicked()
-                && let Some(id) = self.selected
-            {
-                self.reload_rows(db, id);
-            }
-        });
-        if self.rows.is_empty() {
-            ui.weak("(no rows — create the connector with data or run a refresh)");
-            return;
-        }
-        egui::ScrollArea::vertical()
-            .id_salt("connector-rows")
-            .show(ui, |ui| {
-                for row in &self.rows {
-                    let data = row.get("data").and_then(|d| d.as_str()).unwrap_or("");
-                    ui.monospace(format!("{} {data}", i64_field(row, "id")));
+        let t = design::tokens(ui);
+        let rows = self.rows.clone();
+        let rows_query = self.rows_query.clone();
+        let rows_total = self.rows_total;
+        design::card(ui, |ui| {
+            design::section_title(ui, &format!("Rows ({rows_total})"));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let mut q = rows_query;
+                let response = ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut q).hint_text("search rows…"),
+                );
+                if response.changed() {
+                    self.rows_query = q;
+                }
+                if design::button_with_icon(ui, Icon::Search, "search", ButtonVariant::Primary)
+                    .clicked()
+                    && let Some(id) = self.selected
+                {
+                    self.reload_rows(db, id);
                 }
             });
+            if rows.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::Plug,
+                    "No rows",
+                    "Create the connector with data or run a refresh.",
+                );
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("connector-rows")
+                .show(ui, |ui| {
+                    for row in &rows {
+                        let data = row.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                        ui.monospace(
+                            egui::RichText::new(format!("{} {data}", i64_field(row, "id")))
+                                .color(t.foreground),
+                        );
+                    }
+                });
+        });
     }
 
     fn new_connector_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("New Connector");
-        egui::Grid::new("connector-new")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("name:");
-                ui.text_edit_singleline(&mut self.new_name);
+        design::card(ui, |ui| {
+            design::section_title(ui, "New Connector");
+            design::form_grid(ui, "connector-new", |ui| {
+                design::field_label(ui, "name:");
+                ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_name).hint_text("connector name"),
+                );
                 ui.end_row();
-                ui.label("kind:");
+                design::field_label(ui, "kind:");
                 ui.horizontal(|ui| {
                     for kind in Kind::ALL {
-                        if ui
-                            .selectable_label(self.new_kind == kind, kind.label())
-                            .clicked()
-                        {
+                        if design::chip(ui, self.new_kind == kind, kind.label()).clicked() {
                             self.new_kind = kind;
                         }
                     }
@@ -372,27 +422,37 @@ impl ConnectorsPage {
                 ui.end_row();
                 match self.new_kind {
                     Kind::Csv => {
-                        ui.label("file (data dir):");
-                        ui.text_edit_singleline(&mut self.new_file)
-                            .on_hover_text("relative to the app data directory");
+                        design::field_label(ui, "file (data dir):");
+                        ui.add_sized(
+                            [260.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.new_file).hint_text("billing.csv"),
+                        )
+                        .on_hover_text("relative to the app data directory");
                         ui.end_row();
                     }
                     Kind::Http => {
-                        ui.label("url:");
-                        ui.text_edit_singleline(&mut self.new_url);
+                        design::field_label(ui, "url:");
+                        ui.add_sized(
+                            [280.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.new_url).hint_text("https://…"),
+                        );
                         ui.end_row();
                     }
                 }
-                ui.label("refresh seconds:");
-                ui.text_edit_singleline(&mut self.new_refresh_seconds);
+                design::field_label(ui, "refresh seconds:");
+                ui.add_sized(
+                    [140.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_refresh_seconds).hint_text("3600"),
+                );
                 ui.end_row();
-                ui.label("allow AI:");
+                design::field_label(ui, "allow AI:");
                 ui.checkbox(&mut self.new_allowed_ai, "AI tools may query");
                 ui.end_row();
             });
-        if ui.button("create").clicked() {
-            self.create(db);
-        }
+            if design::button(ui, "create", ButtonVariant::Primary).clicked() {
+                self.create(db);
+            }
+        });
     }
 }
 

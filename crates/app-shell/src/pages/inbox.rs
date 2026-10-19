@@ -30,6 +30,8 @@ use spp_core::eventing::EventBus;
 use spp_core::inbox::{ConversationDetail, ConversationListItem, InboxFilters};
 use spp_core::ticket_ops::{OperationResult, TicketOperation};
 
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 use crate::mention::{
     Directory, apply_completion, caret_query, char_index_to_byte, filter_matches,
 };
@@ -442,104 +444,12 @@ impl InboxPage {
             self.reload_list(db);
         }
 
-        ui.heading("Inbox");
-        if let Some(ops) = self.bar.ops.clone() {
-            ui.horizontal(|ui| {
-                ui.label("Operations filter:");
-                ui.monospace(ops);
-                if ui.button("clear ×").clicked() {
-                    self.bar.ops = None;
-                    self.reload_list(db);
-                }
-            });
-        }
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label("View:");
-            for view in ViewFilter::ALL {
-                if ui
-                    .selectable_label(self.view_pick == view, view.label())
-                    .clicked()
-                {
-                    self.view_pick = view;
-                    self.bar.view = Some(view);
-                    self.reload_list(db);
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Mailbox:");
-            egui::ComboBox::from_id_salt("inbox-mailbox")
-                .selected_text(
-                    self.mailbox_pick
-                        .and_then(|id| {
-                            self.mailboxes
-                                .iter()
-                                .find(|(mid, _)| *mid == id)
-                                .map(|(_, name)| name.clone())
-                        })
-                        .unwrap_or_else(|| "All".into()),
-                )
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.mailbox_pick, None, "All");
-                    for (id, name) in self.mailboxes.clone() {
-                        ui.selectable_value(&mut self.mailbox_pick, Some(id), name);
-                    }
-                });
-            if ui.button("apply").clicked() {
-                self.bar.mailbox = self.mailbox_pick;
-                self.reload_list(db);
-            }
-
-            ui.label("Channel:");
-            egui::ComboBox::from_id_salt("inbox-channel")
-                .selected_text(self.channel_pick.clone().unwrap_or_else(|| "All".into()))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.channel_pick, None, "All");
-                    ui.selectable_value(&mut self.channel_pick, Some("email".into()), "Email");
-                    ui.selectable_value(&mut self.channel_pick, Some("chat".into()), "Chat");
-                });
-            if ui.button("apply").clicked() {
-                self.bar.channel = self.channel_pick.clone();
-                self.reload_list(db);
-            }
-
-            ui.label("Tag:");
-            egui::ComboBox::from_id_salt("inbox-tag")
-                .selected_text(self.tag_pick.clone().unwrap_or_else(|| "Any".into()))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.tag_pick, None, "Any");
-                    for tag in self.tags.clone() {
-                        ui.selectable_value(&mut self.tag_pick, Some(tag.clone()), tag);
-                    }
-                });
-            if ui.button("apply").clicked() {
-                self.bar.tag = self.tag_pick.clone();
-                self.reload_list(db);
-            }
-        });
-        ui.horizontal(|ui| {
-            let mut search = self.search_edit.clone();
-            let response = ui.text_edit_singleline(&mut search);
-            if response.changed() {
-                self.search_edit = search.clone();
-            }
-            if ui.button("search").clicked() {
-                let trimmed = self.search_edit.trim();
-                self.bar.query = if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                };
-                self.bar.number = self.number_edit.trim().parse::<i64>().ok();
-                self.reload_list(db);
-            }
-            let mut number = self.number_edit.clone();
-            ui.label("#");
-            ui.text_edit_singleline(&mut number).changed();
-            self.number_edit = number;
-            if ui.button("reset").clicked() {
+        let subtitle = format!("{} of {} conversations", self.list.len(), self.total);
+        design::page_header(ui, "Inbox", Some(&subtitle), |ui| {
+            if design::button(ui, "reset filters", ButtonVariant::Ghost)
+                .on_hover_text("clear every filter and reload")
+                .clicked()
+            {
                 self.bar = FilterBar::default();
                 self.view_pick = ViewFilter::All;
                 self.mailbox_pick = None;
@@ -550,62 +460,290 @@ impl InboxPage {
                 self.reload_list(db);
             }
         });
-        ui.separator();
 
-        if let Some(err) = &self.status {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+        if let Some(ops) = self.bar.ops.clone() {
+            let t = design::tokens(ui);
+            ui.horizontal(|ui| {
+                let (id, rect) = ui.allocate_space(egui::vec2(16.0, 16.0));
+                Icon::Filter.paint_at(ui.painter(), rect, t.info_foreground);
+                ui.advance_cursor_after_rect(rect);
+                let _ = id;
+                ui.label(
+                    egui::RichText::new(format!("Operations drill-down: {ops}"))
+                        .small()
+                        .color(t.info_foreground),
+                );
+                if design::icon_button(
+                    ui,
+                    Icon::X,
+                    ButtonVariant::Ghost,
+                    "clear the operations filter",
+                )
+                .clicked()
+                {
+                    self.bar.ops = None;
+                    self.reload_list(db);
+                }
+            });
+            ui.add_space(4.0);
         }
 
-        ui.columns(2, |cols| {
-            self.list_ui(&mut cols[0], db);
-            self.detail_ui(&mut cols[1], db, bus);
-        });
-    }
-
-    fn list_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong(format!(
-            "Conversations ({}/{})",
-            self.list.len(),
-            self.total
-        ));
-        let mut clicked: Option<i64> = None;
-        egui::ScrollArea::vertical().show_rows(ui, 42.0, self.list.len(), |ui, range| {
-            for item in self.list[range].iter().cloned() {
-                let selected = self.selected == Some(item.id);
-                let frame = egui::Frame::NONE
-                    .fill(if selected {
-                        ui.visuals().selection.bg_fill
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    })
-                    .inner_margin(4.0);
-                let response = frame
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
-                            ui.vertical(|ui| {
-                                ui.strong(format!(
-                                    "#{} {}",
-                                    item.number,
-                                    item.subject.as_deref().unwrap_or("(no subject)")
-                                ));
-                                ui.small(format!(
-                                    "{} · {} · {} · {}",
-                                    item.customer_name.as_deref().unwrap_or("(no customer)"),
-                                    item.mailbox_name.as_deref().unwrap_or("-"),
-                                    item.status,
-                                    item.updated_at.as_deref().unwrap_or("-")
-                                ));
-                            });
-                        });
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if response.clicked() {
-                    clicked = Some(item.id);
+        // View chips.
+        ui.horizontal(|ui| {
+            for view in ViewFilter::ALL {
+                if design::chip(ui, self.view_pick == view, view.label()).clicked() {
+                    self.view_pick = view;
+                    self.bar.view = Some(view);
+                    self.reload_list(db);
                 }
             }
         });
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("inbox-mailbox")
+                .width(170.0)
+                .selected_text(
+                    self.mailbox_pick
+                        .and_then(|id| {
+                            self.mailboxes
+                                .iter()
+                                .find(|(mid, _)| *mid == id)
+                                .map(|(_, name)| name.clone())
+                        })
+                        .unwrap_or_else(|| "All mailboxes".into()),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.mailbox_pick, None, "All mailboxes");
+                    for (id, name) in self.mailboxes.clone() {
+                        ui.selectable_value(&mut self.mailbox_pick, Some(id), name);
+                    }
+                });
+            egui::ComboBox::from_id_salt("inbox-channel")
+                .width(130.0)
+                .selected_text(
+                    self.channel_pick
+                        .clone()
+                        .map(|c| match c.as_str() {
+                            "email" => "Email".to_string(),
+                            "chat" => "Chat".to_string(),
+                            other => other.to_string(),
+                        })
+                        .unwrap_or_else(|| "All channels".into()),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.channel_pick, None, "All channels");
+                    ui.selectable_value(&mut self.channel_pick, Some("email".into()), "Email");
+                    ui.selectable_value(&mut self.channel_pick, Some("chat".into()), "Chat");
+                });
+            egui::ComboBox::from_id_salt("inbox-tag")
+                .width(150.0)
+                .selected_text(self.tag_pick.clone().unwrap_or_else(|| "Any tag".into()))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.tag_pick, None, "Any tag");
+                    for tag in self.tags.clone() {
+                        ui.selectable_value(&mut self.tag_pick, Some(tag.clone()), tag);
+                    }
+                });
+            if design::button(ui, "apply", ButtonVariant::Secondary)
+                .on_hover_text("apply the mailbox, channel and tag picks")
+                .clicked()
+            {
+                self.bar.mailbox = self.mailbox_pick;
+                self.bar.channel = self.channel_pick.clone();
+                self.bar.tag = self.tag_pick.clone();
+                self.reload_list(db);
+            }
+        });
+        ui.horizontal(|ui| {
+            let mut search = self.search_edit.clone();
+            let response = ui.add_sized(
+                [280.0, 32.0],
+                egui::TextEdit::singleline(&mut search).hint_text("search conversations…"),
+            );
+            if response.changed() {
+                self.search_edit = search.clone();
+            }
+            let mut number = self.number_edit.clone();
+            ui.add_sized(
+                [90.0, 32.0],
+                egui::TextEdit::singleline(&mut number).hint_text("#"),
+            );
+            self.number_edit = number;
+            if design::button_with_icon(ui, Icon::Search, "search", ButtonVariant::Primary)
+                .clicked()
+            {
+                let trimmed = self.search_edit.trim();
+                self.bar.query = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+                self.bar.number = self.number_edit.trim().parse::<i64>().ok();
+                self.reload_list(db);
+            }
+        });
+        ui.add_space(6.0);
+
+        if let Some(err) = &self.status {
+            design::error_text(ui, &format!("error: {err}"));
+        }
+
+        // Conversation list (left) + detail (remaining space).
+        egui::Panel::left("inbox-list")
+            .exact_size(360.0)
+            .show_separator_line(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(design::tokens(ui).sidebar)
+                    .inner_margin(egui::Margin {
+                        left: 0,
+                        right: 12,
+                        top: 4,
+                        bottom: 4,
+                    }),
+            )
+            .show(ui, |ui| {
+                self.list_ui(ui, db);
+            });
+        ui.add_space(12.0);
+        self.detail_ui(ui, db, bus);
+    }
+
+    fn list_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let t = design::tokens(ui);
+        let mut clicked: Option<i64> = None;
+        egui::ScrollArea::vertical()
+            .id_salt("inbox-list-scroll")
+            .show(ui, |ui| {
+                for item in self.list.clone() {
+                    let selected = self.selected == Some(item.id);
+                    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 66.0));
+                    let response = ui.interact(
+                        rect,
+                        auto_id.with(("inbox-item", item.id)),
+                        egui::Sense::click(),
+                    );
+                    let fill = if selected {
+                        t.selection
+                    } else if response.hovered() {
+                        t.accent
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    if fill != egui::Color32::TRANSPARENT {
+                        ui.painter()
+                            .rect_filled(rect, egui::CornerRadius::same(8), fill);
+                    }
+                    let pad = 10.0;
+                    let inner = egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x + pad, rect.min.y + 7.0),
+                        egui::pos2(rect.max.x - pad, rect.max.y - 7.0),
+                    );
+                    // Row 1: subject (truncated) + status badge.
+                    let (tone, label) = design::status_tone(&item.status);
+                    let badge_galley = badge_galley(ui, label, tone);
+                    let badge_w = badge_galley.size().x + 18.0;
+                    let subject_width = inner.width() - badge_w - 8.0;
+                    let subject = format!(
+                        "#{}  {}",
+                        item.number,
+                        item.subject.as_deref().unwrap_or("(no subject)"),
+                    );
+                    let subject_galley = egui::WidgetText::from(
+                        egui::RichText::new(subject)
+                            .size(13.5)
+                            .strong()
+                            .color(t.foreground),
+                    )
+                    .into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Truncate),
+                        subject_width,
+                        egui::TextStyle::Button,
+                    );
+                    ui.painter().galley(
+                        egui::pos2(inner.min.x, inner.min.y),
+                        subject_galley,
+                        t.foreground,
+                    );
+                    paint_badge(
+                        ui,
+                        badge_galley,
+                        tone,
+                        egui::pos2(inner.max.x - badge_w, inner.min.y - 3.0),
+                    );
+                    // Row 2: customer · mailbox · assignee.
+                    let meta = format!(
+                        "{} · {}",
+                        item.customer_name.as_deref().unwrap_or("(no customer)"),
+                        item.mailbox_name.as_deref().unwrap_or("-"),
+                    );
+                    let meta_galley = egui::WidgetText::from(
+                        egui::RichText::new(meta).small().color(t.muted_foreground),
+                    )
+                    .into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Truncate),
+                        inner.width(),
+                        egui::TextStyle::Small,
+                    );
+                    ui.painter().galley(
+                        egui::pos2(inner.min.x, inner.min.y + 20.0),
+                        meta_galley,
+                        t.muted_foreground,
+                    );
+                    // Row 3: preview + updated time.
+                    let preview = item.preview.clone().unwrap_or_default();
+                    let time = item
+                        .updated_at
+                        .as_deref()
+                        .map(compact_time)
+                        .unwrap_or_default();
+                    let preview_width = inner.width() - 124.0;
+                    let preview_galley = egui::WidgetText::from(
+                        egui::RichText::new(preview)
+                            .small()
+                            .color(t.muted_foreground),
+                    )
+                    .into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Truncate),
+                        preview_width,
+                        egui::TextStyle::Small,
+                    );
+                    ui.painter().galley(
+                        egui::pos2(inner.min.x, inner.min.y + 38.0),
+                        preview_galley,
+                        t.muted_foreground,
+                    );
+                    let time_galley = egui::WidgetText::from(
+                        egui::RichText::new(time).small().color(t.muted_foreground),
+                    )
+                    .into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Truncate),
+                        112.0,
+                        egui::TextStyle::Small,
+                    );
+                    ui.painter().galley(
+                        egui::pos2(inner.max.x - 112.0, inner.min.y + 38.0),
+                        time_galley,
+                        t.muted_foreground,
+                    );
+                    if response.clicked() {
+                        clicked = Some(item.id);
+                    }
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::ListItem,
+                            ui.is_enabled(),
+                            selected,
+                            item.subject
+                                .clone()
+                                .unwrap_or_else(|| "conversation".into()),
+                        )
+                    });
+                }
+            });
         if let Some(id) = clicked {
             self.select(db, id);
         }
@@ -613,166 +751,252 @@ impl InboxPage {
 
     fn detail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, bus: &EventBus) {
         let Some(detail) = self.detail.clone() else {
-            ui.weak("Select a conversation.");
+            design::empty_state(
+                ui,
+                Icon::Inbox,
+                "Select a conversation",
+                "Pick a conversation from the list to read the thread and reply.",
+            );
             return;
         };
 
-        ui.strong(format!(
-            "#{} {}",
-            detail.number,
-            detail.subject.as_deref().unwrap_or("(no subject)")
-        ));
-        ui.small(format!(
-            "customer: {} <{}> · mailbox: {} · status: {} · priority: {}",
-            detail.customer_name.as_deref().unwrap_or("-"),
-            detail.customer_email.as_deref().unwrap_or("-"),
-            detail.mailbox_name.as_deref().unwrap_or("-"),
-            detail.status,
-            detail.priority.as_deref().unwrap_or("none")
-        ));
-        ui.separator();
-
-        // Action bar: status, assignee.
-        ui.horizontal(|ui| {
-            ui.label("status:");
-            for status in ["active", "pending", "closed", "spam"] {
-                if ui
-                    .selectable_label(detail.status == status, status)
-                    .on_hover_text("local change + queued remote job")
-                    .clicked()
-                {
-                    self.change_status(db, bus, status);
-                }
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("assign:");
-            egui::ComboBox::from_id_salt("inbox-assign")
-                .selected_text(
-                    detail
-                        .assignee_name
-                        .clone()
-                        .unwrap_or_else(|| "unassigned".into()),
-                )
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.assign_pick, None, "unassigned");
-                    for (id, name) in self.users.clone() {
-                        ui.selectable_value(&mut self.assign_pick, Some(id), name);
-                    }
-                });
-            if ui.button("assign").clicked() {
-                self.assign(db, bus, self.assign_pick);
-            }
-        });
-        if let Some(msg) = &self.status_message {
-            ui.colored_label(egui::Color32::GREEN, msg.clone());
-        }
-        ui.separator();
-
-        // Thread timeline.
-        ui.strong("Thread");
+        // The whole detail pane scrolls; the composer stays reachable at
+        // any window height.
         egui::ScrollArea::vertical()
-            .id_salt("inbox-thread")
-            .max_height(260.0)
+            .id_salt("inbox-detail-scroll")
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                for entry in &detail.thread {
-                    thread_entry_ui(ui, entry);
+                self.detail_body_ui(ui, db, bus, detail);
+            });
+    }
+
+    fn detail_body_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        bus: &EventBus,
+        detail: ConversationDetail,
+    ) {
+        let t = design::tokens(ui);
+        // Subject + status badge.
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "#{}  {}",
+                    detail.number,
+                    detail.subject.as_deref().unwrap_or("(no subject)")
+                ))
+                .size(15.5)
+                .strong()
+                .color(t.foreground),
+            );
+            let (tone, label) = design::status_tone(&detail.status);
+            design::badge(ui, label, tone);
+        });
+        design::hint_text(
+            ui,
+            &format!(
+                "{} <{}> · mailbox: {} · priority: {}",
+                detail.customer_name.as_deref().unwrap_or("-"),
+                detail.customer_email.as_deref().unwrap_or("-"),
+                detail.mailbox_name.as_deref().unwrap_or("-"),
+                detail.priority.as_deref().unwrap_or("none"),
+            ),
+        );
+        ui.add_space(8.0);
+
+        // Action bar: status, assignee (local change + queued remote job).
+        design::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                design::field_label(ui, "status:");
+                for status in ["active", "pending", "closed", "spam"] {
+                    if design::chip(ui, detail.status == status, status)
+                        .on_hover_text("local change + queued remote job")
+                        .clicked()
+                    {
+                        self.change_status(db, bus, status);
+                    }
                 }
             });
-        ui.separator();
-
-        // Composer with mention autocomplete.
-        ui.horizontal(|ui| {
-            if ui
-                .selectable_label(self.composer_mode == ComposerMode::Reply, "Reply")
-                .clicked()
-            {
-                self.composer_mode = ComposerMode::Reply;
-            }
-            if ui
-                .selectable_label(self.composer_mode == ComposerMode::Note, "Internal note")
-                .clicked()
-            {
-                self.composer_mode = ComposerMode::Note;
-            }
-        });
-        let hint = match self.composer_mode {
-            ComposerMode::Reply => "Type your reply to the customer... (Ctrl+Enter sends)",
-            ComposerMode::Note => {
-                "Type an internal note (visible only to your team) — @ to mention (Ctrl+Enter sends)"
-            }
-        };
-        let mut body = self.composer_body.clone();
-        let output = egui::TextEdit::multiline(&mut body)
-            .hint_text(hint)
-            .desired_rows(6)
-            .lock_focus(false)
-            .show(ui);
-        let mut changed = false;
-        if output.response.changed() {
-            self.composer_body = body.clone();
-            changed = true;
-        }
-        if let Some(range) = output.cursor_range {
-            let caret = char_index_to_byte(&body, range.primary.index.0);
-            self.mention_caret = caret;
-            if changed {
-                self.mention_active = 0;
-            }
-        }
-        // Ctrl+Enter sends (matches the web widget).
-        if output.response.has_focus()
-            && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter))
-        {
-            self.submit_composer(db, bus);
-        }
-
-        // Mention popup.
-        if let Some((query, start)) = caret_query(&body, self.mention_caret) {
-            let matches = filter_matches(&self.directory, &query);
-            if !matches.is_empty() {
-                ui.strong("@ mentions");
-                egui::Grid::new("mention-popup")
-                    .num_columns(1)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        for (i, (token, display, _)) in matches.iter().enumerate() {
-                            let picked = ui
-                                .selectable_label(self.mention_active == i, display.as_str())
-                                .clicked();
-                            if picked {
-                                let completed =
-                                    apply_completion(&body, start, token, self.mention_caret);
-                                self.composer_body = completed;
-                            }
+            ui.horizontal(|ui| {
+                design::field_label(ui, "assign:");
+                egui::ComboBox::from_id_salt("inbox-assign")
+                    .width(200.0)
+                    .selected_text(
+                        detail
+                            .assignee_name
+                            .clone()
+                            .unwrap_or_else(|| "unassigned".into()),
+                    )
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.assign_pick, None, "unassigned");
+                        for (id, name) in self.users.clone() {
+                            ui.selectable_value(&mut self.assign_pick, Some(id), name);
                         }
                     });
-                ui.small("Enter/Tab completes the highlighted entry when typed; click to pick");
-                if ui.input(|i| i.key_pressed(egui::Key::Tab) || i.key_pressed(egui::Key::Enter))
-                    && output.response.has_focus()
-                    && let Some((token, _, _)) =
-                        matches.get(self.mention_active.min(matches.len() - 1))
-                {
-                    let completed = apply_completion(&body, start, token, self.mention_caret);
-                    self.composer_body = completed;
+                if design::button(ui, "assign", ButtonVariant::Secondary).clicked() {
+                    self.assign(db, bus, self.assign_pick);
                 }
+            });
+            if let Some(msg) = &self.status_message {
+                design::success_text(ui, msg);
             }
-        }
+        });
+        ui.add_space(8.0);
 
-        if self.composer_mode == ComposerMode::Reply {
-            let mut cc = self.composer_cc.clone();
-            ui.text_edit_singleline(&mut cc)
-                .on_hover_text("Cc (comma-separated emails)");
-            self.composer_cc = cc;
-            let mut bcc = self.composer_bcc.clone();
-            ui.text_edit_singleline(&mut bcc)
-                .on_hover_text("Bcc (comma-separated emails)");
-            self.composer_bcc = bcc;
-        }
-        ui.add_space(4.0);
-        if ui.button("send").clicked() {
-            self.submit_composer(db, bus);
-        }
+        // Thread timeline.
+        design::card_titled(ui, "Thread", None, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("inbox-thread")
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    for entry in &detail.thread {
+                        thread_entry_ui(ui, entry);
+                    }
+                });
+        });
+        ui.add_space(8.0);
+
+        // Composer with mention autocomplete.
+        design::card_titled(
+            ui,
+            if self.composer_mode == ComposerMode::Reply {
+                "Reply to customer"
+            } else {
+                "Internal note"
+            },
+            None,
+            |ui| {
+                ui.horizontal(|ui| {
+                    if design::chip_with_icon(
+                        ui,
+                        self.composer_mode == ComposerMode::Reply,
+                        Icon::Send,
+                        "Reply",
+                    )
+                    .clicked()
+                    {
+                        self.composer_mode = ComposerMode::Reply;
+                    }
+                    if design::chip_with_icon(
+                        ui,
+                        self.composer_mode == ComposerMode::Note,
+                        Icon::Pencil,
+                        "Internal note",
+                    )
+                    .clicked()
+                    {
+                        self.composer_mode = ComposerMode::Note;
+                    }
+                });
+                let hint = match self.composer_mode {
+                    ComposerMode::Reply => "Type your reply to the customer… (Ctrl+Enter sends)",
+                    ComposerMode::Note => {
+                        "Type an internal note (visible only to your team) — @ to mention (Ctrl+Enter sends)"
+                    }
+                };
+                let mut body = self.composer_body.clone();
+                let output = egui::TextEdit::multiline(&mut body)
+                    .hint_text(hint)
+                    .desired_rows(5)
+                    .desired_width(ui.available_width())
+                    .lock_focus(false)
+                    .show(ui);
+                let mut changed = false;
+                if output.response.changed() {
+                    self.composer_body = body.clone();
+                    changed = true;
+                }
+                if let Some(range) = output.cursor_range {
+                    let caret = char_index_to_byte(&body, range.primary.index.0);
+                    self.mention_caret = caret;
+                    if changed {
+                        self.mention_active = 0;
+                    }
+                }
+                // Ctrl+Enter sends (matches the web widget).
+                if output.response.has_focus()
+                    && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter))
+                {
+                    self.submit_composer(db, bus);
+                }
+
+                // Mention popup.
+                if let Some((query, start)) = caret_query(&body, self.mention_caret) {
+                    let matches = filter_matches(&self.directory, &query);
+                    if !matches.is_empty() {
+                        design::section_title(ui, "@ mentions");
+                        egui::Grid::new("mention-popup")
+                            .num_columns(1)
+                            .show(ui, |ui| {
+                                for (i, (token, display, _)) in matches.iter().enumerate() {
+                                    let picked = design::chip(
+                                        ui,
+                                        self.mention_active == i,
+                                        display.as_str(),
+                                    )
+                                    .clicked();
+                                    if picked {
+                                        let completed = apply_completion(
+                                            &body,
+                                            start,
+                                            token,
+                                            self.mention_caret,
+                                        );
+                                        self.composer_body = completed;
+                                    }
+                                }
+                            });
+                        design::hint_text(
+                            ui,
+                            "Enter/Tab completes the highlighted entry when typed; click to pick",
+                        );
+                        if ui.input(|i| {
+                            i.key_pressed(egui::Key::Tab) || i.key_pressed(egui::Key::Enter)
+                        }) && output.response.has_focus()
+                            && let Some((token, _, _)) =
+                                matches.get(self.mention_active.min(matches.len() - 1))
+                        {
+                            let completed =
+                                apply_completion(&body, start, token, self.mention_caret);
+                            self.composer_body = completed;
+                        }
+                    }
+                }
+
+                if self.composer_mode == ComposerMode::Reply {
+                    ui.horizontal(|ui| {
+                        let mut cc = self.composer_cc.clone();
+                        ui.add_sized(
+                            [ui.available_width() / 2.0 - 4.0, 28.0],
+                            egui::TextEdit::singleline(&mut cc)
+                                .hint_text("Cc (comma-separated emails)"),
+                        );
+                        self.composer_cc = cc;
+                    });
+                    ui.horizontal(|ui| {
+                        let mut bcc = self.composer_bcc.clone();
+                        ui.add_sized(
+                            [ui.available_width() / 2.0 - 4.0, 28.0],
+                            egui::TextEdit::singleline(&mut bcc)
+                                .hint_text("Bcc (comma-separated emails)"),
+                        );
+                        self.composer_bcc = bcc;
+                    });
+                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    design::hint_text(ui, "Ctrl+Enter sends");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if design::button_with_icon(ui, Icon::Send, "send", ButtonVariant::Primary)
+                            .clicked()
+                        {
+                            self.submit_composer(db, bus);
+                        }
+                    });
+                });
+            },
+        );
     }
 }
 
@@ -782,21 +1006,97 @@ impl Default for InboxPage {
     }
 }
 
+/// Compact an ISO timestamp (`2026-10-19T22:26:10.207Z`) to
+/// `2026-10-19 22:26` for the narrow list rows.
+fn compact_time(iso: &str) -> String {
+    let mut out = iso.replacen('T', " ", 1);
+    out.truncate(out.len().min(16));
+    out
+}
+
+/// Build the galley for a small badge label (used by the custom list-row
+/// painter).
+fn badge_galley(ui: &mut egui::Ui, label: &str, tone: BadgeTone) -> std::sync::Arc<egui::Galley> {
+    let t = design::tokens(ui);
+    let fg = match tone {
+        BadgeTone::Neutral => t.secondary_foreground,
+        BadgeTone::Success => t.success_foreground,
+        BadgeTone::Warning => t.warning_foreground,
+        BadgeTone::Destructive => t.destructive_text,
+        BadgeTone::Info => t.info_foreground,
+    };
+    egui::WidgetText::from(egui::RichText::new(label).size(11.0).strong().color(fg)).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Small,
+    )
+}
+
+/// Paint a badge from a prebuilt galley at a top-left position (the list
+/// rows need the same soft-fill pill look as [`design::badge`] without
+/// allocating layout space).
+fn paint_badge(
+    ui: &mut egui::Ui,
+    galley: std::sync::Arc<egui::Galley>,
+    tone: BadgeTone,
+    pos: egui::Pos2,
+) {
+    let t = design::tokens(ui);
+    let bg = match tone {
+        BadgeTone::Neutral => t.muted,
+        BadgeTone::Success => t.success_soft,
+        BadgeTone::Warning => t.warning_soft,
+        BadgeTone::Destructive => t.destructive_soft,
+        BadgeTone::Info => t.info_soft,
+    };
+    let fg = match tone {
+        BadgeTone::Neutral => t.secondary_foreground,
+        BadgeTone::Success => t.success_foreground,
+        BadgeTone::Warning => t.warning_foreground,
+        BadgeTone::Destructive => t.destructive_text,
+        BadgeTone::Info => t.info_foreground,
+    };
+    let size = egui::vec2(galley.size().x + 18.0, galley.size().y + 6.0);
+    let rect = egui::Rect::from_min_size(pos, size);
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(6), bg);
+    ui.painter().galley(
+        egui::pos2(rect.min.x + 9.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        fg,
+    );
+}
+
+/// One thread entry: kind badge, actor, timestamp, and the rich body.
 fn thread_entry_ui(ui: &mut egui::Ui, entry: &spp_core::inbox::ThreadEntry) {
+    let t = design::tokens(ui);
     let actor = entry
         .actor_name
         .clone()
         .unwrap_or_else(|| entry.actor_type.clone());
-    let kind_color = match entry.thread_type.as_str() {
-        "reply" => egui::Color32::from_rgb(52, 120, 198),
-        "note" => egui::Color32::from_rgb(180, 130, 20),
-        "customer_message" => egui::Color32::from_rgb(60, 140, 60),
-        _ => ui.visuals().weak_text_color(),
+    let (tone, label) = match entry.thread_type.as_str() {
+        "reply" => (BadgeTone::Info, "Reply"),
+        "note" => (BadgeTone::Warning, "Note"),
+        "customer_message" => (BadgeTone::Success, "Customer"),
+        kind if kind.starts_with("ai") => (BadgeTone::Info, "AI"),
+        _ => (BadgeTone::Neutral, "Other"),
     };
     ui.horizontal(|ui| {
-        ui.colored_label(kind_color, format!("[{}]", entry.thread_type));
-        ui.strong(actor);
-        ui.weak(entry.created_at.as_str());
+        design::badge(ui, label, tone);
+        ui.label(
+            egui::RichText::new(actor)
+                .size(13.0)
+                .strong()
+                .color(t.foreground),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(entry.created_at.as_str())
+                    .small()
+                    .color(t.muted_foreground),
+            );
+        });
     });
     let body = entry.body.as_deref().unwrap_or("");
     for span in spp_core::richtext::html_to_spans(body) {
@@ -830,7 +1130,7 @@ fn thread_entry_ui(ui: &mut egui::Ui, entry: &spp_core::inbox::ThreadEntry) {
             ui.label(rich);
         }
     }
-    ui.separator();
+    design::divider(ui);
 }
 
 /// Submit a customer reply: durable outbound job with duplicate-send

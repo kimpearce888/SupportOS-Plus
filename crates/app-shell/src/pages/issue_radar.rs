@@ -1,5 +1,9 @@
 //! Issue Radar page (port of the web `pages/issue_radar.rs`).
 //!
+//! Presentational pass (shadcn redesign): this page renders through the
+//! shared design system in `crate::design`; the queries, state, and
+//! behavior are unchanged.
+//!
 //! Tabs (web: Alerts / Clusters / Known issues / SLA):
 //! * **Alerts** — `issue_radar_impl` (`/api/reports/issue-radar`) plus
 //!   `sla::sla_alerts` (`/api/issues/sla-alerts`).
@@ -13,6 +17,8 @@ use rusqlite::Connection;
 use spp_core::db::DbHandle;
 
 use super::str_field;
+use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::icons::Icon;
 
 /// Page tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,18 +257,23 @@ impl IssueRadarPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        ui.heading("Issue Radar");
+        design::page_header(
+            ui,
+            "Issue Radar",
+            Some("AI-derived alerts, clusters, and known issues"),
+            |_| {},
+        );
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
-                if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
                     self.tab = tab;
                 }
             }
         });
         if let Some(err) = &self.error {
-            ui.colored_label(egui::Color32::RED, format!("error: {err}"));
+            design::error_text(ui, &format!("error: {err}"));
         }
-        ui.separator();
+        design::divider(ui);
 
         match self.tab {
             Tab::Alerts => self.alerts_ui(ui),
@@ -273,94 +284,139 @@ impl IssueRadarPage {
 
     fn alerts_ui(&mut self, ui: &mut egui::Ui) {
         let radar = self.radar.clone();
-        ui.strong(format!("{} radar alert(s)", radar.len()));
-        if radar.is_empty() {
-            ui.weak("(no alerts)");
-        } else {
-            for alert in &radar {
-                let title = str_field(alert, "title");
-                let severity = str_field(alert, "severity");
-                let count = alert
-                    .get("conversation_ids")
-                    .and_then(|v| v.as_array())
-                    .map_or(0, Vec::len);
-                let color = if severity == "critical" {
-                    egui::Color32::RED
+        design::card_titled(
+            ui,
+            &format!("{} radar alert(s)", radar.len()),
+            Some("AI-derived from local conversation data"),
+            |ui| {
+                if radar.is_empty() {
+                    design::empty_state(
+                        ui,
+                        Icon::Target,
+                        "(no alerts)",
+                        "No AI-derived alerts for the current data.",
+                    );
                 } else {
-                    egui::Color32::YELLOW
-                };
-                ui.colored_label(
-                    color,
-                    format!("{title} · {count} conversations · {severity}"),
-                );
-            }
-        }
-        ui.separator();
+                    for alert in &radar {
+                        let title = str_field(alert, "title");
+                        let severity = str_field(alert, "severity");
+                        let count = alert
+                            .get("conversation_ids")
+                            .and_then(|v| v.as_array())
+                            .map_or(0, Vec::len);
+                        let tone = if severity == "critical" {
+                            BadgeTone::Destructive
+                        } else {
+                            BadgeTone::Warning
+                        };
+                        ui.horizontal(|ui| {
+                            design::badge(ui, &severity, tone);
+                            ui.label(
+                                egui::RichText::new(format!("{title} · {count} conversations"))
+                                    .size(13.0)
+                                    .color(design::tokens(ui).foreground),
+                            );
+                        });
+                        ui.add_space(2.0);
+                    }
+                }
+            },
+        );
+        ui.add_space(10.0);
         let sla = self.sla.clone();
         let Some(sla) = sla else {
             ui.spinner();
             return;
         };
-        ui.strong(format!(
-            "SLA: {} breached · {} at risk",
-            sla.total_breached, sla.total_at_risk
-        ));
-        if sla.alerts.is_empty() {
-            ui.weak("(no SLA alerts)");
-            return;
-        }
-        egui::ScrollArea::vertical().show_rows(ui, 20.0, sla.alerts.len(), |ui, range| {
-            for alert in &sla.alerts[range] {
-                let state = alert.state.as_str();
-                let color = if state == "breached" {
-                    egui::Color32::RED
+        design::card_titled(
+            ui,
+            &format!(
+                "SLA: {} breached · {} at risk",
+                sla.total_breached, sla.total_at_risk
+            ),
+            None,
+            |ui| {
+                if sla.alerts.is_empty() {
+                    design::empty_state(
+                        ui,
+                        Icon::Clock,
+                        "(no SLA alerts)",
+                        "No conversations are breaching or at risk right now.",
+                    );
                 } else {
-                    egui::Color32::YELLOW
-                };
-                ui.colored_label(
-                    color,
-                    format!(
-                        "#{} {} · {} · {}",
-                        alert.number,
-                        alert.subject.clone().unwrap_or_default(),
-                        alert.mailbox_name,
-                        state
-                    ),
-                );
-            }
-        });
+                    egui::ScrollArea::vertical().show_rows(
+                        ui,
+                        20.0,
+                        sla.alerts.len(),
+                        |ui, range| {
+                            let t = design::tokens(ui);
+                            for alert in &sla.alerts[range] {
+                                let state = alert.state.as_str();
+                                let line = format!(
+                                    "#{} {} · {} · {}",
+                                    alert.number,
+                                    alert.subject.clone().unwrap_or_default(),
+                                    alert.mailbox_name,
+                                    state
+                                );
+                                if state == "breached" {
+                                    design::error_text(ui, &line);
+                                } else {
+                                    ui.label(
+                                        egui::RichText::new(line)
+                                            .small()
+                                            .color(t.warning_foreground),
+                                    );
+                                }
+                            }
+                        },
+                    );
+                }
+            },
+        );
     }
 
     fn clusters_ui(&mut self, ui: &mut egui::Ui) {
         let clusters = self.clusters.clone();
-        ui.strong(format!("{} cluster(s)", clusters.len()));
+        design::section_title(ui, &format!("{} cluster(s)", clusters.len()));
         if clusters.is_empty() {
-            ui.weak("(no clusters yet)");
+            design::empty_state(
+                ui,
+                Icon::Boxes,
+                "(no clusters yet)",
+                "Clusters appear once enough related conversations accumulate.",
+            );
             return;
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for cluster in &clusters {
-                ui.group(|ui| {
+                design::card(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.strong(cluster.title.as_str());
+                        ui.label(
+                            egui::RichText::new(cluster.title.as_str())
+                                .size(13.0)
+                                .strong()
+                                .color(design::tokens(ui).foreground),
+                        );
                         if let Some(trend) = &cluster.trend {
-                            ui.colored_label(
-                                if trend == "rising" || trend == "new" {
-                                    egui::Color32::YELLOW
-                                } else {
-                                    egui::Color32::GRAY
-                                },
-                                trend,
-                            );
+                            let tone = if trend == "rising" || trend == "new" {
+                                BadgeTone::Warning
+                            } else {
+                                BadgeTone::Neutral
+                            };
+                            design::badge(ui, trend, tone);
                         }
-                        ui.weak(format!(
-                            "{} conversations · {} customers",
-                            cluster.conversation_count,
-                            cluster.customer_count.unwrap_or(0)
-                        ));
+                        design::hint_text(
+                            ui,
+                            &format!(
+                                "{} conversations · {} customers",
+                                cluster.conversation_count,
+                                cluster.customer_count.unwrap_or(0)
+                            ),
+                        );
                     });
                     if let Some(summary) = &cluster.summary {
-                        ui.weak(summary.as_str());
+                        design::hint_text(ui, summary.as_str());
                     }
                 });
             }
@@ -369,33 +425,54 @@ impl IssueRadarPage {
 
     fn known_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         ui.horizontal(|ui| {
-            if ui.button("New known issue").clicked() {
+            if design::button(ui, "New known issue", ButtonVariant::Primary).clicked() {
                 self.show_new = !self.show_new;
             }
         });
         if self.show_new {
             self.new_known_ui(ui, db);
-            ui.separator();
+            design::divider(ui);
         }
         let known = self.known.clone();
-        ui.strong(format!("{} known issue(s)", known.len()));
+        design::section_title(ui, &format!("{} known issue(s)", known.len()));
         if known.is_empty() {
-            ui.weak("(no known issues)");
+            design::empty_state(
+                ui,
+                Icon::AlertCircle,
+                "(no known issues)",
+                "Create one to track recurring problems and their workarounds.",
+            );
             return;
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for issue in &known {
-                ui.group(|ui| {
+                design::card(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.strong(issue.title.as_str());
-                        ui.weak(issue.status.as_str());
-                        ui.monospace(format!("{} conversations", issue.conversation_count));
+                        ui.label(
+                            egui::RichText::new(issue.title.as_str())
+                                .size(13.0)
+                                .strong()
+                                .color(design::tokens(ui).foreground),
+                        );
+                        design::badge(ui, issue.status.as_str(), BadgeTone::Neutral);
+                        ui.monospace(
+                            egui::RichText::new(format!(
+                                "{} conversations",
+                                issue.conversation_count
+                            ))
+                            .small()
+                            .color(design::tokens(ui).muted_foreground),
+                        );
                     });
                     if let Some(symptoms) = &issue.symptoms {
-                        ui.weak(symptoms.as_str());
+                        design::hint_text(ui, symptoms.as_str());
                     }
                     if let Some(workaround) = &issue.workaround {
-                        ui.label(format!("workaround: {workaround}"));
+                        ui.label(
+                            egui::RichText::new(format!("workaround: {workaround}"))
+                                .size(13.0)
+                                .color(design::tokens(ui).foreground),
+                        );
                     }
                 });
             }
@@ -403,14 +480,15 @@ impl IssueRadarPage {
     }
 
     fn new_known_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.strong("New known issue");
-        egui::Grid::new("radar-new-known")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("title:");
-                ui.text_edit_singleline(&mut self.new_title);
+        design::card_titled(ui, "New known issue", None, |ui| {
+            design::form_grid(ui, "radar-new-known", |ui| {
+                design::field_label(ui, "title:");
+                ui.add_sized(
+                    [260.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_title),
+                );
                 ui.end_row();
-                ui.label("status:");
+                design::field_label(ui, "status:");
                 egui::ComboBox::from_id_salt("radar-new-status")
                     .selected_text(self.new_status.clone())
                     .show_ui(ui, |ui| {
@@ -420,20 +498,29 @@ impl IssueRadarPage {
                         }
                     });
                 ui.end_row();
-                ui.label("symptoms:");
-                ui.text_edit_multiline(&mut self.new_symptoms);
+                design::field_label(ui, "symptoms:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.new_symptoms).desired_width(f32::INFINITY),
+                );
                 ui.end_row();
-                ui.label("workaround:");
-                ui.text_edit_multiline(&mut self.new_workaround);
+                design::field_label(ui, "workaround:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.new_workaround)
+                        .desired_width(f32::INFINITY),
+                );
                 ui.end_row();
-                ui.label("conversation ids:");
-                ui.text_edit_singleline(&mut self.new_conversation_ids)
-                    .on_hover_text("comma-separated local conversation ids");
+                design::field_label(ui, "conversation ids:");
+                ui.add_sized(
+                    [260.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_conversation_ids),
+                )
+                .on_hover_text("comma-separated local conversation ids");
                 ui.end_row();
             });
-        if ui.button("create").clicked() {
-            self.create(db);
-        }
+            if design::button(ui, "create", ButtonVariant::Primary).clicked() {
+                self.create(db);
+            }
+        });
     }
 }
 
