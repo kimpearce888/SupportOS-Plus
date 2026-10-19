@@ -530,3 +530,70 @@ for epaint's bundled fonts) · `xtask vector-count` smoke ok · GitHub Actions r
   delete_by_entity both halves, generic Filter count scan, facade disabled/enabled health
   + full pipeline. CI run `39174410019` green (incl. cargo-deny advisories+licenses for
   the new sqlite-vec dependency).
+
+### Final batch (8) — 2026-10-19 (commit `04567cf`, CI run `39179188225`: success)
+
+**36. Wire WorkerManager into the shell boot (user-directed cutover-gap fix)**
+- Work: new `crates/app-shell/src/workers_host.rs` — `WorkersHost` spawns a dedicated OS
+  thread hosting a fixed 2-worker-thread multi-thread tokio runtime that owns the core
+  `WorkerManager` (job drain + stale-job recovery, webhook drain, embedding passes,
+  maintenance/backup, notification/customer-event sweeps, connector refresh, ratings) for
+  the whole process lifetime; `main.rs` starts it after boot services with the shared
+  DbHandle, sync engine, provider, event bus, data dir and a boot-built `VectorIndex`
+  (enabled from the `qdrant_enabled` setting, store lazily opened — the embedding timers
+  were no-ops with `None` before). `restart()` re-arms timers on the worker runtime via a
+  captured `Handle` (`WorkerManager::start` needs a runtime context; the settings page
+  runs on the UI thread); the Settings general save calls it when `sync_interval_minutes`
+  changed (the old `PUT /api/settings` stop/start behavior). Drop = stop + join; the
+  host lives in `main` (not `ShellApp`) so page tests stay timer-free.
+- Verification: 2 `workers_host` tests (start/drop stop + restart re-arm, incl. the
+  caught-and-fixed no-reactor bug); local debug + packaged AppImage smoke runs log
+  "Background workers started" at boot and "Background workers stopped" at exit; CI green.
+
+**37. tokio feature slim + 2-thread runtime (row 12)**
+- Work: workspace `tokio` features `full` → `rt, rt-multi-thread, time, sync` (exactly the
+  port's direct call sites: spawn/spawn_blocking/runtime builders, the 2-thread worker
+  host, interval/sleep timers, broadcast/oneshot channels); net/io still arrive through
+  reqwest's own dependency via feature unification; fs/process/signal have zero call
+  sites. Rationale documented in Cargo.toml and decisions.md.
+- Verification: `cargo check/clippy/test --workspace` green on the slimmed feature set
+  (255 tests); CI `check` job green.
+
+**38. Landlock + seccomp sandbox for pdf/zip parsing (Linux, feature-flagged)**
+- Work: new `crates/core/src/sandbox.rs` (compiles only on Linux with
+  `--features sandbox`): `run_sandboxed(label, f)` runs a closure on a fresh thread that
+  first applies a Landlock deny-all ruleset (all V1 read/write path rights handled, zero
+  rules; `CompatLevel::BestEffort` so pre-5.13 kernels degrade with a logged status) and
+  then a seccomp BPF allow-list (read, close, brk, mmap/munmap/mprotect/madvise/mremap,
+  futex, clock/nanosleep, rt_sig*, sigaltstack, getpid/gettid, sched_*, getrandom,
+  seccomp, exit/exit_group; `write` pinned to fds 1/2 via arg conditions). Mismatch
+  action is `EPERM` by design — a killed thread cannot notify its channel (caller would
+  hang to the timeout) while EPERM still blocks every escape path, and filters only ever
+  stack. Panics inside the sandbox surface as ordinary parse errors; a 120 s bounded
+  receive guards against wedges. `knowledge_store::import_one_file` routes the pdf and
+  docx parse arms through `sandbox_parse` (byte caps unchanged and still pre-parse);
+  without the feature the parse runs inline exactly as before.
+- Verification: 5 sandbox tests (pure computation, panic surfacing, Landlock FS denial —
+  degrades to a no-op note on this 5.10 kernel, socket blocked by the allow-list,
+  docx+pdf parse end-to-end under the filter) + full core suite with the feature on
+  (125 tests). CI adds explicit sandbox clippy + test steps on an
+  Landlock-enforcing ubuntu-latest kernel; run `39179188225` green. New deps (landlock
+  0.4.7, seccompiler 0.5.0) pass `cargo deny` licenses.
+
+**39. CI: AppImage build + smoke-test job**
+- Work: `.github/workflows/ci.yml` gains an `appimage` job: pinned toolchain, rust-cache,
+  `cargo run -p supportos-plusplus-xtask -- package` (release build + AppDir staging +
+  type-2 AppImage, appimagetool downloaded/cached by the xtask), then a smoke step
+  running `APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 ./target/appimage/
+  SupportOs-Plus-x86_64.AppImage`. The new `SPP_SMOKE=1` hook in `main.rs` (CI-only,
+  never active in normal runs) verifies the full boot chain headless — logging,
+  single-instance lock, all boot migrations, boot services, background workers, the
+  loopback listener — then exits 0 without opening a window; the AppImage artifact is
+  uploaded via actions/upload-artifact@v4.
+- Verification: locally built the 10.8 MB type-2 AppImage and ran the exact smoke command
+  (exit 0, boot chain logged, workers started/stopped cleanly); CI job
+  `AppImage build + smoke test` conclusion `success` in run `39179188225`.
+
+The plan is now exhausted: 39 of 39 items completed across 8 batches (7 × five + this
+final four-item batch: three planned items plus the user-directed WorkerManager boot
+gap). `plan.md` is empty, `progress.md` is empty.
