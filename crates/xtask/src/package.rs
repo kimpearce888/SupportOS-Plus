@@ -90,15 +90,16 @@ fn deb_arch() -> anyhow::Result<&'static str> {
 }
 
 /// The GUI stack loads its windowing and graphics libraries at runtime
-/// (`winit`'s X11 backends, `xkbcommon`, `glutin`/`glow` and the Wayland
-/// client all `dlopen` their system libraries), so `ldd` cannot see them.
-/// The .deb therefore declares the client-library set explicitly and APT
-/// pulls it in on minimal systems; the GL driver itself stays
-/// host-provided (Mesa software rendering works on GPU-less machines).
+/// (`winit`'s X11 backends, `xkbcommon`, `glutin`/`glow`, wgpu's GLES
+/// fallback and the Wayland client all `dlopen` their system libraries),
+/// so `ldd` cannot see them. The .deb therefore declares the
+/// client-library set explicitly and APT pulls it in on minimal
+/// systems; the GL driver itself stays host-provided (Mesa software
+/// rendering works on GPU-less machines).
 const DEB_DEPENDS: &str = "libc6 (>= 2.35), libgcc-s1, libx11-6, libxext6, libxfixes3, \
                            libxrender1, libxcursor1, libxrandr2, libxi6, libxinerama1, \
                            libxkbcommon0, libxkbcommon-x11-0, libxcb1, libgl1, libegl1, \
-                           libwayland-client0, libwayland-cursor0, libwayland-egl1";
+                           libgles2, libwayland-client0, libwayland-cursor0, libwayland-egl1";
 
 /// Everything `package` needs.
 pub struct PackageOptions {
@@ -715,6 +716,10 @@ mod tests {
         assert!(control.contains("Depends:"));
         assert!(control.contains("libxkbcommon0"));
         assert!(control.contains("libgl1"));
+        // v1.1.1: the GLES client library is part of the declared set —
+        // wgpu's GL fallback dlopens it, and 1.1.0 died on machines that
+        // had neither a Vulkan ICD nor libGLESv2.
+        assert!(control.contains("libgles2"));
         assert!(control.contains("libc6 (>= 2.35)"));
         let installed_size = control
             .lines()

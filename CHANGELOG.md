@@ -4,6 +4,37 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-10-20
+
+Hotfix for 1.1.0's startup failure on real machines. The shipped binary
+rendered with eframe's default `wgpu` backend, which needs a working
+Vulkan driver or a GLES stack — neither is guaranteed outside CI, where
+the GUI-launch tests install `mesa-vulkan-drivers` (software Vulkan).
+On machines without them (VirtualBox/VMware VMs, NVIDIA with nouveau,
+older Mesa, minimal desktops) the process died before opening a window,
+and because the desktop entry discards stderr, it looked like "nothing
+happened".
+
+### Fixed
+
+- **Startup failure on systems without Vulkan/GLES**: the shell now
+  compiles in the GL-based `glow` renderer (already used by the CI
+  screenshot harness) and makes it the default. `glow` opens wherever
+  GLX or EGL desktop GL exists, including llvmpipe software GL on
+  GPU-less machines. `SPP_RENDERER=wgpu` opts back into wgpu for
+  systems where GL is the broken half instead; unrecognized values
+  fall back to `glow` with a warning.
+- **Startup failures are now findable**: fatal errors (instance lock,
+  database, background workers, renderer/window setup) append to
+  `logs/fatal.log` inside the data directory, and a panic hook records
+  panics there too — including renderer and context-setup panics, the
+  failure class that made 1.1.0 vanish silently. When `zenity` or
+  `notify-send` is installed, the failure is also shown as a dialog.
+- `.deb` now declares `libgles2` (wgpu's GL fallback `dlopen`s it);
+  1.1.0 machines that had neither a Vulkan ICD nor `libGLESv2` lost
+  their last fallback. The declared dependency set is otherwise
+  unchanged.
+
 ## [1.1.0] — 2026-10-20
 
 Interface refresh: the entire application now ships a shadcn/ui-inspired

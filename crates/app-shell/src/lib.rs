@@ -17,6 +17,7 @@ pub mod app;
 pub mod bridge;
 pub mod chart;
 pub mod design;
+pub mod fatal;
 pub mod icons;
 pub mod mention;
 pub mod overlays;
@@ -130,6 +131,37 @@ pub fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
     build_boot_services(db, bus).engine
 }
 
+/// Pick the rendering backend for this run.
+///
+/// Default since 1.1.1: the GL-based `glow` renderer. eframe 0.37's own
+/// default is `wgpu`, which needs a working Vulkan driver or a GLES
+/// stack — neither is guaranteed outside CI (which installs
+/// `mesa-vulkan-drivers`), and 1.1.0 died before showing a window on
+/// machines without them (VMs, nouveau, older Mesa, minimal desktops).
+/// `glow` opens wherever GLX or EGL desktop GL exists, including
+/// llvmpipe software GL on GPU-less machines. `SPP_RENDERER=wgpu` opts
+/// back into the eframe default for systems where GL is the broken
+/// half instead; unrecognized values fall back to `glow` with a warning.
+fn resolve_renderer() -> eframe::Renderer {
+    let requested = std::env::var("SPP_RENDERER").unwrap_or_default();
+    if requested.eq_ignore_ascii_case("wgpu") {
+        tracing::info!(renderer = "wgpu", "renderer: wgpu (SPP_RENDERER=wgpu)");
+        eframe::Renderer::Wgpu
+    } else {
+        if !requested.is_empty() && !requested.eq_ignore_ascii_case("glow") {
+            tracing::warn!(
+                value = %requested,
+                "SPP_RENDERER: unrecognized value, falling back to glow"
+            );
+        }
+        tracing::info!(
+            renderer = "glow",
+            "renderer: glow (default; set SPP_RENDERER=wgpu to switch)"
+        );
+        eframe::Renderer::Glow
+    }
+}
+
 /// Run the native shell window. Blocks until the window is closed.
 ///
 /// # Errors
@@ -151,14 +183,15 @@ pub fn run(options: ShellOptions) -> Result<(), eframe::Error> {
             viewport = viewport.with_inner_size([w, h]);
         }
     }
-    #[cfg_attr(
-        not(feature = "ui-screenshot"),
-        expect(unused_mut, reason = "only mutated by the ui-screenshot harness")
-    )]
     let mut native_options = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
+    // v1.1.1: never trust eframe's default (wgpu) — it needs a Vulkan
+    // driver or a GLES stack, neither of which is guaranteed outside
+    // CI. The GL-based glow renderer is the safe default for real
+    // desktops, VMs and software GL; `resolve_renderer` above says why.
+    native_options.renderer = resolve_renderer();
     #[cfg(feature = "ui-screenshot")]
     {
         // The harness runs headless (Xvfb + llvmpipe software GL); the

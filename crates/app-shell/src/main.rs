@@ -20,10 +20,16 @@ fn main() {
     let app_config = spp_core::config::AppConfig::default();
     tracing::info!(?app_config.data_dir, "data directory");
 
+    // v1.1.1: from here on, panics also land in logs/fatal.log. Desktop
+    // entries discard stderr, so without this a renderer or context
+    // panic leaves nothing behind ("opened it, nothing appeared").
+    spp_shell::fatal::install_panic_hook(app_config.data_dir.clone());
+
     let lock = match spp_shell::single_instance::acquire(&app_config.data_dir) {
         Ok(lock) => lock,
         Err(e) => {
-            eprintln!("SupportOS-Plus: {e}");
+            tracing::error!(error = %e, "cannot acquire the instance lock");
+            spp_shell::fatal::fatal(&app_config.data_dir, "cannot start", &e);
             std::process::exit(1);
         }
     };
@@ -35,7 +41,7 @@ fn main() {
         Ok(db) => db,
         Err(e) => {
             tracing::error!(error = %e, path = %db_path.display(), "failed to open SQLite DB");
-            eprintln!("SupportOS-Plus: failed to open SQLite DB: {e}");
+            spp_shell::fatal::fatal(&app_config.data_dir, "failed to open SQLite DB", &e);
             std::process::exit(1);
         }
     };
@@ -68,7 +74,11 @@ fn main() {
         Ok(host) => host,
         Err(e) => {
             tracing::error!(error = %e, "failed to start background workers");
-            eprintln!("SupportOS-Plus: failed to start background workers: {e}");
+            spp_shell::fatal::fatal(
+                &app_config.data_dir,
+                "failed to start background workers",
+                &e,
+            );
             std::process::exit(1);
         }
     };
@@ -135,7 +145,9 @@ fn main() {
 
     if let Err(e) = spp_shell::run(options) {
         tracing::error!(error = %e, "shell failed");
-        eprintln!("SupportOS-Plus: shell failed: {e}");
+        // No window exists at this point; make the failure findable
+        // (fatal.log) and visible (dialog) instead of a silent exit.
+        spp_shell::fatal::fatal(&app_config.data_dir, "shell failed", &e);
         std::process::exit(1);
     }
 }
