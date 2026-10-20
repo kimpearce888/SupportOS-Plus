@@ -125,6 +125,69 @@ pub fn recover_interrupted_state(conn: &Connection) -> bool {
     true
 }
 
+/// R2 (D1): the watermark-integrity policy for a provider transition.
+///
+/// Called exactly once per boot (and once per in-session activation)
+/// with the kind that was active *before* the change and the kind that
+/// is active now:
+///
+/// * `empty → real`: the previous session ran against the inert
+///   provider. Any `LIVE`/`CATCHING_UP` state and every checkpoint it
+///   stamped describe a zero-record account, so the engine forgets
+///   them: `sync_state` resets to `NEW` and the full initial sync runs
+///   on the next tick. Without this, a pre-1.4.0 install that was
+///   poisoned while disconnected would stay "up to date" forever.
+/// * `real → empty`: informational only; the mirror is preserved and
+///   the R2 engine guard stops the empty provider from advancing
+///   anything.
+/// * same-kind transitions: no-op.
+///
+/// Returns the state the machine ended in (for tests and diagnostics).
+pub fn on_provider_kind_transition(
+    conn: &Connection,
+    previous: Option<&str>,
+    current: &str,
+) -> String {
+    let previous = previous.unwrap_or("");
+    if previous == current {
+        return get_state(conn);
+    }
+    match (previous, current) {
+        ("empty", "real") | ("", "real") => {
+            let before = get_state(conn);
+            set_state(conn, "NEW");
+            let _ = crate::audit::log_event(
+                conn,
+                "warn",
+                "sync",
+                &format!(
+                    "Help Scout credentials activated: sync state reset ({before} → NEW) so the \
+                     full account history is pulled from scratch — an earlier session with no \
+                     credentials may have stamped empty watermarks"
+                ),
+                None,
+                None,
+            );
+            tracing::info!(
+                before = %before,
+                "provider transition empty→real: sync state reset to NEW"
+            );
+            "NEW".to_string()
+        }
+        (previous, current) => {
+            let _ = crate::audit::log_event(
+                conn,
+                "info",
+                "sync",
+                &format!("provider transition {previous}→{current}"),
+                None,
+                None,
+            );
+            get_state(conn)
+        }
+    }
+}
+
 pub fn get_state(conn: &Connection) -> String {
     conn.query_row(
         "SELECT value FROM application_settings WHERE key = 'sync_state'",
@@ -902,6 +965,50 @@ impl SyncEngine {
         }
     }
 
+    /// Emit an [`crate::events::ServerEvent::ErrorOccurred`] to the bus
+    /// (v1.4.0 R5, D4): background failures used to land only in the
+    /// Diagnostics log, so a failing sync or a dead resource looked
+    /// exactly like a healthy quiet one everywhere else.
+    fn emit_error(
+        &self,
+        severity: &str,
+        service: &str,
+        message: &str,
+        conversation_id: Option<i64>,
+    ) {
+        if let Some(bus) = &self.bus {
+            use crate::events::ServerEvent;
+            bus.emit(&ServerEvent::error_occurred(
+                severity,
+                message,
+                service,
+                conversation_id,
+            ));
+        }
+    }
+
+    /// R2 (D1): every sync entry point refuses to run against the empty
+    /// provider. Before this guard, a fresh install without credentials
+    /// ran "successful" zero-record syncs every minute: checkpoints
+    /// stamped forward, `sync_state` flipped to LIVE, and when real
+    /// credentials finally arrived the engine believed the account was
+    /// already synchronized and only pulled a ten-minute incremental
+    /// window — the entire history never arrived. The guard keeps that
+    /// poisoning from ever starting, and the transition policy in
+    /// [`on_provider_kind_transition`] repairs a state that already
+    /// carries poisoned watermarks (a pre-1.4.0 install).
+    fn guard_provider_connected(&self) -> Result<()> {
+        if self.provider.kind() == "empty" {
+            return Err(Error::Other(
+                "Help Scout is not connected — nothing to sync. Add your \n\
+                 credentials in Settings; the connection activates \n\
+                 immediately and the first sync starts by itself."
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Mid-run progress heartbeat. Before 1.3.0 the engine was silent
     /// until the very end of a run: pages cached their snapshots, so a
     /// multi-hour initial sync looked like a dead "in progress" list
@@ -956,6 +1063,7 @@ impl SyncEngine {
     /// instead of a full engine pass. Emits `SyncCompleted("docs", ...)`
     /// so the page reloads itself when the articles land.
     pub async fn sync_docs_only(&self) -> Result<Vec<ResourceSyncResult>> {
+        self.guard_provider_connected()?;
         if self
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -968,6 +1076,20 @@ impl SyncEngine {
             let conn = self.lock();
             start_run(&conn, "docs")?
         };
+        // R5 (D15): a missing Docs API key used to degrade to a silent
+        // empty Help Center (one buried warn in the log). Say it live on
+        // the bus instead so the Knowledge page banner and a toast can
+        // explain the zeros.
+        if !self.provider.docs_configured() {
+            self.emit_error(
+                "warn",
+                "docs",
+                "Help Center sync is idle: no Docs API key configured. Add one in \n\
+                 Settings → Help Scout credentials (Help Scout Profile → \n\
+                 Security & Access → Docs API).",
+                None,
+            );
+        }
         let mut results = Vec::new();
         for resource in ["docs_collections", "docs_articles"] {
             let r = self.run_resource(resource, false).await;
@@ -1091,6 +1213,7 @@ impl SyncEngine {
     }
 
     pub async fn initial_sync(&self) -> Result<Vec<ResourceSyncResult>> {
+        self.guard_provider_connected()?;
         if self
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -1107,6 +1230,17 @@ impl SyncEngine {
         };
         let mut results: Vec<ResourceSyncResult> = Vec::new();
         let outcome: Result<()> = async {
+            // R5 (D15): same honest docs-key warning as the docs-only
+            // pass, so the first full sync explains an empty Help Center
+            // instead of silently mirroring zero articles.
+            if !self.provider.docs_configured() {
+                self.emit_error(
+                    "warn",
+                    "docs",
+                    "Help Center sync is idle: no Docs API key configured. Add one in Settings → Help Scout credentials.",
+                    None,
+                );
+            }
             for resource in INITIAL_SYNC_ORDER {
                 if self.cancelled() {
                     break;
@@ -1138,6 +1272,16 @@ impl SyncEngine {
                             res.error.as_deref().unwrap_or(""),
                             res.failed,
                         );
+                        self.emit_error(
+                            "warn",
+                            "sync",
+                            &format!(
+                                "Sync resource {} failed: {}",
+                                resource,
+                                res.error.as_deref().unwrap_or("unknown error")
+                            ),
+                            None,
+                        );
                     }
                     Ok(res) => {
                         let conn = self.lock();
@@ -1146,6 +1290,12 @@ impl SyncEngine {
                     Err(e) => {
                         let conn = self.lock();
                         record_failure(&conn, resource, &e.to_string(), 1);
+                        self.emit_error(
+                            "warn",
+                            "sync",
+                            &format!("Sync resource {resource} failed: {e}"),
+                            None,
+                        );
                     }
                 }
                 let r = match r {
@@ -1239,6 +1389,7 @@ impl SyncEngine {
         }
         .await;
         if let Err(e) = outcome {
+            self.emit_error("error", "sync", &format!("Initial sync failed: {e}"), None);
             let conn = self.lock();
             set_state(&conn, "ERROR");
             let _ = update_run(
@@ -1260,6 +1411,7 @@ impl SyncEngine {
     }
 
     pub async fn incremental_sync(&self) -> Result<Vec<ResourceSyncResult>> {
+        self.guard_provider_connected()?;
         if self
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -1364,6 +1516,12 @@ impl SyncEngine {
         }
         .await;
         if let Err(e) = outcome {
+            self.emit_error(
+                "error",
+                "sync",
+                &format!("Incremental sync failed: {e}"),
+                None,
+            );
             let conn = self.lock();
             set_state(&conn, "ERROR");
             let _ = update_run(
@@ -1399,6 +1557,15 @@ impl SyncEngine {
                     res.error.as_deref().unwrap_or(""),
                     res.failed,
                 );
+                self.emit_error(
+                    "warn",
+                    "sync",
+                    &format!(
+                        "Sync resource {resource} failed: {}",
+                        res.error.as_deref().unwrap_or("unknown error")
+                    ),
+                    None,
+                );
             }
             Ok(res) => {
                 let conn = self.lock();
@@ -1407,6 +1574,12 @@ impl SyncEngine {
             Err(e) => {
                 let conn = self.lock();
                 record_failure(&conn, resource, &e.to_string(), 1);
+                self.emit_error(
+                    "warn",
+                    "sync",
+                    &format!("Sync resource {resource} failed: {e}"),
+                    None,
+                );
             }
         }
         let r = r.unwrap_or(ResourceSyncResult {
@@ -1420,6 +1593,7 @@ impl SyncEngine {
     }
 
     pub async fn reconcile(&self) -> Result<ReconciliationResult> {
+        self.guard_provider_connected()?;
         if self
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -1634,6 +1808,7 @@ impl SyncEngine {
     }
 
     pub async fn sync_single_conversation(&self, remote_id: i64) -> Result<bool> {
+        self.guard_provider_connected()?;
         let remote = self.provider.get_conversation(remote_id).await;
         match remote {
             Ok(Some(conv)) => {
@@ -2314,5 +2489,116 @@ impl SyncEngine {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::DbHandle;
+
+    fn temp_db() -> DbHandle {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-sync-engine-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("engine.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        DbHandle::new(conn)
+    }
+
+    fn empty_engine(db: &DbHandle) -> SyncEngine {
+        SyncEngine::new(
+            db.clone(),
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        )
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    }
+
+    #[test]
+    fn r2_engine_refuses_every_sync_against_the_empty_provider() {
+        let db = temp_db();
+        // Poison the state the way a pre-1.4.0 install would have been.
+        db.with_write(|conn| {
+            set_state(conn, "LIVE");
+        });
+        let engine = empty_engine(&db);
+        let rt = runtime();
+
+        let err = rt
+            .block_on(engine.initial_sync())
+            .expect_err("the engine must refuse to run against the empty provider");
+        assert!(
+            err.to_string().contains("not connected"),
+            "the refusal must be legible: {err}"
+        );
+        let err = rt
+            .block_on(engine.incremental_sync())
+            .expect_err("incremental must refuse too");
+        assert!(err.to_string().contains("not connected"));
+        let err = rt
+            .block_on(engine.sync_docs_only())
+            .expect_err("docs-only must refuse too");
+        assert!(err.to_string().contains("not connected"));
+        assert!(
+            rt.block_on(engine.sync_single_conversation(1)).is_err(),
+            "single-conversation sync must refuse on the empty provider"
+        );
+        assert!(rt.block_on(engine.reconcile()).is_err());
+
+        // The poisoned state and the checkpoints are untouched by the
+        // refusals: no run rows, no watermark movement.
+        let (state, runs, checkpoints) = db.with_read(|conn| {
+            (
+                get_state(conn),
+                conn.query_row("SELECT COUNT(*) FROM sync_runs", [], |r| r.get::<_, i64>(0))
+                    .unwrap_or(0),
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sync_checkpoints WHERE status = 'ok'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+        });
+        assert_eq!(state, "LIVE", "a refused run must not touch the state");
+        assert_eq!(runs, 0, "a refused run must not start a run row");
+        assert_eq!(checkpoints, 0, "no watermark is stamped");
+    }
+
+    #[test]
+    fn r2_transition_policy_resets_a_poisoned_empty_session() {
+        let db = temp_db();
+        db.with_write(|conn| {
+            set_state(conn, "LIVE");
+        });
+        let after = on_provider_kind_transition(&db.write_guard(), Some("empty"), "real");
+        assert_eq!(after, "NEW", "empty→real forgets poisoned watermarks");
+        assert_eq!(db.with_read(get_state), "NEW");
+    }
+
+    #[test]
+    fn r2_transition_policy_keeps_a_healthy_real_session() {
+        let db = temp_db();
+        db.with_write(|conn| {
+            set_state(conn, "LIVE");
+        });
+        let after = on_provider_kind_transition(&db.write_guard(), Some("real"), "real");
+        assert_eq!(after, "LIVE", "same-kind transitions are no-ops");
+        assert_eq!(db.with_read(get_state), "LIVE");
+        let after = on_provider_kind_transition(&db.write_guard(), Some("real"), "empty");
+        assert_eq!(after, "LIVE", "deactivating preserves the mirror state");
+        assert_eq!(db.with_read(get_state), "LIVE");
     }
 }

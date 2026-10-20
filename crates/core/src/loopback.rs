@@ -29,7 +29,8 @@ use rusqlite::Connection;
 
 use crate::db::DbHandle;
 use crate::error::Result;
-use crate::helpscout_real::{HsCredentials, RealHelpScoutProvider};
+use crate::helpscout_real::HsCredentials;
+use crate::provider_handle::ProviderHandle;
 use crate::webhook_handler::{self, WebhookProcessResult};
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
@@ -136,16 +137,28 @@ pub trait OAuthCompletion: Send + Sync {
     fn complete(&self, code: &str) -> std::result::Result<ConnectedIdentity, String>;
 }
 
-/// Production [`OAuthCompletion`] over the real provider: runs the two
+/// Production [`OAuthCompletion`] over the live provider: runs the two
 /// async calls on a throwaway current-thread runtime (the listener thread
 /// owns no reactor).
+///
+/// v1.4.0 (R3): holds the shared [`ProviderHandle`] instead of a
+/// boot-time snapshot, so a browser authorization that lands after a
+/// mid-session credential activation completes against the *current*
+/// provider instead of the stale one boot captured.
 struct RealOAuthCompletion {
-    provider: Arc<RealHelpScoutProvider>,
+    handle: Arc<ProviderHandle>,
 }
 
 impl OAuthCompletion for RealOAuthCompletion {
     fn complete(&self, code: &str) -> std::result::Result<ConnectedIdentity, String> {
-        let provider = Arc::clone(&self.provider);
+        let Some(provider) = self.handle.real() else {
+            return Err(
+                "the authorization code cannot be exchanged: no Help Scout connection is \
+                 active in this session. Save your client credentials in Settings first \
+                 (they activate immediately, no restart needed)."
+                    .to_string(),
+            );
+        };
         let code = code.to_string();
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -496,20 +509,14 @@ impl LoopbackServer {
     /// Bind `127.0.0.1:port` (port 0 = OS-assigned; see [`Self::port`])
     /// and start serving. Only the two documented routes exist; everything
     /// else is rejected.
-    pub fn start(
-        db: DbHandle,
-        real: Option<Arc<RealHelpScoutProvider>>,
-        port: u16,
-    ) -> std::io::Result<Self> {
+    pub fn start(db: DbHandle, handle: Arc<ProviderHandle>, port: u16) -> std::io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         let bound_port = listener.local_addr()?.port();
         let shutdown = Arc::new(AtomicBool::new(false));
 
         let ctx = Arc::new(LoopbackCtx {
             db,
-            oauth: real.map(|provider| {
-                Arc::new(RealOAuthCompletion { provider }) as Arc<dyn OAuthCompletion>
-            }),
+            oauth: Some(Arc::new(RealOAuthCompletion { handle }) as Arc<dyn OAuthCompletion>),
         });
 
         let thread_shutdown = Arc::clone(&shutdown);
@@ -1082,7 +1089,12 @@ mod tests {
     fn listener_answers_only_for_the_real_loopback_server() {
         // Our listener: identifies itself on /healthz.
         let db = fixture_db();
-        let mut server = LoopbackServer::start(db, None, 0).expect("start the real listener");
+        let mut server = LoopbackServer::start(
+            db,
+            std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_empty()),
+            0,
+        )
+        .expect("start the real listener");
         assert!(
             listener_answers(server.port()),
             "the real listener must answer the probe"

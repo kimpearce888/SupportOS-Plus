@@ -160,6 +160,13 @@ impl HsRateLimiter {
         limiter
     }
 
+    /// Current limit state (v1.4.0 R1: Connection Doctor step 5).
+    /// Named distinctly from [`Self::snapshot`] (the JSON status view).
+    #[must_use]
+    pub fn rate_limit_state(&self) -> RateLimitState {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
     fn load(&self) {
         let Some(db) = &self.db else { return };
         let conn = db.write_guard();
@@ -592,6 +599,23 @@ impl RealHelpScoutProvider {
 
     pub fn set_api_concurrency(&self, n: usize) {
         self.queue.set_concurrency(n);
+    }
+
+    /// A fresh handle to the provider's HTTP client (v1.4.0 R1: the
+    /// Connection Doctor runs its reachability probe outside the API
+    /// queue on the same client configuration). `reqwest::Client` is
+    /// internally Arc'd, so the clone is cheap.
+    #[must_use]
+    pub fn http_client(&self) -> reqwest::Client {
+        self.client.clone()
+    }
+
+    /// The current rate-limit picture (v1.4.0 R1: the Connection
+    /// Doctor's step 5 shows what Help Scout last reported instead of
+    /// guessing).
+    #[must_use]
+    pub fn rate_limit_snapshot(&self) -> RateLimitState {
+        self.limiter.rate_limit_state()
     }
 
     fn conn_lock(&self) -> crate::db::DbWriteGuard<'_> {
@@ -1426,6 +1450,10 @@ impl RealHelpScoutProvider {
 impl HelpScoutProvider for RealHelpScoutProvider {
     fn kind(&self) -> &'static str {
         "real"
+    }
+
+    fn docs_configured(&self) -> bool {
+        !self.credentials.docs_api_key.is_empty()
     }
 
     async fn get_me(&self) -> Result<HsUser> {

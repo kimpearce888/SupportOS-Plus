@@ -65,6 +65,11 @@ pub struct GeneralSettings {
     pub qdrant_enabled: bool,
     pub attachment_auto_download: bool,
     pub automatic_reply_sending: bool,
+    /// v1.4.0 (R4, D9): the status a conversation moves to when a reply
+    /// is sent (decision D-b). `pending` matches Help Scout semantics
+    /// (awaiting the customer), `waiting` keeps it waiting on the agent,
+    /// `keep` leaves the status untouched (the pre-1.4.0 behavior).
+    pub reply_status_after: String,
     pub log_level: String,
     pub display_timezone: String,
     pub agent_language: String,
@@ -84,6 +89,7 @@ impl Default for GeneralSettings {
             qdrant_enabled: true,
             attachment_auto_download: true,
             automatic_reply_sending: false,
+            reply_status_after: "pending".into(),
             log_level: "info".into(),
             display_timezone: "system".into(),
             agent_language: "en".into(),
@@ -159,6 +165,17 @@ impl GeneralSettings {
                 defaults.automatic_reply_sending,
             )
             .unwrap_or(defaults.automatic_reply_sending),
+            reply_status_after: spp_core::settings::get_string(conn, "reply_status_after")
+                .ok()
+                .flatten()
+                .map(|v| {
+                    if ["pending", "waiting", "keep"].contains(&v.as_str()) {
+                        v
+                    } else {
+                        defaults.reply_status_after.clone()
+                    }
+                })
+                .unwrap_or_else(|| defaults.reply_status_after.clone()),
             log_level: spp_core::settings::get_string(conn, "log_level")
                 .ok()
                 .flatten()
@@ -210,6 +227,7 @@ impl GeneralSettings {
             "automatic_reply_sending",
             self.automatic_reply_sending,
         )?;
+        spp_core::settings::set_string(conn, "reply_status_after", &self.reply_status_after)?;
         spp_core::settings::set_string(conn, "log_level", &self.log_level)?;
         spp_core::settings::set_string(conn, "display_timezone", &self.display_timezone)?;
         spp_core::settings::set_string(conn, "agent_language", &self.agent_language)?;
@@ -388,15 +406,29 @@ pub struct SettingsPage {
     data_dir: Option<PathBuf>,
     /// Two-step confirmation state for the demo purge.
     purge_armed: bool,
-    /// The real Help Scout provider for THIS session, set by the shell
-    /// at boot (`None` while the demo or empty provider runs — i.e.
-    /// always until the restart after credentials are saved, 1.1.4).
-    real: Option<std::sync::Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
+    /// The swappable provider handle (v1.4.0 R3): credential saves and
+    /// clears activate/deactivate the provider through it in-session.
+    /// `None` in tests that exercise the page without boot services.
+    provider: Option<std::sync::Arc<spp_core::provider_handle::ProviderHandle>>,
+    /// The shared sync engine — after an in-session activation the
+    /// initial sync is kicked directly through it (no restart, no
+    /// waiting for the auto-sync timer).
+    engine: Option<std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
+    /// Event bus handle for connect-failure events (R5/D4).
+    bus: Option<spp_core::eventing::EventBus>,
     /// In-flight client-credentials connect (1.1.4): the detached
     /// thread writes its outcome here; the UI polls it each frame.
     hs_connect_result: std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>,
     /// Mirrors `hs_connect_result` being in flight (UI-thread state).
     hs_connecting: bool,
+    /// In-flight Connection Doctor run (R1): the detached thread writes
+    /// the five steps here; the UI polls every frame while visible.
+    doctor_result:
+        std::sync::Arc<std::sync::Mutex<Option<Vec<spp_core::connection_doctor::DoctorStep>>>>,
+    /// Mirrors `doctor_result` being in flight (UI-thread state).
+    doctor_running: bool,
+    /// The latest completed doctor report, kept until the next run.
+    doctor_steps: Vec<spp_core::connection_doctor::DoctorStep>,
     lmstudio_base_url: String,
     lmstudio_chat_model: String,
     lmstudio_embedding_model: String,
@@ -430,9 +462,14 @@ impl SettingsPage {
             hs_show_secrets: false,
             data_dir: None,
             purge_armed: false,
-            real: None,
+            provider: None,
+            engine: None,
+            bus: None,
             hs_connect_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
             hs_connecting: false,
+            doctor_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            doctor_running: false,
+            doctor_steps: Vec::new(),
             lmstudio_base_url: String::new(),
             lmstudio_chat_model: String::new(),
             lmstudio_embedding_model: String::new(),
@@ -466,16 +503,30 @@ impl SettingsPage {
         self.workers = workers;
     }
 
-    /// Install this session's real Help Scout provider (the shell sets
-    /// it at boot from `BootServices::real`). `None` means the demo or
-    /// empty provider is running: the connect buttons then explain that
-    /// a restart is required instead of offering a flow whose callback
-    /// listener cannot complete (1.1.4).
-    pub fn set_real_provider(
+    /// Install the swappable provider handle (v1.4.0 R3, replaces the
+    /// boot-time real-provider snapshot): saving credentials activates
+    /// the provider through it immediately — the restart ritual is
+    /// gone — and the Connection Doctor runs against whatever provider
+    /// is currently live.
+    pub fn set_provider_handle(
         &mut self,
-        real: Option<std::sync::Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
+        handle: std::sync::Arc<spp_core::provider_handle::ProviderHandle>,
     ) {
-        self.real = real;
+        self.provider = Some(handle);
+    }
+
+    /// Install the shared sync engine (the activation path kicks the
+    /// initial sync through it).
+    pub fn set_sync_engine(
+        &mut self,
+        engine: Option<std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
+    ) {
+        self.engine = engine;
+    }
+
+    /// Install the event bus (connect failures emit live errors, R5/D4).
+    pub fn set_bus(&mut self, bus: spp_core::eventing::EventBus) {
+        self.bus = Some(bus);
     }
 
     /// Live-update invalidation.
@@ -603,9 +654,11 @@ impl SettingsPage {
     }
 
     /// Save the credential form (1.1.3): non-empty fields are stored in
-    /// the encrypted envelope; the next boot builds the real provider
-    /// from them. Since 1.2.0 the app also signs in with the stored
-    /// client credentials automatically when no token exists.
+    /// the encrypted envelope. v1.4.0 (R3, D2): the saved credentials
+    /// activate the provider **immediately, in-session** — no restart —
+    /// the Connection Doctor runs against the fresh connection, and the
+    /// first sync starts right away (initial when the state machine was
+    /// reset by an empty session, R2).
     fn save_helpscout_credentials(&mut self, db: &DbHandle) {
         let (cid, cs, ws, dk) = (
             self.hs_client_id.trim().to_string(),
@@ -619,38 +672,219 @@ impl SettingsPage {
         });
         match result {
             Ok(()) => {
-                self.message = Some(
-                    "credentials stored (encrypted). RESTART SupportOS+ now — \
-                     on the next start the app connects with them and immediately \
-                     begins pulling your Help Scout data."
-                        .into(),
-                );
+                self.message =
+                    Some("credentials stored (encrypted) — activating the connection now…".into());
                 // The three secret fields do not linger on screen after a
                 // successful save; the client id stays for reference.
                 self.hs_client_secret.clear();
                 self.hs_webhook_secret.clear();
                 self.hs_docs_api_key.clear();
+                self.activate_saved_credentials(db);
             }
             Err(e) => self.error = Some(e.to_string()),
         }
         self.reload(db);
     }
 
+    /// v1.4.0 (R3): rebuild the real provider from the resolved
+    /// credentials and swap it into the shared handle; apply the R2
+    /// transition policy; run the Connection Doctor; kick the sync.
+    /// Called after every credential save. When the resolved
+    /// credentials are incomplete (the form left both id and secret
+    /// blank on a clean install), nothing activates — the stored
+    /// envelope is unchanged.
+    fn activate_saved_credentials(&mut self, db: &DbHandle) {
+        let Some(handle) = self.provider.clone() else {
+            // Bare pages (unit tests) carry no handle; the message the
+            // caller set already tells the truth about the stored state,
+            // and the next real boot activates the credentials.
+            return;
+        };
+        let (credentials, _) = db.with_read(spp_core::helpscout_real::HsCredentials::resolve);
+        if !credentials.is_configured() {
+            return;
+        }
+        let previous_kind = handle.kind();
+        let real = std::sync::Arc::new(spp_core::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
+            credentials,
+        ));
+        handle.activate_real(real);
+        db.with_write(|conn| {
+            spp_core::sync_engine::on_provider_kind_transition(
+                conn,
+                Some(previous_kind.as_str()),
+                "real",
+            );
+            let _ = spp_core::settings::set_string(conn, "provider_kind", "real");
+            let _ = spp_core::audit::log_event(
+                conn,
+                "info",
+                "connect",
+                "Help Scout credentials activated in-session (no restart)",
+                None,
+                None,
+            );
+        });
+        // Side effects (doctor + sync kick) run when the page is wired
+        // into the live shell (a bus is installed); bare test pages skip
+        // them so no network is ever touched from a unit test.
+        if self.bus.is_some() {
+            self.message = Some(
+                "credentials active — running the Connection Doctor and starting the sync…".into(),
+            );
+            self.run_connection_doctor();
+            self.kick_sync_after_activation(db);
+        }
+    }
+
+    /// Kick the first sync after an in-session activation (R3): the
+    /// engine decides initial vs incremental from the state machine
+    /// (R2 resets it to NEW when the previous session was poisoned),
+    /// and the "already running" error is the healthy overlap case.
+    fn kick_sync_after_activation(&mut self, db: &DbHandle) {
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        let spawn_db = db.clone();
+        let spawned = std::thread::Builder::new()
+            .name("spp-activation-sync".to_string())
+            .spawn(move || {
+                let state = spawn_db.with_read(spp_core::sync_engine::get_state);
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "cannot start the activation sync runtime");
+                        return;
+                    }
+                };
+                let result = if state == "NEW" {
+                    tracing::info!(state, "activation: starting the initial sync");
+                    runtime.block_on(engine.initial_sync())
+                } else {
+                    tracing::info!(state, "activation: starting an incremental sync");
+                    runtime.block_on(engine.incremental_sync())
+                };
+                if let Err(e) = result {
+                    let msg = e.to_string();
+                    if !msg.contains("already running") {
+                        tracing::warn!(error = %msg, "activation sync failed");
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "cannot spawn the activation sync thread");
+        }
+    }
+
+    /// Run the Connection Doctor (R1) in a detached thread against the
+    /// currently live provider; the UI polls `doctor_result`.
+    fn run_connection_doctor(&mut self) {
+        let Some(handle) = self.provider.clone() else {
+            self.error = Some("the provider handle is not available (test session)".into());
+            return;
+        };
+        if self.doctor_running {
+            return;
+        }
+        self.doctor_running = true;
+        let slot = std::sync::Arc::clone(&self.doctor_result);
+        let bus = self.bus.clone();
+        let spawned = std::thread::Builder::new()
+            .name("spp-connection-doctor".to_string())
+            .spawn(move || {
+                let Some(real) = handle.real() else {
+                    if let Ok(mut guard) = slot.lock() {
+                        *guard = Some(Vec::new());
+                    }
+                    return;
+                };
+                let outcome = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("cannot start the doctor runtime: {e}"))
+                    .map(|rt| {
+                        rt.block_on(async { spp_core::connection_doctor::run_doctor(&real).await })
+                    });
+                match outcome {
+                    Ok(steps) => {
+                        if let Some(step) = steps
+                            .iter()
+                            .find(|s| s.status == spp_core::connection_doctor::DoctorStatus::Fail)
+                        {
+                            // R5 (D4): a failing step is a live error, not
+                            // just a form detail.
+                            if let Some(bus) = &bus {
+                                spp_core::eventing::notify_error(
+                                    bus,
+                                    "error",
+                                    &format!(
+                                        "Connection check failed: {} — {}",
+                                        step.name, step.detail
+                                    ),
+                                    "connect",
+                                    None,
+                                );
+                            }
+                        }
+                        if let Ok(mut guard) = slot.lock() {
+                            *guard = Some(steps);
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(bus) = &bus {
+                            spp_core::eventing::notify_error(
+                                bus,
+                                "error",
+                                &format!("the Connection Doctor could not run: {e}"),
+                                "connect",
+                                None,
+                            );
+                        }
+                        if let Ok(mut guard) = slot.lock() {
+                            *guard = Some(Vec::new());
+                        }
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            self.doctor_running = false;
+            self.error = Some(format!("cannot start the doctor thread: {e}"));
+        }
+    }
+
     /// Remove every credential stored by the form. The connection
-    /// tokens are deliberately untouched.
+    /// tokens are deliberately untouched. v1.4.0 (R3): the provider
+    /// deactivates in-session — the app stays fully usable against the
+    /// local mirror, and the R2 guard stops the sync timers from
+    /// stamping watermarks against the empty provider.
     fn clear_helpscout_credentials(&mut self, db: &DbHandle) {
         let result =
             db.with_write(|conn| spp_core::helpscout_real::HsCredentials::clear_envelope(conn));
         match result {
             Ok(removed) => {
                 self.message = Some(format!(
-                    "stored credentials removed ({removed} values). The \
-                     connection tokens are untouched."
+                    "stored credentials removed ({removed} values). The connection \
+                     tokens are untouched; the provider deactivated in-session."
                 ));
                 self.hs_client_id.clear();
                 self.hs_client_secret.clear();
                 self.hs_webhook_secret.clear();
                 self.hs_docs_api_key.clear();
+                if let Some(handle) = self.provider.clone() {
+                    let previous_kind = handle.deactivate();
+                    db.with_write(|conn| {
+                        spp_core::sync_engine::on_provider_kind_transition(
+                            conn,
+                            Some(previous_kind.as_str()),
+                            "empty",
+                        );
+                        let _ = spp_core::settings::set_string(conn, "provider_kind", "empty");
+                    });
+                }
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -833,6 +1067,24 @@ impl SettingsPage {
                     egui::TextEdit::singleline(&mut general.agent_language),
                 );
                 ui.end_row();
+                design::field_label(ui, "status after reply:");
+                egui::ComboBox::from_id_salt("settings-reply-status-after")
+                    .width(190.0)
+                    .selected_text(general.reply_status_after.clone())
+                    .show_ui(ui, |ui| {
+                        for (value, label) in [
+                            ("pending", "pending (await customer)"),
+                            ("waiting", "waiting (await agent)"),
+                            ("keep", "keep current status"),
+                        ] {
+                            ui.selectable_value(
+                                &mut general.reply_status_after,
+                                value.into(),
+                                label,
+                            );
+                        }
+                    });
+                ui.end_row();
             });
         });
         ui.add_space(10.0);
@@ -891,19 +1143,20 @@ impl SettingsPage {
     }
 
     fn helpscout_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // Pick up a finished client-credentials connect (1.1.4).
+        // Pick up a finished client-credentials connect (1.1.4) and a
+        // finished doctor run (R1).
         self.poll_connect_result(db);
+        self.poll_doctor_result();
         let Some(status) = self.helpscout.clone() else {
             ui.spinner();
             return;
         };
-        let session_ready = self.real.is_some();
         design::card_titled(
             ui,
             "Help Scout connection",
             Some(
-                "Connect with the browser OAuth flow (the loopback listener \
-                 serves the callback) or the client-credentials button",
+                "Connect with client credentials (recommended — no browser, \
+                 no redirect URL) or the advanced browser flow",
             ),
             |ui| {
                 design::form_grid(ui, "settings-helpscout", |ui| {
@@ -912,10 +1165,14 @@ impl SettingsPage {
                         design::badge(
                             ui,
                             if status.configured {
-                                "configured"
+                                "connected"
+                            } else if status.credentials {
+                                "credentials saved"
                             } else {
                                 "not configured"
                             },
+                            // Any unconnected state reads the same: the
+                            // badge tone only distinguishes "connected".
                             if status.configured {
                                 BadgeTone::Success
                             } else {
@@ -932,10 +1189,12 @@ impl SettingsPage {
                                 .color(design::tokens(ui).foreground),
                         )
                         .on_hover_text(
-                            "register this EXACT URL as the callback URL of your \
-                             Help Scout custom app (Profile → Apps & Integrations). \
-                             The local listener binds its port when SupportOS+ \
-                             starts; change it with HELPSCOUT_REDIRECT_URI.",
+                            "only for the browser flow: register this EXACT URL as \
+                             the callback URL of your Help Scout custom app \
+                             (Profile → Apps & Integrations). Help Scout matches \
+                             the redirect exactly. The local listener binds its \
+                             port when SupportOS+ starts; change it with \
+                             HELPSCOUT_REDIRECT_URI.",
                         );
                     });
                     ui.end_row();
@@ -949,30 +1208,21 @@ impl SettingsPage {
                     {
                         self.disconnect_helpscout(db);
                     }
+                    // R1: client credentials is the primary, recommended
+                    // flow — it completes inside the app with no browser
+                    // round-trip and no exact-match redirect dependency.
                     if !status.configured
                         && status.credentials
-                        && design::button(ui, "connect via OAuth", ButtonVariant::Primary)
-                            .on_hover_text(
-                                "opens Help Scout in your browser; the local callback \
-                                 listener stores the token",
-                            )
-                            .clicked()
-                    {
-                        self.begin_oauth(db);
-                    }
-                    if !status.configured
-                        && status.credentials
-                        && session_ready
                         && !self.hs_connecting
                         && design::button(
                             ui,
-                            "connect with client credentials",
-                            ButtonVariant::Outline,
+                            "connect with client credentials (recommended)",
+                            ButtonVariant::Primary,
                         )
                         .on_hover_text(
                             "no browser round-trip: verifies the stored client \
                              id/secret against Help Scout and stores the token \
-                             directly — also the fastest way to test credentials",
+                             directly",
                         )
                         .clicked()
                     {
@@ -982,13 +1232,38 @@ impl SettingsPage {
                         ui.spinner();
                     }
                 });
-                if !status.configured && status.credentials && !session_ready && !self.hs_connecting
-                {
+                if !status.configured && status.credentials {
                     ui.add_space(4.0);
-                    design::hint_text(
-                        ui,
-                        "credentials are stored — restart SupportOS+ to activate \
-                         them; the connect buttons work after the restart.",
+                    // R1: the browser flow is demoted to a clearly-labeled
+                    // secondary with the exact-match warning the audit
+                    // demanded (D3): loopback redirects are undocumented on
+                    // the platform, and a mismatched callback URL dead-ends
+                    // silently on Help Scout's side of the browser.
+                    ui.collapsing(
+                        egui::RichText::new("advanced: browser authorization flow")
+                            .small()
+                            .color(design::tokens(ui).muted_foreground),
+                        |ui| {
+                            design::hint_text(
+                                ui,
+                                "Help Scout redirects the browser to the callback URL \
+                                 registered on your custom app — it must match the \
+                                 redirect URI above EXACTLY, and loopback \
+                                 (localhost) redirects are undocumented on the \
+                                 platform. If the browser flow fails, use client \
+                                 credentials above instead.",
+                            );
+                            ui.add_space(4.0);
+                            if design::button(
+                                ui,
+                                "open the authorization page in the browser",
+                                ButtonVariant::Outline,
+                            )
+                            .clicked()
+                            {
+                                self.begin_oauth(db);
+                            }
+                        },
                     );
                 }
                 if let Some(url) = &self.authorize_url {
@@ -1008,15 +1283,23 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
+        // Connection Doctor (v1.4.0 R1): five sequential checks with
+        // per-step results and remedies, so no owner ever has to guess
+        // which link in the chain broke.
+        self.connection_doctor_ui(ui);
+        ui.add_space(10.0);
+
         // Credential form (1.1.3): values are stored in the encrypted
-        // secrets envelope; environment variables still win per field.
+        // secrets envelope; saving activates the connection immediately
+        // (R3 — no restart). Environment variables still win per field.
         design::card_titled(
             ui,
             "Help Scout credentials",
             Some(
-                "Stored encrypted on this machine. Save them, restart \
-                 SupportOS+, and the app connects and starts pulling your \
-                 account. Environment variables override these values.",
+                "Stored encrypted on this machine. Save them and the app \
+                 connects immediately — the Connection Doctor verifies the \
+                 chain and the first sync starts by itself. Environment \
+                 variables override these values.",
             ),
             |ui| {
                 let mask = !self.hs_show_secrets;
@@ -1138,27 +1421,121 @@ impl SettingsPage {
         );
     }
 
+    /// The Connection Doctor card (R1): a run button, the five steps
+    /// with pass/warn/fail state, what each saw, and the remedy for a
+    /// failure. Runs automatically after every credential save and can
+    /// be re-run any time.
+    fn connection_doctor_ui(&mut self, ui: &mut egui::Ui) {
+        design::card_titled(
+            ui,
+            "Connection Doctor",
+            Some(
+                "five checks: reach the API → sign in → read the user → \
+                 list mailboxes → rate-limit budget",
+            ),
+            |ui| {
+                if self.doctor_running {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("checking the connection…");
+                    });
+                } else {
+                    let live = self.provider.as_ref().is_some_and(|p| p.is_real());
+                    if live
+                        && design::button(ui, "run the checks", ButtonVariant::Outline)
+                            .on_hover_text(
+                                "verifies the whole connection chain right now: \
+                                 network, credentials, token, identity, mailboxes, \
+                                 rate limits",
+                            )
+                            .clicked()
+                    {
+                        self.run_connection_doctor();
+                    }
+                    if !live {
+                        design::hint_text(
+                            ui,
+                            "save credentials above (or press connect) and the doctor \
+                             runs automatically — or run it any time while a \
+                             connection is active.",
+                        );
+                    }
+                }
+                if !self.doctor_steps.is_empty() {
+                    let steps = self.doctor_steps.clone();
+                    ui.add_space(6.0);
+                    egui::Grid::new(egui::IdSalt::new("doctor-steps"))
+                        .num_columns(2)
+                        .striped(true)
+                        .spacing(egui::vec2(16.0, 4.0))
+                        .show(ui, |ui| {
+                            use spp_core::connection_doctor::DoctorStatus;
+                            for step in &steps {
+                                let (tone, label) = match step.status {
+                                    DoctorStatus::Pass => {
+                                        (egui::Color32::from_rgb(34, 197, 94), "✓ ok")
+                                    }
+                                    DoctorStatus::Warn => {
+                                        (egui::Color32::from_rgb(234, 179, 8), "! warning")
+                                    }
+                                    DoctorStatus::Fail => {
+                                        (egui::Color32::from_rgb(239, 68, 68), "✗ failed")
+                                    }
+                                };
+                                ui.label(
+                                    egui::RichText::new(format!("{label} — {}", step.name))
+                                        .color(tone)
+                                        .strong(),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("{} {}", step.detail, step.remedy))
+                                        .small(),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                }
+            },
+        );
+    }
+
+    /// Pick up a finished doctor run (called from the UI each frame
+    /// while the Help Scout tab is visible); the report stays on screen
+    /// until the next run replaces it.
+    fn poll_doctor_result(&mut self) {
+        if !self.doctor_running {
+            return;
+        }
+        let done = self
+            .doctor_result
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        if let Some(steps) = done {
+            self.doctor_running = false;
+            self.doctor_steps = steps;
+        }
+    }
+
     /// Start the browser OAuth flow: issue a single-use state and show the
     /// authorization URL (the loopback listener serves the callback).
     ///
-    /// 1.1.4 guards: the flow can only complete when (a) this session
-    /// actually runs the real provider — saving credentials mid-session
-    /// used to reveal a connect button whose callback listener answered
-    /// "Demo mode is active - OAuth is not needed" — and (b) the
-    /// loopback listener is really listening on the redirect port
-    /// (a busy port 3000 used to dead-end the browser silently).
+    /// 1.1.4 guards stay (the listener must really be listening on the
+    /// redirect port); the 1.1.4 restart guard is gone — v1.4.0 (R3)
+    /// activates saved credentials in-session, so the callback listener
+    /// exchanges against the live provider whenever the browser lands.
     fn begin_oauth(&mut self, db: &DbHandle) {
-        let Some(real) = self.real.clone() else {
+        let live = self.provider.as_ref().and_then(|p| p.real());
+        let Some(_real) = live else {
             self.error = Some(
-                "credentials are stored, but this session has no live \
-                 Help Scout provider. Restart SupportOS+ first — the OAuth \
-                 callback listener starts with the app."
+                "the browser flow needs an active Help Scout connection. \
+                 Save your client credentials in the form below first — \
+                 they activate immediately, no restart needed."
                     .into(),
             );
             self.authorize_url = None;
             return;
         };
-        drop(real); // presence is the guard; the listener owns the exchange
         let (creds, _) = db.with_read(spp_core::helpscout_real::HsCredentials::resolve);
         let redirect_uri = creds.redirect_uri.clone();
         self.begin_oauth_at(db, &creds, &redirect_uri);
@@ -1210,14 +1587,17 @@ impl SettingsPage {
     /// Connect with the client-credentials grant in the background
     /// (1.1.4): the immediate in-app answer to "are my credentials any
     /// good?" — and a full connection for users whose Help Scout app
-    /// authenticates that way (no browser round-trip). The detached
+    /// authenticates that way (no browser round-trip). v1.4.0 (R5):
+    /// failures emit a live error event, and (R3) the provider comes from
+    /// the swappable handle, not a boot-time snapshot. The detached
     /// thread writes its outcome into `hs_connect_result`; the UI polls
     /// it every frame and turns it into a message/error.
     fn connect_client_credentials(&mut self) {
-        let Some(real) = self.real.clone() else {
+        let Some(real) = self.provider.as_ref().and_then(|p| p.real()) else {
             self.error = Some(
-                "connect needs the real provider — restart SupportOS+ after \
-                 saving credentials."
+                "connect needs an active Help Scout connection — save your \
+                 credentials in the form below first (they activate \
+                 immediately, no restart)."
                     .into(),
             );
             return;
@@ -1228,6 +1608,7 @@ impl SettingsPage {
         self.hs_connecting = true;
         self.message = Some("connecting with client credentials…".into());
         let slot = std::sync::Arc::clone(&self.hs_connect_result);
+        let bus = self.bus.clone();
         let spawned = std::thread::Builder::new()
             .name("spp-hs-client-credentials".to_string())
             .spawn(move || {
@@ -1239,11 +1620,27 @@ impl SettingsPage {
                         rt.block_on(async { real.client_credentials_login().await.map(|_| ()) })
                             .map_err(|e| e.to_string())
                     })
-                    .map_or_else(Err, |()| {
-                        Ok("connected with client credentials — tokens stored. \
-                                Run a sync from Sync Health to pull your account."
-                            .to_string())
-                    });
+                    .map_or_else(
+                        |e| {
+                            // R5 (D4): connect failures reach the UI live,
+                            // even from another page.
+                            if let Some(bus) = &bus {
+                                spp_core::eventing::notify_error(
+                                    bus,
+                                    "error",
+                                    &format!("Connecting with client credentials failed: {e}"),
+                                    "connect",
+                                    None,
+                                );
+                            }
+                            Err(e)
+                        },
+                        |()| {
+                            Ok("connected with client credentials — tokens stored. \
+                                The sync pulls your account automatically."
+                                .to_string())
+                        },
+                    );
                 if let Ok(mut guard) = slot.lock() {
                     *guard = Some(outcome);
                 }
@@ -1742,10 +2139,11 @@ mod tests {
     }
 
     #[test]
-    fn begin_oauth_before_restart_explains_the_restart() {
-        // Credentials saved in a demo session (1.1.4 trap): the button is
-        // visible but the session's callback listener cannot exchange the
-        // code — the click must explain that, not dead-end in a browser.
+    fn begin_oauth_without_an_active_connection_explains_itself() {
+        // v1.4.0 (R3): the restart ritual is gone; the browser flow's
+        // only remaining precondition is an active connection. Without
+        // one (fresh page, no handle), the click explains what to do
+        // instead of dead-ending in a browser.
         install_master_key();
         let db = fixture(Vec::new());
         db.with_write(|conn| {
@@ -1757,12 +2155,12 @@ mod tests {
 
         let mut page = SettingsPage::new();
         page.begin_oauth(&db);
-        assert!(page.authorize_url.is_none(), "no URL before the restart");
+        assert!(page.authorize_url.is_none(), "no URL without a connection");
         assert!(
             page.error
                 .as_deref()
-                .is_some_and(|e| e.contains("Restart SupportOS+")),
-            "the error must demand the restart: {:?}",
+                .is_some_and(|e| e.contains("no restart")),
+            "the error must point at the activation path: {:?}",
             page.error
         );
     }
@@ -1770,8 +2168,12 @@ mod tests {
     #[test]
     fn begin_oauth_succeeds_against_a_live_listener() {
         let db = fixture(Vec::new());
-        let mut server =
-            spp_core::loopback::LoopbackServer::start(db.clone(), None, 0).expect("listener");
+        let mut server = spp_core::loopback::LoopbackServer::start(
+            db.clone(),
+            std::sync::Arc::new(spp_core::provider_handle::ProviderHandle::new_empty()),
+            0,
+        )
+        .expect("listener");
         let redirect_uri = format!("http://localhost:{}/oauth/callback", server.port());
         let creds = spp_core::helpscout_real::HsCredentials {
             client_id: "cid-live".into(),
@@ -1781,9 +2183,11 @@ mod tests {
         };
 
         let mut page = SettingsPage::new();
-        page.set_real_provider(Some(std::sync::Arc::new(
-            spp_core::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds.clone()),
-        )));
+        page.set_provider_handle(std::sync::Arc::new(
+            spp_core::provider_handle::ProviderHandle::new_real(std::sync::Arc::new(
+                spp_core::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds.clone()),
+            )),
+        ));
         page.begin_oauth_at(&db, &creds, &redirect_uri);
 
         let url = page.authorize_url.clone().expect("authorization URL");
@@ -1818,9 +2222,11 @@ mod tests {
             ..Default::default()
         };
         let mut page = SettingsPage::new();
-        page.set_real_provider(Some(std::sync::Arc::new(
-            spp_core::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds),
-        )));
+        page.set_provider_handle(std::sync::Arc::new(
+            spp_core::provider_handle::ProviderHandle::new_real(std::sync::Arc::new(
+                spp_core::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds),
+            )),
+        ));
         page.connect_client_credentials();
         assert!(page.hs_connecting, "the connect runs in the background");
 
@@ -1836,6 +2242,48 @@ mod tests {
                 .is_some_and(|e| e.contains("rejected the login credentials")),
             "the failure must be reported in-app with the friendly message: {:?}",
             page.error
+        );
+    }
+
+    #[test]
+    fn r3_saving_credentials_activates_the_provider_in_session() {
+        // D2 regression test: saving credentials used to demand a
+        // restart; now the shared handle swaps to the real provider
+        // immediately and the R2 transition policy resets a poisoned
+        // state machine.
+        install_master_key();
+        let db = fixture(Vec::new());
+        let handle = std::sync::Arc::new(spp_core::provider_handle::ProviderHandle::new_empty());
+        // A poisoned pre-1.4.0 state: the empty session stamped LIVE.
+        db.with_write(|conn| {
+            spp_core::sync_engine::set_state(conn, "LIVE");
+            let _ = spp_core::settings::set_string(conn, "provider_kind", "empty");
+        });
+        let mut page = SettingsPage::new();
+        page.set_provider_handle(std::sync::Arc::clone(&handle));
+        page.hs_client_id = "cid-activate".into();
+        page.hs_client_secret = "secret-activate".into();
+        page.save_helpscout_credentials(&db);
+        assert!(
+            handle.is_real(),
+            "the provider must be live immediately after the save"
+        );
+        assert!(handle.real().is_some());
+        let (state, kind) = db.with_read(|conn| {
+            (
+                spp_core::sync_engine::get_state(conn),
+                spp_core::settings::get_string(conn, "provider_kind")
+                    .ok()
+                    .flatten(),
+            )
+        });
+        assert_eq!(state, "NEW", "the poisoned LIVE watermark is reset (R2)");
+        assert_eq!(kind.as_deref(), Some("real"));
+        // The doctor + sync kick are live-shell side effects (this bare
+        // test page has no bus), so nothing touched the network here.
+        assert!(
+            !page.doctor_running,
+            "bare pages skip the network side effects"
         );
     }
 }

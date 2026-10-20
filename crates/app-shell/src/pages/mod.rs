@@ -138,42 +138,56 @@ impl PageKey {
 
 /// Pages that must reload when a background event arrives.
 ///
-/// Port of the web `queries::keys_for_event` invalidation map:
-/// * `ratings` → dashboard + customer views,
-/// * `sync` → conversations, conversation, dashboard, nav-counts,
-///   operations-center (+ docs on incremental rows),
-/// * `conversation` → inbox, dashboard, operations (center + workload),
-/// * `notification` → notifications, mention queue, inbox, operations,
-/// * `campaign` → outreach campaigns.
+/// Port of the web `queries::keys_for_event` invalidation map, made
+/// **complete** in v1.4.0 (R5, D19): before, eleven pages (Incidents,
+/// Issue Radar, AI Center, Automation, Connectors, Custom Objects,
+/// Onboarding, Organizations, Search, Settings, Support Graph) were
+/// subscribed to nothing at all, so their cached snapshots went stale
+/// for the whole session. Now every page that renders mirror data is
+/// invalidated by the events that change mirror data. Invalidation is
+/// cheap (it clears a cached model; only the visible page re-queries),
+/// so erring on the side of freshness costs nothing.
 #[must_use]
 pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
     match event {
         ServerEvent::RatingReceived(_) | ServerEvent::RatingsRefreshed(_) => {
-            vec![PageKey::Dashboard, PageKey::Customers]
+            vec![PageKey::Dashboard, PageKey::Customers, PageKey::Reports]
         }
-        ServerEvent::SyncCompleted(e) => {
-            let mut pages = vec![
-                PageKey::Inbox,
-                PageKey::Dashboard,
-                PageKey::Operations,
-                PageKey::Reports,
-                PageKey::SyncHealth,
-                PageKey::Notifications,
-            ];
-            // Reports live on the synced mirror, so every finished sync
-            // refreshes them (they used to stay frozen on first load —
-            // PageKey::Reports was missing from every branch).
-            if (e.kind == "incremental" || e.kind == "docs") && e.processed > 0 {
-                pages.push(PageKey::Knowledge);
-            }
-            pages
-        }
+        ServerEvent::SyncCompleted(_) => vec![
+            // A finished sync can touch any mirrored table.
+            PageKey::Inbox,
+            PageKey::Dashboard,
+            PageKey::Operations,
+            PageKey::Reports,
+            PageKey::SyncHealth,
+            PageKey::Notifications,
+            PageKey::Knowledge,
+            PageKey::Customers,
+            PageKey::Organizations,
+            PageKey::Search,
+            PageKey::IssueRadar,
+            PageKey::Incidents,
+            PageKey::CustomObjects,
+            PageKey::SupportGraph,
+            PageKey::AiCenter,
+            PageKey::Onboarding,
+            PageKey::Automation,
+            PageKey::Settings,
+            PageKey::Connectors,
+        ],
         ServerEvent::ConversationUpdated(_) => vec![
             PageKey::Inbox,
             PageKey::Dashboard,
             PageKey::Operations,
             PageKey::Reports,
             PageKey::Notifications,
+            PageKey::Customers,
+            PageKey::Search,
+            PageKey::SupportGraph,
+            PageKey::IssueRadar,
+            PageKey::Incidents,
+            PageKey::CustomObjects,
+            PageKey::AiCenter,
         ],
         ServerEvent::SyncProgress(_) => vec![PageKey::SyncHealth],
         ServerEvent::OutboundJobFinished(_) => {
@@ -186,7 +200,18 @@ pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
             vec![PageKey::Inbox, PageKey::Notifications, PageKey::Operations]
         }
         ServerEvent::CampaignUpdated(_) => vec![PageKey::Outreach],
-        ServerEvent::ErrorOccurred(_) => Vec::new(),
+        ServerEvent::ErrorOccurred(e) => {
+            // R5 (D4): background failures now invalidate the pages that
+            // can explain them, plus service-specific surfaces.
+            let mut pages = vec![PageKey::Diagnostics, PageKey::SyncHealth];
+            match e.service.as_str() {
+                "docs" => pages.push(PageKey::Knowledge),
+                "connect" => pages.push(PageKey::Settings),
+                "jobs" => pages.push(PageKey::AiCenter),
+                _ => {}
+            }
+            pages
+        }
     }
 }
 
@@ -220,7 +245,63 @@ mod tests {
         let pages = invalidated_pages(&ServerEvent::sync_completed("incremental", 0, 0));
         assert!(pages.contains(&PageKey::Dashboard));
         assert!(pages.contains(&PageKey::Inbox));
-        assert!(!pages.contains(&PageKey::Knowledge));
+        // v1.4.0: Knowledge is part of the sync-complete set regardless
+        // of row count — its Help Center model is cheap to re-read and
+        // used to sit stale after a docs-only pass with 0 changes.
+        assert!(pages.contains(&PageKey::Knowledge));
+    }
+
+    #[test]
+    fn r5_every_cacheable_page_is_invalidated_by_something() {
+        // D19 regression test: every page key (except the cacheless
+        // Shell diagnostics page) must appear in at least one event's
+        // invalidation set.
+        let mut covered: Vec<PageKey> = Vec::new();
+        let probes = vec![
+            ServerEvent::sync_completed("incremental", 0, 0),
+            ServerEvent::sync_completed("initial", 5, 0),
+            ServerEvent::conversation_updated(None, None, None, None, "probe"),
+            ServerEvent::sync_progress("probe", 0, 1, 0, 0),
+            ServerEvent::outbound_job_finished(1, "create_reply", None, true, None),
+            ServerEvent::rating_received(None, None, None, None, None, None),
+            ServerEvent::ratings_refreshed(0, 0),
+            ServerEvent::notification_received(
+                1, "mention", "info", "probe", None, None, None, None, 0,
+            ),
+            ServerEvent::campaign_updated(1, "sent", 0, 0, 0, 0),
+            ServerEvent::error_occurred("error", "probe", "sync", None),
+            ServerEvent::error_occurred("warn", "probe", "docs", None),
+        ];
+        for probe in &probes {
+            for page in invalidated_pages(probe) {
+                if !covered.contains(&page) {
+                    covered.push(page);
+                }
+            }
+        }
+        for key in PageKey::all() {
+            if key == PageKey::Shell {
+                continue; // no cached model
+            }
+            assert!(
+                covered.contains(&key),
+                "page {} is subscribed to no event at all (D19)",
+                key.label()
+            );
+        }
+    }
+
+    #[test]
+    fn r5_error_occurred_invalidates_diagnostics_and_the_service_surface() {
+        let pages = invalidated_pages(&ServerEvent::error_occurred("error", "probe", "sync", None));
+        assert!(pages.contains(&PageKey::Diagnostics));
+        assert!(pages.contains(&PageKey::SyncHealth));
+        let docs = invalidated_pages(&ServerEvent::error_occurred("warn", "probe", "docs", None));
+        assert!(docs.contains(&PageKey::Knowledge));
+        let connect = invalidated_pages(&ServerEvent::error_occurred(
+            "warn", "probe", "connect", None,
+        ));
+        assert!(connect.contains(&PageKey::Settings));
     }
 
     #[test]

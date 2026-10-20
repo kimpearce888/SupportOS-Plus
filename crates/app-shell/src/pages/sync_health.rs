@@ -183,6 +183,9 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
+            // The async block below moves `engine`; keep the bus for the
+            // failure report (R5).
+            let bus = engine.bus.clone();
             let result = runtime
                 .map_err(|e| spp_core::Error::Config(e.to_string()))
                 .and_then(|rt| {
@@ -215,6 +218,18 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
                         &format!("{} failed: {e}", action_label_static(action)),
                     );
                 });
+                // v1.4.0 (R5, D4): manual-sync failures reach the UI live —
+                // before, they landed only in Diagnostics and a red-zero
+                // Sync Health page looked like a healthy quiet account.
+                if let Some(bus) = &bus {
+                    spp_core::eventing::notify_error(
+                        bus,
+                        "error",
+                        &format!("{} failed: {e}", action_label_static(action)),
+                        "sync",
+                        None,
+                    );
+                }
             }
         });
     if spawned.is_err() {
@@ -241,6 +256,9 @@ pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
+            // The async block below moves `engine`; keep the bus for the
+            // failure report (R5).
+            let bus = engine.bus.clone();
             let result = runtime
                 .map_err(|e| spp_core::Error::Config(e.to_string()))
                 .and_then(|rt| {
@@ -254,6 +272,16 @@ pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
                         &format!("Help Center sync failed: {e}"),
                     );
                 });
+                // v1.4.0 (R5, D4): same live surfacing for the docs pass.
+                if let Some(bus) = &bus {
+                    spp_core::eventing::notify_error(
+                        bus,
+                        "error",
+                        &format!("Help Center sync failed: {e}"),
+                        "docs",
+                        None,
+                    );
+                }
             }
         });
     if spawned.is_err() {

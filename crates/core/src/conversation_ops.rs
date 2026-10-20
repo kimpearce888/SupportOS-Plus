@@ -149,25 +149,11 @@ pub fn eval_mode_blocked(conn: &Connection) -> Option<&'static str> {
         )
 }
 
-pub fn create_outbound_job(
-    conn: &Connection,
-    kind: &str,
-    payload: &Value,
-    conversation_id: Option<i64>,
-    thread_id: Option<i64>,
-) -> i64 {
-    let payload = serde_json::to_string(payload).unwrap_or_else(|_| "{}".into());
-    let res = conn.execute(
-        "INSERT INTO outbound_jobs (kind, conversation_id, thread_id, payload,
-             status, requires_confirmation, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'queued', 0, datetime('now'), datetime('now'))",
-        params![kind, conversation_id, thread_id, payload],
-    );
-    if res.is_err() {
-        return 0;
-    }
-    conn.last_insert_rowid()
-}
+// `create_outbound_job` (the unkeyed variant) was removed in v1.4.0 R4:
+// it had no callers since the Phase 4 cutover and its silent
+// `return 0` on INSERT failure was defect D8's root. Everything
+// enqueues through `create_outbound_job_keyed`, which now returns a
+// truthful Result.
 
 pub fn set_outbound_status(conn: &Connection, id: i64, status: &str, error: Option<&str>) {
     if id == 0 {
@@ -468,15 +454,26 @@ pub fn require_auth(conn: &Connection, provider_kind: &str) -> Option<&'static s
     if connected { None } else { Some(NOT_CONNECTED) }
 }
 
+/// Create an outbound job row (v1.4.0 R4 / D8: the id is now a real
+/// `Result` — an INSERT failure used to return job id `0` and every
+/// caller reported success with it, so a queued reply could evaporate
+/// while the composer said it was sent).
+///
+/// With an idempotency key the insert is an upsert: an existing row for
+/// the same key is re-queued (attempts reset, error cleared) and its id
+/// returned — the duplicate-send retry path.
+///
+/// # Errors
+/// Propagates the database write failure verbatim.
 pub fn create_outbound_job_keyed(
     conn: &Connection,
     kind: &str,
     payload: &Value,
     conversation_id: Option<i64>,
     idempotency_key: Option<&str>,
-) -> i64 {
+) -> crate::error::Result<i64> {
     let payload = serde_json::to_string(payload).unwrap_or_else(|_| "{}".into());
-    let res = conn.execute(
+    conn.execute(
         "INSERT INTO outbound_jobs (kind, conversation_id, thread_id, payload,
              status, requires_confirmation, idempotency_key, created_at, updated_at)
          VALUES (?1, ?2, NULL, ?3, 'queued', 0, ?4, datetime('now'), datetime('now'))
@@ -485,16 +482,14 @@ pub fn create_outbound_job_keyed(
             status = 'queued', error = NULL, remote_result = NULL,
             attempts = 0, updated_at = datetime('now')",
         params![kind, conversation_id, payload, idempotency_key],
-    );
-    if res.is_err() {
-        return 0;
-    }
-    conn.query_row(
-        "SELECT id FROM outbound_jobs WHERE idempotency_key = ?1",
-        params![idempotency_key],
-        |r| r.get(0),
-    )
-    .unwrap_or_else(|_| conn.last_insert_rowid())
+    )?;
+    Ok(conn
+        .query_row(
+            "SELECT id FROM outbound_jobs WHERE idempotency_key = ?1",
+            params![idempotency_key],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| conn.last_insert_rowid()))
 }
 
 fn hex(bytes: &[u8]) -> String {

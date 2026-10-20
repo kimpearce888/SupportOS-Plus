@@ -320,6 +320,16 @@ impl WorkerManager {
                     "job panicked (contained at worker boundary)",
                     true,
                 );
+                drop(conn);
+                // R5 (D4): a panicking background job used to be visible
+                // only in the stdout log; it must reach the UI too.
+                crate::eventing::notify_error(
+                    &self.bus,
+                    "error",
+                    &format!("background job {} panicked and was marked failed", job.kind),
+                    "jobs",
+                    None,
+                );
             }
         }
         self.processing.store(false, Ordering::SeqCst);
@@ -355,6 +365,13 @@ impl WorkerManager {
                     true,
                 );
                 self.emit_outbound_finished(&job, false, Some("dispatcher panicked"));
+                crate::eventing::notify_error(
+                    &self.bus,
+                    "error",
+                    "the outbound dispatcher panicked while delivering; the job was marked failed",
+                    "outbound",
+                    job.conversation_local_id,
+                );
             }
         }
     }
@@ -475,19 +492,75 @@ impl WorkerManager {
                         .filter(|s| !s.is_empty())
                         .map(str::to_string);
                     let assign_to = num("assignTo");
-                    self.provider
-                        .create_reply_thread(CreateThreadInput {
-                            conversation_id: remote_id,
-                            text,
-                            draft: false,
-                            cc,
-                            bcc,
-                            status_after,
-                            assign_to,
-                            customer_id: customer_remote,
-                        })
-                        .await
-                        .map(|created| format!("reply delivered (thread {})", created.thread_id))
+                    // R4 (D7): the reply endpoint requires the customer
+                    // object, and a mirror row without a resolvable
+                    // customer used to be a guaranteed 400. Resolve the
+                    // primary customer from the live conversation and
+                    // repair the mirror row so the next send (and every
+                    // copilot surface) sees it too.
+                    let customer_remote = if customer_remote.is_some() {
+                        customer_remote
+                    } else {
+                        match self.provider.get_conversation(remote_id).await {
+                            Ok(Some(conv)) if conv.customer_id > 0 => {
+                                let cust_remote = conv.customer_id;
+                                {
+                                    let conn = self.lock();
+                                    if let Some(customer_local) = crate::sync_engine::local_id(
+                                        &conn,
+                                        "customers",
+                                        cust_remote,
+                                    ) {
+                                        let _ = conn.execute(
+                                            "UPDATE conversations SET customer_local_id = ?1
+                                               WHERE id = ?2 AND customer_local_id IS NULL",
+                                            rusqlite::params![customer_local, conversation_local],
+                                        );
+                                    }
+                                }
+                                tracing::info!(
+                                    remote_id,
+                                    customer_remote_id = cust_remote,
+                                    "reply dispatch: customer resolved from the live conversation \
+                                     (mirror row repaired)"
+                                );
+                                Some(cust_remote)
+                            }
+                            Ok(_) => None,
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "reply dispatch: could not resolve the customer from the API"
+                                );
+                                None
+                            }
+                        }
+                    };
+                    match customer_remote {
+                        Some(customer_id) => self
+                            .provider
+                            .create_reply_thread(CreateThreadInput {
+                                conversation_id: remote_id,
+                                text,
+                                draft: false,
+                                cc,
+                                bcc,
+                                status_after,
+                                assign_to,
+                                customer_id: Some(customer_id),
+                            })
+                            .await
+                            .map(|created| {
+                                format!("reply delivered (thread {})", created.thread_id)
+                            }),
+                        None => Err(Error::Other(
+                            "the reply cannot be delivered: Help Scout requires the customer \
+                             being replied to, and this conversation has no customer in the \
+                             local mirror or on the server (it may have been deleted or \
+                             merged). Refresh the conversation and retry."
+                                .into(),
+                        )),
+                    }
                 }
             }
             "create_note" => {
@@ -657,6 +730,18 @@ impl WorkerManager {
                     "outbound job failed"
                 );
                 self.emit_outbound_finished(job, false, Some(&msg));
+                // R5 (D4): also broadcast as a first-class error so the
+                // invalidation map covers Diagnostics even when the
+                // specific OutboundJobFinished handler changes. The shell
+                // suppresses the duplicate toast for service="outbound" —
+                // the outbound event already carries the exact message.
+                crate::eventing::notify_error(
+                    &self.bus,
+                    if will_retry { "warn" } else { "error" },
+                    &msg,
+                    "outbound",
+                    job.conversation_local_id,
+                );
             }
         }
     }
@@ -685,6 +770,16 @@ impl WorkerManager {
 
     async fn auto_sync(&self) {
         if self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+        // R2 (D1): the timer refuses to run against the empty provider.
+        // Before this guard, a fresh install without credentials ran a
+        // "successful" zero-record sync every minute — checkpoints
+        // stamped forward and sync_state flipped to LIVE — so when real
+        // credentials arrived the engine believed it was already up to
+        // date and never pulled the account. (The engine has the same
+        // guard; this one keeps the timer from even reading state.)
+        if self.provider.kind() == "empty" {
             return;
         }
         let state = {
@@ -726,6 +821,16 @@ impl WorkerManager {
                     "sync",
                     &format!("Automatic sync failed: {msg}"),
                     None,
+                    None,
+                );
+                drop(conn);
+                // R5 (D4): background failures reach the UI live, not
+                // only through the Diagnostics page.
+                crate::eventing::notify_error(
+                    &self.bus,
+                    "error",
+                    &format!("Automatic sync failed: {msg}"),
+                    "sync",
                     None,
                 );
             }
@@ -2008,5 +2113,80 @@ mod tests {
         assert!(!is_dangling_rating(&rating(None), None));
         // Non-positive ids are placeholders, not references -> keep.
         assert!(!is_dangling_rating(&rating(Some(0)), None));
+    }
+}
+
+#[cfg(test)]
+mod auto_sync_tests {
+    use super::*;
+
+    fn temp_db() -> crate::db::DbHandle {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-workers-autosync-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::db::DbHandle::new(conn)
+    }
+
+    /// R2 (D1) regression: the auto-sync timer must refuse to run against
+    /// the empty provider. Before the guard, a fresh install without
+    /// credentials "completed" a zero-record initial sync every minute —
+    /// stamping checkpoints forward and flipping the state to LIVE — so
+    /// real credentials that arrived later never triggered the full
+    /// history pull.
+    #[test]
+    fn auto_sync_skips_the_empty_provider_and_stamps_nothing() {
+        let db = temp_db();
+        // A poisoned pre-1.4.0 state: pretend a previous empty session
+        // already stamped LIVE. The timer must leave it exactly as it is
+        // and write no run rows.
+        db.with_write(|conn| crate::sync_engine::set_state(conn, "LIVE"));
+        let engine = Arc::new(crate::sync_engine::SyncEngine::new(
+            db.clone(),
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        ));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        // Enter before start_workers: start() spawns its timer tasks with
+        // tokio::spawn, which requires an ambient runtime on this thread.
+        // The current-thread tasks only advance while a block_on drives
+        // them, so the test below keeps full control of what runs.
+        let _enter = rt.enter();
+        let manager = start_workers(
+            db.clone(),
+            Some(engine),
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+            crate::eventing::EventBus::default(),
+            std::env::temp_dir(),
+            None,
+        );
+        rt.block_on(manager.auto_sync());
+
+        let (state, runs, checkpoints) = db.with_read(|conn| {
+            (
+                crate::sync_engine::get_state(conn),
+                conn.query_row("SELECT COUNT(*) FROM sync_runs", [], |r| r.get::<_, i64>(0))
+                    .unwrap_or(0),
+                conn.query_row(
+                    "SELECT COUNT(*) FROM sync_checkpoints WHERE status = 'ok'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0),
+            )
+        });
+        assert_eq!(state, "LIVE", "the timer must not touch the state");
+        assert_eq!(runs, 0, "the timer must not start a run");
+        assert_eq!(checkpoints, 0, "the timer must not stamp watermarks");
+        manager.stop();
     }
 }
