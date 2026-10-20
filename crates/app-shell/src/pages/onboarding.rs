@@ -1,14 +1,13 @@
-//! Onboarding page (port of the web `pages/onboarding.rs`).
+//! Onboarding page.
 //!
-//! Presentational pass (shadcn redesign): this page renders through the
-//! shared design system in `crate::design`; the queries, state, and
-//! behavior are unchanged.
+//! Status from the onboarding route logic (first-run flag, conversation
+//! count, Help Scout credential presence, sync state) and the action
+//! buttons: run the initial sync (`/api/sync/initial`, dispatched through
+//! the shared sync engine) and mark onboarding complete
+//! (`/api/onboarding/complete`).
 //!
-//! Status from the `/api/onboarding` route logic (first-run flag,
-//! conversation count, Help Scout credential presence, sync state) and the
-//! action buttons: enable demo mode (`/api/demo/enable`), run the initial
-//! sync (`/api/sync/initial`, dispatched through the shared sync engine),
-//! and mark onboarding complete (`/api/onboarding/complete`).
+//! Since 1.2.0 there is no demo mode: a fresh install is empty until
+//! Help Scout is connected.
 
 use std::sync::Arc;
 
@@ -25,7 +24,6 @@ use crate::pages::sync_health::SyncAction;
 pub struct OnboardingStatus {
     pub step: String,
     pub completed: bool,
-    pub demo_mode: bool,
     pub conversations: i64,
     pub hs_configured: bool,
     pub sync_state: String,
@@ -38,7 +36,14 @@ pub fn load_status(conn: &Connection) -> OnboardingStatus {
     let conv_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
         .unwrap_or(0);
-    let hs_configured: i64 = conn
+    // 1.2.0: credentials count as "configured" the moment the user
+    // saves them (the encrypted envelope), not only after a token
+    // exists — the 1.1.x check missed the freshly-connected state the
+    // user actually starts from.
+    let credentials_configured = spp_core::helpscout_real::HsCredentials::resolve(conn)
+        .0
+        .is_configured();
+    let token_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM oauth_tokens WHERE access_token IS NOT NULL",
             [],
@@ -51,7 +56,6 @@ pub fn load_status(conn: &Connection) -> OnboardingStatus {
     let webhook_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM webhook_events", [], |r| r.get(0))
         .unwrap_or(0);
-    let demo_mode = spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false);
     let sync_state = if webhook_count > 0 {
         "receiving"
     } else if sync_count > 0 {
@@ -62,9 +66,8 @@ pub fn load_status(conn: &Connection) -> OnboardingStatus {
     OnboardingStatus {
         step: if first_run { "complete" } else { "welcome" }.into(),
         completed: first_run,
-        demo_mode,
         conversations: conv_count,
-        hs_configured: hs_configured > 0,
+        hs_configured: credentials_configured || token_count > 0,
         sync_state: sync_state.into(),
     }
 }
@@ -91,26 +94,6 @@ impl OnboardingPage {
 
     fn reload(&mut self, db: &DbHandle) {
         self.status = Some(db.with_read(load_status));
-    }
-
-    /// Enable demo mode and complete onboarding
-    /// (the `/api/demo/enable` route logic).
-    pub fn enable_demo_mode(&mut self, db: &DbHandle) {
-        db.with_write(|conn| {
-            let _ = spp_core::settings::set_bool(conn, "demo_mode", true);
-            // 1.1.4: deliberately re-enabling demo mode revives the
-            // demo dataset, so the one-click purge's "stay empty"
-            // marker must go (boot would otherwise keep serving the
-            // empty provider and the demo data would never come back).
-            let _ = spp_core::settings::set_bool(conn, spp_core::data_reset::PURGED_FLAG, false);
-            let _ = spp_core::settings::mark_first_run_done(conn);
-        });
-        self.message = Some(
-            "Demo mode active with a simulated Help Scout account. Run the initial sync \
-             from Sync Health to populate the demo database."
-                .into(),
-        );
-        self.reload(db);
     }
 
     /// Mark onboarding complete (the `/api/onboarding/complete` route logic).
@@ -140,8 +123,9 @@ impl OnboardingPage {
             ui,
             "Welcome to SupportOS+",
             Some(
-                "Connect Help Scout, or start in demo mode with a simulated account. \
-                 Everything stays in your local database.",
+                "Connect your Help Scout account in Settings to pull your \
+                 real conversations. The app starts empty — no sample or \
+                 simulated data.",
             ),
             |_| {},
         );
@@ -155,9 +139,6 @@ impl OnboardingPage {
                 ui.end_row();
                 design::field_label(ui, "onboarding complete:");
                 ui.monospace(egui::RichText::new(status.completed.to_string()).color(t.foreground));
-                ui.end_row();
-                design::field_label(ui, "demo mode:");
-                ui.monospace(egui::RichText::new(status.demo_mode.to_string()).color(t.foreground));
                 ui.end_row();
                 design::field_label(ui, "conversations:");
                 ui.monospace(
@@ -180,10 +161,7 @@ impl OnboardingPage {
         }
 
         ui.horizontal(|ui| {
-            if design::button(ui, "Enable demo mode", ButtonVariant::Primary).clicked() {
-                self.enable_demo_mode(db);
-            }
-            if design::button(ui, "Run initial sync", ButtonVariant::Outline).clicked() {
+            if design::button(ui, "Run initial sync", ButtonVariant::Primary).clicked() {
                 match engine {
                     Some(engine) => {
                         if engine.is_running() {
@@ -193,7 +171,9 @@ impl OnboardingPage {
                             let mut sync_page = crate::pages::sync_health::SyncHealthPage::new();
                             sync_page.run_sync_action(db, engine, SyncAction::Initial);
                             self.message = Some(
-                                "Initial sync started. Watch Sync Health for progress.".into(),
+                                "Initial sync started. Watch Sync Health or Diagnostics \
+                                 for progress and errors."
+                                    .into(),
                             );
                         }
                     }
@@ -210,6 +190,12 @@ impl OnboardingPage {
         if !status.completed {
             design::hint_text(ui, "Onboarding is not marked complete yet.");
         }
+        if !status.hs_configured {
+            design::hint_text(
+                ui,
+                "No Help Scout credentials yet — add them in Settings → Help Scout first.",
+            );
+        }
     }
 }
 
@@ -224,47 +210,34 @@ mod tests {
     use super::*;
     use crate::testsupport::fixture;
 
-    fn fake_engine(db: &DbHandle) -> Arc<SyncEngine> {
-        Arc::new(SyncEngine::new(
-            db.clone(),
-            Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_demo()),
-        ))
-    }
-
     #[test]
     fn fresh_database_reports_welcome_state() {
         let db = fixture(Vec::new());
         let status = db.with_read(load_status);
         assert_eq!(status.step, "welcome");
         assert!(!status.completed);
-        assert!(!status.demo_mode);
         assert_eq!(status.conversations, 0);
         assert!(!status.hs_configured);
         assert_eq!(status.sync_state, "new");
     }
 
     #[test]
-    fn demo_mode_enable_flips_status_and_completes() {
+    fn saved_credentials_count_as_configured_before_any_token_exists() {
+        // The 1.1.x status only saw oauth_tokens, so a user who had just
+        // saved credentials (and had not completed a connect) was told
+        // Help Scout was not configured.
+        crate::testsupport::install_master_key();
         let db = fixture(Vec::new());
-        // Simulate a prior purge (1.1.4): enabling demo mode deliberately
-        // revives the demo dataset, so the purge marker must be cleared.
+        let before = db.with_read(load_status);
+        assert!(!before.hs_configured);
         db.with_write(|conn| {
-            spp_core::settings::set_bool(conn, spp_core::data_reset::PURGED_FLAG, true)
-                .expect("purge flag");
+            spp_core::helpscout_real::HsCredentials::store_in_envelope(
+                conn, "cid", "secret", "", "",
+            )
+            .expect("store credentials");
         });
-        let mut page = OnboardingPage::new();
-        page.reload(&db);
-        page.enable_demo_mode(&db);
-        let status = page.status.clone().expect("status");
-        assert!(status.demo_mode);
-        assert!(status.completed);
-        assert_eq!(status.step, "complete");
-        assert!(page.message.is_some());
-        let purged = db.with_read(|conn| {
-            spp_core::settings::get_bool(conn, spp_core::data_reset::PURGED_FLAG, false)
-                .unwrap_or(false)
-        });
-        assert!(!purged, "enabling demo mode clears the purge marker");
+        let after = db.with_read(load_status);
+        assert!(after.hs_configured, "saved credentials must count");
     }
 
     #[test]
@@ -309,24 +282,5 @@ mod tests {
                 .flatten()
         });
         assert_eq!(stored.as_deref(), Some("connect"));
-    }
-
-    #[test]
-    fn initial_sync_through_the_engine_populates_demo_data() {
-        let db = fixture(Vec::new());
-        let engine = fake_engine(&db);
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime");
-        runtime.block_on(async {
-            engine.initial_sync().await.expect("initial sync");
-        });
-        let status = db.with_read(load_status);
-        assert!(
-            status.conversations > 0,
-            "demo provider seeds conversations"
-        );
-        assert_eq!(status.sync_state, "registered");
     }
 }

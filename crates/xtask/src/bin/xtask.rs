@@ -58,10 +58,6 @@ enum Cmd {
         #[arg(long)]
         backup: String,
     },
-    Seed {
-        #[arg(long, default_value = "./data/supportos.db")]
-        db: String,
-    },
     Healthcheck {
         #[arg(long, default_value = "./data/supportos.db")]
         db: String,
@@ -97,7 +93,6 @@ fn main() -> anyhow::Result<()> {
         Cmd::Migrate { db } => run_migrate(&db),
         Cmd::Backup { db, backups_dir } => run_backup(&db, &backups_dir),
         Cmd::Restore { db, backup } => run_restore(&db, &backup),
-        Cmd::Seed { db } => run_seed(&db),
         Cmd::Healthcheck { db } => run_healthcheck(&db),
         Cmd::VectorCount { data_dir, db } => run_vector_count(&data_dir, db.as_deref()),
     }
@@ -239,25 +234,6 @@ fn run_restore(db_path: &str, backup_path: &str) -> anyhow::Result<()> {
                 .get("message")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
-        );
-    }
-    Ok(())
-}
-
-fn run_seed(db_path: &str) -> anyhow::Result<()> {
-    let path = std::path::Path::new(db_path);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut conn = spp_core::db::open(path)?;
-    spp_core::bootstrap::apply_all(&mut conn)?;
-    let seeded = spp_core::demo::seed_demo_data(&conn, true);
-    if seeded {
-        println!("seed: demo data inserted into {}", path.display());
-    } else {
-        println!(
-            "seed: demo data already present in {} (no changes)",
-            path.display()
         );
     }
     Ok(())

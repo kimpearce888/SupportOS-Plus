@@ -1463,7 +1463,7 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
             .filter(|h| !h.is_empty())
             .or(body.as_deref())
             .unwrap_or("");
-        crate::demo::html_to_text(raw).to_lowercase()
+        crate::textutil::html_to_text(raw).to_lowercase()
     };
     let customer_msgs: Vec<String> = rows
         .iter()
@@ -1493,7 +1493,7 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
                     .filter(|x| !x.is_empty())
                     .or(b.as_deref())
                     .unwrap_or("");
-                crate::demo::html_to_text(raw)
+                crate::textutil::html_to_text(raw)
             };
             if !is_closing_acknowledgment(&plain) {
                 follow_up_count += 1;

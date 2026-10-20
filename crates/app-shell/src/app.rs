@@ -31,6 +31,7 @@ use crate::pages::connectors::ConnectorsPage;
 use crate::pages::custom_objects::CustomObjectsPage;
 use crate::pages::customers::CustomersPage;
 use crate::pages::dashboard::DashboardPage;
+use crate::pages::diagnostics::DiagnosticsPage;
 use crate::pages::inbox::InboxPage;
 use crate::pages::incidents::IncidentsPage;
 use crate::pages::issue_radar::IssueRadarPage;
@@ -85,6 +86,7 @@ pub struct ShellApp {
     search: SearchPage,
     settings: SettingsPage,
     support_graph: SupportGraphPage,
+    diagnostics: DiagnosticsPage,
     sync_health: SyncHealthPage,
     palette: CommandPalette,
     toasts: Toasts,
@@ -162,6 +164,7 @@ impl ShellApp {
             search: SearchPage::new(),
             settings,
             support_graph: SupportGraphPage::new(),
+            diagnostics: DiagnosticsPage::new(),
             sync_health: SyncHealthPage::new(),
             palette: CommandPalette::new(),
             toasts: Toasts::new(),
@@ -195,6 +198,7 @@ impl ShellApp {
                 PageKey::Search => self.search.invalidate(),
                 PageKey::Settings => self.settings.invalidate(),
                 PageKey::SupportGraph => self.support_graph.invalidate(),
+                PageKey::Diagnostics => self.diagnostics.invalidate(),
                 PageKey::SyncHealth => self.sync_health.invalidate(),
                 PageKey::Shell => {}
             }
@@ -516,6 +520,9 @@ impl eframe::App for ShellApp {
                                     PageKey::Search => self.search.ui(ui, &self.db),
                                     PageKey::Settings => self.settings.ui(ui, &self.db),
                                     PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
+                                    PageKey::Diagnostics => {
+                                        self.diagnostics.ui(ui, &self.db);
+                                    }
                                     PageKey::SyncHealth => {
                                         self.sync_health.ui(ui, &self.db, sync.as_ref());
                                     }
@@ -570,6 +577,7 @@ const NAV_GROUPS: &[(&str, &[PageKey])] = &[
             PageKey::Search,
             PageKey::SupportGraph,
             PageKey::Connectors,
+            PageKey::Diagnostics,
             PageKey::SyncHealth,
             PageKey::Settings,
             PageKey::Onboarding,
@@ -815,7 +823,7 @@ impl ShellApp {
             }
         }
         if std::env::var("SPP_SHOT_SEED").as_deref() == Ok("1")
-            && let Err(e) = self.db.with_write(seed_demo_for_screenshots)
+            && let Err(e) = self.db.with_write(seed_fixture_for_screenshots)
         {
             tracing::warn!(error = %e, "screenshot seed failed");
         }
@@ -825,10 +833,10 @@ impl ShellApp {
     }
 }
 
-/// Seed a compact demo dataset so the screenshots show real rows, badges,
+/// Seed a compact fixture dataset so the screenshots show real rows, badges,
 /// charts and thread entries (feature-gated; never runs in normal builds).
 #[cfg(feature = "ui-screenshot")]
-fn seed_demo_for_screenshots(conn: &mut rusqlite::Connection) -> spp_core::error::Result<()> {
+fn seed_fixture_for_screenshots(conn: &mut rusqlite::Connection) -> spp_core::error::Result<()> {
     use spp_core::error::Result;
     let seed_conv = |conn: &rusqlite::Connection,
                      id: i64,
@@ -1049,7 +1057,7 @@ mod tests {
 
     #[test]
     fn every_page_key_has_a_label_and_covers_the_full_surface() {
-        assert_eq!(PageKey::all().len(), 21);
+        assert_eq!(PageKey::all().len(), 22);
         for key in PageKey::all() {
             assert!(!key.label().is_empty());
         }

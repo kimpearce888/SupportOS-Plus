@@ -64,31 +64,31 @@ display server and GL/Vulkan driver are used from the system.
 **First run** initializes itself: the SQLite database is created (all
 migrations applied) under `~/.local/share/supportos-plus/` (override with
 `SPP_DATA_DIR`), background workers start, a loopback listener serves Help
-Scout webhooks and the OAuth callback on `127.0.0.1`, and the shell boots into
-demo mode unless Help Scout credentials are configured (or the demo data was
-explicitly purged, in which case it boots empty until you connect). No setup
-steps.
+Scout webhooks and the OAuth callback on `127.0.0.1`, and the shell boots
+**empty** — no sample, demo or simulated data of any kind — until Help
+Scout credentials are configured. No setup steps.
 
-**Connecting your Help Scout account** (updated in 1.1.4): open
+**Connecting your Help Scout account** (updated in 1.2.0): open
 *Settings → Help Scout* and fill in the credentials form — client ID, client
 secret, webhook secret (and, optionally, the Docs API key) from your Help
 Scout custom app. The values are stored encrypted in the local secrets
-envelope; saving a configured client ID/secret pair turns demo mode off
-automatically. The order matters, and 1.1.4 now enforces and explains it at
-every step:
+envelope. Then:
 
 1. On your Help Scout profile create a *custom app* and set its **callback
    URL** to exactly `http://localhost:3000/oauth/callback` (shown in the
    connection card; change the port with `HELPSCOUT_REDIRECT_URI` — the
    registered URL and the setting must match).
-2. Save the credentials in the form, **restart SupportOS+** (the connect
-   buttons refuse to run before the restart and say so — the OAuth callback
-   listener starts with the app).
-3. Back on *Settings → Help Scout*, either press **connect via OAuth**
-   (the browser flow; the local listener verifies the callback and stores
-   the token) or **connect with client credentials** (no browser round-trip;
-   also the fastest way to see whether the credentials are accepted — the
-   result appears directly in the app).
+2. Save the credentials in the form and **restart SupportOS+**.
+3. **That is all.** Since 1.2.0 the app signs in with the stored client
+   credentials automatically (no token dance required) and immediately
+   starts the initial sync — conversations, customers, threads, ratings and
+   the rest start arriving on the first boot. The browser OAuth flow and
+   the in-page "connect with client credentials" button remain available
+   if you prefer an explicit connect.
+
+Every failure along the way — a rejected login, a rate limit, a failed
+resource sync, a rejected webhook — is recorded and shown on the
+*Diagnostics* page (see below) instead of vanishing into stdout logs.
 
 Environment variables (`HELPSCOUT_CLIENT_ID`, `HELPSCOUT_CLIENT_SECRET`,
 `HELPSCOUT_WEBHOOK_SECRET`, `HELPSCOUT_DOCS_API_KEY`,
@@ -97,18 +97,21 @@ field — useful for CI and headless setups. If the callback listener cannot
 bind its port (another program is using it), the connect button says so
 instead of leaving a dead browser tab.
 
-**Removing demo data** (updated in 1.1.4): *Settings → Help Scout → Demo
-data* deletes every demo-seeded or synced record (conversations, customers,
-threads, ratings, knowledge base, incidents, reports, AI records), resets
-sync state and the vector index in one click — after a two-step
-confirmation — and **turns demo mode off in the same transaction**, so the
-data cannot silently re-sync minutes later (in 1.1.3 the still-running
-session re-pulled the whole fake dataset within five minutes, and the next
-boot rebuilt it; both paths are closed). Credentials, application settings,
-business hours, automation rules, saved views/replies and custom object
-types are kept. After a purge SupportOS+ boots empty until you connect Help
-Scout; re-enabling demo mode from the onboarding page deliberately brings
-the demo dataset back.
+**Diagnostics & reports** (new in 1.2.0): the *Diagnostics* page shows every
+recorded error, warning and info event — sync failures with the failing
+resource and reason, automatic sign-ins, OAuth callback outcomes, webhook
+rejections, background job failures — with level filters and a clear
+button, plus the outcome of every recent sync run (records processed,
+errors, state). If "nothing is syncing", the answer is on this page.
+
+**Resetting workspace data** (updated in 1.2.0): *Settings → Help Scout →
+Workspace data* deletes every synced record (conversations, customers,
+threads, ratings, knowledge base, incidents, reports, AI records — plus
+anything left over from the demo dataset that shipped before 1.2.0),
+resets sync state and the vector index in one click after a two-step
+confirmation, and arms a fresh first sync for the next start. Credentials,
+application settings, business hours, automation rules, saved views/replies
+and custom object types are kept.
 
 **Upgrading from 0.2.x:** the first 1.0.0 launch moves your existing data from
 the old `~/.local/share/supportos-plusplus/` directory to the new location
@@ -126,14 +129,14 @@ A single Cargo workspace, split by concern:
 | Crate | Role |
 |---|---|
 | `crates/catalog` | Shared type catalog re-exported by every other crate |
-| `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, Help Scout provider (real + demo), AI providers, sqlite-vec vector store, loopback listener. No UI deps. |
-| `crates/app-shell` | Native desktop shell (eframe/egui) — 21 pages render in-process against `core`, no HTTP hop |
-| `crates/xtask` | Developer entry point — `dev` / `lint` / `verify-icons` / `package` / `deb` / db ops (`migrate`/`backup`/`restore`/`seed`/`healthcheck`/`vector-count`) |
+| `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, Help Scout provider (real), AI providers, sqlite-vec vector store, loopback listener, diagnostics event log. No UI deps. |
+| `crates/app-shell` | Native desktop shell (eframe/egui) — 22 pages render in-process against `core`, no HTTP hop |
+| `crates/xtask` | Developer entry point — `dev` / `lint` / `verify-icons` / `package` / `deb` / db ops (`migrate`/`backup`/`restore`/`healthcheck`/`vector-count`) |
 
-The 21 shell pages: Shell, Dashboard, Inbox, Customers, Knowledge, Reports,
+The 22 shell pages: Shell, Dashboard, Inbox, Customers, Knowledge, Reports,
 Operations, AI Center, Automation, Connectors, Custom Objects, Incidents,
 Issue Radar, Notifications, Onboarding, Organizations, Outreach, Search,
-Settings, Support Graph, Sync Health.
+Settings, Support Graph, Sync Health, Diagnostics.
 
 ## Key design decisions
 

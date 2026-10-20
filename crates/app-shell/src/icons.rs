@@ -95,6 +95,7 @@ impl Icon {
             K::SupportGraph => Self::ShareGraph,
             K::Connectors => Self::Plug,
             K::SyncHealth => Self::HeartPulse,
+            K::Diagnostics => Self::Activity,
             K::Settings => Self::Sliders,
             K::Onboarding => Self::Compass,
             K::Shell => Self::Terminal,

@@ -84,76 +84,54 @@ pub fn open_db(path: &Path) -> spp_core::error::Result<DbHandle> {
 /// `HelpScoutProvider` trait, so the boot code hands both out of one
 /// construction.
 pub struct BootServices {
-    /// Which of the three providers boot built (diagnostics, the
-    /// loopback listener's demo flag, and tests all read it).
+    /// Which provider boot built (diagnostics and tests read it).
     pub mode: BootMode,
     /// The real provider when Help Scout credentials are configured,
-    /// `None` in demo mode.
+    /// `None` in the empty session.
     pub real: Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
-    /// The provider the sync engine drives (real, demo, or empty).
+    /// The provider the sync engine drives (real or empty).
     pub provider: Arc<dyn spp_core::helpscout::HelpScoutProvider>,
     /// The shared sync engine.
     pub engine: Arc<SyncEngine>,
 }
 
-/// The provider boot selected (1.1.4). Before 1.1.4 "no credentials"
-/// silently meant "demo data": the one-click demo purge could never
-/// stick, because the next boot rebuilt the demo provider and re-synced
-/// the whole fake dataset. The explicit third state fixes that.
+/// The provider boot selected. Since 1.2.0 there are exactly two
+/// states — the app never loads simulated content:
+///
+/// * [`Real`](BootMode::Real) — Help Scout credentials resolved
+///   (environment first, then the encrypted envelope written by the
+///   settings form).
+/// * [`Empty`](BootMode::Empty) — no credentials configured: the
+///   inert provider serves nothing until Help Scout is connected, and
+///   nothing is ever faked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootMode {
     /// Real Help Scout credentials resolved (env or the encrypted
-    /// envelope written by the settings form) and demo mode is off.
+    /// envelope written by the settings form).
     Real,
-    /// Demo mode is on (setting or `LOCAL_DEMO_MODE`): the fake
-    /// provider serves a simulated account.
-    Demo,
-    /// The user purged the demo content (Settings → Help Scout →
-    /// Demo data) and no credentials are configured yet: the empty
-    /// provider serves nothing until Help Scout is connected.
+    /// No credentials configured: the inert provider serves nothing
+    /// until Help Scout is connected.
     Empty,
 }
 
-/// Build the boot services the way the Tauri shell did — with one fix
-/// (1.1.4): the provider is chosen explicitly instead of "whatever is
-/// not real is demo".
+/// Build the boot services.
 ///
-/// * **Real** when demo mode is off and client credentials resolve
-///   (environment first, then the encrypted envelope).
-/// * **Empty** when the user has purged the demo content
-///   ([`spp_core::data_reset::PURGED_FLAG`]) and no credentials are
-///   configured — the purge must stick, so boot must NOT resurrect the
-///   fake dataset.
-/// * **Demo** otherwise (the out-of-the-box experience: a fresh
-///   install without credentials runs against the simulated account).
-///
-/// `LOCAL_DEMO_MODE=true` is an explicit developer override and wins
-/// over the purge flag.
-///
-/// # Panics
-/// Never; a missing provider degrades to the demo provider.
+/// * **Real** when client credentials resolve (environment first,
+///   then the encrypted envelope written by the settings form).
+/// * **Empty** otherwise — the inert provider. Before 1.2.0 a fresh
+///   install without credentials silently ran a simulated demo
+///   account; that dataset and its boot path are gone.
 #[must_use]
 pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
-    let env_demo = std::env::var("LOCAL_DEMO_MODE").as_deref() == Ok("true");
-    let demo_mode = db
-        .with_read(|conn| spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false))
-        || env_demo;
     // Credentials resolve per field: environment first (CI, power
     // users), then the encrypted envelope written by the in-app
     // settings form (1.1.3) — so the app connects without any
     // environment variables.
     let credentials = db.with_read(|conn| spp_core::helpscout_real::HsCredentials::resolve(conn).0);
-    let purged = !env_demo
-        && db.with_read(|conn| {
-            spp_core::settings::get_bool(conn, spp_core::data_reset::PURGED_FLAG, false)
-                .unwrap_or(false)
-        });
-    let mode = if !demo_mode && credentials.is_configured() {
+    let mode = if credentials.is_configured() {
         BootMode::Real
-    } else if !demo_mode && purged {
-        BootMode::Empty
     } else {
-        BootMode::Demo
+        BootMode::Empty
     };
     let (real, provider): (
         Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
@@ -169,11 +147,7 @@ pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
         }
         BootMode::Empty => (
             None,
-            Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_empty()),
-        ),
-        BootMode::Demo => (
-            None,
-            Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_demo()),
+            Arc::new(spp_core::helpscout::EmptyHelpScoutProvider::new()),
         ),
     };
     let engine = Arc::new(SyncEngine::new(db.clone(), provider.clone()).with_bus(bus.clone()));
@@ -310,26 +284,14 @@ mod tests {
     }
 
     #[test]
-    fn boot_defaults_to_the_demo_provider_on_a_fresh_install() {
+    fn boot_serves_the_empty_provider_on_a_fresh_install() {
         let db = crate::testsupport::empty_db();
-        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
-        assert_eq!(boot.mode, BootMode::Demo);
-        assert!(boot.real.is_none(), "no credentials, no real provider");
-    }
-
-    #[test]
-    fn boot_serves_the_empty_provider_after_a_demo_purge() {
-        // The 1.1.3 bug: purged data came back on the next boot because
-        // "no credentials" silently meant "demo provider".
-        let db = crate::testsupport::empty_db();
-        db.with_write(|conn| {
-            spp_core::settings::set_bool(conn, "demo_mode", false).expect("demo off");
-            spp_core::settings::set_bool(conn, spp_core::data_reset::PURGED_FLAG, true)
-                .expect("purge flag");
-        });
         let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
         assert_eq!(boot.mode, BootMode::Empty);
-        assert!(boot.real.is_none());
+        assert!(
+            boot.real.is_none(),
+            "no credentials, no real provider — and nothing is simulated"
+        );
     }
 
     #[test]
@@ -349,28 +311,5 @@ mod tests {
         let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
         assert_eq!(boot.mode, BootMode::Real);
         assert!(boot.real.is_some(), "credentials resolve at boot");
-    }
-
-    #[test]
-    fn boot_demo_mode_wins_over_stored_credentials() {
-        install_master_key();
-        let db = crate::testsupport::empty_db();
-        db.with_write(|conn| {
-            spp_core::helpscout_real::HsCredentials::store_in_envelope(
-                conn,
-                "cid-boot",
-                "secret-boot",
-                "wh",
-                "",
-            )
-            .expect("store");
-            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
-        });
-        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
-        assert_eq!(boot.mode, BootMode::Demo);
-        assert!(
-            boot.real.is_none(),
-            "explicit demo mode overrides credentials"
-        );
     }
 }

@@ -316,7 +316,7 @@ impl OperationsPage {
                 ui,
                 Icon::Activity,
                 "No operations data yet",
-                "Run a sync or try demo mode to populate tiles.",
+                "No activity yet — connect Help Scout and run a sync to populate tiles.",
             );
             return None;
         }

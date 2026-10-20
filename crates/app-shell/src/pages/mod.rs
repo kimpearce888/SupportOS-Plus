@@ -18,6 +18,7 @@ pub mod connectors;
 pub mod custom_objects;
 pub mod customers;
 pub mod dashboard;
+pub mod diagnostics;
 pub mod inbox;
 pub mod incidents;
 pub mod issue_radar;
@@ -52,6 +53,7 @@ pub enum PageKey {
     /// Shell diagnostics (theme, database status) — the Phase 2 surface.
     Shell,
     Dashboard,
+    Diagnostics,
     Inbox,
     Customers,
     Knowledge,
@@ -80,6 +82,7 @@ impl PageKey {
         match self {
             Self::Shell => "Shell",
             Self::Dashboard => "Dashboard",
+            Self::Diagnostics => "Diagnostics",
             Self::Inbox => "Inbox",
             Self::Customers => "Customers",
             Self::Knowledge => "Knowledge",
@@ -105,7 +108,7 @@ impl PageKey {
     /// Sidebar order (port of the web nav: work queues first, reference
     /// pages last).
     #[must_use]
-    pub fn all() -> [Self; 21] {
+    pub fn all() -> [Self; 22] {
         [
             Self::Dashboard,
             Self::Inbox,
@@ -124,6 +127,7 @@ impl PageKey {
             Self::Search,
             Self::SupportGraph,
             Self::Connectors,
+            Self::Diagnostics,
             Self::SyncHealth,
             Self::Settings,
             Self::Onboarding,

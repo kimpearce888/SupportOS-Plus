@@ -587,7 +587,7 @@ pub fn conversation_languages(conn: &Connection, conversation_id: i64) -> Result
         .map(|rows| {
             rows.filter_map(|r| r.ok())
                 .map(|(id, html)| {
-                    let text = crate::demo::html_to_text(&html);
+                    let text = crate::textutil::html_to_text(&html);
                     (id, detect_language(&text))
                 })
                 .collect()

@@ -99,11 +99,9 @@ fn main() {
                 .and_then(|p| p.parse::<u16>().ok())
         })
         .unwrap_or(0);
-    let demo_mode = matches!(boot.mode, spp_shell::BootMode::Demo);
     let loopback = match spp_core::loopback::LoopbackServer::start(
         db.clone(),
         boot.real.clone(),
-        demo_mode,
         configured_port,
     ) {
         Ok(server) => {

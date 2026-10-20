@@ -544,7 +544,10 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
             let msgs: Vec<Value> = messages
                 .iter()
                 .map(|(author, kind, date, body)| {
-                    let text: String = crate::demo::html_to_text(body).chars().take(700).collect();
+                    let text: String = crate::textutil::html_to_text(body)
+                        .chars()
+                        .take(700)
+                        .collect();
                     json!({
                         "author": author,
                         "type": kind,

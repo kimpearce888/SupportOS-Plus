@@ -177,6 +177,17 @@ pub fn record_failure(conn: &Connection, resource: &str, error: &str, records_fa
            last_error = excluded.last_error, retry_count = retry_count + 1, status = 'error'",
         params![resource, records_failed, clipped],
     );
+    // 1.2.0: every resource failure also lands in the Diagnostics log
+    // (application_errors) so the user can see *why* nothing is syncing
+    // from Settings → Diagnostics instead of a stdout log they never see.
+    let _ = crate::audit::log_event(
+        conn,
+        "error",
+        "sync",
+        &format!("Sync resource {resource} failed"),
+        None,
+        Some(&serde_json::json!({ "resource": resource, "error": clipped })),
+    );
 }
 
 pub fn set_checkpoint_running(conn: &Connection, resource: &str, running: bool) {
@@ -967,6 +978,14 @@ impl SyncEngine {
                 if n > 0 {
                     tracing::debug!(conversations = n, "interaction snapshots built");
                 }
+                let _ = crate::audit::log_event(
+                    &conn,
+                    if failed == 0 { "info" } else { "warn" },
+                    "sync",
+                    &format!("Initial sync finished: {processed} records processed, {failed} resource(s) failed"),
+                    None,
+                    None,
+                );
             }
             self.emit_sync_completed("initial", processed, failed);
             Ok(())
@@ -1056,6 +1075,17 @@ impl SyncEngine {
                 );
             }
             let processed: i64 = results.iter().map(|r| r.processed).sum();
+            {
+                let conn = self.lock();
+                let _ = crate::audit::log_event(
+                    &conn,
+                    if failed == 0 { "info" } else { "warn" },
+                    "sync",
+                    &format!("Incremental sync finished: {processed} records processed, {failed} resource(s) failed"),
+                    None,
+                    None,
+                );
+            }
             self.emit_sync_completed("incremental", processed, failed);
             Ok(())
         }

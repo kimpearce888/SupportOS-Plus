@@ -65,7 +65,7 @@ pub(crate) fn published_threads(conn: &Connection, conversation_local: i64) -> V
         Ok(ThreadLite {
             thread_id: r.get(0)?,
             kind: r.get(1)?,
-            text: crate::demo::html_to_text(&r.get::<_, String>(2)?),
+            text: crate::textutil::html_to_text(&r.get::<_, String>(2)?),
             at: r.get(3)?,
         })
     })
@@ -1833,7 +1833,7 @@ pub async fn compute_qa_ai_layer(
                     "reply" => "agent",
                     _ => "note",
                 };
-                let text = crate::demo::html_to_text(body);
+                let text = crate::textutil::html_to_text(body);
                 format!(
                     "[{author} #{id}] {}",
                     text.chars().take(600).collect::<String>()

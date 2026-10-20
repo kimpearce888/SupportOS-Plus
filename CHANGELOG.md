@@ -4,6 +4,75 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-10-20
+
+The "nothing fake" release. The demo dataset and its boot path are
+gone entirely: a fresh install starts empty, credentials alone are
+enough to connect and receive real data automatically, and every
+error the app records is now visible on a dedicated Diagnostics page
+instead of vanishing into stdout logs.
+
+### Removed
+
+- **The entire demo/placeholder dataset and every path that served
+  it.** The simulated Help Scout account (fake customers,
+  conversations, threads, ratings, knowledge, incidents — roughly
+  1,500 lines of fixture content), the `new_demo()` provider, the
+  demo boot mode, the `LOCAL_DEMO_MODE` override, the demo onboarding
+  button, the simulated-activity demo tools on Sync Health, and the
+  `xtask seed` command are all deleted. The app now boots in exactly
+  two states: **Real** (credentials configured) or **Empty** (an
+  inert provider that serves nothing and simulates nothing). Existing
+  demo content in older databases is wiped by the new
+  *Settings → Help Scout → Workspace data* reset (which also arms a
+  fresh first sync), and migration m050 deletes the retired
+  `demo_mode` / `demo_content_purged` settings rows.
+
+### Fixed
+
+- **Saved credentials never pulled any data.** Two compounding
+  defects: (a) `access_token()` returned a bare 401 when no token
+  row existed, so a user who saved their Client ID/Secret but never
+  pressed a connect button got nothing — and no visible error; (b)
+  the five-minute auto-sync timer treated `sync_state = NEW` (never
+  synced) as "do nothing", and nothing in the production path ever
+  started the initial sync — the only triggers were manual buttons
+  on Onboarding/Sync Health. Now the client-credentials grant signs
+  in automatically whenever credentials are stored (and re-logs in
+  when a token expires without a refresh token), and a `NEW` state
+  kicks off the initial sync immediately at boot: save credentials,
+  restart, data arrives.
+- **Errors were invisible.** Sync failures, rejected logins and
+  webhook rejections only went to the terminal (or a DB table no
+  page displayed). They are all recorded in the diagnostics event
+  log now — see Added.
+
+### Added
+
+- **Diagnostics page** (System group): the persisted event log
+  (`application_errors`, extended by migration m050 with an
+  info/warn/error `level` column and a 500-row cap) with level
+  filters, expandable details and a clear button, plus a sync-run
+  report table (kind, state, records processed, errors). Writers:
+  every failed sync resource (with the resource name and reason),
+  run summaries, automatic client-credentials sign-ins and their
+  failures, OAuth callback outcomes, unsigned-webhook rejections and
+  automatic-sync failures.
+- **Migration m050** (`m050_diagnostics_log`): the level column, a
+  level-aware index, and removal of the retired demo settings rows.
+
+### Changed
+
+- *Settings → Help Scout → Demo data* became **Workspace data**: it
+  now deletes all synced content (and any pre-1.2.0 demo leftovers),
+  keeps credentials and configuration, and sets `sync_state = NEW`
+  so the next start pulls a connected account fresh.
+- Onboarding no longer offers demo mode; its status card counts
+  saved credentials as "configured" (the 1.1.x check only saw
+  stored tokens, missing the freshly-connected state).
+- Unsigned webhook events with no configured secret are always
+  rejected (the old demo-mode allowance died with demo mode).
+
 ## [1.1.4] — 2026-10-20
 
 Hotfix for the two 1.1.3 features: user reports showed both the
