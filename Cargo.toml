@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 # MSRV = the pinned toolchain (rust-toolchain.toml, D1/D5: stability
 # first). Older compilers are never tested, so claiming 1.85 would be
@@ -48,7 +48,13 @@ subtle = "2.6"
 
 # --- egui stack (decision D1): exact pins, first consumed by crates/app-shell in Phase 2 ---
 egui = { version = "=0.37" }
-eframe = { version = "=0.37" }
+# v1.1.1: `glow` is compiled into every build and is the default
+# renderer (see app-shell `resolve_renderer`). eframe's own default
+# (wgpu alone) needs a Vulkan driver or a GLES stack — neither is
+# guaranteed on real machines, which is exactly how 1.1.0 failed to
+# start outside CI. wgpu stays compiled in via eframe defaults; it is
+# reachable again with SPP_RENDERER=wgpu.
+eframe = { version = "=0.37", features = ["glow"] }
 egui_extras = { version = "=0.37" }
 # NOTE: egui_plot 0.37 builds against egui 0.36 (no release targets 0.37
 # yet — releases lag one minor). Re-pin and adopt it once it catches up;
