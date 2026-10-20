@@ -8,7 +8,6 @@ struct Rebuild<'a> {
     copy_sql: &'a str,
     replacement_indexes: &'a [&'a str],
 }
-
 fn with_if_not_exists(sql: &str) -> String {
     let s = sql.trim().trim_end_matches(';');
     if let Some(rest) = s.strip_prefix("CREATE UNIQUE INDEX ") {
@@ -52,14 +51,9 @@ fn captured_triggers(conn: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(rows)
 }
 
-struct ChildRows {
-    name: String,
-    fks: Vec<(String, String, String)>,
-    columns: Vec<String>,
-    rows: Vec<Vec<rusqlite::types::Value>>,
-}
-
-fn fk_children(conn: &Connection, table: &str) -> Result<Vec<String>> {
+/// Every `(child_table, from_column, parent_column)` edge in which
+/// `child_table` references `parent` via a declared foreign key.
+fn referencing_edges(conn: &Connection, parent: &str) -> Result<Vec<(String, String, String)>> {
     let mut stmt = conn.prepare(
         "SELECT name FROM sqlite_master
           WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -69,104 +63,69 @@ fn fk_children(conn: &Connection, table: &str) -> Result<Vec<String>> {
         .filter_map(|r| r.ok())
         .collect();
     drop(stmt);
-    let mut children = Vec::new();
+    let mut edges = Vec::new();
     for name in names {
         let mut fk = conn.prepare(&format!("PRAGMA foreign_key_list({name})"))?;
-        let hits: i64 = fk
-            .query_map([], |r| r.get::<_, String>(2))?
-            .filter_map(|r| r.ok())
-            .filter(|t| t == table)
-            .count() as i64;
-        if hits > 0 {
-            children.push(name);
-        }
-    }
-    Ok(children)
-}
-
-fn capture_child(conn: &Connection, name: &str, parent: &str) -> Result<ChildRows> {
-    let columns: Vec<String> = {
-        let mut stmt = conn.prepare(&format!("PRAGMA table_info({name})"))?;
-        let cols: Vec<String> = stmt
-            .query_map([], |r| r.get(1))?
-            .filter_map(|c| c.ok())
-            .collect();
-        cols
-    };
-    let fks: Vec<(String, String, String)> = {
-        let mut stmt = conn.prepare(&format!("PRAGMA foreign_key_list({name})"))?;
-        let rows: Vec<(String, String, String)> = stmt
+        let rows: Vec<(String, String, String)> = fk
             .query_map([], |r| {
                 Ok((
-                    r.get::<_, String>(3)?,
                     r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
                     r.get::<_, String>(4)?,
                 ))
             })?
             .filter_map(|r| r.ok())
-            .filter(|(from, to, _)| to == parent && from != to)
+            .filter(|(to_table, _, _)| to_table == parent)
+            .map(|(_, from, to)| (name.clone(), from, to))
             .collect();
-        rows
-    };
-    let rows: Vec<Vec<rusqlite::types::Value>> = {
-        let mut stmt = conn.prepare(&format!("SELECT * FROM {name}"))?;
-        let n = columns.len();
-
-        stmt.query_map([], |r| {
-            let mut row: Vec<rusqlite::types::Value> = Vec::with_capacity(n);
-            for i in 0..n {
-                row.push(r.get(i)?);
-            }
-            Ok(row)
-        })?
-        .filter_map(|r| r.ok())
-        .collect()
-    };
-    Ok(ChildRows {
-        name: name.to_string(),
-        fks,
-        columns,
-        rows,
-    })
+        edges.extend(rows);
+    }
+    Ok(edges)
 }
 
-fn restore_child(conn: &Connection, cap: &ChildRows) -> Result<()> {
-    let placeholders = (1..=cap.columns.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "INSERT INTO {} ({}) VALUES ({})",
-        cap.name,
-        cap.columns.join(", "),
-        placeholders
-    );
-    'rows: for row in &cap.rows {
-        for (from, parent, to) in &cap.fks {
-            let idx = cap
-                .columns
-                .iter()
-                .position(|c| c == from)
-                .expect("foreign_key_list column exists in table_info");
-            if let rusqlite::types::Value::Integer(id) = &row[idx] {
-                let n: i64 = conn.query_row(
-                    &format!("SELECT COUNT(*) FROM {parent} WHERE {to} = ?1"),
-                    [id],
-                    |r| r.get(0),
-                )?;
-                if n == 0 {
-                    continue 'rows;
-                }
+/// Remove rows that dangle after `root` was rebuilt with a possibly
+/// filtered row set. v1.1.2 design: migrations run with foreign-key
+/// enforcement suspended (see `apply_boot_steps`), so nothing cascades
+/// on its own — this walk performs the cascade explicitly, breadth
+/// first: rows of every table referencing `root` whose target row no
+/// longer exists are deleted, then their dependents likewise, so no
+/// dangling reference survives to the step's foreign_key_check.
+fn prune_dangling_references(conn: &Connection, root: &str) -> Result<()> {
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(root.to_string());
+    let mut enqueued: Vec<String> = vec![root.to_string()];
+    while let Some(parent) = queue.pop_front() {
+        for (child, from, to) in referencing_edges(conn, &parent)? {
+            conn.execute(
+                &format!(
+                    "DELETE FROM \"{child}\" WHERE \"{from}\" IS NOT NULL
+                       AND \"{from}\" NOT IN (SELECT \"{to}\" FROM \"{parent}\")"
+                ),
+                [],
+            )?;
+            if !enqueued.iter().any(|c| c == &child) {
+                enqueued.push(child.clone());
+                queue.push_back(child);
             }
         }
-        conn.execute(&sql, rusqlite::params_from_iter(row.iter().cloned()))?;
     }
     Ok(())
 }
 
+/// Rebuild a table in place: create `__rebuild`, copy rows through
+/// `copy_sql` (which may filter), drop the original, rename, restore
+/// indexes and triggers, then prune rows that now dangle.
+///
+/// v1.1.2 contract: the caller (`apply_boot_steps`) suspends foreign-key
+/// enforcement for the whole step, and verifies integrity with
+/// `PRAGMA foreign_key_check` before committing — SQLite's live
+/// enforcement cannot survive a drop-and-rename dance (immediate
+/// cascade actions fire against rows that are about to come back, and
+/// the deferred-violation counter never forgets a violation that
+/// UPDATE-in-place or a rename has long since repaired — the mechanism
+/// behind the 1.1.0/1.1.1 "migration 36 failed" boot failures on real
+/// 0.2.x data).
 fn rebuild_table(conn: &Connection, table: &str, rb: &Rebuild<'_>) -> Result<()> {
-    conn.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
-
     let indexes = captured_indexes(conn, table)?;
     let triggers = captured_triggers(conn, table)?;
     let replaced: Vec<String> = rb
@@ -186,10 +145,6 @@ fn rebuild_table(conn: &Connection, table: &str, rb: &Rebuild<'_>) -> Result<()>
         .collect();
 
     if rb.new_name == table {
-        let children: Vec<ChildRows> = fk_children(conn, table)?
-            .iter()
-            .map(|name| capture_child(conn, name, table))
-            .collect::<Result<Vec<_>>>()?;
         conn.execute_batch(&format!(
             "CREATE TABLE \"{}__rebuild\" {};",
             table, rb.new_ddl
@@ -217,9 +172,11 @@ fn rebuild_table(conn: &Connection, table: &str, rb: &Rebuild<'_>) -> Result<()>
         for ddl in &triggers {
             conn.execute_batch(ddl)?;
         }
-        for cap in &children {
-            restore_child(conn, cap)?;
-        }
+        // The copy may have dropped rows (orphaned threads, merged
+        // conversations, ...): every row that now points at a missing
+        // row of the rebuilt table — recursively — must go before the
+        // step's foreign_key_check.
+        prune_dangling_references(conn, table)?;
     } else {
         conn.execute_batch(&format!("CREATE TABLE \"{}\" {};", rb.new_name, rb.new_ddl))?;
         conn.execute_batch(rb.copy_sql)?;
@@ -379,59 +336,7 @@ pub fn apply_m045(conn: &Connection) -> Result<()> {
 }
 
 pub fn apply_m046(conn: &Connection) -> Result<()> {
-    if !fk_declared(conn, "customers", "organization_id")? {
-        rebuild_table(
-            conn,
-            "customers",
-            &Rebuild {
-                new_name: "customers",
-                new_ddl: "(
-                    id               INTEGER PRIMARY KEY,
-                    remote_id        INTEGER NOT NULL UNIQUE,
-                    first_name       TEXT,
-                    last_name        TEXT,
-                    email            TEXT,
-                    organization     TEXT,
-                    job_title        TEXT,
-                    phone            TEXT,
-                    created_at       TEXT,
-                    updated_at       TEXT,
-                    local_created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-                    deleted_at       TEXT,
-                    organization_id  INTEGER REFERENCES organizations (id) ON DELETE SET NULL,
-                    photo_url        TEXT,
-                    raw_json         TEXT,
-                    raw_json_hash    TEXT,
-                    remote_created_at TEXT,
-                    remote_updated_at TEXT,
-                    last_seen_at     TEXT,
-                    last_synced_at   TEXT,
-                    local_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    background       TEXT,
-                    age              TEXT,
-                    gender           TEXT,
-                    location         TEXT
-                )",
-                copy_sql: "INSERT INTO \"customers__rebuild\"
-                               (id, remote_id, first_name, last_name, email, organization,
-                                job_title, phone, created_at, updated_at, local_created_at,
-                                deleted_at, organization_id, photo_url, raw_json,
-                                raw_json_hash, remote_created_at, remote_updated_at,
-                                last_seen_at, last_synced_at, local_updated_at,
-                                background, age, gender, location)
-                           SELECT id, remote_id, first_name, last_name, email, organization,
-                                  job_title, phone, created_at, updated_at, local_created_at,
-                                  deleted_at,
-                                  CASE WHEN organization_id IN (SELECT id FROM organizations)
-                                       THEN organization_id END,
-                                  photo_url, raw_json, raw_json_hash, remote_created_at,
-                                  remote_updated_at, last_seen_at, last_synced_at,
-                                  local_updated_at, background, age, gender, location
-                             FROM customers",
-                replacement_indexes: &[],
-            },
-        )?;
-    }
+    rebuild_customers(conn)?;
 
     if !fk_declared(conn, "attachments", "thread_id")? {
         rebuild_table(
@@ -988,4 +893,342 @@ fn fk_declared(conn: &Connection, table: &str, column: &str) -> Result<bool> {
         .filter(|from| from == column)
         .count();
     Ok(hits > 0)
+}
+
+/// The customers rebuild of m046, factored out so the regression tests
+/// can drive the exact production DDL and copy path over a legacy
+/// fixture (see the `tests` module below).
+fn rebuild_customers(conn: &Connection) -> Result<()> {
+    if !fk_declared(conn, "customers", "organization_id")? {
+        rebuild_table(
+            conn,
+            "customers",
+            &Rebuild {
+                new_name: "customers",
+                new_ddl: "(
+                    id               INTEGER PRIMARY KEY,
+                    remote_id        INTEGER NOT NULL UNIQUE,
+                    first_name       TEXT,
+                    last_name        TEXT,
+                    email            TEXT,
+                    organization     TEXT,
+                    job_title        TEXT,
+                    phone            TEXT,
+                    created_at       TEXT,
+                    updated_at       TEXT,
+                    local_created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    deleted_at       TEXT,
+                    organization_id  INTEGER REFERENCES organizations (id) ON DELETE SET NULL,
+                    photo_url        TEXT,
+                    raw_json         TEXT,
+                    raw_json_hash    TEXT,
+                    remote_created_at TEXT,
+                    remote_updated_at TEXT,
+                    last_seen_at     TEXT,
+                    last_synced_at   TEXT,
+                    local_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    background       TEXT,
+                    age              TEXT,
+                    gender           TEXT,
+                    location         TEXT
+                )",
+                copy_sql: "INSERT INTO \"customers__rebuild\"
+                               (id, remote_id, first_name, last_name, email, organization,
+                                job_title, phone, created_at, updated_at, local_created_at,
+                                deleted_at, organization_id, photo_url, raw_json,
+                                raw_json_hash, remote_created_at, remote_updated_at,
+                                last_seen_at, last_synced_at, local_updated_at,
+                                background, age, gender, location)
+                           SELECT id, remote_id, first_name, last_name, email, organization,
+                                  job_title, phone, created_at, updated_at, local_created_at,
+                                  deleted_at,
+                                  CASE WHEN organization_id IN (SELECT id FROM organizations)
+                                       THEN organization_id END,
+                                  photo_url, raw_json, raw_json_hash, remote_created_at,
+                                  remote_updated_at, last_seen_at, last_synced_at,
+                                  local_updated_at, background, age, gender, location
+                             FROM customers",
+                replacement_indexes: &[],
+            },
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Regression coverage for the table-rebuild machinery on legacy
+    //! (0.2.x-shaped) data. The CI upgrade test uses an empty database,
+    //! which is why the 1.1.0/1.1.1 "UNIQUE constraint failed:
+    //! ratings.id" boot failure on real data was never caught: the
+    //! capture half of the capture/restore pair did not delete the
+    //! child rows it captured, so the restore re-inserted rows that had
+    //! never been removed.
+
+    use super::*;
+
+    /// Build the legacy shape the m045/m046 rebuilds expect: threads
+    /// with `actor_id` (pre-actor-model), ratings and attachments as
+    /// foreign-key children of `conversation_threads`, and customers
+    /// whose `organization_id` carries no foreign key yet.
+    fn legacy_shape() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .expect("foreign keys on (mirrors db::open)");
+        conn.execute_batch(
+            "CREATE TABLE organizations (id INTEGER PRIMARY KEY, name TEXT, deleted_at TEXT);
+             CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+             CREATE TABLE system_users (id INTEGER PRIMARY KEY, name TEXT);
+             CREATE TABLE saved_replies (id INTEGER PRIMARY KEY, name TEXT);
+             CREATE TABLE customers (
+                 id               INTEGER PRIMARY KEY,
+                 remote_id        INTEGER NOT NULL UNIQUE,
+                 first_name       TEXT, last_name TEXT, email TEXT,
+                 organization     TEXT, job_title TEXT, phone TEXT,
+                 created_at       TEXT, updated_at TEXT,
+                 local_created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 deleted_at       TEXT,
+                 organization_id  INTEGER,
+                 photo_url        TEXT, raw_json TEXT, raw_json_hash TEXT,
+                 remote_created_at TEXT, remote_updated_at TEXT,
+                 last_seen_at     TEXT, last_synced_at TEXT,
+                 local_updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                 background       TEXT, age TEXT, gender TEXT, location TEXT
+             );
+             CREATE TABLE conversations (
+                 id INTEGER PRIMARY KEY,
+                 number INTEGER, subject TEXT, status TEXT,
+                 customer_local_id INTEGER REFERENCES customers (id),
+                 created_at TEXT, updated_at TEXT
+             );
+             CREATE TABLE conversation_threads (
+                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                 remote_id         INTEGER,
+                 conversation_id   INTEGER,
+                 thread_type       TEXT,
+                 state             TEXT,
+                 body              TEXT,
+                 body_html         TEXT,
+                 from_name         TEXT,
+                 from_email        TEXT,
+                 actor_type        TEXT,
+                 actor_id          INTEGER,
+                 assigned_to_type  TEXT,
+                 assigned_to_id    INTEGER,
+                 saved_reply_local_id INTEGER,
+                 action_type       TEXT,
+                 action_text       TEXT,
+                 to_list           TEXT, cc_list TEXT, bcc_list TEXT,
+                 scheduled_for     TEXT,
+                 remote_created_at TEXT, remote_updated_at TEXT,
+                 local_created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                 local_updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                 last_synced_at    TEXT,
+                 raw_json          TEXT, raw_json_hash TEXT,
+                 deleted_at        TEXT,
+                 fts_indexed       INTEGER,
+                 embedding_state   TEXT,
+                 created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE ratings (
+                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                 remote_id         INTEGER UNIQUE,
+                 conversation_id   INTEGER REFERENCES conversations (id),
+                 thread_local_id   INTEGER REFERENCES conversation_threads (id),
+                 rating            TEXT,
+                 comments          TEXT,
+                 customer_local_id INTEGER REFERENCES customers (id),
+                 user_local_id     INTEGER,
+                 remote_created_at TEXT,
+                 raw_json          TEXT,
+                 last_synced_at    TEXT
+             );
+             CREATE TABLE attachments (
+                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                 remote_id       INTEGER UNIQUE,
+                 thread_id       INTEGER NOT NULL
+                                     REFERENCES conversation_threads (id),
+                 conversation_id INTEGER NOT NULL
+                                     REFERENCES conversations (id),
+                 filename        TEXT, mime_type TEXT, size INTEGER,
+                 local_path      TEXT, hash TEXT, downloaded_at TEXT,
+                 state           TEXT, raw_json TEXT
+             );
+             INSERT INTO organizations (id, name) VALUES (1, 'Acme');
+             INSERT INTO users (id, name) VALUES (1, 'Kim');
+             INSERT INTO customers (id, remote_id, first_name, organization_id)
+                 VALUES (1, 9001, 'Ann', 1), (2, 9002, 'Bob', 99);
+             INSERT INTO conversations (id, number, subject, status, customer_local_id)
+                 VALUES (1, 101, 'Refund', 'closed', 1),
+                        (2, 102, 'Billing', 'open', 2);
+             INSERT INTO conversation_threads
+                   (id, remote_id, conversation_id, thread_type, state, body,
+                    actor_type, actor_id)
+                 VALUES (1, 5001, 1,  'customer', 'published', 'please refund', 'user', 1),
+                        (2, 5002, 99, 'customer', 'published', 'orphan thread', 'user', 1),
+                        (3, 5003, 2,  'customer', 'published', 'billing question', 'customer', 2);
+             INSERT INTO ratings
+                   (id, remote_id, conversation_id, thread_local_id, rating, customer_local_id)
+                 VALUES (10, 7001, 1, 1,    '3', 1),
+                        (11, 7002, 1, 2,    '1', 2),
+                        (12, 7003, 2, NULL, '2', 2);
+             INSERT INTO attachments (id, remote_id, thread_id, conversation_id, filename)
+                 VALUES (20, 6001, 1, 1, 'receipt.pdf');",
+        )
+        .expect("seed legacy shape");
+        conn
+    }
+
+    /// Mirror `apply_boot_steps`: every migration step suspends
+    /// foreign-key enforcement, runs in one transaction, and must pass
+    /// `PRAGMA foreign_key_check` before the commit is accepted.
+    fn run_step(conn: &mut Connection, step: fn(&Connection) -> Result<()>) {
+        conn.pragma_update(None, "foreign_keys", "OFF")
+            .expect("suspend FK enforcement for the step");
+        let tx = conn.transaction().expect("begin step transaction");
+        step(&tx).expect("migration step applies");
+        let violations: i64 = tx
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .expect("foreign_key_check");
+        assert_eq!(
+            violations, 0,
+            "step must commit foreign-key clean (foreign_key_check)"
+        );
+        tx.commit().expect("commit step");
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .expect("restore FK enforcement");
+    }
+
+    fn ids(conn: &Connection, table: &str) -> Vec<i64> {
+        let mut stmt = conn
+            .prepare(&format!("SELECT id FROM {table} ORDER BY id"))
+            .expect("prepare id scan");
+        stmt.query_map([], |r| r.get(0))
+            .expect("query ids")
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    fn columns(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("prepare table_info");
+        stmt.query_map([], |r| r.get::<_, String>(1))
+            .expect("query columns")
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    #[test]
+    fn m045_rebuild_restores_ratings_children_on_legacy_data() {
+        // Before v1.1.2 this died with "UNIQUE constraint failed:
+        // ratings.id" on the first non-empty child table (the user's
+        // real 0.2.x database); empty databases never saw it.
+        let mut conn = legacy_shape();
+        run_step(&mut conn, apply_m045);
+
+        // Threads: the orphan (conversation 99 never existed) is gone,
+        // survivors keep their ids and gain the actor-model columns.
+        assert_eq!(ids(&conn, "conversation_threads"), vec![1, 3]);
+        assert!(
+            !columns(&conn, "conversation_threads").contains(&"actor_id".to_string()),
+            "legacy actor_id column must be replaced"
+        );
+        let (thread_type, by_user, by_customer): (String, Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT type, created_by_user_id, created_by_customer_id
+                   FROM conversation_threads WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("thread 1 survived with actor mapping");
+        assert_eq!(thread_type, "customer");
+        assert_eq!(by_user, Some(1), "user actor maps to created_by_user_id");
+        assert_eq!(by_customer, None, "thread 1 had no customer actor");
+
+        // Ratings: restored with their original ids; the row pointing
+        // at the dropped orphan thread is not restored; the row with
+        // no thread reference comes back unchanged.
+        assert_eq!(ids(&conn, "ratings"), vec![10, 12]);
+        let (thread_ref, rating): (Option<i64>, String) = conn
+            .query_row(
+                "SELECT thread_local_id, rating FROM ratings WHERE id = 10",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("rating 10 restored");
+        assert_eq!(thread_ref, Some(1));
+        assert_eq!(rating, "3");
+
+        // Attachments: second FK child of the rebuilt table, restored
+        // with its original id and still pointing at thread 1.
+        assert_eq!(ids(&conn, "attachments"), vec![20]);
+    }
+
+    #[test]
+    fn m046_customers_rebuild_keeps_conversations_and_ratings() {
+        // The upgrade path continues into the m046 customers rebuild,
+        // whose capture set includes conversations and ratings (children
+        // of customers via customer_local_id) — and conversations is
+        // itself the parent of ratings, attachments and threads, so the
+        // delete/re-insert must not disturb the grandchildren. All rows
+        // must come back with their original ids, and an organization_id
+        // pointing at a missing organization is nulled by the copy CASE.
+        // (Driven through `rebuild_customers` because the full m046 also
+        // rebuilds ten other tables the minimal fixture does not carry.)
+        let mut conn = legacy_shape();
+        run_step(&mut conn, apply_m045);
+        conn.pragma_update(None, "foreign_keys", "OFF")
+            .expect("suspend FK enforcement for the step");
+        let tx = conn.transaction().expect("begin step transaction");
+        rebuild_customers(&tx).expect("customers rebuild applies");
+        let violations: i64 = tx
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .expect("foreign_key_check");
+        assert_eq!(
+            violations, 0,
+            "customers rebuild must commit foreign-key clean"
+        );
+        tx.commit().expect("commit step");
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .expect("restore FK enforcement");
+
+        assert_eq!(ids(&conn, "customers"), vec![1, 2]);
+        let org = |cid: i64| -> Option<i64> {
+            conn.query_row(
+                "SELECT organization_id FROM customers WHERE id = ?1",
+                [cid],
+                |r| r.get(0),
+            )
+            .expect("customer row restored")
+        };
+        assert_eq!(org(1), Some(1), "existing organization survives");
+        assert_eq!(
+            org(2),
+            None,
+            "organization 99 does not exist; the copy CASE nulls it"
+        );
+
+        // Conversations and ratings were children of the rebuilt
+        // customers table (customer_local_id); both must be back with
+        // their original ids, and the grandchildren untouched.
+        assert_eq!(ids(&conn, "conversations"), vec![1, 2]);
+        assert_eq!(ids(&conn, "ratings"), vec![10, 12]);
+        assert_eq!(ids(&conn, "conversation_threads"), vec![1, 3]);
+        assert_eq!(ids(&conn, "attachments"), vec![20]);
+
+        // The rebuild is what declares the organization_id foreign key.
+        let has_org_fk = conn
+            .prepare("PRAGMA foreign_key_list(customers)")
+            .expect("prepare fk list")
+            .query_map([], |r| r.get::<_, String>(3))
+            .expect("query fk list")
+            .filter_map(|r| r.ok())
+            .any(|from| from == "organization_id");
+        assert!(has_org_fk, "customers.organization_id now has its FK");
+    }
 }
