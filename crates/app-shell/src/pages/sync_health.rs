@@ -1,16 +1,11 @@
 //! Sync Health page (port of the web `pages/sync_health.rs`).
 //!
-//! Presentational pass (shadcn redesign): this page renders through the
-//! shared design system in `crate::design`; the queries, state, and
-//! behavior are unchanged.
-//!
 //! Status cards (engine state, last successful checkpoint, webhook queue
 //! counts), the checkpoint table, recent runs, and the sync actions —
 //! initial / incremental / reconcile / cancel, run in-process through the
 //! shared `SyncEngine` (the `/api/sync/*` route logic without the HTTP
-//! hop), plus the demo tools from `/api/demo/*` (`demo::run_demo_tool`).
-//!
-//! The run/status queries are typed ports of the `/api/sync/status` SQL.
+//! hop). Since 1.2.0 the simulated-activity demo tools are gone: the
+//! page reports on real sync activity only.
 
 use std::sync::Arc;
 
@@ -170,32 +165,6 @@ impl SyncAction {
     }
 }
 
-/// Demo tools (port of the web page's demo buttons → `/api/demo/*`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DemoToolAction {
-    WebhookEvent,
-    CsatRating,
-    IncomingMessage,
-}
-
-impl DemoToolAction {
-    fn label(self) -> &'static str {
-        match self {
-            Self::WebhookEvent => "Simulate webhook event",
-            Self::CsatRating => "Simulate CSAT rating",
-            Self::IncomingMessage => "Simulate incoming message",
-        }
-    }
-
-    fn tool(self) -> spp_core::demo::DemoTool {
-        match self {
-            Self::WebhookEvent => spp_core::demo::DemoTool::SimulatedWebhookEvent,
-            Self::CsatRating => spp_core::demo::DemoTool::SimulatedCsatRating,
-            Self::IncomingMessage => spp_core::demo::DemoTool::SimulatedIncomingMessage,
-        }
-    }
-}
-
 /// The interactive sync health page state.
 pub struct SyncHealthPage {
     status: Option<SyncStatus>,
@@ -273,19 +242,6 @@ impl SyncHealthPage {
             })
             .ok();
         self.message = Some(format!("{} (started in background)", action.label()));
-    }
-
-    /// Run one demo tool synchronously (writes are local and fast).
-    pub fn run_demo_tool(&mut self, db: &DbHandle, action: DemoToolAction) {
-        let result = db.with_write(|conn| spp_core::demo::run_demo_tool(conn, action.tool()));
-        self.message = Some(match result {
-            spp_core::demo::DemoToolResult::Success { message } => message,
-            spp_core::demo::DemoToolResult::DemoModeRequired => {
-                "Demo mode is off — enable it in onboarding.".into()
-            }
-            spp_core::demo::DemoToolResult::Failed { message } => message,
-        });
-        self.status = None;
     }
 
     /// Render the page. `engine` is the shared sync engine; `None` mirrors
@@ -472,23 +428,6 @@ impl SyncHealthPage {
             }
         });
         ui.add_space(8.0);
-
-        design::card_titled(
-            ui,
-            "Demo tools",
-            Some("Write simulated Help Scout activity into the local database."),
-            |ui| {
-                for action in [
-                    DemoToolAction::WebhookEvent,
-                    DemoToolAction::CsatRating,
-                    DemoToolAction::IncomingMessage,
-                ] {
-                    if design::button(ui, action.label(), ButtonVariant::Outline).clicked() {
-                        self.run_demo_tool(db, action);
-                    }
-                }
-            },
-        );
     }
 }
 
@@ -548,31 +487,6 @@ mod tests {
         assert_eq!(status.webhooks.processed, 2);
         assert_eq!(status.webhooks.failed, 1);
         assert_eq!(status.webhooks.duplicates, 1);
-    }
-
-    #[test]
-    fn demo_tools_require_demo_mode() {
-        let db = fixture(Vec::new());
-        let mut page = SyncHealthPage::new();
-        page.run_demo_tool(&db, DemoToolAction::WebhookEvent);
-        assert!(
-            page.message
-                .clone()
-                .unwrap_or_default()
-                .contains("Demo mode is off")
-        );
-
-        db.with_write(|conn| {
-            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
-        });
-        page.run_demo_tool(&db, DemoToolAction::WebhookEvent);
-        assert!(
-            !page
-                .message
-                .clone()
-                .unwrap_or_default()
-                .contains("Demo mode is off")
-        );
     }
 
     #[test]

@@ -1250,7 +1250,7 @@ pub async fn extract_memories(
         let body_html: Option<String> = r.get(2)?;
         let body: Option<String> = r.get(3)?;
         let author = from_name.or(kind).unwrap_or_else(|| "unknown".into());
-        let text: String = crate::demo::html_to_text(&body_html.or(body).unwrap_or_default())
+        let text: String = crate::textutil::html_to_text(&body_html.or(body).unwrap_or_default())
             .chars()
             .take(1200)
             .collect();
@@ -2111,7 +2111,7 @@ pub async fn analyze_interaction(
                     .filter(|h| !h.is_empty())
                     .or(body.as_deref())
                     .unwrap_or("");
-                let text = crate::demo::html_to_text(raw);
+                let text = crate::textutil::html_to_text(raw);
                 (!text.trim().is_empty()).then_some((text, Some(id)))
             })
             .collect()
@@ -2164,7 +2164,7 @@ pub async fn analyze_interaction(
                 .flatten();
             let excerpt = first_msg
                 .as_deref()
-                .map(crate::demo::html_to_text)
+                .map(crate::textutil::html_to_text)
                 .unwrap_or_default();
             (
                 h.number,

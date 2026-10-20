@@ -827,7 +827,7 @@ pub(crate) fn customer_messages(
                 .filter(|h| !h.is_empty())
                 .or(body.as_deref())
                 .unwrap_or("");
-            let text = crate::demo::html_to_text(raw);
+            let text = crate::textutil::html_to_text(raw);
             if text.trim().is_empty() {
                 None
             } else {

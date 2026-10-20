@@ -300,7 +300,7 @@ fn load_thread_rows(conn: &Connection, conversation_id: i64) -> Vec<ThreadRow> {
     .map(|rows| {
         rows.filter_map(|r| r.ok())
             .map(|mut t| {
-                t.text = crate::demo::html_to_text(&t.text);
+                t.text = crate::textutil::html_to_text(&t.text);
                 t
             })
             .collect()

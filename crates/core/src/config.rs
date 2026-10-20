@@ -18,7 +18,6 @@ const LEGACY_DB_FILE_NAME: &str = "supportos-plusplus.db";
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
     pub data_dir: PathBuf,
-    pub demo_mode: bool,
     pub helpscout: HelpScoutConfig,
     pub ai: AiConfig,
     pub sync_interval_minutes: u32,
@@ -51,7 +50,6 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             data_dir: default_data_dir(),
-            demo_mode: false,
             helpscout: HelpScoutConfig::default(),
             ai: AiConfig::default(),
             sync_interval_minutes: 5,
@@ -207,7 +205,6 @@ fn env_int(key: &str, default: i64) -> i64 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnvConfig {
-    pub demo_mode: bool,
     pub log_level: String,
     pub helpscout: EnvHelpScout,
     pub lmstudio: EnvLmStudio,
@@ -249,7 +246,6 @@ pub struct EnvSync {
 
 pub fn load_env_config() -> EnvConfig {
     EnvConfig {
-        demo_mode: env_bool("LOCAL_DEMO_MODE", false),
         log_level: env_str("LOG_LEVEL", "info"),
         helpscout: EnvHelpScout {
             client_id: env_str("HELPSCOUT_CLIENT_ID", ""),

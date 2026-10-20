@@ -88,7 +88,7 @@ pub fn build(
                 author,
                 kind,
                 date: at.unwrap_or_default().chars().take(10).collect(),
-                text: crate::demo::html_to_text(&raw_text)
+                text: crate::textutil::html_to_text(&raw_text)
                     .chars()
                     .take(1500)
                     .collect(),

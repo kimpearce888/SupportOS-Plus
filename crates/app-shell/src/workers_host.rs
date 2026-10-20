@@ -170,7 +170,7 @@ mod tests {
         WorkersHost::start(
             db,
             None,
-            Arc::new(spp_core::helpscout::FakeHelpScoutProvider::new_demo()),
+            Arc::new(spp_core::helpscout::EmptyHelpScoutProvider::new()),
             EventBus::default(),
             temp_data_dir("boot"),
             None,

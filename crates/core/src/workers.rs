@@ -309,14 +309,41 @@ impl WorkerManager {
             let conn = self.lock();
             crate::sync_engine::get_state(&conn)
         };
-        if state == "NEW" || state == "INITIALIZING" || state == "BACKFILLING" {
+        // A run in progress owns the state machine; do not pile onto it.
+        if state == "INITIALIZING" || state == "BACKFILLING" {
             return;
         }
         let Some(engine) = self.engine.clone() else {
             return;
         };
-        if let Err(e) = engine.incremental_sync().await {
-            tracing::warn!(error = %e, operation = "incremental_sync", "Incremental sync failed");
+        // 1.2.0: `NEW` used to be a "do nothing" state — a freshly
+        // connected account sat empty forever because nothing in the
+        // production path ever started the initial sync (only the manual
+        // buttons on Onboarding / Sync Health did). `NEW` now means
+        // "kick off the initial sync"; the engine's own running guard
+        // prevents a second run from stacking behind it.
+        let result = if state == "NEW" {
+            tracing::info!(state, "first sync: starting the initial pull");
+            engine.initial_sync().await
+        } else {
+            engine.incremental_sync().await
+        };
+        if let Err(e) = result {
+            // "A sync is already running" is the healthy overlap case
+            // (a manual button run); it is not a failure worth reporting.
+            let msg = e.to_string();
+            if !msg.contains("already running") {
+                tracing::warn!(error = %e, operation = "auto_sync", "Automatic sync failed");
+                let conn = self.lock();
+                let _ = crate::audit::log_event(
+                    &conn,
+                    "error",
+                    "sync",
+                    &format!("Automatic sync failed: {msg}"),
+                    None,
+                    None,
+                );
+            }
         }
     }
 

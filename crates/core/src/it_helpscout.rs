@@ -827,7 +827,7 @@ fn client_credentials_login_exchanges_and_persists() {
     );
 
     // Persisted in the DB and visible through the status endpoint.
-    let status = p.oauth_status(false);
+    let status = p.oauth_status();
     assert_eq!(status["configured"], json!(true));
     assert_eq!(status["authenticated"], json!(true));
     let (access, refresh, revoked): (String, Option<String>, i64) = db
@@ -1018,7 +1018,7 @@ fn revoke_clears_the_token_and_blocks_requests() {
     let p = provider_with_token(&db, &creds(&mock));
 
     p.revoke().expect("revoke");
-    let status = p.oauth_status(false);
+    let status = p.oauth_status();
     assert_eq!(status["authenticated"], json!(false));
 
     let err = runtime()

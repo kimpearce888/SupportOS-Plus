@@ -16,6 +16,25 @@ pub fn empty_db() -> DbHandle {
     DbHandle::new(conn)
 }
 
+/// Install a process-global secrets master key for envelope tests.
+/// In-memory databases never get one from bootstrap by design, so page
+/// tests that touch the encrypted envelope call this first. The key
+/// file is created and removed immediately; the key lives in the
+/// process for the rest of the test run.
+pub fn install_master_key() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let path = std::env::temp_dir().join(format!(
+        "spp-testsupport-key-{}-{nanos}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    spp_core::settings::init_master_key(&path).expect("master key");
+    let _ = std::fs::remove_file(&path);
+}
+
 /// A conversation seed row:
 /// `(marker, local_id, subject, status, channel, mailbox_id, assignee_id, customer_id)`.
 pub type ConvSeed = (

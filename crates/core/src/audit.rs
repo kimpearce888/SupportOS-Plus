@@ -3,6 +3,44 @@ use serde_json::{Value, json};
 
 use crate::error::Result;
 
+/// Keep at most this many events; `log_event` prunes older rows so the
+/// Diagnostics page stays fast on long-running installs.
+const EVENT_LOG_CAP: i64 = 500;
+
+/// Migration m050: the diagnostics event log grows a `level` column
+/// (existing rows default to `error`) plus a level-aware index, and the
+/// retired demo-mode settings rows are dropped for good.
+pub fn apply_m050(conn: &Connection) -> Result<()> {
+    let has_level: bool = {
+        let mut stmt = conn.prepare("PRAGMA table_info(application_errors)")?;
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .collect();
+        names.iter().any(|n| n == "level")
+    };
+    if !has_level {
+        conn.execute_batch(
+            "ALTER TABLE application_errors ADD COLUMN level TEXT NOT NULL DEFAULT 'error';",
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_application_errors_level_id
+            ON application_errors(level, id DESC);",
+    )?;
+    let retired = conn.execute(
+        "DELETE FROM application_settings WHERE key IN ('demo_mode', 'demo_content_purged')",
+        [],
+    )?;
+    if retired > 0 {
+        tracing::info!(
+            rows = retired,
+            "m050: removed retired demo-mode settings rows"
+        );
+    }
+    Ok(())
+}
+
 pub fn ensure_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS audit_log (
@@ -167,15 +205,113 @@ pub fn log_error(
     stack: Option<&str>,
     context: Option<&Value>,
 ) -> Result<()> {
+    log_event(conn, "error", service, message, stack, context)
+}
+
+/// Append one event to the diagnostics log (the Diagnostics page reads
+/// it). `level` is one of `"info"`, `"warn"`, `"error"`; anything else
+/// is stored as `"error"` so a typo can never hide a failure.
+pub fn log_event(
+    conn: &Connection,
+    level: &str,
+    service: &str,
+    message: &str,
+    stack: Option<&str>,
+    context: Option<&Value>,
+) -> Result<()> {
     ensure_tables(conn)?;
+    let level = match level {
+        "info" | "warn" | "error" => level,
+        _ => "error",
+    };
     let msg: String = message.chars().take(2000).collect();
     let stk: Option<String> = stack.map(|s| s.chars().take(8000).collect());
     conn.execute(
-        "INSERT INTO application_errors (timestamp, service, message, stack, context)
-         VALUES (datetime('now'), ?1, ?2, ?3, ?4)",
-        rusqlite::params![service, msg, stk, context.map(|c| c.to_string()),],
+        "INSERT INTO application_errors (timestamp, service, message, stack, context, level)
+         VALUES (datetime('now'), ?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![service, msg, stk, context.map(|c| c.to_string()), level],
     )?;
+    // Cap the log: newest EVENT_LOG_CAP events survive.
+    let _ = conn.execute(
+        "DELETE FROM application_errors WHERE id <= \
+         (SELECT COALESCE(MAX(id), 0) FROM application_errors) - ?1",
+        [EVENT_LOG_CAP],
+    );
     Ok(())
+}
+
+/// One diagnostics event as the Diagnostics page shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiagEvent {
+    pub id: i64,
+    pub timestamp: String,
+    pub level: String,
+    pub service: String,
+    pub message: String,
+    pub stack: Option<String>,
+    pub context: Option<Value>,
+}
+
+/// Newest-first slice of the diagnostics log. `level = None` returns all
+/// levels; `Some("error")` returns only errors, `Some("warn")` warnings,
+/// and so on.
+pub fn list_recent_events(
+    conn: &Connection,
+    limit: i64,
+    level: Option<&str>,
+) -> Result<Vec<DiagEvent>> {
+    ensure_tables(conn)?;
+    let mut out = Vec::new();
+    let has_level = {
+        let mut stmt = conn.prepare("PRAGMA table_info(application_errors)")?;
+        stmt.query_map([], |r| r.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .any(|n| n == "level")
+    };
+    if !has_level {
+        return Ok(out);
+    }
+    let mut stmt = if level.is_some() {
+        conn.prepare(
+            "SELECT id, timestamp, level, service, message, stack, context \
+             FROM application_errors WHERE level = ?1 ORDER BY id DESC LIMIT ?2",
+        )?
+    } else {
+        conn.prepare(
+            "SELECT id, timestamp, level, service, message, stack, context \
+             FROM application_errors ORDER BY id DESC LIMIT ?1",
+        )?
+    };
+    let map_row = |r: &rusqlite::Row<'_>| -> rusqlite::Result<DiagEvent> {
+        let context: Option<String> = r.get(6)?;
+        Ok(DiagEvent {
+            id: r.get(0)?,
+            timestamp: r.get(1)?,
+            level: r.get(2)?,
+            service: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            message: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            stack: r.get(5)?,
+            context: context
+                .as_deref()
+                .and_then(|c| serde_json::from_str::<Value>(c).ok()),
+        })
+    };
+    if let Some(lvl) = level {
+        let rows = stmt.query_map(rusqlite::params![lvl, limit], map_row)?;
+        out.extend(rows.flatten());
+    } else {
+        let rows = stmt.query_map(rusqlite::params![limit], map_row)?;
+        out.extend(rows.flatten());
+    }
+    Ok(out)
+}
+
+/// Delete every diagnostics event. Used by the Diagnostics page's clear
+/// button. Returns the number of rows removed.
+pub fn clear_events(conn: &Connection) -> Result<usize> {
+    ensure_tables(conn)?;
+    let n = conn.execute("DELETE FROM application_errors", [])?;
+    Ok(n)
 }
 
 pub fn list_recent_errors(conn: &Connection, limit: i64) -> Result<Vec<Value>> {
@@ -192,4 +328,105 @@ pub fn list_recent_errors(conn: &Connection, limit: i64) -> Result<Vec<Value>> {
         }))
     })?;
     Ok(rows.flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn migrated() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    #[test]
+    fn m050_adds_the_level_column_and_drops_demo_rows() {
+        let conn = migrated();
+        let has_level: bool = {
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(application_errors)")
+                .expect("pragma");
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .expect("columns")
+                .filter_map(|r| r.ok())
+                .any(|n| n == "level")
+        };
+        assert!(has_level, "m050 must add the level column");
+        // The retired demo rows are gone and cannot resurrect.
+        for key in ["demo_mode", "demo_content_purged"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM application_settings WHERE key = ?1",
+                    [key],
+                    |r| r.get(0),
+                )
+                .expect("count");
+            assert_eq!(n, 0, "the {key} settings row must be deleted by m050");
+        }
+    }
+
+    #[test]
+    fn log_event_levels_filter_and_cap() {
+        let conn = migrated();
+        log_event(&conn, "info", "sync", "first sync finished", None, None).expect("info");
+        log_event(&conn, "warn", "webhook", "rejected: no secret", None, None).expect("warn");
+        log_event(
+            &conn,
+            "error",
+            "helpscout",
+            "login failed",
+            Some("stack-frame"),
+            Some(&serde_json::json!({ "detail": "401" })),
+        )
+        .expect("error");
+        // Unknown level is stored as error (a typo can never hide a failure).
+        log_event(&conn, "bogus", "sync", "stored as error", None, None).expect("bogus level");
+
+        let all = list_recent_events(&conn, 10, None).expect("list all");
+        assert_eq!(all.len(), 4);
+        assert_eq!(all[0].level, "error", "newest first: bogus -> error row");
+        assert_eq!(all[0].service, "sync");
+        assert_eq!(
+            all[1].context.as_ref().and_then(|c| c["detail"].as_str()),
+            Some("401"),
+            "context JSON round-trips"
+        );
+        assert_eq!(all[3].message, "first sync finished");
+
+        let only_errors = list_recent_events(&conn, 10, Some("error")).expect("errors only");
+        assert_eq!(only_errors.len(), 2);
+        assert!(only_errors.iter().all(|e| e.level == "error"));
+
+        let only_info = list_recent_events(&conn, 10, Some("info")).expect("info only");
+        assert_eq!(only_info.len(), 1);
+        assert_eq!(only_info[0].message, "first sync finished");
+
+        // log_error keeps its shape and defaults to level = error.
+        log_error(&conn, "sync", "legacy writer", None, None).expect("log_error");
+        let errors = list_recent_events(&conn, 10, Some("error")).expect("errors");
+        assert_eq!(errors.len(), 3);
+        assert_eq!(errors[0].message, "legacy writer");
+
+        // Clear empties the log.
+        let removed = clear_events(&conn).expect("clear");
+        assert_eq!(removed, 5);
+        assert!(
+            list_recent_events(&conn, 10, None)
+                .expect("list")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn log_event_prunes_old_rows_beyond_the_cap() {
+        let conn = migrated();
+        for i in 0..600 {
+            log_event(&conn, "info", "sync", &format!("event {i}"), None, None).expect("write");
+        }
+        let remaining = list_recent_events(&conn, 1000, None).expect("list");
+        assert_eq!(remaining.len(), 500, "the cap keeps the newest 500 events");
+        assert_eq!(remaining[0].message, "event 599");
+        assert_eq!(remaining[499].message, "event 100");
+    }
 }

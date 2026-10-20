@@ -116,9 +116,9 @@ impl Response {
 /// Everything the request handler needs.
 pub struct LoopbackCtx {
     pub db: DbHandle,
-    /// OAuth completion path; `None` in demo mode.
+    /// OAuth completion path; `None` when this session has no live
+    /// Help Scout provider (no credentials at boot).
     pub oauth: Option<Arc<dyn OAuthCompletion>>,
-    pub demo_mode: bool,
 }
 
 /// Identity returned by a successful OAuth code exchange.
@@ -266,8 +266,8 @@ pub fn handle_request(req: &Request, ctx: &LoopbackCtx) -> Response {
 fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
     // Secret resolution order mirrors the old HTTP route: env override
     // first (CI / tests), then the encrypted envelope. An empty result is
-    // handled inside process_webhook: outside demo mode it is a hard
-    // reject (migration-map row 1).
+    // a hard reject inside process_webhook: without a secret anyone with
+    // loopback access could inject fake Help Scout events.
     let secret = std::env::var("HELPSCOUT_WEBHOOK_SECRET")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -286,15 +286,21 @@ fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
     let event_type = req.header("x-helpscout-event").unwrap_or("unknown");
 
     let result = ctx.db.with_write(|conn| {
-        webhook_handler::process_webhook(
-            conn,
-            secret.as_bytes(),
-            &req.body,
-            signature,
-            event_type,
-            ctx.demo_mode,
-        )
+        webhook_handler::process_webhook(conn, secret.as_bytes(), &req.body, signature, event_type)
     });
+
+    if let WebhookProcessResult::SecretNotConfigured = result {
+        let _ = ctx.db.with_write(|conn| {
+            crate::audit::log_event(
+                conn,
+                "warn",
+                "webhook",
+                "A webhook delivery was rejected: no webhook secret is configured",
+                None,
+                None,
+            )
+        });
+    }
 
     match result {
         WebhookProcessResult::Accepted { .. } => {
@@ -313,7 +319,7 @@ fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
             "Forbidden",
             "{\"error\":\"Webhook secret not configured\",\"message\":\"Unsigned webhook events \
              are rejected because no webhook secret is configured. Set a secret in settings or \
-             via HELPSCOUT_WEBHOOK_SECRET, or enable demo mode.\"}"
+             via HELPSCOUT_WEBHOOK_SECRET.\"}"
                 .into(),
         ),
         WebhookProcessResult::BadRequest => Response::json(
@@ -386,16 +392,11 @@ fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
     }
 
     let Some(oauth) = &ctx.oauth else {
-        return fail_page(if ctx.demo_mode {
-            "Demo mode is active - OAuth is not needed."
-        } else {
-            // 1.1.4: the empty session (post demo-purge) or a stale
-            // session whose credentials were saved after boot — both
-            // used to be misreported as "demo mode".
+        return fail_page(
             "No Help Scout connection is active in this session. Save your \
              credentials in Settings and (re)start SupportOS+, then connect \
-             from the Settings page."
-        });
+             from the Settings page.",
+        );
     };
     let (Some(code), Some(state_param)) = (q("code"), q("state")) else {
         return fail_page("The callback is missing its authorization code or state parameter.");
@@ -427,6 +428,17 @@ fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
                     None,
                     false,
                 );
+                let _ = crate::audit::log_event(
+                    conn,
+                    "info",
+                    "helpscout",
+                    &format!(
+                        "Connected to Help Scout as {} (OAuth authorization code)",
+                        identity.name
+                    ),
+                    None,
+                    None,
+                );
             });
             let email_part = identity
                 .email
@@ -448,7 +460,19 @@ fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
                 ),
             )
         }
-        Err(e) => fail_page(&escape_html(&e)),
+        Err(e) => {
+            let _ = ctx.db.with_write(|conn| {
+                crate::audit::log_event(
+                    conn,
+                    "error",
+                    "helpscout",
+                    "The OAuth connection failed at the code exchange",
+                    None,
+                    Some(&serde_json::json!({ "detail": e.clone() })),
+                )
+            });
+            fail_page(&escape_html(&e))
+        }
     }
 }
 
@@ -475,7 +499,6 @@ impl LoopbackServer {
     pub fn start(
         db: DbHandle,
         real: Option<Arc<RealHelpScoutProvider>>,
-        demo_mode: bool,
         port: u16,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
@@ -487,7 +510,6 @@ impl LoopbackServer {
             oauth: real.map(|provider| {
                 Arc::new(RealOAuthCompletion { provider }) as Arc<dyn OAuthCompletion>
             }),
-            demo_mode,
         });
 
         let thread_shutdown = Arc::clone(&shutdown);
@@ -746,7 +768,6 @@ mod tests {
         LoopbackCtx {
             db: fixture_db(),
             oauth: oauth.map(|f| Arc::new(f) as Arc<dyn OAuthCompletion>),
-            demo_mode: false,
         }
     }
 
@@ -859,8 +880,8 @@ mod tests {
         );
         assert_eq!(r.status, 401);
 
-        // No secret configured and not demo mode: hard reject (a fresh
-        // database without the secret, same request shape).
+        // No secret configured: hard reject (a fresh database
+        // without the secret, same request shape).
         let c = ctx(None);
         let r = handle_request(
             &request(
@@ -892,23 +913,11 @@ mod tests {
     // --- OAuth callback route ---
 
     #[test]
-    fn callback_without_oauth_in_a_demo_session_shows_the_demo_page() {
-        let mut c = ctx(None);
-        c.demo_mode = true;
-        let r = handle_request(
-            &request("GET", "/oauth/callback?code=1&state=2", &[], b""),
-            &c,
-        );
-        assert_eq!(r.status, 200);
-        assert!(body_str(&r).contains("Demo mode"));
-    }
-
-    #[test]
-    fn callback_without_oauth_outside_demo_mode_explains_the_real_state() {
-        // 1.1.4: with demo mode off and no real provider (an empty
-        // post-purge session, or credentials saved after boot), the old
-        // page misreported "Demo mode is active".
-        let c = ctx(None); // demo_mode = false, oauth = None
+    fn callback_without_oauth_explains_the_real_state() {
+        // No live provider in this session (no credentials at boot, or
+        // credentials saved after boot): the page must describe that
+        // real state instead of a made-up one.
+        let c = ctx(None); // oauth = None
         let r = handle_request(
             &request("GET", "/oauth/callback?code=1&state=2", &[], b""),
             &c,
@@ -1073,8 +1082,7 @@ mod tests {
     fn listener_answers_only_for_the_real_loopback_server() {
         // Our listener: identifies itself on /healthz.
         let db = fixture_db();
-        let mut server =
-            LoopbackServer::start(db, None, false, 0).expect("start the real listener");
+        let mut server = LoopbackServer::start(db, None, 0).expect("start the real listener");
         assert!(
             listener_answers(server.port()),
             "the real listener must answer the probe"

@@ -649,23 +649,47 @@ impl RealHelpScoutProvider {
             ensure_account_row(&conn);
             token_row(&conn)
         };
+        // 1.2.0: credentials alone are enough to connect. When no token
+        // exists yet (or the stored one is empty), sign in with the
+        // client-credentials grant instead of failing with a bare 401 —
+        // before this, a user who saved their Client ID/Secret but never
+        // pressed Connect saw every API call fail and nothing arrive
+        // from the account.
         let Some(row) = row else {
-            return Err(HsApiError {
-                status_code: 401,
-                message: "No Help Scout token available".into(),
-                friendly: friendly_error(401, "", "GET"),
-                retryable: false,
-            }
-            .into());
+            return match self.client_credentials_login_if_configured().await {
+                Ok(token) => Ok(token),
+                Err(_) => Err(HsApiError {
+                    status_code: 401,
+                    message: "No Help Scout token available".into(),
+                    friendly: friendly_error(401, "", "GET"),
+                    retryable: false,
+                }
+                .into()),
+            };
         };
-        if row.revoked || row.access_token.as_deref().unwrap_or("").is_empty() {
+        if row.revoked {
             return Err(HsApiError {
                 status_code: 401,
-                message: "No Help Scout token available".into(),
+                message: "The Help Scout connection was revoked".into(),
                 friendly: friendly_error(401, "", "GET"),
                 retryable: false,
             }
             .into());
+        }
+        if row.access_token.as_deref().unwrap_or("").is_empty() {
+            // A stored row without a usable access token: the OAuth flow
+            // was started but never completed. The client-credentials
+            // grant can still connect the account.
+            return match self.client_credentials_login_if_configured().await {
+                Ok(token) => Ok(token),
+                Err(_) => Err(HsApiError {
+                    status_code: 401,
+                    message: "No Help Scout token available".into(),
+                    friendly: friendly_error(401, "", "GET"),
+                    retryable: false,
+                }
+                .into()),
+            };
         }
         let expires_soon = match row.expires_at.as_deref() {
             Some(exp) => match chrono::DateTime::parse_from_rfc3339(exp) {
@@ -677,12 +701,57 @@ impl RealHelpScoutProvider {
         if !expires_soon {
             return Ok(row.access_token.unwrap_or_default());
         }
-        if let Some(refresh) = row.refresh_token
-            && let Ok(token) = self.refresh_tokens(&refresh).await
+        if let Some(refresh) = row.refresh_token.as_ref()
+            && let Ok(token) = self.refresh_tokens(refresh).await
         {
             return Ok(token);
         }
+        // The refresh grant failed (or the token came from the
+        // client-credentials grant, which has no refresh token):
+        // re-login with the stored credentials keeps long-running
+        // installs connected instead of decaying into 401s after two days.
+        if let Ok(token) = self.client_credentials_login_if_configured().await {
+            return Ok(token);
+        }
         Ok(row.access_token.unwrap_or_default())
+    }
+
+    /// Sign in with the client-credentials grant when a Client ID/Secret
+    /// pair is stored; `Err` when credentials are incomplete (the caller
+    /// decides how to surface that). Successes and failures are recorded
+    /// in the Diagnostics log so the connection is observable.
+    async fn client_credentials_login_if_configured(&self) -> Result<String> {
+        if !self.credentials.is_configured() {
+            return Err(crate::error::Error::Config(
+                "No Help Scout credentials are configured".into(),
+            ));
+        }
+        match self.client_credentials_login().await {
+            Ok(token) => {
+                let conn = self.conn_lock();
+                let _ = crate::audit::log_event(
+                    &conn,
+                    "info",
+                    "helpscout",
+                    "Signed in to Help Scout with the stored client credentials",
+                    None,
+                    None,
+                );
+                Ok(token)
+            }
+            Err(e) => {
+                let conn = self.conn_lock();
+                let _ = crate::audit::log_event(
+                    &conn,
+                    "error",
+                    "helpscout",
+                    "Signing in with the stored credentials failed (check the Client ID/Secret)",
+                    None,
+                    Some(&serde_json::json!({ "detail": e.to_string() })),
+                );
+                Err(e)
+            }
+        }
     }
 
     pub async fn token_request(
@@ -813,7 +882,7 @@ impl RealHelpScoutProvider {
         Ok(())
     }
 
-    pub fn oauth_status(&self, demo_mode: bool) -> Value {
+    pub fn oauth_status(&self) -> Value {
         let conn = self.conn_lock();
         ensure_account_row(&conn);
         let row = token_row(&conn);
@@ -823,7 +892,6 @@ impl RealHelpScoutProvider {
         json!({
             "configured": self.credentials.is_configured(),
             "authenticated": authenticated,
-            "demoMode": demo_mode,
             "expiresAt": row.as_ref().and_then(|r| r.expires_at.clone()),
         })
     }

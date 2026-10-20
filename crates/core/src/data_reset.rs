@@ -1,45 +1,34 @@
-//! One-click demo-data purge (Settings → Help Scout → Demo data, 1.1.3).
+//! One-click workspace reset (Settings → Help Scout → Workspace data).
 //!
-//! "Demo data" is everything the demo provider and the demo seed write:
-//! the full Help Scout mirror (conversations, customers, threads,
-//! ratings, ...), the knowledge base, incidents, reports, AI records,
-//! and the sync/webhook bookkeeping that tracked how it got there. The
-//! purge walks the **live schema** instead of a hand-maintained delete
-//! list: every table not on the [`KEEP_TABLES`] allowlist is emptied.
-//! A test pins the allowlist against the migrated schema, so a name
-//! typo fails the build, and a table added by a future migration lands
-//! in the purge set by default — its author must make a conscious KEEP
-//! decision here to preserve it.
+//! "Workspace data" is every business record the app holds: the full
+//! Help Scout mirror (conversations, customers, threads, ratings, ...),
+//! the knowledge base, incidents, reports, AI records, and the
+//! sync/webhook bookkeeping that tracked how it got there — including
+//! anything left over from the demo dataset that shipped before 1.2.0.
+//! The reset walks the **live schema** instead of a hand-maintained
+//! delete list: every table not on the [`KEEP_TABLES`] allowlist is
+//! emptied. A test pins the allowlist against the migrated schema, so a
+//! name typo fails the build, and a table added by a future migration
+//! lands in the purge set by default — its author must make a
+//! conscious KEEP decision here to preserve it.
 //!
-//! Deleting the rows is only half the job (fixed in 1.1.4): as long as
-//! the app kept serving the demo provider, the 5-minute auto-sync
-//! timer re-pulled the whole fake dataset (the purge had just wiped
-//! the sync checkpoints, so everything looked new) and the 30-second
-//! ratings timer re-inserted fake ratings. The purge therefore ALSO
-//! exits demo mode inside the same transaction: `demo_mode` off, the
-//! [`PURGED_FLAG`] on (boot then builds the real provider when
-//! credentials exist, or the *empty* provider instead of the demo
-//! one), and `sync_state` reset to `NEW` (auto-sync refuses to run in
-//! that state, so nothing re-syncs even in the still-running session).
+//! The reset also writes `sync_state = NEW` inside the same
+//! transaction: the next boot with credentials configured immediately
+//! starts a fresh initial sync (since 1.2.0 `NEW` means "pull
+//! everything", not "do nothing"), and without credentials the app
+//! stays empty — nothing is ever simulated.
 //!
 //! Foreign keys make the dance delicate: deleting mirror rows while
 //! child tables still hold rows would fire immediate cascades or
-//! constraint errors under live enforcement, so the purge runs with
+//! constraint errors under live enforcement, so the reset runs with
 //! enforcement suspended (the same pattern as boot migrations since
 //! 1.1.2) and restores consistency itself: a `PRAGMA foreign_key_check`
 //! sweep deletes every row left dangling by the bulk delete —
 //! repeatedly, until the schema checks clean — so the commit is either
-//! fully consistent or the whole purge rolls back. KEEP rows that
+//! fully consistent or the whole reset rolls back. KEEP rows that
 //! reference purged content (a business-hours row for a mailbox that
 //! no longer exists) die in the sweep: config tied to deleted content
 //! is stale by definition.
-
-/// Setting key set to `"true"` by [`purge_demo_data`]: the user has
-/// deleted the demo content and must not get it back. Boot reads it to
-/// pick the *empty* provider over the demo one until real credentials
-/// are configured; `onboarding` clears it when the user deliberately
-/// re-enables demo mode.
-pub const PURGED_FLAG: &str = "demo_content_purged";
 
 use std::path::Path;
 
@@ -47,11 +36,12 @@ use rusqlite::Connection;
 
 use crate::error::{Error, Result};
 
-/// Tables that survive the purge: migration bookkeeping, application
+/// Tables that survive the reset: migration bookkeeping, application
 /// settings and diagnostics, encrypted credentials, connection state,
 /// and every user-configured artifact (views, rules, templates,
 /// definitions, connector configs). Everything else is business
-/// content — demo-seeded or synced — and is deleted.
+/// content — synced or left over from the pre-1.2.0 demo — and is
+/// deleted.
 const KEEP_TABLES: &[&str] = &[
     // Migration bookkeeping and app state
     "_migrations",
@@ -84,36 +74,38 @@ const KEEP_TABLES: &[&str] = &[
     "products",
 ];
 
-/// What the purge did: rows deleted, tables emptied (only tables that
+/// What the reset did: rows deleted, tables emptied (only tables that
 /// actually held rows), vector collections and payload entries dropped.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PurgeReport {
+pub struct ResetReport {
     pub rows_deleted: u64,
     pub tables_cleared: usize,
     pub vectors_dropped: u64,
 }
 
-/// Delete all demo/business content from the database.
+/// Delete all business content from the database (workspace reset).
 ///
 /// Keeps the tables on [`KEEP_TABLES`], resets the vector store next to
 /// the database (`data_dir/vectors/vectors.db`) when `data_dir` is
 /// given, and leaves credentials, settings and connection tokens
 /// untouched. Runs in one transaction — a failure rolls the database
-/// back to its pre-purge state.
+/// back to its pre-reset state. `sync_state` is set to `NEW` so the
+/// next boot either pulls the account fresh (credentials configured)
+/// or stays honestly empty.
 ///
 /// # Errors
 /// Returns [`Error::Migration`]-style failures from SQLite, or a
-/// `Config` error when the post-purge `foreign_key_check` sweep fails
+/// `Config` error when the post-reset `foreign_key_check` sweep fails
 /// to converge (should be impossible; the transaction rolls back).
-pub fn purge_demo_data(conn: &mut Connection, data_dir: Option<&Path>) -> Result<PurgeReport> {
-    // Enforcement is suspended for the whole purge; the sweep below
+pub fn reset_workspace_data(conn: &mut Connection, data_dir: Option<&Path>) -> Result<ResetReport> {
+    // Enforcement is suspended for the whole reset; the sweep below
     // restores a verified-consistent state before the commit. The
     // pragma is a no-op inside a transaction, so it must run here,
     // before `purge_in_transaction` begins one.
     conn.pragma_update(None, "foreign_keys", "OFF")?;
-    let purged = purge_in_transaction(conn);
+    let report = purge_in_transaction(conn);
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    let mut report = purged?;
+    let mut report = report?;
 
     if let Some(dir) = data_dir {
         match crate::vectorstore_sqlitevec::SqliteVecStore::purge_all(dir) {
@@ -128,8 +120,8 @@ pub fn purge_demo_data(conn: &mut Connection, data_dir: Option<&Path>) -> Result
     Ok(report)
 }
 
-fn purge_in_transaction(conn: &mut Connection) -> Result<PurgeReport> {
-    let mut report = PurgeReport::default();
+fn purge_in_transaction(conn: &mut Connection) -> Result<ResetReport> {
+    let mut report = ResetReport::default();
     let tx = conn.transaction()?;
 
     // (name, create-sql) of every user table, in schema order.
@@ -170,13 +162,9 @@ fn purge_in_transaction(conn: &mut Connection) -> Result<PurgeReport> {
         }
     }
 
-    // Exit demo mode atomically with the delete (1.1.4): without
-    // these three writes the still-running session re-synced the
-    // whole fake dataset within five minutes (auto-sync saw state
-    // LIVE + no checkpoints = "everything is new"), and the next boot
-    // rebuilt the demo provider whenever credentials were missing.
-    crate::settings::set_bool(&tx, "demo_mode", false)?;
-    crate::settings::set_bool(&tx, PURGED_FLAG, true)?;
+    // Fresh sync state, atomically with the delete: the next boot with
+    // credentials starts a clean initial pull (`NEW`), and without
+    // credentials the app stays empty (nothing is ever simulated).
     crate::sync_engine::set_state(&tx, "NEW");
 
     // Restore consistency: delete rows that dangle after the bulk
@@ -335,7 +323,7 @@ mod tests {
         conn.execute("INSERT INTO oauth_tokens (access_token) VALUES ('tok')", [])
             .expect("token");
 
-        let report = purge_demo_data(&mut conn, None).expect("purge");
+        let report = reset_workspace_data(&mut conn, None).expect("reset");
         assert!(
             report.rows_deleted >= 5,
             "at least the seeded rows: {report:?}"
@@ -364,10 +352,10 @@ mod tests {
             );
         }
         for (table, expected) in [
-            // display_timezone (seeded) + the three rows the purge itself
-            // writes when exiting demo mode: demo_mode, the purge flag,
-            // and sync_state (all asserted by value below).
-            ("application_settings", 4),
+            // display_timezone (seeded) + the sync_state row the reset
+            // itself writes (asserted by value below). The retired demo
+            // rows are gone: m050 deletes them at migration time.
+            ("application_settings", 2),
             // Both replies: the standalone one survives; the mailbox-bound
             // one was pruned by the dangling sweep.
             ("saved_replies", 1),
@@ -376,7 +364,7 @@ mod tests {
             assert_eq!(
                 count(&conn, table),
                 expected,
-                "{table} config must survive the purge"
+                "{table} config must survive the reset"
             );
         }
         let tz = crate::settings::get_string(&conn, "display_timezone")
@@ -384,14 +372,14 @@ mod tests {
             .expect("present");
         assert_eq!(tz, "Asia/Dhaka");
 
-        // The purge exits demo mode atomically (1.1.4): without these
-        // the auto-sync timer re-pulled the whole fake dataset within
-        // five minutes and the next boot rebuilt the demo provider.
-        assert!(!crate::settings::get_bool(&conn, "demo_mode", false).unwrap_or(false));
-        assert!(crate::settings::get_bool(&conn, PURGED_FLAG, false).unwrap_or(false));
+        // The reset arms a fresh first pull: sync_state is NEW (boot
+        // starts the initial sync immediately when credentials exist,
+        // and nothing is simulated otherwise).
         assert_eq!(crate::sync_engine::get_state(&conn), "NEW");
+        // And the retired demo settings rows are not resurrected.
+        assert!(!crate::settings::get_bool(&conn, "demo_mode", false).unwrap_or(false));
 
-        // The post-purge schema checks foreign-key clean.
+        // The post-reset schema checks foreign-key clean.
         let violations: i64 = conn
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
                 r.get(0)
@@ -399,16 +387,16 @@ mod tests {
             .expect("fk check");
         assert_eq!(violations, 0);
 
-        // Idempotent: a second purge succeeds and deletes nothing.
-        let again = purge_demo_data(&mut conn, None).expect("second purge");
+        // Idempotent: a second reset succeeds and deletes nothing.
+        let again = reset_workspace_data(&mut conn, None).expect("second reset");
         assert_eq!(
             again.rows_deleted, 0,
-            "second purge must be a no-op: {again:?}"
+            "second reset must be a no-op: {again:?}"
         );
     }
 
     #[test]
-    fn purge_cleans_the_vector_store_when_a_data_dir_is_given() {
+    fn reset_cleans_the_vector_store_when_a_data_dir_is_given() {
         let mut conn = migrated_conn();
         let dir = std::env::temp_dir().join(format!("spp-purge-vec-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -437,7 +425,7 @@ mod tests {
                 .expect("point");
         }
 
-        let report = purge_demo_data(&mut conn, Some(&dir)).expect("purge with vectors");
+        let report = reset_workspace_data(&mut conn, Some(&dir)).expect("reset with vectors");
         assert!(
             report.vectors_dropped >= 2,
             "collection + payload row: {report:?}"

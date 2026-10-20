@@ -222,6 +222,14 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m049_secret_envelope",
         apply: crate::settings::apply_m049_secret_envelope,
     },
+    // The diagnostics event log gains a level column (info/warn/error)
+    // so the Diagnostics page can show and filter reports, and the
+    // retired demo-mode settings rows are dropped for good.
+    BootStep {
+        version: 41,
+        label: "m050_diagnostics_log",
+        apply: crate::audit::apply_m050,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

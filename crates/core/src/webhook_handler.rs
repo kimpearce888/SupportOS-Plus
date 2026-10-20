@@ -13,9 +13,9 @@ pub enum WebhookProcessResult {
     },
     SignatureInvalid,
     BadRequest,
-    /// No webhook secret is configured and demo mode is off. Unsigned events
-    /// are hard-rejected in this state (migration-map row 1): accepting them
-    /// would let anyone with loopback access inject fake Help Scout events.
+    /// No webhook secret is configured. Unsigned events are always
+    /// hard-rejected (migration-map row 1): accepting them would let
+    /// anyone with loopback access inject fake Help Scout events.
     SecretNotConfigured,
 }
 
@@ -25,7 +25,6 @@ pub fn process_webhook(
     body: &[u8],
     provided_signature: Option<&str>,
     event_type: &str,
-    demo_mode: bool,
 ) -> WebhookProcessResult {
     if body.is_empty() {
         return WebhookProcessResult::BadRequest;
@@ -35,20 +34,14 @@ pub fn process_webhook(
     }
 
     if secret.is_empty() {
-        if !demo_mode {
-            return WebhookProcessResult::SecretNotConfigured;
-        }
-        // Demo mode: unsigned events flow through the real persistence + job
-        // pipeline so the demo exercises delivery end-to-end. Production
-        // configurations must always set a secret.
-    } else {
-        let valid = match provided_signature {
-            Some(sig) => webhook::verify_signature(secret, body, sig).is_ok(),
-            None => false,
-        };
-        if !valid {
-            return WebhookProcessResult::SignatureInvalid;
-        }
+        return WebhookProcessResult::SecretNotConfigured;
+    }
+    let valid = match provided_signature {
+        Some(sig) => webhook::verify_signature(secret, body, sig).is_ok(),
+        None => false,
+    };
+    if !valid {
+        return WebhookProcessResult::SignatureInvalid;
     }
 
     let raw = String::from_utf8_lossy(body).into_owned();
@@ -219,8 +212,7 @@ mod tests {
         let body = br#"{"objectID":123}"#;
         let sig = signed(secret, body);
 
-        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created", false)
-        {
+        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created") {
             WebhookProcessResult::Accepted { row_id } => row_id,
             other => panic!("expected Accepted, got {other:?}"),
         };
@@ -248,7 +240,7 @@ mod tests {
     #[test]
     fn rejects_empty_body() {
         let conn = fresh_conn();
-        let result = process_webhook(&conn, b"secret", b"", None, "convo.created", false);
+        let result = process_webhook(&conn, b"secret", b"", None, "convo.created");
         assert!(matches!(result, WebhookProcessResult::BadRequest));
     }
 
@@ -257,7 +249,7 @@ mod tests {
         let conn = fresh_conn();
         let body = b"not-json";
         let sig = signed(b"secret", body);
-        let result = process_webhook(&conn, b"secret", body, Some(&sig), "convo.created", false);
+        let result = process_webhook(&conn, b"secret", body, Some(&sig), "convo.created");
         assert!(matches!(result, WebhookProcessResult::BadRequest));
     }
 
@@ -270,7 +262,6 @@ mod tests {
             br#"{"id":1}"#,
             Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
             "convo.created",
-            false,
         );
         assert!(matches!(result, WebhookProcessResult::SignatureInvalid));
     }
@@ -278,33 +269,14 @@ mod tests {
     #[test]
     fn rejects_missing_signature_when_secret_set() {
         let conn = fresh_conn();
-        let result = process_webhook(
-            &conn,
-            b"secret",
-            br#"{"id":1}"#,
-            None,
-            "convo.created",
-            false,
-        );
+        let result = process_webhook(&conn, b"secret", br#"{"id":1}"#, None, "convo.created");
         assert!(matches!(result, WebhookProcessResult::SignatureInvalid));
     }
 
-    // CHARACTERIZATION of current behavior, kept deliberately: in demo mode
-    // an empty secret lets unsigned events through so the demo webhook tools
-    // can exercise the full pipeline without a real Help Scout secret.
-    // Outside demo mode the empty secret is a hard reject (row 1) — see
-    // `empty_secret_hard_rejects_outside_demo_mode` below.
     #[test]
-    fn empty_secret_allows_unsigned_events_in_demo_mode() {
+    fn empty_secret_hard_rejects_without_a_secret() {
         let conn = fresh_conn();
-        let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created", true);
-        assert!(matches!(result, WebhookProcessResult::Accepted { .. }));
-    }
-
-    #[test]
-    fn empty_secret_hard_rejects_outside_demo_mode() {
-        let conn = fresh_conn();
-        let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created", false);
+        let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created");
         assert!(matches!(result, WebhookProcessResult::SecretNotConfigured));
 
         // A provided (unverifiable) signature does not rescue an unconfigured
@@ -315,7 +287,6 @@ mod tests {
             br#"{"id":1}"#,
             Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
             "convo.created",
-            false,
         );
         assert!(matches!(result, WebhookProcessResult::SecretNotConfigured));
     }
@@ -327,12 +298,11 @@ mod tests {
         let body = br#"{"objectID":7}"#;
         let sig = signed(secret, body);
 
-        let first_id =
-            match process_webhook(&conn, secret, body, Some(&sig), "convo.created", false) {
-                WebhookProcessResult::Accepted { row_id } => row_id,
-                other => panic!("expected first Accepted, got {other:?}"),
-            };
-        let second = process_webhook(&conn, secret, body, Some(&sig), "convo.created", false);
+        let first_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.created") {
+            WebhookProcessResult::Accepted { row_id } => row_id,
+            other => panic!("expected first Accepted, got {other:?}"),
+        };
+        let second = process_webhook(&conn, secret, body, Some(&sig), "convo.created");
         assert!(matches!(
             second,
             WebhookProcessResult::Duplicate { row_id } if row_id == first_id

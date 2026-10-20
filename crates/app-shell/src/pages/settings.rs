@@ -220,7 +220,6 @@ impl GeneralSettings {
 /// Help Scout connection status (port of `/api/oauth/status` read side).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HelpScoutStatus {
-    pub demo_mode: bool,
     pub configured: bool,
     /// OAuth client credentials are available — from the environment or
     /// the in-app form — so the OAuth connect flow can start.
@@ -238,7 +237,6 @@ pub struct HelpScoutStatus {
 /// Load the connection status from the local mirror.
 #[must_use]
 pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
-    let demo_mode = spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false);
     let tokens: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM oauth_tokens WHERE access_token IS NOT NULL",
@@ -249,7 +247,6 @@ pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
     let (credentials, sources) = spp_core::helpscout_real::HsCredentials::resolve(conn);
     let redirect_uri = credentials.redirect_uri.clone();
     HelpScoutStatus {
-        demo_mode,
         configured: tokens > 0,
         credentials: credentials.is_configured(),
         sources,
@@ -606,8 +603,9 @@ impl SettingsPage {
     }
 
     /// Save the credential form (1.1.3): non-empty fields are stored in
-    /// the encrypted envelope, and a configured pair switches demo mode
-    /// off so the next boot builds the real provider.
+    /// the encrypted envelope; the next boot builds the real provider
+    /// from them. Since 1.2.0 the app also signs in with the stored
+    /// client credentials automatically when no token exists.
     fn save_helpscout_credentials(&mut self, db: &DbHandle) {
         let (cid, cs, ws, dk) = (
             self.hs_client_id.trim().to_string(),
@@ -617,18 +615,14 @@ impl SettingsPage {
         );
         let result = db.with_write(|conn| {
             spp_core::helpscout_real::HsCredentials::store_in_envelope(conn, &cid, &cs, &ws, &dk)?;
-            let (resolved, _) = spp_core::helpscout_real::HsCredentials::resolve(conn);
-            if resolved.is_configured() {
-                spp_core::settings::set_bool(conn, "demo_mode", false)?;
-            }
             spp_core::error::Result::Ok(())
         });
         match result {
             Ok(()) => {
                 self.message = Some(
-                    "credentials stored (encrypted). Demo mode is off — RESTART \
-                     SupportOS+ now: the connect buttons only work after the \
-                     restart (the callback listener starts with the app)."
+                    "credentials stored (encrypted). RESTART SupportOS+ now — \
+                     on the next start the app connects with them and immediately \
+                     begins pulling your Help Scout data."
                         .into(),
                 );
                 // The three secret fields do not linger on screen after a
@@ -643,7 +637,7 @@ impl SettingsPage {
     }
 
     /// Remove every credential stored by the form. The connection
-    /// tokens and demo mode are deliberately untouched.
+    /// tokens are deliberately untouched.
     fn clear_helpscout_credentials(&mut self, db: &DbHandle) {
         let result =
             db.with_write(|conn| spp_core::helpscout_real::HsCredentials::clear_envelope(conn));
@@ -651,7 +645,7 @@ impl SettingsPage {
             Ok(removed) => {
                 self.message = Some(format!(
                     "stored credentials removed ({removed} values). The \
-                     connection and demo mode are untouched."
+                     connection tokens are untouched."
                 ));
                 self.hs_client_id.clear();
                 self.hs_client_secret.clear();
@@ -663,21 +657,19 @@ impl SettingsPage {
         self.reload(db);
     }
 
-    /// One-click demo purge (1.1.3): clears all business content, keeps
-    /// the KEEP_TABLES config, resets the vector store when the data
-    /// directory is known. Since 1.1.4 the purge also exits demo mode
-    /// (atomically, inside the purge transaction) so the deleted data
-    /// cannot silently re-sync minutes later.
-    fn purge_demo(&mut self, db: &DbHandle) {
+    /// One-click workspace reset (1.2.0): clears all business content —
+    /// synced or left over from the pre-1.2.0 demo — keeps the
+    /// KEEP_TABLES config, resets the vector store when the data
+    /// directory is known, and arms a fresh first sync.
+    fn reset_workspace(&mut self, db: &DbHandle) {
         let result = db.with_write(|conn| {
-            spp_core::data_reset::purge_demo_data(conn, self.data_dir.as_deref())
+            spp_core::data_reset::reset_workspace_data(conn, self.data_dir.as_deref())
         });
         match result {
             Ok(report) => {
                 self.message = Some(format!(
-                    "demo data deleted: {} rows across {} tables, {} vector \
-                     entries. Demo mode is now OFF — the data will NOT come \
-                     back. Restart SupportOS+ so every view reloads clean{}.",
+                    "workspace data deleted: {} rows across {} tables, {} vector \
+                     entries. Restart SupportOS+ so every view reloads clean{}.",
                     report.rows_deleted,
                     report.tables_cleared,
                     report.vectors_dropped,
@@ -687,13 +679,13 @@ impl SettingsPage {
                         })
                         .is_configured()
                     {
-                        ", then connect Help Scout from this page"
+                        " — the next start pulls your account fresh"
                     } else {
-                        ""
+                        " — connect Help Scout from this page when ready"
                     }
                 ));
             }
-            Err(e) => self.error = Some(format!("purge failed (nothing was changed): {e}")),
+            Err(e) => self.error = Some(format!("reset failed (nothing was changed): {e}")),
         }
         self.purge_armed = false;
         self.invalidate();
@@ -910,23 +902,11 @@ impl SettingsPage {
             ui,
             "Help Scout connection",
             Some(
-                "OAuth in the browser flow (the loopback listener serves the callback), or run in demo mode with the fake provider",
+                "Connect with the browser OAuth flow (the loopback listener \
+                 serves the callback) or the client-credentials button",
             ),
             |ui| {
                 design::form_grid(ui, "settings-helpscout", |ui| {
-                    design::field_label(ui, "demo mode:");
-                    ui.horizontal(|ui| {
-                        design::badge(
-                            ui,
-                            if status.demo_mode { "on" } else { "off" },
-                            if status.demo_mode {
-                                BadgeTone::Info
-                            } else {
-                                BadgeTone::Neutral
-                            },
-                        );
-                    });
-                    ui.end_row();
                     design::field_label(ui, "credentials stored:");
                     ui.horizontal(|ui| {
                         design::badge(
@@ -1034,9 +1014,9 @@ impl SettingsPage {
             ui,
             "Help Scout credentials",
             Some(
-                "Stored encrypted on this machine. Saving a configured pair \
-                 turns demo mode off — restart SupportOS+ to connect the \
-                 real account. Environment variables override these values.",
+                "Stored encrypted on this machine. Save them, restart \
+                 SupportOS+, and the app connects and starts pulling your \
+                 account. Environment variables override these values.",
             ),
             |ui| {
                 let mask = !self.hs_show_secrets;
@@ -1114,22 +1094,21 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
-        // Demo-data purge (1.1.3): one click, two-step confirmation.
+        // Workspace reset (1.2.0): one click, two-step confirmation.
         design::card_titled(
             ui,
-            "Demo data",
+            "Workspace data",
             Some(
                 "Deletes every conversation, customer, thread, rating, \
                  knowledge document, incident, report and AI record — all \
-                 demo-seeded or synced content — and resets sync state. \
-                 Also turns demo mode OFF, so the data will not re-sync \
-                 (restart SupportOS+ afterwards). Keeps: credentials, \
-                 settings, business hours, automation rules, saved views \
-                 and replies, custom object types.",
+                 synced content (and anything left over from the demo that \
+                 shipped before 1.2.0) — and arms a fresh first sync. \
+                 Keeps: credentials, settings, business hours, automation \
+                 rules, saved views and replies, custom object types.",
             ),
             |ui| {
                 if !self.purge_armed {
-                    if design::button(ui, "delete all demo data", ButtonVariant::Destructive)
+                    if design::button(ui, "delete all workspace data", ButtonVariant::Destructive)
                         .clicked()
                     {
                         self.purge_armed = true;
@@ -1151,7 +1130,7 @@ impl SettingsPage {
                         )
                         .clicked()
                         {
-                            self.purge_demo(db);
+                            self.reset_workspace(db);
                         }
                     });
                 }
@@ -1171,8 +1150,8 @@ impl SettingsPage {
     fn begin_oauth(&mut self, db: &DbHandle) {
         let Some(real) = self.real.clone() else {
             self.error = Some(
-                "credentials are stored, but this session is still running the \
-                 demo/empty provider. Restart SupportOS+ first — the OAuth \
+                "credentials are stored, but this session has no live \
+                 Help Scout provider. Restart SupportOS+ first — the OAuth \
                  callback listener starts with the app."
                     .into(),
             );
@@ -1562,11 +1541,11 @@ mod tests {
     }
 
     #[test]
-    fn helpscout_status_reads_tokens_and_demo_mode() {
+    fn helpscout_status_reads_tokens() {
         let db = fixture(Vec::new());
         let status = db.with_read(helpscout_status);
         assert!(!status.configured);
-        assert!(!status.demo_mode);
+        assert!(!status.credentials, "no credentials on a fresh database");
 
         db.with_write(|conn| {
             conn.execute("INSERT INTO oauth_tokens (access_token) VALUES ('tok')", [])
@@ -1648,13 +1627,9 @@ mod tests {
     }
 
     #[test]
-    fn helpscout_credentials_save_clear_and_demo_mode_flip() {
+    fn helpscout_credentials_save_and_clear() {
         install_master_key();
         let db = fixture(Vec::new());
-        // Demo mode on, as after onboarding's "try demo" path.
-        db.with_write(|conn| {
-            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
-        });
 
         let mut page = SettingsPage::new();
         // The real UI loads the form once on the first frame (see
@@ -1685,10 +1660,6 @@ mod tests {
             spp_core::helpscout_real::CredentialSource::AppSettings
         );
         assert!(
-            !status.demo_mode,
-            "saving a configured pair flips demo mode off"
-        );
-        assert!(
             page.hs_client_secret.is_empty(),
             "secret fields are cleared after a successful save"
         );
@@ -1698,11 +1669,10 @@ mod tests {
         assert_eq!(stored.client_id, "cid-app");
         assert_eq!(stored.client_secret, "secret-app");
 
-        // Clear: tokens and the demo flag stay as they are.
+        // Clear: connection tokens survive.
         db.with_write(|conn| {
             conn.execute("INSERT INTO oauth_tokens (access_token) VALUES ('tok')", [])
                 .expect("token");
-            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
         });
         page.clear_helpscout_credentials(&db);
         let status2 = db.with_read(helpscout_status);
@@ -1712,34 +1682,42 @@ mod tests {
             spp_core::helpscout_real::CredentialSource::NotSet
         );
         assert!(status2.configured, "connection tokens survive the clear");
-        assert!(status2.demo_mode, "the clear leaves demo mode untouched");
     }
 
     #[test]
-    fn purge_demo_empties_content_and_keeps_config() {
-        let db = fixture(vec![("conv", 1, "Demo ticket", "active", "email", 1, 5, 9)]);
+    fn reset_workspace_empties_content_and_keeps_config() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Seeded ticket",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
         db.with_write(|conn| {
             spp_core::settings::set_string(conn, "display_timezone", "Asia/Dhaka").expect("tz");
         });
 
         let mut page = SettingsPage::new();
         page.purge_armed = true;
-        page.purge_demo(&db);
+        page.reset_workspace(&db);
 
         assert!(
             page.message
                 .as_deref()
-                .is_some_and(|m| m.contains("demo data deleted")),
-            "purge must report: {:?}",
+                .is_some_and(|m| m.contains("workspace data deleted")),
+            "reset must report: {:?}",
             page.message
         );
         assert!(page.error.is_none(), "{:?}", page.error);
         assert!(
             !page.purge_armed,
-            "the confirmation disarms after the purge"
+            "the confirmation disarms after the reset"
         );
 
-        let (convs, users, mailboxes, tz) = db.with_read(|conn| {
+        let (convs, users, mailboxes, tz, sync_state) = db.with_read(|conn| {
             let count = |table: &str| -> i64 {
                 conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| {
                     r.get::<_, i64>(0)
@@ -1753,43 +1731,14 @@ mod tests {
                 spp_core::settings::get_string(conn, "display_timezone")
                     .expect("read")
                     .expect("present"),
+                spp_core::sync_engine::get_state(conn),
             )
         });
         assert_eq!(convs, 0, "seeded conversations must be purged");
         assert_eq!(users, 0, "mirror users must be purged");
         assert_eq!(mailboxes, 0, "mirror mailboxes must be purged");
         assert_eq!(tz, "Asia/Dhaka", "application settings must survive");
-    }
-
-    #[test]
-    fn purge_demo_also_exits_demo_mode_so_it_cannot_re_sync() {
-        let db = fixture(vec![("conv", 1, "Demo ticket", "active", "email", 1, 5, 9)]);
-        db.with_write(|conn| {
-            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
-        });
-
-        let mut page = SettingsPage::new();
-        page.purge_armed = true;
-        page.purge_demo(&db);
-
-        let (demo_mode, purged, sync_state) = db.with_read(|conn| {
-            (
-                spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false),
-                spp_core::settings::get_bool(conn, spp_core::data_reset::PURGED_FLAG, false)
-                    .unwrap_or(false),
-                spp_core::sync_engine::get_state(conn),
-            )
-        });
-        assert!(!demo_mode, "the purge turns demo mode off");
-        assert!(purged, "the purge sets the stay-empty marker");
-        assert_eq!(sync_state, "NEW", "the purge stops the auto-sync timer");
-        assert!(
-            page.message
-                .as_deref()
-                .is_some_and(|m| m.contains("will NOT come")),
-            "the purge message must say the data stays gone: {:?}",
-            page.message
-        );
+        assert_eq!(sync_state, "NEW", "the reset arms a fresh first sync");
     }
 
     #[test]
@@ -1821,8 +1770,8 @@ mod tests {
     #[test]
     fn begin_oauth_succeeds_against_a_live_listener() {
         let db = fixture(Vec::new());
-        let mut server = spp_core::loopback::LoopbackServer::start(db.clone(), None, false, 0)
-            .expect("listener");
+        let mut server =
+            spp_core::loopback::LoopbackServer::start(db.clone(), None, 0).expect("listener");
         let redirect_uri = format!("http://localhost:{}/oauth/callback", server.port());
         let creds = spp_core::helpscout_real::HsCredentials {
             client_id: "cid-live".into(),
