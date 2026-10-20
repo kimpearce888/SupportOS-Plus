@@ -40,6 +40,7 @@ use std::sync::Arc;
 
 use spp_core::db::DbHandle;
 use spp_core::eventing::EventBus;
+use spp_core::provider_handle::ProviderHandle;
 use spp_core::sync_engine::SyncEngine;
 
 use crate::app::ShellApp;
@@ -53,13 +54,14 @@ pub struct ShellOptions {
     pub bus: EventBus,
     /// Application data directory (lock file, vector store, logs).
     pub data_dir: PathBuf,
-    /// Shared sync engine, built by the boot code (demo or real provider).
+    /// The shared sync engine, built by the boot code (real or empty
+    /// provider).
     pub sync: Option<Arc<SyncEngine>>,
-    /// The real Help Scout provider when boot resolved credentials
-    /// (`None` in demo/empty sessions). The Settings page needs it for
-    /// the client-credentials connect button and to detect that the
-    /// OAuth callback listener is actually armed this session (1.1.4).
-    pub real: Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
+    /// The swappable provider cell (v1.4.0 R3): every consumer — the
+    /// engine, the workers, the loopback listener, Settings — holds this
+    /// same handle, and credentials saved mid-session swap the provider
+    /// inside it in place. The end of the restart ritual (D2).
+    pub handle: Option<Arc<ProviderHandle>>,
     /// The background worker host started by `main` (job drain, webhook
     /// drain, embedding pass, maintenance). `None` in tests, where the
     /// background timers must not run.
@@ -82,14 +84,15 @@ pub fn open_db(path: &Path) -> spp_core::error::Result<DbHandle> {
 /// The loopback listener needs the *real* provider handle (OAuth code
 /// exchange, `get_me`) while the sync engine drives the provider behind the
 /// `HelpScoutProvider` trait, so the boot code hands both out of one
-/// construction.
+/// construction. Since v1.4.0 the provider behind both is the swappable
+/// [`ProviderHandle`] — credentials activate in-session (R3).
 pub struct BootServices {
     /// Which provider boot built (diagnostics and tests read it).
     pub mode: BootMode,
-    /// The real provider when Help Scout credentials are configured,
-    /// `None` in the empty session.
-    pub real: Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
-    /// The provider the sync engine drives (real or empty).
+    /// The swappable provider cell shared by everything.
+    pub handle: Arc<ProviderHandle>,
+    /// The provider the sync engine and workers drive (the handle as the
+    /// trait object).
     pub provider: Arc<dyn spp_core::helpscout::HelpScoutProvider>,
     /// The shared sync engine.
     pub engine: Arc<SyncEngine>,
@@ -121,6 +124,11 @@ pub enum BootMode {
 /// * **Empty** otherwise — the inert provider. Before 1.2.0 a fresh
 ///   install without credentials silently ran a simulated demo
 ///   account; that dataset and its boot path are gone.
+///
+/// v1.4.0 (R2 + R3): the chosen provider is wrapped in a
+/// [`ProviderHandle`] that every consumer shares, and a session that
+/// previously ran the empty provider forces `sync_state` back to `NEW`
+/// when real credentials appear — the watermark-poisoning repair (D1).
 #[must_use]
 pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
     // Credentials resolve per field: environment first (CI, power
@@ -133,43 +141,44 @@ pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
     } else {
         BootMode::Empty
     };
-    let (real, provider): (
-        Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
-        Arc<dyn spp_core::helpscout::HelpScoutProvider>,
-    ) = match mode {
+    // R2: the kind the *previous* session ran with decides whether the
+    // state machine carries poisoned watermarks. Read it before this
+    // session's kind is written.
+    let previous_kind = db.with_read(|conn| {
+        spp_core::settings::get_string(conn, "provider_kind")
+            .ok()
+            .flatten()
+    });
+    let handle = match mode {
         BootMode::Real => {
             let real = Arc::new(spp_core::helpscout_real::RealHelpScoutProvider::new(
                 db.clone(),
                 credentials,
             ));
-            let as_trait: Arc<dyn spp_core::helpscout::HelpScoutProvider> = real.clone();
-            (Some(real), as_trait)
+            Arc::new(ProviderHandle::new_real(real))
         }
-        BootMode::Empty => (
-            None,
-            Arc::new(spp_core::helpscout::EmptyHelpScoutProvider::new()),
-        ),
+        BootMode::Empty => Arc::new(ProviderHandle::new_empty()),
     };
-    let engine = Arc::new(SyncEngine::new(db.clone(), provider.clone()).with_bus(bus.clone()));
-    // Record the live provider kind for the UI's connected-guards (the
-    // composer rejects sends with a legible message when boot resolved
-    // no credentials, instead of queueing into a provider that cannot
-    // deliver).
+    let current_kind = match mode {
+        BootMode::Real => "real",
+        BootMode::Empty => "empty",
+    };
     {
         let conn = db.write_guard();
-        let _ = spp_core::settings::set_string(
+        // R2: apply the transition policy exactly once per boot.
+        spp_core::sync_engine::on_provider_kind_transition(
             &conn,
-            "provider_kind",
-            match mode {
-                BootMode::Real => "real",
-                BootMode::Empty => "empty",
-            },
+            previous_kind.as_deref(),
+            current_kind,
         );
+        let _ = spp_core::settings::set_string(&conn, "provider_kind", current_kind);
     }
+    let provider: Arc<dyn spp_core::helpscout::HelpScoutProvider> = handle.clone();
+    let engine = Arc::new(SyncEngine::new(db.clone(), provider.clone()).with_bus(bus.clone()));
     tracing::info!(mode = ?mode, "boot services built");
     BootServices {
         mode,
-        real,
+        handle,
         provider,
         engine,
     }
@@ -304,7 +313,7 @@ mod tests {
         let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
         assert_eq!(boot.mode, BootMode::Empty);
         assert!(
-            boot.real.is_none(),
+            !boot.handle.is_real(),
             "no credentials, no real provider — and nothing is simulated"
         );
     }
@@ -325,6 +334,43 @@ mod tests {
         });
         let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
         assert_eq!(boot.mode, BootMode::Real);
-        assert!(boot.real.is_some(), "credentials resolve at boot");
+        assert!(boot.handle.is_real(), "credentials resolve at boot");
+        assert!(boot.handle.real().is_some());
+    }
+
+    #[test]
+    fn r2_empty_session_then_credentials_resets_the_sync_state() {
+        install_master_key();
+        let db = crate::testsupport::empty_db();
+        // First boot with no credentials: writes provider_kind=empty.
+        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
+        assert_eq!(boot.mode, BootMode::Empty);
+        // A pre-1.4.0 poisoned install: the empty session stamped
+        // sync_state=LIVE and its watermarks forward every minute.
+        db.with_write(|conn| {
+            spp_core::sync_engine::set_state(conn, "LIVE");
+            spp_core::sync_engine::record_success(conn, "customers", 0);
+            let kind = spp_core::settings::get_string(conn, "provider_kind")
+                .ok()
+                .flatten();
+            assert_eq!(kind.as_deref(), Some("empty"));
+        });
+        // Storing credentials and rebuilding (what boot does on the
+        // next start, what Settings does in-session now) must reset
+        // the poisoned machine.
+        db.with_write(|conn| {
+            spp_core::helpscout_real::HsCredentials::store_in_envelope(
+                conn,
+                "cid-reset",
+                "secret-reset",
+                "",
+                "",
+            )
+            .expect("store");
+        });
+        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
+        assert_eq!(boot.mode, BootMode::Real);
+        let state = db.with_read(spp_core::sync_engine::get_state);
+        assert_eq!(state, "NEW", "the poisoned LIVE watermark is forgotten");
     }
 }

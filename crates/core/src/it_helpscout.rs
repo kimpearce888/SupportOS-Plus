@@ -1110,3 +1110,163 @@ fn hs_status_and_error_helpers_downcast() {
     assert!(hs_error(&e).is_some());
     assert_eq!(e.to_string(), "f", "Display renders the friendly text");
 }
+
+// ---------------------------------------------------------------------------
+// v1.4.0 R4 (D7): the reply dispatch resolves the customer from the live
+// conversation when the mirror row lacks one, and repairs the mirror.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
+    let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+        match (req.method.as_str(), req.path.as_str()) {
+            // The dispatch's customer fallback fetches the live
+            // conversation; primaryCustomer.id is the answer.
+            ("GET", "/v3/conversations/77") => MockResponse::json(
+                200,
+                json!({
+                    "id": 77, "number": 9001, "status": "active",
+                    "mailboxId": 1,
+                    "primaryCustomer": {"id": 900, "email": "kim@example.com"},
+                    "threads": 2,
+                    "createdBy": {"type": "customer"},
+                    "source": {"type": "email", "via": "customer"}
+                }),
+            ),
+            ("POST", "/v2/conversations/77/reply") => {
+                MockResponse::json(201, json!({"id": 950})).with_header("Resource-Id", "950")
+            }
+            _ => MockResponse::json(404, r#"{"error":"unexpected path"}"#),
+        }
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let creds = creds(&mock);
+    let provider = provider_with_token(&db, &creds);
+
+    // A mirror conversation with NO customer link — the pre-1.4.0
+    // guaranteed-400 case (D7). A customer row exists but is unlinked.
+    db.with_write(|conn| {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, status, mailbox_local_id,
+                 subject, created_at, updated_at)
+             VALUES (77, 9001, 'active', NULL, 'Customer missing?', 'now', 'now')",
+            [],
+        )
+        .expect("seed conversation");
+        let conv_local = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, email) VALUES (900, 'kim@example.com')",
+            [],
+        )
+        .expect("seed customer");
+        let cust_local = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO outbound_jobs (kind, conversation_id, payload, status, attempts,
+                 created_at, updated_at)
+             VALUES ('create_reply', ?1, ?2, 'queued', 0, datetime('now'), datetime('now'))",
+            rusqlite::params![
+                conv_local,
+                serde_json::to_string(&json!({
+                    "conversationId": conv_local,
+                    "text": "We fixed it",
+                    "draft": false,
+                    "cc": [],
+                    "bcc": [],
+                    "statusAfter": "pending",
+                    "assignTo": null
+                }))
+                .expect("payload"),
+            ],
+        )
+        .expect("seed outbound job");
+        Ok::<(i64, i64), rusqlite::Error>((conv_local, cust_local))
+    })
+    .expect("seed mirror");
+    let (_, seeded_customer_local) = db
+        .with_read(|conn| {
+            conn.query_row("SELECT id FROM customers WHERE remote_id = 900", [], |r| {
+                r.get::<_, i64>(0)
+            })
+        })
+        .map(|id| ((), id))
+        .expect("seeded customer read");
+
+    let engine = Arc::new(crate::sync_engine::SyncEngine::new(
+        db.clone(),
+        Arc::new(provider),
+    ));
+    // The runtime must exist (and be entered) before start_workers:
+    // start() spawns its timer tasks with tokio::spawn, which needs an
+    // ambient runtime on this thread. A current-thread runtime keeps the
+    // test in control — the spawned timers only advance while a block_on
+    // below drives the reactor.
+    let rt = runtime();
+    let _enter = rt.enter();
+    let manager = crate::workers::start_workers(
+        db.clone(),
+        Some(engine),
+        Arc::new(crate::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
+            creds,
+        )),
+        crate::eventing::EventBus::default(),
+        std::env::temp_dir(),
+        None,
+    );
+
+    rt.block_on(manager.tick());
+    // The dispatcher may need a second tick to claim after the fallback
+    // GET; tick again to be safe.
+    rt.block_on(manager.tick());
+    manager.stop();
+
+    let (status, error, mirror_customer) = db.with_read(|conn| {
+        let (status, error): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error FROM outbound_jobs ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("job row");
+        let mirror_customer: Option<i64> = conn
+            .query_row(
+                "SELECT c.customer_local_id FROM conversations c WHERE c.remote_id = 77",
+                [],
+                |r| r.get(0),
+            )
+            .expect("conversation row");
+        (status, error, mirror_customer)
+    });
+    let reply_hits: Vec<_> = mock
+        .hits()
+        .iter()
+        .filter(|h| h.path.contains("/reply"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        reply_hits.len(),
+        1,
+        "exactly one reply POST (no retries): {:?}",
+        mock.hits()
+            .iter()
+            .map(|h| h.path.clone())
+            .collect::<Vec<_>>()
+    );
+    let body: Value = serde_json::from_str(&reply_hits[0].body).expect("reply body json");
+    assert_eq!(
+        body["customer"]["id"], 900,
+        "D7: the fallback resolved the customer onto the POST body"
+    );
+    assert_eq!(
+        body["status"], "pending",
+        "D9: the configured statusAfter rides along"
+    );
+    assert_eq!(status, "confirmed", "the reply landed; error: {error:?}");
+    assert_eq!(
+        mirror_customer,
+        Some(seeded_customer_local),
+        "D7: the mirror row is repaired — the customer link points at the \
+         seeded customer"
+    );
+}

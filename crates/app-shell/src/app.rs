@@ -112,17 +112,21 @@ impl ShellApp {
         let sync = options.sync;
         let mut settings = SettingsPage::new();
         settings.set_backups_dir(options.data_dir.join("backups"));
-        // The demo purge clears the vector store that lives next to the
-        // database (1.1.3).
+        // The workspace reset clears the vector store that lives next to
+        // the database (1.1.3).
         settings.set_data_dir(options.data_dir.clone());
         // Worker handle for restart-on-interval-change (see save_general).
-        settings.set_workers(options.workers);
-        // Real Help Scout provider for this session (None in demo/empty
-        // sessions): the connect buttons must know whether the OAuth
-        // callback listener is actually armed before offering the flow
-        // (1.1.4 — without this, saving credentials mid-session showed
-        // a connect button whose browser flow always failed).
-        settings.set_real_provider(options.real.clone());
+        settings.set_workers(options.workers.clone());
+        // v1.4.0 (R1/R3): the swappable provider handle replaces the
+        // boot-time real-provider snapshot. Settings activates saved
+        // credentials in-session through it and runs the Connection
+        // Doctor against whatever provider is currently live — no more
+        // "restart SupportOS+".
+        if let Some(handle) = options.handle.clone() {
+            settings.set_provider_handle(handle);
+        }
+        settings.set_sync_engine(sync.clone());
+        settings.set_bus(options.bus.clone());
         let mut connectors = ConnectorsPage::new();
         connectors.set_data_dir(options.data_dir.clone());
         // The knowledge import panel reads the `knowledge-import` watch
@@ -421,19 +425,10 @@ impl eframe::App for ShellApp {
                     self.sync_health.note_progress(p.clone());
                 }
                 spp_core::events::ServerEvent::SyncCompleted(e) => {
-                    if e.processed > 0 {
-                        self.toasts.push(
-                            crate::toasts::ToastKind::Success,
-                            format!("Sync finished: {} record(s) updated", e.processed),
-                            Some(match e.kind.as_str() {
-                                "initial" => {
-                                    "Your Help Scout history is in the local mirror now.".into()
-                                }
-                                "docs" => "Help Center articles refreshed.".into(),
-                                _ => "Latest changes pulled from Help Scout.".into(),
-                            }),
-                        );
-                    }
+                    // v1.4.0 (R5, D20): see `sync_completed_toast` — a
+                    // zero-record completion is a visible result.
+                    let (kind, title, detail) = sync_completed_toast(e);
+                    self.toasts.push(kind, title, detail);
                 }
                 spp_core::events::ServerEvent::OutboundJobFinished(e) => {
                     if e.success {
@@ -457,6 +452,19 @@ impl eframe::App for ShellApp {
                         );
                     }
                 }
+                // R5 (D4): the first live surfacing of background
+                // failures. `outbound` is exempt from the toast — the
+                // OutboundJobFinished event for the same failure
+                // already carries the exact message — but every
+                // service still invalidates its pages below.
+                spp_core::events::ServerEvent::ErrorOccurred(e) if e.service != "outbound" => {
+                    let kind = match e.severity.as_str() {
+                        "warn" | "warning" => crate::toasts::ToastKind::Warning,
+                        _ => crate::toasts::ToastKind::Error,
+                    };
+                    self.toasts.push(kind, e.message.clone(), None);
+                }
+                spp_core::events::ServerEvent::ErrorOccurred(_) => {}
                 _ => {}
             }
         }
@@ -602,6 +610,43 @@ fn human_outbound_kind(kind: &str) -> &str {
         "update_status" => "Status change",
         "assign" => "Assignment",
         other => other,
+    }
+}
+
+/// v1.4.0 (R5, D20): map a finished sync to its toast. A zero-record
+/// completion is a *visible* result now — "up to date, nothing new" —
+/// where it used to be indistinguishable from a dead connection.
+#[must_use]
+fn sync_completed_toast(
+    e: &spp_core::events::SyncCompletedEvent,
+) -> (crate::toasts::ToastKind, String, Option<String>) {
+    if e.processed > 0 {
+        let detail = match e.kind.as_str() {
+            "initial" => "Your Help Scout history is in the local mirror now.".to_string(),
+            "docs" => "Help Center articles refreshed.".to_string(),
+            _ => "Latest changes pulled from Help Scout.".to_string(),
+        };
+        (
+            crate::toasts::ToastKind::Success,
+            format!("Sync finished: {} record(s) updated", e.processed),
+            Some(detail),
+        )
+    } else if e.errors > 0 {
+        (
+            crate::toasts::ToastKind::Warning,
+            "Sync finished with errors".to_string(),
+            Some("See Diagnostics for the exact failures.".to_string()),
+        )
+    } else {
+        (
+            crate::toasts::ToastKind::Info,
+            "Up to date — nothing new from Help Scout".to_string(),
+            Some(
+                "The last sync checked the account and found no changes. \
+                 This is what a healthy, quiet account looks like."
+                    .to_string(),
+            ),
+        )
     }
 }
 
@@ -1131,6 +1176,42 @@ mod tests {
             grouped.extend_from_slice(keys);
         }
         assert_eq!(grouped, PageKey::all());
+    }
+
+    #[test]
+    fn r5_d20_zero_record_syncs_and_error_runs_have_visible_outcomes() {
+        // Healthy quiet account: "up to date" is said out loud now.
+        let (kind, title, _) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
+            kind: "incremental".into(),
+            processed: 0,
+            errors: 0,
+            at: "2026-10-20T00:00:00Z".into(),
+        });
+        assert!(matches!(kind, crate::toasts::ToastKind::Info));
+        assert!(title.contains("Up to date"), "title: {title}");
+
+        // A run that failed something says so and points at Diagnostics.
+        let (kind, _, detail) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
+            kind: "incremental".into(),
+            processed: 0,
+            errors: 2,
+            at: "2026-10-20T00:00:00Z".into(),
+        });
+        assert!(matches!(kind, crate::toasts::ToastKind::Warning));
+        assert!(
+            detail.as_deref().is_some_and(|d| d.contains("Diagnostics")),
+            "must point at the record: {detail:?}"
+        );
+
+        // Rows landed: the success copy is unchanged.
+        let (kind, title, _) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
+            kind: "initial".into(),
+            processed: 25_000,
+            errors: 0,
+            at: "2026-10-20T00:00:00Z".into(),
+        });
+        assert!(matches!(kind, crate::toasts::ToastKind::Success));
+        assert!(title.contains("25000"), "title: {title}");
     }
 
     #[test]

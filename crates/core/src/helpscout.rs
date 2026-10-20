@@ -594,6 +594,15 @@ pub trait HelpScoutProvider: Send + Sync {
 
     fn reset(&self) {}
 
+    /// Whether a Docs API key is configured for Help Center sync
+    /// (v1.4.0 R5, D15): lets the sync engine surface "Help Center
+    /// sync is idle: no Docs API key" to the UI instead of silently
+    /// mirroring an empty Help Center. The real provider overrides
+    /// with the actual key state.
+    fn docs_configured(&self) -> bool {
+        true
+    }
+
     async fn update_tags(&self, _conversation_id: i64, _tags: Vec<String>) -> Result<bool> {
         Err(crate::error::Error::Other(
             "update_tags is not supported by this provider".into(),
@@ -795,6 +804,11 @@ impl EmptyHelpScoutProvider {
 impl HelpScoutProvider for EmptyHelpScoutProvider {
     fn kind(&self) -> &'static str {
         "empty"
+    }
+
+    fn docs_configured(&self) -> bool {
+        // No credentials resolved: no Docs key, no Help Center sync.
+        false
     }
 
     async fn get_me(&self) -> Result<HsUser> {

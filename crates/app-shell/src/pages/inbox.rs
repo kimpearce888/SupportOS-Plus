@@ -210,18 +210,23 @@ fn insert_local_note(
 }
 
 /// Queue an outbound job, returning its id (mirrors the HTTP ops).
+/// v1.4.0 (R4, D8): the enqueue is now a real `Result` — an INSERT
+/// failure used to return job id `0` while the composer reported
+/// success, so a reply could evaporate between the composer and the
+/// dispatcher. The caller renders the error and keeps the typed text.
 fn queue_job(
     conn: &Connection,
     kind: &str,
     payload: &serde_json::Value,
     conversation_id: Option<i64>,
     idempotency_key: Option<&str>,
-) -> i64 {
-    let id = create_outbound_job_keyed(conn, kind, payload, conversation_id, idempotency_key);
+) -> Result<i64, String> {
+    let id = create_outbound_job_keyed(conn, kind, payload, conversation_id, idempotency_key)
+        .map_err(|e| e.to_string())?;
     // Jobs are born "queued"; "sending" marks a provider call in flight,
     // which only the worker/loopback batch will set.
     set_outbound_status(conn, id, "queued", None);
-    id
+    Ok(id)
 }
 
 fn guard_eval_mode(conn: &Connection) -> Result<(), String> {
@@ -279,6 +284,10 @@ pub struct InboxPage {
     directory: Directory,
     status: Option<String>,
     assign_pick: Option<i64>,
+    /// v1.4.0 (R5, D16): a failed detail load used to vanish via `.ok()`
+    /// and render an empty pane; the exact error now shows in place of
+    /// the thread so the user knows what broke.
+    detail_error: Option<String>,
     /// Honest status of the user's last outbound action for this
     /// conversation, derived from the outbound queue on every detail
     /// reload: "Sending…", "Reply delivered", "Send failed: …".
@@ -318,6 +327,7 @@ impl InboxPage {
             tags: Vec::new(),
             directory: Directory::default(),
             status: None,
+            detail_error: None,
             assign_pick: None,
             outbound_note: None,
             status_message: None,
@@ -376,7 +386,27 @@ impl InboxPage {
     fn reload_detail(&mut self, db: &DbHandle) {
         let id = self.selected;
         let detail = id.map(|id| db.with_read(|conn| spp_core::inbox::get_conversation(conn, id)));
-        self.detail = detail.and_then(|result| result.ok()).flatten();
+        // v1.4.0 (R5, D16): `.and_then(|result| result.ok()).flatten()`
+        // swallowed every database error here, so a failed thread load
+        // looked exactly like "no conversation selected".
+        match detail {
+            Some(Ok(Some(loaded))) => {
+                self.detail = Some(loaded);
+                self.detail_error = None;
+            }
+            Some(Ok(None)) => {
+                self.detail = None;
+                self.detail_error = None;
+            }
+            Some(Err(e)) => {
+                self.detail = None;
+                self.detail_error = Some(e.to_string());
+            }
+            None => {
+                self.detail = None;
+                self.detail_error = None;
+            }
+        }
         if let Some(id) = id {
             let (note, report) = db.with_read(|conn| {
                 let note = spp_core::outbound::latest_for_conversation(conn, id).map(|o| {
@@ -882,6 +912,17 @@ impl InboxPage {
 
     fn detail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, bus: &EventBus) {
         let Some(detail) = self.detail.clone() else {
+            // R5 (D16): a load failure is not "nothing selected" — say
+            // what broke so the user can act on it.
+            if let Some(err) = &self.detail_error {
+                design::empty_state(
+                    ui,
+                    Icon::AlertCircle,
+                    "This conversation could not be loaded",
+                    err,
+                );
+                return;
+            }
             design::empty_state(
                 ui,
                 Icon::Inbox,
@@ -1605,6 +1646,28 @@ pub fn submit_reply(
                 "This exact reply was already sent (duplicate-send protection).".to_string(),
             );
         }
+        // v1.4.0 (R4, D9): a sent reply moves the conversation to the
+        // configured status (default `pending`, decision D-b). Before
+        // this, replies never carried statusAfter and the conversation
+        // stayed in whatever status it was in — the "status never
+        // changes" complaint.
+        let status_after = conn
+            .query_row(
+                "SELECT value FROM application_settings WHERE key = 'reply_status_after'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|raw| serde_json::from_str::<String>(&raw).ok().or(Some(raw)))
+            .unwrap_or_else(|| "\"pending\"".to_string())
+            .trim_matches('"')
+            .to_string();
+        let status_after = match status_after.as_str() {
+            "waiting" => json!("waiting"),
+            "keep" => serde_json::Value::Null,
+            // default: pending (await customer) — Help Scout semantics
+            _ => json!("pending"),
+        };
         let job_id = queue_job(
             conn,
             "create_reply",
@@ -1614,12 +1677,12 @@ pub fn submit_reply(
                 "draft": false,
                 "cc": cc,
                 "bcc": bcc,
-                "statusAfter": serde_json::Value::Null,
+                "statusAfter": status_after,
                 "assignTo": serde_json::Value::Null,
             }),
             Some(detail.id),
             Some(&key),
-        );
+        )?;
         let _ = spp_core::jobs::audit_entry(
             conn,
             "user",
@@ -1697,7 +1760,7 @@ pub fn submit_note(
             }),
             Some(detail.id),
             None,
-        );
+        )?;
         let _ = spp_core::jobs::audit_entry(
             conn,
             "user",
@@ -1741,7 +1804,7 @@ fn mutate(
         }
         let outcome = spp_core::ticket_ops::execute(conn, &op).map_err(|e| e.to_string())?;
         if matches!(outcome, OperationResult::Success { .. }) {
-            queue_job(conn, job_kind, payload, Some(detail.id), None);
+            queue_job(conn, job_kind, payload, Some(detail.id), None)?;
         }
         Ok(outcome)
     });
@@ -2010,5 +2073,80 @@ mod tests {
         assert!(users.contains(&(5, "Ada Lovelace".into())));
         let tags = db.with_read(tag_names);
         assert_eq!(tags, vec!["billing".to_string()]);
+    }
+
+    #[test]
+    fn r4_d9_reply_carries_the_configured_status_after() {
+        // Default (decision D-b): pending — a sent reply moves the
+        // conversation to "awaiting the customer" like Help Scout itself.
+        let db = fixture(vec![seeded().0]);
+        let bus = EventBus::new(8);
+        let detail = db
+            .with_read(|conn| spp_core::inbox::get_conversation(conn, 1))
+            .expect("detail")
+            .expect("conversation 1 exists");
+
+        let outcome = submit_reply(&db, &bus, &detail, "status after test", "", "");
+        assert!(matches!(outcome, ActionOutcome::Success(_)));
+        let payload: String = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT payload FROM outbound_jobs ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("job row")
+        });
+        let parsed: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert_eq!(
+            parsed["statusAfter"], "pending",
+            "D9: the default reply statusAfter is pending"
+        );
+
+        // The "keep" setting restores the pre-1.4.0 behavior: no status
+        // transition on send.
+        db.with_write(|conn| spp_core::settings::set_string(conn, "reply_status_after", "keep"))
+            .expect("set keep");
+        let outcome = submit_reply(&db, &bus, &detail, "keep setting text", "", "");
+        assert!(matches!(outcome, ActionOutcome::Success(_)));
+        let payload: String = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT payload FROM outbound_jobs ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("job row")
+        });
+        let parsed: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert!(
+            parsed["statusAfter"].is_null(),
+            "D9: keep means no statusAfter on the wire"
+        );
+    }
+
+    #[test]
+    fn r4_d8_a_failed_enqueue_is_rejected_instead_of_faking_success() {
+        // Break the queue so the INSERT fails; the composer must say so
+        // and the typed text must survive (pre-1.4.0: job id 0 + a green
+        // "accepted" while the reply evaporated).
+        let db = fixture(vec![seeded().0]);
+        let bus = EventBus::new(8);
+        let detail = db
+            .with_read(|conn| spp_core::inbox::get_conversation(conn, 1))
+            .expect("detail")
+            .expect("conversation 1 exists");
+
+        db.with_write(|conn| conn.execute_batch("DROP TABLE outbound_jobs"))
+            .expect("drop the queue");
+
+        let outcome = submit_reply(&db, &bus, &detail, "must be rejected", "", "");
+        match outcome {
+            ActionOutcome::Rejected(reason) => {
+                assert!(
+                    !reason.is_empty(),
+                    "the failure must carry the database's reason"
+                );
+            }
+            other => panic!("expected rejection, got {other:?}"),
+        }
     }
 }

@@ -96,7 +96,12 @@ fn signed_webhook_roundtrip_over_tcp() {
     let db = fixture_db();
     db.with_write(|conn| crate::settings::set_secret(conn, "webhook_secret", b"top-secret"))
         .expect("store webhook secret");
-    let mut server = LoopbackServer::start(db.clone(), None, 0).expect("start listener");
+    let mut server = LoopbackServer::start(
+        db.clone(),
+        std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_empty()),
+        0,
+    )
+    .expect("start listener");
     let port = server.port();
 
     let (status, body) = get(port, "/healthz");
@@ -159,7 +164,12 @@ fn signed_webhook_roundtrip_over_tcp() {
 fn webhook_without_configured_secret_hard_rejects() {
     install_master_key();
     let db = fixture_db(); // no webhook_secret stored
-    let mut server = LoopbackServer::start(db.clone(), None, 0).expect("start listener");
+    let mut server = LoopbackServer::start(
+        db.clone(),
+        std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_empty()),
+        0,
+    )
+    .expect("start listener");
 
     let (status, body) = post_webhook(server.port(), None, "convo.created", r#"{"id":9}"#);
     assert_eq!(
@@ -179,7 +189,12 @@ fn webhook_burst_is_served_concurrently() {
     let db = fixture_db();
     db.with_write(|conn| crate::settings::set_secret(conn, "webhook_secret", b"burst-secret"))
         .expect("store webhook secret");
-    let mut server = LoopbackServer::start(db.clone(), None, 0).expect("start listener");
+    let mut server = LoopbackServer::start(
+        db.clone(),
+        std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_empty()),
+        0,
+    )
+    .expect("start listener");
     let port = server.port();
 
     // 12 concurrent POSTs of distinct events: the per-connection threads
@@ -273,8 +288,14 @@ fn oauth_authorization_code_flow_over_tcp() {
     };
     let provider = Arc::new(RealHelpScoutProvider::new(db.clone(), creds.clone()));
 
-    let mut server =
-        LoopbackServer::start(db.clone(), Some(provider.clone()), 0).expect("listener");
+    let mut server = LoopbackServer::start(
+        db.clone(),
+        std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_real(
+            provider.clone(),
+        )),
+        0,
+    )
+    .expect("listener");
     let port = server.port();
 
     // begin_oauth issues the single-use state and builds the real
@@ -404,7 +425,12 @@ fn oauth_callback_reports_token_endpoint_rejection() {
     };
     let provider = Arc::new(RealHelpScoutProvider::new(db.clone(), creds.clone()));
 
-    let mut server = LoopbackServer::start(db.clone(), Some(provider), 0).expect("listener");
+    let mut server = LoopbackServer::start(
+        db.clone(),
+        std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_real(provider)),
+        0,
+    )
+    .expect("listener");
     let port = server.port();
 
     let redirect = format!("http://127.0.0.1:{port}/oauth/callback");

@@ -98,6 +98,25 @@ pub fn notify_outbound_finished(
     ));
 }
 
+/// R5 (D4): the first live emitters for `ErrorOccurred`. Background
+/// failures (sync, outbound, connect, worker jobs) used to land only in
+/// the Diagnostics log; now they also invalidate pages and surface as
+/// toasts through the shell's event bridge.
+pub fn notify_error(
+    bus: &EventBus,
+    severity: &str,
+    message: &str,
+    service: &str,
+    conversation_id: Option<i64>,
+) {
+    bus.emit(&ServerEvent::error_occurred(
+        severity,
+        message,
+        service,
+        conversation_id,
+    ));
+}
+
 pub fn notify_rating_received(
     bus: &EventBus,
     rating: Option<&str>,

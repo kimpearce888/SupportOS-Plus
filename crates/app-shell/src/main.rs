@@ -101,7 +101,7 @@ fn main() {
         .unwrap_or(0);
     let loopback = match spp_core::loopback::LoopbackServer::start(
         db.clone(),
-        boot.real.clone(),
+        boot.handle.clone(),
         configured_port,
     ) {
         Ok(server) => {
@@ -127,7 +127,7 @@ fn main() {
         bus,
         data_dir: app_config.data_dir.clone(),
         sync: Some(boot.engine),
-        real: boot.real,
+        handle: Some(boot.handle),
         workers: Some(std::sync::Arc::new(_workers)),
     };
 
