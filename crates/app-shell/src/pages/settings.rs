@@ -222,9 +222,12 @@ impl GeneralSettings {
 pub struct HelpScoutStatus {
     pub demo_mode: bool,
     pub configured: bool,
-    /// Help Scout client credentials are available in the environment, so
-    /// the OAuth connect flow can start.
+    /// OAuth client credentials are available — from the environment or
+    /// the in-app form — so the OAuth connect flow can start.
     pub credentials: bool,
+    /// Per-field credential source for the form badges (1.1.3):
+    /// environment, app settings, or not set.
+    pub sources: spp_core::helpscout_real::CredentialSources,
 }
 
 /// Load the connection status from the local mirror.
@@ -238,10 +241,12 @@ pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
             |r| r.get(0),
         )
         .unwrap_or(0);
+    let (credentials, sources) = spp_core::helpscout_real::HsCredentials::resolve(conn);
     HelpScoutStatus {
         demo_mode,
         configured: tokens > 0,
-        credentials: spp_core::helpscout_real::HsCredentials::from_env().is_configured(),
+        credentials: credentials.is_configured(),
+        sources,
     }
 }
 
@@ -366,6 +371,19 @@ pub struct SettingsPage {
     general: Option<GeneralSettings>,
     helpscout: Option<HelpScoutStatus>,
     authorize_url: Option<String>,
+    /// Help Scout credential form (1.1.3). The three secrets render as
+    /// password fields; `hs_show_secrets` toggles the mask.
+    hs_client_id: String,
+    hs_client_secret: String,
+    hs_webhook_secret: String,
+    hs_docs_api_key: String,
+    hs_form_loaded: bool,
+    hs_show_secrets: bool,
+    /// Application data directory: the demo purge clears the vector
+    /// store that lives next to the database.
+    data_dir: Option<PathBuf>,
+    /// Two-step confirmation state for the demo purge.
+    purge_armed: bool,
     lmstudio_base_url: String,
     lmstudio_chat_model: String,
     lmstudio_embedding_model: String,
@@ -391,6 +409,14 @@ impl SettingsPage {
             general: None,
             helpscout: None,
             authorize_url: None,
+            hs_client_id: String::new(),
+            hs_client_secret: String::new(),
+            hs_webhook_secret: String::new(),
+            hs_docs_api_key: String::new(),
+            hs_form_loaded: false,
+            hs_show_secrets: false,
+            data_dir: None,
+            purge_armed: false,
             lmstudio_base_url: String::new(),
             lmstudio_chat_model: String::new(),
             lmstudio_embedding_model: String::new(),
@@ -403,6 +429,12 @@ impl SettingsPage {
             message: None,
             error: None,
         }
+    }
+
+    /// Application data directory (set by the shell at boot; the demo
+    /// purge needs it to clear the vector store).
+    pub fn set_data_dir(&mut self, dir: PathBuf) {
+        self.data_dir = Some(dir);
     }
 
     /// Backups directory (set by the shell at boot).
@@ -437,6 +469,16 @@ impl SettingsPage {
         self.general = Some(general);
         self.helpscout = Some(helpscout);
         self.hours = hours;
+        // Prefill the credential form once from the envelope (like the
+        // LM Studio fields); after that the fields belong to the user.
+        if !self.hs_form_loaded {
+            let stored = db.with_read(spp_core::helpscout_real::HsCredentials::from_envelope);
+            self.hs_client_id = stored.client_id;
+            self.hs_client_secret = stored.client_secret;
+            self.hs_webhook_secret = stored.webhook_secret;
+            self.hs_docs_api_key = stored.docs_api_key;
+            self.hs_form_loaded = true;
+        }
         if self.lmstudio_base_url.is_empty() {
             let (base, chat, embed) = db.with_read(|conn| {
                 (
@@ -529,6 +571,85 @@ impl SettingsPage {
             let _ = conn.execute("DELETE FROM oauth_tokens", []);
         });
         self.message = Some("Disconnected. Local data is fully preserved.".into());
+        self.reload(db);
+    }
+
+    /// Save the credential form (1.1.3): non-empty fields are stored in
+    /// the encrypted envelope, and a configured pair switches demo mode
+    /// off so the next boot builds the real provider.
+    fn save_helpscout_credentials(&mut self, db: &DbHandle) {
+        let (cid, cs, ws, dk) = (
+            self.hs_client_id.trim().to_string(),
+            self.hs_client_secret.trim().to_string(),
+            self.hs_webhook_secret.trim().to_string(),
+            self.hs_docs_api_key.trim().to_string(),
+        );
+        let result = db.with_write(|conn| {
+            spp_core::helpscout_real::HsCredentials::store_in_envelope(conn, &cid, &cs, &ws, &dk)?;
+            let (resolved, _) = spp_core::helpscout_real::HsCredentials::resolve(conn);
+            if resolved.is_configured() {
+                spp_core::settings::set_bool(conn, "demo_mode", false)?;
+            }
+            spp_core::error::Result::Ok(())
+        });
+        match result {
+            Ok(()) => {
+                self.message = Some(
+                    "credentials stored (encrypted). Demo mode is off — restart \
+                     SupportOS+ to connect the real account."
+                        .into(),
+                );
+                // The three secret fields do not linger on screen after a
+                // successful save; the client id stays for reference.
+                self.hs_client_secret.clear();
+                self.hs_webhook_secret.clear();
+                self.hs_docs_api_key.clear();
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+        self.reload(db);
+    }
+
+    /// Remove every credential stored by the form. The connection
+    /// tokens and demo mode are deliberately untouched.
+    fn clear_helpscout_credentials(&mut self, db: &DbHandle) {
+        let result =
+            db.with_write(|conn| spp_core::helpscout_real::HsCredentials::clear_envelope(conn));
+        match result {
+            Ok(removed) => {
+                self.message = Some(format!(
+                    "stored credentials removed ({removed} values). The \
+                     connection and demo mode are untouched."
+                ));
+                self.hs_client_id.clear();
+                self.hs_client_secret.clear();
+                self.hs_webhook_secret.clear();
+                self.hs_docs_api_key.clear();
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+        self.reload(db);
+    }
+
+    /// One-click demo purge (1.1.3): clears all business content, keeps
+    /// the KEEP_TABLES config, resets the vector store when the data
+    /// directory is known.
+    fn purge_demo(&mut self, db: &DbHandle) {
+        let result = db.with_write(|conn| {
+            spp_core::data_reset::purge_demo_data(conn, self.data_dir.as_deref())
+        });
+        match result {
+            Ok(report) => {
+                self.message = Some(format!(
+                    "demo data deleted: {} rows across {} tables, {} vector \
+                     entries. Restart SupportOS+ so every view reloads clean.",
+                    report.rows_deleted, report.tables_cleared, report.vectors_dropped
+                ));
+            }
+            Err(e) => self.error = Some(format!("purge failed (nothing was changed): {e}")),
+        }
+        self.purge_armed = false;
+        self.invalidate();
         self.reload(db);
     }
 
@@ -799,12 +920,141 @@ impl SettingsPage {
                 }
             },
         );
+        ui.add_space(10.0);
+
+        // Credential form (1.1.3): values are stored in the encrypted
+        // secrets envelope; environment variables still win per field.
+        design::card_titled(
+            ui,
+            "Help Scout credentials",
+            Some(
+                "Stored encrypted on this machine. Saving a configured pair \
+                 turns demo mode off — restart SupportOS+ to connect the \
+                 real account. Environment variables override these values.",
+            ),
+            |ui| {
+                let mask = !self.hs_show_secrets;
+                design::form_grid(ui, "settings-hs-creds", |ui| {
+                    design::field_label(ui, "client id:");
+                    ui.add_sized(
+                        [320.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.hs_client_id)
+                            .hint_text("Help Scout custom app — client ID"),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "client secret:");
+                    ui.add_sized(
+                        [320.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.hs_client_secret)
+                            .password(mask)
+                            .hint_text("leave blank to keep the stored value"),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "webhook secret:");
+                    ui.add_sized(
+                        [320.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.hs_webhook_secret)
+                            .password(mask)
+                            .hint_text("verifies incoming Help Scout webhooks"),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "docs api key:");
+                    ui.add_sized(
+                        [320.0, 28.0],
+                        egui::TextEdit::singleline(&mut self.hs_docs_api_key)
+                            .password(mask)
+                            .hint_text("optional — leave blank to keep the stored value"),
+                    );
+                    ui.end_row();
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.hs_show_secrets, "show secrets");
+                    if design::button(ui, "save credentials", ButtonVariant::Primary).clicked() {
+                        self.save_helpscout_credentials(db);
+                    }
+                    let any_stored = status.sources.client_id.is_set()
+                        || status.sources.client_secret.is_set()
+                        || status.sources.webhook_secret.is_set()
+                        || status.sources.docs_api_key.is_set();
+                    if any_stored
+                        && design::button(ui, "clear stored", ButtonVariant::Destructive).clicked()
+                    {
+                        self.clear_helpscout_credentials(db);
+                    }
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let sources = status.sources;
+                    for (label, source) in [
+                        ("client id", sources.client_id),
+                        ("client secret", sources.client_secret),
+                        ("webhook secret", sources.webhook_secret),
+                        ("docs api key", sources.docs_api_key),
+                    ] {
+                        design::hint_text(ui, &format!("{label}:"));
+                        design::badge(
+                            ui,
+                            source.label(),
+                            if source.is_set() {
+                                BadgeTone::Success
+                            } else {
+                                BadgeTone::Neutral
+                            },
+                        );
+                    }
+                });
+            },
+        );
+        ui.add_space(10.0);
+
+        // Demo-data purge (1.1.3): one click, two-step confirmation.
+        design::card_titled(
+            ui,
+            "Demo data",
+            Some(
+                "Deletes every conversation, customer, thread, rating, \
+                 knowledge document, incident, report and AI record — all \
+                 demo-seeded or synced content — and resets sync state. \
+                 Keeps: credentials, settings, business hours, automation \
+                 rules, saved views and replies, custom object types.",
+            ),
+            |ui| {
+                if !self.purge_armed {
+                    if design::button(ui, "delete all demo data", ButtonVariant::Destructive)
+                        .clicked()
+                    {
+                        self.purge_armed = true;
+                    }
+                } else {
+                    design::error_text(
+                        ui,
+                        "This cannot be undone. Everything listed above will be deleted.",
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if design::button(ui, "cancel", ButtonVariant::Outline).clicked() {
+                            self.purge_armed = false;
+                        }
+                        if design::button(
+                            ui,
+                            "really delete everything",
+                            ButtonVariant::Destructive,
+                        )
+                        .clicked()
+                        {
+                            self.purge_demo(db);
+                        }
+                    });
+                }
+            },
+        );
     }
 
     /// Start the browser OAuth flow: issue a single-use state and show the
     /// authorization URL (the loopback listener serves the callback).
     fn begin_oauth(&mut self, db: &DbHandle) {
-        let creds = spp_core::helpscout_real::HsCredentials::from_env();
+        let (creds, _) = db.with_read(spp_core::helpscout_real::HsCredentials::resolve);
         let redirect_uri = creds.redirect_uri.clone();
         match spp_core::loopback::begin_oauth(db, &creds, &redirect_uri) {
             Ok(url) => {
@@ -1146,5 +1396,137 @@ mod tests {
         assert!(file.contains("supportos-backup-"), "unexpected name {file}");
         assert!(i64_field(&list[0], "size_bytes") > 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Install a master key for envelope tests (pub API; in-memory
+    /// databases do not get one from bootstrap by design). Only these
+    /// page tests touch the key in this test binary, so there is no
+    /// parallel-flip race.
+    fn install_master_key() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        let path = std::env::temp_dir().join(format!(
+            "spp-settings-page-key-{}-{nanos}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        spp_core::settings::init_master_key(&path).expect("master key");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn helpscout_credentials_save_clear_and_demo_mode_flip() {
+        install_master_key();
+        let db = fixture(Vec::new());
+        // Demo mode on, as after onboarding's "try demo" path.
+        db.with_write(|conn| {
+            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
+        });
+
+        let mut page = SettingsPage::new();
+        // The real UI loads the form once on the first frame (see
+        // reload); simulate that so the save-time field clear is not
+        // immediately overwritten by the first prefill.
+        page.hs_form_loaded = true;
+        page.hs_client_id = "cid-app".into();
+        page.hs_client_secret = "secret-app".into();
+        page.hs_webhook_secret = "wh-app".into();
+        page.save_helpscout_credentials(&db);
+
+        assert!(
+            page.message
+                .as_deref()
+                .is_some_and(|m| m.contains("stored")),
+            "save must confirm: {:?}",
+            page.message
+        );
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let status = db.with_read(helpscout_status);
+        assert!(status.credentials, "credentials resolve from the envelope");
+        assert_eq!(
+            status.sources.client_id,
+            spp_core::helpscout_real::CredentialSource::AppSettings
+        );
+        assert_eq!(
+            status.sources.webhook_secret,
+            spp_core::helpscout_real::CredentialSource::AppSettings
+        );
+        assert!(
+            !status.demo_mode,
+            "saving a configured pair flips demo mode off"
+        );
+        assert!(
+            page.hs_client_secret.is_empty(),
+            "secret fields are cleared after a successful save"
+        );
+
+        // The stored secrets decrypt back through the envelope.
+        let stored = db.with_read(spp_core::helpscout_real::HsCredentials::from_envelope);
+        assert_eq!(stored.client_id, "cid-app");
+        assert_eq!(stored.client_secret, "secret-app");
+
+        // Clear: tokens and the demo flag stay as they are.
+        db.with_write(|conn| {
+            conn.execute("INSERT INTO oauth_tokens (access_token) VALUES ('tok')", [])
+                .expect("token");
+            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
+        });
+        page.clear_helpscout_credentials(&db);
+        let status2 = db.with_read(helpscout_status);
+        assert!(!status2.credentials);
+        assert_eq!(
+            status2.sources.client_id,
+            spp_core::helpscout_real::CredentialSource::NotSet
+        );
+        assert!(status2.configured, "connection tokens survive the clear");
+        assert!(status2.demo_mode, "the clear leaves demo mode untouched");
+    }
+
+    #[test]
+    fn purge_demo_empties_content_and_keeps_config() {
+        let db = fixture(vec![("conv", 1, "Demo ticket", "active", "email", 1, 5, 9)]);
+        db.with_write(|conn| {
+            spp_core::settings::set_string(conn, "display_timezone", "Asia/Dhaka").expect("tz");
+        });
+
+        let mut page = SettingsPage::new();
+        page.purge_armed = true;
+        page.purge_demo(&db);
+
+        assert!(
+            page.message
+                .as_deref()
+                .is_some_and(|m| m.contains("demo data deleted")),
+            "purge must report: {:?}",
+            page.message
+        );
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert!(
+            !page.purge_armed,
+            "the confirmation disarms after the purge"
+        );
+
+        let (convs, users, mailboxes, tz) = db.with_read(|conn| {
+            let count = |table: &str| -> i64 {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap_or_else(|e| panic!("count {table}: {e}"))
+            };
+            (
+                count("conversations"),
+                count("users"),
+                count("mailboxes"),
+                spp_core::settings::get_string(conn, "display_timezone")
+                    .expect("read")
+                    .expect("present"),
+            )
+        });
+        assert_eq!(convs, 0, "seeded conversations must be purged");
+        assert_eq!(users, 0, "mirror users must be purged");
+        assert_eq!(mailboxes, 0, "mirror mailboxes must be purged");
+        assert_eq!(tz, "Asia/Dhaka", "application settings must survive");
     }
 }

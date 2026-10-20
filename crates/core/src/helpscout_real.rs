@@ -325,6 +325,67 @@ pub struct HsCredentials {
     pub docs_api_base: String,
 }
 
+/// Envelope keys for the credentials stored by the in-app settings form
+/// (1.1.3). The webhook secret deliberately reuses the pre-existing
+/// `webhook_secret` key so the loopback webhook route's
+/// environment-then-envelope resolution picks it up unchanged.
+pub const SECRET_CLIENT_ID: &str = "helpscout_client_id";
+pub const SECRET_CLIENT_SECRET: &str = "helpscout_client_secret";
+pub const SECRET_DOCS_API_KEY: &str = "helpscout_docs_api_key";
+pub const SECRET_WEBHOOK: &str = "webhook_secret";
+
+/// Where a credential value came from — for the settings-page badges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CredentialSource {
+    /// No value from any source.
+    #[default]
+    NotSet,
+    /// Set in the process environment (overrides the stored value).
+    Environment,
+    /// Stored by the in-app form (encrypted envelope).
+    AppSettings,
+}
+
+impl CredentialSource {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NotSet => "not set",
+            Self::Environment => "environment",
+            Self::AppSettings => "app settings",
+        }
+    }
+
+    #[must_use]
+    pub fn is_set(self) -> bool {
+        !matches!(self, Self::NotSet)
+    }
+}
+
+/// Per-field credential sources for the settings badges.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CredentialSources {
+    pub client_id: CredentialSource,
+    pub client_secret: CredentialSource,
+    pub webhook_secret: CredentialSource,
+    pub docs_api_key: CredentialSource,
+}
+
+/// Per-field merge of an environment value with the stored envelope
+/// value: environment wins (CI, power users), envelope fills the gaps.
+fn merge_field(env_value: String, stored: Option<Vec<u8>>) -> (String, CredentialSource) {
+    if !env_value.trim().is_empty() {
+        return (env_value, CredentialSource::Environment);
+    }
+    match stored {
+        Some(bytes) if !bytes.is_empty() => (
+            String::from_utf8_lossy(&bytes).into_owned(),
+            CredentialSource::AppSettings,
+        ),
+        _ => (String::new(), CredentialSource::NotSet),
+    }
+}
+
 impl HsCredentials {
     pub fn from_env() -> Self {
         let env = crate::config::load_env_config();
@@ -337,6 +398,119 @@ impl HsCredentials {
             docs_api_key: env.helpscout.docs_api_key,
             docs_api_base: env.helpscout.docs_api_base,
         }
+    }
+
+    /// The credentials stored by the in-app settings form (encrypted
+    /// envelope); environment-only fields are left empty. A missing
+    /// master key degrades to empty values (reads are best-effort).
+    #[must_use]
+    pub fn from_envelope(conn: &Connection) -> Self {
+        let read = |key: &str| {
+            crate::settings::get_secret(conn, key)
+                .ok()
+                .flatten()
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .unwrap_or_default()
+        };
+        Self {
+            client_id: read(SECRET_CLIENT_ID),
+            client_secret: read(SECRET_CLIENT_SECRET),
+            webhook_secret: read(SECRET_WEBHOOK),
+            docs_api_key: read(SECRET_DOCS_API_KEY),
+            ..Self::default()
+        }
+    }
+
+    /// Resolve the credentials per field: environment first, then the
+    /// encrypted envelope. This is what boot and the settings page use
+    /// since 1.1.3 — credentials entered in the app work without any
+    /// environment variables.
+    #[must_use]
+    pub fn resolve(conn: &Connection) -> (Self, CredentialSources) {
+        Self::resolve_with(&Self::from_env(), conn)
+    }
+
+    /// Testable core of [`Self::resolve`]: merge `env` with whatever is
+    /// stored in the envelope.
+    #[must_use]
+    pub fn resolve_with(env: &Self, conn: &Connection) -> (Self, CredentialSources) {
+        let read = |key: &str| crate::settings::get_secret(conn, key).ok().flatten();
+        let (client_id, client_id_src) = merge_field(env.client_id.clone(), read(SECRET_CLIENT_ID));
+        let (client_secret, client_secret_src) =
+            merge_field(env.client_secret.clone(), read(SECRET_CLIENT_SECRET));
+        let (webhook_secret, webhook_secret_src) =
+            merge_field(env.webhook_secret.clone(), read(SECRET_WEBHOOK));
+        let (docs_api_key, docs_api_key_src) =
+            merge_field(env.docs_api_key.clone(), read(SECRET_DOCS_API_KEY));
+        (
+            Self {
+                client_id,
+                client_secret,
+                webhook_secret,
+                docs_api_key,
+                redirect_uri: env.redirect_uri.clone(),
+                api_base: env.api_base.clone(),
+                docs_api_base: env.docs_api_base.clone(),
+            },
+            CredentialSources {
+                client_id: client_id_src,
+                client_secret: client_secret_src,
+                webhook_secret: webhook_secret_src,
+                docs_api_key: docs_api_key_src,
+            },
+        )
+    }
+
+    /// Store the non-empty credential fields in the encrypted envelope.
+    /// An empty field leaves any previously stored value untouched, so
+    /// the form can save just one value without re-typing the rest.
+    ///
+    /// # Errors
+    /// Fails when the secrets master key is not initialized (in-memory
+    /// test databases) or the write fails.
+    pub fn store_in_envelope(
+        conn: &Connection,
+        client_id: &str,
+        client_secret: &str,
+        webhook_secret: &str,
+        docs_api_key: &str,
+    ) -> crate::error::Result<()> {
+        if !client_id.trim().is_empty() {
+            crate::settings::set_secret(conn, SECRET_CLIENT_ID, client_id.trim().as_bytes())?;
+        }
+        if !client_secret.trim().is_empty() {
+            crate::settings::set_secret(
+                conn,
+                SECRET_CLIENT_SECRET,
+                client_secret.trim().as_bytes(),
+            )?;
+        }
+        if !webhook_secret.trim().is_empty() {
+            crate::settings::set_secret(conn, SECRET_WEBHOOK, webhook_secret.trim().as_bytes())?;
+        }
+        if !docs_api_key.trim().is_empty() {
+            crate::settings::set_secret(conn, SECRET_DOCS_API_KEY, docs_api_key.trim().as_bytes())?;
+        }
+        Ok(())
+    }
+
+    /// Remove every credential stored by the form (the clear button).
+    /// The connection tokens and demo mode are deliberately untouched.
+    ///
+    /// # Errors
+    /// Fails when a delete fails (the master key is not needed to
+    /// delete).
+    pub fn clear_envelope(conn: &Connection) -> crate::error::Result<usize> {
+        let mut removed = 0;
+        for key in [
+            SECRET_CLIENT_ID,
+            SECRET_CLIENT_SECRET,
+            SECRET_WEBHOOK,
+            SECRET_DOCS_API_KEY,
+        ] {
+            removed += usize::from(crate::settings::delete_secret(conn, key)?);
+        }
+        Ok(removed)
     }
 
     pub fn is_configured(&self) -> bool {
@@ -2083,4 +2257,96 @@ fn ensure_account_row(conn: &Connection) {
     let _ = conn.execute_batch(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_tokens_account ON oauth_tokens(account);",
     );
+}
+
+#[cfg(test)]
+mod credentials_tests {
+    use super::*;
+
+    fn migrated_conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn install_key() {
+        crate::settings::clear_master_key_for_tests();
+        let path = std::env::temp_dir().join(format!(
+            "spp-hscreds-key-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let _ = std::fs::remove_file(&path);
+        crate::settings::init_master_key(&path).expect("master key");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn credentials_envelope_lifecycle() {
+        // The master-key holder is process-global and tests run in
+        // parallel threads; the lock serializes every test that flips it.
+        let _key_guard = crate::settings::SECRETS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        install_key();
+        let conn = migrated_conn();
+
+        // 1. Nothing stored anywhere: every field NotSet, unconfigured.
+        let env_none = HsCredentials::default();
+        let (resolved, sources) = HsCredentials::resolve_with(&env_none, &conn);
+        assert!(!resolved.is_configured());
+        assert_eq!(sources.client_id, CredentialSource::NotSet);
+        assert_eq!(sources.client_secret, CredentialSource::NotSet);
+        assert_eq!(sources.webhook_secret, CredentialSource::NotSet);
+        assert_eq!(sources.docs_api_key, CredentialSource::NotSet);
+
+        // 2. Store: empty fields are skipped, the rest become AppSettings.
+        HsCredentials::store_in_envelope(&conn, "cid-1", "csecret-1", "wh-1", "").expect("store");
+        let (r2, s2) = HsCredentials::resolve_with(&env_none, &conn);
+        assert!(r2.is_configured());
+        assert_eq!(r2.client_id, "cid-1");
+        assert_eq!(r2.client_secret, "csecret-1");
+        assert_eq!(r2.webhook_secret, "wh-1");
+        assert_eq!(r2.docs_api_key, "");
+        assert_eq!(s2.client_id, CredentialSource::AppSettings);
+        assert_eq!(s2.client_secret, CredentialSource::AppSettings);
+        assert_eq!(s2.webhook_secret, CredentialSource::AppSettings);
+        assert_eq!(s2.docs_api_key, CredentialSource::NotSet);
+
+        // The plaintext never enters the secrets table.
+        let blob: Vec<u8> = conn
+            .query_row(
+                "SELECT value FROM secrets WHERE key = 'helpscout_client_secret'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("blob");
+        assert!(!blob.windows(8).any(|w| w == b"csecret-1"));
+
+        // 3. Environment wins per field; the envelope fills the rest.
+        let env_some = HsCredentials {
+            client_id: "env-cid".into(),
+            webhook_secret: "env-wh".into(),
+            ..HsCredentials::default()
+        };
+        let (r3, s3) = HsCredentials::resolve_with(&env_some, &conn);
+        assert_eq!(r3.client_id, "env-cid");
+        assert_eq!(s3.client_id, CredentialSource::Environment);
+        assert_eq!(s3.webhook_secret, CredentialSource::Environment);
+        assert_eq!(r3.webhook_secret, "env-wh");
+        assert_eq!(s3.client_secret, CredentialSource::AppSettings);
+        assert_eq!(r3.client_secret, "csecret-1");
+
+        // 4. Clear removes everything that was stored.
+        let removed = HsCredentials::clear_envelope(&conn).expect("clear");
+        assert_eq!(
+            removed, 3,
+            "client id + secret + webhook (docs never stored)"
+        );
+        let (r4, s4) = HsCredentials::resolve_with(&env_none, &conn);
+        assert!(!r4.is_configured());
+        assert_eq!(s4.client_id, CredentialSource::NotSet);
+        assert_eq!(s4.client_secret, CredentialSource::NotSet);
+        assert_eq!(s4.webhook_secret, CredentialSource::NotSet);
+    }
 }

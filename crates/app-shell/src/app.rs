@@ -110,6 +110,9 @@ impl ShellApp {
         let sync = options.sync;
         let mut settings = SettingsPage::new();
         settings.set_backups_dir(options.data_dir.join("backups"));
+        // The demo purge clears the vector store that lives next to the
+        // database (1.1.3).
+        settings.set_data_dir(options.data_dir.clone());
         // Worker handle for restart-on-interval-change (see save_general).
         settings.set_workers(options.workers);
         let mut connectors = ConnectorsPage::new();

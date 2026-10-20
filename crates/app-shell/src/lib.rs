@@ -98,7 +98,11 @@ pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
     let demo_mode = db
         .with_read(|conn| spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false))
         || std::env::var("LOCAL_DEMO_MODE").as_deref() == Ok("true");
-    let credentials = spp_core::helpscout_real::HsCredentials::from_env();
+    // Credentials resolve per field: environment first (CI, power
+    // users), then the encrypted envelope written by the in-app
+    // settings form (1.1.3) — so the app connects without any
+    // environment variables.
+    let credentials = db.with_read(|conn| spp_core::helpscout_real::HsCredentials::resolve(conn).0);
     let use_real = !demo_mode && credentials.is_configured();
     let (real, provider): (
         Option<Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
