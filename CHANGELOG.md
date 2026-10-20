@@ -4,6 +4,53 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] — 2026-10-20
+
+Hotfix for the upgrade path from 0.2.x data. Migration 36
+(`m045_threads_actor_model`, the `conversation_threads` table rebuild)
+died with `UNIQUE constraint failed: ratings.id` on any database whose
+foreign-key child tables already held rows — which is every real 0.2.x
+database and none of the empty ones CI tests with. The database was
+left untouched at schema version 35 (each migration is one
+transaction), so installing 1.1.2 simply resumes and completes the
+upgrade.
+
+### Fixed
+
+- **Migration 36 failed on real 0.2.x data** ("failed to open SQLite
+  DB: migration 36 failed: UNIQUE constraint failed: ratings.id"):
+  table-rebuild migrations captured the child rows of the rebuilt
+  table in order to restore them afterwards, but the capture only
+  *read* the rows — the restore then re-inserted rows that had never
+  been removed, and the first non-empty child table (`ratings`)
+  tripped its primary key.
+- **Rebuild migrations no longer fight SQLite's live foreign-key
+  machinery.** Enforcement is now suspended for the duration of each
+  migration step: the drop-and-rename dance at the heart of every
+  rebuild fires immediate cascade actions against rows that are about
+  to come back under the rebuilt table, and SQLite's deferred-violation
+  counter never forgets a violation that a rename has long since
+  repaired. Integrity is enforced instead by an explicit
+  `PRAGMA foreign_key_check` sweep inside each step's transaction — a
+  step that would commit a dangling reference rolls back whole, which
+  is a strictly stronger guarantee than before.
+- **Dangling references are pruned explicitly.** Rebuild copies may
+  drop rows (orphaned threads whose conversation no longer exists,
+  merged conversations, ...); a breadth-first walk now deletes every
+  row that references a missing row of the rebuilt table, recursively
+  through the dependents, so no orphan survives to the check. The
+  central fix covers every rebuild migration (`m045` threads, `m046`
+  customers/attachments and friends, `m047` conversations).
+- Regression coverage for the whole class: seeded 0.2.x-shaped
+  fixtures (threads with `actor_id`, ratings and attachments as
+  foreign-key children, customers without the `organization_id` FK)
+  are driven through the `m045` rebuild and the `m046` customers
+  rebuild, pinning id preservation, actor-column mapping, orphan
+  cleanup and foreign-key-clean commits. Two interim fix designs were
+  rejected by these tests: a capture-side delete (cascade-deleted
+  every thread during the customers rebuild) and UPDATE-in-place
+  restoration (the deferred-violation counter blocked the commit).
+
 ## [1.1.1] — 2026-10-20
 
 Hotfix for 1.1.0's startup failure on real machines. The shipped binary

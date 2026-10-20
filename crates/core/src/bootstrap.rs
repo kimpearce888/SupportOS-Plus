@@ -235,17 +235,56 @@ fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {
             label = step.label,
             "applying migration"
         );
-        let tx = conn.transaction()?;
-        (step.apply)(&tx).map_err(|e| crate::error::Error::Migration {
-            version: step.version,
-            message: e.to_string(),
-        })?;
-        tx.execute(
-            "INSERT INTO _migrations (version, label) VALUES (?1, ?2)",
-            rusqlite::params![i64::from(step.version), step.label],
-        )?;
-        tx.commit()?;
+        // Foreign-key enforcement is suspended while a step runs. Several
+        // steps rebuild tables by dropping and renaming them, and SQLite's
+        // live enforcement cannot survive that dance: immediate cascade
+        // actions fire against rows that are about to come back under the
+        // rebuilt table, and the deferred-violation counter never forgets
+        // a violation that the rename has long since repaired (the 1.1.x
+        // "migration 36 failed" boot failures on real 0.2.x data).
+        // Integrity is enforced instead by an explicit PRAGMA
+        // foreign_key_check sweep below, inside the same transaction: a
+        // step that would commit dangling references rolls back whole.
+        conn.pragma_update(None, "foreign_keys", "OFF")?;
+        let applied = apply_one_step(conn, step);
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        applied?;
     }
+    Ok(())
+}
+
+/// Run one boot step in its own transaction, verified foreign-key clean.
+fn apply_one_step(conn: &mut Connection, step: &BootStep) -> Result<()> {
+    let tx = conn.transaction()?;
+    (step.apply)(&tx).map_err(|e| crate::error::Error::Migration {
+        version: step.version,
+        message: e.to_string(),
+    })?;
+    let violations: i64 =
+        tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })?;
+    if violations > 0 {
+        let first: Option<(String, i64, String)> = tx
+            .query_row(
+                "SELECT \"table\", rowid, \"parent\" FROM pragma_foreign_key_check LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .ok();
+        return Err(crate::error::Error::Migration {
+            version: step.version,
+            message: format!(
+                "foreign_key_check reports {violations} dangling reference(s), \
+                 e.g. {first:?}"
+            ),
+        });
+    }
+    tx.execute(
+        "INSERT INTO _migrations (version, label) VALUES (?1, ?2)",
+        rusqlite::params![i64::from(step.version), step.label],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
