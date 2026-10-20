@@ -11,6 +11,17 @@
 //! in the purge set by default — its author must make a conscious KEEP
 //! decision here to preserve it.
 //!
+//! Deleting the rows is only half the job (fixed in 1.1.4): as long as
+//! the app kept serving the demo provider, the 5-minute auto-sync
+//! timer re-pulled the whole fake dataset (the purge had just wiped
+//! the sync checkpoints, so everything looked new) and the 30-second
+//! ratings timer re-inserted fake ratings. The purge therefore ALSO
+//! exits demo mode inside the same transaction: `demo_mode` off, the
+//! [`PURGED_FLAG`] on (boot then builds the real provider when
+//! credentials exist, or the *empty* provider instead of the demo
+//! one), and `sync_state` reset to `NEW` (auto-sync refuses to run in
+//! that state, so nothing re-syncs even in the still-running session).
+//!
 //! Foreign keys make the dance delicate: deleting mirror rows while
 //! child tables still hold rows would fire immediate cascades or
 //! constraint errors under live enforcement, so the purge runs with
@@ -22,6 +33,13 @@
 //! reference purged content (a business-hours row for a mailbox that
 //! no longer exists) die in the sweep: config tied to deleted content
 //! is stale by definition.
+
+/// Setting key set to `"true"` by [`purge_demo_data`]: the user has
+/// deleted the demo content and must not get it back. Boot reads it to
+/// pick the *empty* provider over the demo one until real credentials
+/// are configured; `onboarding` clears it when the user deliberately
+/// re-enables demo mode.
+pub const PURGED_FLAG: &str = "demo_content_purged";
 
 use std::path::Path;
 
@@ -151,6 +169,15 @@ fn purge_in_transaction(conn: &mut Connection) -> Result<PurgeReport> {
             }
         }
     }
+
+    // Exit demo mode atomically with the delete (1.1.4): without
+    // these three writes the still-running session re-synced the
+    // whole fake dataset within five minutes (auto-sync saw state
+    // LIVE + no checkpoints = "everything is new"), and the next boot
+    // rebuilt the demo provider whenever credentials were missing.
+    crate::settings::set_bool(&tx, "demo_mode", false)?;
+    crate::settings::set_bool(&tx, PURGED_FLAG, true)?;
+    crate::sync_engine::set_state(&tx, "NEW");
 
     // Restore consistency: delete rows that dangle after the bulk
     // delete (children of purged parents, recursively). Convergence is
@@ -337,7 +364,10 @@ mod tests {
             );
         }
         for (table, expected) in [
-            ("application_settings", 1),
+            // display_timezone (seeded) + the three rows the purge itself
+            // writes when exiting demo mode: demo_mode, the purge flag,
+            // and sync_state (all asserted by value below).
+            ("application_settings", 4),
             // Both replies: the standalone one survives; the mailbox-bound
             // one was pruned by the dangling sweep.
             ("saved_replies", 1),
@@ -353,6 +383,13 @@ mod tests {
             .expect("read")
             .expect("present");
         assert_eq!(tz, "Asia/Dhaka");
+
+        // The purge exits demo mode atomically (1.1.4): without these
+        // the auto-sync timer re-pulled the whole fake dataset within
+        // five minutes and the next boot rebuilt the demo provider.
+        assert!(!crate::settings::get_bool(&conn, "demo_mode", false).unwrap_or(false));
+        assert!(crate::settings::get_bool(&conn, PURGED_FLAG, false).unwrap_or(false));
+        assert_eq!(crate::sync_engine::get_state(&conn), "NEW");
 
         // The post-purge schema checks foreign-key clean.
         let violations: i64 = conn

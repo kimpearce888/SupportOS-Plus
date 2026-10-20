@@ -4,6 +4,66 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.4] — 2026-10-20
+
+Hotfix for the two 1.1.3 features: user reports showed both the
+demo-data purge and the Help Scout connect flow misbehaving on real
+installs. A fresh end-to-end audit found four concrete defects — the
+purge deleted rows but let the running session re-sync them minutes
+later, and the connect flow dead-ended in two different ways before
+the token exchange (which itself was verified correct against the
+current Help Scout API).
+
+### Fixed
+
+- **Demo data reappeared after the purge.** Three re-seed paths
+  survived the delete: (a) the purge kept `sync_state = LIVE` in the
+  retained application settings while wiping the sync checkpoints, so
+  the five-minute auto-sync timer saw "everything is new" and
+  re-pulled the whole fake dataset from the still-running demo
+  provider; (b) the 30-second ratings timer re-inserted fake ratings
+  immediately (the upsert stored ratings whose conversation had just
+  been deleted); (c) any restart rebuilt the demo provider whenever
+  credentials were missing, so the purge message's own "restart
+  SupportOS+" advice resurrected the data. All three are closed: the
+  purge now exits demo mode atomically inside its transaction
+  (`demo_mode` off, a `demo_content_purged` marker on, sync state back
+  to `NEW` so even the still-running session stops auto-syncing), the
+  ratings refresh skips ratings whose conversation is referenced but
+  no longer mirrored, and boot picks the provider explicitly — real
+  with credentials, **empty** (not demo) after a purge, demo
+  otherwise. Re-enabling demo mode from the onboarding page
+  deliberately clears the marker and brings the demo dataset back.
+- **"Connect via OAuth" failed right after saving credentials.**
+  Saving flipped the demo-mode setting immediately, so the connect
+  button appeared in the same session — but the OAuth callback
+  listener had started with the demo provider and answered every
+  browser callback with "Demo mode is active - OAuth is not needed."
+  The button now knows whether this session actually runs the real
+  provider: before the restart it explains that a restart is required
+  instead of offering a flow that cannot complete.
+- **A busy callback port silently killed the OAuth flow.** Nothing
+  verified the listener really bound its port (another program on
+  3000 is the classic case) or that it is *our* listener. The connect
+  button now probes `GET /healthz` and reports "listener not
+  answering on port N" with concrete remedies; the settings page also
+  shows the redirect URI that must be registered on the Help Scout
+  custom app (`http://localhost:3000/oauth/callback` by default) —
+  previously that requirement was documented nowhere in the app.
+- **The callback fail page no longer lies.** With no real provider in
+  the session it said "Demo mode is active" even when demo mode was
+  off (empty post-purge session or credentials saved after boot); it
+  now describes the actual situation.
+
+### Added
+
+- **Connect with client credentials** (Settings → Help Scout): no
+  browser round-trip — verifies the stored client ID/secret against
+  Help Scout and stores the token directly, reporting success or the
+  friendly rejection message inside the app. Also the fastest way to
+  test whether saved credentials work (the 1.1.3 loopback error page
+  referenced this button; it did not exist until now).
+
 ## [1.1.3] — 2026-10-20
 
 Two frequently-requested workflow features, both fully usable from the

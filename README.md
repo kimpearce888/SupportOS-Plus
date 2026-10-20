@@ -65,26 +65,50 @@ display server and GL/Vulkan driver are used from the system.
 migrations applied) under `~/.local/share/supportos-plus/` (override with
 `SPP_DATA_DIR`), background workers start, a loopback listener serves Help
 Scout webhooks and the OAuth callback on `127.0.0.1`, and the shell boots into
-demo mode unless Help Scout credentials are configured. No setup steps.
+demo mode unless Help Scout credentials are configured (or the demo data was
+explicitly purged, in which case it boots empty until you connect). No setup
+steps.
 
-**Connecting your Help Scout account** (1.1.3): open
+**Connecting your Help Scout account** (updated in 1.1.4): open
 *Settings → Help Scout* and fill in the credentials form — client ID, client
 secret, webhook secret (and, optionally, the Docs API key) from your Help
 Scout custom app. The values are stored encrypted in the local secrets
 envelope; saving a configured client ID/secret pair turns demo mode off
-automatically, and the next launch boots the real provider, after which the
-"connect via OAuth" button completes the handshake. Environment variables
-(`HELPSCOUT_CLIENT_ID`, `HELPSCOUT_CLIENT_SECRET`, `HELPSCOUT_WEBHOOK_SECRET`,
-`HELPSCOUT_DOCS_API_KEY`) still work and override the stored values per
-field — useful for CI and headless setups.
+automatically. The order matters, and 1.1.4 now enforces and explains it at
+every step:
 
-**Removing demo data** (1.1.3): *Settings → Help Scout → Demo data* deletes
-every demo-seeded or synced record (conversations, customers, threads,
-ratings, knowledge base, incidents, reports, AI records) and resets sync
-state and the vector index in one click — after a two-step confirmation.
-Credentials, application settings, business hours, automation rules, saved
-views/replies and custom object types are kept. If demo mode is still on,
-the next sync repopulates demo data (that is the "fresh demo" path).
+1. On your Help Scout profile create a *custom app* and set its **callback
+   URL** to exactly `http://localhost:3000/oauth/callback` (shown in the
+   connection card; change the port with `HELPSCOUT_REDIRECT_URI` — the
+   registered URL and the setting must match).
+2. Save the credentials in the form, **restart SupportOS+** (the connect
+   buttons refuse to run before the restart and say so — the OAuth callback
+   listener starts with the app).
+3. Back on *Settings → Help Scout*, either press **connect via OAuth**
+   (the browser flow; the local listener verifies the callback and stores
+   the token) or **connect with client credentials** (no browser round-trip;
+   also the fastest way to see whether the credentials are accepted — the
+   result appears directly in the app).
+
+Environment variables (`HELPSCOUT_CLIENT_ID`, `HELPSCOUT_CLIENT_SECRET`,
+`HELPSCOUT_WEBHOOK_SECRET`, `HELPSCOUT_DOCS_API_KEY`,
+`HELPSCOUT_REDIRECT_URI`) still work and override the stored values per
+field — useful for CI and headless setups. If the callback listener cannot
+bind its port (another program is using it), the connect button says so
+instead of leaving a dead browser tab.
+
+**Removing demo data** (updated in 1.1.4): *Settings → Help Scout → Demo
+data* deletes every demo-seeded or synced record (conversations, customers,
+threads, ratings, knowledge base, incidents, reports, AI records), resets
+sync state and the vector index in one click — after a two-step
+confirmation — and **turns demo mode off in the same transaction**, so the
+data cannot silently re-sync minutes later (in 1.1.3 the still-running
+session re-pulled the whole fake dataset within five minutes, and the next
+boot rebuilt it; both paths are closed). Credentials, application settings,
+business hours, automation rules, saved views/replies and custom object
+types are kept. After a purge SupportOS+ boots empty until you connect Help
+Scout; re-enabling demo mode from the onboarding page deliberately brings
+the demo dataset back.
 
 **Upgrading from 0.2.x:** the first 1.0.0 launch moves your existing data from
 the old `~/.local/share/supportos-plusplus/` directory to the new location

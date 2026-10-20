@@ -98,6 +98,11 @@ impl OnboardingPage {
     pub fn enable_demo_mode(&mut self, db: &DbHandle) {
         db.with_write(|conn| {
             let _ = spp_core::settings::set_bool(conn, "demo_mode", true);
+            // 1.1.4: deliberately re-enabling demo mode revives the
+            // demo dataset, so the one-click purge's "stay empty"
+            // marker must go (boot would otherwise keep serving the
+            // empty provider and the demo data would never come back).
+            let _ = spp_core::settings::set_bool(conn, spp_core::data_reset::PURGED_FLAG, false);
             let _ = spp_core::settings::mark_first_run_done(conn);
         });
         self.message = Some(
@@ -241,6 +246,12 @@ mod tests {
     #[test]
     fn demo_mode_enable_flips_status_and_completes() {
         let db = fixture(Vec::new());
+        // Simulate a prior purge (1.1.4): enabling demo mode deliberately
+        // revives the demo dataset, so the purge marker must be cleared.
+        db.with_write(|conn| {
+            spp_core::settings::set_bool(conn, spp_core::data_reset::PURGED_FLAG, true)
+                .expect("purge flag");
+        });
         let mut page = OnboardingPage::new();
         page.reload(&db);
         page.enable_demo_mode(&db);
@@ -249,6 +260,11 @@ mod tests {
         assert!(status.completed);
         assert_eq!(status.step, "complete");
         assert!(page.message.is_some());
+        let purged = db.with_read(|conn| {
+            spp_core::settings::get_bool(conn, spp_core::data_reset::PURGED_FLAG, false)
+                .unwrap_or(false)
+        });
+        assert!(!purged, "enabling demo mode clears the purge marker");
     }
 
     #[test]

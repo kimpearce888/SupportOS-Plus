@@ -228,6 +228,11 @@ pub struct HelpScoutStatus {
     /// Per-field credential source for the form badges (1.1.3):
     /// environment, app settings, or not set.
     pub sources: spp_core::helpscout_real::CredentialSources,
+    /// The redirect URI this instance expects (1.1.4): it must exactly
+    /// match the callback URL registered on the Help Scout custom app,
+    /// and the loopback listener binds its port — so the UI must show
+    /// it next to the connect button.
+    pub redirect_uri: String,
 }
 
 /// Load the connection status from the local mirror.
@@ -242,11 +247,13 @@ pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
         )
         .unwrap_or(0);
     let (credentials, sources) = spp_core::helpscout_real::HsCredentials::resolve(conn);
+    let redirect_uri = credentials.redirect_uri.clone();
     HelpScoutStatus {
         demo_mode,
         configured: tokens > 0,
         credentials: credentials.is_configured(),
         sources,
+        redirect_uri,
     }
 }
 
@@ -384,6 +391,15 @@ pub struct SettingsPage {
     data_dir: Option<PathBuf>,
     /// Two-step confirmation state for the demo purge.
     purge_armed: bool,
+    /// The real Help Scout provider for THIS session, set by the shell
+    /// at boot (`None` while the demo or empty provider runs — i.e.
+    /// always until the restart after credentials are saved, 1.1.4).
+    real: Option<std::sync::Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
+    /// In-flight client-credentials connect (1.1.4): the detached
+    /// thread writes its outcome here; the UI polls it each frame.
+    hs_connect_result: std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Mirrors `hs_connect_result` being in flight (UI-thread state).
+    hs_connecting: bool,
     lmstudio_base_url: String,
     lmstudio_chat_model: String,
     lmstudio_embedding_model: String,
@@ -417,6 +433,9 @@ impl SettingsPage {
             hs_show_secrets: false,
             data_dir: None,
             purge_armed: false,
+            real: None,
+            hs_connect_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            hs_connecting: false,
             lmstudio_base_url: String::new(),
             lmstudio_chat_model: String::new(),
             lmstudio_embedding_model: String::new(),
@@ -448,6 +467,18 @@ impl SettingsPage {
         workers: Option<std::sync::Arc<crate::workers_host::WorkersHost>>,
     ) {
         self.workers = workers;
+    }
+
+    /// Install this session's real Help Scout provider (the shell sets
+    /// it at boot from `BootServices::real`). `None` means the demo or
+    /// empty provider is running: the connect buttons then explain that
+    /// a restart is required instead of offering a flow whose callback
+    /// listener cannot complete (1.1.4).
+    pub fn set_real_provider(
+        &mut self,
+        real: Option<std::sync::Arc<spp_core::helpscout_real::RealHelpScoutProvider>>,
+    ) {
+        self.real = real;
     }
 
     /// Live-update invalidation.
@@ -595,8 +626,9 @@ impl SettingsPage {
         match result {
             Ok(()) => {
                 self.message = Some(
-                    "credentials stored (encrypted). Demo mode is off — restart \
-                     SupportOS+ to connect the real account."
+                    "credentials stored (encrypted). Demo mode is off — RESTART \
+                     SupportOS+ now: the connect buttons only work after the \
+                     restart (the callback listener starts with the app)."
                         .into(),
                 );
                 // The three secret fields do not linger on screen after a
@@ -633,7 +665,9 @@ impl SettingsPage {
 
     /// One-click demo purge (1.1.3): clears all business content, keeps
     /// the KEEP_TABLES config, resets the vector store when the data
-    /// directory is known.
+    /// directory is known. Since 1.1.4 the purge also exits demo mode
+    /// (atomically, inside the purge transaction) so the deleted data
+    /// cannot silently re-sync minutes later.
     fn purge_demo(&mut self, db: &DbHandle) {
         let result = db.with_write(|conn| {
             spp_core::data_reset::purge_demo_data(conn, self.data_dir.as_deref())
@@ -642,8 +676,21 @@ impl SettingsPage {
             Ok(report) => {
                 self.message = Some(format!(
                     "demo data deleted: {} rows across {} tables, {} vector \
-                     entries. Restart SupportOS+ so every view reloads clean.",
-                    report.rows_deleted, report.tables_cleared, report.vectors_dropped
+                     entries. Demo mode is now OFF — the data will NOT come \
+                     back. Restart SupportOS+ so every view reloads clean{}.",
+                    report.rows_deleted,
+                    report.tables_cleared,
+                    report.vectors_dropped,
+                    if db
+                        .with_read(|conn| {
+                            spp_core::helpscout_real::HsCredentials::resolve(conn).0
+                        })
+                        .is_configured()
+                    {
+                        ", then connect Help Scout from this page"
+                    } else {
+                        ""
+                    }
                 ));
             }
             Err(e) => self.error = Some(format!("purge failed (nothing was changed): {e}")),
@@ -852,10 +899,13 @@ impl SettingsPage {
     }
 
     fn helpscout_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        // Pick up a finished client-credentials connect (1.1.4).
+        self.poll_connect_result(db);
         let Some(status) = self.helpscout.clone() else {
             ui.spinner();
             return;
         };
+        let session_ready = self.real.is_some();
         design::card_titled(
             ui,
             "Help Scout connection",
@@ -894,6 +944,21 @@ impl SettingsPage {
                         );
                     });
                     ui.end_row();
+                    design::field_label(ui, "redirect uri:");
+                    ui.horizontal(|ui| {
+                        ui.monospace(
+                            egui::RichText::new(status.redirect_uri.as_str())
+                                .size(12.5)
+                                .color(design::tokens(ui).foreground),
+                        )
+                        .on_hover_text(
+                            "register this EXACT URL as the callback URL of your \
+                             Help Scout custom app (Profile → Apps & Integrations). \
+                             The local listener binds its port when SupportOS+ \
+                             starts; change it with HELPSCOUT_REDIRECT_URI.",
+                        );
+                    });
+                    ui.end_row();
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -906,16 +971,57 @@ impl SettingsPage {
                     }
                     if !status.configured
                         && status.credentials
-                        && design::button(ui, "connect via OAuth", ButtonVariant::Primary).clicked()
+                        && design::button(ui, "connect via OAuth", ButtonVariant::Primary)
+                            .on_hover_text(
+                                "opens Help Scout in your browser; the local callback \
+                                 listener stores the token",
+                            )
+                            .clicked()
                     {
                         self.begin_oauth(db);
                     }
+                    if !status.configured
+                        && status.credentials
+                        && session_ready
+                        && !self.hs_connecting
+                        && design::button(
+                            ui,
+                            "connect with client credentials",
+                            ButtonVariant::Outline,
+                        )
+                        .on_hover_text(
+                            "no browser round-trip: verifies the stored client \
+                             id/secret against Help Scout and stores the token \
+                             directly — also the fastest way to test credentials",
+                        )
+                        .clicked()
+                    {
+                        self.connect_client_credentials();
+                    }
+                    if self.hs_connecting {
+                        ui.spinner();
+                    }
                 });
+                if !status.configured && status.credentials && !session_ready && !self.hs_connecting
+                {
+                    ui.add_space(4.0);
+                    design::hint_text(
+                        ui,
+                        "credentials are stored — restart SupportOS+ to activate \
+                         them; the connect buttons work after the restart.",
+                    );
+                }
                 if let Some(url) = &self.authorize_url {
                     ui.add_space(6.0);
                     ui.hyperlink_to(
                         egui::RichText::new("open the Help Scout authorization page").size(13.0),
                         url.clone(),
+                    );
+                    ui.add_space(2.0);
+                    design::hint_text(
+                        ui,
+                        "after approving, Help Scout redirects the browser to the \
+                         redirect URI above; leave SupportOS+ running.",
                     );
                 }
             },
@@ -1016,8 +1122,10 @@ impl SettingsPage {
                 "Deletes every conversation, customer, thread, rating, \
                  knowledge document, incident, report and AI record — all \
                  demo-seeded or synced content — and resets sync state. \
-                 Keeps: credentials, settings, business hours, automation \
-                 rules, saved views and replies, custom object types.",
+                 Also turns demo mode OFF, so the data will not re-sync \
+                 (restart SupportOS+ afterwards). Keeps: credentials, \
+                 settings, business hours, automation rules, saved views \
+                 and replies, custom object types.",
             ),
             |ui| {
                 if !self.purge_armed {
@@ -1053,10 +1161,61 @@ impl SettingsPage {
 
     /// Start the browser OAuth flow: issue a single-use state and show the
     /// authorization URL (the loopback listener serves the callback).
+    ///
+    /// 1.1.4 guards: the flow can only complete when (a) this session
+    /// actually runs the real provider — saving credentials mid-session
+    /// used to reveal a connect button whose callback listener answered
+    /// "Demo mode is active - OAuth is not needed" — and (b) the
+    /// loopback listener is really listening on the redirect port
+    /// (a busy port 3000 used to dead-end the browser silently).
     fn begin_oauth(&mut self, db: &DbHandle) {
+        let Some(real) = self.real.clone() else {
+            self.error = Some(
+                "credentials are stored, but this session is still running the \
+                 demo/empty provider. Restart SupportOS+ first — the OAuth \
+                 callback listener starts with the app."
+                    .into(),
+            );
+            self.authorize_url = None;
+            return;
+        };
+        drop(real); // presence is the guard; the listener owns the exchange
         let (creds, _) = db.with_read(spp_core::helpscout_real::HsCredentials::resolve);
         let redirect_uri = creds.redirect_uri.clone();
-        match spp_core::loopback::begin_oauth(db, &creds, &redirect_uri) {
+        self.begin_oauth_at(db, &creds, &redirect_uri);
+    }
+
+    /// Testable core of [`Self::begin_oauth`]: guard the listener, then
+    /// issue the single-use state and the authorization URL.
+    fn begin_oauth_at(
+        &mut self,
+        db: &DbHandle,
+        creds: &spp_core::helpscout_real::HsCredentials,
+        redirect_uri: &str,
+    ) {
+        let Some(port) = spp_core::loopback::port_from_redirect_uri(redirect_uri) else {
+            self.error = Some(format!(
+                "the redirect URI {redirect_uri:?} is not a local http URL with \
+                 a port; set HELPSCOUT_REDIRECT_URI to something like \
+                 http://localhost:3000/oauth/callback"
+            ));
+            self.authorize_url = None;
+            return;
+        };
+        if !spp_core::loopback::listener_answers(port) {
+            self.error = Some(format!(
+                "the SupportOS+ callback listener is not answering on port \
+                 {port}. Either SupportOS+ was not restarted after the \
+                 credentials were saved, or another program is using the \
+                 port. Restart SupportOS+ and try again; if the port is \
+                 taken, close that program (or set HELPSCOUT_REDIRECT_URI \
+                 to a free port and register the same URL on your Help \
+                 Scout app)."
+            ));
+            self.authorize_url = None;
+            return;
+        }
+        match spp_core::loopback::begin_oauth(db, creds, redirect_uri) {
             Ok(url) => {
                 self.message = Some(
                     "Authorization URL ready. Complete the flow in the browser; the loopback \
@@ -1066,6 +1225,78 @@ impl SettingsPage {
                 self.authorize_url = Some(url);
             }
             Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Connect with the client-credentials grant in the background
+    /// (1.1.4): the immediate in-app answer to "are my credentials any
+    /// good?" — and a full connection for users whose Help Scout app
+    /// authenticates that way (no browser round-trip). The detached
+    /// thread writes its outcome into `hs_connect_result`; the UI polls
+    /// it every frame and turns it into a message/error.
+    fn connect_client_credentials(&mut self) {
+        let Some(real) = self.real.clone() else {
+            self.error = Some(
+                "connect needs the real provider — restart SupportOS+ after \
+                 saving credentials."
+                    .into(),
+            );
+            return;
+        };
+        if self.hs_connecting {
+            return;
+        }
+        self.hs_connecting = true;
+        self.message = Some("connecting with client credentials…".into());
+        let slot = std::sync::Arc::clone(&self.hs_connect_result);
+        let spawned = std::thread::Builder::new()
+            .name("spp-hs-client-credentials".to_string())
+            .spawn(move || {
+                let outcome = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("cannot start the connect runtime: {e}"))
+                    .and_then(|rt| {
+                        rt.block_on(async { real.client_credentials_login().await.map(|_| ()) })
+                            .map_err(|e| e.to_string())
+                    })
+                    .map_or_else(Err, |()| {
+                        Ok("connected with client credentials — tokens stored. \
+                                Run a sync from Sync Health to pull your account."
+                            .to_string())
+                    });
+                if let Ok(mut guard) = slot.lock() {
+                    *guard = Some(outcome);
+                }
+            });
+        if let Err(e) = spawned {
+            self.hs_connecting = false;
+            self.error = Some(format!("cannot start the connect thread: {e}"));
+        }
+    }
+
+    /// Poll the in-flight client-credentials connect (called from the
+    /// UI each frame while the Help Scout tab is visible).
+    fn poll_connect_result(&mut self, db: &DbHandle) {
+        if !self.hs_connecting {
+            return;
+        }
+        let outcome = self
+            .hs_connect_result
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        let Some(outcome) = outcome else {
+            return;
+        };
+        self.hs_connecting = false;
+        match outcome {
+            Ok(msg) => {
+                self.message = Some(msg);
+                self.invalidate();
+                self.reload(db);
+            }
+            Err(e) => self.error = Some(e),
         }
     }
 
@@ -1528,5 +1759,134 @@ mod tests {
         assert_eq!(users, 0, "mirror users must be purged");
         assert_eq!(mailboxes, 0, "mirror mailboxes must be purged");
         assert_eq!(tz, "Asia/Dhaka", "application settings must survive");
+    }
+
+    #[test]
+    fn purge_demo_also_exits_demo_mode_so_it_cannot_re_sync() {
+        let db = fixture(vec![("conv", 1, "Demo ticket", "active", "email", 1, 5, 9)]);
+        db.with_write(|conn| {
+            spp_core::settings::set_bool(conn, "demo_mode", true).expect("demo on");
+        });
+
+        let mut page = SettingsPage::new();
+        page.purge_armed = true;
+        page.purge_demo(&db);
+
+        let (demo_mode, purged, sync_state) = db.with_read(|conn| {
+            (
+                spp_core::settings::get_bool(conn, "demo_mode", false).unwrap_or(false),
+                spp_core::settings::get_bool(conn, spp_core::data_reset::PURGED_FLAG, false)
+                    .unwrap_or(false),
+                spp_core::sync_engine::get_state(conn),
+            )
+        });
+        assert!(!demo_mode, "the purge turns demo mode off");
+        assert!(purged, "the purge sets the stay-empty marker");
+        assert_eq!(sync_state, "NEW", "the purge stops the auto-sync timer");
+        assert!(
+            page.message
+                .as_deref()
+                .is_some_and(|m| m.contains("will NOT come")),
+            "the purge message must say the data stays gone: {:?}",
+            page.message
+        );
+    }
+
+    #[test]
+    fn begin_oauth_before_restart_explains_the_restart() {
+        // Credentials saved in a demo session (1.1.4 trap): the button is
+        // visible but the session's callback listener cannot exchange the
+        // code — the click must explain that, not dead-end in a browser.
+        install_master_key();
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            spp_core::helpscout_real::HsCredentials::store_in_envelope(
+                conn, "cid", "secret", "", "",
+            )
+            .expect("store");
+        });
+
+        let mut page = SettingsPage::new();
+        page.begin_oauth(&db);
+        assert!(page.authorize_url.is_none(), "no URL before the restart");
+        assert!(
+            page.error
+                .as_deref()
+                .is_some_and(|e| e.contains("Restart SupportOS+")),
+            "the error must demand the restart: {:?}",
+            page.error
+        );
+    }
+
+    #[test]
+    fn begin_oauth_succeeds_against_a_live_listener() {
+        let db = fixture(Vec::new());
+        let mut server = spp_core::loopback::LoopbackServer::start(db.clone(), None, false, 0)
+            .expect("listener");
+        let redirect_uri = format!("http://localhost:{}/oauth/callback", server.port());
+        let creds = spp_core::helpscout_real::HsCredentials {
+            client_id: "cid-live".into(),
+            client_secret: "secret-live".into(),
+            redirect_uri: redirect_uri.clone(),
+            ..Default::default()
+        };
+
+        let mut page = SettingsPage::new();
+        page.set_real_provider(Some(std::sync::Arc::new(
+            spp_core::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds.clone()),
+        )));
+        page.begin_oauth_at(&db, &creds, &redirect_uri);
+
+        let url = page.authorize_url.clone().expect("authorization URL");
+        assert!(
+            url.contains("client_id=cid-live"),
+            "the URL carries the client id: {url}"
+        );
+        assert!(url.contains("state="));
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let states: i64 = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM oauth_states WHERE consumed_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        });
+        assert_eq!(states, 1, "one single-use state backs the URL");
+        server.stop();
+    }
+
+    #[test]
+    fn client_credentials_connect_reports_failures_in_app() {
+        // The in-app answer to "are my credentials any good?" (1.1.4):
+        // a provider pointed at an unreachable endpoint must land its
+        // friendly error in the page, not in a browser tab.
+        let db = fixture(Vec::new());
+        let creds = spp_core::helpscout_real::HsCredentials {
+            client_id: "cid-x".into(),
+            client_secret: "secret-x".into(),
+            api_base: "http://127.0.0.1:1".into(), // nothing listens here
+            ..Default::default()
+        };
+        let mut page = SettingsPage::new();
+        page.set_real_provider(Some(std::sync::Arc::new(
+            spp_core::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds),
+        )));
+        page.connect_client_credentials();
+        assert!(page.hs_connecting, "the connect runs in the background");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while page.hs_connecting && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            page.poll_connect_result(&db);
+        }
+        assert!(!page.hs_connecting, "the connect must finish");
+        assert!(
+            page.error
+                .as_deref()
+                .is_some_and(|e| e.contains("rejected the login credentials")),
+            "the failure must be reported in-app with the friendly message: {:?}",
+            page.error
+        );
     }
 }

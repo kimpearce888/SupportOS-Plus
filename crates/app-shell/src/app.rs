@@ -115,6 +115,12 @@ impl ShellApp {
         settings.set_data_dir(options.data_dir.clone());
         // Worker handle for restart-on-interval-change (see save_general).
         settings.set_workers(options.workers);
+        // Real Help Scout provider for this session (None in demo/empty
+        // sessions): the connect buttons must know whether the OAuth
+        // callback listener is actually armed before offering the flow
+        // (1.1.4 — without this, saving credentials mid-session showed
+        // a connect button whose browser flow always failed).
+        settings.set_real_provider(options.real.clone());
         let mut connectors = ConnectorsPage::new();
         connectors.set_data_dir(options.data_dir.clone());
         // The knowledge import panel reads the `knowledge-import` watch

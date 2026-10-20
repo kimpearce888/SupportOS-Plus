@@ -202,6 +202,38 @@ pub fn port_from_redirect_uri(redirect_uri: &str) -> Option<u16> {
     }
 }
 
+/// Whether the SupportOS+ loopback listener really answers on `port`
+/// (1.1.4). The settings page calls this before offering the OAuth
+/// flow: in 1.1.3 the browser flow silently dead-ended when the
+/// listener could not bind (another program held the port) — the
+/// connect button must explain the problem instead.
+///
+/// This is stronger than "something listens": it speaks one `GET
+/// /healthz` request and checks the listener identifies itself as
+/// `supportos-loopback`, so a foreign program squatting on the port
+/// (a dev server on 3000 is the classic case) is caught too. The
+/// answer arrives in milliseconds from our own listener; a silent
+/// squatter costs the 2-second read timeout once, on button click.
+#[must_use]
+pub fn listener_answers(port: u16) -> bool {
+    let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    if stream
+        .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut buf = [0u8; 512];
+    let Ok(n) = stream.read(&mut buf) else {
+        return false;
+    };
+    String::from_utf8_lossy(&buf[..n]).contains("supportos-loopback")
+}
+
 /// Dispatch one parsed request. Pure apart from the database and the
 /// optional OAuth completion — fully unit-testable.
 pub fn handle_request(req: &Request, ctx: &LoopbackCtx) -> Response {
@@ -354,7 +386,16 @@ fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
     }
 
     let Some(oauth) = &ctx.oauth else {
-        return fail_page("Demo mode is active - OAuth is not needed.");
+        return fail_page(if ctx.demo_mode {
+            "Demo mode is active - OAuth is not needed."
+        } else {
+            // 1.1.4: the empty session (post demo-purge) or a stale
+            // session whose credentials were saved after boot — both
+            // used to be misreported as "demo mode".
+            "No Help Scout connection is active in this session. Save your \
+             credentials in Settings and (re)start SupportOS+, then connect \
+             from the Settings page."
+        });
     };
     let (Some(code), Some(state_param)) = (q("code"), q("state")) else {
         return fail_page("The callback is missing its authorization code or state parameter.");
@@ -851,14 +892,34 @@ mod tests {
     // --- OAuth callback route ---
 
     #[test]
-    fn callback_without_oauth_shows_demo_page() {
-        let c = ctx(None);
+    fn callback_without_oauth_in_a_demo_session_shows_the_demo_page() {
+        let mut c = ctx(None);
+        c.demo_mode = true;
         let r = handle_request(
             &request("GET", "/oauth/callback?code=1&state=2", &[], b""),
             &c,
         );
         assert_eq!(r.status, 200);
         assert!(body_str(&r).contains("Demo mode"));
+    }
+
+    #[test]
+    fn callback_without_oauth_outside_demo_mode_explains_the_real_state() {
+        // 1.1.4: with demo mode off and no real provider (an empty
+        // post-purge session, or credentials saved after boot), the old
+        // page misreported "Demo mode is active".
+        let c = ctx(None); // demo_mode = false, oauth = None
+        let r = handle_request(
+            &request("GET", "/oauth/callback?code=1&state=2", &[], b""),
+            &c,
+        );
+        assert_eq!(r.status, 200);
+        let body = body_str(&r);
+        assert!(
+            body.contains("No Help Scout connection is active"),
+            "the page must describe the actual state: {body}"
+        );
+        assert!(!body.contains("Demo mode is active"));
     }
 
     #[test]
@@ -1006,5 +1067,34 @@ mod tests {
         assert_eq!(state.len(), 32, "16 random bytes hex-encoded");
         let consumed = db.with_write(|conn| crate::oauth_state::consume_state(conn, &state));
         assert!(consumed.is_ok());
+    }
+
+    #[test]
+    fn listener_answers_only_for_the_real_loopback_server() {
+        // Our listener: identifies itself on /healthz.
+        let db = fixture_db();
+        let mut server =
+            LoopbackServer::start(db, None, false, 0).expect("start the real listener");
+        assert!(
+            listener_answers(server.port()),
+            "the real listener must answer the probe"
+        );
+        server.stop();
+
+        // A foreign silent program holding the port (the 1.1.3 dead-end:
+        // connect() succeeds, the OAuth flow does not) must NOT count.
+        let squatter = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind squatter");
+        let squatter_port = squatter.local_addr().expect("addr").port();
+        assert!(
+            !listener_answers(squatter_port),
+            "a foreign program on the port must fail the probe"
+        );
+        drop(squatter);
+
+        // Nothing listening at all.
+        let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind probe");
+        let closed_port = probe.local_addr().expect("addr").port();
+        drop(probe);
+        assert!(!listener_answers(closed_port), "a closed port must fail");
     }
 }
