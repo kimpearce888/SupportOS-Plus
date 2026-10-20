@@ -99,7 +99,7 @@ fn main() {
                 .and_then(|p| p.parse::<u16>().ok())
         })
         .unwrap_or(0);
-    let demo_mode = boot.real.is_none();
+    let demo_mode = matches!(boot.mode, spp_shell::BootMode::Demo);
     let loopback = match spp_core::loopback::LoopbackServer::start(
         db.clone(),
         boot.real.clone(),
@@ -129,6 +129,7 @@ fn main() {
         bus,
         data_dir: app_config.data_dir.clone(),
         sync: Some(boot.engine),
+        real: boot.real,
         workers: Some(std::sync::Arc::new(_workers)),
     };
 

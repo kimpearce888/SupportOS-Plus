@@ -339,6 +339,16 @@ impl WorkerManager {
                             None
                         }
                     });
+                    // 1.1.4: a rating whose conversation exists remotely
+                    // but has no local row is dangling (the conversation
+                    // was deleted locally — e.g. by the demo purge).
+                    // Persisting it re-created orphaned "demo" rows within
+                    // 30 seconds of a purge; skip it instead. A rating the
+                    // source itself gives no conversation for is legal and
+                    // still stored.
+                    if is_dangling_rating(r, conv_local) {
+                        continue;
+                    }
                     let conv_number = conv_local.and_then(|local| {
                         conn.query_row(
                             "SELECT number FROM conversations WHERE id = ?1",
@@ -1495,6 +1505,14 @@ fn parse_iso_to_unix(s: &str) -> Option<i64> {
     Some(days * 86_400 + h * 3600 + mi * 60 + se)
 }
 
+/// Whether a rating from the provider dangles after a local delete:
+/// the source references a conversation (`id > 0`) that has no local
+/// mirror row. Such ratings must not be (re-)inserted — after the demo
+/// purge this is what resurrected fake ratings within 30 seconds.
+fn is_dangling_rating(r: &crate::helpscout::HsRating, conversation_local_id: Option<i64>) -> bool {
+    matches!(r.conversation_id, Some(id) if id > 0) && conversation_local_id.is_none()
+}
+
 fn upsert_rating_row(
     conn: &Connection,
     r: &crate::helpscout::HsRating,
@@ -1543,4 +1561,39 @@ pub fn start_workers(
     ));
     manager.start();
     manager
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_dangling_rating;
+    use crate::helpscout::HsRating;
+
+    fn rating(conversation_id: Option<i64>) -> HsRating {
+        HsRating {
+            remote_id: 1,
+            conversation_id,
+            thread_id: None,
+            rating: Some("great".into()),
+            comment: None,
+            customer_id: None,
+            customer_name: None,
+            user_id: None,
+            created_at: None,
+        }
+    }
+
+    #[test]
+    fn dangling_ratings_are_detected_and_sourceless_ones_are_kept() {
+        // Conversation referenced but not mirrored locally -> skip
+        // (this is what re-created fake ratings 30 seconds after a
+        // demo purge in 1.1.3).
+        assert!(is_dangling_rating(&rating(Some(42)), None));
+        // Mirrored conversation -> keep.
+        assert!(!is_dangling_rating(&rating(Some(42)), Some(7)));
+        // The source itself has no conversation reference -> keep
+        // (a legal conversation-less rating).
+        assert!(!is_dangling_rating(&rating(None), None));
+        // Non-positive ids are placeholders, not references -> keep.
+        assert!(!is_dangling_rating(&rating(Some(0)), None));
+    }
 }
