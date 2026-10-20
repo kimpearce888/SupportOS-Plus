@@ -230,6 +230,16 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m050_diagnostics_log",
         apply: crate::audit::apply_m050,
     },
+    // 1.3.0: the outbound lane becomes a real dispatcher (replies/notes/
+    // status changes/assignments actually reach Help Scout). Existing
+    // rows get a retry budget, rows stuck mid-send by an older crash are
+    // re-queued, and installs sitting on the old 5-minute default poll
+    // move to 1 minute.
+    BootStep {
+        version: 42,
+        label: "m051_outbound_dispatch",
+        apply: crate::outbound::apply_m051,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

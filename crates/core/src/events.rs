@@ -80,15 +80,51 @@ pub struct ErrorOccurredEvent {
     pub at: String,
 }
 
+/// Mid-run sync progress: emitted per resource (and per page of
+/// conversations) so the UI can show a live "X of Y" instead of one
+/// terminal event at the end of a multi-hour run (the 1.2.0 freeze).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgressEvent {
+    /// Resource or stage label ("conversations", "customers", …).
+    pub stage: String,
+    /// Resources completed so far in this run.
+    pub done: u32,
+    /// Total resources planned for this run.
+    pub total: u32,
+    /// Cumulative records processed so far.
+    pub processed: u64,
+    /// Records in the just-completed stage (0 for a pure heartbeat).
+    pub stage_records: u32,
+    pub at: String,
+}
+
+/// An outbound job (reply / note / status change / assignment) reached a
+/// terminal state. Success means the Help Scout API accepted the write —
+/// the very thing that never happened before 1.3.0.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboundJobFinishedEvent {
+    pub job_id: i64,
+    pub kind: String,
+    pub conversation_id: Option<i64>,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ServerEvent {
     RatingReceived(RatingReceivedEvent),
     RatingsRefreshed(RatingsRefreshedEvent),
     SyncCompleted(SyncCompletedEvent),
+    SyncProgress(SyncProgressEvent),
     ConversationUpdated(ConversationUpdatedEvent),
     CampaignUpdated(CampaignUpdatedEvent),
     NotificationReceived(NotificationReceivedEvent),
     ErrorOccurred(ErrorOccurredEvent),
+    OutboundJobFinished(OutboundJobFinishedEvent),
 }
 
 impl ServerEvent {
@@ -97,10 +133,12 @@ impl ServerEvent {
         match self {
             Self::RatingReceived { .. } | Self::RatingsRefreshed { .. } => "ratings",
             Self::SyncCompleted { .. } => "sync",
+            Self::SyncProgress { .. } => "sync",
             Self::ConversationUpdated { .. } => "conversation",
             Self::CampaignUpdated { .. } => "campaign",
             Self::NotificationReceived { .. } => "notification",
             Self::ErrorOccurred { .. } => "error",
+            Self::OutboundJobFinished { .. } => "outbound",
         }
     }
 
@@ -108,10 +146,12 @@ impl ServerEvent {
     pub fn channel(&self) -> &'static str {
         match self {
             Self::RatingReceived { .. } | Self::RatingsRefreshed { .. } => "spp://rating/arrived",
-            Self::SyncCompleted { .. } | Self::ConversationUpdated { .. } => "spp://sync/updated",
+            Self::SyncCompleted { .. } | Self::SyncProgress { .. } => "spp://sync/updated",
+            Self::ConversationUpdated { .. } => "spp://sync/updated",
             Self::CampaignUpdated { .. } => "spp://campaign/updated",
             Self::NotificationReceived { .. } => "spp://notification/received",
             Self::ErrorOccurred { .. } => "spp://error/occurred",
+            Self::OutboundJobFinished { .. } => "spp://outbound/finished",
         }
     }
 
@@ -125,6 +165,10 @@ impl ServerEvent {
                 serde_json::to_string(e).unwrap_or_else(|_| "{}".into())
             }
             Self::CampaignUpdated(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
+            Self::SyncProgress(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
+            Self::OutboundJobFinished(e) => {
+                serde_json::to_string(e).unwrap_or_else(|_| "{}".into())
+            }
             Self::NotificationReceived(e) => {
                 serde_json::to_string(e).unwrap_or_else(|_| "{}".into())
             }
@@ -162,6 +206,42 @@ impl ServerEvent {
             kind: kind.to_string(),
             processed,
             errors,
+            at: Self::now_iso(),
+        })
+    }
+
+    #[must_use]
+    pub fn sync_progress(
+        stage: &str,
+        done: u32,
+        total: u32,
+        processed: u64,
+        stage_records: u32,
+    ) -> Self {
+        Self::SyncProgress(SyncProgressEvent {
+            stage: stage.to_string(),
+            done,
+            total,
+            processed,
+            stage_records,
+            at: Self::now_iso(),
+        })
+    }
+
+    #[must_use]
+    pub fn outbound_job_finished(
+        job_id: i64,
+        kind: &str,
+        conversation_id: Option<i64>,
+        success: bool,
+        error: Option<&str>,
+    ) -> Self {
+        Self::OutboundJobFinished(OutboundJobFinishedEvent {
+            job_id,
+            kind: kind.to_string(),
+            conversation_id,
+            success,
+            error: error.map(str::to_string),
             at: Self::now_iso(),
         })
     }

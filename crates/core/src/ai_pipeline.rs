@@ -851,7 +851,7 @@ pub async fn analyze_ticket(
         &serde_json::json!([conversation_local_id]),
     )
     .map_err(|e| LmStudioError::new(e.to_string(), true))?;
-    let res = backend
+    let res = match backend
         .chat_json(
             conn,
             TICKET_ANALYSIS_SYSTEM,
@@ -859,7 +859,22 @@ pub async fn analyze_ticket(
             true,
             None,
         )
-        .await?;
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            // 1.3.0: a transport failure (LM Studio not running, model
+            // name typo, timeout) used to propagate with `?` BEFORE the
+            // run was marked failed — the ai_runs row stayed "running"
+            // forever and the AI Center rendered it with a green badge.
+            let _ = fail_run(
+                conn,
+                run_id,
+                &format!("LM Studio chat failed: {}", e.message),
+            );
+            return Err(e);
+        }
+    };
     let analysis = match parse_ticket_analysis(res.json.as_ref()) {
         Some(a) => a,
         None => {

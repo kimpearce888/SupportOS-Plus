@@ -334,6 +334,7 @@ fn create_conversation_and_thread_roundtrips() {
                 draft: false,
                 status_after: Some("active".into()),
                 assign_to: None,
+                customer_id: Some(900),
             })
             .await
         })
@@ -353,6 +354,7 @@ fn create_conversation_and_thread_roundtrips() {
                 bcc: Vec::new(),
                 status_after: None,
                 assign_to: None,
+                customer_id: None,
             })
             .await
         })
@@ -1053,9 +1055,12 @@ fn docs_api_skipped_entirely_without_key() {
 
 #[test]
 fn docs_api_uses_basic_auth_on_its_own_base() {
+    // 1.3.0 ground truth: the Docs API is v1-only with an {items} envelope
+    // (the pre-1.3.0 /v2/ paths 404'd on the real service).
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
-        json!({"collections": [{"id": 3, "name": "Docs", "slug": "docs", "articleCount": 2}]}),
+        json!({"page": 1, "pages": 1, "count": 1,
+               "items": [{"id": 3, "name": "Docs", "slug": "docs", "articleCount": 2}]}),
     )))
     .expect("mock server");
     let db = fixture_db();
@@ -1073,7 +1078,11 @@ fn docs_api_uses_basic_auth_on_its_own_base() {
         let hits = mock.hits();
         hits.first().cloned().expect("docs request")
     };
-    assert_eq!(token_req.path, "/v2/collections");
+    assert!(
+        token_req.path.starts_with("/v1/collections"),
+        "docs must use the v1 API, got {}",
+        token_req.path
+    );
     let expected = {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode("docs-key:X")

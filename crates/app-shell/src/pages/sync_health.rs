@@ -165,10 +165,116 @@ impl SyncAction {
     }
 }
 
+/// Run a sync action on a detached thread with its own single-threaded
+/// runtime (the web route's tokio spawn, ported). Shared by Sync Health,
+/// Onboarding and — since 1.3.0 — the "Sync now" buttons on the Inbox
+/// and Knowledge pages. Terminal state arrives via the event bus
+/// (SyncCompleted), never via the dropped thread result.
+pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) {
+    if action != SyncAction::Cancel && engine.is_running() {
+        return;
+    }
+    let engine = Arc::clone(engine);
+    let db = db.clone();
+    let log_db = db.clone();
+    let spawned = std::thread::Builder::new()
+        .name("spp-sync-action".to_string())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            let result = runtime
+                .map_err(|e| spp_core::Error::Config(e.to_string()))
+                .and_then(|rt| {
+                    rt.block_on(async move {
+                        match action {
+                            SyncAction::Initial => engine
+                                .initial_sync()
+                                .await
+                                .map(|_| "Initial sync completed.".to_string()),
+                            SyncAction::Incremental => engine
+                                .incremental_sync()
+                                .await
+                                .map(|_| "Incremental sync completed.".to_string()),
+                            SyncAction::Reconcile => engine
+                                .reconcile()
+                                .await
+                                .map(|_| "Reconcile completed.".to_string()),
+                            SyncAction::Cancel => {
+                                engine.request_cancellation();
+                                Ok("Cancellation requested.".to_string())
+                            }
+                        }
+                    })
+                });
+            if let Err(e) = result {
+                db.with_write(|conn| {
+                    let _ = spp_core::jobs::log_error(
+                        conn,
+                        "sync",
+                        &format!("{} failed: {e}", action_label_static(action)),
+                    );
+                });
+            }
+        });
+    if spawned.is_err() {
+        log_db.with_write(|conn| {
+            let _ =
+                spp_core::jobs::log_error(conn, "sync", "failed to spawn the sync action thread");
+        });
+    }
+}
+
+/// Kick off a Help Center (Docs API) refresh — the Knowledge page's
+/// "Sync Help Center now" button. Full docs v1 walk: collections,
+/// categories and per-article content.
+pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
+    if engine.is_running() {
+        return;
+    }
+    let engine = Arc::clone(engine);
+    let db = db.clone();
+    let log_db = db.clone();
+    let spawned = std::thread::Builder::new()
+        .name("spp-docs-sync".to_string())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            let result = runtime
+                .map_err(|e| spp_core::Error::Config(e.to_string()))
+                .and_then(|rt| {
+                    rt.block_on(async move { engine.sync_docs_only().await.map(|_| ()) })
+                });
+            if let Err(e) = result {
+                db.with_write(|conn| {
+                    let _ = spp_core::jobs::log_error(
+                        conn,
+                        "docs",
+                        &format!("Help Center sync failed: {e}"),
+                    );
+                });
+            }
+        });
+    if spawned.is_err() {
+        log_db.with_write(|conn| {
+            let _ = spp_core::jobs::log_error(
+                conn,
+                "docs",
+                "failed to spawn the Help Center sync thread",
+            );
+        });
+    }
+}
+
 /// The interactive sync health page state.
 pub struct SyncHealthPage {
     status: Option<SyncStatus>,
     message: Option<String>,
+    /// The most recent SyncProgress event — Sync Health renders live
+    /// "X of Y resources" instead of a frozen "started in background"
+    /// banner that never cleared (the 1.2.0 behavior).
+    last_progress: Option<spp_core::events::SyncProgressEvent>,
 }
 
 impl SyncHealthPage {
@@ -177,11 +283,21 @@ impl SyncHealthPage {
         Self {
             status: None,
             message: None,
+            last_progress: None,
         }
     }
 
-    /// Live-update invalidation.
+    /// Live-update invalidation. The stale action banner clears with it —
+    /// before 1.3.0 "Initial sync started…" lingered forever.
     pub fn invalidate(&mut self) {
+        self.status = None;
+        self.message = None;
+    }
+
+    /// Record a mid-run progress event (driven by the invalidation
+    /// bridge; cheap — the status reload reads the same tables).
+    pub fn note_progress(&mut self, event: spp_core::events::SyncProgressEvent) {
+        self.last_progress = Some(event);
         self.status = None;
     }
 
@@ -189,58 +305,14 @@ impl SyncHealthPage {
         self.status = Some(db.with_read(load_status));
     }
 
-    /// Run one sync action in the background (the web route spawned a
-    /// tokio task; the shell runs a detached thread with its own
-    /// single-threaded runtime — the 2-thread runtime slim is a later
-    /// plan item).
+    /// Run one sync action in the background (delegates to the shared
+    /// helper used by every page's refresh buttons).
     pub fn run_sync_action(&mut self, db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) {
         if action != SyncAction::Cancel && engine.is_running() {
             self.message = Some("A sync is already running.".into());
             return;
         }
-        let engine = Arc::clone(engine);
-        let db = db.clone();
-        std::thread::Builder::new()
-            .name("spp-sync-action".to_string())
-            .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build();
-                let result = runtime
-                    .map_err(|e| spp_core::Error::Config(e.to_string()))
-                    .and_then(|rt| {
-                        rt.block_on(async move {
-                            match action {
-                                SyncAction::Initial => engine
-                                    .initial_sync()
-                                    .await
-                                    .map(|_| "Initial sync completed.".to_string()),
-                                SyncAction::Incremental => engine
-                                    .incremental_sync()
-                                    .await
-                                    .map(|_| "Incremental sync completed.".to_string()),
-                                SyncAction::Reconcile => engine
-                                    .reconcile()
-                                    .await
-                                    .map(|_| "Reconcile completed.".to_string()),
-                                SyncAction::Cancel => {
-                                    engine.request_cancellation();
-                                    Ok("Cancellation requested.".to_string())
-                                }
-                            }
-                        })
-                    });
-                if let Err(e) = result {
-                    db.with_write(|conn| {
-                        let _ = spp_core::jobs::log_error(
-                            conn,
-                            "sync",
-                            &format!("{} failed: {e}", action_label_static(action)),
-                        );
-                    });
-                }
-            })
-            .ok();
+        spawn_sync_action(db, engine, action);
         self.message = Some(format!("{} (started in background)", action.label()));
     }
 
@@ -257,6 +329,24 @@ impl SyncHealthPage {
             Some("engine state, checkpoints, and recent runs"),
             |_| {},
         );
+        // Live progress (SyncProgress events): "conversations · 3/22 ·
+        // 1,204 records" while a run is executing — replaces the frozen
+        // "started in background" banner of the 1.2.0 era.
+        if let Some(p) = &self.last_progress {
+            let stage_line = if p.total > 0 {
+                format!(
+                    "progress: {} · resource {}/{} · {} record(s) so far",
+                    p.stage, p.done, p.total, p.processed
+                )
+            } else {
+                format!("progress: {} · {} record(s) so far", p.stage, p.processed)
+            };
+            design::hint_text(ui, &stage_line);
+        }
+        let engine_running = engine.is_some_and(|e| e.is_running());
+        if engine_running {
+            design::hint_text(ui, "engine: running");
+        }
         if let Some(message) = &self.message {
             design::success_text(ui, &format!("status: {message}"));
         }

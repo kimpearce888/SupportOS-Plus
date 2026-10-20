@@ -255,6 +255,57 @@ impl DiagnosticsPage {
                 );
             },
         );
+        ui.add_space(10.0);
+
+        // --- Outbound deliveries ---------------------------------------
+        // The reply/note/status/assignment dispatch lane: what went out,
+        // what is pending, and — most importantly — what failed and why.
+        let (out_stats, failed_rows) = db.with_read(|conn| {
+            let stats = spp_core::outbound::stats(conn);
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, kind, updated_at, COALESCE(error, '') FROM outbound_jobs
+                      WHERE status = 'failed' ORDER BY id DESC LIMIT 8",
+                )
+                .ok();
+            let rows: Vec<(i64, String, String, String)> = match stmt {
+                Some(ref mut s) => s
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            };
+            (stats, rows)
+        });
+        let out_subtitle = format!(
+            "{} delivered · {} queued · {} sending · {} failed",
+            out_stats.confirmed, out_stats.queued, out_stats.sending, out_stats.failed
+        );
+        design::card_titled(ui, "Outbound deliveries", Some(&out_subtitle), |ui| {
+            if failed_rows.is_empty() {
+                design::hint_text(
+                    ui,
+                    "No failed deliveries. Replies, notes, status changes and \
+                         assignments are dispatched to Help Scout within seconds.",
+                );
+            } else {
+                design::table(
+                    ui,
+                    "diagnostics-outbound",
+                    &["job", "kind", "at", "error"],
+                    22.0,
+                    |ui| {
+                        for (id, kind, at, error) in &failed_rows {
+                            ui.monospace(egui::RichText::new(id.to_string()).size(12.5));
+                            ui.monospace(egui::RichText::new(kind.as_str()).size(12.5));
+                            ui.monospace(egui::RichText::new(at.as_str()).size(12.0).weak());
+                            ui.monospace(egui::RichText::new(error.as_str()).size(11.5).weak());
+                            ui.end_row();
+                        }
+                    },
+                );
+            }
+        });
     }
 }
 

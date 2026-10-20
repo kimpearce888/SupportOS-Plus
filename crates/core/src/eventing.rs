@@ -64,6 +64,40 @@ pub fn notify_sync_completed(bus: &EventBus, kind: &str, processed: u32, errors:
     bus.emit(&ServerEvent::sync_completed(kind, processed, errors));
 }
 
+pub fn notify_sync_progress(
+    bus: &EventBus,
+    stage: &str,
+    done: u32,
+    total: u32,
+    processed: u64,
+    stage_records: u32,
+) {
+    bus.emit(&ServerEvent::sync_progress(
+        stage,
+        done,
+        total,
+        processed,
+        stage_records,
+    ));
+}
+
+pub fn notify_outbound_finished(
+    bus: &EventBus,
+    job_id: i64,
+    kind: &str,
+    conversation_id: Option<i64>,
+    success: bool,
+    error: Option<&str>,
+) {
+    bus.emit(&ServerEvent::outbound_job_finished(
+        job_id,
+        kind,
+        conversation_id,
+        success,
+        error,
+    ));
+}
+
 pub fn notify_rating_received(
     bus: &EventBus,
     rating: Option<&str>,

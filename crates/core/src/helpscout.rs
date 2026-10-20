@@ -700,6 +700,9 @@ pub struct CreateThreadInput {
     pub bcc: Vec<String>,
     pub status_after: Option<String>,
     pub assign_to: Option<i64>,
+    /// Remote customer id — the POST /reply body requires a `customer`
+    /// object (Help Scout rejects the request without it).
+    pub customer_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

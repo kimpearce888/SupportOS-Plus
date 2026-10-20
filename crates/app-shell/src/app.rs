@@ -396,7 +396,14 @@ impl ShellApp {
 impl eframe::App for ShellApp {
     /// Runs before every frame — and while the window is hidden, whenever
     /// the bridge requested a repaint. No painting is allowed here.
-    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 1.3.0: a periodic repaint heartbeat. Everything the user does
+        // now crosses an async boundary (outbound dispatch ~2s ticks,
+        // sync progress, the 1-minute poll) — with repaints only on
+        // input, "sending…" status lines and live progress never
+        // refreshed on screen.
+        ctx.request_repaint_after(std::time::Duration::from_millis(1500));
+
         let events = self.bridge.drain();
         self.events_seen += events.len();
         if let Some(last) = events.last() {
@@ -408,6 +415,49 @@ impl eframe::App for ShellApp {
                 if !dirty.contains(&page) {
                     dirty.push(page);
                 }
+            }
+            match event {
+                spp_core::events::ServerEvent::SyncProgress(p) => {
+                    self.sync_health.note_progress(p.clone());
+                }
+                spp_core::events::ServerEvent::SyncCompleted(e) => {
+                    if e.processed > 0 {
+                        self.toasts.push(
+                            crate::toasts::ToastKind::Success,
+                            format!("Sync finished: {} record(s) updated", e.processed),
+                            Some(match e.kind.as_str() {
+                                "initial" => {
+                                    "Your Help Scout history is in the local mirror now.".into()
+                                }
+                                "docs" => "Help Center articles refreshed.".into(),
+                                _ => "Latest changes pulled from Help Scout.".into(),
+                            }),
+                        );
+                    }
+                }
+                spp_core::events::ServerEvent::OutboundJobFinished(e) => {
+                    if e.success {
+                        if matches!(e.kind.as_str(), "create_reply" | "create_note") {
+                            let message: String = if e.kind == "create_reply" {
+                                "Reply delivered to Help Scout".to_string()
+                            } else {
+                                "Note delivered to Help Scout".to_string()
+                            };
+                            self.toasts
+                                .push(crate::toasts::ToastKind::Success, message, None);
+                        }
+                    } else {
+                        // The single most important toast in the app:
+                        // "it did not go through" must never be silent
+                        // again.
+                        self.toasts.push(
+                            crate::toasts::ToastKind::Error,
+                            format!("{} failed", human_outbound_kind(&e.kind)),
+                            e.error.clone(),
+                        );
+                    }
+                }
+                _ => {}
             }
         }
         if !dirty.is_empty() {
@@ -477,7 +527,7 @@ impl eframe::App for ShellApp {
                         .fill(t.background)
                         .inner_margin(egui::Margin::symmetric(22, 14)),
                 )
-                .show(ui, |ui| self.inbox.ui(ui, &self.db, &bus));
+                .show(ui, |ui| self.inbox.ui(ui, &self.db, &bus, sync.as_ref()));
             nav = None;
         } else {
             egui::CentralPanel::default()
@@ -494,7 +544,9 @@ impl eframe::App for ShellApp {
                                 .show(ui, |ui| match self.page {
                                     PageKey::Dashboard => self.dashboard.ui(ui, &self.db),
                                     PageKey::Customers => self.customers.ui(ui, &self.db),
-                                    PageKey::Knowledge => self.knowledge.ui(ui, &self.db),
+                                    PageKey::Knowledge => {
+                                        self.knowledge.ui(ui, &self.db, sync.as_ref());
+                                    }
                                     PageKey::Reports => self.reports.ui(ui, &self.db),
                                     PageKey::Operations => {
                                         nav = self.operations.ui(ui, &self.db);
@@ -539,6 +591,17 @@ impl eframe::App for ShellApp {
         // Destructive-action confirmations arm the dialog (sample wiring:
         // deleting an automation rule).
         self.toasts.ui(ui.ctx());
+    }
+}
+
+/// Human label for an outbound job kind (toast copy).
+fn human_outbound_kind(kind: &str) -> &str {
+    match kind {
+        "create_reply" => "Reply",
+        "create_note" => "Note",
+        "update_status" => "Status change",
+        "assign" => "Assignment",
+        other => other,
     }
 }
 
