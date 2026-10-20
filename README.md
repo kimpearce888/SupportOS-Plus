@@ -97,6 +97,41 @@ field — useful for CI and headless setups. If the callback listener cannot
 bind its port (another program is using it), the connect button says so
 instead of leaving a dead browser tab.
 
+**Working in real time** (updated in 1.3.0): the local mirror polls Help
+Scout **every minute by default** (configurable in Settings), streams
+conversations into the inbox while the initial sync is still running
+(live progress on Sync Health), and applies what you do immediately —
+replies, notes, status changes and assignments are dispatched to Help
+Scout within seconds, with a per-conversation status line that says
+"delivering…", "delivered ✓" or the exact failure. A "Sync now" button
+sits on the Inbox header, every conversation has its own refresh, and
+Dashboard / Reports / Customers / Organizations / Knowledge all carry
+reload buttons that re-pull real data rather than repaint a stale
+cache. (True push via webhooks is impossible for a localhost desktop
+app — Help Scout needs a publicly reachable URL — so fast polling plus
+everywhere-refresh is the honest real-time design.)
+
+**The Copilot** (new in 1.3.0): open the spark icon on any conversation
+and the panel reads the entire thread *locally* — no configuration, no
+AI service: what the customer needs (extractive summary), their open
+questions, intent / urgency / sentiment / escalation signals, the
+customer's history, **similar past issues** with the resolution that
+worked and why they matched, relevant Help Center articles, and a
+**suggested reply assembled from that evidence** (every line traces to
+a real past resolution or article — nothing is invented) that inserts
+into the composer for editing. Install [LM
+Studio](https://lmstudio.ai) and set a chat model in Settings to add
+generative drafts on top; the local engine keeps working without it.
+
+**Help Center sync** (fixed in 1.3.0): Help Scout's Docs API is used at
+its real v1 endpoints (the previous build called a `/v2/` that does not
+exist, so articles never arrived). Collections, categories and full
+article contents sync on the initial pull, on every incremental pass
+and via the "Sync Help Center now" button. The Docs API uses a
+separate key from the Mailbox API (Help Scout → Profile → Security &
+Access → Docs API); the Knowledge page says exactly that when the key
+is missing instead of showing a silently empty tab.
+
 **Diagnostics & reports** (new in 1.2.0): the *Diagnostics* page shows every
 recorded error, warning and info event — sync failures with the failing
 resource and reason, automatic sign-ins, OAuth callback outcomes, webhook

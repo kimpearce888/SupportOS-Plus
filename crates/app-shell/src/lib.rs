@@ -151,6 +151,21 @@ pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
         ),
     };
     let engine = Arc::new(SyncEngine::new(db.clone(), provider.clone()).with_bus(bus.clone()));
+    // Record the live provider kind for the UI's connected-guards (the
+    // composer rejects sends with a legible message when boot resolved
+    // no credentials, instead of queueing into a provider that cannot
+    // deliver).
+    {
+        let conn = db.write_guard();
+        let _ = spp_core::settings::set_string(
+            &conn,
+            "provider_kind",
+            match mode {
+                BootMode::Real => "real",
+                BootMode::Empty => "empty",
+            },
+        );
+    }
     tracing::info!(mode = ?mode, "boot services built");
     BootServices {
         mode,

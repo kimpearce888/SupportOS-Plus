@@ -9,8 +9,9 @@ use std::panic::AssertUnwindSafe;
 
 use crate::error::{Error, Result};
 use crate::eventing::EventBus;
-use crate::helpscout::HelpScoutProvider;
+use crate::helpscout::{ConversationPatch, CreateThreadInput, HelpScoutProvider};
 use crate::jobs;
+use crate::outbound;
 use crate::sync_engine::SyncEngine;
 
 pub const RATINGS_REFRESH_DEFAULT_SECONDS: i64 = 30;
@@ -103,6 +104,22 @@ impl WorkerManager {
                 Ok(_) => {}
                 Err(e) => tracing::warn!(error = %e, "stale-job recovery failed"),
             }
+            // 1.3.0: rows stuck mid-send by a crash (the pre-1.3.0 world
+            // never dispatched at all, but a crash mid-POST is real now)
+            // re-enter the queue so the user's reply eventually goes out.
+            if let Err(e) = outbound::recover_stale_sending(&conn) {
+                tracing::warn!(error = %e, "outbound recovery failed");
+            }
+            // 1.3.0: a sync_state stranded in INITIALIZING/BACKFILLING by
+            // an unclean shutdown used to make the auto-sync timer skip
+            // itself forever ("sync in progress", eternally). Recover it
+            // before the first tick so the account actually fills.
+            if crate::sync_engine::recover_interrupted_state(&conn) {
+                tracing::info!(
+                    operation = "sync_recover",
+                    "Interrupted sync state recovered at worker start"
+                );
+            }
             let drained = crate::webhook_handler::drain_pending(&conn);
             if drained > 0 {
                 tracing::info!(
@@ -126,7 +143,11 @@ impl WorkerManager {
         {
             let (minutes, raw) = {
                 let conn = self.lock();
-                let raw = crate::settings::get_i64(&conn, "sync_interval_minutes", 5).unwrap_or(5);
+                // 1.3.0: default poll 5 min -> 1 min. "Sync in real time"
+                // for a localhost desktop app means fast polling (Help
+                // Scout webhooks cannot reach 127.0.0.1 without a public
+                // tunnel); an idle tick costs only a couple of requests.
+                let raw = crate::settings::get_i64(&conn, "sync_interval_minutes", 1).unwrap_or(1);
                 let clamped = raw.clamp(1, 1440);
                 (clamped, raw)
             };
@@ -273,6 +294,9 @@ impl WorkerManager {
         if self.stopped.load(Ordering::SeqCst) || self.processing.swap(true, Ordering::SeqCst) {
             return;
         }
+        // Outbound dispatch runs before the background job kinds: a
+        // queued user reply outranks any maintenance work.
+        self.flush_outbound().await;
         for _ in 0..10 {
             let claimed = {
                 let mut conn = self.lock();
@@ -301,16 +325,377 @@ impl WorkerManager {
         self.processing.store(false, Ordering::SeqCst);
     }
 
+    /// Drain queued outbound jobs (replies, notes, status changes,
+    /// assignments) to the live Help Scout provider — the half the
+    /// Phase 4 cutover lost and 1.3.0 restores. Runs before the
+    /// background job kinds every tick: a user reply outranks any
+    /// maintenance work.
+    async fn flush_outbound(&self) {
+        for _ in 0..outbound::OUTBOUND_BATCH_PER_TICK {
+            let claimed = {
+                let mut conn = self.lock();
+                outbound::claim_next(&mut conn).unwrap_or(None)
+            };
+            let Some(job) = claimed else { break };
+            if AssertUnwindSafe(self.execute_outbound(&job))
+                .catch_unwind()
+                .await
+                .is_err()
+            {
+                tracing::error!(
+                    job_id = job.id,
+                    kind = %job.kind,
+                    "outbound job panicked (contained at the worker boundary)"
+                );
+                let conn = self.lock();
+                let _ = outbound::mark_failed(
+                    &conn,
+                    job.id,
+                    "dispatcher panicked (contained at worker boundary)",
+                    true,
+                );
+                self.emit_outbound_finished(&job, false, Some("dispatcher panicked"));
+            }
+        }
+    }
+
+    /// Execute one outbound job against the provider, then either confirm
+    /// (+ pull the remote truth back into the mirror) or retry/fail.
+    async fn execute_outbound(&self, job: &outbound::OutboundJob) {
+        let started = std::time::Instant::now();
+        let payload: serde_json::Value =
+            serde_json::from_str(&job.payload).unwrap_or(serde_json::Value::Null);
+
+        // Defense in depth: eval mode must never reach the wire, even for
+        // rows queued before the toggle flipped on.
+        let blocked_by_eval_mode = {
+            let conn = self.lock();
+            if crate::conversation_ops::eval_mode_on(&conn) {
+                let _ = outbound::mark_failed(
+                    &conn,
+                    job.id,
+                    "AI evaluation mode is ON: no replies, notes or status changes are sent.",
+                    false,
+                );
+                self.emit_outbound_finished(job, false, Some("blocked by AI evaluation mode"));
+                true
+            } else {
+                false
+            }
+        };
+        if blocked_by_eval_mode {
+            return;
+        }
+
+        // Fail fast and legibly when no Help Scout account is connected —
+        // otherwise the inert provider answers a cryptic 404.
+        if self.provider.kind() != "real" {
+            let conn = self.lock();
+            let _ =
+                outbound::mark_failed(&conn, job.id, crate::conversation_ops::NOT_CONNECTED, false);
+            self.emit_outbound_finished(job, false, Some(crate::conversation_ops::NOT_CONNECTED));
+            return;
+        }
+
+        let num = |key: &str| -> Option<i64> {
+            payload.get(key).and_then(|v| v.as_i64()).or_else(|| {
+                payload
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+            })
+        };
+        let str_or = |key: &str, fallback: &str| -> String {
+            payload
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or(fallback)
+                .to_string()
+        };
+
+        // Resolve local -> remote ids for the conversation, its customer
+        // (the POST /reply body requires a customer object) and the
+        // assignee (the PATCH assignTo value is a remote user/team id).
+        let conversation_local = job.conversation_local_id.or_else(|| num("conversationId"));
+        let Some(conversation_local) = conversation_local else {
+            let conn = self.lock();
+            let _ =
+                outbound::mark_failed(&conn, job.id, "outbound job has no conversation id", false);
+            self.emit_outbound_finished(job, false, Some("missing conversation id"));
+            return;
+        };
+        let ctx = {
+            let conn = self.lock();
+            conn.query_row(
+                "SELECT c.remote_id,
+                        (SELECT cu.remote_id FROM customers cu WHERE cu.id = c.customer_local_id)
+                   FROM conversations c WHERE c.id = ?1",
+                rusqlite::params![conversation_local],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )
+            .ok()
+        };
+        let Some((remote_id, customer_remote)) = ctx else {
+            let conn = self.lock();
+            let _ = outbound::mark_failed(
+                &conn,
+                job.id,
+                "conversation no longer exists locally",
+                false,
+            );
+            self.emit_outbound_finished(job, false, Some("conversation not found locally"));
+            return;
+        };
+
+        let summary = format!("{} conversation {remote_id}", job.kind);
+        let result: Result<String> = match job.kind.as_str() {
+            "create_reply" => {
+                let text = str_or("text", "");
+                if text.trim().is_empty() {
+                    Err(Error::Other("reply text is empty".into()))
+                } else {
+                    let cc: Vec<String> = payload["cc"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let bcc: Vec<String> = payload["bcc"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(str::to_string))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let status_after = payload["statusAfter"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string);
+                    let assign_to = num("assignTo");
+                    self.provider
+                        .create_reply_thread(CreateThreadInput {
+                            conversation_id: remote_id,
+                            text,
+                            draft: false,
+                            cc,
+                            bcc,
+                            status_after,
+                            assign_to,
+                            customer_id: customer_remote,
+                        })
+                        .await
+                        .map(|created| format!("reply delivered (thread {})", created.thread_id))
+                }
+            }
+            "create_note" => {
+                let text = str_or("text", "");
+                if text.trim().is_empty() {
+                    Err(Error::Other("note text is empty".into()))
+                } else {
+                    self.provider
+                        .create_note_thread(CreateThreadInput {
+                            conversation_id: remote_id,
+                            text,
+                            draft: false,
+                            cc: vec![],
+                            bcc: vec![],
+                            status_after: None,
+                            assign_to: None,
+                            customer_id: None,
+                        })
+                        .await
+                        .map(|created| format!("note delivered (thread {})", created.thread_id))
+                }
+            }
+            "update_status" => {
+                let status = str_or("status", "");
+                if !matches!(status.as_str(), "active" | "pending" | "closed" | "spam") {
+                    Err(Error::Other(format!("invalid status {status}").into()))
+                } else {
+                    self.provider
+                        .update_conversation(
+                            remote_id,
+                            ConversationPatch {
+                                status: Some(status.clone()),
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                        .map(|_| format!("status set to {status}"))
+                }
+            }
+            "assign" => {
+                let user_local = num("userId");
+                let assign_remote = user_local.and_then(|local| {
+                    let conn = self.lock();
+                    conn.query_row(
+                        "SELECT remote_id FROM users WHERE id = ?1",
+                        rusqlite::params![local],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .ok()
+                });
+                if user_local.is_some() && assign_remote.is_none() {
+                    // Local-only user (never synced): keep the local write,
+                    // but tell the user the remote assignment cannot go out.
+                    Err(Error::Other(
+                        "assignee is not a synced Help Scout user (cannot assign remotely)".into(),
+                    ))
+                } else {
+                    self.provider
+                        .update_conversation(
+                            remote_id,
+                            ConversationPatch {
+                                assign_to: Some(assign_remote),
+                                ..Default::default()
+                            },
+                        )
+                        .await
+                        .map(|_| match assign_remote {
+                            Some(remote) => format!("assigned to user {remote}"),
+                            None => "unassigned".to_string(),
+                        })
+                }
+            }
+            other => Err(Error::Other(
+                format!("unknown outbound job kind {other}").into(),
+            )),
+        };
+
+        let latency_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(0);
+        match result {
+            Ok(remote_result) => {
+                {
+                    let conn = self.lock();
+                    let _ = jobs::record_outbound_attempt(
+                        &conn,
+                        job.id,
+                        job.attempts + 1,
+                        &summary,
+                        None,
+                        Some(&remote_result),
+                        Some(latency_ms),
+                    );
+                    let _ = outbound::mark_confirmed(&conn, job.id, &remote_result);
+                    let action = match job.kind.as_str() {
+                        "create_reply" => "reply_sent",
+                        "create_note" => "note_sent",
+                        "update_status" => "status_changed",
+                        _ => "conversation_assigned",
+                    };
+                    let _ = crate::jobs::audit(
+                        &conn,
+                        "user",
+                        action,
+                        Some(conversation_local),
+                        None,
+                        None,
+                        Some(&summary),
+                        Some(&remote_result),
+                        false,
+                    );
+                    self.emit_outbound_finished(job, true, None);
+                }
+                // Pull the remote truth back: the new thread (and any
+                // status side effects) flow into the mirror and the UI.
+                if let Err(e) = self
+                    .run_engine(|e| async move {
+                        e.sync_single_conversation(remote_id).await.map(|_| ())
+                    })
+                    .await
+                {
+                    tracing::warn!(
+                        job_id = job.id,
+                        error = %e,
+                        "post-send refresh failed (the delivery itself succeeded)"
+                    );
+                }
+                self.emit_conversation_updated_for_remote(remote_id);
+                if let Some(local) = self.conversation_local_id_for_remote(remote_id) {
+                    self.on_conversation_changed(local);
+                }
+            }
+            Err(e) => {
+                let retryable = crate::helpscout_real::hs_error(&e)
+                    .map(|hs| hs.retryable)
+                    .unwrap_or(false);
+                let msg = crate::helpscout_real::hs_error(&e)
+                    .map(|hs| hs.friendly.clone())
+                    .unwrap_or_else(|| e.to_string());
+                let conn = self.lock();
+                let _ = jobs::record_outbound_attempt(
+                    &conn,
+                    job.id,
+                    job.attempts + 1,
+                    &summary,
+                    crate::helpscout_real::hs_status(&e).map(i64::from),
+                    Some(&msg),
+                    Some(latency_ms),
+                );
+                let will_retry =
+                    outbound::mark_failed(&conn, job.id, &msg, retryable).unwrap_or(false);
+                let _ = crate::audit::log_event(
+                    &conn,
+                    if will_retry { "warn" } else { "error" },
+                    "outbound",
+                    &format!(
+                        "{} failed{}: {msg}",
+                        job.kind,
+                        if will_retry { " (will retry)" } else { "" }
+                    ),
+                    None,
+                    Some(&serde_json::json!({ "conversation_id": conversation_local })),
+                );
+                tracing::warn!(
+                    job_id = job.id,
+                    kind = %job.kind,
+                    retry = will_retry,
+                    error = %msg,
+                    "outbound job failed"
+                );
+                self.emit_outbound_finished(job, false, Some(&msg));
+            }
+        }
+    }
+
+    fn emit_outbound_finished(
+        &self,
+        job: &outbound::OutboundJob,
+        success: bool,
+        error: Option<&str>,
+    ) {
+        crate::eventing::notify_outbound_finished(
+            &self.bus,
+            job.id,
+            &job.kind,
+            job.conversation_local_id,
+            success,
+            error,
+        );
+    }
+
+    /// True when a live engine run holds the state machine (the only
+    /// legitimate reason to skip an auto-sync tick).
+    fn engine_engaged(&self) -> bool {
+        self.engine.as_ref().is_some_and(|e| e.is_running())
+    }
+
     async fn auto_sync(&self) {
         if self.stopped.load(Ordering::SeqCst) {
             return;
         }
         let state = {
             let conn = self.lock();
+            // Belt-and-braces: the same recovery that runs at boot, in
+            // case the process died between a state write and here.
+            crate::sync_engine::recover_interrupted_state(&conn);
             crate::sync_engine::get_state(&conn)
         };
         // A run in progress owns the state machine; do not pile onto it.
-        if state == "INITIALIZING" || state == "BACKFILLING" {
+        if (state == "INITIALIZING" || state == "BACKFILLING") && self.engine_engaged() {
             return;
         }
         let Some(engine) = self.engine.clone() else {
@@ -1185,6 +1570,7 @@ impl WorkerManager {
                     bcc: vec![],
                     status_after: None,
                     assign_to: None,
+                    customer_id: None,
                 })
                 .await?;
             let engine = self.engine.clone();

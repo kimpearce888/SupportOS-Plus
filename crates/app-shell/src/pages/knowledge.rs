@@ -21,6 +21,7 @@ use eframe::egui;
 use rusqlite::Connection;
 use serde_json::Value;
 use spp_core::db::DbHandle;
+use spp_core::sync_engine::SyncEngine;
 
 use super::{i64_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
@@ -631,14 +632,50 @@ impl KnowledgePage {
         self.reader_text = db.with_read(|conn| article_detail(conn, id));
     }
 
-    /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// Render the page. `engine` powers the "Sync Help Center now"
+    /// action (a real Docs API v1 pull — before 1.3.0 the page had no
+    /// way to fetch and the /v2/ endpoint paths it used did not exist).
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        engine: Option<&std::sync::Arc<SyncEngine>>,
+    ) {
         design::page_header(
             ui,
             "Knowledge",
             Some("local documents, sources, freshness, and the help center"),
-            |_| {},
+            |ui| {
+                if design::button_with_icon(
+                    ui,
+                    Icon::Refresh,
+                    "Sync Help Center now",
+                    ButtonVariant::Outline,
+                )
+                .on_hover_text("pull Help Scout Docs collections and articles (v1 API)")
+                .clicked()
+                    && let Some(engine) = engine
+                {
+                    crate::pages::sync_health::spawn_docs_sync(db, engine);
+                    self.status_message = Some("Help Center sync started…".into());
+                }
+            },
         );
+        // Missing Docs API key = the Help Center tab can never fill.
+        // Say so, and how to fix it, instead of an unexplained empty tab.
+        let docs_key_missing = db.with_read(|conn| {
+            spp_core::settings::get_string(conn, "docs_api_key")
+                .ok()
+                .flatten()
+                .is_none_or(|k| k.is_empty())
+        });
+        if docs_key_missing {
+            design::hint_text(
+                ui,
+                "Help Center sync needs a Docs API key (Help Scout Profile → Security & Access \
+                 → Docs API). Add it in Settings → Help Scout, then press \"Sync Help Center now\".",
+            );
+        }
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
                 if design::chip(ui, self.tab == tab, tab.label()).clicked() {

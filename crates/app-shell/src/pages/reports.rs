@@ -13,7 +13,7 @@ use spp_core::sla::SlaReport;
 
 use super::{i64_field, str_field};
 use crate::chart;
-use crate::design::{self, BadgeTone};
+use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 use crate::pages::dashboard::{DashboardData, DashboardScope, load_dashboard};
 
@@ -135,6 +135,12 @@ impl ReportsPage {
                         self.days = d;
                         self.reload(db);
                     }
+                }
+                if design::button_with_icon(ui, Icon::Refresh, "Reload", ButtonVariant::Outline)
+                    .on_hover_text("recompute from the local mirror (auto-refreshes on every sync)")
+                    .clicked()
+                {
+                    self.invalidate();
                 }
             },
         );

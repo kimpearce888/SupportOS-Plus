@@ -24,10 +24,12 @@ use eframe::egui;
 use rusqlite::Connection;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use spp_core::conversation_ops::NOT_CONNECTED;
 use spp_core::conversation_ops::{create_outbound_job_keyed, set_outbound_status};
 use spp_core::db::DbHandle;
 use spp_core::eventing::EventBus;
 use spp_core::inbox::{ConversationDetail, ConversationListItem, InboxFilters};
+use spp_core::sync_engine::SyncEngine;
 use spp_core::ticket_ops::{OperationResult, TicketOperation};
 
 use crate::design::{self, BadgeTone, ButtonVariant};
@@ -143,6 +145,8 @@ pub fn reply_key(remote_id: i64, draft: bool, text: &str) -> String {
 }
 
 /// Outcome of a composer/action submit, surfaced in the status line.
+/// 1.3.0: `Rejected` no longer masquerades as success — the caller styles
+/// it red and keeps the composer text instead of wiping it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionOutcome {
     Success(String),
@@ -150,10 +154,14 @@ pub enum ActionOutcome {
 }
 
 impl ActionOutcome {
-    fn success_msg(self) -> Option<String> {
+    #[must_use]
+    pub fn is_rejected(&self) -> bool {
+        matches!(self, Self::Rejected(_))
+    }
+
+    fn message(&self) -> &str {
         match self {
-            Self::Success(m) => Some(m),
-            Self::Rejected(m) => Some(m),
+            Self::Success(m) | Self::Rejected(m) => m,
         }
     }
 }
@@ -224,6 +232,18 @@ fn guard_eval_mode(conn: &Connection) -> Result<(), String> {
     }
 }
 
+/// True when boot resolved real Help Scout credentials (boot writes the
+/// `provider_kind` setting; tests default to real). When false, every
+/// submit is rejected up front — before 1.3.0 the action silently
+/// queued into a dispatcher that did not exist and reported success.
+fn provider_connected(conn: &Connection) -> bool {
+    spp_core::settings::get_string(conn, "provider_kind")
+        .ok()
+        .flatten()
+        .map(|v| v != "empty")
+        .unwrap_or(true)
+}
+
 fn emit_updated(bus: &EventBus, conversation_id: i64, number: i64) {
     bus.emit(&spp_core::events::ServerEvent::conversation_updated(
         Some(conversation_id),
@@ -259,7 +279,17 @@ pub struct InboxPage {
     directory: Directory,
     status: Option<String>,
     assign_pick: Option<i64>,
+    /// Honest status of the user's last outbound action for this
+    /// conversation, derived from the outbound queue on every detail
+    /// reload: "Sending…", "Reply delivered", "Send failed: …".
+    outbound_note: Option<(String, bool)>,
     status_message: Option<String>,
+    status_is_error: bool,
+    /// Copilot side panel (1.3.0): local analysis + similar issues +
+    /// suggested reply + related articles + customer history.
+    copilot_open: bool,
+    copilot: Option<spp_core::ai_local::CopilotReport>,
+    copilot_error: Option<String>,
 }
 
 impl InboxPage {
@@ -289,11 +319,19 @@ impl InboxPage {
             directory: Directory::default(),
             status: None,
             assign_pick: None,
+            outbound_note: None,
             status_message: None,
+            status_is_error: false,
+            copilot_open: false,
+            copilot: None,
+            copilot_error: None,
         }
     }
 
-    /// Live-update invalidation: reload the list (and the open detail).
+    /// Live-update invalidation: clear the cached list; the detail is
+    /// reloaded (selection preserved) on the next frame. Before 1.3.0
+    /// this nulled the open conversation on every sync event, so the
+    /// pane flashed to "Select a conversation" right after sending.
     pub fn invalidate(&mut self) {
         self.list.clear();
         self.detail = None;
@@ -339,6 +377,50 @@ impl InboxPage {
         let id = self.selected;
         let detail = id.map(|id| db.with_read(|conn| spp_core::inbox::get_conversation(conn, id)));
         self.detail = detail.and_then(|result| result.ok()).flatten();
+        if let Some(id) = id {
+            let (note, report) = db.with_read(|conn| {
+                let note = spp_core::outbound::latest_for_conversation(conn, id).map(|o| {
+                    let label = match o.kind.as_str() {
+                        "create_reply" => "Reply",
+                        "create_note" => "Note",
+                        "update_status" => "Status change",
+                        "assign" => "Assignment",
+                        other => other,
+                    };
+                    match o.status.as_str() {
+                        "queued" => (format!("{label}: queued for delivery…"), false),
+                        "sending" => (format!("{label}: sending to Help Scout…"), false),
+                        "confirmed" => (format!("{label} delivered to Help Scout ✓"), false),
+                        "failed" => (
+                            format!(
+                                "{label} failed: {}",
+                                o.error.as_deref().unwrap_or("unknown error")
+                            ),
+                            true,
+                        ),
+                        other => (format!("{label}: {other}"), false),
+                    }
+                });
+                let report = if self.copilot_open {
+                    Some(spp_core::ai_local::copilot_report(conn, id))
+                } else {
+                    None
+                };
+                (note, report)
+            });
+            self.outbound_note = note;
+            match report {
+                Some(Ok(r)) => {
+                    self.copilot = Some(r);
+                    self.copilot_error = None;
+                }
+                Some(Err(e)) => {
+                    self.copilot = None;
+                    self.copilot_error = Some(e.to_string());
+                }
+                None => {}
+            }
+        }
     }
 
     /// Select a conversation and load its detail.
@@ -351,8 +433,9 @@ impl InboxPage {
         self.reload_detail(db);
     }
 
-    /// Submit the composer (reply or note) — see the module docs for the
-    /// local-first outbound semantics.
+    /// Submit the composer (reply or note). The job is dispatched to
+    /// Help Scout by the outbound worker within ~2 seconds; the status
+    /// line then reflects the real delivery result.
     pub fn submit_composer(&mut self, db: &DbHandle, bus: &EventBus) -> ActionOutcome {
         let body = self.composer_body.trim().to_string();
         if body.is_empty() {
@@ -372,11 +455,20 @@ impl InboxPage {
             ),
             ComposerMode::Note => submit_note(db, bus, &detail, &body),
         };
-        if let Some(msg) = outcome.clone().success_msg() {
-            self.status_message = Some(msg);
-            self.composer_body.clear();
-            self.composer_cc.clear();
-            self.composer_bcc.clear();
+        match &outcome {
+            ActionOutcome::Success(msg) => {
+                self.status_message = Some(msg.clone());
+                self.status_is_error = false;
+                self.composer_body.clear();
+                self.composer_cc.clear();
+                self.composer_bcc.clear();
+            }
+            // Rejections keep the typed text (the user fixes the problem
+            // and re-sends; wiping the composer destroyed their work).
+            ActionOutcome::Rejected(msg) => {
+                self.status_message = Some(msg.clone());
+                self.status_is_error = true;
+            }
         }
         self.reload_detail(db);
         self.reload_list(db);
@@ -401,9 +493,8 @@ impl InboxPage {
             "update_status",
             &json!({ "conversationId": detail.id, "status": status }),
         );
-        if let Some(msg) = outcome.clone().success_msg() {
-            self.status_message = Some(msg);
-        }
+        self.status_message = Some(outcome.message().to_string());
+        self.status_is_error = outcome.is_rejected();
         self.reload_detail(db);
         self.reload_list(db);
         outcome
@@ -427,24 +518,38 @@ impl InboxPage {
             "assign",
             &json!({ "conversationId": detail.id, "userId": user_id }),
         );
-        if let Some(msg) = outcome.clone().success_msg() {
-            self.status_message = Some(msg);
-        }
+        self.status_message = Some(outcome.message().to_string());
+        self.status_is_error = outcome.is_rejected();
         self.reload_detail(db);
         self.reload_list(db);
         outcome
     }
 
-    /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, bus: &EventBus) {
+    /// Render the page. `engine` powers the "Sync now" header action
+    /// (a real incremental pull from Help Scout — before 1.3.0 no page
+    /// except Sync Health could touch the network).
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        bus: &EventBus,
+        engine: Option<&std::sync::Arc<SyncEngine>>,
+    ) {
         if self.mailboxes.is_empty() {
             self.reload_refs(db);
         }
         if self.list.is_empty() {
             self.reload_list(db);
         }
+        // Invalidation cleared the detail: reload it (selection kept) so
+        // the open conversation survives sync events instead of
+        // vanishing behind "Select a conversation".
+        if self.selected.is_some() && self.detail.is_none() {
+            self.reload_detail(db);
+        }
 
         let subtitle = format!("{} of {} conversations", self.list.len(), self.total);
+        let syncing = engine.is_some_and(|e| e.is_running());
         design::page_header(ui, "Inbox", Some(&subtitle), |ui| {
             if design::button(ui, "reset filters", ButtonVariant::Ghost)
                 .on_hover_text("clear every filter and reload")
@@ -458,6 +563,25 @@ impl InboxPage {
                 self.search_edit.clear();
                 self.number_edit.clear();
                 self.reload_list(db);
+            }
+            if design::button_with_icon(
+                ui,
+                Icon::Refresh,
+                if syncing { "syncing…" } else { "Sync now" },
+                ButtonVariant::Outline,
+            )
+            .on_hover_text(
+                "pull new and updated conversations from Help Scout right now \
+                 (also happens automatically every minute)",
+            )
+            .clicked()
+                && let Some(engine) = engine
+            {
+                crate::pages::sync_health::spawn_sync_action(
+                    db,
+                    engine,
+                    crate::pages::sync_health::SyncAction::Incremental,
+                );
             }
         });
 
@@ -585,6 +709,13 @@ impl InboxPage {
 
         if let Some(err) = &self.status {
             design::error_text(ui, &format!("error: {err}"));
+        }
+        if !db.with_read(provider_connected) {
+            design::hint_text(
+                ui,
+                "Help Scout is not connected — nothing can sync yet. Add your app credentials in \
+                 Settings (Help Scout tab), press connect, and this inbox fills automatically.",
+            );
         }
 
         // Conversation list (left) + detail (remaining space).
@@ -770,6 +901,242 @@ impl InboxPage {
             });
     }
 
+    /// The Copilot side panel: everything the local engine can say about
+    /// this conversation, zero configuration required. LM Studio passes
+    /// are offered on top when a provider is configured.
+    fn copilot_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, detail: &ConversationDetail) {
+        design::card_titled(
+            ui,
+            "Copilot",
+            Some("local · no configuration needed"),
+            |ui| {
+                if let Some(err) = &self.copilot_error {
+                    design::error_text(ui, &format!("copilot: {err}"));
+                    return;
+                }
+                let Some(report) = &self.copilot else {
+                    design::hint_text(ui, "Analyzing the conversation…");
+                    return;
+                };
+                let a = &report.analysis;
+
+                // Signal chips.
+                ui.horizontal(|ui| {
+                    design::badge(ui, &a.intent, design::BadgeTone::Info);
+                    let urgency_tone = match a.urgency.as_str() {
+                        "high" => design::BadgeTone::Destructive,
+                        "medium" => design::BadgeTone::Warning,
+                        _ => design::BadgeTone::Neutral,
+                    };
+                    design::badge(ui, &format!("urgency: {}", a.urgency), urgency_tone);
+                    let sentiment_tone = match a.sentiment.as_str() {
+                        "negative" => design::BadgeTone::Warning,
+                        "positive" => design::BadgeTone::Success,
+                        _ => design::BadgeTone::Neutral,
+                    };
+                    design::badge(ui, &format!("sentiment: {}", a.sentiment), sentiment_tone);
+                    if a.escalation {
+                        design::badge(ui, "escalation risk", design::BadgeTone::Destructive);
+                    }
+                });
+                ui.add_space(6.0);
+
+                // Summary.
+                if !a.summary.is_empty() {
+                    design::field_label(ui, "What the customer needs");
+                    for line in &a.summary {
+                        ui.label(
+                            egui::RichText::new(format!("• {line}"))
+                                .small()
+                                .color(design::tokens(ui).foreground),
+                        );
+                    }
+                    ui.add_space(4.0);
+                }
+
+                // Open questions.
+                if !a.questions.is_empty() {
+                    design::field_label(ui, "Open questions");
+                    for q in &a.questions {
+                        ui.label(
+                            egui::RichText::new(format!("? {q}"))
+                                .small()
+                                .color(design::tokens(ui).muted_foreground),
+                        );
+                    }
+                    ui.add_space(4.0);
+                }
+
+                // Customer history.
+                design::hint_text(
+                    ui,
+                    &format!(
+                        "History: {} conversation(s) on file{}",
+                        report.history.previous_conversations,
+                        report
+                            .history
+                            .last_contact
+                            .as_deref()
+                            .map(|t| format!(" · last contact {t}"))
+                            .unwrap_or_default()
+                    ),
+                );
+                ui.add_space(6.0);
+
+                // Similar past issues ("have we seen this before?").
+                if report.similar.is_empty() {
+                    design::hint_text(ui, "No similar past conversations found yet.");
+                } else {
+                    design::field_label(ui, "Similar past issues");
+                    for s in report.similar.iter().take(3) {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!("#{} {}", s.number, s.subject))
+                                    .small()
+                                    .strong()
+                                    .color(design::tokens(ui).foreground),
+                            );
+                            design::badge(
+                                ui,
+                                &format!("{}%", (s.score * 100.0) as u32),
+                                design::BadgeTone::Info,
+                            );
+                        });
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "resolved with: {}",
+                                truncate_chars(&s.resolution, 160)
+                            ))
+                            .small()
+                            .color(design::tokens(ui).muted_foreground),
+                        );
+                        if !s.why.is_empty() {
+                            ui.label(
+                                egui::RichText::new(format!("why: {}", s.why.join(", ")))
+                                    .small()
+                                    .weak(),
+                            );
+                        }
+                        ui.add_space(3.0);
+                    }
+                    ui.add_space(4.0);
+                }
+
+                // Related Help Center / knowledge articles.
+                if !report.articles.is_empty() {
+                    design::field_label(ui, "Relevant help articles");
+                    for art in report.articles.iter().take(3) {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "• {} — {}",
+                                art.name,
+                                truncate_chars(&art.snippet, 120)
+                            ))
+                            .small()
+                            .color(design::tokens(ui).muted_foreground),
+                        );
+                    }
+                    ui.add_space(6.0);
+                }
+
+                // Suggested reply (evidence-grounded, editable in composer).
+                design::field_label(ui, "Suggested reply");
+                ui.push_id("copilot-suggested", |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("copilot-suggested-scroll")
+                        .max_height(160.0)
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(&report.suggested_reply)
+                                    .small()
+                                    .color(design::tokens(ui).foreground),
+                            );
+                        });
+                });
+                ui.horizontal(|ui| {
+                if design::button_with_icon(
+                    ui,
+                    Icon::Send,
+                    "Insert into reply",
+                    ButtonVariant::Primary,
+                )
+                .on_hover_text("put the draft in the composer for editing")
+                .clicked()
+                {
+                    self.composer_mode = ComposerMode::Reply;
+                    self.composer_body = report.suggested_reply.clone();
+                }
+                let (gen_ok, has_draft) = db.with_read(|conn| {
+                    (
+                        spp_core::ai_local::generative_backend_available(conn),
+                        spp_core::ai_local::latest_ai_draft(conn, detail.id).is_some(),
+                    )
+                });
+                if gen_ok {
+                    if design::button(ui, "Draft with LM Studio", ButtonVariant::Outline)
+                        .on_hover_text("generative draft grounded in the same evidence")
+                        .clicked()
+                    {
+                        db.with_write(|conn| {
+                            let _ = spp_core::jobs::enqueue_on(
+                                conn,
+                                "ai",
+                                "generate_draft",
+                                &json!({ "conversationId": detail.id }).to_string(),
+                                3,
+                                2,
+                            );
+                        });
+                        self.status_message =
+                            Some("LM Studio draft generation queued…".into());
+                        self.status_is_error = false;
+                    }
+                } else {
+                    ui.label(
+                        egui::RichText::new(
+                            "Tip: install LM Studio and set a chat model in Settings for generative drafts.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+                if has_draft {
+                    ui.label(
+                        egui::RichText::new("an LM Studio draft exists — sent to composer")
+                            .small()
+                            .weak(),
+                    );
+                }
+            });
+                // Surface the latest LM Studio draft (if any) below the local one.
+                if let Some((draft, model)) =
+                    db.with_read(|conn| spp_core::ai_local::latest_ai_draft(conn, detail.id))
+                {
+                    ui.add_space(4.0);
+                    design::field_label(ui, &format!("LM Studio draft ({model})"));
+                    ui.push_id("copilot-lm-draft", |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("copilot-lm-draft-scroll")
+                            .max_height(140.0)
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(&draft)
+                                        .small()
+                                        .color(design::tokens(ui).foreground),
+                                );
+                            });
+                    });
+                    if design::button(ui, "Insert LM Studio draft", ButtonVariant::Secondary)
+                        .clicked()
+                    {
+                        self.composer_mode = ComposerMode::Reply;
+                        self.composer_body = draft.clone();
+                    }
+                }
+            },
+        );
+    }
+
     fn detail_body_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -778,7 +1145,7 @@ impl InboxPage {
         detail: ConversationDetail,
     ) {
         let t = design::tokens(ui);
-        // Subject + status badge.
+        // Subject + status badge + per-conversation actions.
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(format!(
@@ -792,6 +1159,39 @@ impl InboxPage {
             );
             let (tone, label) = design::status_tone(&detail.status);
             design::badge(ui, label, tone);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if design::icon_button(
+                    ui,
+                    Icon::Sparkles,
+                    ButtonVariant::Ghost,
+                    "Copilot: local summary, similar past issues, suggested reply",
+                )
+                .clicked()
+                {
+                    self.copilot_open = !self.copilot_open;
+                    self.copilot = None;
+                    self.copilot_error = None;
+                    self.reload_detail(db);
+                }
+                if design::icon_button(
+                    ui,
+                    Icon::Refresh,
+                    ButtonVariant::Ghost,
+                    "refresh this conversation from Help Scout",
+                )
+                .clicked()
+                {
+                    db.with_write(|conn| {
+                        let _ = spp_core::jobs::enqueue(
+                            conn,
+                            "sync_conversation",
+                            &json!({ "remoteId": detail.remote_id }).to_string(),
+                        );
+                    });
+                    self.status_message = Some("Refreshing from Help Scout…".into());
+                    self.status_is_error = false;
+                }
+            });
         });
         design::hint_text(
             ui,
@@ -805,13 +1205,14 @@ impl InboxPage {
         );
         ui.add_space(8.0);
 
-        // Action bar: status, assignee (local change + queued remote job).
+        // Action bar: status, assignee — applied locally for instant
+        // feedback AND dispatched to Help Scout by the outbound worker.
         design::card(ui, |ui| {
             ui.horizontal(|ui| {
                 design::field_label(ui, "status:");
                 for status in ["active", "pending", "closed", "spam"] {
                     if design::chip(ui, detail.status == status, status)
-                        .on_hover_text("local change + queued remote job")
+                        .on_hover_text("applied locally and sent to Help Scout")
                         .clicked()
                     {
                         self.change_status(db, bus, status);
@@ -838,11 +1239,33 @@ impl InboxPage {
                     self.assign(db, bus, self.assign_pick);
                 }
             });
+            // Honest outcome lines: the local action result, then the
+            // real delivery state from the outbound queue (sending →
+            // delivered / failed) — never a green "queued" that goes
+            // nowhere (the 1.2.0 lie).
             if let Some(msg) = &self.status_message {
-                design::success_text(ui, msg);
+                if self.status_is_error {
+                    design::error_text(ui, msg);
+                } else {
+                    design::success_text(ui, msg);
+                }
+            }
+            if let Some((note, is_error)) = &self.outbound_note {
+                if *is_error {
+                    design::error_text(ui, note);
+                } else {
+                    design::hint_text(ui, note);
+                }
             }
         });
         ui.add_space(8.0);
+
+        // Copilot side panel (zero-config local intelligence; LM Studio
+        // optional on top).
+        if self.copilot_open {
+            self.copilot_ui(ui, db, &detail);
+            ui.add_space(8.0);
+        }
 
         // Thread timeline.
         design::card_titled(ui, "Thread", None, |ui| {
@@ -1006,6 +1429,15 @@ impl Default for InboxPage {
     }
 }
 
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max).collect();
+        format!("{cut}…")
+    }
+}
+
 /// Compact an ISO timestamp (`2026-10-19T22:26:10.207Z`) to
 /// `2026-10-19 22:26` for the narrow list rows.
 fn compact_time(iso: &str) -> String {
@@ -1158,6 +1590,9 @@ pub fn submit_reply(
     let key = reply_key(detail.remote_id, false, body);
     let result: Result<i64, String> = db.with_write(|conn| {
         guard_eval_mode(conn)?;
+        if !provider_connected(conn) {
+            return Err(NOT_CONNECTED.to_string());
+        }
         let existing: Option<String> = conn
             .query_row(
                 "SELECT status FROM outbound_jobs WHERE idempotency_key = ?1",
@@ -1201,9 +1636,11 @@ pub fn submit_reply(
         Ok(job_id)
     });
     match result {
-        Ok(job_id) => {
+        Ok(_job_id) => {
             emit_updated(bus, detail.id, detail.number);
-            ActionOutcome::Success(format!("Reply queued as job #{job_id}."))
+            ActionOutcome::Success(
+                "Reply accepted — delivering to Help Scout (watch the status line).".into(),
+            )
         }
         Err(reason) => ActionOutcome::Rejected(reason),
     }
@@ -1219,6 +1656,9 @@ pub fn submit_note(
 ) -> ActionOutcome {
     let result: Result<i64, String> = db.with_write(|conn| {
         guard_eval_mode(conn)?;
+        if !provider_connected(conn) {
+            return Err(NOT_CONNECTED.to_string());
+        }
         let thread_id =
             insert_local_note(conn, detail.id, body, None).map_err(|e| e.to_string())?;
         // Mention notifications (same records the sweep creates for synced
@@ -1274,9 +1714,11 @@ pub fn submit_note(
         Ok(job_id)
     });
     match result {
-        Ok(job_id) => {
+        Ok(_job_id) => {
             emit_updated(bus, detail.id, detail.number);
-            ActionOutcome::Success(format!("Internal note added (job #{job_id} queued)."))
+            ActionOutcome::Success(
+                "Internal note added — posting to Help Scout (watch the status line).".into(),
+            )
         }
         Err(reason) => ActionOutcome::Rejected(reason),
     }
@@ -1294,6 +1736,9 @@ fn mutate(
 ) -> ActionOutcome {
     let result: Result<OperationResult, String> = db.with_write(|conn| {
         guard_eval_mode(conn)?;
+        if !provider_connected(conn) {
+            return Err(NOT_CONNECTED.to_string());
+        }
         let outcome = spp_core::ticket_ops::execute(conn, &op).map_err(|e| e.to_string())?;
         if matches!(outcome, OperationResult::Success { .. }) {
             queue_job(conn, job_kind, payload, Some(detail.id), None);
@@ -1303,7 +1748,7 @@ fn mutate(
     match result {
         Ok(OperationResult::Success { message }) => {
             emit_updated(bus, detail.id, detail.number);
-            ActionOutcome::Success(format!("{message} (remote job queued)"))
+            ActionOutcome::Success(format!("{message} — sending to Help Scout"))
         }
         Ok(OperationResult::Rejected { reason }) => ActionOutcome::Rejected(reason),
         Err(reason) => ActionOutcome::Rejected(reason),
@@ -1399,11 +1844,14 @@ mod tests {
             .expect("conversation 1 exists");
 
         let outcome = submit_reply(&db, &bus, &detail, "here is the fix", "", "");
-        let job_id = match outcome {
+        let message = match outcome {
             ActionOutcome::Success(m) => m,
             other => panic!("expected success, got {other:?}"),
         };
-        assert!(job_id.contains("job #"));
+        assert!(
+            message.contains("delivering to Help Scout"),
+            "honest delivery wording expected, got: {message}"
+        );
 
         let (kind, status, key, payload): (String, String, String, String) = db.with_read(|conn| {
             conn.query_row(

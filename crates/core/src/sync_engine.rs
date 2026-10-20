@@ -79,6 +79,52 @@ fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
+/// Clears the engine's `running` flag when dropped — panic-safe, unlike
+/// the manual trailing store it replaces. A panic between the
+/// `compare_exchange` and the end of the run used to leave
+/// `running == true` forever, after which every trigger answered
+/// "A sync is already running" and the shell showed a phantom sync.
+struct RunningGuard<'a>(&'a AtomicBool);
+
+impl Drop for RunningGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Boot recovery for a state machine stranded mid-flight: if the app
+/// died during an initial/backfill sync, `sync_state` stays
+/// `INITIALIZING`/`BACKFILLING` forever and the auto-sync timer skips
+/// itself for eternity (workers.rs reads the state before every tick).
+/// Recovery rule: any finished run on record means the account has data
+/// → `CATCHING_UP` (incremental); otherwise → `NEW` (initial again).
+pub fn recover_interrupted_state(conn: &Connection) -> bool {
+    let state = get_state(conn);
+    if state != "INITIALIZING" && state != "BACKFILLING" {
+        return false;
+    }
+    let has_runs: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sync_runs WHERE state IN ('LIVE','ERROR','CATCHING_UP'))",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    let recovered = if has_runs { "CATCHING_UP" } else { "NEW" };
+    set_state(conn, recovered);
+    let _ = crate::audit::log_event(
+        conn,
+        "warn",
+        "sync",
+        &format!(
+            "Recovered interrupted sync state ({state} -> {recovered}) after an unclean shutdown"
+        ),
+        None,
+        None,
+    );
+    true
+}
+
 pub fn get_state(conn: &Connection) -> String {
     conn.query_row(
         "SELECT value FROM application_settings WHERE key = 'sync_state'",
@@ -856,6 +902,194 @@ impl SyncEngine {
         }
     }
 
+    /// Mid-run progress heartbeat. Before 1.3.0 the engine was silent
+    /// until the very end of a run: pages cached their snapshots, so a
+    /// multi-hour initial sync looked like a dead "in progress" list
+    /// even while rows landed. Every event triggers a repaint through
+    /// the bridge, so Sync Health now shows live X-of-Y progress and
+    /// the inbox streams conversations in as they ingest.
+    fn emit_progress(
+        &self,
+        stage: &str,
+        done: u32,
+        total: u32,
+        processed: i64,
+        stage_records: u32,
+    ) {
+        if let Some(bus) = &self.bus {
+            use crate::events::ServerEvent;
+            bus.emit(&ServerEvent::sync_progress(
+                stage,
+                done,
+                total,
+                processed.max(0) as u64,
+                stage_records,
+            ));
+        }
+    }
+
+    fn emit_conversation_updated_local(&self, local_id: i64, subject: Option<&str>) {
+        if let Some(bus) = &self.bus {
+            use crate::events::ServerEvent;
+            let conn = self.lock();
+            let row: Option<(i64, Option<i64>)> = conn
+                .query_row(
+                    "SELECT number, mailbox_local_id FROM conversations WHERE id = ?1",
+                    params![local_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .ok();
+            if let Some((number, mailbox_id)) = row {
+                bus.emit(&ServerEvent::conversation_updated(
+                    Some(local_id),
+                    Some(number),
+                    mailbox_id,
+                    subject.map(str::to_string),
+                    "sync",
+                ));
+            }
+        }
+    }
+
+    /// Refresh ONLY the Help Center mirror (collections + articles) —
+    /// the Knowledge page's "Sync Help Center now" button runs this
+    /// instead of a full engine pass. Emits `SyncCompleted("docs", ...)`
+    /// so the page reloads itself when the articles land.
+    pub async fn sync_docs_only(&self) -> Result<Vec<ResourceSyncResult>> {
+        if self
+            .running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(Error::Other("A sync is already running".into()));
+        }
+        let _running = RunningGuard(&self.running);
+        let run_id = {
+            let conn = self.lock();
+            start_run(&conn, "docs")?
+        };
+        let mut results = Vec::new();
+        for resource in ["docs_collections", "docs_articles"] {
+            let r = self.run_resource(resource, false).await;
+            let r = match r {
+                Ok(r) => r,
+                Err(e) => {
+                    let conn = self.lock();
+                    record_failure(&conn, resource, &e.to_string(), 1);
+                    ResourceSyncResult {
+                        resource: resource.to_string(),
+                        processed: 0,
+                        failed: 1,
+                        error: Some(e.to_string()),
+                    }
+                }
+            };
+            match &r {
+                ok if ok.error.is_none() => {
+                    let conn = self.lock();
+                    record_success(&conn, resource, r.processed);
+                }
+                other => {
+                    let conn = self.lock();
+                    record_failure(
+                        &conn,
+                        resource,
+                        other.error.as_deref().unwrap_or(""),
+                        other.failed,
+                    );
+                }
+            }
+            let processed = r.processed;
+            results.push(r);
+            self.emit_progress(
+                resource,
+                results.len() as u32,
+                2,
+                processed,
+                processed as u32,
+            );
+        }
+        let processed: i64 = results.iter().map(|r| r.processed).sum();
+        let failed = results.iter().filter(|r| r.error.is_some()).count() as i64;
+        {
+            let conn = self.lock();
+            let _ = update_run(
+                &conn,
+                run_id,
+                RunUpdate {
+                    state: Some(if failed == 0 { "LIVE" } else { "ERROR" }),
+                    resources_done: None,
+                    resources_total: None,
+                    records_processed: Some(processed),
+                    errors: Some(failed),
+                    detail: None,
+                    finished: true,
+                },
+            );
+            let _ = crate::audit::log_event(
+                &conn,
+                if failed == 0 { "info" } else { "warn" },
+                "docs",
+                &format!(
+                    "Help Center sync finished: {processed} articles/collections, {failed} failed"
+                ),
+                None,
+                None,
+            );
+        }
+        self.emit_sync_completed("docs", processed, failed);
+        Ok(results)
+    }
+
+    /// Backfill threads for conversations whose thread list is empty
+    /// locally (crashed run, hard rate limit mid-walk). Bounded per pass;
+    /// the next pass continues where this one stopped.
+    async fn sync_missing_threads(&self) -> Result<ResourceSyncResult> {
+        let resource = "threads".to_string();
+        let candidates: Vec<(i64, i64)> = {
+            let conn = self.lock();
+            let mut stmt = conn.prepare(
+                "SELECT id, remote_id FROM conversations
+                  WHERE deleted_at IS NULL AND merged_into_conversation_id IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM conversation_threads t
+                                     WHERE t.conversation_id = conversations.id)
+                  ORDER BY id ASC LIMIT 200",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let mut processed = 0i64;
+        for (local, remote) in candidates {
+            if self.cancelled() {
+                break;
+            }
+            match self.provider.get_conversation(remote).await {
+                Ok(Some(conv)) => {
+                    self.ingest_conversation(&conv, &[], true).await?;
+                    processed += 1;
+                    self.emit_conversation_updated_local(local, conv.subject.as_deref());
+                }
+                Ok(None) => {
+                    let conn = self.lock();
+                    soft_delete_by_remote_id(&conn, remote)?;
+                }
+                Err(e) => {
+                    // A single unreachable conversation must not fail the
+                    // pass; the failure is visible in diagnostics.
+                    let conn = self.lock();
+                    record_failure(&conn, &resource, &e.to_string(), 1);
+                }
+            }
+        }
+        self.emit_progress(&resource, 1, 1, processed, processed as u32);
+        Ok(ResourceSyncResult {
+            resource,
+            processed,
+            failed: 0,
+            error: None,
+        })
+    }
+
     pub async fn initial_sync(&self) -> Result<Vec<ResourceSyncResult>> {
         if self
             .running
@@ -864,6 +1098,7 @@ impl SyncEngine {
         {
             return Err(Error::Other("A sync is already running".into()));
         }
+        let _running = RunningGuard(&self.running);
         self.cancel_requested.store(false, Ordering::SeqCst);
         let run_id = {
             let conn = self.lock();
@@ -928,6 +1163,8 @@ impl SyncEngine {
                 let processed: i64 = results.iter().map(|x| x.processed).sum::<i64>() + r.processed;
                 let errors = results.iter().filter(|x| x.error.is_some()).count() as i64
                     + i64::from(r.error.is_some());
+                let stage_records = r.processed.max(0) as u32;
+                let stage = resource.to_string();
                 results.push(r);
                 {
                     let conn = self.lock();
@@ -945,6 +1182,16 @@ impl SyncEngine {
                         },
                     );
                 }
+                // Live progress: one event per resource so Sync Health and
+                // the inbox track the run instead of freezing on a stale
+                // snapshot until the terminal event.
+                self.emit_progress(
+                    &stage,
+                    results.len() as u32,
+                    INITIAL_SYNC_ORDER.len() as u32,
+                    processed,
+                    stage_records,
+                );
             }
             let failed = results.iter().filter(|r| r.error.is_some()).count() as i64;
             {
@@ -1009,7 +1256,6 @@ impl SyncEngine {
             );
             let _ = crate::jobs::log_error(&conn, "sync", &format!("Initial sync failed: {e}"));
         }
-        self.running.store(false, Ordering::SeqCst);
         Ok(results)
     }
 
@@ -1021,6 +1267,7 @@ impl SyncEngine {
         {
             return Err(Error::Other("A sync is already running".into()));
         }
+        let _running = RunningGuard(&self.running);
         self.cancel_requested.store(false, Ordering::SeqCst);
         let run_id = {
             let conn = self.lock();
@@ -1031,12 +1278,22 @@ impl SyncEngine {
         };
         let mut results: Vec<ResourceSyncResult> = Vec::new();
         let outcome: Result<()> = async {
+            let total = INCREMENTAL_REFERENCE_ORDER.len() as u32 + 2;
             for resource in INCREMENTAL_REFERENCE_ORDER {
                 if self.cancelled() {
                     break;
                 }
                 let r = self.sync_resource(resource, false).await;
+                let stage_records = r.as_ref().map_or(0, |x| x.processed).max(0) as u32;
                 let r = self.finish_resource(resource, r, &mut results);
+                let processed: i64 = results.iter().map(|x| x.processed).sum();
+                self.emit_progress(
+                    resource,
+                    results.len() as u32,
+                    total,
+                    processed,
+                    stage_records,
+                );
                 let _ = r;
             }
             {
@@ -1045,7 +1302,15 @@ impl SyncEngine {
                     get_incremental_since(&conn, "customers", SYNC_OVERLAP_MINUTES)
                 };
                 let r = self.sync_customers(since.as_deref(), false).await;
+                let processed = r.as_ref().map_or(0, |x| x.processed).max(0) as u32;
                 let _ = self.finish_resource("customers", r, &mut results);
+                self.emit_progress(
+                    "customers",
+                    results.len() as u32,
+                    total,
+                    results.iter().map(|x| x.processed).sum::<i64>(),
+                    processed as u32,
+                );
             }
             {
                 let since = {
@@ -1053,7 +1318,15 @@ impl SyncEngine {
                     get_incremental_since(&conn, "conversations", SYNC_OVERLAP_MINUTES)
                 };
                 let r = self.sync_conversations(since.as_deref(), false).await;
+                let processed = r.as_ref().map_or(0, |x| x.processed).max(0) as u32;
                 let _ = self.finish_resource("conversations", r, &mut results);
+                self.emit_progress(
+                    "conversations",
+                    results.len() as u32,
+                    total,
+                    results.iter().map(|x| x.processed).sum::<i64>(),
+                    processed as u32,
+                );
             }
             let failed = results.iter().filter(|r| r.error.is_some()).count() as i64;
             {
@@ -1108,7 +1381,6 @@ impl SyncEngine {
             );
             let _ = crate::jobs::log_error(&conn, "sync", &format!("Incremental sync failed: {e}"));
         }
-        self.running.store(false, Ordering::SeqCst);
         Ok(results)
     }
 
@@ -1155,6 +1427,7 @@ impl SyncEngine {
         {
             return Err(Error::Other("A sync is already running".into()));
         }
+        let _running = RunningGuard(&self.running);
         let run_id = {
             let conn = self.lock();
             set_state(&conn, "RECONCILING");
@@ -1357,7 +1630,6 @@ impl SyncEngine {
             let _ = crate::jobs::log_error(&conn, "sync", &format!("Reconciliation failed: {e}"));
             result.failed += 1;
         }
-        self.running.store(false, Ordering::SeqCst);
         Ok(result)
     }
 
@@ -1606,7 +1878,12 @@ impl SyncEngine {
                     error: None,
                 })
             }
-            "conversations" | "threads" => self.sync_conversations(None, initial).await,
+            "conversations" => self.sync_conversations(None, initial).await,
+            // The conversations pass above already hydrates threads; this
+            // resource now only backfills rows that came back thread-less
+            // (a crashed run, a rate-limited page) instead of walking the
+            // whole account a second time.
+            "threads" => self.sync_missing_threads().await,
             "chats" => {
                 let chats = self.provider.list_beacon_chats().await?;
                 let mut processed = 0;
@@ -1866,7 +2143,44 @@ impl SyncEngine {
                 };
                 self.ingest_conversation(c, &threads, !initial).await?;
                 processed += 1;
+                // Real-time feel: each ingested conversation notifies the
+                // UI immediately, so the inbox fills while the sync runs
+                // instead of after it.
+                if let Some(bus) = &self.bus
+                    && let Some(local) = {
+                        let conn = self.lock();
+                        conversation_local_id(&conn, c.remote_id)
+                    }
+                {
+                    use crate::events::ServerEvent;
+                    let conn = self.lock();
+                    let row: Option<(i64, Option<i64>)> = conn
+                        .query_row(
+                            "SELECT number, mailbox_local_id FROM conversations WHERE id = ?1",
+                            params![local],
+                            |r| Ok((r.get(0)?, r.get(1)?)),
+                        )
+                        .ok();
+                    if let Some((number, mailbox_id)) = row {
+                        bus.emit(&ServerEvent::conversation_updated(
+                            Some(local),
+                            Some(number),
+                            mailbox_id,
+                            c.subject.clone(),
+                            "sync",
+                        ));
+                    }
+                }
             }
+            // A page-level progress heartbeat even when the page is the
+            // current stage (total unknown mid-walk: done = records).
+            self.emit_progress(
+                "conversations",
+                processed.max(0) as u32,
+                0,
+                processed,
+                page.items.len() as u32,
+            );
             let empty = page.items.is_empty();
             match page.next_cursor {
                 Some(next) => {

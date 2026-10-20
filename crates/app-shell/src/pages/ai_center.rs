@@ -632,7 +632,9 @@ impl Default for AiCenterPage {
 /// read as success, queued/pending stay neutral, failed is destructive.
 fn job_status_tone(status: &str) -> BadgeTone {
     match status {
-        "completed" | "succeeded" | "running" => BadgeTone::Success,
+        // 1.3.0: "running" is in-flight, not success — a job stuck
+        // "running" after a transport failure used to wear a green badge.
+        "completed" | "succeeded" => BadgeTone::Success,
         "failed" => BadgeTone::Destructive,
         _ => BadgeTone::Neutral,
     }

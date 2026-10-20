@@ -73,7 +73,7 @@ pub struct GeneralSettings {
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
-            sync_interval_minutes: 5,
+            sync_interval_minutes: 1,
             api_concurrency: 2,
             ai_enabled: true,
             automatic_analysis_enabled: true,
@@ -553,7 +553,7 @@ impl SettingsPage {
         // capture the pre-save value so a change can restart the timers
         // (mirrors the old PUT /api/settings stop/start behavior).
         let interval_before = db.with_read(|conn| {
-            spp_core::settings::get_i64(conn, "sync_interval_minutes", 5).unwrap_or(5)
+            spp_core::settings::get_i64(conn, "sync_interval_minutes", 1).unwrap_or(1)
         });
         let result = db.with_write(|conn| general.save(conn));
         match result {

@@ -129,7 +129,14 @@ impl OrganizationsPage {
             ui,
             "Organizations",
             Some("customer organizations, their domains, and their members"),
-            |_| {},
+            |ui| {
+                if design::button_with_icon(ui, Icon::Refresh, "Reload", ButtonVariant::Outline)
+                    .on_hover_text("re-read the local mirror (auto-refreshes on every sync)")
+                    .clicked()
+                {
+                    self.invalidate();
+                }
+            },
         );
         ui.horizontal(|ui| {
             let mut filter = self.filter_edit.clone();

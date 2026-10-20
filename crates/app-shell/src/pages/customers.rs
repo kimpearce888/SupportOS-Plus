@@ -289,7 +289,14 @@ impl CustomersPage {
                 Mode::Profile { customer_id } => self.load_profile(db, customer_id),
             }
         }
-        design::page_header(ui, "Customers", None, |_| {});
+        design::page_header(ui, "Customers", None, |ui| {
+            if design::button_with_icon(ui, Icon::Refresh, "Reload", ButtonVariant::Outline)
+                .on_hover_text("re-read the local mirror (auto-refreshes on every sync)")
+                .clicked()
+            {
+                self.invalidate();
+            }
+        });
 
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));

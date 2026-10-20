@@ -23,6 +23,12 @@ pub const HS_DOCS_API_BASE: &str = "https://docsapi.helpscout.net";
 pub const HS_AUTHORIZE_URL: &str =
     "https://secure.helpscout.net/authentication/authorizeClientApplication";
 
+/// Upper bound of full-article fetches per collection per sync pass.
+/// The Docs API v1 list endpoint returns refs without content; each
+/// article body costs one GET (Docs API budget: 2000-4000 req / 10 min
+/// per account, shared with the Help Scout admin UI).
+const DOC_ARTICLE_FETCH_CAP: usize = 500;
+
 #[derive(Debug, Clone)]
 pub struct HsApiError {
     pub status_code: u16,
@@ -555,6 +561,9 @@ pub struct RealHelpScoutProvider {
     pub limiter: Arc<HsRateLimiter>,
     pub queue: Arc<ApiQueue>,
     docs_queue: Arc<ApiQueue>,
+    /// One-shot guard so the missing-Docs-key warning is logged once
+    /// per process, not once per resource.
+    missing_docs_key_warned: std::sync::atomic::AtomicBool,
 }
 
 impl RealHelpScoutProvider {
@@ -577,6 +586,7 @@ impl RealHelpScoutProvider {
             queue,
             docs_queue,
             credentials,
+            missing_docs_key_warned: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -586,6 +596,30 @@ impl RealHelpScoutProvider {
 
     fn conn_lock(&self) -> crate::db::DbWriteGuard<'_> {
         self.db.write_guard()
+    }
+
+    /// Surface the missing-Docs-key state once per process so the
+    /// Diagnostics page and the logs explain the empty Help Center tab
+    /// instead of leaving the user guessing.
+    fn log_missing_docs_key(&self) {
+        if !self
+            .missing_docs_key_warned
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            let conn = self.conn_lock();
+            let _ = crate::audit::log_event(
+                &conn,
+                "warn",
+                "docs",
+                "Help Center sync is idle: no Docs API key configured. Add one in Settings (Help Scout Profile -> Security & Access -> Docs API).",
+                None,
+                None,
+            );
+            tracing::warn!(
+                operation = "docs",
+                "Docs API key missing - Help Center articles will not sync until one is configured"
+            );
+        }
     }
 
     async fn docs_request(&self, path: &str) -> Result<Value> {
@@ -1064,19 +1098,39 @@ impl RealHelpScoutProvider {
         }
 
         if (200..300).contains(&status) {
+            // Thread-creating endpoints answer 201 with an empty body and
+            // the new resource id in the Resource-Id header. Surface it as
+            // `resourceId` so callers do not read a phantom 0.
+            let resource_id = res
+                .headers()
+                .get("resource-id")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<i64>().ok());
             let text = res.text().await.unwrap_or_default();
             if text.is_empty() {
-                return Ok(Value::Null);
+                return Ok(match resource_id {
+                    Some(id) => json!({ "resourceId": id }),
+                    None => Value::Null,
+                });
             }
-            return serde_json::from_str::<Value>(&text).map_err(|_| {
-                HsApiError {
-                    status_code: status,
-                    message: "Invalid JSON from Help Scout".into(),
-                    friendly: "Help Scout returned an unexpected response format. The raw response was preserved for diagnostics.".into(),
-                    retryable: false,
-                }
-                .into()
-            });
+            return serde_json::from_str::<Value>(&text)
+                .map(|mut v| {
+                    if let Some(id) = resource_id
+                        && let Some(obj) = v.as_object_mut()
+                    {
+                        obj.insert("resourceId".into(), json!(id));
+                    }
+                    v
+                })
+                .map_err(|_| {
+                    HsApiError {
+                        status_code: status,
+                        message: "Invalid JSON from Help Scout".into(),
+                        friendly: "Help Scout returned an unexpected response format. The raw response was preserved for diagnostics.".into(),
+                        retryable: false,
+                    }
+                    .into()
+                });
         }
 
         let body_text = res.text().await.unwrap_or_default();
@@ -1832,72 +1886,160 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_doc_collections(&self) -> Result<Vec<HsDocCollection>> {
-        let v = self.docs_request("/v2/collections").await?;
-        Ok(v["collections"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|c| HsDocCollection {
-                        remote_id: c["id"].as_i64().unwrap_or(0),
-                        slug: c["slug"].as_str().map(|s| s.to_string()),
-                        name: c["name"].as_str().unwrap_or_default().to_string(),
-                        description: c["description"].as_str().map(|s| s.to_string()),
-                        visibility: c["visibility"].as_str().map(|s| s.to_string()),
-                        article_count: c["articleCount"].as_i64(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        // The Docs API is v1-only (docsapi.helpscout.net/v1/...); the
+        // pre-1.3.0 /v2/ paths 404'd on every request, so the KB never
+        // filled even with a valid key.
+        if self.credentials.docs_api_key.is_empty() {
+            self.log_missing_docs_key();
+            return Ok(Vec::new());
+        }
+        let mut out: Vec<HsDocCollection> = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let v = self
+                .docs_request(&format!("/v1/collections?page={page}"))
+                .await?;
+            let items = v["items"].as_array().cloned().unwrap_or_default();
+            if items.is_empty() {
+                break;
+            }
+            for c in &items {
+                out.push(HsDocCollection {
+                    remote_id: c["id"].as_i64().unwrap_or(0),
+                    slug: c["slug"].as_str().map(|s| s.to_string()),
+                    name: c["name"].as_str().unwrap_or_default().to_string(),
+                    description: c["description"].as_str().map(|s| s.to_string()),
+                    visibility: c["visibility"].as_str().map(|s| s.to_string()),
+                    article_count: c["articleCount"].as_i64(),
+                });
+            }
+            let pages = v["pages"].as_u64().unwrap_or(1) as u32;
+            if page >= pages {
+                break;
+            }
+            page += 1;
+        }
+        Ok(out)
     }
 
     async fn list_doc_categories(&self, collection_id: i64) -> Result<Vec<HsDocCategory>> {
-        let v = self
-            .docs_request(&format!("/v2/collections/{collection_id}/categories"))
-            .await?;
-        Ok(v["categories"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|c| HsDocCategory {
-                        remote_id: c["id"].as_i64().unwrap_or(0),
-                        collection_id,
-                        slug: c["slug"].as_str().map(|s| s.to_string()),
-                        name: c["name"].as_str().unwrap_or_default().to_string(),
-                        sort_order: c["order"].as_i64(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        if self.credentials.docs_api_key.is_empty() {
+            self.log_missing_docs_key();
+            return Ok(Vec::new());
+        }
+        let mut out: Vec<HsDocCategory> = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let v = self
+                .docs_request(&format!(
+                    "/v1/collections/{collection_id}/categories?page={page}"
+                ))
+                .await?;
+            let items = v["items"].as_array().cloned().unwrap_or_default();
+            if items.is_empty() {
+                break;
+            }
+            for c in &items {
+                out.push(HsDocCategory {
+                    remote_id: c["id"].as_i64().unwrap_or(0),
+                    collection_id,
+                    slug: c["slug"].as_str().map(|s| s.to_string()),
+                    name: c["name"].as_str().unwrap_or_default().to_string(),
+                    sort_order: c["order"].as_i64(),
+                });
+            }
+            let pages = v["pages"].as_u64().unwrap_or(1) as u32;
+            if page >= pages {
+                break;
+            }
+            page += 1;
+        }
+        Ok(out)
     }
 
     async fn list_doc_articles(&self, collection_id: i64) -> Result<Vec<HsDocArticle>> {
-        let v = self
-            .docs_request(&format!("/v2/collections/{collection_id}/articles"))
-            .await?;
-        Ok(v["articles"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|art| HsDocArticle {
-                        remote_id: art["id"].as_i64().unwrap_or(0),
-                        collection_id,
-                        category_id: art["categoryId"].as_i64(),
-                        number: art["number"].as_i64(),
-                        slug: art["slug"].as_str().map(|s| s.to_string()),
-                        name: art["name"].as_str().unwrap_or_default().to_string(),
-                        status: art["status"].as_str().map(|s| s.to_string()),
-                        text: art["text"].as_str().map(|s| s.to_string()),
-                        views: art["views"].as_i64(),
-                        created_at: art["createdAt"].as_str().map(|s| s.to_string()),
-                        updated_at: art["updatedAt"].as_str().map(|s| s.to_string()),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        if self.credentials.docs_api_key.is_empty() {
+            self.log_missing_docs_key();
+            return Ok(Vec::new());
+        }
+        // v1 list: {"page","pages","count","items":[refs without text]}.
+        let mut refs: Vec<(i64, Value)> = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let v = self
+                .docs_request(&format!(
+                    "/v1/collections/{collection_id}/articles?page={page}&pageSize=100&status=all"
+                ))
+                .await?;
+            let items = v["items"].as_array().cloned().unwrap_or_default();
+            if items.is_empty() {
+                break;
+            }
+            for art in &items {
+                let id = art["id"].as_i64().unwrap_or(0);
+                if id > 0 {
+                    refs.push((id, art.clone()));
+                }
+            }
+            let pages = v["pages"].as_u64().unwrap_or(1) as u32;
+            if page >= pages {
+                break;
+            }
+            page += 1;
+        }
+        if refs.len() > DOC_ARTICLE_FETCH_CAP {
+            tracing::warn!(
+                count = refs.len(),
+                cap = DOC_ARTICLE_FETCH_CAP,
+                operation = "docs_articles",
+                "Article count exceeds the per-pass fetch cap; the remainder syncs next pass"
+            );
+            refs.truncate(DOC_ARTICLE_FETCH_CAP);
+        }
+        // Each ref needs its own GET for the article text (no bulk endpoint).
+        let mut out: Vec<HsDocArticle> = Vec::new();
+        for (id, r) in &refs {
+            let full = match self.docs_request(&format!("/v1/articles/{id}")).await {
+                Ok(v) => v["article"].clone(),
+                Err(e) => {
+                    // One unreachable article must not sink the collection.
+                    tracing::warn!(article = id, error = %e, "Docs article fetch failed");
+                    r.clone()
+                }
+            };
+            out.push(HsDocArticle {
+                remote_id: *id,
+                collection_id,
+                category_id: full["categories"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|c| c["id"].as_i64()),
+                number: full["number"].as_i64().or_else(|| r["number"].as_i64()),
+                slug: full["slug"].as_str().map(|s| s.to_string()),
+                name: full["name"]
+                    .as_str()
+                    .or_else(|| r["name"].as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                status: full["status"].as_str().map(|s| s.to_string()),
+                text: full["text"].as_str().map(|s| s.to_string()),
+                views: full["viewCount"]
+                    .as_i64()
+                    .or_else(|| r["viewCount"].as_i64()),
+                created_at: full["createdDate"].as_str().map(|s| s.to_string()),
+                updated_at: full["modifiedDate"].as_str().map(|s| s.to_string()),
+            });
+        }
+        Ok(out)
     }
 
     async fn create_reply_thread(&self, input: CreateThreadInput) -> Result<ThreadCreated> {
         let mut body = json!({ "text": input.text, "draft": input.draft });
+        // The Mailbox API requires the customer being replied to on the
+        // POST /reply body — a request without it is a guaranteed 400.
+        if let Some(customer_id) = input.customer_id {
+            body["customer"] = json!({ "id": customer_id });
+        }
         if !input.cc.is_empty() {
             body["cc"] = json!(input.cc);
         }
@@ -1918,8 +2060,13 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 PRIORITY_USER_SEND,
             )
             .await?;
+        // 201 responses carry the new thread id in the Resource-Id header
+        // (the body is empty); request_inner injects it as `resourceId`.
         Ok(ThreadCreated {
-            thread_id: res["id"].as_i64().unwrap_or_default(),
+            thread_id: res["resourceId"]
+                .as_i64()
+                .or_else(|| res["id"].as_i64())
+                .unwrap_or_default(),
             conversation_id: input.conversation_id,
         })
     }
@@ -1934,7 +2081,10 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             )
             .await?;
         Ok(ThreadCreated {
-            thread_id: res["id"].as_i64().unwrap_or_default(),
+            thread_id: res["resourceId"]
+                .as_i64()
+                .or_else(|| res["id"].as_i64())
+                .unwrap_or_default(),
             conversation_id: input.conversation_id,
         })
     }

@@ -17,7 +17,7 @@ use rusqlite::Connection;
 use spp_core::db::DbHandle;
 
 use crate::chart;
-use crate::design::{self, BadgeTone};
+use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
 /// Date ranges offered by the web page.
@@ -519,7 +519,14 @@ impl DashboardPage {
             ui,
             "Dashboard",
             Some("Local metrics · sources labeled Help Scout / local / AI-derived everywhere"),
-            |_| {},
+            |ui| {
+                if design::button_with_icon(ui, Icon::Refresh, "Reload", ButtonVariant::Outline)
+                    .on_hover_text("re-read the local mirror (auto-refreshes on every sync)")
+                    .clicked()
+                {
+                    self.invalidate();
+                }
+            },
         );
 
         // Scope filters.

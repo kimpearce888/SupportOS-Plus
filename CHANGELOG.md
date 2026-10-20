@@ -4,6 +4,112 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] — 2026-10-20
+
+The "it actually does things" release. Replies, notes, status changes
+and assignments now really reach Help Scout; the inbox streams
+conversations in while the sync runs instead of freezing; every page
+has working refresh; a zero-configuration Copilot panel reads the
+conversation, finds the same issue in history and drafts an answer;
+and the Help Center sync talks to the real Docs API (v1) instead of a
+version that does not exist.
+
+### Fixed
+
+- **Replies, notes, status changes and assignments are now actually
+  delivered to Help Scout.** Since the desktop port the composer was
+  enqueue-only: rows landed in an `outbound_jobs` table that nothing
+  ever dispatched, while the UI reported green success ("Reply queued
+  as job #N"). A real dispatcher now claims each job on the 2-second
+  worker tick, performs the provider call (with the `customer` object
+  the Mailbox API requires, which was missing), records the attempt,
+  retries with exponential backoff, pulls the remote truth back into
+  the mirror, and reports `OutboundJobFinished` — success toast, or a
+  red error toast plus a Diagnostics entry with the exact API error.
+  Stuck "sending" rows recover at boot; migration m051 gives existing
+  rows a 3-attempt budget.
+- **Honest outcomes everywhere.** Rejections (eval mode, duplicates,
+  "not connected") render in red instead of green success text, keep
+  the typed composer text instead of wiping it, and the status line
+  now shows the real delivery state per conversation: "sending to Help
+  Scout…" → "delivered ✓" / "failed: <exact error>". Sending with no
+  credentials is rejected up front with instructions instead of
+  queuing into a provider that cannot deliver.
+- **The open conversation survives sync events.** Every background
+  event used to wipe the detail pane back to "Select a conversation"
+  a frame after you sent something. Selection is preserved and the
+  detail reloads.
+- **"Sync in progress" no longer means a frozen screen.** The engine
+  now emits per-resource and per-page `SyncProgress` events: Sync
+  Health shows live "resource 3/22 · 1,204 records" and the inbox
+  streams conversations in as they ingest. A periodic repaint
+  heartbeat keeps status lines moving even without mouse input.
+- **A crash can no longer strand the sync state machine.** Boot
+  recovery resets a `sync_state` stranded in INITIALIZING/BACKFILLING
+  by an unclean shutdown (which used to make the auto-sync timer skip
+  itself forever), and the engine's running flag is now panic-safe
+  (a panic mid-run used to answer every later trigger with "A sync is
+  already running").
+- **The initial sync no longer walks every conversation twice.** The
+  "threads" resource previously repeated the full conversation walk
+  (including thread fetches); it now only backfills conversations that
+  came back thread-less. On a large account this halves the first
+  sync.
+- **Faster polling: the default sync interval drops from 5 minutes to
+  1 minute.** Help Scout webhooks cannot reach a localhost desktop
+  app (they need a public URL), so "real time" here means fast
+  polling; existing installs on the old 5-minute default move to 1
+  minute via migration m051.
+- **Help Center sync now talks to the real Docs API.** The provider
+  called `/v2/collections` — the Docs API only exists as v1, so every
+  request 404'd and the KB never filled even with a valid key. The
+  client now uses the v1 endpoints with the correct `{"items"}`
+  envelopes, paginates collections/categories/articles, and fetches
+  each article's full content (`GET /v1/articles/{id}` — v1 lists
+  return refs without text). A missing Docs API key is surfaced as a
+  banner with setup instructions instead of a silent zero.
+- **AI jobs no longer look alive when they are dead.** A transport
+  failure (LM Studio not running, wrong model name) used to leave
+  `ai_runs` rows stuck at "running" — displayed with a green success
+  badge. Runs are now marked failed, and "running" renders neutral.
+
+### Added
+
+- **Refresh everywhere.** "Sync now" on the Inbox header (a real
+  incremental pull), per-conversation "refresh from Help Scout",
+  "Sync Help Center now" on Knowledge, "Reload" on Dashboard,
+  Reports, Customers and Organizations — all backed by the shared
+  sync-action helper rather than re-reading a stale cache.
+- **Reports auto-refresh.** The Reports page was missing from every
+  invalidation map: after the first load it stayed frozen until a
+  restart. It now refreshes on every sync/conversation event and has a
+  Reload button.
+- **Copilot panel in the conversation view — zero configuration.**
+  Local, offline, deterministic: extractive summary of what the
+  customer needs, open questions, intent/urgency/sentiment/escalation
+  chips, the customer's history, **similar past issues** with
+  resolution excerpts and match reasons, relevant Help Center
+  articles, and an **evidence-grounded suggested reply** (built from
+  the best past resolution and help articles — every line cites its
+  source, nothing is hallucinated) that inserts into the composer with
+  one click. With LM Studio configured, "Draft with LM Studio" runs
+  the generative pass on top.
+- **Live sync progress on Sync Health** (per-resource stage, running
+  engine indicator) and a clearing action banner — the "started in
+  background" message no longer lingers forever.
+- **Outbound deliveries card on Diagnostics:** delivered / queued /
+  sending / failed counts plus the exact error text of recent failed
+  deliveries.
+
+### Changed
+
+- Migration m051 (schema v42): outbound retries get a budget, stuck
+  "sending" rows re-queue, the 5-minute default poll moves to 1
+  minute.
+- The reply request now includes the `customer` object required by
+  `POST /v2/conversations/{id}/reply`, and thread ids are read from
+  the `Resource-Id` header (the 201 response body is empty).
+
 ## [1.2.0] — 2026-10-20
 
 The "nothing fake" release. The demo dataset and its boot path are

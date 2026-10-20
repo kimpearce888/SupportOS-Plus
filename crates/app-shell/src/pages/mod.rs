@@ -156,10 +156,14 @@ pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
                 PageKey::Inbox,
                 PageKey::Dashboard,
                 PageKey::Operations,
+                PageKey::Reports,
                 PageKey::SyncHealth,
                 PageKey::Notifications,
             ];
-            if e.kind == "incremental" && e.processed > 0 {
+            // Reports live on the synced mirror, so every finished sync
+            // refreshes them (they used to stay frozen on first load —
+            // PageKey::Reports was missing from every branch).
+            if (e.kind == "incremental" || e.kind == "docs") && e.processed > 0 {
                 pages.push(PageKey::Knowledge);
             }
             pages
@@ -168,8 +172,16 @@ pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
             PageKey::Inbox,
             PageKey::Dashboard,
             PageKey::Operations,
+            PageKey::Reports,
             PageKey::Notifications,
         ],
+        ServerEvent::SyncProgress(_) => vec![PageKey::SyncHealth],
+        ServerEvent::OutboundJobFinished(_) => {
+            // A reply/note/status change reached its terminal state: the
+            // inbox re-reads the mirror (the dispatcher pulled the remote
+            // truth back) and Diagnostics picks up the audit trail.
+            vec![PageKey::Inbox, PageKey::Diagnostics]
+        }
         ServerEvent::NotificationReceived(_) => {
             vec![PageKey::Inbox, PageKey::Notifications, PageKey::Operations]
         }
