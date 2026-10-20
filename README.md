@@ -67,6 +67,25 @@ migrations applied) under `~/.local/share/supportos-plus/` (override with
 Scout webhooks and the OAuth callback on `127.0.0.1`, and the shell boots into
 demo mode unless Help Scout credentials are configured. No setup steps.
 
+**Connecting your Help Scout account** (1.1.3): open
+*Settings → Help Scout* and fill in the credentials form — client ID, client
+secret, webhook secret (and, optionally, the Docs API key) from your Help
+Scout custom app. The values are stored encrypted in the local secrets
+envelope; saving a configured client ID/secret pair turns demo mode off
+automatically, and the next launch boots the real provider, after which the
+"connect via OAuth" button completes the handshake. Environment variables
+(`HELPSCOUT_CLIENT_ID`, `HELPSCOUT_CLIENT_SECRET`, `HELPSCOUT_WEBHOOK_SECRET`,
+`HELPSCOUT_DOCS_API_KEY`) still work and override the stored values per
+field — useful for CI and headless setups.
+
+**Removing demo data** (1.1.3): *Settings → Help Scout → Demo data* deletes
+every demo-seeded or synced record (conversations, customers, threads,
+ratings, knowledge base, incidents, reports, AI records) and resets sync
+state and the vector index in one click — after a two-step confirmation.
+Credentials, application settings, business hours, automation rules, saved
+views/replies and custom object types are kept. If demo mode is still on,
+the next sync repopulates demo data (that is the "fresh demo" path).
+
 **Upgrading from 0.2.x:** the first 1.0.0 launch moves your existing data from
 the old `~/.local/share/supportos-plusplus/` directory to the new location
 (and renames the database inside it) automatically — one atomic directory

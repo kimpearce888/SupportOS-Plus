@@ -203,6 +203,35 @@ impl SqliteVecStore {
         Self::open(&store_dir(data_dir).join("vectors.db"))
     }
 
+    /// Purge the vector store of a data directory: drop every vec0
+    /// collection table and clear the payload/metadata bookkeeping
+    /// (the demo-data purge, 1.1.3). Safe on a missing store (creates
+    /// an empty one) and safe while a worker holds the store open —
+    /// both connections see the same WAL file, and the pipeline
+    /// re-creates collections and re-embeds chunks on demand.
+    ///
+    /// Returns how many entries were removed (collection tables plus
+    /// payload plus metadata rows).
+    pub fn purge_all(data_dir: &Path) -> Result<u64> {
+        let conn = open_store_db(&store_dir(data_dir).join("vectors.db"))?;
+        let collections: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT name FROM sqlite_master \
+                 WHERE type = 'table' AND sql LIKE '%USING vec0%'",
+            )?;
+            stmt.query_map([], |r| r.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        let mut removed = collections.len() as u64;
+        for table in &collections {
+            conn.execute(&format!("DROP TABLE IF EXISTS \"{table}\""), [])?;
+        }
+        removed += u64::try_from(conn.execute("DELETE FROM vec_payload", [])?).unwrap_or(0);
+        removed += u64::try_from(conn.execute("DELETE FROM vec_meta", [])?).unwrap_or(0);
+        Ok(removed)
+    }
+
     fn dim_for(&self, collection: &str) -> Result<Option<usize>> {
         let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
         let dim: Option<i64> = conn

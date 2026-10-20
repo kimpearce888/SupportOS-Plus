@@ -59,6 +59,13 @@ pub(crate) fn clear_master_key_for_tests() {
     *MASTER_KEY.write().expect("master key lock") = None;
 }
 
+/// Serializes tests that manipulate the process-global master key —
+/// cargo runs unit tests in parallel threads inside one process, and
+/// several modules now exercise the envelope (settings lifecycle,
+/// Help Scout credentials, app-shell page tests).
+#[cfg(test)]
+pub(crate) static SECRETS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn master_key() -> Result<[u8; KEY_LEN]> {
     MASTER_KEY.read().expect("master key lock").ok_or_else(|| {
         Error::Config(
@@ -271,6 +278,7 @@ mod tests {
     // function — the sequence also mirrors a real installation's lifecycle.
     #[test]
     fn secrets_envelope_lifecycle() {
+        let _key_guard = SECRETS_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let conn = migrated_conn();
 
         // 1. No master key: writes fail loudly, never silently store plaintext.

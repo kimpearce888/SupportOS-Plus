@@ -4,6 +4,39 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.3] — 2026-10-20
+
+Two frequently-requested workflow features, both fully usable from the
+interface — no environment variables, no shell, no data-directory
+surgery.
+
+### Added
+
+- **Help Scout credentials can now be entered in the app**
+  (Settings → Help Scout): client ID, client secret, webhook secret
+  and Docs API key are stored in the encrypted secrets envelope
+  (AES-GCM under the master key — the same envelope that already
+  guards connection secrets; the plaintext never enters the
+  database). Saving a configured client ID/secret pair turns demo
+  mode off automatically, so the next launch boots the real provider.
+  Per-field badges show where each value comes from — environment
+  variables still win per field (CI, power users) — and "clear
+  stored" removes the saved values without touching the connection.
+  The "connect via OAuth" button now appears whenever credentials
+  resolve from either source.
+- **One-click demo-data purge** (Settings → Help Scout → Demo data):
+  deletes every conversation, customer, thread, rating, knowledge
+  document, incident, report and AI record — all demo-seeded or
+  synced content — in one transaction, and resets the sync cursors
+  and the vector store so the real account starts clean. Keeps
+  credentials, application settings, business hours, automation
+  rules, saved views and replies, connector configs and custom
+  object types. The purge walks the live schema against a pinned
+  KEEP allowlist (a test fails the build when a KEEP name goes
+  stale), runs with foreign keys suspended like the boot migrations
+  and commits only when `PRAGMA foreign_key_check` is clean — a
+  failure rolls everything back. Two-step confirmation.
+
 ## [1.1.2] — 2026-10-20
 
 Hotfix for the upgrade path from 0.2.x data. Migration 36

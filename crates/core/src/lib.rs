@@ -39,6 +39,7 @@ pub mod crypto;
 pub mod custom_objects;
 pub mod customer_events;
 pub mod customers;
+pub mod data_reset;
 pub mod data_tools;
 pub mod db;
 pub mod db_breadth;
