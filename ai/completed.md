@@ -799,3 +799,78 @@ never silently dropped.
 The plan is now fully exhausted: 46 of 46 items completed across 10 batches. `plan.md`
 empty, `progress.md` empty. The one remaining untestable item is documented above under
 item 45 (real Help Scout account verification requires external credentials).
+
+### Batch 11 (Phase R, v1.4.0 items R1–R5) — 2026-10-21 (commits `c8de6e4`+`91479ef`, CI run `39508562660`: success)
+
+First batch of the owner-approved v2 blueprint (plan.md phases R/A/K/P). Authored
+2026-10-20 in the pre-reset rebuilt workspace (which had no compiler and no remote at
+the time), then verified end-to-end on 2026-10-21 after the origin was restored —
+per Rule 5 nothing below counted as done before this verification.
+
+**R1. Connection Doctor; auth flow honesty (D3)**
+- Work: new `crates/core/src/connection_doctor.rs` — five sequential checks (reach
+  api.helpscout.net → client-credentials token exchange → `GET /v2/users/me` → list
+  mailboxes → read rate-limit headers), each step reporting plain-language detail and,
+  on failure, a concrete remedy; the doctor stops at the first hard failure so every
+  rendered report is complete evidence of the chain up to the break. Settings runs it
+  after every credential change; client credentials are promoted to the primary,
+  recommended flow and the authorization-code browser flow is demoted to a
+  clearly-labeled secondary with the exact-match redirect-URL warning.
+
+**R2. Provider-kind guard and watermark integrity (D1)**
+- Work: the auto-sync timer refuses to run against the empty provider; checkpoints
+  and cursors never advance on empty-provider results; the new
+  `sync_engine::on_provider_kind_transition` forces `sync_state` back to `NEW` on an
+  Empty→Real transition so the full initial sync actually runs after credentials
+  arrive — closing the "connected but nothing received" poisoning path for good.
+- Tests: `workers::auto_sync_tests::auto_sync_skips_the_empty_provider_and_stamps_nothing`
+  (a poisoned pre-1.4.0 `LIVE` state stays untouched: no run rows, no checkpoint
+  stamps) and `sync_engine::tests::r2_transition_policy_resets_a_poisoned_empty_session`.
+
+**R3. In-session credential activation (D2)**
+- Work: new `crates/core/src/provider_handle.rs` — one shared hot-swappable provider
+  cell (`RwLock`-guarded, kind-tagged Real/Empty) held for the whole process by the
+  sync engine, the worker host and the loopback listener. Saving or clearing
+  credentials swaps the inner provider in place; no `Arc` holder is rebuilt and no
+  restart ritual is needed — the running engine sees the new provider on its next
+  call, and the activation is observable in the UI.
+
+**R4. Send honesty (D7, D8, D9)**
+- Work: the reply dispatch resolves the customer remote id from the live conversation
+  (`GET /v3/conversations/{id}` → `primaryCustomer.id`) and repairs the mirror row
+  before `POST /v2/conversations/{id}/reply`; an enqueue failure now renders an error
+  and preserves the composed text instead of reporting green success; the
+  settings-backed `statusAfter` (default `pending`) rides on every reply send; a
+  single-conversation refresh runs immediately after delivery.
+- Test: `it_helpscout::reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror`
+  over the real reqwest stack and a mock TCP server — proves exactly one reply POST,
+  with `customer.id` resolved onto the body and `status: pending` riding along; the
+  mirror row is repaired and the job lands `confirmed`.
+
+**R5. Error surfacing and complete invalidation (D4, D5, D15, D16, D19, D20)**
+- Work: real `ErrorOccurred` emitters from sync, outbound, connect and worker failures
+  (toast + Diagnostics); the page invalidation map extended to every page (11 were
+  previously missing); zero-record sync completions render an explicit "up to date,
+  nothing new" outcome; docs-sync missing-key degradation and inbox-detail error
+  swallowing surface honestly.
+- Tests: `pages::tests::r5_error_occurred_invalidates_diagnostics_and_the_service_surface`,
+  `app::tests::r5_d20_zero_record_syncs_and_error_runs_have_visible_outcomes`.
+
+**Verification (Rule 5)**
+- The two new R2/R4 tests initially panicked with "there is no reactor running": they
+  called `start_workers` (whose `start()` spawns its timers via `tokio::spawn`) before
+  creating a runtime. Fixed by creating and entering the current-thread runtime
+  before `start_workers` in both tests; both then pass.
+- Local, pinned toolchain 1.99.1: `cargo fmt --all --check` clean; `cargo clippy
+  --workspace --all-targets -- -D warnings` clean; `cargo test --workspace` green
+  (163 app-shell + 203 core + xtask suites); `cargo clippy/test -p
+  supportos-plus-core --features sandbox` clean with 208 tests green;
+  `cargo-deny 0.20.2 check advisories licenses` ok (after the bump below).
+- First main push (`c8de6e4`, CI run `39507409148`): fmt, clippy, workspace tests and
+  the sandbox feature all passed on the runner, but the deny advisory gate failed on a
+  brand-new RUSTSEC advisory against `rustls-webpki < 0.103.16` (trust-anchor path
+  validation accepting intermediates whose private keys are now well known) that
+  landed after the v1.3.0 release. Fixed with a lockfile-only
+  `cargo update -p rustls-webpki` (`0.103.15` → `0.103.16`) as commit `91479ef`.
+- **CI run `39508562660` on `91479ef`: success on both jobs** (fmt, clippy, test,
+  deny + AppImage/.deb build with clean smoke boots). `main` is green.
