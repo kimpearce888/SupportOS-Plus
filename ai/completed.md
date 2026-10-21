@@ -1419,3 +1419,66 @@ now that the engagement's plan is exhausted.
 - Runner verification: code commit `4850f71af8156539d22936b6eb39385f96470645` — `CI run 39625936192 (CI): success`.
   v1.7.0 released: `release run 39627683265 (Release): success; published 4 assets: BUILD-INFO.txt (0 KB), SHA256SUMS.txt (0 KB), SupportOS-Plus-1.7.0-x86_64.AppImage (12234 KB), supportos-plus_1.7.0_amd64.deb (9715 KB)`.
 
+
+## Batch 16 — 2026-10-22 — Clean-source audit: items 1-5 (first five audit findings)
+
+**Source**: the owner-mandated v1.7.0 clean-source audit — source code only,
+no test suite, no descriptive docs, report nothing without proof. 13 parallel
+read-only audit agents read every non-test build-required file (core ~80k
+non-test lines, app-shell ~27.3k, xtask/catalog, CI/deny/gate configs); all
+197 cited evidence anchors were re-verified personally with display-safe
+byte encodings after the audit pane itself was caught eating the two bytes
+`[m` (which had produced — and then retracted, with od/base64 proof — a false
+`ci.yml` trigger finding). Full report with all 184 findings:
+`/home/z/my-project/download/SupportOS-Plus-v1.7.0-clean-audit.md`.
+The remaining 160 findings are queued in `ai/plan.md` (items 6-165) for
+future five-at-a-time batches.
+
+1. **Provider delegations** (high|bug) — `ProviderHandle` never delegated 8
+   trait methods; saved-reply CRUD, workflow runs and attachment downloads
+   always hit the trait's rejecting defaults even with a live provider
+   connected (impl ended at `docs_configured`; workers.rs:3236/3360/3521
+   enqueue through the handle). Added `create_saved_reply`,
+   `update_saved_reply`, `delete_saved_reply`, `delete_thread_schedule`,
+   `run_workflow`, `get_attachment_data`, `get_routing_configuration`,
+   `ping` (+ the `AttachmentData` import).
+2. **chunk_text UTF-8 panic** (high|bug) — knowledge_store.rs:53 backed
+   `start` up `overlap` bytes without a boundary check: any multibyte
+   document (accents, CJK, emoji) panicked at import ("byte index is not a
+   char boundary"). `start` now walks forward to the next boundary.
+3. **not_equals evaluated as equality** (high|bug) — automation.rs:1577-1579
+   fired exclusion rules on exactly the excluded value. condition_matches
+   now implements the accepted operator set per field semantics (subject
+   equals/not_equals; tag not_equals = "no tag equals the value"; body and
+   mailbox not_equals = negated contains; unknown operators return false
+   instead of silently matching; ai_verification not_equals added).
+4. **Dead 'customer_message' thread-type literal** (medium|bug) —
+   people_store.rs:478 and reports.rs:574 filtered a type no writer ever
+   emits, so the customer-effort metric and the CustomerReplies metric were
+   structurally always 0. Both corrected to 'customer' (the type every
+   writer emits).
+5. **No-simulation gate blind spots** (high|bug) — scripts/gate_no_simulation.py:
+   a `#[cfg(test)]` marker inside a // comment triggered region mode and
+   braceless `mod x;` declarations ran the region into the next `{`-bearing
+   production line (verified trips: app-shell lib.rs:31-38, core lib.rs:121-136
+   swallowing `pub use error::{Error, Result};`, mockserver.rs:1-16);
+   removing lines also shifted every later reported line number.
+   `strip_test_regions` rewritten: comment lines never trigger regions,
+   braceless `mod x;` regions end at their declaration, consumed lines are
+   blanked in place so violation line numbers are true file lines.
+
+Verification (Rule 5):
+
+- `cargo fmt --all --check` clean; `cargo clippy --workspace -- -D warnings`
+  clean on the pinned 1.99.1 toolchain (reinstalled from rust-toolchain.toml
+  after the janitor rewind had wiped ~/.cargo); `python3 scripts/gate_no_simulation.py` clean.
+- Fresh harness `/home/z/my-project/scripts/verify_gate_fix.py` (not the
+  existing suite): 161/161 scanned files preserve line counts; all 4
+  previously-swallowed production lines are scanned again; an injected marker
+  on a previously-swallowed line is caught by the new algorithm and provably
+  missed by the old one; real cfg(test) regions still blanked — ALL OK.
+- Audit-evidence harness `/home/z/my-project/scripts/verify_audit_citations.py`:
+  all 197 cited anchors re-printed and matched.
+- Runner verification: code commit `48022b7f44b7f23b11561e15b87f5155e3a1b704` — `CI run 39669015404 (CI): success`.
+- Security: the staged diff was token-scanned clean before the push (no
+  credentials in the commit).
