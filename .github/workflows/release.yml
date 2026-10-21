@@ -27,12 +27,13 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential curl ca-certificates git file \
+            build-essential curl ca-certificates git file python3 \
             libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1
           # `file` is required by appimagetool (runtime arch detection);
           # ubuntu-latest runners ship it, bare containers do not. The
           # xkbcommon trio is bundled from the build host into the
-          # AppImage, so it must be present here too.
+          # AppImage, so it must be present here too. `python3` runs the
+          # no-simulation gate (the minimal container ships no Python).
 
       - uses: actions/checkout@v4
 
