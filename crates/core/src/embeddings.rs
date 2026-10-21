@@ -243,16 +243,22 @@ fn last_index_of_dot_space(units: &[u16], from: usize) -> Option<usize> {
     None
 }
 
-pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<()> {
+/// Chunk a conversation for the A4 retrieval spine (idempotent: the
+/// conversation's rows are rebuilt each call). Returns the number of chunks
+/// written — callers use it to decide whether an embedding pass is worth
+/// enqueuing. `thread` chunks carry the full transcript; a closed conversation
+/// also gets a `resolution` chunk with the final published reply.
+pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<usize> {
     struct ConvRow {
         number: i64,
         subject: Option<String>,
         customer: Option<String>,
         tags: Option<String>,
+        closed_at: Option<String>,
     }
     let conv: Option<ConvRow> = conn
         .query_row(
-            "SELECT c.number, c.subject,
+            "SELECT c.number, c.subject, c.closed_at,
                     TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, '')) AS customer,
                     (SELECT GROUP_CONCAT(t.name) FROM conversation_tags ct
                       JOIN tags t ON t.id = ct.tag_id WHERE ct.conversation_id = c.id) AS tags
@@ -263,14 +269,15 @@ pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<()>
                 Ok(ConvRow {
                     number: r.get(0)?,
                     subject: r.get(1)?,
-                    customer: r.get(2)?,
-                    tags: r.get(3)?,
+                    closed_at: r.get(2)?,
+                    customer: r.get(3)?,
+                    tags: r.get(4)?,
                 })
             },
         )
         .ok();
     let Some(conv) = conv else {
-        return Ok(());
+        return Ok(0);
     };
 
     let mut stmt = conn.prepare(
@@ -303,11 +310,25 @@ pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<()>
         .collect::<Vec<_>>()
         .join("\n\n---\n\n");
     let full = format!("{header}\n\n{thread_text}");
-    let chunks = if !thread_text.is_empty() {
+    let mut chunks = if !thread_text.is_empty() {
         chunk_text(&full, 1200, 150)
     } else {
         vec![full]
     };
+
+    // A4: resolved conversations carry a resolution-excerpt chunk — the last
+    // published reply before closure, labeled so retrieval can prefer it for
+    // "how was this solved" queries. Only one kind per row: `thread` or
+    // `resolution` (m055).
+    let resolution_chunk = conv
+        .closed_at
+        .as_deref()
+        .filter(|c| !c.is_empty())
+        .and_then(|_| resolution_excerpt(conn, conversation_id, &header));
+    let has_resolution = resolution_chunk.is_some();
+    if let Some(excerpt) = resolution_chunk {
+        chunks.push(excerpt);
+    }
 
     conn.execute_batch("BEGIN")?;
     let tx = (|| -> Result<()> {
@@ -316,11 +337,18 @@ pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<()>
             params![conversation_id],
         )?;
         let mut ins = conn.prepare(
-            "INSERT INTO conversation_chunks (conversation_id, chunk_index, content, chunk_version)
-             VALUES (?1, ?2, ?3, 1)",
+            "INSERT INTO conversation_chunks
+                (conversation_id, chunk_index, content, chunk_version, chunk_kind)
+             VALUES (?1, ?2, ?3, 1, ?4)",
         )?;
+        let thread_count = chunks.len().saturating_sub(usize::from(has_resolution));
         for (i, c) in chunks.iter().enumerate() {
-            ins.execute(params![conversation_id, i as i64, c])?;
+            let kind = if i < thread_count {
+                "thread"
+            } else {
+                "resolution"
+            };
+            ins.execute(params![conversation_id, i as i64, c, kind])?;
         }
         Ok(())
     })();
@@ -330,6 +358,70 @@ pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<()>
             let _ = conn.execute_batch("ROLLBACK");
             return Err(e);
         }
+    }
+    Ok(chunks.len())
+}
+
+/// The A4 resolution excerpt: the last published reply of a closed
+/// conversation, prefixed with a self-locating header so semantic hits on
+/// "how was this resolved" land on it. `None` when the conversation has no
+/// published reply text to excerpt (nothing fabricated — an unresolved or
+/// empty thread simply gets no resolution chunk).
+fn resolution_excerpt(conn: &Connection, conversation_id: i64, header: &str) -> Option<String> {
+    let raw: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT body_text, body_html
+               FROM conversation_threads
+              WHERE conversation_id = ?1 AND type = 'reply' AND state = 'published'
+                AND deleted_at IS NULL AND COALESCE(body_text, body_html, '') <> ''
+              ORDER BY COALESCE(remote_created_at, created_at) DESC, id DESC
+              LIMIT 1",
+            params![conversation_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let (body_text, body_html) = raw?;
+    let body = body_text.filter(|b| !b.trim().is_empty()).or_else(|| {
+        body_html
+            .map(|h| crate::textutil::html_to_text(&h))
+            .filter(|t| !t.trim().is_empty())
+    })?;
+    let excerpt = utf16_slice(body.trim(), 0, 1200);
+    if excerpt.trim().is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{header}\n\nRESOLUTION EXCERPT (final agent reply):\n{excerpt}"
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Migration m055: conversation_chunks.chunk_kind (A4 retrieval spine)
+// ---------------------------------------------------------------------------
+
+/// Migration m055 (boot step 46): `conversation_chunks` gains `chunk_kind`
+/// ('thread' | 'resolution') so the A4 retrieval spine can prefer resolution
+/// excerpts for "how was this solved" queries. Existing rows are all thread
+/// content and keep the 'thread' default.
+pub fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
+    if !crate::sync_schema::table_exists(conn, "conversation_chunks")? {
+        return Ok(());
+    }
+    let has: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('conversation_chunks')
+             WHERE name = 'chunk_kind'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has {
+        conn.execute(
+            "ALTER TABLE conversation_chunks
+             ADD COLUMN chunk_kind TEXT NOT NULL DEFAULT 'thread'",
+            [],
+        )?;
     }
     Ok(())
 }
@@ -510,9 +602,31 @@ pub struct LmStudioEmbeddingSettings {
     pub base_url: String,
     pub embedding_model: Option<String>,
     pub timeout_ms: u64,
+    /// Envelope-stored BYOK key for cloud embedding endpoints (A4).
+    pub api_key: Option<String>,
 }
 
+/// Resolve the embedding endpoint. A4 order of precedence: the hub **Embed
+/// role** first (endpoint base URL + role model + envelope key), then the
+/// legacy `lmstudio_*`/AI-status settings as the pre-hub fallback. Cloud
+/// embeddings are an explicit opt-in (D-a): they only happen when the user
+/// routed the Embed role to a cloud endpoint in the AI Center.
 pub fn lm_studio_embedding_settings(conn: &Connection) -> Result<LmStudioEmbeddingSettings> {
+    let timeout_ms = u64::try_from(
+        crate::settings::get_i64(conn, "lmstudio_timeout_ms", 120_000).unwrap_or(120_000),
+    )
+    .unwrap_or(120_000);
+    if let Some((endpoint, model, api_key)) =
+        crate::ai_hub::resolve_role(conn, crate::ai_hub::AiRole::Embed)
+    {
+        let model = model.filter(|m: &String| !m.is_empty());
+        return Ok(LmStudioEmbeddingSettings {
+            base_url: normalize_lm_base_url(&endpoint.base_url),
+            embedding_model: model,
+            timeout_ms,
+            api_key,
+        });
+    }
     let model = crate::settings::get_string(conn, "lmstudio_embedding_model")
         .ok()
         .flatten()
@@ -534,14 +648,11 @@ pub fn lm_studio_embedding_settings(conn: &Connection) -> Result<LmStudioEmbeddi
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or_else(|| "http://127.0.0.1:1234".to_string());
-    let timeout_ms = u64::try_from(
-        crate::settings::get_i64(conn, "lmstudio_timeout_ms", 120_000).unwrap_or(120_000),
-    )
-    .unwrap_or(120_000);
     Ok(LmStudioEmbeddingSettings {
         base_url: normalize_lm_base_url(&base),
         embedding_model: model,
         timeout_ms,
+        api_key: None,
     })
 }
 
@@ -567,9 +678,18 @@ pub async fn embed_texts(
     model: &str,
     texts: &[String],
     timeout_ms: u64,
+    api_key: Option<&str>,
 ) -> Result<Vec<Vec<f32>>> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms.max(1)))
+    let mut builder =
+        reqwest::Client::builder().timeout(std::time::Duration::from_millis(timeout_ms.max(1)));
+    if let Some(key) = api_key {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {key}")) {
+            headers.insert(reqwest::header::AUTHORIZATION, v);
+        }
+        builder = builder.default_headers(headers);
+    }
+    let client = builder
         .build()
         .map_err(|e| Error::Config(format!("LM Studio embedding failed: {e}")))?;
     let res = client
@@ -602,6 +722,7 @@ fn embed_texts_blocking(
     model: String,
     texts: Vec<String>,
     timeout_ms: u64,
+    api_key: Option<String>,
 ) -> Result<Vec<Vec<f32>>> {
     std::thread::Builder::new()
         .name("lmstudio-embed".into())
@@ -610,11 +731,40 @@ fn embed_texts_blocking(
                 .enable_all()
                 .build()
                 .map_err(|e| Error::Config(format!("LM Studio embedding failed: {e}")))?;
-            rt.block_on(embed_texts(&base_url, &model, &texts, timeout_ms))
+            rt.block_on(embed_texts(
+                &base_url,
+                &model,
+                &texts,
+                timeout_ms,
+                api_key.as_deref(),
+            ))
         })
         .map_err(Error::Io)?
         .join()
         .map_err(|_| Error::Config("LM Studio embedding worker thread panicked".into()))?
+}
+
+/// Embed a single query text (A4 retrieval spine: fused search + evidence
+/// semantic hits). `Ok(None)` is the honest no-endpoint answer — when no
+/// embedding model is routed (Embed role unset and no legacy config) callers
+/// stay BM25-only instead of inventing vectors.
+pub fn embed_query_text_blocking(conn: &Connection, text: &str) -> Result<Option<Vec<f32>>> {
+    let settings = lm_studio_embedding_settings(conn)?;
+    let Some(model) = settings.embedding_model else {
+        return Ok(None);
+    };
+    let input: String = utf16_slice(text.trim(), 0, 4000);
+    if input.is_empty() {
+        return Ok(None);
+    }
+    let vectors = embed_texts_blocking(
+        settings.base_url.clone(),
+        model,
+        vec![input],
+        settings.timeout_ms,
+        settings.api_key.clone(),
+    )?;
+    Ok(vectors.into_iter().next().filter(|v| !v.is_empty()))
 }
 
 struct PendingChunk {
@@ -731,6 +881,7 @@ fn embed_pending_chunks(
         model.clone(),
         texts,
         settings.timeout_ms,
+        settings.api_key.clone(),
     ) {
         Ok(v) => v,
         Err(_) => {
@@ -871,4 +1022,112 @@ pub fn embed_pending_conversation_chunks(
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     embed_pending_chunks(conn, "conversation_chunks", qdrant)
+}
+
+#[cfg(test)]
+mod batch13_a4_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db_with_conversation(status: &str, closed_at: Option<&str>) -> (Connection, i64) {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, closed_at)
+             VALUES (9201, 92, 'Export failing', 'preview', ?1, ?2)",
+            params![status, closed_at],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads
+                (conversation_id, type, state, body_text, remote_created_at, created_at)
+             VALUES (?1, 'customer', 'published', 'The export throws an error every time.',
+                     '2026-10-20T10:00:00Z', datetime('now'))",
+            params![conv],
+        )
+        .expect("customer thread");
+        conn.execute(
+            "INSERT INTO conversation_threads
+                (conversation_id, type, state, body_text, remote_created_at, created_at)
+             VALUES (?1, 'reply', 'published', 'We fixed the timeout by raising the limit.',
+                     '2026-10-20T11:00:00Z', datetime('now'))",
+            params![conv],
+        )
+        .expect("reply thread");
+        (conn, conv)
+    }
+
+    fn chunk_kinds(conn: &Connection, conv: i64) -> Vec<(String, String)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT chunk_kind, content FROM conversation_chunks
+                  WHERE conversation_id = ?1 ORDER BY chunk_index",
+            )
+            .expect("chunks");
+        stmt.query_map(params![conv], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("rows")
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    /// A4: a closed conversation carries exactly one `resolution` chunk whose
+    /// content is the final published reply, plus the `thread` chunks.
+    #[test]
+    fn closed_conversation_gains_resolution_chunk() {
+        let (conn, conv) = db_with_conversation("closed", Some("2026-10-20T12:00:00Z"));
+        let written = chunk_conversation(&conn, conv).expect("chunk");
+        assert!(
+            written >= 2,
+            "thread + resolution chunks expected, got {written}"
+        );
+        let kinds = chunk_kinds(&conn, conv);
+        let resolutions: Vec<&(String, String)> =
+            kinds.iter().filter(|(k, _)| k == "resolution").collect();
+        assert_eq!(resolutions.len(), 1, "exactly one resolution chunk");
+        let (_, content) = resolutions[0];
+        assert!(
+            content.contains("RESOLUTION EXCERPT"),
+            "the resolution chunk self-locates: {content}"
+        );
+        assert!(
+            content.contains("raising the limit"),
+            "the excerpt is the final reply, not the customer thread"
+        );
+        assert!(
+            kinds.iter().any(|(k, _)| k == "thread"),
+            "thread chunks still present"
+        );
+    }
+
+    /// A4: an open conversation gets no resolution chunk — nothing is
+    /// fabricated for unresolved threads.
+    #[test]
+    fn open_conversation_has_no_resolution_chunk() {
+        let (conn, conv) = db_with_conversation("active", None);
+        chunk_conversation(&conn, conv).expect("chunk");
+        let kinds = chunk_kinds(&conn, conv);
+        assert!(
+            kinds.iter().all(|(k, _)| k == "thread"),
+            "only thread chunks for open conversations"
+        );
+    }
+
+    /// A4 (m055): chunking is idempotent — re-running replaces the rows
+    /// instead of duplicating them.
+    #[test]
+    fn chunking_is_idempotent() {
+        let (conn, conv) = db_with_conversation("closed", Some("2026-10-20T12:00:00Z"));
+        chunk_conversation(&conn, conv).expect("first");
+        chunk_conversation(&conn, conv).expect("second");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_chunks WHERE conversation_id = ?1",
+                params![conv],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let first = chunk_conversation(&conn, conv).expect("third");
+        assert_eq!(first as i64, count, "no duplication across re-chunks");
+    }
 }

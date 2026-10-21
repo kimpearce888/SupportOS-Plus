@@ -56,6 +56,8 @@ pub struct SearchPage {
     status_filter: Option<String>,
     response: Option<SearchResponse>,
     error: Option<String>,
+    /// Shared vector index (A4): the fused search's dense lane.
+    vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
 }
 
 impl SearchPage {
@@ -68,7 +70,17 @@ impl SearchPage {
             status_filter: None,
             response: None,
             error: None,
+            vector_index: None,
         }
+    }
+
+    /// A4: receive the shared vector index so search can fuse BM25 +
+    /// sqlite-vec hits instead of the hardcoded FTS-only mode.
+    pub fn set_vector_index(
+        &mut self,
+        index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
+    ) {
+        self.vector_index = index;
     }
 
     /// Live-update invalidation (web: the search version key).
@@ -91,7 +103,13 @@ impl SearchPage {
             ..SearchFilters::default()
         };
         let result = db.with_read(|conn| {
-            spp_core::search::search(conn, &query, self.scope.as_str(), &filters)
+            spp_core::search::search_with_semantics(
+                conn,
+                self.vector_index.as_deref(),
+                &query,
+                self.scope.as_str(),
+                &filters,
+            )
         });
         match result {
             Ok(response) => {
@@ -189,6 +207,11 @@ impl SearchPage {
                 }
             ),
         );
+        // A4: the honest mode line — which lanes actually ran, and why the
+        // semantic lane was skipped when it was.
+        if let Some(note) = &response.mode_note {
+            design::hint_text(ui, note);
+        }
         if response.hits.is_empty() {
             design::empty_state(
                 ui,
@@ -210,6 +233,19 @@ impl SearchPage {
                         );
                         if !hit.subtitle.is_empty() {
                             design::hint_text(ui, hit.subtitle.as_str());
+                        }
+                        // A4: real lane provenance — "keyword match",
+                        // "semantic match", "recent".
+                        for reason in &hit.why {
+                            design::badge(
+                                ui,
+                                reason,
+                                if reason == "semantic match" {
+                                    BadgeTone::Info
+                                } else {
+                                    BadgeTone::Neutral
+                                },
+                            );
                         }
                     });
                     if !hit.snippet.is_empty() {

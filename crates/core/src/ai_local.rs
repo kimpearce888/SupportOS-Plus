@@ -517,8 +517,14 @@ fn build_draft(
     draft
 }
 
-/// The full local copilot report for one conversation.
-pub fn copilot_report(conn: &Connection, conversation_local_id: i64) -> Result<CopilotReport> {
+/// The full local copilot report for one conversation. A4: when a vector
+/// index is available the similar-issues lane fuses FTS + sqlite-vec hits,
+/// so the panel's "semantic match" reasons are backed by real vectors.
+pub fn copilot_report(
+    conn: &Connection,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
+    conversation_local_id: i64,
+) -> Result<CopilotReport> {
     let analysis = analyze(conn, conversation_local_id)?;
     let (subject, customer_first, me_name): (Option<String>, Option<String>, Option<String>) = conn
         .query_row(
@@ -531,8 +537,12 @@ pub fn copilot_report(conn: &Connection, conversation_local_id: i64) -> Result<C
         )
         .unwrap_or((None, None, None));
 
-    let similar =
-        crate::ai_evidence::find_similar(conn, conversation_local_id, 5, &[]).unwrap_or_default();
+    let semantic: Vec<(i64, f64)> = match index {
+        Some(ix) => crate::ai_evidence::semantic_hits(conn, ix, conversation_local_id, 8),
+        None => Vec::new(),
+    };
+    let similar = crate::ai_evidence::find_similar(conn, conversation_local_id, 5, &semantic)
+        .unwrap_or_default();
     let articles = related_articles(conn, &analysis.keywords, subject.as_deref(), 4);
     let history = customer_history(conn, conversation_local_id);
     let suggested_reply = build_draft(
@@ -561,6 +571,22 @@ pub fn latest_ai_draft(conn: &Connection, conversation_local_id: i64) -> Option<
           WHERE conversation_id = ?1 ORDER BY id DESC LIMIT 1",
         params![conversation_local_id],
         |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .ok()
+}
+
+/// A6 feedback loop variant of [`latest_ai_draft`]: the newest draft's
+/// **row id** rides along so the composer can track provenance and record
+/// accept / edit-distance / reject against the real `ai_drafts` row.
+pub fn latest_ai_draft_row(
+    conn: &Connection,
+    conversation_local_id: i64,
+) -> Option<(i64, String, String)> {
+    conn.query_row(
+        "SELECT id, content, model FROM ai_drafts
+          WHERE conversation_id = ?1 ORDER BY id DESC LIMIT 1",
+        params![conversation_local_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )
     .ok()
 }
@@ -645,7 +671,7 @@ mod tests {
             "customer",
             "I am locked out of my account and cannot log in. How do I reset my password?",
         );
-        let report = copilot_report(&conn, conv).unwrap();
+        let report = copilot_report(&conn, None, conv).unwrap();
         assert!(
             report.suggested_reply.contains("Thanks for reaching out"),
             "draft must greet"

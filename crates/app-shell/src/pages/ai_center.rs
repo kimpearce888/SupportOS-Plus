@@ -33,17 +33,28 @@ enum Tab {
     Health,
     Analytics,
     Attributes,
+    Copilot,
+    Usage,
     Jobs,
 }
 
 impl Tab {
-    const ALL: [Self; 4] = [Self::Health, Self::Analytics, Self::Attributes, Self::Jobs];
+    const ALL: [Self; 6] = [
+        Self::Health,
+        Self::Analytics,
+        Self::Attributes,
+        Self::Copilot,
+        Self::Usage,
+        Self::Jobs,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Self::Health => "Health",
             Self::Analytics => "Analytics",
             Self::Attributes => "Attributes",
+            Self::Copilot => "Copilot",
+            Self::Usage => "Usage",
             Self::Jobs => "Jobs",
         }
     }
@@ -253,6 +264,31 @@ pub struct AiCenterPage {
     ledger: Vec<spp_core::ai_hub::UsageRow>,
     /// Per-feature toggle states (name, enabled), loaded at reload.
     feature_states: Vec<(&'static str, bool)>,
+    /// Shared vector index (A4/A5): the copilot chat's similar-issues tools
+    /// fuse FTS + sqlite-vec through it.
+    vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
+    // ---- A5 copilot chat state ----
+    /// Copilot sessions (copilot_sessions rows, newest first).
+    copilot_sessions: Vec<serde_json::Value>,
+    /// The open session's messages (copilot_messages rows).
+    copilot_messages: Vec<serde_json::Value>,
+    /// The open session id (None = fresh chat; the job creates the row).
+    copilot_session: Option<i64>,
+    /// The question being typed.
+    copilot_input: String,
+    /// The in-flight copilot_chat job id (polled each frame).
+    copilot_pending: Option<i64>,
+    /// Last chat error (job failures land here verbatim).
+    copilot_error: Option<String>,
+    /// Chat data loaded flag (invalidation clears it).
+    copilot_loaded: bool,
+    // ---- A6 usage dashboard state ----
+    /// Golden runs, newest first (eval scores).
+    golden_runs: Vec<spp_core::ai_eval::GoldenRunRow>,
+    /// (total drafts, accepted, rejected) from ai_drafts states.
+    draft_states: (i64, i64, i64),
+    /// (feedback rows, edited rows, avg edit distance) from ai_feedback.
+    edit_stats: (i64, i64, f64),
 }
 
 impl AiCenterPage {
@@ -279,7 +315,26 @@ impl AiCenterPage {
             add_price_completion: String::new(),
             ledger: Vec::new(),
             feature_states: Vec::new(),
+            vector_index: None,
+            copilot_sessions: Vec::new(),
+            copilot_messages: Vec::new(),
+            copilot_session: None,
+            copilot_input: String::new(),
+            copilot_pending: None,
+            copilot_error: None,
+            copilot_loaded: false,
+            golden_runs: Vec::new(),
+            draft_states: (0, 0, 0),
+            edit_stats: (0, 0, 0.0),
         }
+    }
+
+    /// A4/A5: receive the shared vector index for the copilot chat tools.
+    pub fn set_vector_index(
+        &mut self,
+        index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
+    ) {
+        self.vector_index = index;
     }
 
     /// Live-update invalidation.
@@ -290,6 +345,7 @@ impl AiCenterPage {
         self.jobs.clear();
         self.hub_loaded = false;
         self.ledger.clear();
+        self.copilot_loaded = false;
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -378,6 +434,9 @@ impl AiCenterPage {
     /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
+        // A5: resolve the in-flight copilot chat turn (the worker persists
+        // messages; the poll only moves the terminal state into the page).
+        self.poll_copilot_job(db);
 
         design::page_header(ui, "AI Center", None, |_| {});
         ui.horizontal(|ui| {
@@ -393,7 +452,431 @@ impl AiCenterPage {
             Tab::Health => self.health_ui(ui, db),
             Tab::Analytics => self.analytics_ui(ui),
             Tab::Attributes => self.attributes_ui(ui),
+            Tab::Copilot => self.copilot_ui(ui, db),
+            Tab::Usage => self.usage_ui(ui, db),
             Tab::Jobs => self.jobs_ui(ui),
+        }
+    }
+
+    /// A5: poll the in-flight copilot_chat job — completed turns reload the
+    /// session + messages; failures surface the exact worker error.
+    fn poll_copilot_job(&mut self, db: &DbHandle) {
+        let Some(job_id) = self.copilot_pending else {
+            return;
+        };
+        let (status, error): (String, Option<String>) = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT status, error FROM jobs WHERE id = ?1",
+                rusqlite::params![job_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or(("missing".into(), None))
+        });
+        match status.as_str() {
+            "queued" | "running" => {}
+            "completed" => {
+                self.copilot_pending = None;
+                self.copilot_error = None;
+                self.reload_copilot(db);
+            }
+            _ => {
+                self.copilot_pending = None;
+                self.copilot_error =
+                    Some(error.unwrap_or_else(|| "the chat job failed without an error".into()));
+                self.reload_copilot(db);
+            }
+        }
+    }
+
+    /// A5: load sessions (newest first) + the open session's messages.
+    fn reload_copilot(&mut self, db: &DbHandle) {
+        let (sessions, messages) = db.with_read(|conn| {
+            let sessions = spp_core::copilot::list_sessions(conn, 50);
+            // If no session is open, fall back to the newest so the page
+            // always shows something after a completed turn.
+            let session = self.copilot_session.or_else(|| {
+                sessions
+                    .first()
+                    .and_then(|s| s.get("id"))
+                    .and_then(|v| v.as_i64())
+            });
+            let messages = session
+                .map(|id| spp_core::copilot::list_messages(conn, id))
+                .unwrap_or_default();
+            (sessions, messages)
+        });
+        self.copilot_sessions = sessions;
+        self.copilot_messages = messages;
+        self.copilot_loaded = true;
+    }
+
+    /// A5: the copilot chat on the 22-tool read-only agent. Sessions and
+    /// messages are durable rows; the turn runs as a worker job so the UI
+    /// thread never blocks on the model.
+    fn copilot_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        if !self.copilot_loaded {
+            self.reload_copilot(db);
+        }
+        let t = design::tokens(ui);
+        // Gate the whole surface honestly: feature + Agent role.
+        let (feature_on, agent_ok) = db.with_read(|conn| {
+            (
+                spp_core::ai_hub::ai_feature_enabled(conn, "copilot"),
+                !matches!(
+                    spp_core::ai_hub::backend_for_role(conn, spp_core::ai_hub::AiRole::Agent),
+                    spp_core::ai_pipeline::AiBackend::Disabled,
+                ),
+            )
+        });
+        if !feature_on {
+            design::empty_state(
+                ui,
+                Icon::Sparkles,
+                "Copilot is switched off",
+                "Enable it in AI Center > Features & kill switches.",
+            );
+            return;
+        }
+        if !agent_ok {
+            design::empty_state(
+                ui,
+                Icon::Sparkles,
+                "No Agent role endpoint routed",
+                "Assign one in AI Center > Model-role routing (Health tab) to chat with the 22-tool agent.",
+            );
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.set_min_width(ui.available_width());
+            // Left column: sessions.
+            egui::ScrollArea::vertical()
+                .id_salt("copilot-sessions")
+                .max_height(420.0)
+                .show(ui, |ui| {
+                    design::section_title(ui, "Sessions");
+                    if design::button(ui, "New chat", ButtonVariant::Outline).clicked() {
+                        self.copilot_session = None;
+                        self.copilot_messages.clear();
+                        self.copilot_error = None;
+                    }
+                    for session in self.copilot_sessions.clone() {
+                        let id = session.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let title: String = session
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("(untitled)")
+                            .chars()
+                            .take(60)
+                            .collect();
+                        let count = session
+                            .get("message_count")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0);
+                        let selected = self.copilot_session == Some(id);
+                        if design::chip(ui, selected, &format!("{title} ({count})"))
+                            .on_hover_text("open this session")
+                            .clicked()
+                        {
+                            self.copilot_session = Some(id);
+                            self.copilot_messages =
+                                db.with_read(|conn| spp_core::copilot::list_messages(conn, id));
+                        }
+                    }
+                });
+        });
+        design::divider(ui);
+        // Messages.
+        design::section_title(ui, "Chat");
+        if let Some(err) = self.copilot_error.clone() {
+            design::error_text(ui, &format!("last turn failed: {err}"));
+        }
+        if self.copilot_messages.is_empty() {
+            design::hint_text(
+                ui,
+                "Ask anything answerable from the local mirror — the agent runs 22 read-only tools (searches, lookups, clusters, gaps) and cites what it used.",
+            );
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("copilot-messages")
+            .max_height(320.0)
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                for message in &self.copilot_messages {
+                    let role = message.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+                    let content = message
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if role == "tool" {
+                        continue;
+                    }
+                    ui.horizontal(|ui| {
+                        design::badge(
+                            ui,
+                            role,
+                            if role == "assistant" {
+                                BadgeTone::Info
+                            } else {
+                                BadgeTone::Neutral
+                            },
+                        );
+                        ui.label(egui::RichText::new(content).small().color(t.foreground));
+                    });
+                    if role == "assistant"
+                        && let Some(citations) = message.get("citations").and_then(|c| c.as_array())
+                        && !citations.is_empty()
+                    {
+                        ui.horizontal(|ui| {
+                            design::hint_text(ui, "cited:");
+                            for citation in citations.iter().take(6) {
+                                let label: String = citation
+                                    .get("label")
+                                    .and_then(|l| l.as_str())
+                                    .unwrap_or("source")
+                                    .chars()
+                                    .take(48)
+                                    .collect();
+                                design::badge(ui, &label, BadgeTone::Success);
+                            }
+                        });
+                    }
+                    ui.add_space(3.0);
+                }
+            });
+        // Input.
+        let busy = self.copilot_pending.is_some();
+        ui.horizontal(|ui| {
+            let mut question = self.copilot_input.clone();
+            let response = ui.add_sized(
+                [ui.available_width() - 120.0, 28.0],
+                egui::TextEdit::singleline(&mut question).hint_text("Ask the copilot…"),
+            );
+            if response.changed() {
+                self.copilot_input = question;
+            }
+            let submit =
+                ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.copilot_input.is_empty();
+            if (design::button_with_icon(
+                ui,
+                Icon::Send,
+                if busy { "thinking…" } else { "send" },
+                ButtonVariant::Primary,
+            )
+            .clicked()
+                && !busy)
+                || (submit && !busy)
+            {
+                let question = self.copilot_input.trim().to_string();
+                if !question.is_empty() {
+                    let payload = serde_json::json!({
+                        "question": question,
+                        "sessionId": self.copilot_session,
+                    });
+                    let job = db.with_write(|conn| {
+                        spp_core::jobs::enqueue_on(
+                            conn,
+                            "ai",
+                            "copilot_chat",
+                            &payload.to_string(),
+                            3,
+                            2,
+                        )
+                    });
+                    match job {
+                        Ok(job_id) => {
+                            self.copilot_pending = Some(job_id);
+                            self.copilot_input.clear();
+                        }
+                        Err(e) => self.copilot_error = Some(e.to_string()),
+                    }
+                }
+            }
+        });
+    }
+
+    /// A6: the AI usage dashboard — per-feature tokens/latency/cost from the
+    /// ledger, live edit rate from real feedback rows, and the golden-set
+    /// eval scores with the on-demand runner.
+    fn usage_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        // Usage data rides `reload` (invalidation refreshes it).
+        let ledger30: Vec<spp_core::ai_hub::UsageRow> =
+            db.with_read(|conn| spp_core::ai_hub::usage_ledger(conn, 30).unwrap_or_default());
+        let (golden_runs, draft_states, edit_stats) = db.with_read(|conn| {
+            (
+                spp_core::ai_eval::latest_golden_runs(conn, 5),
+                conn.query_row(
+                    "SELECT COUNT(*),
+                            COALESCE(SUM(CASE WHEN state = 'accepted' THEN 1 ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN state = 'rejected' THEN 1 ELSE 0 END), 0)
+                       FROM ai_drafts",
+                    [],
+                    |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .unwrap_or((0, 0, 0)),
+                conn.query_row(
+                    "SELECT COUNT(*),
+                            COALESCE(SUM(CASE WHEN edit_distance > 20 THEN 1 ELSE 0 END), 0),
+                            COALESCE(AVG(edit_distance), 0.0)
+                       FROM ai_feedback",
+                    [],
+                    |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, f64>(2)?,
+                        ))
+                    },
+                )
+                .unwrap_or((0, 0, 0.0)),
+            )
+        });
+        self.golden_runs = golden_runs;
+        self.draft_states = draft_states;
+        self.edit_stats = edit_stats;
+
+        design::section_title(ui, "Per-feature usage — last 30 days");
+        if ledger30.is_empty() {
+            design::hint_text(
+                ui,
+                "No completed model runs yet. Tokens, latency and estimated cost appear here as features run.",
+            );
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("usage-ledger")
+                .max_height(260.0)
+                .show(ui, |ui| {
+                    egui::Grid::new("usage-ledger-grid")
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for label in [
+                                "day",
+                                "feature",
+                                "model",
+                                "runs",
+                                "prompt tok",
+                                "completion tok",
+                                "latency s",
+                                "est cost",
+                            ] {
+                                design::field_label(ui, label);
+                            }
+                            ui.end_row();
+                            for row in &ledger30 {
+                                ui.monospace(row.day.as_str());
+                                ui.monospace(row.feature.as_str());
+                                ui.monospace(row.model.as_str());
+                                ui.monospace(row.runs.to_string());
+                                ui.monospace(row.prompt_tokens.to_string());
+                                ui.monospace(row.completion_tokens.to_string());
+                                ui.monospace(format!(
+                                    "{:.1}",
+                                    row.latency_ms_total as f64 / 1000.0
+                                ));
+                                ui.monospace(format!("${:.4}", row.est_cost_usd));
+                                ui.end_row();
+                            }
+                        });
+                });
+        }
+        ui.add_space(8.0);
+
+        design::section_title(ui, "Draft feedback (edit rate)");
+        let (rows, edited, avg_distance) = self.edit_stats;
+        let (drafts, accepted, rejected) = self.draft_states;
+        ui.horizontal(|ui| {
+            design::badge(ui, &format!("{drafts} drafts"), BadgeTone::Neutral);
+            design::badge(ui, &format!("{accepted} accepted"), BadgeTone::Success);
+            design::badge(ui, &format!("{rejected} rejected"), BadgeTone::Warning);
+            design::badge(ui, &format!("{rows} feedback rows"), BadgeTone::Info);
+            if rows > 0 {
+                design::badge(
+                    ui,
+                    &format!(
+                        "{:.0}% edited (>20 chars)",
+                        100.0 * edited as f64 / rows as f64
+                    ),
+                    BadgeTone::Info,
+                );
+                design::badge(
+                    ui,
+                    &format!("avg edit distance {avg_distance:.0}"),
+                    BadgeTone::Neutral,
+                );
+            }
+        });
+        design::hint_text(
+            ui,
+            "Accept, edit-distance and reject come from the composer send path and the draft panel — real rows, zero invention.",
+        );
+        ui.add_space(8.0);
+
+        design::section_title(ui, "Golden-set evals (9 seeded cases)");
+        ui.horizontal(|ui| {
+            let busy = db
+                .with_read(|conn| {
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM jobs
+                          WHERE type = 'golden_eval' AND status IN ('queued','running')",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0)
+                })
+                > 0;
+            if busy {
+                design::hint_text(ui, "golden set running…");
+            } else if design::button(ui, "Run golden set now", ButtonVariant::Outline)
+                .on_hover_text(
+                    "the 9 seeded cases run through the real analysis prompt; scores land below and re-run automatically on prompt/role changes",
+                )
+                .clicked()
+            {
+                let _ = db.with_write(|conn| {
+                    spp_core::jobs::enqueue_on(conn, "ai", "golden_eval", "{}", 3, 2)
+                });
+            }
+        });
+        if self.golden_runs.is_empty() {
+            design::hint_text(
+                ui,
+                "No eval runs recorded yet — run the golden set to score the routed Classify model.",
+            );
+        } else {
+            for run in &self.golden_runs {
+                ui.horizontal(|ui| {
+                    let tone = if run.failed == 0 {
+                        BadgeTone::Success
+                    } else if run.passed > 0 {
+                        BadgeTone::Warning
+                    } else {
+                        BadgeTone::Destructive
+                    };
+                    design::badge(
+                        ui,
+                        &format!("{}/{} passed", run.passed, run.passed + run.failed),
+                        tone,
+                    );
+                    ui.monospace(format!("backend: {}", run.backend));
+                    design::hint_text(ui, &format!("run #{} — {}", run.id, run.started_at));
+                });
+                if let Some(results) = run.results.as_array()
+                    && run.failed > 0
+                {
+                    for case in results.iter().take(9) {
+                        let name = case.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                        let error = case.get("error").and_then(|v| v.as_str());
+                        if let Some(error) = error {
+                            design::hint_text(ui, &format!("{name}: {error}"));
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -744,6 +1227,19 @@ impl AiCenterPage {
                                 self.hub_roles = roles.clone();
                                 let _ = db
                                     .with_write(|conn| spp_core::ai_hub::save_roles(conn, &roles));
+                                // A6: model-role reassignment re-runs the
+                                // golden set — the eval scores on the Usage
+                                // tab must describe the routing that is live.
+                                let _ = db.with_write(|conn| {
+                                    spp_core::jobs::enqueue_on(
+                                        conn,
+                                        "ai",
+                                        "golden_eval",
+                                        "{}",
+                                        3,
+                                        2,
+                                    )
+                                });
                             }
                             ui.end_row();
                         }

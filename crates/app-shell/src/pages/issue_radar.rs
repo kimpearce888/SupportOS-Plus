@@ -25,16 +25,18 @@ use crate::icons::Icon;
 enum Tab {
     Alerts,
     Clusters,
+    Gaps,
     Known,
 }
 
 impl Tab {
-    const ALL: [Self; 3] = [Self::Alerts, Self::Clusters, Self::Known];
+    const ALL: [Self; 4] = [Self::Alerts, Self::Clusters, Self::Gaps, Self::Known];
 
     fn label(self) -> &'static str {
         match self {
             Self::Alerts => "Alerts",
             Self::Clusters => "Clusters",
+            Self::Gaps => "Gaps",
             Self::Known => "Known issues",
         }
     }
@@ -159,6 +161,8 @@ pub struct IssueRadarPage {
     sla: Option<spp_core::sla::SlaAlerts>,
     clusters: Vec<ClusterRow>,
     known: Vec<KnownIssueRow>,
+    /// K1: the gap-detection report (deterministic candidates).
+    gaps: serde_json::Value,
     show_new: bool,
     new_title: String,
     new_symptoms: String,
@@ -179,6 +183,7 @@ impl IssueRadarPage {
             sla: None,
             clusters: Vec::new(),
             known: Vec::new(),
+            gaps: serde_json::Value::Null,
             show_new: false,
             new_title: String::new(),
             new_symptoms: String::new(),
@@ -196,21 +201,25 @@ impl IssueRadarPage {
         self.sla = None;
         self.clusters.clear();
         self.known.clear();
+        self.gaps = serde_json::Value::Null;
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        let (radar, sla, clusters, known) = db.with_read(|conn| {
+        let (radar, sla, clusters, known, gaps) = db.with_read(|conn| {
             (
                 spp_core::analytics::issue_radar_impl(conn),
                 spp_core::sla::sla_alerts(conn).ok(),
                 load_clusters(conn),
                 load_known(conn),
+                // K1: the deterministic gap pipeline's current report.
+                spp_core::quality::gap_report(conn),
             )
         });
         self.radar = radar;
         self.sla = sla;
         self.clusters = clusters;
         self.known = known;
+        self.gaps = gaps;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
@@ -313,6 +322,41 @@ impl IssueRadarPage {
                     self.reload(db);
                     self.notice = None;
                 }
+                // K1: the deterministic gap pipeline on demand — the daily
+                // maintenance trigger also enqueues it.
+                if crate::design::button(ui, "Detect gaps now", crate::design::ButtonVariant::Outline)
+                    .on_hover_text(
+                        "rebuild friction findings and 'asked often, documented nowhere' gap candidates \
+                         from the last 90 days (deterministic, no model needed)",
+                    )
+                    .clicked()
+                {
+                    let feature_on = db.with_read(|conn| {
+                        spp_core::ai_hub::ai_feature_enabled(conn, "gap_detection")
+                    });
+                    if !feature_on {
+                        self.error = Some(
+                            "gap detection is disabled — enable it in AI Center \
+                             (Features & kill switches)."
+                                .into(),
+                        );
+                    } else {
+                        db.with_write(|conn| {
+                            let _ = spp_core::jobs::enqueue_on(
+                                conn,
+                                "ai",
+                                "rebuild_gaps",
+                                "{}",
+                                3,
+                                2,
+                            );
+                        });
+                        self.error = None;
+                        self.notice = Some(
+                            "gap detection queued — reload in a few seconds to see what landed.".into(),
+                        );
+                    }
+                }
             },
         );
         if let Some(note) = &self.notice {
@@ -333,7 +377,210 @@ impl IssueRadarPage {
         match self.tab {
             Tab::Alerts => self.alerts_ui(ui),
             Tab::Clusters => self.clusters_ui(ui),
+            Tab::Gaps => self.gaps_ui(ui, db),
             Tab::Known => self.known_ui(ui, db),
+        }
+    }
+
+    /// K1: the Gaps tab — "asked often, documented nowhere" topics with
+    /// counts and examples, plus friction-derived kinds, all deterministic.
+    /// Every candidate carries approve/reject (a human decides; approving
+    /// marks the candidate only — nothing is published automatically).
+    fn gaps_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let report = self.gaps.clone();
+        if report.is_null() {
+            ui.spinner();
+            return;
+        }
+        let totals = report.get("totals").cloned().unwrap_or_default();
+        ui.horizontal(|ui| {
+            design::badge(
+                ui,
+                &format!(
+                    "{} open",
+                    totals
+                        .get("candidates")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                ),
+                BadgeTone::Warning,
+            );
+            design::badge(
+                ui,
+                &format!(
+                    "{} approved",
+                    totals.get("approved").and_then(|v| v.as_i64()).unwrap_or(0)
+                ),
+                BadgeTone::Success,
+            );
+            design::badge(
+                ui,
+                &format!(
+                    "{} rejected",
+                    totals.get("rejected").and_then(|v| v.as_i64()).unwrap_or(0)
+                ),
+                BadgeTone::Neutral,
+            );
+        });
+        let empty = report
+            .get("kinds")
+            .and_then(|k| k.as_array())
+            .map(|kinds| {
+                kinds.iter().all(|k| {
+                    k.get("candidates")
+                        .and_then(|c| c.as_array())
+                        .is_none_or(Vec::is_empty)
+                })
+            })
+            .unwrap_or(true);
+        if empty {
+            design::empty_state(
+                ui,
+                Icon::Target,
+                "(no gap candidates yet)",
+                "Run 'Detect gaps now' — repeated unresolved patterns from resolved and reopened conversations land here with counts and examples.",
+            );
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("gap-candidates")
+            .show(ui, |ui| {
+                if let Some(notes) = report.get("notes").and_then(|n| n.as_array()) {
+                    for note in notes {
+                        design::hint_text(ui, note.as_str().unwrap_or_default());
+                    }
+                    ui.add_space(6.0);
+                }
+                if let Some(kinds) = report.get("kinds").and_then(|k| k.as_array()) {
+                    for kind in kinds {
+                        let label = kind.get("label").and_then(|l| l.as_str()).unwrap_or("gaps");
+                        let candidates = kind
+                            .get("candidates")
+                            .and_then(|c| c.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        if candidates.is_empty() {
+                            continue;
+                        }
+                        design::card_titled(ui, label, None, |ui| {
+                            for candidate in &candidates {
+                                self.gap_candidate_ui(ui, db, candidate);
+                                ui.add_space(6.0);
+                            }
+                        });
+                        ui.add_space(8.0);
+                    }
+                }
+            });
+    }
+
+    /// K1: one gap candidate row — the question/topic, its occurrence count,
+    /// example conversations, the deterministic explanation, and the
+    /// approve/reject decision buttons.
+    fn gap_candidate_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        candidate: &serde_json::Value,
+    ) {
+        let id = candidate.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        let query = candidate
+            .get("query_text")
+            .and_then(|q| q.as_str())
+            .unwrap_or("(unknown topic)");
+        let count = candidate
+            .get("occurrence_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let status = candidate
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("open");
+        let explanation = candidate
+            .get("explanation")
+            .and_then(|e| e.as_str())
+            .or_else(|| {
+                candidate
+                    .get("detail")
+                    .and_then(|d| d.get("explanation"))
+                    .and_then(|e| e.as_str())
+            })
+            .unwrap_or_default();
+        ui.horizontal(|ui| {
+            design::badge(ui, &format!("{count}×"), BadgeTone::Warning);
+            ui.label(
+                egui::RichText::new(query)
+                    .strong()
+                    .color(design::tokens(ui).foreground),
+            );
+            let tone = match status {
+                "approved" => BadgeTone::Success,
+                "rejected" => BadgeTone::Neutral,
+                _ => BadgeTone::Info,
+            };
+            design::badge(ui, status, tone);
+        });
+        if !explanation.is_empty() {
+            design::hint_text(ui, explanation);
+        }
+        // Example conversations: local ids -> numbers for display.
+        let examples: Vec<i64> = candidate
+            .get("evidence_conversation_ids")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_i64()).take(5).collect())
+            .unwrap_or_default();
+        if !examples.is_empty() {
+            let numbers: Vec<String> = db.with_read(|conn| {
+                examples
+                    .iter()
+                    .filter_map(|id| {
+                        conn.query_row(
+                            "SELECT number FROM conversations WHERE id = ?1",
+                            rusqlite::params![id],
+                            |r| r.get::<_, i64>(0),
+                        )
+                        .ok()
+                    })
+                    .map(|n| format!("#{n}"))
+                    .collect()
+            });
+            ui.horizontal(|ui| {
+                design::hint_text(ui, "examples:");
+                for number in numbers {
+                    design::badge(ui, &number, BadgeTone::Neutral);
+                }
+            });
+        }
+        if status == "open" {
+            ui.horizontal(|ui| {
+                if design::button(ui, "approve", ButtonVariant::Secondary).clicked() {
+                    let decided = db
+                        .with_write(|conn| {
+                            spp_core::quality::decide_gap(conn, id, "approved", None, None)
+                        })
+                        .is_some();
+                    if decided {
+                        self.notice =
+                            Some("candidate approved — decisions survive rebuilds.".into());
+                        self.reload(db);
+                    } else {
+                        self.error = Some("approve failed — see Diagnostics.".into());
+                    }
+                }
+                if design::button(ui, "reject", ButtonVariant::Ghost).clicked() {
+                    let decided = db
+                        .with_write(|conn| {
+                            spp_core::quality::decide_gap(conn, id, "rejected", None, None)
+                        })
+                        .is_some();
+                    if decided {
+                        self.notice = Some("candidate rejected.".into());
+                        self.reload(db);
+                    } else {
+                        self.error = Some("reject failed — see Diagnostics.".into());
+                    }
+                }
+            });
         }
     }
 

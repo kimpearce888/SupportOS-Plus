@@ -66,6 +66,10 @@ pub struct ShellOptions {
     /// drain, embedding pass, maintenance). `None` in tests, where the
     /// background timers must not run.
     pub workers: Option<Arc<WorkersHost>>,
+    /// The shared vector index (A4): the same instance the workers embed
+    /// into, handed to the pages that fuse FTS + sqlite-vec hits (inbox
+    /// evidence, search, copilot chat). `None` in tests.
+    pub vector_index: Option<Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
 }
 
 /// Open the database and apply all boot migrations, returning a handle.

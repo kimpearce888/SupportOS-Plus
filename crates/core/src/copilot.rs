@@ -113,6 +113,7 @@ struct ExecutedToolCall {
 pub async fn chat(
     conn: &Connection,
     backend: &AiBackend,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
     question: &str,
     conversation_id: Option<i64>,
     session_id: Option<i64>,
@@ -254,7 +255,7 @@ pub async fn chat(
                 if executed.len() >= MAX_TOOL_CALLS as usize {
                     break;
                 }
-                let result = ai_tools::execute(conn, &tc.name, &tc.arguments);
+                let result = ai_tools::execute(conn, index, &tc.name, &tc.arguments);
                 executed.push(ExecutedToolCall {
                     name: tc.name.clone(),
                     args: tc.arguments.clone(),

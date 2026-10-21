@@ -104,7 +104,7 @@ impl AiBackend {
         }
     }
 
-    async fn chat_json(
+    pub(crate) async fn chat_json(
         &self,
         conn: &Connection,
         system: &str,
@@ -342,8 +342,8 @@ pub fn start_run(
 ) -> Result<i64> {
     conn.execute(
         "INSERT INTO ai_runs (type, conversation_id, status, model, prompt_version, input_hash,
-                              input_refs, created_at, response_json)
-         VALUES (?1, ?2, 'running', ?3, ?4, ?5, ?6, datetime('now'), '')",
+                              input_refs, created_at, started_at, response_json)
+         VALUES (?1, ?2, 'running', ?3, ?4, ?5, ?6, datetime('now'), datetime('now'), '')",
         params![
             kind,
             conversation_id,
@@ -854,6 +854,7 @@ pub struct AnalyzeOutcome {
 pub async fn analyze_ticket(
     conn: &Connection,
     backend: &AiBackend,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
     conversation_local_id: i64,
     force: bool,
 ) -> std::result::Result<AnalyzeOutcome, LmStudioError> {
@@ -875,7 +876,7 @@ pub async fn analyze_ticket(
             run_id: cached.id,
         });
     }
-    let ctx = build_evidence(conn, conversation_local_id, true)
+    let ctx = build_evidence(conn, index, conversation_local_id, true)
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
         .ok_or_else(|| LmStudioError::new("Conversation not found", false))?;
     let model = match backend {
@@ -1013,6 +1014,7 @@ pub fn parse_ticket_analysis(json: Option<&serde_json::Value>) -> Option<TicketA
 pub async fn generate_draft(
     conn: &Connection,
     backend: &AiBackend,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
     conversation_local_id: i64,
     mode: &str,
     force: bool,
@@ -1021,12 +1023,12 @@ pub async fn generate_draft(
     let analysis = match analysis_override {
         Some(a) => a.clone(),
         None => {
-            analyze_ticket(conn, backend, conversation_local_id, force)
+            analyze_ticket(conn, backend, index, conversation_local_id, force)
                 .await?
                 .analysis
         }
     };
-    let mut ctx = build_evidence(conn, conversation_local_id, false)
+    let mut ctx = build_evidence(conn, index, conversation_local_id, false)
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
         .ok_or_else(|| LmStudioError::new("Conversation not found", false))?;
     ctx.interaction_strategy = build_interaction_strategy_block(conn, conversation_local_id);
@@ -1099,6 +1101,7 @@ pub async fn generate_draft(
     let verification = match verify_draft_internal(
         conn,
         backend,
+        index,
         conversation_local_id,
         &draft_text,
         Some(&analysis),
@@ -1139,11 +1142,12 @@ pub async fn generate_draft(
 pub async fn verify_draft_internal(
     conn: &Connection,
     backend: &AiBackend,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
     conversation_local_id: i64,
     draft_text: &str,
     analysis: Option<&TicketAnalysis>,
 ) -> std::result::Result<DraftVerification, LmStudioError> {
-    let ctx = build_evidence(conn, conversation_local_id, true)
+    let ctx = build_evidence(conn, index, conversation_local_id, true)
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
         .ok_or_else(|| LmStudioError::new("Conversation not found", false))?;
     let run_id = start_run(
@@ -1225,16 +1229,11 @@ fn parse_draft_verification(json: Option<&serde_json::Value>) -> DraftVerificati
     }
 }
 
-pub async fn rewrite_draft(
-    conn: &Connection,
-    backend: &AiBackend,
-    draft_id: i64,
-    instruction: &str,
-) -> std::result::Result<String, LmStudioError> {
-    let draft = get_draft(conn, draft_id)
-        .map_err(|e| LmStudioError::new(e.to_string(), true))?
-        .ok_or_else(|| LmStudioError::new("Draft not found", false))?;
-    let instructions = match instruction {
+/// The shared rewrite-instruction map (composer AI menu + stored-draft
+/// rewrite both speak it).
+#[must_use]
+pub fn rewrite_instruction(instruction: &str) -> &'static str {
+    match instruction {
         "shorten" => {
             "Rewrite the reply to be roughly half as long while keeping every essential fact."
         }
@@ -1244,7 +1243,106 @@ pub async fn rewrite_draft(
         "warmer" => "Rewrite the reply with a warmer, friendlier tone. Keep facts identical.",
         "more_direct" => "Rewrite the reply to be more direct and concise. Keep facts identical.",
         _ => "Rewrite the reply to be more direct and concise. Keep facts identical.",
+    }
+}
+
+/// A3 composer rewrite: the raw composer text variant of [`rewrite_draft`].
+///
+/// Works on whatever the composer holds (not just stored ai_drafts rows) so
+/// the pre-send menu can transform any draft, and — unlike the stored-draft
+/// path — records an `ai_runs` row (kind `draft_rewrite`, with usage +
+/// endpoint) so the A6 usage dashboard sees every rewrite.
+pub async fn rewrite_composer_text(
+    conn: &Connection,
+    backend: &AiBackend,
+    conversation_id: Option<i64>,
+    text: &str,
+    instruction: &str,
+) -> std::result::Result<String, LmStudioError> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(LmStudioError::new(
+            "Nothing to rewrite: the draft is empty.",
+            false,
+        ));
+    }
+    let (client, model) = match backend {
+        AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
+        AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
     };
+    let messages = vec![
+        ChatMessage {
+            role: "system".into(),
+            content: "You rewrite customer support replies. Preserve all facts exactly; never add new facts. Output only the rewritten reply text.".into(),
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: format!(
+                "{}\n\nReply to rewrite:\n\"\"\"\n{}\n\"\"\"",
+                rewrite_instruction(instruction),
+                text
+            ),
+        },
+    ];
+    let run_id = start_run(
+        conn,
+        "draft_rewrite",
+        conversation_id,
+        model,
+        crate::ai_prompts::PROMPT_VERSIONS_DRAFT_REWRITE,
+        None,
+        &serde_json::json!([conversation_id, instruction]),
+    )
+    .map_err(|e| LmStudioError::new(e.to_string(), true))?;
+    let res = client
+        .chat_with_opts(
+            model,
+            &messages,
+            ChatOpts {
+                temperature: Some(0.3),
+                max_tokens: Some(1600),
+                json_mode: false,
+            },
+        )
+        .await;
+    match res {
+        Ok(res) => {
+            let rewritten = res.content.unwrap_or_default().trim().to_string();
+            if rewritten.is_empty() {
+                let _ = fail_run(conn, run_id, "The model returned an empty rewrite.");
+                return Err(LmStudioError::new(
+                    "The local model returned an empty rewrite.",
+                    false,
+                ));
+            }
+            complete_run_with_usage(
+                conn,
+                run_id,
+                &serde_json::json!({ "instruction": instruction, "output": rewritten, "output_chars": rewritten.chars().count() }),
+                res.latency_ms,
+                res.usage.as_ref(),
+                backend.endpoint_id(),
+            )
+            .map_err(|e| LmStudioError::new(e.to_string(), true))?;
+            Ok(rewritten)
+        }
+        Err(e) => {
+            let _ = fail_run(conn, run_id, &e.to_string());
+            Err(LmStudioError::new(e.to_string(), true))
+        }
+    }
+}
+
+pub async fn rewrite_draft(
+    conn: &Connection,
+    backend: &AiBackend,
+    draft_id: i64,
+    instruction: &str,
+) -> std::result::Result<String, LmStudioError> {
+    let draft = get_draft(conn, draft_id)
+        .map_err(|e| LmStudioError::new(e.to_string(), true))?
+        .ok_or_else(|| LmStudioError::new("Draft not found", false))?;
+    let instructions = rewrite_instruction(instruction);
     let (client, model) = match backend {
         AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
         AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
@@ -1903,9 +2001,10 @@ pub struct ProcessNewTicketResult {
 pub async fn process_new_ticket(
     conn: &Connection,
     backend: &AiBackend,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
     conversation_local_id: i64,
 ) -> ProcessNewTicketResult {
-    let outcome = analyze_ticket(conn, backend, conversation_local_id, false).await;
+    let outcome = analyze_ticket(conn, backend, index, conversation_local_id, false).await;
     let analysis = match outcome {
         Ok(o) => o.analysis,
         Err(e) => {
@@ -1922,7 +2021,11 @@ pub async fn process_new_ticket(
     let automatic_note =
         crate::settings::get_bool(conn, "automatic_note_enabled", false).unwrap_or(false);
     if automatic_note {
-        let similar = find_similar(conn, conversation_local_id, 3, &[]).unwrap_or_default();
+        let semantic: Vec<(i64, f64)> = match index {
+            Some(ix) => crate::ai_evidence::semantic_hits(conn, ix, conversation_local_id, 6),
+            None => Vec::new(),
+        };
+        let similar = find_similar(conn, conversation_local_id, 3, &semantic).unwrap_or_default();
         let note = build_ai_note(
             conversation_local_id,
             &analysis,
@@ -1949,6 +2052,7 @@ pub async fn process_new_ticket(
         && generate_draft(
             conn,
             backend,
+            index,
             conversation_local_id,
             "verified_answer",
             false,
@@ -2497,5 +2601,92 @@ pub async fn analyze_interaction(
                 error: Some("The local model did not return a valid support-approach JSON.".into()),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod batch13_a3_a6_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// A3: the composer rewrite refuses honestly without a backend instead of
+    /// inventing a transform, and records no run.
+    #[test]
+    fn rewrite_composer_text_refuses_without_backend() {
+        let conn = db();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let err = rt
+            .block_on(rewrite_composer_text(
+                &conn,
+                &AiBackend::Disabled,
+                None,
+                "Please check the export logs.",
+                "shorten",
+            ))
+            .expect_err("must refuse");
+        assert!(
+            err.message.contains("disabled"),
+            "the honest disabled message, got: {err_message}",
+            err_message = err.message
+        );
+        let runs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ai_runs WHERE type = 'draft_rewrite'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(runs, 0, "no run row for a refused rewrite");
+    }
+
+    /// A6: record_feedback computes the real edit distance and the draft
+    /// state advances — the edit-rate the usage dashboard renders is real.
+    #[test]
+    fn record_feedback_computes_edit_distance() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9501, 95, 'Draft conversation', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO ai_drafts (conversation_id, content, state, model)
+             VALUES (?1, 'Hello, we fixed the export timeout for you.', 'generated', 'm')",
+            params![conv],
+        )
+        .expect("draft");
+        let draft_id = conn.last_insert_rowid();
+        record_feedback(
+            &conn,
+            draft_id,
+            "Hello, we fixed the export timeout for you.",
+            "Hi — the export timeout is fixed. Reply here if it recurs.",
+            true,
+        )
+        .expect("feedback");
+        set_draft_state(&conn, draft_id, "accepted").expect("state");
+        let (distance, was_sent, state): (i64, i64, String) = conn
+            .query_row(
+                "SELECT f.edit_distance, f.was_sent, d.state
+                   FROM ai_feedback f JOIN ai_drafts d ON d.id = f.draft_id
+                  WHERE f.draft_id = ?1",
+                params![draft_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("feedback row");
+        assert!(distance > 0, "a real edit distance was computed");
+        assert_eq!(was_sent, 1);
+        assert_eq!(state, "accepted");
     }
 }

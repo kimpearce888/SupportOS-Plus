@@ -308,7 +308,12 @@ fn conv_by_number(conn: &Connection, number: i64) -> Option<(i64, Option<i64>)> 
     .ok()
 }
 
-pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
+pub fn execute(
+    conn: &Connection,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
+    name: &str,
+    args_json: &str,
+) -> Value {
     let args: serde_json::Map<String, Value> = match serde_json::from_str(if args_json.is_empty() {
         "{}"
     } else {
@@ -638,8 +643,15 @@ pub fn execute(conn: &Connection, name: &str, args_json: &str) -> Value {
             let Some((id, _)) = conv_by_number(conn, num) else {
                 return json!({ "error": "Conversation not found" });
             };
+            // A4: the agent's similar lane rides the same semantic spine as
+            // the evidence engine — FTS fused with sqlite-vec hits when the
+            // index is available, honest FTS-only otherwise.
+            let semantic: Vec<(i64, f64)> = match index {
+                Some(ix) => crate::ai_evidence::semantic_hits(conn, ix, id, 8),
+                None => Vec::new(),
+            };
             let similar =
-                crate::ai_evidence::find_similar(conn, id, limit.clamp(1, 10) as usize, &[])
+                crate::ai_evidence::find_similar(conn, id, limit.clamp(1, 10) as usize, &semantic)
                     .unwrap_or_default();
             json!(
                 similar

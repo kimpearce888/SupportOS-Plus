@@ -307,6 +307,48 @@ pub struct InboxPage {
     briefing: Vec<spp_core::ai_prompts::MemoryEntry>,
     /// The triage chip currently open for correction (A2).
     editing_chip: Option<spp_core::catalog::AiAttributeKey>,
+    /// Shared vector index (A4): lets the copilot panel's similar-issues
+    /// lane fuse FTS + sqlite-vec hits with real "semantic match" reasons.
+    vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
+    /// A3: the in-flight composer-AI job the page polls every frame
+    /// (rewrite / translate / coaching review / QA AI layer). Cleared
+    /// once the job reaches a terminal state.
+    pending_ai: Option<PendingComposerAi>,
+    /// A3: the persisted coaching review for the selected conversation
+    /// (`coaching_reviews` via `coaching::get`) — advisory, never blocks
+    /// a send.
+    coaching_review: Option<serde_json::Value>,
+    /// A3: post-resolution QA for the selected conversation (the
+    /// deterministic layer + the on-demand AI layer when run).
+    qa_review: Option<serde_json::Value>,
+    /// A3: the translate-target picker (language code).
+    translate_lang: String,
+    /// A6: provenance of the AI draft currently sitting in the composer
+    /// — (ai_drafts id, original text) — so accept, edit-distance and
+    /// reject feedback record against the real row.
+    inserted_draft: Option<(i64, String)>,
+    // ---- A5 inbox assistant (copilot chat scoped to this conversation) ----
+    /// The conversation's newest copilot session id.
+    assistant_session: Option<i64>,
+    /// The assistant message log for the selected conversation.
+    assistant_messages: Vec<serde_json::Value>,
+    /// The question being typed into the assistant.
+    assistant_input: String,
+    /// The in-flight copilot_chat job id (polled each frame).
+    assistant_pending: Option<i64>,
+    /// Last assistant error (job failure text, verbatim).
+    assistant_error: Option<String>,
+}
+
+/// One in-flight composer-AI job the inbox polls (A3/A6). Jobs carry
+/// their results in durable rows (`ai_runs` response JSON or
+/// `coaching_reviews` / `post_resolution_qa`), so the poll only needs the
+/// job row's terminal state — never a fabricated interim value.
+#[derive(Debug, Clone)]
+struct PendingComposerAi {
+    job_id: i64,
+    kind: &'static str,
+    conversation_id: i64,
 }
 
 /// One editable triage chip (A2). Attribute-backed chips open a vocab
@@ -359,7 +401,27 @@ impl InboxPage {
             triage: Vec::new(),
             briefing: Vec::new(),
             editing_chip: None,
+            vector_index: None,
+            pending_ai: None,
+            coaching_review: None,
+            qa_review: None,
+            translate_lang: "es".into(),
+            inserted_draft: None,
+            assistant_session: None,
+            assistant_messages: Vec::new(),
+            assistant_input: String::new(),
+            assistant_pending: None,
+            assistant_error: None,
         }
+    }
+
+    /// A4: receive the shared vector index (the same store the workers
+    /// embed into) so the copilot panel can fuse FTS + sqlite-vec.
+    pub fn set_vector_index(
+        &mut self,
+        index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
+    ) {
+        self.vector_index = index;
     }
 
     /// Live-update invalidation: clear the cached list; the detail is
@@ -456,7 +518,11 @@ impl InboxPage {
                     }
                 });
                 let report = if self.copilot_open {
-                    Some(spp_core::ai_local::copilot_report(conn, id))
+                    Some(spp_core::ai_local::copilot_report(
+                        conn,
+                        self.vector_index.as_deref(),
+                        id,
+                    ))
                 } else {
                     None
                 };
@@ -474,6 +540,48 @@ impl InboxPage {
                 }
                 None => {}
             }
+            // A3: coaching review + post-resolution QA ride the same reload
+            // (both are persisted rows keyed by conversation; QA computes
+            // its deterministic layer lazily on first read of a closed
+            // conversation).
+            let (coaching, qa, assistant) = db.with_read(|conn| {
+                let coaching = spp_core::coaching::get(conn, id).ok().flatten();
+                let status: Option<String> = conn
+                    .query_row(
+                        "SELECT status FROM conversations WHERE id = ?1",
+                        rusqlite::params![id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let qa = if status.as_deref() == Some("closed") {
+                    let ai_ok = !matches!(
+                        spp_core::ai_hub::backend_for_role(
+                            conn,
+                            spp_core::ai_hub::AiRole::Classify
+                        ),
+                        spp_core::ai_pipeline::AiBackend::Disabled,
+                    );
+                    spp_core::quality::get_qa(conn, id, ai_ok)
+                } else {
+                    None
+                };
+                // A5: the conversation's newest copilot session + log.
+                let session: Option<i64> = conn
+                    .query_row(
+                        "SELECT id FROM copilot_sessions WHERE conversation_id = ?1
+                          ORDER BY updated_at DESC LIMIT 1",
+                        rusqlite::params![id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let assistant = session
+                    .map(|sid| spp_core::copilot::list_messages(conn, sid))
+                    .unwrap_or_default();
+                (coaching, qa, (session, assistant))
+            });
+            self.coaching_review = coaching;
+            self.qa_review = qa;
+            (self.assistant_session, self.assistant_messages) = assistant;
             self.reload_triage(db);
         }
     }
@@ -637,6 +745,18 @@ impl InboxPage {
         self.composer_cc.clear();
         self.composer_bcc.clear();
         self.status_message = None;
+        // A3/A6: per-conversation AI state resets with the selection —
+        // provenance, pending jobs and cards belong to the previous
+        // conversation, never the new one.
+        self.inserted_draft = None;
+        self.pending_ai = None;
+        self.coaching_review = None;
+        self.qa_review = None;
+        self.assistant_session = None;
+        self.assistant_messages.clear();
+        self.assistant_input.clear();
+        self.assistant_pending = None;
+        self.assistant_error = None;
         self.reload_detail(db);
     }
 
@@ -664,6 +784,23 @@ impl InboxPage {
         };
         match &outcome {
             ActionOutcome::Success(msg) => {
+                // A6 feedback loop: sending with an inserted AI draft records
+                // accept + edit-distance against the real ai_drafts row —
+                // the edit-rate in the AI usage dashboard becomes real.
+                if let Some((draft_id, original)) = self.inserted_draft.take() {
+                    let sent = body.clone();
+                    let recorded = db.with_write(|conn| {
+                        spp_core::ai_pipeline::record_feedback(
+                            conn, draft_id, &original, &sent, true,
+                        )
+                        .and_then(|()| {
+                            spp_core::ai_pipeline::set_draft_state(conn, draft_id, "accepted")
+                        })
+                    });
+                    if let Err(e) = recorded {
+                        tracing::warn!(error = %e, "draft feedback recording failed (non-fatal)");
+                    }
+                }
                 self.status_message = Some(msg.clone());
                 self.status_is_error = false;
                 self.composer_body.clear();
@@ -754,6 +891,12 @@ impl InboxPage {
         if self.selected.is_some() && self.detail.is_none() {
             self.reload_detail(db);
         }
+        // A3: resolve in-flight composer-AI jobs (rewrite / translate /
+        // coaching / QA) — results land in durable rows, the poll just
+        // moves them into the page state.
+        self.poll_pending_ai(db);
+        // A5: the conversation-scoped assistant poll.
+        self.poll_assistant(db);
 
         let subtitle = format!("{} of {} conversations", self.list.len(), self.total);
         let syncing = engine.is_some_and(|e| e.is_running());
@@ -1335,8 +1478,8 @@ impl InboxPage {
                 }
             });
                 // Surface the latest LM Studio draft (if any) below the local one.
-                if let Some((draft, model)) =
-                    db.with_read(|conn| spp_core::ai_local::latest_ai_draft(conn, detail.id))
+                if let Some((draft_id, draft, model)) =
+                    db.with_read(|conn| spp_core::ai_local::latest_ai_draft_row(conn, detail.id))
                 {
                     ui.add_space(4.0);
                     design::field_label(ui, &format!("LM Studio draft ({model})"));
@@ -1352,15 +1495,348 @@ impl InboxPage {
                                 );
                             });
                     });
-                    if design::button(ui, "Insert LM Studio draft", ButtonVariant::Secondary)
+                    ui.horizontal(|ui| {
+                        if design::button(ui, "Insert LM Studio draft", ButtonVariant::Secondary)
+                            .clicked()
+                        {
+                            self.composer_mode = ComposerMode::Reply;
+                            // A6: track provenance so the send path records
+                            // accept + edit distance against this row.
+                            self.inserted_draft = Some((draft_id, draft.clone()));
+                            self.composer_body = draft.clone();
+                        }
+                        // A6: an explicit reject closes the loop for drafts
+                        // the agent never sends (state + zero-edit feedback).
+                        if design::button(ui, "Discard draft", ButtonVariant::Ghost)
+                            .on_hover_text("mark this AI draft as rejected (records feedback)")
+                            .clicked()
+                        {
+                            let rejected = db.with_write(|conn| {
+                                spp_core::ai_pipeline::record_feedback(
+                                    conn, draft_id, &draft, &draft, false,
+                                )
+                                .and_then(|()| {
+                                    spp_core::ai_pipeline::set_draft_state(
+                                        conn, draft_id, "rejected",
+                                    )
+                                })
+                            });
+                            match rejected {
+                                Ok(()) => {
+                                    self.status_message =
+                                        Some("Draft marked rejected — feedback recorded.".into());
+                                    self.status_is_error = false;
+                                }
+                                Err(e) => {
+                                    self.status_message = Some(format!("Reject failed: {e}"));
+                                    self.status_is_error = true;
+                                }
+                            }
+                        }
+                        if self
+                            .inserted_draft
+                            .as_ref()
+                            .is_some_and(|(id, _)| *id == draft_id)
+                        {
+                            design::badge(ui, "in composer", BadgeTone::Info);
+                        }
+                    });
+                }
+                // A5: the inbox assistant — the same 22-tool copilot agent
+                // scoped to this conversation. Turns run as worker jobs;
+                // answers cite the mirror rows the tools returned.
+                ui.add_space(10.0);
+                design::divider(ui);
+                design::section_title(ui, "Ask the assistant");
+                let (feature_on, agent_ok) = db.with_read(|conn| {
+                    (
+                        spp_core::ai_hub::ai_feature_enabled(conn, "copilot"),
+                        !matches!(
+                            spp_core::ai_hub::backend_for_role(
+                                conn,
+                                spp_core::ai_hub::AiRole::Agent,
+                            ),
+                            spp_core::ai_pipeline::AiBackend::Disabled,
+                        ),
+                    )
+                });
+                if !feature_on {
+                    design::hint_text(ui, "Copilot is switched off (AI Center > Features).");
+                } else if !agent_ok {
+                    design::hint_text(
+                        ui,
+                        "Route the Agent role to an endpoint to ask questions (AI Center > Model-role routing).",
+                    );
+                } else {
+                    if let Some(err) = self.assistant_error.clone() {
+                        design::error_text(ui, &format!("assistant: {err}"));
+                    }
+                    if !self.assistant_messages.is_empty() {
+                        egui::ScrollArea::vertical()
+                            .id_salt("assistant-messages")
+                            .max_height(180.0)
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                for message in &self.assistant_messages {
+                                    let role =
+                                        message.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+                                    if role == "tool" {
+                                        continue;
+                                    }
+                                    let content = message
+                                        .get("content")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    ui.horizontal(|ui| {
+                                        design::badge(
+                                            ui,
+                                            role,
+                                            if role == "assistant" {
+                                                BadgeTone::Info
+                                            } else {
+                                                BadgeTone::Neutral
+                                            },
+                                        );
+                                        ui.label(egui::RichText::new(content).small());
+                                    });
+                                }
+                            });
+                    }
+                    let busy = self.assistant_pending.is_some();
+                    ui.horizontal(|ui| {
+                        let mut question = self.assistant_input.clone();
+                        let response = ui.add_sized(
+                            [ui.available_width() - 110.0, 26.0],
+                            egui::TextEdit::singleline(&mut question)
+                                .hint_text("ask about this conversation…"),
+                        );
+                        if response.changed() {
+                            self.assistant_input = question;
+                        }
+                        if (design::button(
+                            ui,
+                            if busy { "thinking…" } else { "ask" },
+                            ButtonVariant::Primary,
+                        )
                         .clicked()
-                    {
-                        self.composer_mode = ComposerMode::Reply;
-                        self.composer_body = draft.clone();
+                            && !busy)
+                            || (ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                && response.lost_focus()
+                                && !busy)
+                        {
+                            let question = self.assistant_input.trim().to_string();
+                            if !question.is_empty() {
+                                let payload = json!({
+                                    "question": question,
+                                    "conversationId": detail.id,
+                                    "sessionId": self.assistant_session,
+                                });
+                                let job = db.with_write(|conn| {
+                                    spp_core::jobs::enqueue_on(
+                                        conn,
+                                        "ai",
+                                        "copilot_chat",
+                                        &payload.to_string(),
+                                        3,
+                                        2,
+                                    )
+                                });
+                                match job {
+                                    Ok(job_id) => {
+                                        self.assistant_pending = Some(job_id);
+                                        self.assistant_input.clear();
+                                    }
+                                    Err(e) => self.assistant_error = Some(e.to_string()),
+                                }
+                            }
+                        }
+                    });
+                    // Starter questions grounded in this conversation.
+                    let starters =
+                        db.with_read(|conn| spp_core::copilot::starter_questions(conn, detail.id));
+                    if !starters.is_empty() {
+                        ui.horizontal(|ui| {
+                            for (question, hint) in starters.iter().take(4) {
+                                if design::chip(ui, false, &truncate_chars(question, 34))
+                                    .on_hover_text(hint)
+                                    .clicked()
+                                    && self.assistant_pending.is_none()
+                                {
+                                    self.assistant_input = question.clone();
+                                }
+                            }
+                        });
                     }
                 }
             },
         );
+    }
+
+    /// Queue a composer-AI job and start polling it (A3). The payload is
+    /// built by the caller; the worker's feature/role re-checks stay
+    /// authoritative.
+    fn enqueue_composer_ai(
+        &mut self,
+        db: &DbHandle,
+        kind: &'static str,
+        payload: serde_json::Value,
+        conversation_id: i64,
+    ) {
+        let job = db.with_write(|conn| {
+            spp_core::jobs::enqueue_on(conn, "ai", kind, &payload.to_string(), 3, 2)
+        });
+        match job {
+            Ok(job_id) => {
+                self.pending_ai = Some(PendingComposerAi {
+                    job_id,
+                    kind,
+                    conversation_id,
+                });
+                self.status_message = Some(format!(
+                    "{kind} queued — the result lands here when it finishes."
+                ));
+                self.status_is_error = false;
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Could not queue {kind}: {e}"));
+                self.status_is_error = true;
+            }
+        }
+    }
+
+    /// Poll the in-flight composer-AI job (A3): completed jobs move their
+    /// durable results into page state; failed jobs surface their exact
+    /// error; running/queued jobs keep the working note.
+    fn poll_pending_ai(&mut self, db: &DbHandle) {
+        let Some(p) = self.pending_ai.clone() else {
+            return;
+        };
+        let (status, error): (String, Option<String>) = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT status, error FROM jobs WHERE id = ?1",
+                rusqlite::params![p.job_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or(("missing".into(), None))
+        });
+        match status.as_str() {
+            "queued" | "running" => {}
+            "completed" => {
+                self.pending_ai = None;
+                match p.kind {
+                    "rewrite_composer" | "translate_composer" => {
+                        let run_kind = if p.kind == "rewrite_composer" {
+                            "draft_rewrite"
+                        } else {
+                            "translation"
+                        };
+                        let output: Option<String> = db.with_read(|conn| {
+                            conn.query_row(
+                                "SELECT response_json FROM ai_runs
+                                  WHERE type = ?1 AND status = 'completed'
+                                    AND (conversation_id = ?2 OR conversation_id IS NULL)
+                                  ORDER BY id DESC LIMIT 1",
+                                rusqlite::params![run_kind, p.conversation_id],
+                                |r| r.get::<_, String>(0),
+                            )
+                            .ok()
+                            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                            .and_then(|v| {
+                                v.get("output").and_then(|o| o.as_str()).map(str::to_string)
+                            })
+                        });
+                        match output {
+                            Some(text) if !text.trim().is_empty() => {
+                                self.composer_body = text;
+                                self.status_message =
+                                    Some("Composer updated by the AI transform.".into());
+                                self.status_is_error = false;
+                            }
+                            _ => {
+                                self.status_message = Some(
+                                    "The AI transform produced no result — the feature is off or no Draft role endpoint is routed.".into(),
+                                );
+                                self.status_is_error = true;
+                            }
+                        }
+                    }
+                    "review_draft" => {
+                        self.coaching_review = db.with_read(|conn| {
+                            spp_core::coaching::get(conn, p.conversation_id)
+                                .ok()
+                                .flatten()
+                        });
+                        self.status_message =
+                            Some("Draft review finished — see the coaching card.".into());
+                        self.status_is_error = false;
+                    }
+                    "qa_ai_layer" => {
+                        self.qa_review = db.with_read(|conn| {
+                            spp_core::quality::get_qa(conn, p.conversation_id, true)
+                        });
+                        self.status_message = Some("Post-resolution QA AI review finished.".into());
+                        self.status_is_error = false;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {
+                self.pending_ai = None;
+                self.status_message = Some(format!(
+                    "AI job failed: {}",
+                    error.unwrap_or_else(|| "unknown error".into())
+                ));
+                self.status_is_error = true;
+            }
+        }
+    }
+
+    /// A5: poll the conversation-scoped assistant chat job.
+    fn poll_assistant(&mut self, db: &DbHandle) {
+        let Some(job_id) = self.assistant_pending else {
+            return;
+        };
+        let (status, error): (String, Option<String>) = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT status, error FROM jobs WHERE id = ?1",
+                rusqlite::params![job_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or(("missing".into(), None))
+        });
+        let Some(conv_id) = self.selected else {
+            self.assistant_pending = None;
+            return;
+        };
+        match status.as_str() {
+            "queued" | "running" => {}
+            "completed" => {
+                self.assistant_pending = None;
+                self.assistant_error = None;
+                let (session, messages) = db.with_read(|conn| {
+                    let session: Option<i64> = conn
+                        .query_row(
+                            "SELECT id FROM copilot_sessions WHERE conversation_id = ?1
+                              ORDER BY updated_at DESC LIMIT 1",
+                            rusqlite::params![conv_id],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    let messages = session
+                        .map(|sid| spp_core::copilot::list_messages(conn, sid))
+                        .unwrap_or_default();
+                    (session, messages)
+                });
+                self.assistant_session = session;
+                self.assistant_messages = messages;
+            }
+            _ => {
+                self.assistant_pending = None;
+                self.assistant_error = Some(
+                    error.unwrap_or_else(|| "the assistant job failed without an error".into()),
+                );
+            }
+        }
     }
 
     fn detail_body_ui(
@@ -1597,6 +2073,14 @@ impl InboxPage {
         });
         ui.add_space(8.0);
 
+        // A3: post-resolution QA for closed conversations — the
+        // deterministic checks surfaced with their honest disclaimers, plus
+        // the on-demand AI layer.
+        if let Some(qa) = self.qa_review.clone() {
+            self.qa_card_ui(ui, db, &qa, detail.id);
+            ui.add_space(8.0);
+        }
+
         // Composer with mention autocomplete.
         design::card_titled(
             ui,
@@ -1659,6 +2143,102 @@ impl InboxPage {
                     && ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Enter))
                 {
                     self.submit_composer(db, bus);
+                }
+
+                // A3: the composer AI menu — pre-send review (deterministic +
+                // AI layer), rewrites and translation. All transforms replace
+                // the composer text only after the user sees the result;
+                // nothing is sent automatically.
+                let conv_id = detail.id;
+                let busy = self.pending_ai.is_some();
+                ui.horizontal(|ui| {
+                    if design::chip_with_icon(
+                        ui,
+                        false,
+                        Icon::Sparkles,
+                        if busy { "AI working…" } else { "Review draft" },
+                    )
+                    .on_hover_text(
+                        "run the 9 deterministic coaching checks (plus the AI layer when a model is routed) — advisory only",
+                    )
+                    .clicked()
+                        && !busy
+                        && !self.composer_body.trim().is_empty()
+                    {
+                        self.enqueue_composer_ai(
+                            db,
+                            "review_draft",
+                            json!({
+                                "conversationId": conv_id,
+                                "draft": self.composer_body,
+                            }),
+                            conv_id,
+                        );
+                    }
+                    let gen_ok =
+                        db.with_read(spp_core::ai_local::generative_backend_available);
+                    if gen_ok && !busy && !self.composer_body.trim().is_empty() {
+                        for (instruction, label) in
+                            [("shorten", "Shorten"), ("expand", "Expand"), ("warmer", "Warmer")]
+                        {
+                            if design::chip(ui, false, label)
+                                .on_hover_text("rewrite the composer text with the Draft role model")
+                                .clicked()
+                            {
+                                self.enqueue_composer_ai(
+                                    db,
+                                    "rewrite_composer",
+                                    json!({
+                                        "conversationId": conv_id,
+                                        "text": self.composer_body,
+                                        "instruction": instruction,
+                                    }),
+                                    conv_id,
+                                );
+                            }
+                        }
+                        egui::ComboBox::from_id_salt("composer-translate-lang")
+                            .selected_text(self.translate_lang.as_str())
+                            .width(110.0)
+                            .show_ui(ui, |ui| {
+                                for (code, name) in
+                                    spp_core::translation::SUPPORTED_LANGUAGES
+                                {
+                                    ui.selectable_value(
+                                        &mut self.translate_lang,
+                                        code.to_string(),
+                                        format!("{code} — {name}"),
+                                    );
+                                }
+                            });
+                        if design::chip(ui, false, "Translate")
+                            .on_hover_text(
+                                "translate the composer text to the picked language (cached locally)",
+                            )
+                            .clicked()
+                        {
+                            let text: String = self
+                                .composer_body
+                                .chars()
+                                .take(8000)
+                                .collect();
+                            self.enqueue_composer_ai(
+                                db,
+                                "translate_composer",
+                                json!({
+                                    "conversationId": conv_id,
+                                    "text": text,
+                                    "targetLang": self.translate_lang,
+                                }),
+                                conv_id,
+                            );
+                        }
+                    }
+                });
+                // A3: the coaching card — the persisted review of the draft,
+                // advisory only, refreshed by "Review draft".
+                if let Some(review) = self.coaching_review.clone() {
+                    self.coaching_review_ui(ui, &review);
                 }
 
                 // Mention popup.
@@ -1735,6 +2315,199 @@ impl InboxPage {
                         }
                     });
                 });
+            },
+        );
+    }
+}
+
+impl InboxPage {
+    /// A3: the coaching review card — the 9 deterministic checks + AI layer
+    /// of the persisted `coaching_reviews` row. Advisory only: it never
+    /// blocks a send and says so.
+    fn coaching_review_ui(&mut self, ui: &mut egui::Ui, review: &serde_json::Value) {
+        let summary = review.get("summary").cloned().unwrap_or_default();
+        let flagged = summary.get("flagged").and_then(|v| v.as_i64()).unwrap_or(0);
+        let checks_run = summary
+            .get("checks_run")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let ai = review.get("ai").cloned().unwrap_or_default();
+        let ai_available = ai
+            .get("available")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        design::card_titled(
+            ui,
+            "Draft coaching",
+            Some("advisory — never blocks sending"),
+            |ui| {
+                ui.horizontal(|ui| {
+                    let tone = if flagged > 0 {
+                        BadgeTone::Warning
+                    } else {
+                        BadgeTone::Success
+                    };
+                    design::badge(ui, &format!("{flagged} flagged"), tone);
+                    design::hint_text(ui, &format!("{checks_run} checks ran"));
+                    if ai_available {
+                        design::badge(
+                            ui,
+                            &format!(
+                                "AI layer: {}",
+                                ai.get("model").and_then(|m| m.as_str()).unwrap_or("routed")
+                            ),
+                            BadgeTone::Info,
+                        );
+                    } else {
+                        design::badge(
+                            ui,
+                            "AI layer: none (deterministic only)",
+                            BadgeTone::Neutral,
+                        );
+                    }
+                    if let Some(note) = review.get("note").and_then(|n| n.as_str()) {
+                        design::hint_text(ui, note);
+                    }
+                });
+                if let Some(checks) = review.get("checks").and_then(|c| c.as_array()) {
+                    egui::ScrollArea::vertical()
+                        .id_salt("coaching-checks")
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            for check in checks {
+                                let label = check
+                                    .get("label")
+                                    .and_then(|l| l.as_str())
+                                    .unwrap_or("check");
+                                let status = check
+                                    .get("status")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("unavailable");
+                                let detail = check
+                                    .get("detail")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or_default();
+                                ui.horizontal(|ui| {
+                                    let tone = match status {
+                                        "flagged" => BadgeTone::Warning,
+                                        "pass" => BadgeTone::Success,
+                                        _ => BadgeTone::Neutral,
+                                    };
+                                    design::badge(ui, status, tone);
+                                    ui.label(
+                                        egui::RichText::new(label)
+                                            .small()
+                                            .color(design::tokens(ui).foreground),
+                                    );
+                                });
+                                if !detail.is_empty() {
+                                    design::hint_text(ui, &truncate_chars(detail, 220));
+                                }
+                                ui.add_space(2.0);
+                            }
+                        });
+                }
+            },
+        );
+    }
+
+    /// A3: the post-resolution QA card for closed conversations —
+    /// deterministic checks with their honest disclaimers, the AI layer
+    /// when it has run, and the on-demand "Run AI review" button.
+    fn qa_card_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        qa: &serde_json::Value,
+        conversation_id: i64,
+    ) {
+        let deterministic = qa.get("deterministic").cloned().unwrap_or_default();
+        let ai_available = qa
+            .get("ai_available")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let has_ai = qa.get("ai").is_some();
+        let busy = self
+            .pending_ai
+            .as_ref()
+            .is_some_and(|p| p.kind == "qa_ai_layer");
+        design::card_titled(
+            ui,
+            "Post-resolution QA",
+            Some("computed locally from the mirrored thread"),
+            |ui| {
+                egui::Grid::new("qa-deterministic")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        for (key, label) in [
+                            ("back_and_forth_count", "Back-and-forth messages"),
+                            ("repeated_information_count", "Repeated information"),
+                            ("messages_after_close", "Messages after close"),
+                            ("handoff_count", "Handoffs"),
+                            ("first_response_minutes", "First response (min)"),
+                            ("resolution_minutes", "Resolution (min)"),
+                        ] {
+                            let value = deterministic
+                                .get(key)
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "—".into());
+                            design::field_label(ui, label);
+                            ui.label(
+                                egui::RichText::new(value.as_str())
+                                    .small()
+                                    .color(design::tokens(ui).foreground),
+                            );
+                            ui.end_row();
+                        }
+                    });
+                if let Some(disclaimer) = deterministic
+                    .get("computed_honestly")
+                    .and_then(|d| d.as_str())
+                {
+                    design::hint_text(ui, disclaimer);
+                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if has_ai {
+                        design::badge(ui, "AI review: present", BadgeTone::Success);
+                    } else if ai_available {
+                        if busy {
+                            design::hint_text(ui, "AI review running…");
+                        } else if design::button(ui, "Run AI review", ButtonVariant::Outline)
+                            .on_hover_text(
+                                "the AI layer reads the transcript and answers: did the reply resolve it, is it evidence-grounded",
+                            )
+                            .clicked()
+                        {
+                            self.enqueue_composer_ai(
+                                db,
+                                "qa_ai_layer",
+                                json!({ "conversationId": conversation_id }),
+                                conversation_id,
+                            );
+                        }
+                    } else {
+                        design::hint_text(
+                            ui,
+                            "AI review needs a routed Classify role (AI Center > Model-role routing).",
+                        );
+                    }
+                    if let Some(at) = qa.get("recomputed_at").and_then(|a| a.as_str()) {
+                        design::hint_text(ui, &format!("AI layer recomputed {at}"));
+                    }
+                });
+                if let Some(ai) = qa.get("ai") {
+                    ui.add_space(4.0);
+                    if let Some(answered) = ai.get("answered").and_then(|a| a.as_str()) {
+                        design::hint_text(ui, &format!("answered: {answered}"));
+                    }
+                    if let Some(evidence) = ai.get("evidence_supported").and_then(|a| a.as_str()) {
+                        design::hint_text(ui, &format!("evidence-supported: {evidence}"));
+                    }
+                    if let Some(reason) = ai.get("kb_reason").and_then(|a| a.as_str()) {
+                        design::hint_text(ui, &format!("KB suggestion: {reason}"));
+                    }
+                }
             },
         );
     }

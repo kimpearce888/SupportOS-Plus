@@ -70,7 +70,7 @@ fn main() {
         boot.provider.clone(),
         bus.clone(),
         app_config.data_dir.clone(),
-        Some(vector_index),
+        Some(vector_index.clone()),
     ) {
         Ok(host) => host,
         Err(e) => {
@@ -130,6 +130,7 @@ fn main() {
         sync: Some(boot.engine),
         handle: Some(boot.handle),
         workers: Some(std::sync::Arc::new(_workers)),
+        vector_index: Some(vector_index),
     };
 
     // CI smoke hook (AppImage job): verifies the full boot chain —

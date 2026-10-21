@@ -10,6 +10,9 @@ pub const PROMPT_VERSIONS_INTERACTION_OBSERVATION: &str = "interaction_observati
 pub const PROMPT_VERSIONS_INTERACTION_RECOMMENDATION: &str = "interaction_recommendation_v1";
 pub const PROMPT_VERSIONS_ATTRIBUTE_EXTRACTION: &str = "attribute_extraction_v1";
 pub const PROMPT_VERSIONS_COPILOT_CHAT: &str = "copilot_chat_v1";
+pub const PROMPT_VERSIONS_DRAFT_REWRITE: &str = "draft_rewrite_v1";
+pub const PROMPT_VERSIONS_TRANSLATION: &str = "translation_v1";
+pub const PROMPT_VERSIONS_GOLDEN_EVAL: &str = "golden_eval_v1";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TicketAnalysis {
