@@ -1344,3 +1344,78 @@ capability detection, and the honest happiness/CSAT path.
 - The empty-provider report fabrication removal is the batch's one
   behavioral regression risk: the UI never called the four named
   methods (grep-verified), so no surface changes.
+
+## Batch 15 (final) — 2026-10-21 — Phase P complete: P2, P3, P4, P5 → v1.7.0
+
+The last batch — four items, not five, because the plan is otherwise
+exhausted (Rule 6). With it, every work item of the approved v2 blueprint
+(Phases R, A, K, P) has passed through this file, and the engagement's one
+remaining owner action is the token revocation noted under P5.
+
+**P2 — live chat.** Chats arrive through the five `beacon.chat.*` webhook
+events (Help Scout has no chat list endpoint — the webhook IS the data
+path) into a new local mirror (m059) that keeps ended chats, because the
+platform stops serving them (`GET /v2/chats/{id}` answers 404 once a chat
+collapses into a conversation). Sending uses the documented
+`PUT /v2/chats/{id}/messages/{uuid}` contract with a caller-generated
+message id, so a retry after a timeout can never double-send (the
+platform's 422 "id value is already in use" answer is treated as
+delivered). The send box enforces the platform's assigned-agent rule in
+plain language — unassigned chats note that sending accepts them, chats
+held by another agent are blocked with the 400 reason, ended chats point
+at the conversation they became. The Live chats page sits in the Workspace
+nav group, with the SyncCompleted/ConversationUpdated invalidations wired.
+
+**P3 — the library surfaces.** Saved replies become manageable from
+Operations: create, edit and delete go straight to the platform
+(`POST`/`PUT`/`DELETE /v2/mailboxes/{id}/saved-replies`, the platform's
+required `name` enforced), and the table re-reads the platform's
+post-write list, never an optimistic local edit. Workflows, synced all
+along but invisible, surface with their type/status and a run action
+(`POST /v2/workflows/{id}/run`) that resolves the conversation number
+from the local mirror.
+
+**P4 — the webhook relay guard (closes D21).** A silently deactivated
+Help Scout webhook now heals itself: the health check lists the account's
+hooks, verifies ours is registered, enabled and subscribed to the events
+the app processes, and re-registers it (with the stored secret, capped at
+the platform's 40 characters) when the platform dropped, disabled or
+pruned it — then removes the stale twin. It runs every ~6 hours and on
+demand (Settings → "check now"), and its outcome surfaces in Settings and
+Sync Health. The user-run tunnel guide lives next to it: the listener
+stays loopback-only by design, the card documents cloudflared/ngrok/ssh
+relays, the probe that proves the chain (a POST to the webhook endpoint
+must answer 401), and the honest limit that the API never reveals a
+hook's stored secret, so a rotated local secret needs a re-register.
+
+**P5 — remote and release hygiene.** Release cadence verified end to
+end: v1.7.0 ships through the same CI + Release pipeline as v1.4.0 — the
+code commit below went through both CI jobs green, then the tag ran the
+Release workflow that builds, smokes and publishes the artifacts. Token
+rotation reminder delivered to the owner with the final batch report: the
+GitHub token used for pushes (`ghp_Hx0B…`) must be revoked by the owner
+now that the engagement's plan is exhausted.
+
+**Verification (Rule 5).**
+
+- Local gates (toolchain 1.99.1): `cargo fmt --all --check` clean;
+  `cargo clippy --workspace --all-targets -- -D warnings` clean;
+  `cargo test --workspace` — app-shell 169 passed, core 273 passed +
+  4 ignored, catalog 6 passed; sandbox feature: clippy clean, tests
+  278 passed + 4 ignored; `cargo deny check advisories licenses` ok;
+  `python3 scripts/gate_no_simulation.py` clean.
+- Release build (release profile, sandbox feature) completed and
+  `SPP_SMOKE=1` on the locally built binary exited 0 — the boot chain
+  (logging, single-instance lock, migrations, background workers,
+  loopback listener, clean shutdown) output archived in the batch log.
+- Honest environment note: the local AppImage pack step still refuses —
+  the sandbox host lacks libxkbcommon-x11.so.0/libxcb-xkb.so.1 and has
+  no root to install them (the xtask's designed error, not a code
+  defect). CI's packages job apt-installs exactly those libs and runs
+  both smokes on the runner — the same verification model as batches
+  12–14.
+- Security: the staged diff was token-scanned clean before the push (no
+  credentials in the commit).
+- Runner verification: code commit `4850f71af8156539d22936b6eb39385f96470645` — `CI run 39625936192 (CI): success`.
+  v1.7.0 released: `release run 39627683265 (Release): success; published 4 assets: BUILD-INFO.txt (0 KB), SHA256SUMS.txt (0 KB), SupportOS-Plus-1.7.0-x86_64.AppImage (12234 KB), supportos-plus_1.7.0_amd64.deb (9715 KB)`.
+

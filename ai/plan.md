@@ -13,18 +13,21 @@ audit records of 2026-10-21). Owner decision defaults D-a..D-g apply as recorded
 
 **Phase R — Prove It (v1.4.0): trust and truth**
 
-*(R6, R7, R8 moved to progress.md — active batch 12.)*
+Complete — R1–R5 in batch 11; R6–R8 in batch 12. Released as v1.4.0 (2026-10-21).
 
 **Phase A — Lights On (v1.5.0): the AI becomes real**
 
-*(A1, A2 completed in batch 12; A3–A6 completed in batch 13. Phase A — "Lights On" — is complete.)*
+Complete — A1, A2 in batch 12; A3–A6 (+ K1) in batch 13.
 
 **Phase K — Learn & Advise (v1.6.0): the knowledge loop**
 
-*(K1 completed in batch 13; K2, K3, K4, K5 completed in batch 14. Phase K — "Learn &
-Advise" — is complete.)*
+Complete — K2–K5 (+ P1) in batch 14.
 
 **Phase P — Power & Polish (v1.7.0): the long tail, honestly**
 
-*(P1 completed in batch 14; P2, P3, P4, P5 moved to progress.md — active batch 15,
-the final batch: fewer than five only because the plan is otherwise exhausted.)*
+Complete — P2–P5 in batch 15, the final batch. Released as v1.7.0 (2026-10-21).
+
+---
+
+The plan is exhausted (Rule 6: every item processed). No further work items exist.
+The one remaining owner action is the GitHub token revocation noted under P5.
