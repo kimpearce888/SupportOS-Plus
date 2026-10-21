@@ -53,6 +53,15 @@ pub struct WebhookQueue {
     pub duplicates: i64,
 }
 
+/// The P4 webhook health snapshot: the last check's verdict, as the
+/// status card renders it (source: `spp_core::webhook_health`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct WebhookHealthSnapshot {
+    pub verdict: String,
+    pub detail: String,
+    pub checked_at: String,
+}
+
 /// The full sync health status model.
 #[derive(Debug, Clone, Default)]
 pub struct SyncStatus {
@@ -61,6 +70,7 @@ pub struct SyncStatus {
     pub checkpoints: Vec<CheckpointRow>,
     pub runs: Vec<RunRow>,
     pub webhooks: WebhookQueue,
+    pub webhook_health: Option<WebhookHealthSnapshot>,
 }
 
 /// Load the status model (typed port of `/api/sync/status`).
@@ -136,12 +146,22 @@ pub fn load_status(conn: &Connection) -> SyncStatus {
         )
         .unwrap_or_default();
 
+    let webhook_health = spp_core::webhook_health::load_outcome(conn)
+        .ok()
+        .flatten()
+        .map(|o| WebhookHealthSnapshot {
+            verdict: o.verdict,
+            detail: o.detail,
+            checked_at: o.checked_at,
+        });
+
     SyncStatus {
         state,
         last_success,
         checkpoints,
         runs,
         webhooks,
+        webhook_health,
     }
 }
 
@@ -418,6 +438,17 @@ impl SyncHealthPage {
                     status.webhooks.duplicates
                 ),
             );
+            // P4: the self-healing guard's last verdict — a re-registered
+            // hook is the visible trace of a silent platform deactivation.
+            if let Some(health) = &status.webhook_health {
+                design::hint_text(
+                    ui,
+                    &format!(
+                        "webhook health: {} · checked {} · {}",
+                        health.verdict, health.checked_at, health.detail
+                    ),
+                );
+            }
         });
         ui.add_space(8.0);
 
@@ -627,5 +658,21 @@ mod tests {
         assert_eq!(str_field(&v, "state"), "idle");
         assert_eq!(opt_str_field(&v, "last_success"), None);
         assert_eq!(i64_field(&v, "total"), 5);
+    }
+
+    #[test]
+    fn webhook_health_outcome_surfaces_in_the_status_model() {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
+        spp_core::bootstrap::apply_all(&mut conn).expect("migrations");
+        assert!(
+            load_status(&conn).webhook_health.is_none(),
+            "no check has run yet"
+        );
+        let outcome = spp_core::webhook_health::not_configured_outcome("probe: no relay URL");
+        spp_core::webhook_health::store_outcome(&conn, &outcome).expect("store outcome");
+        let status = load_status(&conn);
+        let health = status.webhook_health.expect("outcome surfaced");
+        assert_eq!(health.verdict, "not_configured");
+        assert_eq!(health.detail, "probe: no relay URL");
     }
 }

@@ -36,6 +36,7 @@ use crate::pages::inbox::InboxPage;
 use crate::pages::incidents::IncidentsPage;
 use crate::pages::issue_radar::IssueRadarPage;
 use crate::pages::knowledge::KnowledgePage;
+use crate::pages::live_chats::LiveChatsPage;
 use crate::pages::notifications::NotificationsPage;
 use crate::pages::onboarding::OnboardingPage;
 use crate::pages::operations::OperationsPage;
@@ -69,6 +70,7 @@ pub struct ShellApp {
     page: PageKey,
     dashboard: DashboardPage,
     inbox: InboxPage,
+    live_chats: LiveChatsPage,
     customers: CustomersPage,
     knowledge: KnowledgePage,
     reports: ReportsPage,
@@ -160,6 +162,7 @@ impl ShellApp {
             page: PageKey::Dashboard,
             dashboard: DashboardPage::new(),
             inbox,
+            live_chats: LiveChatsPage::new(),
             customers: CustomersPage::new(),
             knowledge,
             reports: ReportsPage::new(),
@@ -194,6 +197,7 @@ impl ShellApp {
             match page {
                 PageKey::Dashboard => self.dashboard.invalidate(),
                 PageKey::Inbox => self.inbox.invalidate(),
+                PageKey::LiveChats => self.live_chats.invalidate(),
                 PageKey::Customers => self.customers.invalidate(),
                 PageKey::Knowledge => self.knowledge.invalidate(),
                 PageKey::Reports => self.reports.invalidate(),
@@ -620,6 +624,9 @@ impl eframe::App for ShellApp {
                                     PageKey::Reports => {
                                         self.reports.ui(ui, &self.db, sync.as_ref());
                                     }
+                                    PageKey::LiveChats => {
+                                        self.live_chats.ui(ui, &self.db);
+                                    }
                                     PageKey::Operations => {
                                         nav = self.operations.ui(ui, &self.db);
                                     }
@@ -719,7 +726,12 @@ fn sync_completed_toast(
 const NAV_GROUPS: &[(&str, &[PageKey])] = &[
     (
         "Workspace",
-        &[PageKey::Dashboard, PageKey::Inbox, PageKey::Operations],
+        &[
+            PageKey::Dashboard,
+            PageKey::Inbox,
+            PageKey::LiveChats,
+            PageKey::Operations,
+        ],
     ),
     (
         "Customers & knowledge",
@@ -1230,7 +1242,7 @@ mod tests {
 
     #[test]
     fn every_page_key_has_a_label_and_covers_the_full_surface() {
-        assert_eq!(PageKey::all().len(), 22);
+        assert_eq!(PageKey::all().len(), 23);
         for key in PageKey::all() {
             assert!(!key.label().is_empty());
         }

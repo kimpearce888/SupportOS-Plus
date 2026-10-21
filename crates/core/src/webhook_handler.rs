@@ -149,6 +149,37 @@ pub fn process_event(conn: &Connection, row_id: i64, event_type: &str, raw: &str
         "user.status.changed" => {
             enqueued = Some(("sync_user_statuses", serde_json::json!({})));
         }
+        // P2: the five beacon.chat.* events are the only push path for
+        // live chats — Help Scout exposes no chat list endpoint — so
+        // they ingest the chat payload straight into the mirror (m059).
+        // A chat is not a conversation: the mirror keeps even ended
+        // chats, because the platform stops serving them once they
+        // collapse into a conversation.
+        "beacon.chat.created"
+        | "beacon.chat.customer.replied"
+        | "beacon.chat.agent.replied"
+        | "beacon.chat.assigned"
+        | "beacon.chat.ended" => {
+            let chat_id = payload
+                .get("chat")
+                .and_then(|c| c.get("id"))
+                .or_else(|| payload.get("id"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            match crate::chats::ingest_event(conn, event_type, &payload) {
+                Ok(()) => tracing::info!(event_type, chat_id, "beacon chat ingested"),
+                Err(e) => {
+                    tracing::error!(error = %e, event_type, "failed to ingest beacon chat");
+                    let _ = webhook::set_webhook_event_state(
+                        conn,
+                        row_id,
+                        "failed",
+                        Some(&e.to_string()),
+                    );
+                    return;
+                }
+            }
+        }
         _ => {}
     }
 
@@ -326,5 +357,59 @@ mod tests {
             crate::webhook::pending_event_count(&conn).expect("pending count"),
             0
         );
+    }
+
+    #[test]
+    fn beacon_chat_events_ingest_into_the_mirror() {
+        let conn = fresh_conn();
+        let secret = b"chat-secret";
+        let body = br#"{"chat": {"id": "chat-1", "mailboxId": 3, "state": "open",
+            "customer": {"id": 7, "first": "Kim", "last": "One"},
+            "events": [{"id": "m-1", "type": "customer.message.created", "text": "hi",
+                        "createdAt": "2026-10-21T10:00:00Z"}]}}"#;
+        let sig = signed(secret, body);
+
+        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "beacon.chat.created") {
+            WebhookProcessResult::Accepted { row_id } => row_id,
+            other => panic!("expected Accepted, got {other:?}"),
+        };
+
+        let (state, chats): (String, i64) = conn
+            .query_row(
+                "SELECT processing_state,
+                        (SELECT COUNT(*) FROM beacon_chats WHERE chat_id = 'chat-1')
+                 FROM webhook_events WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("event row");
+        assert_eq!(state, "processed");
+        assert_eq!(chats, 1, "the chat payload must land in the m059 mirror");
+    }
+
+    #[test]
+    fn beacon_chat_without_a_chat_object_marks_the_event_failed() {
+        let conn = fresh_conn();
+        let secret = b"chat-secret";
+        let body = br#"{"id": 123}"#;
+        let sig = signed(secret, body);
+        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "beacon.chat.assigned")
+        {
+            WebhookProcessResult::Accepted { row_id } => row_id,
+            other => panic!("expected Accepted, got {other:?}"),
+        };
+        let state: String = conn
+            .query_row(
+                "SELECT processing_state FROM webhook_events WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| r.get(0),
+            )
+            .expect("event row");
+        assert_eq!(state, "failed");
+        // Nothing was mirrored from an id-less payload.
+        let mirrored: i64 = conn
+            .query_row("SELECT COUNT(*) FROM beacon_chats", [], |r| r.get(0))
+            .expect("mirror readable");
+        assert_eq!(mirrored, 0);
     }
 }

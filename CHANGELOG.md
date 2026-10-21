@@ -4,6 +4,95 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] — 2026-10-21
+
+The "AI becomes real, learns, and the long tail ships honestly" release:
+everything since 1.4.0 — Phases A ("Lights On"), K ("Learn & Advise") and
+P ("Power & Polish") of the v2 blueprint, complete.
+
+### Added — live chat (P2)
+
+- **A Live chats page answers Beacon visitors while the chat is still
+  open.** Chats arrive through the five `beacon.chat.*` webhook events
+  (Help Scout has no chat list endpoint — the webhook IS the data path)
+  and land in a new local mirror (m059) that keeps ended chats, because
+  the platform stops serving them (`GET /v2/chats/{id}` answers 404 once
+  a chat collapses into a conversation). Sending uses the documented
+  `PUT /v2/chats/{id}/messages/{uuid}` contract: the message id is
+  caller-generated, so a retry after a timeout can never double-send
+  (the platform's 422 "id value is already in use" answer is treated as
+  delivered). The send box enforces the platform's **assigned-agent
+  rule** in plain language — unassigned chats note that sending accepts
+  them, chats held by another agent are blocked with the 400 reason,
+  ended chats point at the conversation they became.
+
+### Added — the library surfaces (P3)
+
+- **Saved replies become manageable from Operations** — create, edit
+  and delete go straight to the platform (`POST`/`PUT`/`DELETE`
+  `/v2/mailboxes/{id}/saved-replies`, the platform's required `name`
+  enforced), and the table re-reads the platform's post-write list,
+  never an optimistic local edit. Workflows, synced all along but
+  invisible, surface with their type/status and a run action
+  (`POST /v2/workflows/{id}/run`) that resolves the conversation number
+  from the local mirror.
+
+### Added — the webhook relay guard (P4, closes D21)
+
+- **A silently deactivated Help Scout webhook now heals itself.** The
+  new health check lists the account's hooks, verifies ours is
+  registered, enabled and subscribed to the events the app processes,
+  and re-registers it (with the stored secret, capped at the platform's
+  40 characters) when the platform dropped, disabled or pruned it —
+  then removes the stale twin. It runs every ~6 hours and on demand
+  (Settings → "check now"), and its outcome surfaces in Settings and
+  Sync Health. The user-run tunnel guide lives next to it: the listener
+  stays loopback-only by design, the card documents cloudflared/ngrok/
+  ssh relays, the probe that proves the chain (`curl -X POST …/webhook
+  -d '{}'` must answer 401), and the honest limit that the API never
+  reveals a hook's stored secret, so a rotated local secret needs a
+  re-register.
+
+### Added — the AI layer (Phase A, since 1.4.0)
+
+- **A provider hub** (AI Center): local LM Studio / Ollama plus
+  user-added OpenAI-compatible endpoints (BYOK, keys in the encrypted
+  envelope), five model roles (Embed/Classify/Summarize/Draft/Agent)
+  routed per role with a legacy fallback, per-endpoint health probes,
+  a feature registry under one kill switch, and a cost ledger that
+  prices token usage per feature per day.
+- **The wire batch**: 14-key attribute extraction with human overrides,
+  inbox triage chips, real issue clustering (daily cadence + manual),
+  customer memory ("know before you reply") with a quarantine guard,
+  post-resolution QA, coaching insights, and the golden-set eval that
+  re-runs whenever the prompts or routing change.
+
+### Added — the knowledge loop (Phase K, since 1.4.0)
+
+- **AI article drafts with a human-only review queue**: gap candidates
+  become cited draft articles (`[^N]` citations, honest refusals
+  before any run row), review approves/rejects, and approved drafts
+  publish through the real Docs API with a verify re-sync.
+- **Weekly AI digests**: deterministic anomaly detection (2-sigma), fact
+  tables from SQL, narrative from the Summarize role when routed —
+  archived either way, searchable on the Reports Digest tab.
+- **The Reports API behind honest capability detection**: 32 registry
+  endpoints, one generic fetch job, a 403 → "your plan does not include
+  the Reports API" banner instead of empty charts, and a cache keyed by
+  report/range.
+- **Happiness from webhook truth (P1, closes D11)**: the satisfaction
+  webhook ingests over TCP end to end (signed, verified, persisted,
+  fetch-by-id), and the Happiness tab renders CSAT from those rows —
+  absent honestly means "none received", never "zero happened".
+
+### Fixed
+
+- `create_webhook` now reads the documented `Resource-Id` header on the
+  201 answer (previously returned 0 for every created hook).
+- Terminal job failures in the chat/report/workflow jobs carry the real
+  explanation to the jobs table (the `job_id` threading defect class
+  found and fixed while building the chat jobs).
+
 ## [1.4.0] — 2026-10-21
 
 The "trust and truth" release: Phase R of the v2 blueprint completes

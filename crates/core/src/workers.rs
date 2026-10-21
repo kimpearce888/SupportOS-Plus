@@ -1012,6 +1012,18 @@ impl WorkerManager {
                     }
                 }
             }
+            // P4 (D21): the webhook relay guard — Help Scout silently
+            // deactivates a hook after ten discarded events (a relay
+            // outage does exactly that), so the maintenance tick also
+            // enqueues the health check on a ~6-hour cadence. The job
+            // itself stamps the clock when it actually runs; the empty
+            // provider records not-configured honestly instead of
+            // hammering the API without credentials.
+            if provider_kind != "empty"
+                && crate::webhook_health::cadence_due(&conn).unwrap_or(false)
+            {
+                let _ = crate::jobs::enqueue_on(&conn, "sync", "webhook_health_check", "{}", 3, 2);
+            }
             let _ = crate::notification_sweep::sweep(&conn, Some(&bus));
             let backup_hours =
                 crate::settings::get_i64(&conn, "backup_interval_hours", 24).unwrap_or(24);
@@ -1466,6 +1478,46 @@ impl WorkerManager {
                 }
                 "fetch_hs_report" => {
                     self.run_fetch_hs_report_job(&payload).await?;
+                }
+                // Batch 15 (P2, P3, P4): live chat sends, saved reply
+                // writes, workflow runs, the webhook relay guard.
+                "send_chat_message" => {
+                    let chat_id = payload
+                        .get("chatId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let message_id = payload
+                        .get("messageId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let text = payload
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    if chat_id.is_empty() || message_id.is_empty() {
+                        let conn = self.lock();
+                        jobs::fail(
+                            &conn,
+                            job_id,
+                            "send_chat_message missing chatId/messageId",
+                            false,
+                        )?;
+                        return Ok(());
+                    }
+                    self.run_send_chat_message_job(job_id, &chat_id, &message_id, &text)
+                        .await?;
+                }
+                "saved_reply_write" => {
+                    self.run_saved_reply_write_job(job_id, &payload).await?;
+                }
+                "run_workflow" => {
+                    self.run_workflow_job(job_id, &payload).await?;
+                }
+                "webhook_health_check" => {
+                    self.run_webhook_health_job().await?;
                 }
                 "automation_action_awaiting_approval" => {
                     let approved = payload
@@ -3072,6 +3124,354 @@ impl WorkerManager {
             "fetch_hs_report",
         ));
         Ok(())
+    }
+
+    /// The local mirror id for a remote mailbox (0 when unknown — the
+    /// saved-reply re-read upserts against it like the sync stage does).
+    fn mailbox_local_id(conn: &rusqlite::Connection, remote_id: i64) -> i64 {
+        conn.query_row(
+            "SELECT id FROM mailboxes WHERE remote_id = ?1",
+            rusqlite::params![remote_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// P2: send one live chat message under the platform's assigned-agent
+    /// rule. The message id was generated at enqueue time and rides in
+    /// the payload, so a retry after a timeout can never double-send —
+    /// the provider treats the platform's 422 "id value is already in
+    /// use" answer as delivered. A 400 (someone else's chat) or a 404
+    /// (the chat became a conversation) is a terminal failure that
+    /// carries the platform's own reason to the jobs table; anything
+    /// else (auth, rate limit, network) stays retryable.
+    async fn run_send_chat_message_job(
+        &self,
+        job_id: i64,
+        chat_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Result<()> {
+        match self
+            .provider
+            .send_chat_message(chat_id, message_id, text)
+            .await
+        {
+            Ok(()) => {
+                {
+                    let conn = self.lock();
+                    crate::chats::record_outgoing_message(&conn, chat_id, message_id, text)?;
+                }
+                tracing::info!(operation = "send_chat_message", chat_id, "message sent");
+                use crate::events::ServerEvent;
+                self.bus.emit(&ServerEvent::conversation_updated(
+                    None,
+                    None,
+                    None,
+                    None,
+                    "send_chat_message",
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                let terminal = matches!(
+                    &e,
+                    Error::Other(b)
+                        if b.downcast_ref::<crate::helpscout_real::HsApiError>()
+                            .is_some_and(|hs| hs.status_code == 400 || hs.status_code == 404)
+                );
+                if terminal {
+                    let msg = e.to_string();
+                    let conn = self.lock();
+                    jobs::fail(&conn, job_id, &msg, false)?;
+                    return Ok(());
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// P3: one saved-reply write (create / update / delete) straight to
+    /// the platform, followed by a re-read of the mailbox's saved
+    /// replies into the mirror — never an optimistic local edit. The
+    /// platform's required `name` is validated before the round trip.
+    async fn run_saved_reply_write_job(
+        &self,
+        job_id: i64,
+        payload: &serde_json::Value,
+    ) -> Result<()> {
+        let action = payload
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let mailbox_remote_id = payload
+            .get("mailboxRemoteId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_default();
+        let name = payload
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let text = payload
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let reply_remote_id = payload.get("replyRemoteId").and_then(|v| v.as_i64());
+
+        match action.as_str() {
+            "create" => {
+                if name.trim().is_empty() {
+                    let conn = self.lock();
+                    jobs::fail(
+                        &conn,
+                        job_id,
+                        "saved reply requires a name (the platform rejects a blank one)",
+                        false,
+                    )?;
+                    return Ok(());
+                }
+                self.provider
+                    .create_saved_reply(mailbox_remote_id, &name, &text)
+                    .await?;
+            }
+            "update" => {
+                if name.trim().is_empty() {
+                    let conn = self.lock();
+                    jobs::fail(
+                        &conn,
+                        job_id,
+                        "saved reply requires a name (the platform rejects a blank one)",
+                        false,
+                    )?;
+                    return Ok(());
+                }
+                let Some(reply_id) = reply_remote_id else {
+                    let conn = self.lock();
+                    jobs::fail(
+                        &conn,
+                        job_id,
+                        "saved reply update missing replyRemoteId",
+                        false,
+                    )?;
+                    return Ok(());
+                };
+                self.provider
+                    .update_saved_reply(mailbox_remote_id, reply_id, &name, &text)
+                    .await?;
+            }
+            "delete" => {
+                let Some(reply_id) = reply_remote_id else {
+                    let conn = self.lock();
+                    jobs::fail(
+                        &conn,
+                        job_id,
+                        "saved reply delete missing replyRemoteId",
+                        false,
+                    )?;
+                    return Ok(());
+                };
+                self.provider
+                    .delete_saved_reply(mailbox_remote_id, reply_id)
+                    .await?;
+            }
+            other => {
+                let conn = self.lock();
+                jobs::fail(
+                    &conn,
+                    job_id,
+                    &format!("saved_reply_write: unknown action {other}"),
+                    false,
+                )?;
+                return Ok(());
+            }
+        }
+
+        // Re-read the platform's post-write list into the mirror: the
+        // table shows the platform's truth, never an optimistic edit.
+        let replies = self.provider.list_saved_replies(mailbox_remote_id).await?;
+        {
+            let conn = self.lock();
+            let mailbox_local = Self::mailbox_local_id(&conn, mailbox_remote_id);
+            let mailbox_local = (mailbox_local > 0).then_some(mailbox_local);
+            for reply in &replies {
+                crate::sync_engine::upsert_saved_reply(&conn, mailbox_local, reply)?;
+            }
+            tracing::info!(
+                operation = "saved_reply_write",
+                action = %action,
+                reread = replies.len(),
+                "saved reply written; platform list re-read"
+            );
+        }
+        use crate::events::ServerEvent;
+        self.bus
+            .emit(&ServerEvent::sync_completed("incremental", 0, 0));
+        Ok(())
+    }
+
+    /// P3: run one manual workflow on a conversation, resolving the
+    /// conversation number against the local mirror first (the run
+    /// action lives on the Operations Library tab). The platform
+    /// enforces same-inbox and manual-only and answers 400 otherwise —
+    /// that reason lands in the jobs table verbatim.
+    async fn run_workflow_job(&self, job_id: i64, payload: &serde_json::Value) -> Result<()> {
+        let workflow_remote_id = payload
+            .get("workflowRemoteId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_default();
+        let number = payload
+            .get("conversationNumber")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_default();
+        if workflow_remote_id <= 0 || number <= 0 {
+            let conn = self.lock();
+            jobs::fail(
+                &conn,
+                job_id,
+                "run_workflow missing workflowRemoteId/conversationNumber",
+                false,
+            )?;
+            return Ok(());
+        }
+        let conversation_remote_id: Option<i64> = {
+            let conn = self.lock();
+            conn.query_row(
+                "SELECT remote_id FROM conversations WHERE number = ?1 AND deleted_at IS NULL",
+                rusqlite::params![number],
+                |r| r.get(0),
+            )
+            .ok()
+        };
+        let Some(conversation_remote_id) = conversation_remote_id else {
+            let conn = self.lock();
+            jobs::fail(
+                &conn,
+                job_id,
+                &format!("conversation #{number} is not in the local mirror (run a sync first)"),
+                false,
+            )?;
+            return Ok(());
+        };
+        match self
+            .provider
+            .run_workflow(workflow_remote_id, conversation_remote_id)
+            .await
+        {
+            Ok(ran) => {
+                tracing::info!(
+                    operation = "run_workflow",
+                    workflow_remote_id,
+                    conversation_remote_id,
+                    ran,
+                    "workflow run requested"
+                );
+                use crate::events::ServerEvent;
+                self.bus.emit(&ServerEvent::conversation_updated(
+                    None,
+                    None,
+                    None,
+                    None,
+                    "run_workflow",
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                let terminal = matches!(
+                    &e,
+                    Error::Other(b)
+                        if b.downcast_ref::<crate::helpscout_real::HsApiError>()
+                            .is_some_and(|hs| hs.status_code == 400 || hs.status_code == 404)
+                );
+                if terminal {
+                    let msg = e.to_string();
+                    let conn = self.lock();
+                    jobs::fail(&conn, job_id, &msg, false)?;
+                    return Ok(());
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// P4 (D21): the webhook relay guard on a job — list the account's
+    /// hooks, re-register ours when the platform dropped, disabled or
+    /// pruned it (then remove the stale twin), and store the outcome for
+    /// the Settings and Sync Health surfaces. Not-configured is an
+    /// honest outcome, not an error.
+    async fn run_webhook_health_job(&self) -> Result<()> {
+        if self.provider.kind() == "empty" {
+            let conn = self.lock();
+            crate::webhook_health::store_outcome(
+                &conn,
+                &crate::webhook_health::not_configured_outcome(
+                    "no Help Scout connection — the webhook guard has nothing to check",
+                ),
+            )?;
+            return Ok(());
+        }
+        let (url, secret) = {
+            let conn = self.lock();
+            let url = crate::settings::get_string(&conn, "webhook_public_url")
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let secret = crate::settings::get_secret(&conn, "webhook_secret")
+                .ok()
+                .flatten()
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default();
+            (url, secret)
+        };
+        if url.trim().is_empty() {
+            let conn = self.lock();
+            crate::webhook_health::store_outcome(
+                &conn,
+                &crate::webhook_health::not_configured_outcome(
+                    "no relay URL configured — the listener stays loopback-only until you run a tunnel",
+                ),
+            )?;
+            return Ok(());
+        }
+        match crate::webhook_health::run_check(self.provider.as_ref(), &url, &secret).await {
+            Ok(outcome) => {
+                let healed = outcome.is_healed();
+                {
+                    let conn = self.lock();
+                    crate::webhook_health::store_outcome(&conn, &outcome)?;
+                }
+                tracing::info!(
+                    operation = "webhook_health_check",
+                    verdict = %outcome.verdict,
+                    "webhook health checked"
+                );
+                use crate::events::ServerEvent;
+                if healed {
+                    // A healed hook deserves an honest word: it means the
+                    // platform had silently stopped delivering events.
+                    self.bus.emit(&ServerEvent::error_occurred(
+                        "warn",
+                        "the webhook was re-registered (it had been dropped or disabled)",
+                        "connect",
+                        None,
+                    ));
+                } else {
+                    self.bus
+                        .emit(&ServerEvent::sync_completed("incremental", 0, 0));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let outcome = crate::webhook_health::failed_outcome(&format!(
+                    "the health check could not run: {e}"
+                ));
+                let conn = self.lock();
+                crate::webhook_health::store_outcome(&conn, &outcome)?;
+                Err(e)
+            }
+        }
     }
 
     async fn run_attachment_downloads(&self) {

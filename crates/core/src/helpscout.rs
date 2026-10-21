@@ -210,6 +210,84 @@ pub struct HsBeaconChat {
     pub updated_at: Option<String>,
 }
 
+/// P2: one participant of a live Beacon chat (customer or assignee) —
+/// the Chat API carries people as compact objects with split names.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HsChatParticipant {
+    pub remote_id: i64,
+    #[serde(default)]
+    pub first: Option<String>,
+    #[serde(default)]
+    pub last: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+impl HsChatParticipant {
+    /// Display name: "First Last", falling back to the email, then the id.
+    #[must_use]
+    pub fn name(&self) -> String {
+        let full = [self.first.as_deref(), self.last.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let trimmed = full.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+        self.email
+            .clone()
+            .unwrap_or_else(|| format!("#{}", self.remote_id))
+    }
+}
+
+/// P2: one live Beacon chat, as the Chat API and the five
+/// `beacon.chat.*` webhook events carry it. Chat ids are **UUID
+/// strings**, unlike every numeric id the Inbox API uses, and a chat is
+/// not a conversation: Help Scout creates the conversation when the chat
+/// *ends*, and `GET /v2/chats/{id}` answers 404 from then on.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HsChat {
+    /// The platform's own UUID string (never ours).
+    pub id: String,
+    #[serde(default)]
+    pub beacon_id: Option<String>,
+    #[serde(default)]
+    pub mailbox_id: i64,
+    #[serde(default)]
+    pub customer: Option<HsChatParticipant>,
+    #[serde(default)]
+    pub assignee: Option<HsChatParticipant>,
+    /// `open` or `ended`.
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub preview: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    /// The conversation the chat collapsed into once ended (parsed from
+    /// `conversationId` / `conversation.id` when the platform sends it).
+    #[serde(default)]
+    pub conversation_remote_id: Option<i64>,
+    /// The embedded event/message list: `GET /v2/chats/{id}` embeds
+    /// events, webhook payloads carry the newest state. Kept raw — the
+    /// mirror ingests them defensively and stores what is there.
+    #[serde(default)]
+    pub events: Vec<serde_json::Value>,
+}
+
+/// P2: one `beacon.chat.*` webhook event, parsed: the event name plus
+/// the chat object it carries (the five events are the platform's only
+/// push path — there is no chat list endpoint).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HsChatEvent {
+    pub event_type: String,
+    pub chat: HsChat,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsDocArticle {
     pub remote_id: i64,
@@ -489,6 +567,37 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// P3: create a saved reply on the platform
+    /// (POST /v2/mailboxes/{id}/saved-replies — the platform's required
+    /// `name` is enforced there, `text` is HTML). The default rejects: a
+    /// connection without a Help Scout link never pretends to write.
+    async fn create_saved_reply(&self, _mailbox_id: i64, _name: &str, _text: &str) -> Result<i64> {
+        Err(crate::error::Error::Other(
+            "saved reply writes require the real provider".into(),
+        ))
+    }
+
+    /// P3: update a saved reply (PUT /v2/mailboxes/{id}/saved-replies/{id}).
+    async fn update_saved_reply(
+        &self,
+        _mailbox_id: i64,
+        _saved_reply_id: i64,
+        _name: &str,
+        _text: &str,
+    ) -> Result<()> {
+        Err(crate::error::Error::Other(
+            "saved reply writes require the real provider".into(),
+        ))
+    }
+
+    /// P3: soft-delete a saved reply
+    /// (DELETE /v2/mailboxes/{id}/saved-replies/{id}).
+    async fn delete_saved_reply(&self, _mailbox_id: i64, _saved_reply_id: i64) -> Result<()> {
+        Err(crate::error::Error::Other(
+            "saved reply writes require the real provider".into(),
+        ))
+    }
+
     async fn list_workflows(&self) -> Result<Vec<HsWorkflow>> {
         Ok(Vec::new())
     }
@@ -512,6 +621,33 @@ pub trait HelpScoutProvider: Send + Sync {
     async fn delete_webhook(&self, _remote_id: i64) -> Result<bool> {
         Err(crate::error::Error::Other(
             "webhook deletion requires the real provider".into(),
+        ))
+    }
+
+    /// P2: fetch one live chat by its UUID (`GET /v2/chats/{id}` — embeds
+    /// the event list). `Ok(None)` is the honest answer for a chat that
+    /// has collapsed into a conversation (the platform answers 404 from
+    /// then on); the default covers every connection without the Chat
+    /// API.
+    async fn get_chat(&self, _chat_id: &str) -> Result<Option<HsChat>> {
+        Ok(None)
+    }
+
+    /// P2: send a live chat message
+    /// (PUT /v2/chats/{id}/messages/{uuid}). The message id is ours, so
+    /// a retry after a timeout can never double-send — the platform's
+    /// 422 "id value is already in use" answer is treated as delivered
+    /// (the real provider does exactly that). Only the assigned agent
+    /// may message: an unassigned chat is accepted by the send itself, a
+    /// chat held by someone else answers 400 with its reason.
+    async fn send_chat_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<()> {
+        Err(crate::error::Error::Other(
+            "live chat sends require the real provider".into(),
         ))
     }
 

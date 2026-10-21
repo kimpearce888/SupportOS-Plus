@@ -460,7 +460,7 @@ pub fn upsert_organization(conn: &Connection, o: &crate::helpscout::HsOrganizati
     Ok(())
 }
 
-fn upsert_saved_reply(
+pub fn upsert_saved_reply(
     conn: &Connection,
     mailbox_local: Option<i64>,
     r: &crate::helpscout::HsSavedReply,
@@ -476,7 +476,7 @@ fn upsert_saved_reply(
     Ok(())
 }
 
-fn upsert_workflow(conn: &Connection, w: &crate::helpscout::HsWorkflow) -> Result<()> {
+pub fn upsert_workflow(conn: &Connection, w: &crate::helpscout::HsWorkflow) -> Result<()> {
     let mailbox_local = w.mailbox_id.and_then(|m| local_id(conn, "mailboxes", m));
     conn.execute(
         "INSERT INTO workflows (remote_id, mailbox_local_id, name, type, status, sort_order, last_synced_at)
