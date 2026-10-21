@@ -1041,3 +1041,131 @@ from this batch (Phase R, "Prove It").
   SHA256SUMS.txt and the GitHub API digests, BUILD-INFO matches the tag
   commit `943a122…`; assets archived under
   `download/SupportOS-Plus-v1.4.0/`.
+
+### Batch 13 (A3, A4, A5, A6, K1) — 2026-10-21 (commit `a50e73c`, CI run `39548532474`: success — both jobs green: "fmt, clippy, test, deny" and "AppImage + .deb build, smoke")
+
+Phase A batch 2 plus the first Phase K item: the AI layer becomes real
+end to end — every surface wired, every feature kill-switched and
+double-gated, every new AI feature registered in the hub toggle grid.
+
+**A3. Composer AI menu, post-resolution QA pages, interaction AI stage**
+- Work: the composer gains an AI menu — pre-send draft coaching
+  ("review_draft" job → `coaching::review_draft`: 9 deterministic checks
+  + the optional AI layer) rendered as an advisory card above the send
+  row (advisory only: it never blocks a send, and eval-mode semantics are
+  untouched since coaching is a local read-only op); rewrite
+  (shorten/expand/warmer/more_direct → "rewrite_composer" job →
+  `ai_pipeline::rewrite_composer_text` behind the Draft role, refusing
+  honestly without a routed backend) and translation
+  ("translate_composer" job → `translation::translate`, 18 supported
+  targets, per-translation cache rows) as composer transforms. The
+  post-resolution QA trio goes live: maintenance warms the deterministic
+  table (`quality::rebuild_qa`, 20 h cadence, feature-gated
+  `post_resolution_qa`), the Reports page gains a Quality tab rendering
+  `qa_overview` plus per-conversation flags, and the AI layer runs
+  on demand ("qa_ai_layer" job → `compute_qa_ai_layer`, honest
+  disabled-backend error). The interaction-intelligence AI stage rides
+  the already-wired heuristic stage: `on_conversation_changed` enqueues
+  "analyze_interaction" (feature `interaction_intelligence`) →
+  `ai_pipeline::analyze_interaction`'s two-stage
+  observation+recommendation merged onto the heuristic card, and the
+  Customers profile renders the merged heuristic+AI card with the
+  recommendation.
+- Tests: `ai_pipeline::batch13_a3_a6_tests`
+  (rewrite_composer_text refuses without a backend;
+  record_feedback computes edit distance).
+
+**A4. Retrieval spine**
+- Work: `chunk_conversation` finally has its caller — the tail of
+  `ingest_conversation` re-chunks every ingested conversation
+  idempotently (chunk failures are logged, never break sync), closed
+  conversations gain a resolution-excerpt chunk type (migration m055
+  `chunk_kind`: 'thread' | 'resolution'), and fresh chunk writes enqueue
+  an "embed_conversation_chunks" job on the "embeddings" queue (once at a
+  time, feature-gated `retrieval`). Embeddings route through the hub
+  **Embed role** (`backend_for_role`), so vector generation follows the
+  provider hub instead of the legacy settings. The evidence engine's
+  semantic-hits hook receives real sqlite-vec hits: similar-issues is now
+  FTS fused with vector hits and re-ranked with match reasons; the
+  22-tool agent's similar lane rides the same spine (`ai_tools::execute`
+  takes the vector index). The Search page drops its hardcoded
+  semantic=false and fuses BM25 + vector hits via the existing RRF k=60
+  with real reported flags.
+- Tests: `embeddings::batch13_a4_tests` (chunking is idempotent; a closed
+  conversation gains the resolution chunk; an open one does not);
+  `ai_evidence::batch13_a4_evidence_tests` (semantic hits are empty
+  without a routed Embed role; they respect the feature gate);
+  `search::batch13_a4_search_tests` (fused search shape + reported
+  flags).
+
+**A5. Copilot chat on the 22-tool agent**
+- Work: the dead tool-calling agent is the AI Center Chat surface and
+  the inbox assistant. `copilot::chat` takes the vector index (its
+  similar lane is semantic-aware), a "copilot_chat" job kind runs the
+  conversation-scoped assistant inside the inbox (session per
+  conversation, message log, pending-job polling, verbatim job-failure
+  errors), and the AI Center gains the Chat section — 22 read-only
+  allowlisted tools, redacted SQL, bounded loop, sessions, citations and
+  the audit trail unchanged; answers cite real mirror rows.
+
+**A6. Feedback loop, golden-set runner, AI usage dashboard**
+- Work: the feedback loop is wired — the inbox tracks the inserted
+  draft id (provenance), a send records `record_feedback` (edit distance
+  vs the original AI text) plus `set_draft_state("accepted")`, and the
+  draft panel's accept/reject buttons write the same pair; edit-rate is
+  now real in analytics. The golden-set runner lives in the new
+  `ai_eval` module: the 9 seeded cases execute on demand and via
+  `golden_context_fingerprint` drift (prompt-version constants or model
+  role-map changes — maintenance enqueues "golden_eval" when the stored
+  fingerprint differs), each run writing `golden_test_runs` with
+  passed/failed/results; without a backend it writes an honest failed
+  run, never a fabricated pass. The AI Center gains a Usage tab: the cost
+  ledger grouped per feature/day/model/endpoint (tokens, latency, cost,
+  runs), the live edit rate and the golden scores; the ledger SQL now
+  COALESCEs started_at/created_at (start_run never populated started_at,
+  so every production run was excluded from the dashboard — fixed).
+- Tests: `ai_eval::batch13_a6_tests` (the fingerprint tracks role
+  changes; a disabled backend writes an honest failed run);
+  `ai_pipeline::batch13_a3_a6_tests` (edit distance); shell page tests
+  in `ai_center.rs`/`inbox.rs` cover the new surfaces headless.
+
+**K1. Gap detection pipeline**
+- Work: the orphaned `quality.rs` machinery is wired to the worker path —
+  maintenance (20 h cadence, feature-gated `gap_detection`,
+  provider-gated) enqueues "rebuild_gaps" → `run_gap_rebuild_job` →
+  friction findings over every conversation with a customer thread plus
+  "asked often, documented nowhere" gap candidates from resolved and
+  reopened conversations (reopen signal from the `status_changed`
+  activity events), cross-checked against the knowledge base and the
+  help-center mirror; Issue Radar gains a Gaps tab rendering the
+  deterministic candidates with counts and examples.
+- Tests: `quality::batch13_k1_tests` (gap kinds and the rebuild path).
+
+**The fix that made the batch committable** — the IT test
+`reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror`
+hung forever (and `revoke_clears_the_token_and_blocks_requests` queued
+behind it on the process-global secrets lock). Root cause, reproduced
+and confirmed with per-thread syscall dumps: every AI runner's
+`spawn_blocking` closure held the DbHandle write guard across
+`Handle::current().block_on` — the blocking-pool thread parked waiting
+for the spawning runtime to drive its future, while that runtime (a
+current-thread runtime in the tests and in the shell's worker) had its
+only thread free to block on the very same write mutex (the worker
+timer tasks whose first `interval.tick()` fires immediately) — a
+mutual wait with no exit; in production the same shape froze every DB
+write in the app for the length of each LLM round-trip (up to the 120 s
+LM Studio timeout). All 11 runners now drive their pipeline on a
+private self-contained current-thread runtime (`block_ai_pipeline`, the
+embeddings lane's "lmstudio-embed" precedent). The previously-hanging
+test passes in 1.3 s alone and inside the combined 25-test IT module.
+
+Verification (local, mirroring CI end to end): `gate_no_simulation.py`
+clean; `cargo fmt --all --check` clean; `cargo clippy --workspace
+--all-targets -- -D warnings` clean; `cargo test --workspace` — app-shell
+163 passed, core 228 passed/4 ignored (including all 25 it_helpscout
+integration tests), catalog 6 passed; sandbox clippy clean and
+`cargo test -p supportos-plus-core --features sandbox` 233 passed/4
+ignored; `cargo deny check advisories licenses` ok; `SPP_SMOKE=1` boot
+chain green on the freshly built binary (all 46 migrations incl. m055,
+boot services, workers, loopback listener; exit 0). CI run
+`39548532474` on `a50e73c`: both jobs success.
