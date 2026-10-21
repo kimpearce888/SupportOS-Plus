@@ -213,7 +213,7 @@ pub async fn chat(
     let mut model = String::from("unknown");
 
     let (client, backend_model) = match backend {
-        AiBackend::LmStudio { client, model } => (Some(client), model.clone()),
+        AiBackend::LmStudio { client, model, .. } => (Some(client), model.clone()),
         AiBackend::Disabled => (None, None),
     };
     let Some(client) = client else {

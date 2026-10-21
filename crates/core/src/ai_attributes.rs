@@ -1462,3 +1462,137 @@ pub fn deterministic_records(
 
     Ok(out)
 }
+
+/// A2 entry point: attribute extraction routed through the provider hub.
+/// With a live backend the AI layer fills intent/product/feature/issue/
+/// customer_goal/response_style; with AI disabled the deterministic
+/// layer still lands so the Attributes tab and automation conditions
+/// stay alive without any model.
+pub async fn compute_with_backend(
+    conn: &mut Connection,
+    backend: &crate::ai_pipeline::AiBackend,
+    conversation_id: i64,
+    force: bool,
+) -> Result<Option<AttributeSnapshot>> {
+    match backend {
+        crate::ai_pipeline::AiBackend::LmStudio { client, model, .. } => {
+            let provider = crate::ai_lm_studio::LmStudioProvider::with_client(client.clone());
+            compute(
+                conn,
+                &provider,
+                model.as_deref().unwrap_or(""),
+                conversation_id,
+                force,
+            )
+            .await
+        }
+        crate::ai_pipeline::AiBackend::Disabled => {
+            // No model configured: deterministic-only, still a real snapshot.
+            if let Some(prepared) = prepare_computation(conn, conversation_id, "", force)? {
+                finish_computation(conn, prepared, None, "")
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod a2_wiring_tests {
+    use super::*;
+
+    fn db_with_conversation() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9101, 91, 'Export failing again', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, created_at)
+             VALUES (?1, 'customer', ?2, datetime('now'))",
+            rusqlite::params![
+                conv,
+                "This is urgent — the export throws an error every time \
+                 and we cannot work. I want a manager. How do I fix the export timeout?"
+            ],
+        )
+        .expect("thread");
+        conn
+    }
+
+    /// A2: with no model at all, the deterministic layer still lands the
+    /// snapshot — the Attributes tab and automation conditions go live
+    /// without any endpoint configured.
+    #[test]
+    fn compute_with_disabled_backend_lands_deterministic_attributes() {
+        let mut conn = db_with_conversation();
+        let conv: i64 = conn
+            .query_row("SELECT id FROM conversations", [], |r| r.get(0))
+            .expect("conv id");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let snapshot = rt
+            .block_on(compute_with_backend(
+                &mut conn,
+                &crate::ai_pipeline::AiBackend::Disabled,
+                conv,
+                false,
+            ))
+            .expect("compute")
+            .expect("snapshot");
+        let has = |key: &str| {
+            snapshot
+                .attributes
+                .iter()
+                .any(|a| a.get("attribute").and_then(serde_json::Value::as_str) == Some(key))
+        };
+        assert!(has("urgency"), "urgency must be deterministic");
+        assert!(has("question_count"));
+        assert!(has("escalation_signal"));
+    }
+
+    /// A2: a human correction supersedes the machine row — the chip editor
+    /// and automation conditions read the corrected value.
+    #[test]
+    fn human_override_supersedes_the_machine_row() {
+        let mut conn = db_with_conversation();
+        let conv: i64 = conn
+            .query_row("SELECT id FROM conversations", [], |r| r.get(0))
+            .expect("conv id");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(compute_with_backend(
+            &mut conn,
+            &crate::ai_pipeline::AiBackend::Disabled,
+            conv,
+            false,
+        ))
+        .expect("compute");
+        upsert_single(
+            &mut conn,
+            conv,
+            AttributeRecord {
+                key: AiAttributeKey::Intent,
+                value: "question".into(),
+                confidence: "high",
+                source: "human",
+                evidence: Vec::new(),
+                run_id: None,
+            },
+        )
+        .expect("override");
+        let current = current_for_conversation(&conn, conv).expect("rows");
+        let intents: Vec<_> = current.iter().filter(|r| r.attribute == "intent").collect();
+        assert_eq!(intents.len(), 1, "the old row must be superseded");
+        assert_eq!(intents[0].value, "question");
+        assert_eq!(intents[0].source, "human");
+    }
+}

@@ -531,15 +531,21 @@ pub enum BadgeTone {
 }
 
 /// A small status badge (soft fill + colored text), shadcn Badge style.
-pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
+/// The (fill, foreground) pair a tone paints with — shared by badges and
+/// the header freshness pill so they can never drift apart.
+pub fn tone_colors(ui: &egui::Ui, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
     let t = tokens(ui);
-    let (bg, fg) = match tone {
+    match tone {
         BadgeTone::Neutral => (t.muted, t.secondary_foreground),
         BadgeTone::Success => (t.success_soft, t.success_foreground),
         BadgeTone::Warning => (t.warning_soft, t.warning_foreground),
         BadgeTone::Destructive => (t.destructive_soft, t.destructive_text),
         BadgeTone::Info => (t.info_soft, t.info_foreground),
-    };
+    }
+}
+
+pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
+    let (bg, fg) = tone_colors(ui, tone);
     let rich = egui::RichText::new(text).color(fg).size(12.0).strong();
     let galley = egui::WidgetText::from(rich).into_galley(
         ui,

@@ -240,6 +240,31 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m051_outbound_dispatch",
         apply: crate::outbound::apply_m051,
     },
+    // 1.4.0 R6: the sweep's silent no-op stages are gone (chats/attachments/
+    // ratings have no list endpoints on the platform; report_data never had
+    // a fetcher). Their stale checkpoint rows are dropped so Sync Health
+    // stops rendering stages that can never run again.
+    BootStep {
+        version: 43,
+        label: "m052_sweep_stage_cleanup",
+        apply: crate::sync_schema::apply_m052,
+    },
+    // 1.4.0 R7 (D13): the OAuth access/refresh tokens move out of the
+    // plaintext `oauth_tokens` columns into the AES-256-GCM envelope; the
+    // row keeps metadata only. Skips (unstamped) until a master key exists.
+    BootStep {
+        version: 44,
+        label: "m053_oauth_token_envelope",
+        apply: crate::helpscout_real::apply_m053_oauth_token_envelope,
+    },
+    // 1.4.0 A1: ai_runs gains endpoint_id so the provider hub's cost
+    // ledger can price every completed run against the endpoint that
+    // served it.
+    BootStep {
+        version: 45,
+        label: "m054_ai_runs_endpoint",
+        apply: crate::ai_hub::apply_m054_ai_runs_endpoint,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

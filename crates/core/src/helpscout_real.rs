@@ -311,20 +311,65 @@ struct TokenRow {
     revoked: bool,
 }
 
+/// Reads the OAuth session row. Tokens come from the encrypted envelope
+/// (R7/D13); the pre-1.4.0 plaintext columns are consulted only as a
+/// legacy fallback for databases migrated before a master key existed
+/// (m053 scrubs them the moment a key is available, so the fallback is
+/// transitional by design).
 fn token_row(conn: &Connection) -> Option<TokenRow> {
-    conn.query_row(
-        "SELECT access_token, refresh_token, expires_at, revoked FROM oauth_tokens WHERE account = 'default'",
-        [],
-        |r| {
-            Ok(TokenRow {
-                access_token: r.get(0)?,
-                refresh_token: r.get(1)?,
-                expires_at: r.get(2)?,
-                revoked: r.get::<_, i64>(3)? != 0,
-            })
-        },
-    )
-    .ok()
+    let (access_column, refresh_column, expires_at, revoked): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    ) = conn
+        .query_row(
+            "SELECT access_token, refresh_token, expires_at, revoked
+               FROM oauth_tokens WHERE account = 'default'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)?)),
+        )
+        .ok()?;
+    let access_token = crate::settings::get_secret(conn, SECRET_OAUTH_ACCESS)
+        .ok()
+        .flatten()
+        .and_then(|b| String::from_utf8(b).ok())
+        .filter(|t| !t.is_empty())
+        .or(access_column.filter(|t| !t.is_empty()));
+    let refresh_token = crate::settings::get_secret(conn, SECRET_OAUTH_REFRESH)
+        .ok()
+        .flatten()
+        .and_then(|b| String::from_utf8(b).ok())
+        .filter(|t| !t.is_empty())
+        .or(refresh_column.filter(|t| !t.is_empty()));
+    Some(TokenRow {
+        access_token,
+        refresh_token,
+        expires_at,
+        revoked: revoked != 0,
+    })
+}
+
+/// Whether a usable, non-revoked OAuth session exists. Envelope-backed;
+/// the legacy column fallback keeps pre-migration installs honest.
+pub fn has_stored_tokens(conn: &Connection) -> Result<bool> {
+    if !crate::sync_schema::table_exists(conn, "oauth_tokens")? {
+        return Ok(false);
+    }
+    // Older databases (pre account-column) get the column lazily here, the
+    // same way the token writers have always done it.
+    ensure_account_row(conn);
+    let revoked: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(revoked), 0) FROM oauth_tokens WHERE account = 'default' OR id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if revoked != 0 {
+        return Ok(false);
+    }
+    Ok(token_row(conn).is_some_and(|r| r.access_token.is_some_and(|t| !t.is_empty())))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -346,6 +391,11 @@ pub const SECRET_CLIENT_ID: &str = "helpscout_client_id";
 pub const SECRET_CLIENT_SECRET: &str = "helpscout_client_secret";
 pub const SECRET_DOCS_API_KEY: &str = "helpscout_docs_api_key";
 pub const SECRET_WEBHOOK: &str = "webhook_secret";
+/// 1.4.0 R7 (D13): the OAuth session tokens live in the encrypted envelope
+/// too. The `oauth_tokens` row keeps only non-secret metadata (expiry, scope,
+/// grant times, revoked flag); its token columns are permanently empty.
+pub const SECRET_OAUTH_ACCESS: &str = "helpscout_oauth_access_token";
+pub const SECRET_OAUTH_REFRESH: &str = "helpscout_oauth_refresh_token";
 
 /// Where a credential value came from — for the settings-page badges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -508,7 +558,8 @@ impl HsCredentials {
     }
 
     /// Remove every credential stored by the form (the clear button).
-    /// The connection tokens and demo mode are deliberately untouched.
+    /// The connection tokens are deliberately untouched (disconnect owns
+    /// them; demo mode no longer exists since 1.2.0).
     ///
     /// # Errors
     /// Fails when a delete fails (the master key is not needed to
@@ -861,9 +912,16 @@ impl RealHelpScoutProvider {
         let expires_at =
             chrono::Utc::now() + chrono::Duration::seconds(expires_in.unwrap_or(172_800));
         let expires_iso = expires_at.to_rfc3339();
-        let keep_refresh: Option<String> = refresh_token.map(|s| s.to_string());
         let conn = self.conn_lock();
         ensure_account_row(&conn);
+        // 1.4.0 R7 (D13): tokens are sealed into the AES-256-GCM envelope —
+        // the plaintext never enters the database. The row keeps metadata
+        // only (grant shape, expiry, scope, revoked). A refresh grant without
+        // a new refresh token preserves the stored one (COALESCE semantics).
+        crate::settings::set_secret(&conn, SECRET_OAUTH_ACCESS, access_token.as_bytes())?;
+        if let Some(refresh) = refresh_token.filter(|r| !r.is_empty()) {
+            crate::settings::set_secret(&conn, SECRET_OAUTH_REFRESH, refresh.as_bytes())?;
+        }
         // The migrations schema pins `id INTEGER PRIMARY KEY CHECK (id = 1)`,
         // so the row id must be supplied explicitly as 1. Without it, SQLite
         // evaluates the CHECK on the auto-assigned rowid (2 for the second
@@ -873,18 +931,13 @@ impl RealHelpScoutProvider {
         // integration tests in it_helpscout.rs).
         conn.execute(
             "INSERT INTO oauth_tokens (id, account, access_token, refresh_token, token_type, expires_at, obtained_at, scope, revoked)
-             VALUES (1, 'default', ?1, ?2, 'bearer', ?3, datetime('now'), ?4, 0)
-             ON CONFLICT(account) DO UPDATE SET access_token = excluded.access_token,
-               refresh_token = COALESCE(excluded.refresh_token, refresh_token),
+             VALUES (1, 'default', '', NULL, 'bearer', ?1, datetime('now'), ?2, 0)
+             ON CONFLICT(account) DO UPDATE SET access_token = '',
+               refresh_token = NULL,
                expires_at = excluded.expires_at, obtained_at = datetime('now'),
                scope = excluded.scope, revoked = 0",
-            rusqlite::params![access_token, keep_refresh, expires_iso, scope],
+            rusqlite::params![expires_iso, scope],
         )?;
-        let _ = conn.execute(
-            "UPDATE oauth_tokens SET access_token = ?1, refresh_token = ?2, expires_at = ?3, revoked = 0
-              WHERE account = 'default'",
-            rusqlite::params![access_token, keep_refresh, expires_iso],
-        );
         Ok(())
     }
 
@@ -932,6 +985,10 @@ impl RealHelpScoutProvider {
     pub fn revoke(&self) -> Result<()> {
         let conn = self.conn_lock();
         ensure_account_row(&conn);
+        // The tokens leave the envelope entirely — revocation must not leave
+        // readable material behind (R7/D13).
+        let _ = crate::settings::delete_secret(&conn, SECRET_OAUTH_ACCESS);
+        let _ = crate::settings::delete_secret(&conn, SECRET_OAUTH_REFRESH);
         conn.execute(
             "UPDATE oauth_tokens SET revoked = 1, access_token = '', refresh_token = NULL
               WHERE account = 'default'",
@@ -1558,7 +1615,16 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_beacon_chats(&self) -> Result<Vec<HsBeaconChat>> {
-        Ok(Vec::new())
+        // Honest stub (R6): Help Scout's Mailbox API exposes chats by id only
+        // (`GET /v2/chats/{id}`); there is no list endpoint. Chats arrive
+        // through `beacon.chat.*` webhooks and are then fetched individually.
+        // Returning an empty list here would silently pretend the platform
+        // has none.
+        Err(Error::Other(
+            "Help Scout exposes no list endpoint for chats: they arrive via \
+             beacon.chat webhooks and are fetched by id"
+                .into(),
+        ))
     }
 
     async fn list_docs(&self) -> Result<Vec<HsDocArticle>> {
@@ -1572,7 +1638,17 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_ratings(&self) -> Result<Vec<HsRating>> {
-        Ok(Vec::new())
+        // Honest stub (R6): the Mailbox API offers `GET /v2/ratings/{id}` only
+        // — there is no list-ratings endpoint. Ratings arrive via the
+        // `satisfaction.ratings` webhook (fetched by id through the same
+        // webhook job) or via the happiness reports, which require a
+        // Plus/Pro plan (see K5/P1 for the reports path).
+        Err(Error::Other(
+            "Help Scout exposes no list endpoint for ratings: they arrive via \
+             the satisfaction.ratings webhook and are fetched by id; the \
+             happiness reports require a Plus/Pro plan"
+                .into(),
+        ))
     }
 
     async fn get_rating(&self, rating_id: i64) -> Result<Option<HsRating>> {
@@ -2594,5 +2670,169 @@ mod credentials_tests {
         assert_eq!(s4.client_id, CredentialSource::NotSet);
         assert_eq!(s4.client_secret, CredentialSource::NotSet);
         assert_eq!(s4.webhook_secret, CredentialSource::NotSet);
+    }
+}
+
+#[cfg(test)]
+mod r6_honest_stub_tests {
+    use super::*;
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
+
+    /// R6 (D11): the real provider must not silently return empty lists for
+    /// resources the platform cannot list. Ratings and Beacon chats have no
+    /// list endpoints in Mailbox API 2.0; every caller deserves the truth.
+    #[test]
+    fn list_ratings_and_chats_state_the_platform_reality() {
+        let conn = Connection::open_in_memory().expect("db");
+        let provider =
+            RealHelpScoutProvider::new(crate::db::DbHandle::new(conn), HsCredentials::default());
+        let runtime = rt();
+        let ratings_err = runtime
+            .block_on(provider.list_ratings())
+            .expect_err("list_ratings must refuse to pretend the platform lists ratings");
+        assert!(
+            ratings_err
+                .to_string()
+                .contains("no list endpoint for ratings"),
+            "unexpected message: {ratings_err}"
+        );
+        let chats_err = runtime
+            .block_on(provider.list_beacon_chats())
+            .expect_err("list_beacon_chats must refuse to pretend the platform lists chats");
+        assert!(
+            chats_err.to_string().contains("no list endpoint for chats"),
+            "unexpected message: {chats_err}"
+        );
+    }
+}
+
+/// Migration m053 (boot step, R7/D13): seals pre-1.4.0 plaintext OAuth
+/// tokens into the encrypted envelope and scrubs the `oauth_tokens`
+/// columns. Skipped with a warning when no master key is available (e.g.
+/// in-memory tooling databases) — `token_row` falls back to the columns
+/// until a boot with a key completes the migration, and the next boot
+/// re-runs this step because it never stamped on failure.
+pub fn apply_m053_oauth_token_envelope(conn: &Connection) -> Result<()> {
+    if !crate::sync_schema::table_exists(conn, "oauth_tokens")? {
+        return Ok(());
+    }
+    if crate::settings::master_key_available() {
+        let mut stmt = conn.prepare(
+            "SELECT id, access_token, refresh_token FROM oauth_tokens
+              WHERE COALESCE(access_token, '') != '' OR refresh_token IS NOT NULL",
+        )?;
+        let rows: Vec<(i64, Option<String>, Option<String>)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+        for (id, access, refresh) in rows {
+            if let Some(access) = access.filter(|t| !t.is_empty()) {
+                crate::settings::set_secret(conn, SECRET_OAUTH_ACCESS, access.as_bytes())?;
+            }
+            if let Some(refresh) = refresh.filter(|t| !t.is_empty()) {
+                crate::settings::set_secret(conn, SECRET_OAUTH_REFRESH, refresh.as_bytes())?;
+            }
+            conn.execute(
+                "UPDATE oauth_tokens SET access_token = '', refresh_token = NULL WHERE id = ?1",
+                rusqlite::params![id],
+            )?;
+            tracing::info!(
+                row = id,
+                "m053: sealed OAuth tokens into the encrypted envelope"
+            );
+        }
+    } else {
+        tracing::warn!(
+            "secrets master key not initialized; OAuth tokens stay in the \
+             legacy columns until the next boot with a key (m053 pending)"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod r7_token_envelope_tests {
+    use super::*;
+
+    fn conn_with_tokens() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        ensure_account_row(&conn);
+        // A pre-1.4.0 install: the row exists and the tokens sit in the
+        // plaintext columns exactly the way save_tokens used to leave them.
+        conn.execute(
+            "INSERT INTO oauth_tokens (id, account, access_token, refresh_token, token_type, revoked)
+             VALUES (1, 'default', 'legacy-plain', 'legacy-refresh', 'bearer', 0)",
+            [],
+        )
+        .expect("seed legacy plaintext tokens");
+        conn
+    }
+
+    /// R7/D13: the migration seals pre-1.4.0 plaintext tokens into the
+    /// envelope and scrubs the columns the moment a master key exists.
+    #[test]
+    fn m053_seals_legacy_plaintext_tokens_and_scrubs_the_row() {
+        let _g = crate::settings::SECRETS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::settings::set_master_key_for_tests([7u8; 32]);
+        let conn = conn_with_tokens();
+
+        apply_m053_oauth_token_envelope(&conn).expect("m053");
+
+        let access = crate::settings::get_secret(&conn, SECRET_OAUTH_ACCESS)
+            .expect("envelope read")
+            .map(|b| String::from_utf8(b).expect("utf8"));
+        let refresh = crate::settings::get_secret(&conn, SECRET_OAUTH_REFRESH)
+            .expect("envelope read")
+            .map(|b| String::from_utf8(b).expect("utf8"));
+        assert_eq!(access.as_deref(), Some("legacy-plain"));
+        assert_eq!(refresh.as_deref(), Some("legacy-refresh"));
+        let (column_access, column_refresh): (String, Option<String>) = conn
+            .query_row(
+                "SELECT access_token, refresh_token FROM oauth_tokens WHERE account = 'default'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(column_access, "", "m053 must scrub the plaintext column");
+        assert_eq!(column_refresh, None, "m053 must scrub the plaintext column");
+        // The envelope-backed reader sees the same session as before.
+        assert!(has_stored_tokens(&conn).expect("probe"));
+    }
+
+    /// Without a master key the migration must not run half-way: the legacy
+    /// tokens stay readable through the fallback reader until a keyed boot.
+    #[test]
+    fn m053_without_a_key_leaves_the_legacy_row_intact() {
+        let _g = crate::settings::SECRETS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::settings::clear_master_key_for_tests();
+        let conn = conn_with_tokens();
+
+        apply_m053_oauth_token_envelope(&conn).expect("m053 (skip)");
+
+        let (column_access, _): (String, Option<String>) = conn
+            .query_row(
+                "SELECT access_token, refresh_token FROM oauth_tokens WHERE account = 'default'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(
+            column_access, "legacy-plain",
+            "without a key the row must be left exactly as it was"
+        );
+        assert!(has_stored_tokens(&conn).expect("probe"));
+        crate::settings::set_master_key_for_tests([7u8; 32]);
     }
 }

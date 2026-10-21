@@ -52,7 +52,9 @@ impl Default for AppConfig {
             data_dir: default_data_dir(),
             helpscout: HelpScoutConfig::default(),
             ai: AiConfig::default(),
-            sync_interval_minutes: 5,
+            // 1.4.0 R8 (D18): unified with the workers default and the
+            // SYNC_INTERVAL_MINUTES env fallback — one product default.
+            sync_interval_minutes: 1,
             loopback_port: 0,
         }
     }
@@ -277,7 +279,9 @@ pub fn load_env_config() -> EnvConfig {
             enabled: env_bool("QDRANT_ENABLED", true),
         },
         sync: EnvSync {
-            interval_minutes: env_int("SYNC_INTERVAL_MINUTES", 5),
+            // R8 (D18): one default everywhere (this env var is now consumed by the
+            // adaptive auto-sync timer as the quiet-ceiling fallback).
+            interval_minutes: env_int("SYNC_INTERVAL_MINUTES", 1),
             api_concurrency: env_int("SYNC_API_CONCURRENCY", 2),
         },
     }

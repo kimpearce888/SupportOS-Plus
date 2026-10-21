@@ -165,6 +165,10 @@ pub fn conversations_for(
 
 /// The interactive customers page state.
 pub struct CustomersPage {
+    /// R8 (D5): outcome note for the page's "Sync now" action — the
+    /// completion itself is reported by the global sync toast.
+    pub sync_note: String,
+
     mode: Mode,
     search_edit: String,
     applied_query: Option<String>,
@@ -185,6 +189,7 @@ impl CustomersPage {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            sync_note: String::new(),
             mode: Mode::Search,
             search_edit: String::new(),
             applied_query: None,
@@ -281,7 +286,12 @@ impl CustomersPage {
     }
 
     /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        engine: Option<&std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
+    ) {
         if self.stale {
             self.stale = false;
             match self.mode {
@@ -290,11 +300,41 @@ impl CustomersPage {
             }
         }
         design::page_header(ui, "Customers", None, |ui| {
-            if design::button_with_icon(ui, Icon::Refresh, "Reload", ButtonVariant::Outline)
-                .on_hover_text("re-read the local mirror (auto-refreshes on every sync)")
+            if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
+                .on_hover_text(
+                    "pull fresh data from Help Scout now — the completion toast \
+                 reports the outcome; the page re-reads on every sync anyway",
+                )
                 .clicked()
             {
-                self.invalidate();
+                // R8 (D5): this used to be a local-only "Reload" that silently
+                // re-read sqlite and looked like a refresh. It now performs a
+                // real scoped fetch and reports the outcome; the invalidation
+                // below re-reads whatever arrives.
+                match engine {
+                    Some(engine) => {
+                        if crate::pages::sync_health::spawn_sync_action(
+                            db,
+                            engine,
+                            crate::pages::sync_health::SyncAction::Incremental,
+                        ) {
+                            self.sync_note = "syncing\u{2026}".into();
+                        } else {
+                            self.sync_note = "a sync is already running".into();
+                        }
+                    }
+                    None => {
+                        self.invalidate();
+                        self.sync_note = "re-read the local mirror (no engine)".into();
+                    }
+                }
+            }
+            if !self.sync_note.is_empty() {
+                ui.label(
+                    egui::RichText::new(&self.sync_note)
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                );
             }
         });
 

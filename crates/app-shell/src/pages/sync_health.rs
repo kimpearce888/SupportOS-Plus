@@ -170,9 +170,13 @@ impl SyncAction {
 /// Onboarding and — since 1.3.0 — the "Sync now" buttons on the Inbox
 /// and Knowledge pages. Terminal state arrives via the event bus
 /// (SyncCompleted), never via the dropped thread result.
-pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) {
+///
+/// 1.4.0 (R8, D6): returns whether the action actually started — a sync
+/// in progress no longer silently swallows the click; callers tell the
+/// user and the header ring keeps the live state visible.
+pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) -> bool {
     if action != SyncAction::Cancel && engine.is_running() {
-        return;
+        return false;
     }
     let engine = Arc::clone(engine);
     let db = db.clone();
@@ -237,7 +241,9 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
             let _ =
                 spp_core::jobs::log_error(conn, "sync", "failed to spawn the sync action thread");
         });
+        return false;
     }
+    true
 }
 
 /// Kick off a Help Center (Docs API) refresh — the Knowledge page's
@@ -340,8 +346,12 @@ impl SyncHealthPage {
             self.message = Some("A sync is already running.".into());
             return;
         }
-        spawn_sync_action(db, engine, action);
-        self.message = Some(format!("{} (started in background)", action.label()));
+        // R8 (D6): the helper now reports whether it really started.
+        if spawn_sync_action(db, engine, action) {
+            self.message = Some(format!("{} (started in background)", action.label()));
+        } else {
+            self.message = Some("A sync is already running.".into());
+        }
     }
 
     /// Render the page. `engine` is the shared sync engine; `None` mirrors

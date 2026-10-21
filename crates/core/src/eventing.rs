@@ -136,10 +136,6 @@ pub fn notify_rating_received(
     ));
 }
 
-pub fn notify_ratings_refreshed(bus: &EventBus, processed: u32, fresh: u32) {
-    bus.emit(&ServerEvent::ratings_refreshed(processed, fresh));
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn notify_campaign_updated(
     bus: &EventBus,

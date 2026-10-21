@@ -16,14 +16,6 @@ pub struct RatingReceivedEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct RatingsRefreshedEvent {
-    pub processed: u32,
-    pub fresh: u32,
-    pub at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct SyncCompletedEvent {
     pub kind: String,
     pub processed: u32,
@@ -117,7 +109,6 @@ pub struct OutboundJobFinishedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ServerEvent {
     RatingReceived(RatingReceivedEvent),
-    RatingsRefreshed(RatingsRefreshedEvent),
     SyncCompleted(SyncCompletedEvent),
     SyncProgress(SyncProgressEvent),
     ConversationUpdated(ConversationUpdatedEvent),
@@ -131,7 +122,7 @@ impl ServerEvent {
     #[must_use]
     pub fn wire_name(&self) -> &'static str {
         match self {
-            Self::RatingReceived { .. } | Self::RatingsRefreshed { .. } => "ratings",
+            Self::RatingReceived { .. } => "ratings",
             Self::SyncCompleted { .. } => "sync",
             Self::SyncProgress { .. } => "sync",
             Self::ConversationUpdated { .. } => "conversation",
@@ -145,7 +136,7 @@ impl ServerEvent {
     #[must_use]
     pub fn channel(&self) -> &'static str {
         match self {
-            Self::RatingReceived { .. } | Self::RatingsRefreshed { .. } => "spp://rating/arrived",
+            Self::RatingReceived { .. } => "spp://rating/arrived",
             Self::SyncCompleted { .. } | Self::SyncProgress { .. } => "spp://sync/updated",
             Self::ConversationUpdated { .. } => "spp://sync/updated",
             Self::CampaignUpdated { .. } => "spp://campaign/updated",
@@ -159,7 +150,6 @@ impl ServerEvent {
     pub fn payload_json(&self) -> String {
         match self {
             Self::RatingReceived(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
-            Self::RatingsRefreshed(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
             Self::SyncCompleted(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
             Self::ConversationUpdated(e) => {
                 serde_json::to_string(e).unwrap_or_else(|_| "{}".into())
@@ -262,15 +252,6 @@ impl ServerEvent {
             customer_id,
             customer_name,
             comments,
-            at: Self::now_iso(),
-        })
-    }
-
-    #[must_use]
-    pub fn ratings_refreshed(processed: u32, fresh: u32) -> Self {
-        Self::RatingsRefreshed(RatingsRefreshedEvent {
-            processed,
-            fresh,
             at: Self::now_iso(),
         })
     }

@@ -429,28 +429,10 @@ pub fn require_auth(conn: &Connection, provider_kind: &str) -> Option<&'static s
     if provider_kind != "real" {
         return None;
     }
-    let has_cols: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('oauth_tokens')
-              WHERE name IN ('account', 'revoked')",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n == 2)
-        .unwrap_or(false);
-    let connected = if has_cols {
-        conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM oauth_tokens
-               WHERE (account = 'default' OR id = 1)
-                 AND access_token IS NOT NULL AND access_token != ''
-                 AND COALESCE(revoked, 0) = 0)",
-            [],
-            |r| r.get::<_, bool>(0),
-        )
-        .unwrap_or(false)
-    } else {
-        crate::oauth::has_token(conn).unwrap_or(false)
-    };
+    // 1.4.0 R7 (D13): the token itself lives in the encrypted envelope now,
+    // so the existence check goes through the same reader the provider uses
+    // (envelope first, pre-m053 plaintext columns as a transitional fallback).
+    let connected = crate::helpscout_real::has_stored_tokens(conn).unwrap_or(false);
     if connected { None } else { Some(NOT_CONNECTED) }
 }
 

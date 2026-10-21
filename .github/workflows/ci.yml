@@ -15,6 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 1.4.0 R7 (D14): production code must never reintroduce simulated/
+      # fake/demo data markers. Runs before anything expensive.
+      - name: No-simulation gate
+        run: python3 scripts/gate_no_simulation.py
+
       - name: Install pinned Rust toolchain
         # rust-toolchain.toml is the single source of truth for the exact
         # toolchain version; `rustup toolchain install` reads it directly.

@@ -166,6 +166,8 @@ pub struct IssueRadarPage {
     new_status: String,
     new_conversation_ids: String,
     error: Option<String>,
+    /// A2: outcome note for the manual clustering trigger.
+    notice: Option<String>,
 }
 
 impl IssueRadarPage {
@@ -184,6 +186,7 @@ impl IssueRadarPage {
             new_status: "investigating".into(),
             new_conversation_ids: String::new(),
             error: None,
+            notice: None,
         }
     }
 
@@ -261,8 +264,60 @@ impl IssueRadarPage {
             ui,
             "Issue Radar",
             Some("AI-derived alerts, clusters, and known issues"),
-            |_| {},
+            |ui| {
+                // A2: the clustering pipeline is real now — one click runs
+                // it on demand (a daily maintenance trigger also exists),
+                // and a reload refetches whatever has landed.
+                if crate::design::button(ui, "Cluster now", crate::design::ButtonVariant::Outline)
+                    .on_hover_text(
+                        "group the last 14 days of conversations into issue clusters \\
+                     through the Classify role (needs a routed AI endpoint)",
+                    )
+                    .clicked()
+                {
+                    let feature_on = db.with_read(|conn| {
+                        spp_core::ai_hub::ai_feature_enabled(conn, "issue_clustering")
+                    });
+                    if !feature_on {
+                        self.error = Some(
+                            "issue clustering is disabled — enable it in AI Center \\
+                             (Features & kill switches)."
+                                .into(),
+                        );
+                    } else {
+                        db.with_write(|conn| {
+                            let _ = spp_core::jobs::enqueue_on(
+                                conn,
+                                "ai",
+                                "cluster_issues",
+                                "{}",
+                                3,
+                                2,
+                            );
+                        });
+                        self.error = None;
+                        self.notice = Some(
+                            "clustering queued — reload clusters in a few seconds \\
+                             to see what landed."
+                                .into(),
+                        );
+                    }
+                }
+                if crate::design::button(
+                    ui,
+                    "Reload clusters",
+                    crate::design::ButtonVariant::Outline,
+                )
+                .clicked()
+                {
+                    self.reload(db);
+                    self.notice = None;
+                }
+            },
         );
+        if let Some(note) = &self.notice {
+            crate::design::hint_text(ui, note);
+        }
         ui.horizontal(|ui| {
             for tab in Tab::ALL {
                 if design::chip(ui, self.tab == tab, tab.label()).clicked() {

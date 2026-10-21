@@ -32,13 +32,32 @@ fn fixture_db() -> DbHandle {
     DbHandle::new(conn)
 }
 
-/// Install the process-wide secrets master key (idempotent; same pattern
-/// as the loopback unit tests, same per-process path so all tests in this
-/// binary agree on one key).
-fn install_master_key() {
-    let key_path =
-        std::env::temp_dir().join(format!("spp-it-loopback-key-{}.key", std::process::id()));
-    crate::settings::init_master_key(&key_path).expect("init master key");
+/// Hold the process-global secrets lock for the test's duration and
+/// install the deterministic master key the whole test binary shares
+/// (R7/D13: the OAuth flow and webhook-secret resolution now both touch
+/// the encrypted envelope, so the key must stay stable while a test runs;
+/// other modules clear/replace the key under this same lock).
+fn install_master_key() -> std::sync::MutexGuard<'static, ()> {
+    let guard = crate::settings::SECRETS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    crate::settings::set_master_key_for_tests([7u8; 32]);
+    guard
+}
+
+/// The OAuth tokens as stored by the envelope-backed `save_tokens`.
+fn envelope_tokens(db: &DbHandle) -> (Option<String>, Option<String>) {
+    db.with_read(|conn| {
+        let read = |key: &str| {
+            crate::settings::get_secret(conn, key)
+                .expect("envelope read")
+                .map(|b| String::from_utf8(b).expect("utf8 token"))
+        };
+        (
+            read(crate::helpscout_real::SECRET_OAUTH_ACCESS),
+            read(crate::helpscout_real::SECRET_OAUTH_REFRESH),
+        )
+    })
 }
 
 /// Minimal HTTP/1.1 client over a raw socket: send, read to EOF (the
@@ -92,7 +111,7 @@ fn get(port: u16, target: &str) -> (u16, String) {
 
 #[test]
 fn signed_webhook_roundtrip_over_tcp() {
-    install_master_key();
+    let _secrets = install_master_key();
     let db = fixture_db();
     db.with_write(|conn| crate::settings::set_secret(conn, "webhook_secret", b"top-secret"))
         .expect("store webhook secret");
@@ -162,7 +181,7 @@ fn signed_webhook_roundtrip_over_tcp() {
 
 #[test]
 fn webhook_without_configured_secret_hard_rejects() {
-    install_master_key();
+    let _secrets = install_master_key();
     let db = fixture_db(); // no webhook_secret stored
     let mut server = LoopbackServer::start(
         db.clone(),
@@ -185,7 +204,7 @@ fn webhook_without_configured_secret_hard_rejects() {
 
 #[test]
 fn webhook_burst_is_served_concurrently() {
-    install_master_key();
+    let _secrets = install_master_key();
     let db = fixture_db();
     db.with_write(|conn| crate::settings::set_secret(conn, "webhook_secret", b"burst-secret"))
         .expect("store webhook secret");
@@ -245,7 +264,7 @@ fn webhook_burst_is_served_concurrently() {
 
 #[test]
 fn oauth_authorization_code_flow_over_tcp() {
-    install_master_key();
+    let _secrets = install_master_key();
     let db = fixture_db();
 
     // Mock Help Scout: token endpoint + the connected user.
@@ -348,8 +367,12 @@ fn oauth_authorization_code_flow_over_tcp() {
         Some("test-client-secret")
     );
 
-    // Tokens persisted; the connected identity + audit row recorded.
-    let (access, refresh): (String, Option<String>) = db
+    // Tokens persisted in the envelope; the row keeps metadata only
+    // (R7/D13: no plaintext tokens in sqlite).
+    let (envelope_access, envelope_refresh) = envelope_tokens(&db);
+    assert_eq!(envelope_access.as_deref(), Some("tcp-flow-token"));
+    assert_eq!(envelope_refresh.as_deref(), Some("tcp-flow-refresh"));
+    let (access_column, refresh_column): (String, Option<String>) = db
         .with_read(|conn| {
             conn.query_row(
                 "SELECT access_token, refresh_token FROM oauth_tokens WHERE account = 'default'",
@@ -357,9 +380,9 @@ fn oauth_authorization_code_flow_over_tcp() {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
         })
-        .expect("token row");
-    assert_eq!(access, "tcp-flow-token");
-    assert_eq!(refresh.as_deref(), Some("tcp-flow-refresh"));
+        .expect("token metadata row");
+    assert_eq!(access_column, "", "the column must stay empty (R7/D13)");
+    assert_eq!(refresh_column, None, "the column must stay empty (R7/D13)");
 
     let me_id: Option<String> = db
         .with_read(|conn| {
@@ -407,7 +430,7 @@ fn oauth_authorization_code_flow_over_tcp() {
 
 #[test]
 fn oauth_callback_reports_token_endpoint_rejection() {
-    install_master_key();
+    let _secrets = install_master_key();
     let db = fixture_db();
     let mock = crate::mockserver::MockServer::start(crate::mockserver::fixed(
         crate::mockserver::MockResponse::json(400, r#"{"error":"invalid_client"}"#),
