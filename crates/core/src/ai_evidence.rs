@@ -21,6 +21,43 @@ pub struct SimilarConversation {
     pub why: Vec<String>,
 }
 
+/// Top durable customer facts, quarantine-filtered (A2 briefing feed —
+/// shared by the evidence pack and the inbox "know before you reply" panel).
+pub fn customer_memory_facts(
+    conn: &Connection,
+    customer_id: i64,
+    limit: usize,
+) -> Vec<crate::ai_prompts::MemoryEntry> {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT memory_key, memory_value, confidence
+           FROM customer_memory
+          WHERE customer_id = ?1
+          ORDER BY last_seen_at DESC
+          LIMIT ?2",
+    ) else {
+        return Vec::new();
+    };
+    stmt.query_map(params![customer_id, limit as i64], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, Option<String>>(2)?
+                .unwrap_or_else(|| "low".into()),
+        ))
+    })
+    .map(|rows| {
+        rows.filter_map(|r| r.ok())
+            .filter(|(key, value, _)| !crate::ai_memory_guard::is_quarantined(key, Some(value)))
+            .map(|(key, value, confidence)| crate::ai_prompts::MemoryEntry {
+                key,
+                value,
+                confidence,
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default()
+}
+
 pub fn build(
     conn: &Connection,
     conversation_local_id: i64,
@@ -244,6 +281,12 @@ pub fn build(
         knowledge,
         saved_replies,
         interaction_strategy: None,
+        // A2: the evidence pack carries the customer's durable facts —
+        // filtered through the memory guard so quarantined material
+        // (payment/credential/health) never reaches a prompt.
+        customer_memory: customer_id
+            .map(|cid| customer_memory_facts(conn, cid, 5))
+            .unwrap_or_default(),
     }))
 }
 
@@ -591,4 +634,81 @@ fn parse_epoch_millis(s: &str) -> i64 {
         }
     }
     0
+}
+
+#[cfg(test)]
+mod a2_memory_feed_tests {
+    use super::*;
+
+    fn db_with_customer_memory() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (70, 'Ann', 'Lee')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, customer_local_id)
+             VALUES (9201, 92, 'Billing question', 'preview', 'active', ?1)",
+            rusqlite::params![customer],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customer_memory (customer_id, memory_key, memory_value, evidence_excerpt,
+                     source_conversation_id, confidence, provenance, source, last_seen_at)
+             VALUES (?1, 'prefers short replies', 'yes — keep replies under five lines', 'from threads',
+                     NULL, 'high', 'ai_generated', 'ai', datetime('now'))",
+            rusqlite::params![customer],
+        )
+        .expect("memory");
+        conn.execute(
+            "INSERT INTO customer_memory (customer_id, memory_key, memory_value, evidence_excerpt,
+                     source_conversation_id, confidence, provenance, source, last_seen_at)
+             VALUES (?1, 'diagnosed with bipolar', 'mentioned in a thread', 'from threads',
+                     NULL, 'high', 'ai_generated', 'ai', datetime('now'))",
+            rusqlite::params![customer],
+        )
+        .expect("quarantined memory");
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, created_at)
+             VALUES (?1, 'customer', 'Hello, a quick question about my invoice.', datetime('now'))",
+            rusqlite::params![conv],
+        )
+        .expect("thread");
+        conn
+    }
+
+    /// A2: the evidence pack carries the customer's durable facts — and the
+    /// memory guard keeps quarantined material (payment details here) out
+    /// of every prompt.
+    #[test]
+    fn evidence_pack_carries_memory_and_quarantines_secrets() {
+        let conn = db_with_customer_memory();
+        let conv: i64 = conn
+            .query_row("SELECT id FROM conversations", [], |r| r.get(0))
+            .expect("conv id");
+        let ctx = build(&conn, conv, false).expect("build").expect("context");
+        assert!(
+            ctx.customer_memory
+                .iter()
+                .any(|m| m.key == "prefers short replies"),
+            "the durable fact must reach the evidence pack"
+        );
+        assert!(
+            ctx.customer_memory
+                .iter()
+                .all(|m| !m.key.contains("diagnosed")),
+            "quarantined material must never reach a prompt: {:?}",
+            ctx.customer_memory
+        );
+        // The rendered evidence carries the briefing block for the model.
+        let rendered = crate::ai_prompts::build_ticket_analysis_user(&ctx);
+        assert!(rendered.contains("DURABLE CUSTOMER FACTS"));
+        assert!(rendered.contains("prefers short replies"));
+        assert!(!rendered.contains("bipolar"));
+    }
 }

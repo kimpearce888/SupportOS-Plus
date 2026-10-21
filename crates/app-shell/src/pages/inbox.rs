@@ -299,6 +299,27 @@ pub struct InboxPage {
     copilot_open: bool,
     copilot: Option<spp_core::ai_local::CopilotReport>,
     copilot_error: Option<String>,
+    /// A2 triage-on-arrival chips (intent/urgency/sentiment/topic with
+    /// confidence, editable): attribute-backed rows from ai_attributes,
+    /// with the deterministic local analysis filling display-only gaps.
+    triage: Vec<TriageChip>,
+    /// A2 "know before you reply" briefing: the customer's durable facts.
+    briefing: Vec<spp_core::ai_prompts::MemoryEntry>,
+    /// The triage chip currently open for correction (A2).
+    editing_chip: Option<spp_core::catalog::AiAttributeKey>,
+}
+
+/// One editable triage chip (A2). Attribute-backed chips open a vocab
+/// row on click and write a human-sourced ai_attributes row.
+#[derive(Clone)]
+struct TriageChip {
+    key: spp_core::catalog::AiAttributeKey,
+    label: &'static str,
+    value: String,
+    confidence: String,
+    source: String,
+    /// Heuristic-only chips (no attribute backing) are display-only.
+    editable: bool,
 }
 
 impl InboxPage {
@@ -335,6 +356,9 @@ impl InboxPage {
             copilot_open: false,
             copilot: None,
             copilot_error: None,
+            triage: Vec::new(),
+            briefing: Vec::new(),
+            editing_chip: None,
         }
     }
 
@@ -450,7 +474,160 @@ impl InboxPage {
                 }
                 None => {}
             }
+            self.reload_triage(db);
         }
+    }
+
+    /// A2: load the triage chips and the "know before you reply" briefing
+    /// for the selected conversation. ai_attributes rows lead (AI or
+    /// human-sourced, confidence attached); the deterministic local
+    /// analysis fills display-only gaps.
+    fn reload_triage(&mut self, db: &DbHandle) {
+        let Some(id) = self.selected else {
+            self.triage.clear();
+            self.briefing.clear();
+            return;
+        };
+        let (rows, customer_id) = db.with_read(|conn| {
+            (
+                spp_core::ai_attributes::current_for_conversation(conn, id).unwrap_or_default(),
+                conn.query_row(
+                    "SELECT customer_local_id FROM conversations WHERE id = ?1",
+                    rusqlite::params![id],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .unwrap_or(None),
+            )
+        });
+        let heuristic = self.copilot.as_ref().map(|c| &c.analysis);
+        let value_of = |key: &str| -> Option<(String, String, String)> {
+            rows.iter()
+                .find(|r| r.attribute == key)
+                .map(|r| (r.value.clone(), r.confidence.clone(), r.source.clone()))
+        };
+        let mut chips = Vec::new();
+        let attribute_chip = |key: spp_core::catalog::AiAttributeKey,
+                              value: String,
+                              confidence: String,
+                              source: String|
+         -> TriageChip {
+            TriageChip {
+                key,
+                label: key.label(),
+                value,
+                confidence,
+                source,
+                editable: true,
+            }
+        };
+        // Attribute-backed chips (editable): intent, urgency, frustration,
+        // escalation, issue cluster.
+        if let Some((value, confidence, source)) = value_of("intent") {
+            chips.push(attribute_chip(
+                spp_core::catalog::AiAttributeKey::Intent,
+                value,
+                confidence,
+                source,
+            ));
+        }
+        if let Some((value, confidence, source)) = value_of("urgency") {
+            chips.push(attribute_chip(
+                spp_core::catalog::AiAttributeKey::Urgency,
+                value,
+                confidence,
+                source,
+            ));
+        }
+        if let Some((value, confidence, source)) = value_of("frustration_cues") {
+            chips.push(attribute_chip(
+                spp_core::catalog::AiAttributeKey::FrustrationCues,
+                value,
+                confidence,
+                source,
+            ));
+        }
+        if let Some((value, confidence, source)) = value_of("escalation_signal") {
+            chips.push(attribute_chip(
+                spp_core::catalog::AiAttributeKey::EscalationSignal,
+                value,
+                confidence,
+                source,
+            ));
+        }
+        if let Some((value, confidence, source)) = value_of("issue_cluster") {
+            chips.push(attribute_chip(
+                spp_core::catalog::AiAttributeKey::IssueCluster,
+                value,
+                confidence,
+                source,
+            ));
+        }
+        // Display-only heuristic chips where no attribute exists yet:
+        // sentiment comes from the deterministic local analysis.
+        if value_of("sentiment").is_none()
+            && let Some(sentiment) = heuristic
+                .map(|h| h.sentiment.clone())
+                .filter(|s| !s.is_empty())
+        {
+            chips.push(TriageChip {
+                key: spp_core::catalog::AiAttributeKey::Intent,
+                label: "sentiment",
+                value: sentiment,
+                confidence: "heuristic".into(),
+                source: "local".into(),
+                editable: false,
+            });
+        }
+        self.triage = chips;
+        self.briefing = customer_id
+            .map(|cid| {
+                db.with_read(|conn| spp_core::ai_evidence::customer_memory_facts(conn, cid, 3))
+            })
+            .unwrap_or_default();
+    }
+
+    /// A2: apply a human correction from the vocab popup.
+    fn override_chip_value(&mut self, db: &DbHandle, chip: &TriageChip, value: &str) {
+        if value.is_empty() {
+            // "unknown": supersede the current row with the catalog's
+            // unknown marker so the chip disappears from the header until
+            // the next extraction repopulates it.
+            let Some(id) = self.selected else { return };
+            db.with_write(|conn| {
+                let _ = conn.execute(
+                    "UPDATE ai_attributes SET superseded_at = datetime('now')
+                      WHERE conversation_id = ?1 AND attribute = ?2 AND superseded_at IS NULL",
+                    rusqlite::params![id, chip.key.as_str()],
+                );
+            });
+            self.reload_triage(db);
+            return;
+        }
+        self.override_chip(db, chip, value);
+    }
+
+    /// A2: apply a human correction to a triage chip — supersedes the
+    /// current ai_attributes row with a human-sourced one (confidence
+    /// high, source human; automation rules read the same table).
+    fn override_chip(&mut self, db: &DbHandle, chip: &TriageChip, value: &str) {
+        let Some(id) = self.selected else {
+            return;
+        };
+        db.with_write(|conn| {
+            let _ = spp_core::ai_attributes::upsert_single(
+                conn,
+                id,
+                spp_core::ai_attributes::AttributeRecord {
+                    key: chip.key,
+                    value: value.to_string(),
+                    confidence: "high",
+                    source: "human",
+                    evidence: Vec::new(),
+                    run_id: None,
+                },
+            );
+        });
+        self.reload_triage(db);
     }
 
     /// Select a conversation and load its detail.
@@ -602,16 +779,24 @@ impl InboxPage {
             )
             .on_hover_text(
                 "pull new and updated conversations from Help Scout right now \
-                 (also happens automatically every minute)",
+                 (also happens automatically: 30 s while busy, backing off \
+                 when quiet)",
             )
             .clicked()
                 && let Some(engine) = engine
             {
-                crate::pages::sync_health::spawn_sync_action(
+                // R8 (D6): a click during a running sync is answered, not
+                // swallowed — the toast reports the completion outcome.
+                if !crate::pages::sync_health::spawn_sync_action(
                     db,
                     engine,
                     crate::pages::sync_health::SyncAction::Incremental,
-                );
+                ) {
+                    self.status_message =
+                        Some("A sync is already running — watch the ring in the header.".into());
+                } else {
+                    self.status_message = Some("Syncing…".into());
+                }
             }
         });
 
@@ -1245,6 +1430,97 @@ impl InboxPage {
             ),
         );
         ui.add_space(8.0);
+
+        // A2 triage-on-arrival: intent/urgency/sentiment/topic chips with
+        // confidence, editable where attribute-backed (click to correct —
+        // the override lands in ai_attributes with source "human" and the
+        // automation rules read the same rows).
+        if !self.triage.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                for chip in &self.triage {
+                    let tone = match (chip.label, chip.value.as_str()) {
+                        ("urgency", "high" | "critical") => BadgeTone::Destructive,
+                        ("urgency", "moderate") => BadgeTone::Warning,
+                        ("frustration cues", "strong" | "moderate") => BadgeTone::Warning,
+                        ("escalation signal", "true") => BadgeTone::Destructive,
+                        (_, _) => BadgeTone::Info,
+                    };
+                    let text = if chip.confidence == "heuristic" {
+                        format!("{}: {}", chip.label, chip.value)
+                    } else if chip.source == "human" {
+                        format!("{}: {} ✓", chip.label, chip.value)
+                    } else {
+                        format!("{}: {} · {}", chip.label, chip.value, chip.confidence)
+                    };
+                    let response = design::badge(ui, &text, tone);
+                    let hint = format!(
+                        "source: {} · confidence: {}. {}",
+                        chip.source,
+                        chip.confidence,
+                        if chip.editable {
+                            "click to correct"
+                        } else {
+                            "deterministic estimate — not stored"
+                        },
+                    );
+                    let mut response = response.on_hover_text(hint);
+                    if chip.editable {
+                        response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    }
+                    if chip.editable && response.clicked() {
+                        self.editing_chip = Some(chip.key);
+                    }
+                }
+            });
+            // The inline vocab row for the chip being corrected.
+            if let Some(key) = self.editing_chip {
+                let chip = self.triage.iter().find(|c| c.key == key).cloned();
+                if let Some(chip) = chip {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.strong(format!("set {}:", chip.label.to_lowercase()));
+                        if ui.button("unknown (clear)").clicked() {
+                            self.override_chip_value(db, &chip, "");
+                            self.editing_chip = None;
+                        }
+                        for value in key.values() {
+                            if ui.button(value.to_string()).clicked() {
+                                self.override_chip_value(db, &chip, value);
+                                self.editing_chip = None;
+                            }
+                        }
+                        if ui.button("cancel").clicked() {
+                            self.editing_chip = None;
+                        }
+                    });
+                } else {
+                    self.editing_chip = None;
+                }
+            }
+            ui.add_space(6.0);
+        }
+        // A2 "know before you reply": the customer's durable facts, the
+        // same quarantine-filtered rows the evidence pack feeds on.
+        if !self.briefing.is_empty() {
+            design::card_titled(
+                ui,
+                "Know before you reply",
+                Some("durable customer facts extracted from past conversations"),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        Icon::Sparkles.show(ui, 14.0, t.muted_foreground);
+                        design::badge(ui, "AI", BadgeTone::Info);
+                    });
+                    for fact in &self.briefing {
+                        ui.label(
+                            egui::RichText::new(format!("· {}: {}", fact.key, fact.value))
+                                .small()
+                                .color(t.foreground),
+                        );
+                    }
+                },
+            );
+            ui.add_space(6.0);
+        }
 
         // Action bar: status, assignee — applied locally for instant
         // feedback AND dispatched to Help Scout by the outbound worker.

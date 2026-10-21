@@ -565,15 +565,22 @@ pub fn latest_ai_draft(conn: &Connection, conversation_local_id: i64) -> Option<
     .ok()
 }
 
-/// Whether the generative (LM Studio) passes are usable at all.
+/// Whether the generative draft pass is usable (A1: routed through the
+/// Draft role — the hub's endpoint + model, or the legacy single-model
+/// fallback with a configured chat model).
 pub fn generative_backend_available(conn: &Connection) -> bool {
-    !matches!(
-        crate::ai_pipeline::backend_from_settings(conn),
-        crate::ai_pipeline::AiBackend::Disabled
-    ) && crate::settings::get_string(conn, "lmstudio_chat_model")
-        .ok()
-        .flatten()
-        .is_some_and(|m| !m.is_empty())
+    match crate::ai_hub::backend_for_role(conn, crate::ai_hub::AiRole::Draft) {
+        crate::ai_pipeline::AiBackend::Disabled => false,
+        crate::ai_pipeline::AiBackend::LmStudio { model, .. } => {
+            // A role-assigned model qualifies; the legacy fallback needs
+            // its explicitly configured chat model.
+            model.is_some()
+                || crate::settings::get_string(conn, "lmstudio_chat_model")
+                    .ok()
+                    .flatten()
+                    .is_some_and(|m| !m.is_empty())
+        }
+    }
 }
 
 #[cfg(test)]

@@ -452,3 +452,21 @@ pub fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     )?;
     Ok(n > 0)
 }
+
+/// Migration m052 (R6, honest stubs): the chats, attachments, ratings and
+/// report_data stages are gone from the sync sweep — Help Scout exposes no
+/// list endpoints for chats or ratings (both arrive via webhooks and are
+/// fetched by id), attachment metadata is hydrated during thread ingestion,
+/// and report_data never had a fetcher. Their checkpoint rows would keep
+/// rendering on Sync Health as if the stages still existed, so they are
+/// dropped here.
+pub fn apply_m052(conn: &Connection) -> Result<()> {
+    if table_exists(conn, "sync_checkpoints")? {
+        conn.execute(
+            "DELETE FROM sync_checkpoints
+              WHERE resource IN ('chats', 'attachments', 'ratings', 'report_data')",
+            [],
+        )?;
+    }
+    Ok(())
+}

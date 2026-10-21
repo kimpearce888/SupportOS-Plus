@@ -4,6 +4,101 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] — 2026-10-21
+
+The "trust and truth" release: Phase R of the v2 blueprint completes
+(every remaining defect in the audit register that gates trust is
+closed), and the first two items of Phase A turn the AI from a stub
+into a real, routed, measured system.
+
+### Removed — honesty about the platform
+
+- **The sync sweep no longer pretends Help Scout lists things it
+  cannot.** The chats, attachments and ratings stages were silent
+  no-ops or empty stubs: Help Scout exposes **no list endpoint** for
+  Beacon chats (`GET /v2/chats/{id}` only) or ratings
+  (`GET /v2/ratings/{id}` only) — both arrive through webhooks and are
+  fetched by id. The dead sweep stages are gone (migration m052 drops
+  their stale checkpoints), `list_ratings`/`list_beacon_chats` on the
+  real provider now state that platform reality as errors instead of
+  silently returning empty, and the misdesigned 30-second ratings
+  poller is retired (ratings keep arriving through the satisfaction
+  webhook path, which was always the real one). The Reports page says
+  in one line where its rating counts come from and that Help Scout's
+  own happiness reports need a Plus/Pro plan.
+
+- **No simulated data anywhere, provably.** The `FakeAiProvider` and
+  `NoopAiProvider` demo doubles (zero callers), the fabricated
+  "Simulated attachment content…" download body, the dead simulated
+  rating job handler, the legacy verified-draft and interaction-signal
+  CRUD with no callers, and the stale boot comments are gone. A new
+  **CI no-simulation gate** (`scripts/gate_no_simulation.py`, wired
+  into both CI and the release workflow) fails the build if production
+  code ever reintroduces simulated/fake/demo data markers — comments
+  and test fixtures excluded, an explicit allowlist for the purge
+  machinery itself.
+
+### Security
+
+- **OAuth tokens leave plaintext sqlite.** Access and refresh tokens
+  now live in the AES-256-GCM encrypted envelope; the `oauth_tokens`
+  row keeps metadata only (expiry, scope, grant times, revoked flag)
+  and its token columns are permanently empty. Migration m053 seals
+  pre-1.4.0 plaintext tokens on the first keyed boot and scrubs the
+  columns; revocation and disconnect purge the envelope entirely. The
+  connection status reads through the same envelope-backed reader, and
+  a corrupt envelope surfaces as an error, never as "not connected".
+
+### Added
+
+- **Version transparency.** Settings → About & updates shows the
+  running version against the latest published GitHub release, with a
+  strictly user-initiated check (the app never phones home on its
+  own), honest 404 messaging for a private/unreachable repository, and
+  a semver-aware comparison.
+
+- **Adaptive sync cadence + the freshness ring.** The fixed-interval
+  poll is replaced: 30 s while the account is busy, backing off toward
+  the configured ceiling when quiet, and an immediate poll after every
+  send. `SYNC_INTERVAL_MINUTES` is finally consumed (as the ceiling
+  fallback), the two divergent defaults are unified, and the header
+  now carries a global freshness ring — "syncing…", "synced 12s ago",
+  "never synced" — color-coded by age and clickable through to Sync
+  Health. Every refresh control performs a real scoped fetch: the
+  Dashboard, Reports, Customers and Organizations "Reload" buttons
+  became real "Sync now" actions that report their outcome (a
+  click during a running sync is answered, not swallowed).
+
+- **The AI provider hub (Phase A begins).** Endpoints become a list —
+  the default local LM Studio, an optional Ollama, and any number of
+  OpenAI-compatible cloud endpoints (BYOK, keys in the encrypted
+  envelope, off by default per the privacy decision). Every inference
+  routes through one of five model roles (Embed / Classify / Summarize
+  / Draft / Agent, blueprint Table 6); per-endpoint health probes
+  replace guesswork; per-feature toggles plus a global kill switch
+  live in AI Center; and a per-feature cost ledger aggregates tokens,
+  latency and estimated spend per day from `ai_runs` (token usage now
+  actually recorded from every chat call).
+
+- **Triage-on-arrival goes live.** The 14-key attribute extraction now
+  runs for real: deterministic signals always land (no model needed —
+  urgency, question count, frustration, escalation, response style),
+  the AI layer fills intent/product/feature/issue/customer goal when a
+  Classify endpoint is routed, the AI Center Attributes tab and the
+  `ai_attribute` automation conditions read live rows, and the inbox
+  header shows intent/urgency/sentiment/topic chips with confidence —
+  click to correct, and the override supersedes the machine row with
+  source "human". Issue clustering generates real Issue Radar clusters
+  (daily maintenance trigger plus a "Cluster now" button). Customer
+  memory extraction runs on arrival, feeds a quarantine-filtered
+  "know before you reply" briefing panel in the inbox, and rides the
+  evidence pack into every analysis and draft prompt.
+
+### Fixed
+
+- The "sync interval" setting is now the honest "max quiet sync
+  interval" with the adaptive behavior explained on hover.
+
 ## [1.3.0] — 2026-10-20
 
 The "it actually does things" release. Replies, notes, status changes

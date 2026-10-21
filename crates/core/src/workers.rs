@@ -14,8 +14,6 @@ use crate::jobs;
 use crate::outbound;
 use crate::sync_engine::SyncEngine;
 
-pub const RATINGS_REFRESH_DEFAULT_SECONDS: i64 = 30;
-
 pub struct WorkerManager {
     db: crate::db::DbHandle,
     engine: Option<Arc<SyncEngine>>,
@@ -26,10 +24,13 @@ pub struct WorkerManager {
     running: AtomicBool,
     stopped: AtomicBool,
     processing: AtomicBool,
-    refreshing_ratings: AtomicBool,
     sweeping_notifications: AtomicBool,
     sweeping_customer_events: AtomicBool,
     refreshing_connectors: AtomicBool,
+    /// R8 (D10): wakes the adaptive auto-sync timer immediately — armed
+    /// after every successful outbound send ("poll right after the app
+    /// sends anything").
+    sync_nudge: std::sync::Arc<tokio::sync::Notify>,
     handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
@@ -53,10 +54,10 @@ impl WorkerManager {
             running: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
             processing: AtomicBool::new(false),
-            refreshing_ratings: AtomicBool::new(false),
             sweeping_notifications: AtomicBool::new(false),
             sweeping_customer_events: AtomicBool::new(false),
             refreshing_connectors: AtomicBool::new(false),
+            sync_nudge: std::sync::Arc::new(tokio::sync::Notify::new()),
             handles: Mutex::new(Vec::new()),
         }
     }
@@ -83,6 +84,24 @@ impl WorkerManager {
                 timer = label,
                 "timer tick panicked (contained at the task boundary; timer continues)"
             );
+        }
+    }
+
+    /// Panic-guard wrapper that preserves the tick's value (0 on panic),
+    /// for the adaptive auto-sync timer which reads the processed count.
+    async fn contained_value<F: std::future::Future<Output = i64>>(
+        label: &'static str,
+        f: F,
+    ) -> i64 {
+        match AssertUnwindSafe(f).catch_unwind().await {
+            Ok(processed) => processed,
+            Err(_) => {
+                tracing::error!(
+                    timer = label,
+                    "timer tick panicked (contained at the task boundary; timer continues)"
+                );
+                0
+            }
         }
     }
 
@@ -141,55 +160,51 @@ impl WorkerManager {
             });
         }
         {
-            let (minutes, raw) = {
+            // 1.4.0 R8 (D18): adaptive cadence replaces the fixed interval.
+            // Busy accounts poll every 30 s; a quiet account backs off by
+            // doubling toward the configured ceiling (the DB setting, with
+            // the SYNC_INTERVAL_MINUTES env var finally consumed as its
+            // fallback — both defaults now agree on 1 minute, closing the
+            // two-divergent-defaults defect); and every send nudges the
+            // timer awake immediately (see `nudge_sync`).
+            let (ceiling_minutes, raw) = {
                 let conn = self.lock();
-                // 1.3.0: default poll 5 min -> 1 min. "Sync in real time"
-                // for a localhost desktop app means fast polling (Help
-                // Scout webhooks cannot reach 127.0.0.1 without a public
-                // tunnel); an idle tick costs only a couple of requests.
-                let raw = crate::settings::get_i64(&conn, "sync_interval_minutes", 1).unwrap_or(1);
+                let env_fallback = crate::config::load_env_config().sync.interval_minutes;
+                let raw = crate::settings::get_i64(&conn, "sync_interval_minutes", env_fallback)
+                    .unwrap_or(env_fallback);
                 let clamped = raw.clamp(1, 1440);
                 (clamped, raw)
             };
+            let nudge = std::sync::Arc::clone(&self.sync_nudge);
             let this = self.clone();
             self.spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(
-                    u64::try_from(minutes * 60).unwrap_or(300),
-                ));
+                let busy = Duration::from_secs(30);
+                let ceiling =
+                    Duration::from_secs(u64::try_from(ceiling_minutes * 60).unwrap_or(3600));
+                let mut quiet_delay = busy;
                 loop {
-                    interval.tick().await;
-                    Self::contained("auto_sync", this.auto_sync()).await;
+                    // Immediate poll after a send (R8/D10): `timeout`
+                    // races the nudge against the quiet delay without
+                    // needing the tokio macros feature. A notify permit
+                    // stored while a run was in flight wakes the next
+                    // tick instantly.
+                    let _ = tokio::time::timeout(quiet_delay, nudge.notified()).await;
+                    let processed = Self::contained_value("auto_sync", this.auto_sync()).await;
+                    // Busy (changes arrived) keeps the 30 s poll; quiet
+                    // doubles the delay toward the ceiling.
+                    quiet_delay = if processed > 0 {
+                        busy
+                    } else {
+                        std::cmp::min(quiet_delay.saturating_mul(2), ceiling)
+                    };
                 }
             });
             tracing::info!(
                 operation = "start",
-                sync_interval_minutes = raw,
-                "worker auto-sync timer armed"
+                quiet_ceiling_minutes = raw,
+                busy_poll_seconds = 30,
+                "worker auto-sync timer armed (adaptive: 30 s busy, backing off toward the ceiling)"
             );
-        }
-        {
-            let seconds = {
-                let conn = self.lock();
-                crate::settings::get_i64(
-                    &conn,
-                    "ratings_refresh_seconds",
-                    RATINGS_REFRESH_DEFAULT_SECONDS,
-                )
-                .unwrap_or(RATINGS_REFRESH_DEFAULT_SECONDS)
-                .clamp(0, 3600)
-            };
-            if seconds > 0 {
-                let this = self.clone();
-                self.spawn(async move {
-                    let mut interval = tokio::time::interval(Duration::from_secs(
-                        u64::try_from(seconds).unwrap_or(30),
-                    ));
-                    loop {
-                        interval.tick().await;
-                        Self::contained("refresh_ratings", this.refresh_ratings()).await;
-                    }
-                });
-            }
         }
         {
             let this = self.clone();
@@ -690,6 +705,10 @@ impl WorkerManager {
                 if let Some(local) = self.conversation_local_id_for_remote(remote_id) {
                     self.on_conversation_changed(local);
                 }
+                // R8 (D10): a send is the strongest busy signal there is —
+                // the adaptive timer polls immediately instead of waiting
+                // out its quiet back-off.
+                self.nudge_sync();
             }
             Err(e) => {
                 let retryable = crate::helpscout_real::hs_error(&e)
@@ -768,9 +787,18 @@ impl WorkerManager {
         self.engine.as_ref().is_some_and(|e| e.is_running())
     }
 
-    async fn auto_sync(&self) {
+    /// Wake the adaptive auto-sync timer for an immediate poll (R8/D10:
+    /// every send is followed by a poll — no fixed-interval wait). Public
+    /// so the outbound dispatcher can call it from its job context.
+    pub fn nudge_sync(&self) {
+        self.sync_nudge.notify_one();
+    }
+
+    /// One adaptive-timer tick. Returns how many records the run processed
+    /// (0 = quiet; the timer backs off, R8/D18).
+    async fn auto_sync(&self) -> i64 {
         if self.stopped.load(Ordering::SeqCst) {
-            return;
+            return 0;
         }
         // R2 (D1): the timer refuses to run against the empty provider.
         // Before this guard, a fresh install without credentials ran a
@@ -780,7 +808,7 @@ impl WorkerManager {
         // date and never pulled the account. (The engine has the same
         // guard; this one keeps the timer from even reading state.)
         if self.provider.kind() == "empty" {
-            return;
+            return 0;
         }
         let state = {
             let conn = self.lock();
@@ -791,10 +819,10 @@ impl WorkerManager {
         };
         // A run in progress owns the state machine; do not pile onto it.
         if (state == "INITIALIZING" || state == "BACKFILLING") && self.engine_engaged() {
-            return;
+            return 0;
         }
         let Some(engine) = self.engine.clone() else {
-            return;
+            return 0;
         };
         // 1.2.0: `NEW` used to be a "do nothing" state — a freshly
         // connected account sat empty forever because nothing in the
@@ -808,136 +836,66 @@ impl WorkerManager {
         } else {
             engine.incremental_sync().await
         };
-        if let Err(e) = result {
-            // "A sync is already running" is the healthy overlap case
-            // (a manual button run); it is not a failure worth reporting.
-            let msg = e.to_string();
-            if !msg.contains("already running") {
-                tracing::warn!(error = %e, operation = "auto_sync", "Automatic sync failed");
-                let conn = self.lock();
-                let _ = crate::audit::log_event(
-                    &conn,
-                    "error",
-                    "sync",
-                    &format!("Automatic sync failed: {msg}"),
-                    None,
-                    None,
-                );
-                drop(conn);
-                // R5 (D4): background failures reach the UI live, not
-                // only through the Diagnostics page.
-                crate::eventing::notify_error(
-                    &self.bus,
-                    "error",
-                    &format!("Automatic sync failed: {msg}"),
-                    "sync",
-                    None,
-                );
+        match result {
+            Ok(results) => {
+                let processed: i64 = results.iter().map(|r| r.processed).sum();
+                tracing::debug!(processed, operation = "auto_sync", "Adaptive tick finished");
+                processed
             }
-        }
-    }
-
-    async fn refresh_ratings(&self) {
-        if self.stopped.load(Ordering::SeqCst)
-            || self.refreshing_ratings.swap(true, Ordering::SeqCst)
-        {
-            return;
-        }
-        let result: Result<()> = async {
-            let ratings = self.provider.list_ratings().await?;
-            let mut fresh = 0usize;
-            for r in &ratings {
-                let (inserted, conv_local, conv_number, customer_local) = {
+            Err(e) => {
+                // "A sync is already running" is the healthy overlap case
+                // (a manual button run); it is not a failure worth reporting.
+                let msg = e.to_string();
+                if !msg.contains("already running") {
+                    tracing::warn!(error = %e, operation = "auto_sync", "Automatic sync failed");
                     let conn = self.lock();
-                    let conv_local = r.conversation_id.and_then(|id| {
-                        if id > 0 {
-                            crate::sync_engine::conversation_local_id(&conn, id)
-                        } else {
-                            None
-                        }
-                    });
-                    // 1.1.4: a rating whose conversation exists remotely
-                    // but has no local row is dangling (the conversation
-                    // was deleted locally — e.g. by the demo purge).
-                    // Persisting it re-created orphaned "demo" rows within
-                    // 30 seconds of a purge; skip it instead. A rating the
-                    // source itself gives no conversation for is legal and
-                    // still stored.
-                    if is_dangling_rating(r, conv_local) {
-                        continue;
-                    }
-                    let conv_number = conv_local.and_then(|local| {
-                        conn.query_row(
-                            "SELECT number FROM conversations WHERE id = ?1",
-                            rusqlite::params![local],
-                            |row| row.get::<_, i64>(0),
-                        )
-                        .ok()
-                    });
-                    let customer_local = r.customer_id.and_then(|id| {
-                        if id > 0 {
-                            crate::sync_engine::local_id(&conn, "customers", id)
-                        } else {
-                            None
-                        }
-                    });
-                    let user_local = r.user_id.and_then(|id| {
-                        if id > 0 {
-                            crate::sync_engine::local_id(&conn, "users", id)
-                        } else {
-                            None
-                        }
-                    });
-                    (
-                        upsert_rating_row(&conn, r, conv_local, customer_local, user_local)?,
-                        conv_local,
-                        conv_number,
-                        customer_local,
-                    )
-                };
-                if inserted {
-                    fresh += 1;
-                    crate::eventing::notify_rating_received(
+                    let _ = crate::audit::log_event(
+                        &conn,
+                        "error",
+                        "sync",
+                        &format!("Automatic sync failed: {msg}"),
+                        None,
+                        None,
+                    );
+                    drop(conn);
+                    // R5 (D4): background failures reach the UI live, not
+                    // only through the Diagnostics page.
+                    crate::eventing::notify_error(
                         &self.bus,
-                        r.rating.as_deref(),
-                        conv_local,
-                        conv_number,
-                        customer_local,
-                        r.customer_name.as_deref(),
-                        r.comment.as_deref(),
+                        "error",
+                        &format!("Automatic sync failed: {msg}"),
+                        "sync",
+                        None,
                     );
                 }
+                0
             }
-            if fresh > 0 {
-                crate::eventing::notify_ratings_refreshed(
-                    &self.bus,
-                    ratings.len() as u32,
-                    fresh as u32,
-                );
-                tracing::info!(
-                    operation = "ratings_refresh",
-                    fresh,
-                    processed = ratings.len(),
-                    "Ratings refresh pushed new ratings"
-                );
-            }
-            Ok(())
         }
-        .await;
-        if let Err(e) = result {
-            tracing::warn!(error = %e, operation = "ratings_refresh", "Ratings refresh failed");
-        }
-        self.refreshing_ratings.store(false, Ordering::SeqCst);
     }
 
     async fn maintenance(&self) {
         let db_handle = self.db.clone();
         let data_dir = self.data_dir.clone();
         let bus = self.bus.clone();
+        let provider_kind = self.provider.kind().to_string();
         let result = tokio::task::spawn_blocking(move || -> Result<()> {
             let conn = db_handle.write_guard();
             crate::maintenance::compute_trends(&conn)?;
             let _ = crate::maintenance::refresh_products(&conn);
+            // A2: issue clustering cadence — once a day at most, feature-
+            // gated, provider-gated (the job itself skips honestly when
+            // no Classify endpoint is routed).
+            if crate::ai_hub::ai_feature_enabled(&conn, "issue_clustering")
+                && provider_kind != "empty"
+            {
+                let last_run_unix =
+                    crate::settings::get_i64(&conn, "ai_clustering_last_run", 0).unwrap_or(0);
+                let now_unix = chrono::Utc::now().timestamp();
+                if now_unix - last_run_unix >= 20 * 3600 {
+                    let _ = crate::jobs::enqueue_on(&conn, "ai", "cluster_issues", "{}", 3, 2);
+                    let _ = crate::settings::set_i64(&conn, "ai_clustering_last_run", now_unix);
+                }
+            }
             let _ = crate::notification_sweep::sweep(&conn, Some(&bus));
             let backup_hours =
                 crate::settings::get_i64(&conn, "backup_interval_hours", 24).unwrap_or(24);
@@ -1300,6 +1258,37 @@ impl WorkerManager {
                     };
                     self.run_ai_job(kind, conv_id, AiJob::Note).await?;
                 }
+                // A2: triage-on-arrival batch — attribute extraction,
+                // customer-memory extraction and issue clustering.
+                "extract_attributes" => {
+                    let Some(conv_id) = num("conversationId") else {
+                        let conn = self.lock();
+                        jobs::fail(
+                            &conn,
+                            job_id,
+                            "extract_attributes missing conversationId",
+                            true,
+                        )?;
+                        return Ok(());
+                    };
+                    self.run_attributes_job(conv_id).await?;
+                }
+                "extract_memories" => {
+                    let Some(conv_id) = num("conversationId") else {
+                        let conn = self.lock();
+                        jobs::fail(
+                            &conn,
+                            job_id,
+                            "extract_memories missing conversationId",
+                            true,
+                        )?;
+                        return Ok(());
+                    };
+                    self.run_memory_job(conv_id).await?;
+                }
+                "cluster_issues" => {
+                    self.run_clustering_job().await?;
+                }
                 "automation_action_awaiting_approval" => {
                     let approved = payload
                         .get("approved")
@@ -1357,9 +1346,6 @@ impl WorkerManager {
                         return Ok(());
                     }
                 }
-                "rating.process" => {
-                    self.persist_simulated_rating(&payload)?;
-                }
                 "sync.conversations" => {
                     self.run_engine(|e| async move { e.incremental_sync().await.map(|_| ()) })
                         .await?;
@@ -1409,13 +1395,8 @@ impl WorkerManager {
                 2,
             );
         }
-        let automatic_analysis =
-            crate::settings::get_bool(&conn, "automatic_analysis_enabled", true).unwrap_or(true);
-        let ai_enabled = !matches!(
-            crate::ai_pipeline::backend_from_settings(&conn),
-            crate::ai_pipeline::AiBackend::Disabled
-        );
-        if automatic_analysis && ai_enabled {
+        // A1: the ticket_analysis feature gate (kill switch aware).
+        if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis") {
             let fresh: Vec<i64> = {
                 let mut stmt = match conn.prepare(
                     "SELECT c.id FROM conversations c
@@ -1441,6 +1422,38 @@ impl WorkerManager {
                     &conn,
                     "ai",
                     "analyze_ticket",
+                    &format!("{{\"conversationId\":{id}}}"),
+                    3,
+                    2,
+                );
+            }
+        }
+        // A2: conversations analyzed before attributes existed (or
+        // analyzed with the feature off) get their snapshot backfilled
+        // here — the deterministic layer needs no model.
+        if crate::ai_hub::ai_feature_enabled(&conn, "attributes") {
+            let mut stmt = match conn.prepare(
+                "SELECT c.id FROM conversations c
+                      WHERE NOT EXISTS (
+                            SELECT 1 FROM ai_attributes a
+                             WHERE a.conversation_id = c.id
+                               AND a.superseded_at IS NULL)
+                        AND c.deleted_at IS NULL
+                      ORDER BY c.id LIMIT 50",
+            ) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let ids: Vec<i64> = match stmt.query_map([], |r| r.get::<_, i64>(0)) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => Vec::new(),
+            };
+            drop(stmt);
+            for id in ids {
+                let _ = jobs::enqueue_on(
+                    &conn,
+                    "ai",
+                    "extract_attributes",
                     &format!("{{\"conversationId\":{id}}}"),
                     3,
                     2,
@@ -1511,18 +1524,37 @@ impl WorkerManager {
             }
             {
                 let conn = self.lock();
-                let automatic_analysis =
-                    crate::settings::get_bool(&conn, "automatic_analysis_enabled", true)
-                        .unwrap_or(true);
-                let ai_enabled = !matches!(
-                    crate::ai_pipeline::backend_from_settings(&conn),
-                    crate::ai_pipeline::AiBackend::Disabled
-                );
-                if automatic_analysis && ai_enabled {
+                // A1: the ticket_analysis feature gate (kill switch aware).
+                if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis") {
                     let _ = jobs::enqueue_on(
                         &conn,
                         "ai",
                         "analyze_ticket",
+                        &format!("{{\"conversationId\":{conversation_local_id}}}"),
+                        3,
+                        2,
+                    );
+                }
+                // A2: when analysis is switched off, the deterministic
+                // attribute layer still runs (it needs no model); memory
+                // extraction has its own toggle independent of analysis.
+                if !crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis")
+                    && crate::ai_hub::ai_feature_enabled(&conn, "attributes")
+                {
+                    let _ = jobs::enqueue_on(
+                        &conn,
+                        "ai",
+                        "extract_attributes",
+                        &format!("{{\"conversationId\":{conversation_local_id}}}"),
+                        3,
+                        2,
+                    );
+                }
+                if crate::ai_hub::ai_feature_enabled(&conn, "memory_extraction") {
+                    let _ = jobs::enqueue_on(
+                        &conn,
+                        "ai",
+                        "extract_memories",
                         &format!("{{\"conversationId\":{conversation_local_id}}}"),
                         3,
                         2,
@@ -1557,9 +1589,27 @@ impl WorkerManager {
     }
 
     async fn run_ai_job(&self, kind: &str, conv_id: i64, job: AiJob) -> Result<()> {
+        // A1: the provider hub routes each feature through its model role —
+        // triage/analysis classify, customer drafts draft, internal notes
+        // summarize (blueprint Table 6) — and each feature checks its own
+        // kill switch at execution time, not just at enqueue time.
+        let (role, feature) = match job {
+            AiJob::Analyze => (crate::ai_hub::AiRole::Classify, "ticket_analysis"),
+            AiJob::Draft => (crate::ai_hub::AiRole::Draft, "draft"),
+            AiJob::Note => (crate::ai_hub::AiRole::Summarize, "ai_note"),
+        };
         let backend = {
             let conn = self.lock();
-            crate::ai_pipeline::backend_from_settings(&conn)
+            if !crate::ai_hub::ai_feature_enabled(&conn, feature) {
+                tracing::info!(
+                    operation = kind,
+                    conversation_id = conv_id,
+                    feature,
+                    "AI feature disabled - job completed without AI output"
+                );
+                return Ok(());
+            }
+            crate::ai_hub::backend_for_role(&conn, role)
         };
         if matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
             tracing::info!(
@@ -1665,6 +1715,32 @@ impl WorkerManager {
         .map_err(|e| Error::Other(e.to_string().into()))?;
 
         result?;
+        // A2: a completed analysis triggers the rest of the triage batch —
+        // the 14-key attribute snapshot and the customer-memory extraction
+        // ride the same train (each still feature-gated at execution).
+        if matches!(job, AiJob::Analyze) {
+            let conn = self.lock();
+            if crate::ai_hub::ai_feature_enabled(&conn, "attributes") {
+                let _ = jobs::enqueue_on(
+                    &conn,
+                    "ai",
+                    "extract_attributes",
+                    &format!("{{\"conversationId\":{conv_id}}}"),
+                    3,
+                    2,
+                );
+            }
+            if crate::ai_hub::ai_feature_enabled(&conn, "memory_extraction") {
+                let _ = jobs::enqueue_on(
+                    &conn,
+                    "ai",
+                    "extract_memories",
+                    &format!("{{\"conversationId\":{conv_id}}}"),
+                    3,
+                    2,
+                );
+            }
+        }
         if let (Some(text), Some(remote_id)) = (note_text, remote_id) {
             self.provider
                 .create_note_thread(crate::helpscout::CreateThreadInput {
@@ -1701,6 +1777,140 @@ impl WorkerManager {
             conversation_id = conv_id,
             "AI job completed"
         );
+        Ok(())
+    }
+
+    /// A2: populate the 14-key ai_attributes snapshot for one conversation.
+    /// The deterministic layer always lands; the AI layer fills intent/
+    /// product/feature/issue/customer_goal/response_style when the Classify
+    /// role has a live endpoint. The snapshot feeds the AI Center
+    /// Attributes tab and the ai_attribute automation conditions.
+    async fn run_attributes_job(&self, conv_id: i64) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "attributes"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Classify),
+            )
+        };
+        if !enabled {
+            tracing::info!(
+                operation = "extract_attributes",
+                conversation_id = conv_id,
+                "attributes feature disabled - job skipped"
+            );
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut conn = db.write_guard();
+            tokio::runtime::Handle::current().block_on(async {
+                let remote: Option<i64> = conn
+                    .query_row(
+                        "SELECT remote_id FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
+                        rusqlite::params![conv_id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                crate::ai_attributes::compute_with_backend(&mut conn, &backend, conv_id, false)
+                    .await
+                    .map(|snap| (snap.is_some(), remote))
+                    .map_err(|e| Error::Other(e.to_string().into()))
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?;
+        let (snapshotted, remote) = result?;
+        if let Some(remote) = remote.filter(|_| snapshotted) {
+            // The inbox triage chips read ai_attributes; refresh the page.
+            self.emit_conversation_updated_for_remote(remote);
+        }
+        tracing::info!(
+            operation = "extract_attributes",
+            conversation_id = conv_id,
+            snapshotted,
+            "attribute extraction finished"
+        );
+        Ok(())
+    }
+
+    /// A2: extract durable customer facts into customer_memory. Summarize
+    /// role; skipped honestly when no endpoint is routed (memory extraction
+    /// is model-driven — there is no deterministic fallback to pretend with).
+    async fn run_memory_job(&self, conv_id: i64) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "memory_extraction"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Summarize),
+            )
+        };
+        if !enabled {
+            tracing::info!(
+                operation = "extract_memories",
+                conversation_id = conv_id,
+                "memory extraction disabled - job skipped"
+            );
+            return Ok(());
+        }
+        if matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            tracing::info!(
+                operation = "extract_memories",
+                conversation_id = conv_id,
+                "no Summarize role endpoint routed - job skipped"
+            );
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let extracted = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            tokio::runtime::Handle::current().block_on(async {
+                crate::ai_pipeline::extract_memories(&conn, &backend, conv_id).await
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?;
+        tracing::info!(
+            operation = "extract_memories",
+            conversation_id = conv_id,
+            extracted,
+            "customer memory extraction finished"
+        );
+        Ok(())
+    }
+
+    /// A2: issue clustering over the last 14 days (the real Issue Radar
+    /// clusters). Classify role; skipped honestly without an endpoint.
+    async fn run_clustering_job(&self) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "issue_clustering"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Classify),
+            )
+        };
+        if !enabled {
+            tracing::info!("issue clustering disabled - job skipped");
+            return Ok(());
+        }
+        if matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            tracing::info!("no Classify role endpoint routed - clustering skipped");
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let clustered = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            tokio::runtime::Handle::current().block_on(async {
+                crate::ai_pipeline::cluster_issues(&conn, &backend, 14)
+                    .await
+                    .map(|clusters| clusters.len())
+                    .map_err(|e| Error::Other(e.to_string().into()))
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?;
+        let clustered = clustered?;
+        tracing::info!(clusters = clustered, "issue clustering finished");
         Ok(())
     }
 
@@ -1950,49 +2160,6 @@ impl WorkerManager {
         self.emit_conversation_updated_for_remote(remote_id);
         Ok(())
     }
-
-    fn persist_simulated_rating(&self, payload: &serde_json::Value) -> Result<()> {
-        let rating_num = payload.get("rating").and_then(|v| v.as_i64()).unwrap_or(5);
-        let label = match rating_num {
-            4 | 5 => "great",
-            3 => "okay",
-            _ => "not-good",
-        };
-        let conv_remote = payload
-            .get("conversation_id")
-            .and_then(|v| v.as_i64())
-            .or_else(|| payload.get("conversationId").and_then(|v| v.as_i64()));
-        let comment = payload.get("comment").and_then(|v| v.as_str());
-        let conn = self.lock();
-        let conv_local =
-            conv_remote.and_then(|r| crate::sync_engine::conversation_local_id(&conn, r));
-        conn.execute(
-            "INSERT INTO ratings (conversation_id, rating, comments, raw_json, remote_created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![
-                conv_local,
-                label,
-                comment,
-                payload.to_string(),
-                chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            ],
-        )?;
-        if let Some(conv_local) = conv_local {
-            let _ = crate::jobs::audit(
-                &conn,
-                "user",
-                "rating_simulated",
-                Some(conv_local),
-                None,
-                Some(&format!("{{\"rating\":\"{label}\"}}")),
-                None,
-                None,
-                false,
-            );
-        }
-        tracing::info!(rating = label, "Simulated CSAT rating persisted");
-        Ok(())
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -2021,14 +2188,6 @@ fn parse_iso_to_unix(s: &str) -> Option<i64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
     Some(days * 86_400 + h * 3600 + mi * 60 + se)
-}
-
-/// Whether a rating from the provider dangles after a local delete:
-/// the source references a conversation (`id > 0`) that has no local
-/// mirror row. Such ratings must not be (re-)inserted — after the demo
-/// purge this is what resurrected fake ratings within 30 seconds.
-fn is_dangling_rating(r: &crate::helpscout::HsRating, conversation_local_id: Option<i64>) -> bool {
-    matches!(r.conversation_id, Some(id) if id > 0) && conversation_local_id.is_none()
 }
 
 fn upsert_rating_row(
@@ -2079,41 +2238,6 @@ pub fn start_workers(
     ));
     manager.start();
     manager
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_dangling_rating;
-    use crate::helpscout::HsRating;
-
-    fn rating(conversation_id: Option<i64>) -> HsRating {
-        HsRating {
-            remote_id: 1,
-            conversation_id,
-            thread_id: None,
-            rating: Some("great".into()),
-            comment: None,
-            customer_id: None,
-            customer_name: None,
-            user_id: None,
-            created_at: None,
-        }
-    }
-
-    #[test]
-    fn dangling_ratings_are_detected_and_sourceless_ones_are_kept() {
-        // Conversation referenced but not mirrored locally -> skip
-        // (this is what re-created fake ratings 30 seconds after a
-        // demo purge in 1.1.3).
-        assert!(is_dangling_rating(&rating(Some(42)), None));
-        // Mirrored conversation -> keep.
-        assert!(!is_dangling_rating(&rating(Some(42)), Some(7)));
-        // The source itself has no conversation reference -> keep
-        // (a legal conversation-less rating).
-        assert!(!is_dangling_rating(&rating(None), None));
-        // Non-positive ids are placeholders, not references -> keep.
-        assert!(!is_dangling_rating(&rating(Some(0)), None));
-    }
 }
 
 #[cfg(test)]

@@ -150,7 +150,7 @@ impl PageKey {
 #[must_use]
 pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
     match event {
-        ServerEvent::RatingReceived(_) | ServerEvent::RatingsRefreshed(_) => {
+        ServerEvent::RatingReceived(_) => {
             vec![PageKey::Dashboard, PageKey::Customers, PageKey::Reports]
         }
         ServerEvent::SyncCompleted(_) => vec![
@@ -264,7 +264,6 @@ mod tests {
             ServerEvent::sync_progress("probe", 0, 1, 0, 0),
             ServerEvent::outbound_job_finished(1, "create_reply", None, true, None),
             ServerEvent::rating_received(None, None, None, None, None, None),
-            ServerEvent::ratings_refreshed(0, 0),
             ServerEvent::notification_received(
                 1, "mention", "info", "probe", None, None, None, None, 0,
             ),

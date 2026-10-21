@@ -1397,8 +1397,9 @@ pub fn execute_approved_action(
         .get("params")
         .cloned()
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+    // A1: automation's AI passes run on the Classify role.
     let ai_enabled = !matches!(
-        crate::ai_pipeline::backend_from_settings(conn),
+        crate::ai_hub::backend_for_role(conn, crate::ai_hub::AiRole::Classify),
         crate::ai_pipeline::AiBackend::Disabled
     );
     match kind {
@@ -1722,8 +1723,9 @@ pub fn fire_trigger_for_conversation(
     let attributes = current_attributes(conn, conversation_id);
     let verification = latest_verification(conn, conversation_id);
     let write_enabled = crate::settings::get_bool(conn, "automation_write_actions_enabled", false)?;
+    // A1: automation's AI passes run on the Classify role.
     let ai_enabled = !matches!(
-        crate::ai_pipeline::backend_from_settings(conn),
+        crate::ai_hub::backend_for_role(conn, crate::ai_hub::AiRole::Classify),
         crate::ai_pipeline::AiBackend::Disabled
     );
     let mut runs = Vec::new();

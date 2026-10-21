@@ -31,10 +31,40 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("test runtime")
 }
 
+/// Serializes this file against the process-global master key (other test
+/// modules clear/replace it under the same lock; the OAuth flow now stores
+/// tokens in the encrypted envelope, R7/D13, so every test here needs a
+/// stable key for its whole duration).
+fn secrets_guard() -> std::sync::MutexGuard<'static, ()> {
+    crate::settings::SECRETS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+}
+
+const TEST_MASTER_KEY: [u8; 32] = [7u8; 32];
+
 fn fixture_db() -> DbHandle {
+    // In-memory databases have no key file; install the deterministic key
+    // the whole file shares (callers hold `secrets_guard` while using it).
+    crate::settings::set_master_key_for_tests(TEST_MASTER_KEY);
     let mut conn = Connection::open_in_memory().expect("in-memory connection");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
     DbHandle::new(conn)
+}
+
+/// The OAuth tokens as stored by the envelope-backed `save_tokens`.
+fn envelope_tokens(db: &DbHandle) -> (Option<String>, Option<String>) {
+    db.with_read(|conn| {
+        let read = |key: &str| {
+            crate::settings::get_secret(conn, key)
+                .expect("envelope read")
+                .map(|b| String::from_utf8(b).expect("utf8 token"))
+        };
+        (
+            read(crate::helpscout_real::SECRET_OAUTH_ACCESS),
+            read(crate::helpscout_real::SECRET_OAUTH_REFRESH),
+        )
+    })
 }
 
 /// Generated throwaway credentials pointed at the mock server.
@@ -86,6 +116,7 @@ fn token_json(access: &str, refresh: Option<&str>, expires_in: i64) -> Value {
 
 #[test]
 fn get_me_roundtrip_sends_bearer_token() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
         me_json().to_string(),
@@ -115,6 +146,7 @@ fn get_me_roundtrip_sends_bearer_token() {
 
 #[test]
 fn list_mailboxes_and_dependent_resources_roundtrip() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         match (req.method.as_str(), req.path.as_str()) {
             ("GET", "/v2/mailboxes") => MockResponse::json(
@@ -192,6 +224,7 @@ fn list_mailboxes_and_dependent_resources_roundtrip() {
 
 #[test]
 fn conversations_threads_and_customers_roundtrip() {
+    let _secrets = secrets_guard();
     let conv = json!({
         "id": 101, "number": 778, "type": "email",
         "source": {"type": "email", "via": "customer"},
@@ -283,6 +316,7 @@ fn conversations_threads_and_customers_roundtrip() {
 
 #[test]
 fn create_conversation_and_thread_roundtrips() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         match (req.method.as_str(), req.path.as_str()) {
             ("POST", "/v3/conversations") => MockResponse::json(
@@ -404,6 +438,7 @@ fn create_conversation_and_thread_roundtrips() {
 
 #[test]
 fn v2_pagination_follows_page_numbers_until_total_pages() {
+    let _secrets = secrets_guard();
     // 3 pages of tags, 2 per page, totalPages = 3.
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         let page: u32 = req
@@ -451,6 +486,7 @@ fn v2_pagination_follows_page_numbers_until_total_pages() {
 
 #[test]
 fn v2_pagination_stops_on_empty_page_safely() {
+    let _secrets = secrets_guard();
     // Server claims more pages but returns an empty embedded list: the
     // walker must terminate (empty page = stop), not loop forever.
     let mock = MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
@@ -472,6 +508,7 @@ fn v2_pagination_stops_on_empty_page_safely() {
 
 #[test]
 fn v3_conversation_pagination_follows_hal_next_links() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         let conv = |id: i64| {
             json!({"id": id, "number": id + 100, "type": "email", "status": "active",
@@ -538,6 +575,7 @@ fn v3_conversation_pagination_follows_hal_next_links() {
 
 #[test]
 fn v3_customer_pagination_follows_next_cursor_field() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         let cust = |id: i64, name: &str| {
             json!({"id": id, "firstName": name, "lastName": "Doe", "emails": []})
@@ -593,6 +631,7 @@ fn v3_customer_pagination_follows_next_cursor_field() {
 
 #[test]
 fn system_users_follows_next_links() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         if req.path == "/v3/system-users" && req.query.is_empty() {
             return MockResponse::json(
@@ -628,6 +667,7 @@ fn system_users_follows_next_links() {
 
 #[test]
 fn error_statuses_map_to_friendly_non_retryable_errors() {
+    let _secrets = secrets_guard();
     for status in [400u16, 403, 404, 409, 423] {
         let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
             status,
@@ -655,6 +695,7 @@ fn error_statuses_map_to_friendly_non_retryable_errors() {
 
 #[test]
 fn server_error_5xx_is_retried_and_then_recovers() {
+    let _secrets = secrets_guard();
     // First response 503, second 200: the provider must retry once and
     // succeed, having hit the endpoint exactly twice.
     let mock = MockServer::start(crate::mockserver::scripted(vec![
@@ -674,6 +715,7 @@ fn server_error_5xx_is_retried_and_then_recovers() {
 
 #[test]
 fn rate_limit_429_is_honored_retried_and_recorded() {
+    let _secrets = secrets_guard();
     // 429 with a 1-second retry window, then success. Also sends the
     // x-ratelimit headers so the limiter state can be cross-checked.
     let mock = MockServer::start(crate::mockserver::scripted(vec![
@@ -708,6 +750,7 @@ fn rate_limit_429_is_honored_retried_and_recorded() {
 
 #[test]
 fn rate_limit_headers_on_success_are_recorded() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
         me_json().to_string(),
@@ -726,6 +769,7 @@ fn rate_limit_headers_on_success_are_recorded() {
 
 #[test]
 fn unreachable_server_reports_offline_friendly_error() {
+    let _secrets = secrets_guard();
     // Bind then immediately stop a mock server to get a free port with
     // nothing listening: the provider must fail with the offline error,
     // not a raw transport panic.
@@ -762,6 +806,7 @@ fn unreachable_server_reports_offline_friendly_error() {
 
 #[test]
 fn invalid_json_from_success_response_is_reported() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
         "this is not json",
@@ -784,6 +829,7 @@ fn invalid_json_from_success_response_is_reported() {
 
 #[test]
 fn client_credentials_login_exchanges_and_persists() {
+    let _secrets = secrets_guard();
     // Handler decisions are recorded via hits() and asserted afterwards —
     // a panic inside a connection thread would only sever the socket and
     // surface as a confusing transport error.
@@ -828,11 +874,15 @@ fn client_credentials_login_exchanges_and_persists() {
         "token request is form-encoded"
     );
 
-    // Persisted in the DB and visible through the status endpoint.
+    // Persisted in the envelope and visible through the status endpoint;
+    // the row itself keeps metadata only (R7/D13: no plaintext in sqlite).
     let status = p.oauth_status();
     assert_eq!(status["configured"], json!(true));
     assert_eq!(status["authenticated"], json!(true));
-    let (access, refresh, revoked): (String, Option<String>, i64) = db
+    let (envelope_access, envelope_refresh) = envelope_tokens(&db);
+    assert_eq!(envelope_access.as_deref(), Some("cc-token"));
+    assert_eq!(envelope_refresh, None);
+    let (access_column, refresh_column, revoked): (String, Option<String>, i64) = db
         .with_read(|conn| {
             conn.query_row(
                 "SELECT access_token, refresh_token, revoked FROM oauth_tokens WHERE account = 'default'",
@@ -840,9 +890,9 @@ fn client_credentials_login_exchanges_and_persists() {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
         })
-        .expect("token row");
-    assert_eq!(access, "cc-token");
-    assert_eq!(refresh, None);
+        .expect("token metadata row");
+    assert_eq!(access_column, "", "the column must stay empty");
+    assert_eq!(refresh_column, None, "the column must stay empty");
     assert_eq!(revoked, 0);
 
     // The stored token is actually used for the next API call.
@@ -861,6 +911,7 @@ fn client_credentials_login_exchanges_and_persists() {
 
 #[test]
 fn authorization_code_exchange_persists_refresh_token() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
         token_json("auth-code-token", Some("auth-refresh-token"), 86_400).to_string(),
@@ -888,7 +939,14 @@ fn authorization_code_exchange_persists_refresh_token() {
         Some("test-client-id")
     );
 
-    let (access, refresh): (String, Option<String>) = db
+    let (envelope_access, envelope_refresh) = envelope_tokens(&db);
+    assert_eq!(envelope_access.as_deref(), Some("auth-code-token"));
+    assert_eq!(
+        envelope_refresh.as_deref(),
+        Some("auth-refresh-token"),
+        "the refresh token must persist through the authorization-code grant"
+    );
+    let (access_column, refresh_column): (String, Option<String>) = db
         .with_read(|conn| {
             conn.query_row(
                 "SELECT access_token, refresh_token FROM oauth_tokens WHERE account = 'default'",
@@ -896,13 +954,14 @@ fn authorization_code_exchange_persists_refresh_token() {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
         })
-        .expect("token row");
-    assert_eq!(access, "auth-code-token");
-    assert_eq!(refresh.as_deref(), Some("auth-refresh-token"));
+        .expect("token metadata row");
+    assert_eq!(access_column, "", "the column must stay empty (R7/D13)");
+    assert_eq!(refresh_column, None, "the column must stay empty (R7/D13)");
 }
 
 #[test]
 fn expired_token_refreshes_via_token_endpoint_and_retries() {
+    let _secrets = secrets_guard();
     // Production refresh path: stored token is expired; the data request
     // gets a 401; the provider refreshes via the token endpoint and the
     // original request is retried with the fresh token.
@@ -954,6 +1013,7 @@ fn expired_token_refreshes_via_token_endpoint_and_retries() {
 
 #[test]
 fn refresh_token_grant_roundtrip() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
         token_json("new-access", Some("new-refresh"), 600).to_string(),
@@ -975,7 +1035,9 @@ fn refresh_token_grant_roundtrip() {
         token_req.form_value("refresh_token").as_deref(),
         Some("r-tok")
     );
-    let access: String = db
+    let (envelope_access, _) = envelope_tokens(&db);
+    assert_eq!(envelope_access.as_deref(), Some("new-access"));
+    let access_column: String = db
         .with_read(|conn| {
             conn.query_row(
                 "SELECT access_token FROM oauth_tokens WHERE account = 'default'",
@@ -984,11 +1046,12 @@ fn refresh_token_grant_roundtrip() {
             )
         })
         .expect("row");
-    assert_eq!(access, "new-access");
+    assert_eq!(access_column, "", "the column must stay empty (R7/D13)");
 }
 
 #[test]
 fn token_endpoint_rejection_is_friendly() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         400,
         r#"{"error":"invalid_client"}"#,
@@ -1011,6 +1074,7 @@ fn token_endpoint_rejection_is_friendly() {
 
 #[test]
 fn revoke_clears_the_token_and_blocks_requests() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
         me_json().to_string(),
@@ -1022,6 +1086,9 @@ fn revoke_clears_the_token_and_blocks_requests() {
     p.revoke().expect("revoke");
     let status = p.oauth_status();
     assert_eq!(status["authenticated"], json!(false));
+    let (envelope_access, envelope_refresh) = envelope_tokens(&db);
+    assert_eq!(envelope_access, None, "revocation must purge the envelope");
+    assert_eq!(envelope_refresh, None, "revocation must purge the envelope");
 
     let err = runtime()
         .block_on(async { p.get_me().await })
@@ -1039,6 +1106,7 @@ fn revoke_clears_the_token_and_blocks_requests() {
 
 #[test]
 fn docs_api_skipped_entirely_without_key() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::not_found()).expect("mock server");
     let db = fixture_db();
     let p = provider_with_token(&db, &creds(&mock)); // empty docs key
@@ -1055,6 +1123,7 @@ fn docs_api_skipped_entirely_without_key() {
 
 #[test]
 fn docs_api_uses_basic_auth_on_its_own_base() {
+    let _secrets = secrets_guard();
     // 1.3.0 ground truth: the Docs API is v1-only with an {items} envelope
     // (the pre-1.3.0 /v2/ paths 404'd on the real service).
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
@@ -1099,6 +1168,7 @@ fn docs_api_uses_basic_auth_on_its_own_base() {
 
 #[test]
 fn hs_status_and_error_helpers_downcast() {
+    let _secrets = secrets_guard();
     let e: crate::error::Error = HsApiError {
         status_code: 429,
         message: "m".into(),
@@ -1118,6 +1188,7 @@ fn hs_status_and_error_helpers_downcast() {
 
 #[test]
 fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
+    let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         match (req.method.as_str(), req.path.as_str()) {
             // The dispatch's customer fallback fetches the live

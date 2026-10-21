@@ -35,6 +35,12 @@ impl LmStudioProvider {
     }
 
     #[must_use]
+    /// Wrap an existing client (the provider hub hands out clients that
+    /// already carry the endpoint base URL, timeout and optional API key).
+    pub fn with_client(client: OpenAiCompatibleClient) -> Self {
+        Self { client }
+    }
+
     pub fn with_base_url_and_timeout(base_url: impl Into<String>, timeout_ms: u64) -> Self {
         Self {
             client: OpenAiCompatibleClient::new_with_timeout(base_url, timeout_ms),
@@ -251,11 +257,17 @@ impl OpenAiCompatibleClient {
                     .collect()
             })
             .unwrap_or_default();
+        let usage = body.usage.map(|u| crate::ai_provider::TokenUsage {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+        });
         Ok(ChatOptsResult {
             content,
             model: body.model,
             latency_ms,
             tool_calls,
+            usage,
         })
     }
 
@@ -401,6 +413,9 @@ pub struct ChatOptsResult {
     pub model: String,
     pub latency_ms: u64,
     pub tool_calls: Vec<ToolCall>,
+    /// Token usage as reported by the endpoint (A1 cost ledger); `None`
+    /// when the endpoint does not report usage.
+    pub usage: Option<crate::ai_provider::TokenUsage>,
 }
 
 #[derive(Debug, Clone)]

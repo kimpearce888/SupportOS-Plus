@@ -232,6 +232,27 @@ pub struct AiCenterPage {
     /// Connection test outcome, written by the background test thread
     /// and polled each frame.
     connection_status: Arc<Mutex<Option<String>>>,
+    // ---- A1 provider hub state ----
+    hub_endpoints: Vec<spp_core::ai_hub::EndpointConfig>,
+    hub_roles: spp_core::ai_hub::RoleMap,
+    hub_loaded: bool,
+    /// Probe outcomes per endpoint id, filled by the probe thread.
+    probe_results: std::collections::BTreeMap<String, String>,
+    /// Shared probe slot: (endpoint id, result) — one probe at a time.
+    probe_slot: Arc<Mutex<Option<(String, String)>>>,
+    /// The endpoint whose API-key field is currently open.
+    key_edit_for: Option<String>,
+    key_edit_value: String,
+    /// Add-endpoint form.
+    add_name: String,
+    add_url: String,
+    add_key: String,
+    add_price_prompt: String,
+    add_price_completion: String,
+    /// Cost ledger rows (last 7 days).
+    ledger: Vec<spp_core::ai_hub::UsageRow>,
+    /// Per-feature toggle states (name, enabled), loaded at reload.
+    feature_states: Vec<(&'static str, bool)>,
 }
 
 impl AiCenterPage {
@@ -244,6 +265,20 @@ impl AiCenterPage {
             distributions: Vec::new(),
             jobs: Vec::new(),
             connection_status: Arc::new(Mutex::new(None)),
+            hub_endpoints: Vec::new(),
+            hub_roles: spp_core::ai_hub::RoleMap::default(),
+            hub_loaded: false,
+            probe_results: std::collections::BTreeMap::new(),
+            probe_slot: Arc::new(Mutex::new(None)),
+            key_edit_for: None,
+            key_edit_value: String::new(),
+            add_name: String::new(),
+            add_url: String::new(),
+            add_key: String::new(),
+            add_price_prompt: String::new(),
+            add_price_completion: String::new(),
+            ledger: Vec::new(),
+            feature_states: Vec::new(),
         }
     }
 
@@ -253,6 +288,8 @@ impl AiCenterPage {
         self.analytics = None;
         self.distributions.clear();
         self.jobs.clear();
+        self.hub_loaded = false;
+        self.ledger.clear();
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -268,6 +305,27 @@ impl AiCenterPage {
         self.analytics = analytics;
         self.distributions = distributions;
         self.jobs = jobs;
+        self.reload_hub(db);
+    }
+
+    /// Load the A1 provider hub state (endpoints, roles, ledger, toggles).
+    fn reload_hub(&mut self, db: &DbHandle) {
+        let (endpoints, roles, ledger, features) = db.with_read(|conn| {
+            (
+                spp_core::ai_hub::load_endpoints(conn).unwrap_or_default(),
+                spp_core::ai_hub::load_roles(conn).unwrap_or_default(),
+                spp_core::ai_hub::usage_ledger(conn, 7).unwrap_or_default(),
+                spp_core::ai_hub::AI_FEATURES
+                    .iter()
+                    .map(|(name, _, _)| (*name, spp_core::ai_hub::ai_feature_enabled(conn, name)))
+                    .collect::<Vec<_>>(),
+            )
+        });
+        self.hub_endpoints = endpoints;
+        self.hub_roles = roles;
+        self.ledger = ledger;
+        self.feature_states = features;
+        self.hub_loaded = true;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
@@ -339,7 +397,7 @@ impl AiCenterPage {
         }
     }
 
-    fn health_ui(&mut self, ui: &mut egui::Ui, _db: &DbHandle) {
+    fn health_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let Some(settings) = self.settings.clone() else {
             ui.spinner();
             return;
@@ -427,6 +485,496 @@ impl AiCenterPage {
                 self.test_connection();
             }
         });
+        // A1: the provider hub lives directly under the health snapshot.
+        self.hub_ui(ui, db);
+    }
+
+    /// The A1 provider hub: endpoints (health probes, BYOK keys in the
+    /// envelope), model-role routing, per-feature toggles + the global
+    /// kill switch, and the per-feature cost ledger.
+    fn hub_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        if !self.hub_loaded {
+            self.reload_hub(db);
+        }
+        self.poll_probe_slot();
+        let t = design::tokens(ui);
+
+        // ---- endpoints ------------------------------------------------
+        design::card_titled(
+            ui,
+            "Provider hub — endpoints",
+            Some("OpenAI-compatible endpoints: local LM Studio, optional Ollama, cloud BYOK"),
+            |ui| {
+                let endpoints = self.hub_endpoints.clone();
+                for endpoint in &endpoints {
+                    ui.push_id(&endpoint.id, |ui| {
+                        ui.horizontal(|ui| {
+                            if endpoint.enabled {
+                                design::badge(ui, "on", BadgeTone::Success);
+                            } else {
+                                design::badge(ui, "off", BadgeTone::Neutral);
+                            }
+                            ui.strong(&endpoint.name);
+                            ui.monospace(
+                                egui::RichText::new(endpoint.base_url.as_str())
+                                    .small()
+                                    .color(t.muted_foreground),
+                            );
+                            let has_key = db.with_read(|conn| {
+                                spp_core::ai_hub::endpoint_has_key(conn, &endpoint.id)
+                            });
+                            if has_key {
+                                design::badge(ui, "key set", BadgeTone::Info);
+                            }
+                            if endpoint.builtin {
+                                design::badge(ui, "built-in", BadgeTone::Neutral);
+                            }
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if !endpoint.builtin
+                                    && design::button(ui, "remove", ButtonVariant::Ghost)
+                                        .on_hover_text("remove the endpoint, its envelope key and its role assignments")
+                                        .clicked()
+                                {
+                                    let _ = db.with_write(|conn| {
+                                        spp_core::ai_hub::remove_endpoint(conn, &endpoint.id)
+                                    });
+                                    self.reload_hub(db);
+                                }
+                                if design::button(ui, "set key", ButtonVariant::Outline).clicked() {
+                                    self.key_edit_for = Some(endpoint.id.clone());
+                                    self.key_edit_value.clear();
+                                }
+                                if design::button(ui, "probe", ButtonVariant::Outline)
+                                    .on_hover_text("list models once — the green/red light for this endpoint")
+                                    .clicked()
+                                {
+                                    self.start_probe(db, &endpoint.id);
+                                }
+                            });
+                        });
+                        if self.key_edit_for.as_deref() == Some(endpoint.id.as_str()) {
+                            ui.horizontal(|ui| {
+                                design::field_label(ui, "api key:");
+                                ui.add_sized(
+                                    [280.0, 28.0],
+                                    egui::TextEdit::singleline(&mut self.key_edit_value)
+                                        .password(true),
+                                );
+                                if design::button(ui, "save key", ButtonVariant::Primary).clicked() {
+                                    let id = endpoint.id.clone();
+                                    let value = self.key_edit_value.trim().to_string();
+                                    db.with_write(|conn| {
+                                        if value.is_empty() {
+                                            let _ = spp_core::settings::delete_secret(
+                                                conn,
+                                                &spp_core::ai_hub::EndpointConfig::secret_key(&id),
+                                            );
+                                        } else {
+                                            let _ = spp_core::ai_hub::set_endpoint_api_key(
+                                                conn, &id, &value,
+                                            );
+                                        }
+                                    });
+                                    self.key_edit_for = None;
+                                    self.key_edit_value.clear();
+                                }
+                                if design::button(ui, "cancel", ButtonVariant::Ghost).clicked() {
+                                    self.key_edit_for = None;
+                                    self.key_edit_value.clear();
+                                }
+                                design::hint_text(
+                                    ui,
+                                    "stored in the encrypted envelope — never in plaintext",
+                                );
+                            });
+                        }
+                        if let Some(result) = self.probe_results.get(&endpoint.id) {
+                            if result.starts_with("reachable") {
+                                design::success_text(ui, result);
+                            } else {
+                                design::error_text(ui, result);
+                            }
+                        }
+                        if !endpoint.builtin {
+                            ui.horizontal(|ui| {
+                                design::hint_text(
+                                    ui,
+                                    "price USD per million tokens — the cost ledger's estimation input",
+                                );
+                            });
+                        }
+                        ui.add_space(4.0);
+                    });
+                }
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new(
+                    "add endpoint (cloud BYOK — off by default per-feature)",
+                )
+                .default_open(false)
+                .show(ui, |ui| {
+                    egui::Grid::new("ai-hub-add")
+                        .num_columns(2)
+                        .spacing(egui::vec2(12.0, 6.0))
+                        .show(ui, |ui| {
+                            design::field_label(ui, "name:");
+                            ui.add_sized(
+                                [220.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.add_name),
+                            );
+                            ui.end_row();
+                            design::field_label(ui, "base url:");
+                            ui.add_sized(
+                                [280.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.add_url),
+                            );
+                            ui.end_row();
+                            design::field_label(ui, "api key:");
+                            ui.add_sized(
+                                [280.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.add_key).password(true),
+                            );
+                            ui.end_row();
+                            design::field_label(ui, "$ / mtok prompt:");
+                            ui.add_sized(
+                                [120.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.add_price_prompt),
+                            );
+                            ui.end_row();
+                            design::field_label(ui, "$ / mtok completion:");
+                            ui.add_sized(
+                                [120.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.add_price_completion),
+                            );
+                            ui.end_row();
+                        });
+                    if design::button(ui, "add endpoint", ButtonVariant::Primary).clicked() {
+                        self.add_endpoint(db);
+                    }
+                });
+            },
+        );
+        ui.add_space(10.0);
+
+        // ---- model-role routing --------------------------------------
+        design::card_titled(
+            ui,
+            "Model-role routing",
+            Some("every inference goes through one of five roles (blueprint Table 6)"),
+            |ui| {
+                let endpoints = self.hub_endpoints.clone();
+                let mut roles = self.hub_roles.clone();
+                egui::Grid::new("ai-hub-roles")
+                    .num_columns(4)
+                    .striped(true)
+                    .spacing(egui::vec2(14.0, 6.0))
+                    .show(ui, |ui| {
+                        design::field_label(ui, "role");
+                        design::field_label(ui, "endpoint");
+                        design::field_label(ui, "model");
+                        ui.label(egui::RichText::new("").small());
+                        ui.end_row();
+                        for role in spp_core::ai_hub::AiRole::ALL {
+                            ui.strong(role.as_str());
+                            // Owned clone: the combo box below mutates
+                            // `roles` while this value must stay readable.
+                            let current: Option<spp_core::ai_hub::RoleAssignment> =
+                                roles.get(role).cloned();
+                            let selected = current
+                                .as_ref()
+                                .and_then(|a| endpoints.iter().position(|e| e.id == a.endpoint))
+                                .map(|i| i.to_string())
+                                .unwrap_or_else(|| "(unset)".into());
+                            let mut changed = false;
+                            egui::ComboBox::from_id_salt(format!("hub-role-{}", role.as_str()))
+                                .width(200.0)
+                                .selected_text(selected)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut None::<usize>, None, "(unset)");
+                                    for endpoint in endpoints.iter() {
+                                        if endpoint.enabled
+                                            && ui
+                                                .selectable_label(
+                                                    false,
+                                                    format!(
+                                                        "{} — {}",
+                                                        endpoint.name, endpoint.base_url
+                                                    ),
+                                                )
+                                                .clicked()
+                                        {
+                                            roles.set(
+                                                role,
+                                                Some(spp_core::ai_hub::RoleAssignment {
+                                                    endpoint: endpoint.id.clone(),
+                                                    model: current
+                                                        .as_ref()
+                                                        .and_then(|c| c.model.clone()),
+                                                }),
+                                            );
+                                            changed = true;
+                                        }
+                                    }
+                                });
+                            let model_text = current
+                                .as_ref()
+                                .and_then(|c| c.model.clone())
+                                .unwrap_or_default();
+                            let mut model_edit = model_text.clone();
+                            ui.add_sized(
+                                [180.0, 26.0],
+                                egui::TextEdit::singleline(&mut model_edit),
+                            );
+                            if model_edit != model_text {
+                                roles.set(
+                                    role,
+                                    current.clone().map(|c| spp_core::ai_hub::RoleAssignment {
+                                        endpoint: c.endpoint.clone(),
+                                        model: (!model_edit.trim().is_empty())
+                                            .then(|| model_edit.trim().to_string()),
+                                    }),
+                                );
+                                changed = true;
+                            }
+                            ui.label(
+                                egui::RichText::new(role.note())
+                                    .small()
+                                    .color(t.muted_foreground),
+                            );
+                            if changed {
+                                self.hub_roles = roles.clone();
+                                let _ = db
+                                    .with_write(|conn| spp_core::ai_hub::save_roles(conn, &roles));
+                            }
+                            ui.end_row();
+                        }
+                    });
+            },
+        );
+        ui.add_space(10.0);
+
+        // ---- toggles + kill switch ------------------------------------
+        design::card_titled(
+            ui,
+            "Features & kill switches",
+            Some("one click each; the global switch dominates every feature"),
+            |ui| {
+                let features = self.feature_states.clone();
+                egui::Grid::new("ai-hub-features")
+                    .num_columns(2)
+                    .striped(true)
+                    .spacing(egui::vec2(16.0, 4.0))
+                    .show(ui, |ui| {
+                        for (name, enabled) in features {
+                            let mut value = enabled;
+                            ui.checkbox(&mut value, name);
+                            if value != enabled {
+                                let _ = db.with_write(|conn| {
+                                    spp_core::ai_hub::set_ai_feature_enabled(conn, name, value)
+                                });
+                                self.reload_hub(db);
+                            }
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(6.0);
+                let ai_on = db.with_read(|conn| {
+                    spp_core::settings::get_bool(conn, "ai_enabled", true).unwrap_or(true)
+                });
+                if ai_on {
+                    if design::button(
+                        ui,
+                        "global kill switch: AI is ON — click to disable all AI",
+                        ButtonVariant::Outline,
+                    )
+                    .on_hover_text("disables every AI feature and every endpoint call at once")
+                    .clicked()
+                    {
+                        let _ = db.with_write(|conn| {
+                            spp_core::settings::set_bool(conn, "ai_enabled", false)
+                        });
+                        self.reload_hub(db);
+                    }
+                } else if design::button(
+                    ui,
+                    "global kill switch: AI is OFF — click to re-enable",
+                    ButtonVariant::Primary,
+                )
+                .clicked()
+                {
+                    let _ = db
+                        .with_write(|conn| spp_core::settings::set_bool(conn, "ai_enabled", true));
+                    self.reload_hub(db);
+                }
+            },
+        );
+        ui.add_space(10.0);
+
+        // ---- cost ledger ---------------------------------------------
+        design::card_titled(
+            ui,
+            "Cost ledger — last 7 days",
+            Some("tokens, latency and estimated spend per feature per day, from ai_runs"),
+            |ui| {
+                if self.ledger.is_empty() {
+                    design::empty_state(
+                        ui,
+                        Icon::Sparkles,
+                        "no completed AI runs yet",
+                        "the ledger fills as AI runs complete",
+                    );
+                    return;
+                }
+                egui::Grid::new("ai-hub-ledger")
+                    .num_columns(7)
+                    .striped(true)
+                    .spacing(egui::vec2(14.0, 4.0))
+                    .show(ui, |ui| {
+                        for header in [
+                            "day",
+                            "feature",
+                            "model",
+                            "runs",
+                            "tokens (p/c)",
+                            "latency",
+                            "est. cost",
+                        ] {
+                            ui.strong(
+                                egui::RichText::new(header)
+                                    .small()
+                                    .color(t.muted_foreground),
+                            );
+                        }
+                        ui.end_row();
+                        for row in self.ledger.clone() {
+                            ui.monospace(egui::RichText::new(row.day.as_str()).small());
+                            ui.monospace(egui::RichText::new(row.feature.as_str()).small());
+                            ui.monospace(egui::RichText::new(row.model.as_str()).small());
+                            ui.monospace(egui::RichText::new(row.runs.to_string()).small());
+                            ui.monospace(
+                                egui::RichText::new(format!(
+                                    "{} / {}",
+                                    row.prompt_tokens, row.completion_tokens
+                                ))
+                                .small(),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(format!("{} ms", row.latency_ms_total)).small(),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(format!("${:.4}", row.est_cost_usd)).small(),
+                            );
+                            ui.end_row();
+                        }
+                    });
+            },
+        );
+    }
+
+    fn poll_probe_slot(&mut self) {
+        if let Some((id, result)) = self
+            .probe_slot
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+        {
+            self.probe_results.insert(id, result);
+        }
+    }
+
+    fn start_probe(&mut self, db: &DbHandle, endpoint_id: &str) {
+        let Some(endpoint) = self
+            .hub_endpoints
+            .iter()
+            .find(|e| e.id == endpoint_id)
+            .cloned()
+        else {
+            return;
+        };
+        self.probe_results
+            .insert(endpoint.id.clone(), "probing…".into());
+        let api_key =
+            db.with_read(|conn| spp_core::ai_hub::get_endpoint_api_key(conn, &endpoint.id));
+        let timeout = db
+            .with_read(|conn| {
+                spp_core::settings::get_i64(conn, "lmstudio_timeout_ms", 120_000).unwrap_or(120_000)
+            })
+            .max(1) as u64;
+        let slot = Arc::clone(&self.probe_slot);
+        let id = endpoint.id.clone();
+        let url = endpoint.base_url.clone();
+        std::thread::Builder::new()
+            .name("spp-hub-probe".to_string())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("probe runtime");
+                let probe = runtime.block_on(spp_core::ai_hub::probe_endpoint(
+                    &url,
+                    timeout,
+                    api_key.as_deref(),
+                ));
+                let text = if probe.ok {
+                    format!(
+                        "reachable — {} model(s) · {} ms",
+                        probe.model_count, probe.latency_ms
+                    )
+                } else {
+                    format!("offline — {} ({} ms)", probe.message, probe.latency_ms)
+                };
+                if let Ok(mut guard) = slot.lock() {
+                    *guard = Some((id, text));
+                }
+            })
+            .ok();
+    }
+
+    fn add_endpoint(&mut self, db: &DbHandle) {
+        let name = self.add_name.trim().to_string();
+        let url = self.add_url.trim().to_string();
+        if name.is_empty() || url.is_empty() {
+            return;
+        }
+        let price_prompt: f64 = self.add_price_prompt.trim().parse().unwrap_or(0.0);
+        let price_completion: f64 = self.add_price_completion.trim().parse().unwrap_or(0.0);
+        let key = self.add_key.trim().to_string();
+        let mut id = format!(
+            "ep-{}",
+            name.to_lowercase()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>()
+        );
+        let mut list =
+            db.with_read(|conn| spp_core::ai_hub::load_endpoints(conn).unwrap_or_default());
+        let mut n = 1;
+        while list.iter().any(|e| e.id == id) {
+            n += 1;
+            id = format!("ep-{n}");
+        }
+        let endpoint = spp_core::ai_hub::EndpointConfig {
+            id: id.clone(),
+            name,
+            base_url: url,
+            enabled: true,
+            price_prompt_per_mtok: price_prompt,
+            price_completion_per_mtok: price_completion,
+            builtin: false,
+        };
+        let _ = db.with_write(|conn| {
+            list.push(endpoint);
+            spp_core::ai_hub::save_endpoints(conn, &list)?;
+            if !key.is_empty() {
+                spp_core::ai_hub::set_endpoint_api_key(conn, &id, &key)?;
+            }
+            Ok::<(), spp_core::Error>(())
+        });
+        self.add_name.clear();
+        self.add_url.clear();
+        self.add_key.clear();
+        self.add_price_prompt.clear();
+        self.add_price_completion.clear();
+        self.reload_hub(db);
     }
 
     fn analytics_ui(&mut self, ui: &mut egui::Ui) {

@@ -11,7 +11,14 @@ use crate::helpscout::{
 };
 use crate::sync as mirror;
 
-pub const INITIAL_SYNC_ORDER: [&str; 22] = [
+// Removed from the sweep by design (R6, honest stubs):
+//   chats, attachments, ratings — Help Scout exposes no list endpoints for
+//   Beacon chats (id-only, `GET /v2/chats/{id}`) or ratings (id-only,
+// `GET /v2/ratings/{id}`); they arrive through webhooks and are fetched by
+// id. Attachment metadata rows are hydrated during thread ingestion and
+// downloads go through the `download_recent_attachments` job, so a sweep
+// stage for them is a no-op by definition.
+pub const INITIAL_SYNC_ORDER: [&str; 19] = [
     "account",
     "users",
     "system_users",
@@ -28,9 +35,6 @@ pub const INITIAL_SYNC_ORDER: [&str; 22] = [
     "workflows",
     "conversations",
     "threads",
-    "chats",
-    "attachments",
-    "ratings",
     "docs_collections",
     "docs_articles",
     "user_statuses",
@@ -307,60 +311,6 @@ pub fn set_checkpoint_running(conn: &Connection, resource: &str, running: bool) 
     );
 }
 
-pub type RatingPersistOutcome = (bool, Option<i64>, Option<i64>, Option<i64>);
-
-pub fn persist_rating(
-    conn: &Connection,
-    r: &crate::helpscout::HsRating,
-) -> Result<RatingPersistOutcome> {
-    let conv_local = r.conversation_id.and_then(|id| {
-        if id > 0 {
-            conversation_local_id(conn, id)
-        } else {
-            None
-        }
-    });
-    let conv_number = conv_local.and_then(|local| {
-        conn.query_row(
-            "SELECT number FROM conversations WHERE id = ?1",
-            params![local],
-            |row| row.get::<_, i64>(0),
-        )
-        .ok()
-    });
-    let customer_local = r.customer_id.and_then(|id| {
-        if id > 0 {
-            local_id(conn, "customers", id)
-        } else {
-            None
-        }
-    });
-    let user_local = r.user_id.and_then(|id| {
-        if id > 0 {
-            local_id(conn, "users", id)
-        } else {
-            None
-        }
-    });
-    let n = conn.execute(
-        "INSERT INTO ratings (remote_id, conversation_id, rating, comments,
-             customer_local_id, user_local_id, remote_created_at, last_synced_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
-         ON CONFLICT(remote_id) DO UPDATE SET rating = excluded.rating,
-           comments = excluded.comments, last_synced_at = datetime('now')",
-        params![
-            r.remote_id,
-            conv_local,
-            r.rating,
-            r.comment,
-            customer_local,
-            user_local,
-            r.created_at
-        ],
-    )?;
-    Ok((n > 0, conv_local, conv_number, customer_local))
-}
-
 pub fn get_incremental_since(
     conn: &Connection,
     resource: &str,
@@ -387,6 +337,16 @@ pub fn last_successful_sync(conn: &Connection) -> Option<String> {
     )
     .ok()
     .flatten()
+}
+
+/// How long ago the last successful sync completed, in whole seconds
+/// (R8 freshness ring). `None` means "never synced".
+#[must_use]
+pub fn last_sync_age_seconds(conn: &Connection) -> Option<i64> {
+    let last = last_successful_sync(conn)?;
+    let t = chrono::DateTime::parse_from_rfc3339(last.as_str().trim()).ok()?;
+    let age = chrono::Utc::now() - t.with_timezone(&chrono::Utc);
+    Some(age.num_seconds().max(0))
 }
 
 pub fn get_cursor(conn: &Connection, resource: &str) -> Option<String> {
@@ -2059,74 +2019,6 @@ impl SyncEngine {
             // (a crashed run, a rate-limited page) instead of walking the
             // whole account a second time.
             "threads" => self.sync_missing_threads().await,
-            "chats" => {
-                let chats = self.provider.list_beacon_chats().await?;
-                let mut processed = 0;
-                for c in &chats {
-                    let existing = {
-                        let conn = self.lock();
-                        conversation_local_id(&conn, c.remote_id)
-                    };
-                    if existing.is_none() {
-                        let conv = self.provider.get_conversation(c.remote_id).await?;
-                        if let Some(conv) = conv {
-                            self.ingest_conversation(&conv, &[], true).await?;
-                            processed += 1;
-                        }
-                    }
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed,
-                    failed: 0,
-                    error: None,
-                })
-            }
-            "attachments" => Ok(ResourceSyncResult {
-                resource,
-                processed: 0,
-                failed: 0,
-                error: None,
-            }),
-            "ratings" => {
-                let ratings = self.provider.list_ratings().await?;
-                let mut fresh = 0;
-                for r in &ratings {
-                    let (inserted, conv_local, conv_number, customer_local) = {
-                        let conn = self.lock();
-                        persist_rating(&conn, r)?
-                    };
-                    if inserted {
-                        fresh += 1;
-                        if let Some(bus) = &self.bus {
-                            use crate::events::ServerEvent;
-                            bus.emit(&ServerEvent::rating_received(
-                                r.rating.clone(),
-                                conv_local,
-                                conv_number,
-                                customer_local,
-                                r.customer_name.clone(),
-                                r.comment.clone(),
-                            ));
-                        }
-                    }
-                }
-                if fresh > 0
-                    && let Some(bus) = &self.bus
-                {
-                    use crate::events::ServerEvent;
-                    bus.emit(&ServerEvent::ratings_refreshed(
-                        ratings.len() as u32,
-                        fresh as u32,
-                    ));
-                }
-                Ok(ResourceSyncResult {
-                    resource,
-                    processed: ratings.len() as i64,
-                    failed: 0,
-                    error: None,
-                })
-            }
             "docs_collections" => {
                 let collections = self.provider.list_doc_collections().await?;
                 let mut processed = 0;
@@ -2211,12 +2103,6 @@ impl SyncEngine {
                     error: None,
                 })
             }
-            "report_data" => Ok(ResourceSyncResult {
-                resource,
-                processed: 0,
-                failed: 0,
-                error: None,
-            }),
             other => Ok(ResourceSyncResult {
                 resource: other.to_string(),
                 processed: 0,
@@ -2600,5 +2486,60 @@ mod tests {
         let after = on_provider_kind_transition(&db.write_guard(), Some("real"), "empty");
         assert_eq!(after, "LIVE", "deactivating preserves the mirror state");
         assert_eq!(db.with_read(get_state), "LIVE");
+    }
+}
+
+#[cfg(test)]
+mod r8_freshness_tests {
+    use super::*;
+
+    fn temp_conn() -> Connection {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-freshness-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("freshness.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// R8 (D10): the header ring's data source — an ok checkpoint stamps
+    /// a fresh age, a database with none reports "never".
+    #[test]
+    fn last_sync_age_reflects_the_newest_ok_checkpoint() {
+        let conn = temp_conn();
+        assert_eq!(
+            last_sync_age_seconds(&conn),
+            None,
+            "a database with no successful checkpoints has never synced"
+        );
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO sync_checkpoints (resource, status, last_success_at)
+             VALUES ('conversations', 'ok', ?1)",
+            params![now],
+        )
+        .expect("stamp");
+        let age = last_sync_age_seconds(&conn).expect("age after a stamp");
+        assert!(
+            age <= 2,
+            "a just-stamped checkpoint is at most 2 s old: {age}"
+        );
+
+        // A second, older checkpoint must not win the MAX().
+        let older = (chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339();
+        conn.execute(
+            "INSERT INTO sync_checkpoints (resource, status, last_success_at)
+             VALUES ('customers', 'ok', ?1)",
+            params![older],
+        )
+        .expect("stamp");
+        let age = last_sync_age_seconds(&conn).expect("age");
+        assert!(age <= 2, "the newest ok checkpoint wins: {age}");
     }
 }

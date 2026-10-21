@@ -397,12 +397,18 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     assert!(finished_at.is_some(), "the run must be marked finished");
     assert_eq!(errors, 0);
 
-    // Checkpoint bookkeeping recorded a success per resource.
+    // Checkpoint bookkeeping recorded a success per resource (R6: the
+    // order no longer carries chats/attachments/ratings — no list endpoints
+    // exist on the platform — so every stage in the sweep must succeed).
     let checkpointed: i64 = count(
         &db,
         "SELECT COUNT(*) FROM sync_checkpoints WHERE last_success_at IS NOT NULL",
     );
-    assert!(checkpointed >= 20, "checkpoints recorded: {checkpointed}");
+    assert_eq!(
+        checkpointed,
+        crate::sync_engine::INITIAL_SYNC_ORDER.len() as i64,
+        "checkpoints recorded: {checkpointed}"
+    );
 
     // The sync_completed event was broadcast.
     let mut saw_sync_completed = false;

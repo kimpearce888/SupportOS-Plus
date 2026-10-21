@@ -1,11 +1,12 @@
 //! SupportOS+ (SupportOS-Plus) native shell entry point.
 //!
 //! Boot order: logging → single-instance lock → database with all boot
-//! migrations → core event bus → boot services (sync engine + provider,
-//! demo unless Help Scout credentials are configured, mirroring the Tauri
-//! boot) → background worker host (job drain, webhook drain, embedding
-//! pass, maintenance timers on a dedicated 2-thread runtime) → minimal
-//! loopback listener (webhook ingress + OAuth callback) → eframe window.
+//! migrations → core event bus → boot services (sync engine + provider —
+//! real when Help Scout credentials are configured, empty otherwise,
+//! hot-swappable in-session since 1.4.0) → background worker host (job
+//! drain, webhook drain, embedding pass, maintenance timers on a dedicated
+//! 2-thread runtime) → minimal loopback listener (webhook ingress + OAuth
+//! callback) → eframe window.
 //! Everything heavy lives in the library so it stays unit-testable
 //! without a window.
 

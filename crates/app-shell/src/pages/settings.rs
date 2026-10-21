@@ -442,6 +442,12 @@ pub struct SettingsPage {
     /// interval changes (the old settings-route behavior). Absent in
     /// tests, where background timers must not run.
     workers: Option<std::sync::Arc<crate::workers_host::WorkersHost>>,
+    /// R7 version transparency: the detached release-check thread writes
+    /// its outcome here; the UI polls each frame. Strictly user-initiated
+    /// — the app never phones home on its own.
+    update_result: std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Mirrors `update_result` being in flight (UI-thread state).
+    update_running: bool,
     message: Option<String>,
     error: Option<String>,
 }
@@ -479,6 +485,8 @@ impl SettingsPage {
             backups: Vec::new(),
             backups_dir: None,
             workers: None,
+            update_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            update_running: false,
             message: None,
             error: None,
         }
@@ -644,9 +652,18 @@ impl SettingsPage {
     }
 
     fn disconnect_helpscout(&mut self, db: &DbHandle) {
-        // The route revoked remotely first; the local effect is dropping
-        // the stored tokens. Demo mode is left untouched.
+        // The route revoked remotely first; the local effect is dropping the
+        // stored tokens. 1.4.0 (R7/D13): the tokens live in the encrypted
+        // envelope, so both the envelope entries and the metadata row go.
         db.with_write(|conn| {
+            let _ = spp_core::settings::delete_secret(
+                conn,
+                spp_core::helpscout_real::SECRET_OAUTH_ACCESS,
+            );
+            let _ = spp_core::settings::delete_secret(
+                conn,
+                spp_core::helpscout_real::SECRET_OAUTH_REFRESH,
+            );
             let _ = conn.execute("DELETE FROM oauth_tokens", []);
         });
         self.message = Some("Disconnected. Local data is fully preserved.".into());
@@ -1039,8 +1056,13 @@ impl SettingsPage {
         };
         design::card_titled(ui, "Synchronization", None, |ui| {
             design::form_grid(ui, "settings-general", |ui| {
-                design::field_label(ui, "sync interval (minutes):");
-                ui.add(egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440));
+                design::field_label(ui, "max quiet sync interval (minutes):");
+                ui.add(egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440))
+                    .on_hover_text(
+                        "1.4.0 R8: the sync polls every 30 s while the account is busy, \
+                     then backs off by doubling toward this ceiling when quiet. \
+                     Every send triggers an immediate poll.",
+                    );
                 ui.end_row();
                 design::field_label(ui, "api concurrency:");
                 ui.add(egui::DragValue::new(&mut general.api_concurrency).range(1..=8));
@@ -1134,6 +1156,44 @@ impl SettingsPage {
                 ui.add_space(6.0);
             },
         );
+        ui.add_space(10.0);
+        // R7: version transparency — running vs latest published release.
+        // The check is user-initiated only; nothing phones home on its own.
+        self.poll_update_result();
+        design::card_titled(ui, "About & updates", None, |ui| {
+            ui.label(format!("Running version: v{}", env!("CARGO_PKG_VERSION")));
+            if let Some(result) = self.update_snapshot() {
+                match result {
+                    Ok(text) => {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .small()
+                                .color(ui.visuals().text_color()),
+                        );
+                    }
+                    Err(text) => {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .small()
+                                .color(crate::design::tokens(ui).warning_foreground),
+                        );
+                    }
+                }
+            }
+            if self.update_running {
+                ui.spinner();
+            } else if design::button(ui, "check for updates", ButtonVariant::Outline).clicked() {
+                self.start_update_check();
+            }
+            ui.label(
+                egui::RichText::new(
+                    "The check reads the public GitHub release feed once, on \
+                     click. The app never sends telemetry.",
+                )
+                .small()
+                .color(ui.visuals().weak_text_color()),
+            );
+        });
         ui.add_space(10.0);
         if design::button(ui, "save settings", ButtonVariant::Primary).clicked() {
             self.general = Some(general.clone());
@@ -1384,8 +1444,8 @@ impl SettingsPage {
             Some(
                 "Deletes every conversation, customer, thread, rating, \
                  knowledge document, incident, report and AI record — all \
-                 synced content (and anything left over from the demo that \
-                 shipped before 1.2.0) — and arms a fresh first sync. \
+                 synced content (and anything left over from the seeded \
+                 content that shipped before 1.2.0) — and arms a fresh first sync. \
                  Keeps: credentials, settings, business hours, automation \
                  rules, saved views and replies, custom object types.",
             ),
@@ -1515,6 +1575,55 @@ impl SettingsPage {
             self.doctor_running = false;
             self.doctor_steps = steps;
         }
+    }
+
+    /// R7 version transparency: launch the user-initiated release check on
+    /// a detached thread (own runtime inside `latest_release_blocking`).
+    fn start_update_check(&mut self) {
+        self.update_running = true;
+        let slot = std::sync::Arc::clone(&self.update_result);
+        std::thread::spawn(move || {
+            let outcome = match spp_core::version_check::latest_release_blocking() {
+                Ok(info) => {
+                    let ordering = spp_core::version_check::compare_versions(
+                        env!("CARGO_PKG_VERSION"),
+                        &info.tag_name,
+                    );
+                    Ok(format!(
+                        "Latest published release: {} — {}.",
+                        info.tag_name,
+                        ordering.label()
+                    ))
+                }
+                Err(e) => Err(format!("update check failed: {e}")),
+            };
+            if let Ok(mut guard) = slot.lock() {
+                *guard = Some(outcome);
+            }
+        });
+    }
+
+    /// Take a finished update-check outcome, if any (UI thread).
+    fn poll_update_result(&mut self) {
+        if !self.update_running {
+            return;
+        }
+        let done = self
+            .update_result
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+        if done.is_some() {
+            self.update_running = false;
+        }
+    }
+
+    /// The update-check outcome currently on display (cloned for render).
+    fn update_snapshot(&self) -> Option<Result<String, String>> {
+        self.update_result
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
     }
 
     /// Start the browser OAuth flow: issue a single-use state and show the

@@ -387,6 +387,23 @@ impl ShellApp {
             {
                 self.palette.open();
             }
+            // R8 (D10): the global freshness ring — one glance answers
+            // "is this thing alive". Click through to Sync Health for
+            // the full state machine, checkpoints and runs.
+            let (tone, label) = self.freshness();
+            let (fill, fg) = design::tone_colors(ui, tone);
+            let freshness_btn =
+                egui::Button::new(egui::RichText::new(label).size(12.0).strong().color(fg))
+                    .fill(fill)
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .small();
+            if ui
+                .add(freshness_btn)
+                .on_hover_text("open Sync Health (last sync, checkpoints, runs)")
+                .clicked()
+            {
+                self.page = PageKey::SyncHealth;
+            }
         });
         let rect = ui.max_rect();
         ui.painter().hline(
@@ -394,6 +411,38 @@ impl ShellApp {
             rect.bottom() - 0.5,
             egui::Stroke::new(1.0, t.border),
         );
+    }
+
+    /// The header freshness state (R8): tone + label for the ring.
+    fn freshness(&self) -> (design::BadgeTone, String) {
+        if self.sync.as_ref().is_some_and(|e| e.is_running()) {
+            return (design::BadgeTone::Info, "syncing…".into());
+        }
+        let age = self
+            .db
+            .with_read(spp_core::sync_engine::last_sync_age_seconds);
+        match age {
+            None => (design::BadgeTone::Neutral, "never synced".into()),
+            Some(age) => {
+                let label = if age < 60 {
+                    format!("synced {age}s ago")
+                } else if age < 3600 {
+                    format!("synced {}m ago", age / 60)
+                } else {
+                    format!("synced {}h ago", age / 3600)
+                };
+                // Fresh matches the busy poll (30 s) and the 1-minute
+                // default ceiling; anything over half an hour is stale.
+                let tone = if age <= 120 {
+                    design::BadgeTone::Success
+                } else if age <= 1800 {
+                    design::BadgeTone::Warning
+                } else {
+                    design::BadgeTone::Destructive
+                };
+                (tone, label)
+            }
+        }
     }
 }
 
@@ -550,12 +599,18 @@ impl eframe::App for ShellApp {
                                 .fill(egui::Color32::TRANSPARENT)
                                 .inner_margin(egui::Margin::symmetric(22, 14))
                                 .show(ui, |ui| match self.page {
-                                    PageKey::Dashboard => self.dashboard.ui(ui, &self.db),
-                                    PageKey::Customers => self.customers.ui(ui, &self.db),
+                                    PageKey::Dashboard => {
+                                        self.dashboard.ui(ui, &self.db, sync.as_ref());
+                                    }
+                                    PageKey::Customers => {
+                                        self.customers.ui(ui, &self.db, sync.as_ref());
+                                    }
                                     PageKey::Knowledge => {
                                         self.knowledge.ui(ui, &self.db, sync.as_ref());
                                     }
-                                    PageKey::Reports => self.reports.ui(ui, &self.db),
+                                    PageKey::Reports => {
+                                        self.reports.ui(ui, &self.db, sync.as_ref());
+                                    }
                                     PageKey::Operations => {
                                         nav = self.operations.ui(ui, &self.db);
                                     }
@@ -574,7 +629,7 @@ impl eframe::App for ShellApp {
                                         self.onboarding.ui(ui, &self.db, sync.as_ref());
                                     }
                                     PageKey::Organizations => {
-                                        self.organizations.ui(ui, &self.db);
+                                        self.organizations.ui(ui, &self.db, sync.as_ref());
                                     }
                                     PageKey::Outreach => self.outreach.ui(ui, &self.db),
                                     PageKey::Search => self.search.ui(ui, &self.db),
@@ -908,7 +963,8 @@ fn theme_row(ui: &mut egui::Ui, next: Theme) -> bool {
 ///
 /// * `SPP_SHOT_PAGE` — the page to open (any `PageKey::label`, lowercased).
 /// * `SPP_SHOT_THEME` — `light` or `dark`.
-/// * `SPP_SHOT_SEED` — `1` seeds a small demo dataset so pages render data.
+/// * `SPP_SHOT_SEED` — `1` seeds a small screenshot-fixture dataset so
+///   pages render rows in the headless capture harness.
 /// * `SPP_SHOT_PALETTE` — `1` opens the command palette overlay.
 #[cfg(feature = "ui-screenshot")]
 impl ShellApp {

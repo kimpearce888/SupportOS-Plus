@@ -127,6 +127,18 @@ pub struct EvidenceContext {
     pub saved_replies: Vec<SavedReplyEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_strategy: Option<String>,
+    /// Durable customer facts extracted from past conversations (A2):
+    /// the "know before you reply" briefing block. Quarantined keys
+    /// never reach the prompt (ai_memory_guard filters them at load).
+    #[serde(default)]
+    pub customer_memory: Vec<MemoryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    pub key: String,
+    pub value: String,
+    pub confidence: String,
 }
 
 fn render_evidence(ctx: &EvidenceContext) -> String {
@@ -184,6 +196,15 @@ fn render_evidence(ctx: &EvidenceContext) -> String {
         parts.push("\nSAVED REPLIES:".to_string());
         for s in &ctx.saved_replies {
             parts.push(format!("  \"{}\": {}", s.name, s.text));
+        }
+    }
+    if !ctx.customer_memory.is_empty() {
+        parts.push("\nDURABLE CUSTOMER FACTS (know before you reply):".to_string());
+        for m in &ctx.customer_memory {
+            parts.push(format!(
+                "  - {}: {} (confidence: {})",
+                m.key, m.value, m.confidence
+            ));
         }
     }
     if let Some(ref strategy) = ctx.interaction_strategy {

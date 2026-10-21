@@ -6,8 +6,8 @@
 //! the shared sync engine) and mark onboarding complete
 //! (`/api/onboarding/complete`).
 //!
-//! Since 1.2.0 there is no demo mode: a fresh install is empty until
-//! Help Scout is connected.
+//! Since 1.2.0 a fresh install is empty until Help Scout is connected:
+//! nothing is pre-seeded, nothing is stand-in content.
 
 use std::sync::Arc;
 
@@ -124,8 +124,8 @@ impl OnboardingPage {
             "Welcome to SupportOS+",
             Some(
                 "Connect your Help Scout account in Settings to pull your \
-                 real conversations. The app starts empty — no sample or \
-                 simulated data.",
+                 real conversations. The app starts empty: no sample \
+                 content, no stand-ins — only your real history.",
             ),
             |_| {},
         );

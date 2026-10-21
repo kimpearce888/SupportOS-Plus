@@ -51,6 +51,9 @@ pub enum AiBackend {
     LmStudio {
         client: OpenAiCompatibleClient,
         model: Option<String>,
+        /// Which provider-hub endpoint served this backend (A1 cost
+        /// ledger); `None` for the legacy pre-hub fallback backend.
+        endpoint_id: Option<String>,
     },
     Disabled,
 }
@@ -79,6 +82,7 @@ pub fn backend_from_settings(conn: &Connection) -> AiBackend {
     AiBackend::LmStudio {
         client: OpenAiCompatibleClient::new_with_timeout(base_url, timeout_ms),
         model,
+        endpoint_id: None,
     }
 }
 
@@ -87,6 +91,16 @@ impl AiBackend {
         match self {
             AiBackend::LmStudio { .. } => "lmstudio",
             AiBackend::Disabled => "disabled",
+        }
+    }
+
+    /// The provider-hub endpoint serving this backend, when routed
+    /// through the hub (A1 cost ledger attribution).
+    #[must_use]
+    pub fn endpoint_id(&self) -> Option<&str> {
+        match self {
+            AiBackend::LmStudio { endpoint_id, .. } => endpoint_id.as_deref(),
+            AiBackend::Disabled => None,
         }
     }
 
@@ -106,7 +120,7 @@ impl AiBackend {
             user.to_string()
         };
         let (client, model) = match self {
-            AiBackend::LmStudio { client, model } => (client, model.as_deref()),
+            AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
             AiBackend::Disabled => {
                 return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false));
             }
@@ -139,6 +153,7 @@ impl AiBackend {
             raw,
             latency_ms: res.latency_ms,
             model: res.model,
+            usage: res.usage,
         })
     }
 
@@ -150,7 +165,7 @@ impl AiBackend {
         json_mode: bool,
     ) -> std::result::Result<crate::ai_lm_studio::ChatOptsResult, LmStudioError> {
         let (client, model) = match self {
-            AiBackend::LmStudio { client, model } => (client, model.as_deref()),
+            AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
             AiBackend::Disabled => {
                 return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false));
             }
@@ -176,6 +191,8 @@ pub struct ChatJsonResult {
     pub raw: Option<String>,
     pub latency_ms: u64,
     pub model: String,
+    /// Token usage reported by the endpoint (A1 cost ledger).
+    pub usage: Option<crate::ai_provider::TokenUsage>,
 }
 
 pub fn extract_json(text: &str) -> Option<serde_json::Value> {
@@ -345,11 +362,35 @@ pub fn complete_run(
     output: &serde_json::Value,
     latency_ms: u64,
 ) -> Result<()> {
+    complete_run_with_usage(conn, id, output, latency_ms, None, None)
+}
+
+/// Complete a run and persist its token usage + endpoint (the A1 cost
+/// ledger's raw material: `ai_runs.token_usage` and `ai_runs.endpoint_id`).
+pub fn complete_run_with_usage(
+    conn: &Connection,
+    id: i64,
+    output: &serde_json::Value,
+    latency_ms: u64,
+    usage: Option<&crate::ai_provider::TokenUsage>,
+    endpoint_id: Option<&str>,
+) -> Result<()> {
+    let usage_json = match usage {
+        Some(u) => serde_json::to_string(u)?,
+        None => "null".to_string(),
+    };
     conn.execute(
         "UPDATE ai_runs SET status='completed', response_json=?2, latency_ms=?3,
-                            completed_at=datetime('now')
+                            completed_at=datetime('now'),
+                            token_usage=?4, endpoint_id=?5
           WHERE id=?1",
-        params![id, serde_json::to_string(output)?, latency_ms as i64],
+        params![
+            id,
+            serde_json::to_string(output)?,
+            latency_ms as i64,
+            usage_json,
+            endpoint_id
+        ],
     )?;
     Ok(())
 }
@@ -889,11 +930,13 @@ pub async fn analyze_ticket(
             ));
         }
     };
-    complete_run(
+    complete_run_with_usage(
         conn,
         run_id,
         &serde_json::to_value(&analysis).unwrap_or_default(),
         res.latency_ms,
+        res.usage.as_ref(),
+        backend.endpoint_id(),
     )
     .map_err(|e| LmStudioError::new(e.to_string(), true))?;
     let sources = sources_for(conn, &ctx);
@@ -1044,11 +1087,13 @@ pub async fn generate_draft(
                 .collect()
         })
         .unwrap_or_default();
-    complete_run(
+    complete_run_with_usage(
         conn,
         run_id,
         &serde_json::json!({ "draft": draft_text, "usedEvidence": used_evidence }),
         res.latency_ms,
+        res.usage.as_ref(),
+        backend.endpoint_id(),
     )
     .map_err(|e| LmStudioError::new(e.to_string(), true))?;
     let verification = match verify_draft_internal(
@@ -1135,11 +1180,13 @@ pub async fn verify_draft_internal(
         }
     };
     let verification = parse_draft_verification(res.json.as_ref());
-    complete_run(
+    complete_run_with_usage(
         conn,
         run_id,
         &serde_json::to_value(&verification).unwrap_or_default(),
         res.latency_ms,
+        res.usage.as_ref(),
+        backend.endpoint_id(),
     )
     .map_err(|e| LmStudioError::new(e.to_string(), true))?;
     Ok(verification)
@@ -1199,7 +1246,7 @@ pub async fn rewrite_draft(
         _ => "Rewrite the reply to be more direct and concise. Keep facts identical.",
     };
     let (client, model) = match backend {
-        AiBackend::LmStudio { client, model } => (client, model.as_deref()),
+        AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
         AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
     };
     let messages = vec![
@@ -1324,11 +1371,13 @@ pub async fn extract_memories(
                 .collect()
         })
         .unwrap_or_default();
-    let _ = complete_run(
+    let _ = complete_run_with_usage(
         conn,
         run_id,
         &serde_json::json!({ "memories": memories }),
         res.latency_ms,
+        res.usage.as_ref(),
+        backend.endpoint_id(),
     );
     for (key, value, confidence) in &memories {
         let _ = upsert_memory(
@@ -1440,11 +1489,13 @@ pub async fn cluster_issues(
         .and_then(|c| c.as_array())
         .cloned()
         .unwrap_or_default();
-    let _ = complete_run(
+    let _ = complete_run_with_usage(
         conn,
         run_id,
         &serde_json::json!({ "clusters": raw_clusters }),
         res.latency_ms,
+        res.usage.as_ref(),
+        backend.endpoint_id(),
     );
     let mut out: Vec<ClusterOut> = Vec::new();
     for c in raw_clusters {
@@ -1667,11 +1718,13 @@ pub async fn report_narrative(
         .and_then(|n| n.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| res.raw.clone().unwrap_or_default().trim().to_string());
-    let _ = complete_run(
+    let _ = complete_run_with_usage(
         conn,
         run_id,
         &serde_json::json!({ "narrative": narrative }),
         res.latency_ms,
+        res.usage.as_ref(),
+        backend.endpoint_id(),
     );
     Ok(narrative)
 }
@@ -2225,11 +2278,11 @@ pub async fn analyze_interaction(
             Some(1400),
         )
         .await;
-    let (obs, stage1_latency, _stage1_model) = match res {
+    let (obs, stage1_latency, stage1_usage) = match res {
         Ok(r) => (
             parse_observation(r.json.as_ref(), &valid_thread_ids),
             r.latency_ms,
-            r.model,
+            r.usage,
         ),
         Err(e) => {
             let _ = fail_run(conn, run_id1, &e.message);
@@ -2239,7 +2292,7 @@ pub async fn analyze_interaction(
             });
         }
     };
-    complete_run(
+    complete_run_with_usage(
         conn,
         run_id1,
         &serde_json::json!({
@@ -2248,6 +2301,8 @@ pub async fn analyze_interaction(
             "notes": obs.notes,
         }),
         stage1_latency,
+        stage1_usage.as_ref(),
+        backend.endpoint_id(),
     )
     .map_err(|e| LmStudioError::new(e.to_string(), true))?;
 
@@ -2392,8 +2447,13 @@ pub async fn analyze_interaction(
             Some(900),
         )
         .await;
-    let (rec, _stage2_latency, stage2_model) = match res2 {
-        Ok(r) => (parse_recommendation(r.json.as_ref()), r.latency_ms, r.model),
+    let (rec, stage2_latency, stage2_usage, stage2_model) = match res2 {
+        Ok(r) => (
+            parse_recommendation(r.json.as_ref()),
+            r.latency_ms,
+            r.usage,
+            r.model,
+        ),
         Err(e) => {
             let _ = fail_run(conn, run_id2, &e.message);
             return Ok(AnalyzeInteractionOutcome {
@@ -2404,11 +2464,13 @@ pub async fn analyze_interaction(
     };
     match rec {
         Some(rec) => {
-            complete_run(
+            complete_run_with_usage(
                 conn,
                 run_id2,
                 &serde_json::to_value(&rec).unwrap_or_default(),
-                _stage2_latency,
+                stage2_latency,
+                stage2_usage.as_ref(),
+                backend.endpoint_id(),
             )
             .map_err(|e| LmStudioError::new(e.to_string(), true))?;
             let model_arg = (!stage2_model.is_empty()).then_some(stage2_model.as_str());

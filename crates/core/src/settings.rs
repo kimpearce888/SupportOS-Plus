@@ -66,6 +66,12 @@ pub(crate) fn clear_master_key_for_tests() {
 #[cfg(test)]
 pub(crate) static SECRETS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Whether a master key is loaded in this process (probe for migrations
+/// that degrade gracefully without one, e.g. m053).
+pub fn master_key_available() -> bool {
+    MASTER_KEY.read().expect("master key lock").is_some()
+}
+
 fn master_key() -> Result<[u8; KEY_LEN]> {
     MASTER_KEY.read().expect("master key lock").ok_or_else(|| {
         Error::Config(

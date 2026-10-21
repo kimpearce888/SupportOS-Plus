@@ -52,99 +52,12 @@ pub fn apply_m011_to_m013(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DraftStatus {
-    Pending,
-    Approved,
-    Sent,
-    Rejected,
-}
-
-impl DraftStatus {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Approved => "approved",
-            Self::Sent => "sent",
-            Self::Rejected => "rejected",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct VerifiedDraft {
-    pub id: Option<i64>,
-    pub conversation_id: i64,
-    pub draft_text: String,
-    pub status: String,
-    pub created_by_ai_at: String,
-    pub approved_by_user_id: Option<i64>,
-    pub approved_at: Option<String>,
-    pub sent_at: Option<String>,
-}
-
-pub fn create_draft(conn: &Connection, conversation_id: i64, draft_text: &str) -> Result<i64> {
-    conn.execute(
-        "INSERT INTO verified_drafts (conversation_id, draft_text, status)
-         VALUES (?1, ?2, 'pending')",
-        params![conversation_id, draft_text],
-    )?;
-    Ok(conn.last_insert_rowid())
-}
-
-pub fn approve_draft(conn: &Connection, draft_id: i64, user_id: i64) -> Result<bool> {
-    let rows = conn.execute(
-        "UPDATE verified_drafts
-         SET status = 'approved', approved_by_user_id = ?1,
-             approved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id = ?2 AND status = 'pending'",
-        params![user_id, draft_id],
-    )?;
-    Ok(rows > 0)
-}
-
-pub fn send_draft(conn: &Connection, draft_id: i64) -> Result<bool> {
-    let rows = conn.execute(
-        "UPDATE verified_drafts
-         SET status = 'sent', sent_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id = ?1 AND status = 'approved'",
-        params![draft_id],
-    )?;
-    Ok(rows > 0)
-}
-
-pub fn reject_draft(conn: &Connection, draft_id: i64) -> Result<bool> {
-    let rows = conn.execute(
-        "UPDATE verified_drafts SET status = 'rejected' WHERE id = ?1 AND status = 'pending'",
-        params![draft_id],
-    )?;
-    Ok(rows > 0)
-}
-
-pub fn list_drafts(conn: &Connection, conversation_id: i64) -> Result<Vec<VerifiedDraft>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, conversation_id, draft_text, status, created_by_ai_at,
-                approved_by_user_id, approved_at, sent_at
-         FROM verified_drafts WHERE conversation_id = ?1 ORDER BY id DESC",
-    )?;
-    let rows = stmt
-        .query_map(params![conversation_id], |r| {
-            Ok(VerifiedDraft {
-                id: r.get(0)?,
-                conversation_id: r.get(1)?,
-                draft_text: r.get(2)?,
-                status: r.get(3)?,
-                created_by_ai_at: r.get(4)?,
-                approved_by_user_id: r.get(5)?,
-                approved_at: r.get(6)?,
-                sent_at: r.get(7)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
-}
+// 1.4.0 R7 (D14): the legacy verified-draft approval workflow (DraftStatus,
+// VerifiedDraft, create/approve/send/reject/list_drafts) was removed — it
+// had zero production callers and is superseded by the outbound dispatcher
+// plus the draft verification gate (`ai_pipeline::verify_draft_internal`,
+// `ai_drafts` + `ai_verifications` tables). The `verified_drafts` table
+// remains as inert schema (created by m011).
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CoachingSuggestion {
