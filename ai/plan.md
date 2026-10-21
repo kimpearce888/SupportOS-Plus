@@ -18,14 +18,12 @@ Merged root-causes share one item (A2+J2, A3+B2, E1+K8, E2+F4, G6+I2, …).
 Batch 16 = items 1–5 (provider delegations, chunk_text UTF-8 panic,
 not_equals inversion, dead 'customer_message' literal, no-simulation gate
 blind spots) — verified and recorded in `completed.md`.
+Batch 17 = items 6–10 (worker-restart guard flags, writer-lane-across-LLM,
+duplicate-send idempotency, raw_json_hash writer, LM Studio probe API key) —
+verified and recorded in `completed.md`.
 
 ### HIGH — shipped features broken / silent permanent failure
 
-6. [high|bug] Worker restart mid-tick permanently kills the job queue (`processing` guard never cleared by `start()`) — workers.rs:339-341,346,387,145-149
-7. [high|bug] Writer lane held across full LLM round-trips; egui writes freeze the UI behind it — workers.rs:1883-1885 (+13 more sites) + app.rs:252-257
-8. [high|bug] Duplicate outbound sends on ambiguous failure: non-idempotent POSTs auto-retried in-client AND requeued — helpscout_real.rs:1162-1170 + workers.rs:751-768
-9. [high|bug] `raw_json_hash` never written → thread edits never invalidate cached analyses — ai_pipeline.rs:456-459
-10. [high|bug] LM Studio probes never send the stored API key (healthy keyed endpoints show offline) — ai_lm_studio.rs:118-151
 11. [high|bug] Backup restore: unverified file swapped over live DB, no fsync, stale-WAL window, single unconfirmed click — backup_service.rs:186-198 + pages/settings.rs:2124-2131
 12. [high|bug] Auto QA rebuild wipes stored AI QA layers every ≥20h — quality.rs:1637-1644
 13. [high|bug] SLA waiting stats use `updated_at` instead of last-customer-message — sla.rs:510
