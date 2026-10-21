@@ -60,6 +60,7 @@ pub fn customer_memory_facts(
 
 pub fn build(
     conn: &Connection,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
     conversation_local_id: i64,
     include_internal: bool,
 ) -> Result<Option<EvidenceContext>> {
@@ -169,7 +170,15 @@ pub fn build(
         None => Vec::new(),
     };
 
-    let similar: Vec<SimilarCase> = find_similar(conn, conversation_local_id, 5, &[])
+    // A4 retrieval spine: the semantic lane feeds real sqlite-vec hits into
+    // the similar-issues merge, so evidence chips can say "semantic match"
+    // with an actual vector behind them. Absent index / unrouted Embed role /
+    // disabled feature = the honest empty lane (FTS-only).
+    let semantic: Vec<(i64, f64)> = match index {
+        Some(ix) => semantic_hits(conn, ix, conversation_local_id, 8),
+        None => Vec::new(),
+    };
+    let similar: Vec<SimilarCase> = find_similar(conn, conversation_local_id, 5, &semantic)
         .unwrap_or_default()
         .into_iter()
         .map(|s| SimilarCase {
@@ -288,6 +297,82 @@ pub fn build(
             .map(|cid| customer_memory_facts(conn, cid, 5))
             .unwrap_or_default(),
     }))
+}
+
+/// A4 retrieval spine: real sqlite-vec hits for a conversation's own text.
+///
+/// Embeds the conversation's subject+preview through the hub Embed role
+/// (local by default, cloud only on explicit user routing), searches the
+/// vector index, and maps `conversation_chunk` payload hits back to their
+/// conversations — one `(conversation_local_id, score)` pair per
+/// conversation, keeping the best score. Best-effort by design: the
+/// retrieval feature off, an unrouted Embed role, an unreachable endpoint
+/// or an empty index all yield an empty vec and callers stay FTS-only.
+#[must_use]
+pub fn semantic_hits(
+    conn: &Connection,
+    index: &crate::vectorstore_sqlitevec::VectorIndex,
+    conversation_local_id: i64,
+    limit: usize,
+) -> Vec<(i64, f64)> {
+    if !crate::ai_hub::ai_feature_enabled(conn, "retrieval") {
+        return Vec::new();
+    }
+    let query: String = match conn.query_row(
+        "SELECT COALESCE(subject, '') || ' ' || COALESCE(preview, '')
+           FROM conversations WHERE id = ?1",
+        params![conversation_local_id],
+        |r| r.get(0),
+    ) {
+        Ok(q) => q,
+        Err(_) => return Vec::new(),
+    };
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
+    let vector = match crate::embeddings::embed_query_text_blocking(conn, &query) {
+        Ok(Some(v)) => v,
+        Ok(None) => return Vec::new(),
+        Err(e) => {
+            tracing::debug!(
+                operation = "semantic_hits",
+                "query embedding unavailable: {e}"
+            );
+            return Vec::new();
+        }
+    };
+    let search_limit = limit.saturating_mul(4).max(12);
+    let hits = index.search(&vector, search_limit);
+    let mut best: Vec<(i64, f64)> = Vec::new();
+    for hit in hits {
+        let payload = match hit.payload.as_object() {
+            Some(p) => p,
+            None => continue,
+        };
+        if payload.get("entity_type").and_then(|v| v.as_str()) != Some("conversation_chunk") {
+            continue;
+        }
+        let Some(entity_id) = payload.get("entity_id").and_then(|v| v.as_i64()) else {
+            continue;
+        };
+        if entity_id == conversation_local_id {
+            continue;
+        }
+        let score = f64::from(hit.score);
+        match best.iter_mut().find(|(cid, _)| *cid == entity_id) {
+            Some(entry) => {
+                if score > entry.1 {
+                    entry.1 = score;
+                }
+            }
+            None => best.push((entity_id, score)),
+        }
+        if best.len() >= limit {
+            break;
+        }
+    }
+    best.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    best
 }
 
 pub fn find_similar(
@@ -691,7 +776,9 @@ mod a2_memory_feed_tests {
         let conv: i64 = conn
             .query_row("SELECT id FROM conversations", [], |r| r.get(0))
             .expect("conv id");
-        let ctx = build(&conn, conv, false).expect("build").expect("context");
+        let ctx = build(&conn, None, conv, false)
+            .expect("build")
+            .expect("context");
         assert!(
             ctx.customer_memory
                 .iter()
@@ -710,5 +797,57 @@ mod a2_memory_feed_tests {
         assert!(rendered.contains("DURABLE CUSTOMER FACTS"));
         assert!(rendered.contains("prefers short replies"));
         assert!(!rendered.contains("bipolar"));
+    }
+}
+
+#[cfg(test)]
+mod batch13_a4_evidence_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db_with_conversation() -> (Connection, i64) {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9701, 97, 'Export timeouts nightly', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        (conn, conv)
+    }
+
+    /// A4: with no Embed role routed (and no legacy embedding model), the
+    /// semantic lane yields nothing — find_similar stays FTS-only and its
+    /// results keep their honest "keyword match" reasons.
+    #[test]
+    fn semantic_hits_empty_without_routed_embed_role() {
+        let (conn, conv) = db_with_conversation();
+        let dir = std::env::temp_dir().join(format!("spp-evidence-test-{}", std::process::id()));
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
+        let hits = semantic_hits(&conn, &index, conv, 5);
+        assert!(hits.is_empty(), "no embedding model means no semantic lane");
+        let similar = find_similar(&conn, conv, 5, &hits).expect("similar");
+        assert!(
+            similar
+                .iter()
+                .all(|s| !s.why.iter().any(|w| w == "semantic match")),
+            "no semantic claims without vectors"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A4: the retrieval feature gate closes the semantic lane even when a
+    /// model would be reachable.
+    #[test]
+    fn semantic_hits_respect_the_feature_gate() {
+        let (conn, conv) = db_with_conversation();
+        crate::settings::set_bool(&conn, "ai_feature_retrieval_enabled", false).expect("gate");
+        let dir = std::env::temp_dir().join(format!("spp-evidence-gate-{}", std::process::id()));
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
+        let hits = semantic_hits(&conn, &index, conv, 5);
+        assert!(hits.is_empty(), "the kill switch dominates the lane");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

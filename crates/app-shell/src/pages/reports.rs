@@ -24,15 +24,17 @@ pub enum Tab {
     Sla,
     WhyContacting,
     TopQuestions,
+    Quality,
     Radar,
 }
 
 impl Tab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Overview,
         Self::Sla,
         Self::WhyContacting,
         Self::TopQuestions,
+        Self::Quality,
         Self::Radar,
     ];
 
@@ -42,6 +44,7 @@ impl Tab {
             Self::Sla => "SLA",
             Self::WhyContacting => "Why contacting",
             Self::TopQuestions => "Top questions",
+            Self::Quality => "Quality",
             Self::Radar => "Issue radar",
         }
     }
@@ -73,6 +76,10 @@ pub struct ReportsPage {
     why_contacting: Vec<serde_json::Value>,
     top_questions: Vec<serde_json::Value>,
     radar: Vec<serde_json::Value>,
+    /// A3.3: post-resolution QA aggregates (`quality::qa_overview`).
+    quality: Option<serde_json::Value>,
+    /// A3.3: recent closed conversations with their QA rows.
+    quality_rows: Vec<serde_json::Value>,
     error: Option<String>,
 }
 
@@ -88,6 +95,8 @@ impl ReportsPage {
             why_contacting: Vec::new(),
             top_questions: Vec::new(),
             radar: Vec::new(),
+            quality: None,
+            quality_rows: Vec::new(),
             error: None,
         }
     }
@@ -104,13 +113,32 @@ impl ReportsPage {
     fn reload(&mut self, db: &DbHandle) {
         let from = spp_core::business_hours::iso_days_ago(self.days);
         let to = spp_core::business_hours::now_iso_millis();
-        let (overview, sla, why, questions, radar) = db.with_read(|conn| {
+        let (overview, sla, why, questions, radar, quality, quality_rows) = db.with_read(|conn| {
             (
                 Some(load_dashboard(conn, &DashboardScope::days(self.days))),
                 spp_core::sla::sla_report(conn, &from, &to, None).ok(),
                 spp_core::analytics::why_contacting_impl(conn, self.days),
                 spp_core::analytics::top_questions_impl(conn, self.days),
                 spp_core::analytics::issue_radar_impl(conn),
+                // A3.3: the deterministic QA aggregates + the most recent
+                // closed conversations' QA cards (computed lazily).
+                Some(spp_core::quality::qa_overview(conn)),
+                {
+                    let ids: Vec<i64> = conn
+                        .prepare(
+                            "SELECT id FROM conversations
+                              WHERE deleted_at IS NULL AND status = 'closed'
+                              ORDER BY COALESCE(closed_at, updated_at) DESC LIMIT 25",
+                        )
+                        .and_then(|mut stmt| {
+                            stmt.query_map([], |r| r.get(0))
+                                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                        })
+                        .unwrap_or_default();
+                    ids.into_iter()
+                        .filter_map(|id| spp_core::quality::get_qa(conn, id, false))
+                        .collect()
+                },
             )
         });
         self.overview = overview;
@@ -118,6 +146,8 @@ impl ReportsPage {
         self.why_contacting = why;
         self.top_questions = questions;
         self.radar = radar;
+        self.quality = quality;
+        self.quality_rows = quality_rows;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
@@ -203,6 +233,7 @@ impl ReportsPage {
             Tab::WhyContacting => Self::list_ui(ui, &why, "why contacting"),
             Tab::TopQuestions => Self::list_ui(ui, &questions, "top questions"),
             Tab::Radar => self.radar_ui(ui),
+            Tab::Quality => self.quality_ui(ui),
         }
     }
 
@@ -367,6 +398,91 @@ impl ReportsPage {
                 },
             );
         });
+    }
+
+    /// A3.3: the Quality tab — post-resolution QA aggregates plus the most
+    /// recent closed conversations' deterministic QA cards. Computed
+    /// locally from the mirror; the per-conversation AI layer stays on the
+    /// inbox detail.
+    fn quality_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(overview) = self.quality.clone() else {
+            ui.spinner();
+            return;
+        };
+        design::card_titled(
+            ui,
+            "Post-resolution QA",
+            Some(
+                "deterministic checks over closed conversations (AI layer per conversation in the inbox)",
+            ),
+            |ui| {
+                let render_metric = |ui: &mut egui::Ui, key: &str, label: &str| {
+                    if let Some(value) = overview.get(key) {
+                        ui.horizontal(|ui| {
+                            design::field_label(ui, label);
+                            ui.monospace(
+                                egui::RichText::new(value.as_str().unwrap_or(&value.to_string()))
+                                    .color(design::tokens(ui).foreground),
+                            );
+                        });
+                    }
+                };
+                for (key, label) in [
+                    ("closed_conversations", "Closed conversations"),
+                    ("qa_rows", "QA rows computed"),
+                    ("with_ai_layer", "Conversations with the AI layer"),
+                ] {
+                    render_metric(ui, key, label);
+                }
+                design::hint_text(
+                    ui,
+                    "Deterministic checks: back-and-forth, repeated information, messages after close, handoffs, first-response and resolution minutes — per conversation in the inbox detail.",
+                );
+            },
+        );
+        ui.add_space(10.0);
+        design::card_titled(
+            ui,
+            "Recent closed conversations",
+            Some("the 25 most recent closures with their QA rows"),
+            |ui| {
+                if self.quality_rows.is_empty() {
+                    design::hint_text(
+                        ui,
+                        "No closed conversations yet — QA rows appear here (and in the inbox detail) after the first closure.",
+                    );
+                    return;
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("reports-quality-rows")
+                    .max_height(420.0)
+                    .show_rows(ui, 46.0, self.quality_rows.len(), |ui, range| {
+                        for row in &self.quality_rows[range] {
+                            let id = row.get("conversation_id").and_then(|v| v.as_i64());
+                            let det = row.get("deterministic").cloned().unwrap_or_default();
+                            ui.horizontal(|ui| {
+                                ui.monospace(format!("#{id:?}"));
+                                for (key, label) in [
+                                    ("back_and_forth_count", "b&f"),
+                                    ("handoff_count", "handoffs"),
+                                    ("resolution_minutes", "res min"),
+                                ] {
+                                    if let Some(value) = det.get(key) {
+                                        design::badge(
+                                            ui,
+                                            &format!("{label} {}", value.as_i64().unwrap_or(0)),
+                                            BadgeTone::Neutral,
+                                        );
+                                    }
+                                }
+                                if row.get("ai").is_some() {
+                                    design::badge(ui, "AI review", BadgeTone::Success);
+                                }
+                            });
+                        }
+                    });
+            },
+        );
     }
 
     fn radar_ui(&mut self, ui: &mut egui::Ui) {

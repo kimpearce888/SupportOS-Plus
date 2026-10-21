@@ -133,6 +133,15 @@ impl ShellApp {
         // folder under the data dir (route parity).
         let mut knowledge = KnowledgePage::new();
         knowledge.set_data_dir(options.data_dir);
+        // A4: the shared vector index rides into the pages that fuse
+        // FTS + sqlite-vec — the same store the workers embed into.
+        let vector_index = options.vector_index.clone();
+        let mut inbox = InboxPage::new();
+        inbox.set_vector_index(vector_index.clone());
+        let mut search = SearchPage::new();
+        search.set_vector_index(vector_index.clone());
+        let mut ai_center = AiCenterPage::new();
+        ai_center.set_vector_index(vector_index.clone());
         // `mut` is only needed by the (feature-gated) screenshot harness.
         #[cfg_attr(
             not(feature = "ui-screenshot"),
@@ -150,12 +159,12 @@ impl ShellApp {
             last_event: None,
             page: PageKey::Dashboard,
             dashboard: DashboardPage::new(),
-            inbox: InboxPage::new(),
+            inbox,
             customers: CustomersPage::new(),
             knowledge,
             reports: ReportsPage::new(),
             operations: OperationsPage::new(),
-            ai_center: AiCenterPage::new(),
+            ai_center,
             automation: AutomationPage::new(),
             connectors,
             custom_objects: CustomObjectsPage::new(),
@@ -165,7 +174,7 @@ impl ShellApp {
             onboarding: OnboardingPage::new(),
             organizations: OrganizationsPage::new(),
             outreach: OutreachPage::new(),
-            search: SearchPage::new(),
+            search,
             settings,
             support_graph: SupportGraphPage::new(),
             diagnostics: DiagnosticsPage::new(),

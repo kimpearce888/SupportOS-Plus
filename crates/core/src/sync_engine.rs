@@ -2374,6 +2374,47 @@ impl SyncEngine {
                 }
             }
         }
+        // A4 retrieval spine: every ingested conversation is re-chunked
+        // (idempotent rebuild) so semantic search and the evidence engine see
+        // fresh content. The embedding pass is enqueued only when the
+        // retrieval feature is on, new chunks exist, and one isn't already
+        // queued — chunking itself stays on regardless (it is local, cheap,
+        // and future-proof: enabling embeddings later picks chunks up).
+        {
+            let conn = self.lock();
+            match crate::embeddings::chunk_conversation(&conn, local_id) {
+                Ok(0) => {}
+                Ok(_written) => {
+                    let feature_on = crate::ai_hub::ai_feature_enabled(&conn, "retrieval");
+                    let already_queued: bool = conn
+                        .query_row(
+                            "SELECT 1 FROM jobs
+                              WHERE type = 'embed_conversation_chunks'
+                                AND status = 'queued' LIMIT 1",
+                            [],
+                            |_| Ok(true),
+                        )
+                        .unwrap_or(false);
+                    if feature_on && !already_queued {
+                        let _ = crate::jobs::enqueue_on(
+                            &conn,
+                            "embeddings",
+                            "embed_conversation_chunks",
+                            "{}",
+                            4,
+                            2,
+                        );
+                    }
+                }
+                Err(e) => {
+                    let _ = crate::jobs::log_error(
+                        &conn,
+                        "sync",
+                        &format!("Chunking failed for conversation {}: {e}", c.remote_id),
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }

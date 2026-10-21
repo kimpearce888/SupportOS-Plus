@@ -14,6 +14,43 @@ use crate::jobs;
 use crate::outbound;
 use crate::sync_engine::SyncEngine;
 
+/// A3: the boxed future chat helpers handed to `translation::translate`
+/// and `coaching::review_draft` — named so the closures stay readable.
+type TranslateChatOutput<'a> = std::result::Result<(Option<String>, String), String>;
+type TranslateChatFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = TranslateChatOutput<'a>> + 'a>>;
+type CoachingChatOutput<'a> = std::result::Result<(Option<String>, String, u64), String>;
+type CoachingChatFuture<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = CoachingChatOutput<'a>> + 'a>>;
+
+/// Drive an AI pipeline future to completion on a private, self-contained
+/// current-thread runtime — the same isolation the embeddings lane uses
+/// with its dedicated "lmstudio-embed" runtime.
+///
+/// Why not `Handle::current().block_on`: every AI runner below holds the
+/// DbHandle write guard for the whole pipeline call (the pipeline API is
+/// `&Connection`), so while the future runs nobody else can take the write
+/// lock. `Handle::current()` resolves to the runtime that spawned this
+/// blocking-pool thread, and its `block_on` parks THIS thread until that
+/// runtime drives the future — but the spawning runtime can be a
+/// current-thread runtime whose only thread is also free to block on the
+/// very same write mutex (the worker timer tasks whose first interval
+/// tick fires immediately, the sweeps, the reply dispatcher). When both
+/// happen, both sides wait forever: this thread never releases the guard,
+/// the runtime thread never wakes. That is a guaranteed deadlock for the
+/// integration tests (which drive `tick()` on a current-thread runtime)
+/// and a production stall: every DB write in the app would freeze for
+/// the whole LLM round-trip. A private runtime drives the HTTP half
+/// locally, so the job always completes — or fails honestly — on its own,
+/// no matter what the spawning runtime is doing.
+fn block_ai_pipeline<F: std::future::Future>(fut: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("AI pipeline runtime")
+        .block_on(fut)
+}
+
 pub struct WorkerManager {
     db: crate::db::DbHandle,
     engine: Option<Arc<SyncEngine>>,
@@ -896,6 +933,51 @@ impl WorkerManager {
                     let _ = crate::settings::set_i64(&conn, "ai_clustering_last_run", now_unix);
                 }
             }
+            // K1: the gap-detection pipeline — friction findings over every
+            // conversation with a customer thread, then gap candidates from
+            // repeated questions cross-checked against the knowledge base
+            // AND the help-center mirror. Deterministic (no model needed);
+            // provider-gated because its inputs (analysis runs, clusters)
+            // come from AI jobs that never ran on an empty provider.
+            if crate::ai_hub::ai_feature_enabled(&conn, "gap_detection") && provider_kind != "empty"
+            {
+                let last_run_unix =
+                    crate::settings::get_i64(&conn, "ai_gaps_last_run", 0).unwrap_or(0);
+                let now_unix = chrono::Utc::now().timestamp();
+                if now_unix - last_run_unix >= 20 * 3600 {
+                    let _ = crate::jobs::enqueue_on(&conn, "ai", "rebuild_gaps", "{}", 3, 2);
+                    let _ = crate::settings::set_i64(&conn, "ai_gaps_last_run", now_unix);
+                }
+            }
+            // A6: the golden set re-runs when the analysis prompt version
+            // or the role map changed since the last run (upgrade → new
+            // prompt constants; AI Center → new model routing).
+            if crate::ai_hub::ai_feature_enabled(&conn, "golden_eval")
+                && provider_kind != "empty"
+                && crate::ai_eval::golden_fingerprint_stale(&conn)
+            {
+                let _ = crate::jobs::enqueue_on(&conn, "ai", "golden_eval", "{}", 3, 2);
+            }
+            // A3: keep the post-resolution QA table warm for the Reports
+            // Quality tab (deterministic; the AI layer stays on demand).
+            if crate::ai_hub::ai_feature_enabled(&conn, "post_resolution_qa")
+                && provider_kind != "empty"
+            {
+                let last_run_unix =
+                    crate::settings::get_i64(&conn, "ai_qa_rebuild_last_run", 0).unwrap_or(0);
+                let now_unix = chrono::Utc::now().timestamp();
+                if now_unix - last_run_unix >= 20 * 3600 {
+                    let rebuilt = crate::quality::rebuild_qa(&conn);
+                    let _ = crate::settings::set_i64(&conn, "ai_qa_rebuild_last_run", now_unix);
+                    if rebuilt > 0 {
+                        tracing::info!(
+                            operation = "maintenance",
+                            rebuilt,
+                            "post-resolution QA table rebuilt"
+                        );
+                    }
+                }
+            }
             let _ = crate::notification_sweep::sweep(&conn, Some(&bus));
             let backup_hours =
                 crate::settings::get_i64(&conn, "backup_interval_hours", 24).unwrap_or(24);
@@ -1289,6 +1371,55 @@ impl WorkerManager {
                 "cluster_issues" => {
                     self.run_clustering_job().await?;
                 }
+                // ---- Batch 13 (A3/A5/A6/K1): composer transforms, QA,
+                // interaction intelligence, copilot chat, golden evals,
+                // gap detection. Every runner re-checks its feature gate
+                // and role at execution (enqueue-time gates are not
+                // trusted on their own). ----
+                "rewrite_composer" => {
+                    self.run_rewrite_job(&payload).await?;
+                }
+                "translate_composer" => {
+                    self.run_translate_job(&payload).await?;
+                }
+                "review_draft" => {
+                    let Some(conv_id) = num("conversationId") else {
+                        let conn = self.lock();
+                        jobs::fail(&conn, job_id, "review_draft missing conversationId", true)?;
+                        return Ok(());
+                    };
+                    self.run_coaching_job(conv_id, &payload).await?;
+                }
+                "qa_ai_layer" => {
+                    let Some(conv_id) = num("conversationId") else {
+                        let conn = self.lock();
+                        jobs::fail(&conn, job_id, "qa_ai_layer missing conversationId", true)?;
+                        return Ok(());
+                    };
+                    self.run_qa_ai_job(conv_id).await?;
+                }
+                "analyze_interaction" => {
+                    let Some(conv_id) = num("conversationId") else {
+                        let conn = self.lock();
+                        jobs::fail(
+                            &conn,
+                            job_id,
+                            "analyze_interaction missing conversationId",
+                            true,
+                        )?;
+                        return Ok(());
+                    };
+                    self.run_interaction_job(conv_id).await?;
+                }
+                "copilot_chat" => {
+                    self.run_copilot_chat_job(job_id, &payload).await?;
+                }
+                "golden_eval" => {
+                    self.run_golden_job().await?;
+                }
+                "rebuild_gaps" => {
+                    self.run_gap_rebuild_job().await?;
+                }
                 "automation_action_awaiting_approval" => {
                     let approved = payload
                         .get("approved")
@@ -1462,6 +1593,18 @@ impl WorkerManager {
         }
     }
 
+    /// Local → remote conversation id (for re-emitting updates after jobs
+    /// that only know the local mirror id).
+    fn remote_id_for_local(&self, local_id: i64) -> Option<i64> {
+        let conn = self.lock();
+        conn.query_row(
+            "SELECT remote_id FROM conversations WHERE id = ?1",
+            rusqlite::params![local_id],
+            |r| r.get(0),
+        )
+        .ok()
+    }
+
     fn emit_conversation_updated_for_remote(&self, remote_id: i64) {
         use crate::events::ServerEvent;
         let conn = self.lock();
@@ -1560,6 +1703,20 @@ impl WorkerManager {
                         2,
                     );
                 }
+                // A3: the interaction-intelligence AI stage rides right
+                // after the heuristic stage so the Customers profile gains
+                // the merged heuristic+ai card while the conversation is
+                // fresh. Gated at enqueue AND at execution.
+                if crate::ai_hub::ai_feature_enabled(&conn, "interaction_intelligence") {
+                    let _ = jobs::enqueue_on(
+                        &conn,
+                        "ai",
+                        "analyze_interaction",
+                        &format!("{{\"conversationId\":{conversation_local_id}}}"),
+                        3,
+                        2,
+                    );
+                }
                 let _ = crate::interaction_current::record_current_interaction(
                     &conn,
                     conversation_local_id,
@@ -1620,9 +1777,13 @@ impl WorkerManager {
             return Ok(());
         }
         let db = self.db.clone();
+        // A4: the pipeline fns take the vector index so evidence packs can
+        // fuse FTS + sqlite-vec hits; the Arc rides along into the blocking
+        // task unchanged.
+        let index = self.qdrant.clone();
         let (result, note_text, remote_id) = tokio::task::spawn_blocking(move || {
             let conn = db.write_guard();
-            tokio::runtime::Handle::current().block_on(async {
+            block_ai_pipeline(async {
                 let remote: Option<i64> = conn
                     .query_row(
                         "SELECT remote_id FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
@@ -1642,16 +1803,28 @@ impl WorkerManager {
                 };
                 match job {
                     AiJob::Analyze => {
-                        let r = crate::ai_pipeline::analyze_ticket(&conn, &backend, conv_id, false)
-                            .await
-                            .map(|_| ())
-                            .map_err(|e| Error::Other(e.to_string().into()));
+                        let r = crate::ai_pipeline::analyze_ticket(
+                            &conn,
+                            &backend,
+                            index.as_deref(),
+                            conv_id,
+                            false,
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| Error::Other(e.to_string().into()));
                         (r, None, Some(remote_id))
                     }
                     AiJob::Draft => {
                         let mode = "standard".to_string();
                         let r = crate::ai_pipeline::generate_draft(
-                            &conn, &backend, conv_id, &mode, false, None,
+                            &conn,
+                            &backend,
+                            index.as_deref(),
+                            conv_id,
+                            &mode,
+                            false,
+                            None,
                         )
                         .await
                         .map(|_| ())
@@ -1660,7 +1833,11 @@ impl WorkerManager {
                     }
                     AiJob::Note => {
                         let analysis = match crate::ai_pipeline::analyze_ticket(
-                            &conn, &backend, conv_id, false,
+                            &conn,
+                            &backend,
+                            index.as_deref(),
+                            conv_id,
+                            false,
                         )
                         .await
                         {
@@ -1804,7 +1981,7 @@ impl WorkerManager {
         let db = self.db.clone();
         let result = tokio::task::spawn_blocking(move || {
             let mut conn = db.write_guard();
-            tokio::runtime::Handle::current().block_on(async {
+            block_ai_pipeline(async {
                 let remote: Option<i64> = conn
                     .query_row(
                         "SELECT remote_id FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
@@ -1864,7 +2041,7 @@ impl WorkerManager {
         let db = self.db.clone();
         let extracted = tokio::task::spawn_blocking(move || {
             let conn = db.write_guard();
-            tokio::runtime::Handle::current().block_on(async {
+            block_ai_pipeline(async {
                 crate::ai_pipeline::extract_memories(&conn, &backend, conv_id).await
             })
         })
@@ -1900,7 +2077,7 @@ impl WorkerManager {
         let db = self.db.clone();
         let clustered = tokio::task::spawn_blocking(move || {
             let conn = db.write_guard();
-            tokio::runtime::Handle::current().block_on(async {
+            block_ai_pipeline(async {
                 crate::ai_pipeline::cluster_issues(&conn, &backend, 14)
                     .await
                     .map(|clusters| clusters.len())
@@ -1911,6 +2088,549 @@ impl WorkerManager {
         .map_err(|e| Error::Other(e.to_string().into()))?;
         let clustered = clustered?;
         tracing::info!(clusters = clustered, "issue clustering finished");
+        Ok(())
+    }
+
+    /// A3: composer rewrite (shorten/expand/warmer/more_direct). Draft role;
+    /// user-triggered, so an unrouted role fails the job with the setup truth
+    /// instead of a silent skip — the composer is polling the job row.
+    async fn run_rewrite_job(&self, payload: &serde_json::Value) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "draft"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Draft),
+            )
+        };
+        let text: String = payload
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if !enabled || matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            tracing::info!(
+                operation = "rewrite_composer",
+                "rewrite skipped - draft feature off or no Draft role endpoint routed"
+            );
+            return Ok(());
+        }
+        if text.trim().is_empty() {
+            let conn = self.lock();
+            jobs::log_error(&conn, "workers", "rewrite_composer called with empty text")?;
+            return Ok(());
+        }
+        let instruction: String = payload
+            .get("instruction")
+            .and_then(|v| v.as_str())
+            .unwrap_or("more_direct")
+            .to_string();
+        let conversation_id = payload.get("conversationId").and_then(|v| v.as_i64());
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                crate::ai_pipeline::rewrite_composer_text(
+                    &conn,
+                    &backend,
+                    conversation_id,
+                    &text,
+                    &instruction,
+                )
+                .await
+                .map(|rewritten| {
+                    tracing::info!(
+                        operation = "rewrite_composer",
+                        chars = rewritten.chars().count(),
+                        "composer rewrite finished"
+                    );
+                })
+                .map_err(|e| Error::Other(e.to_string().into()))
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))??;
+        Ok(())
+    }
+
+    /// A3: composer translation (18 languages, cached). Draft role; the run
+    /// row records only actual model calls — a cache hit costs nothing and
+    /// says so in its own response.
+    async fn run_translate_job(&self, payload: &serde_json::Value) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "translation"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Draft),
+            )
+        };
+        if !enabled || matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            tracing::info!(
+                operation = "translate_composer",
+                "translation skipped - feature off or no Draft role endpoint routed"
+            );
+            return Ok(());
+        }
+        let text: String = payload
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let target: String = payload
+            .get("targetLang")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let from: Option<String> = payload
+            .get("fromLang")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let conversation_id = payload.get("conversationId").and_then(|v| v.as_i64());
+        if text.trim().is_empty() || target.is_empty() {
+            let conn = self.lock();
+            jobs::log_error(
+                &conn,
+                "workers",
+                "translate_composer called with empty text or target language",
+            )?;
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            let started = std::time::Instant::now();
+            let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let usage_slot: std::sync::Arc<
+                std::sync::Mutex<Option<crate::ai_provider::TokenUsage>>,
+            > = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let result = block_ai_pipeline(async {
+                let backend_ref = &backend;
+                let called_ref = called.clone();
+                let usage_ref = usage_slot.clone();
+                let chat = |msgs: Vec<crate::ai_provider::ChatMessage>,
+                            temp: f64,
+                            max_tokens: u32|
+                 -> TranslateChatFuture<'_> {
+                    let called_ref = called_ref.clone();
+                    let usage_ref = usage_ref.clone();
+                    Box::pin(async move {
+                        let res = backend_ref
+                            .chat_qa(msgs, temp, max_tokens, false)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        called_ref.store(true, std::sync::atomic::Ordering::SeqCst);
+                        *usage_ref.lock().unwrap_or_else(|p| p.into_inner()) = res.usage;
+                        Ok((res.content, res.model))
+                    })
+                };
+                crate::translation::translate(
+                    &conn,
+                    &chat,
+                    &text,
+                    from.as_deref(),
+                    &target,
+                    Some("agent_draft"),
+                )
+                .await
+            });
+            match result {
+                Ok(value) => {
+                    let model_called =
+                        called.load(std::sync::atomic::Ordering::SeqCst);
+                    if model_called {
+                        let run_id = crate::ai_pipeline::start_run(
+                            &conn,
+                            "translation",
+                            conversation_id,
+                            Some(value.get("model").and_then(|m| m.as_str()).unwrap_or_default()),
+                            crate::ai_prompts::PROMPT_VERSIONS_TRANSLATION,
+                            None,
+                            &serde_json::json!([target, conversation_id]),
+                        )
+                        .ok();
+                        if let Some(run_id) = run_id {
+                            let usage = *usage_slot.lock().unwrap_or_else(|p| p.into_inner());
+                            let _ = crate::ai_pipeline::complete_run_with_usage(
+                                &conn,
+                                run_id,
+                                &serde_json::json!({
+                                    "output": value.get("translated_text").cloned().unwrap_or_default(),
+                                    "cached": false,
+                                    "target_lang": target,
+                                }),
+                                started.elapsed().as_millis() as u64,
+                                usage.as_ref(),
+                                backend.endpoint_id(),
+                            );
+                        }
+                    }
+                    Ok(value.get("translated_text")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or_default()
+                        .to_string())
+                }
+                Err(e) => Err(match e {
+                    crate::translation::TranslateError::Client(m)
+                    | crate::translation::TranslateError::Service(m)
+                    | crate::translation::TranslateError::BadGateway(m) => m,
+                }),
+            }
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?;
+        match outcome {
+            Ok(translated) => {
+                tracing::info!(
+                    operation = "translate_composer",
+                    chars = translated.chars().count(),
+                    "composer translation finished"
+                );
+                Ok(())
+            }
+            Err(message) => Err(Error::Other(message.into())),
+        }
+    }
+
+    /// A3: pre-send draft coaching review. The nine deterministic checks
+    /// always run; the AI layer joins only when the coaching feature is on
+    /// AND a Summarize endpoint is routed (review_draft persists the
+    /// upsert row the inbox coaching card reads).
+    async fn run_coaching_job(&self, conv_id: i64, payload: &serde_json::Value) -> Result<()> {
+        let draft: String = payload
+            .get("draft")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if draft.trim().is_empty() {
+            let conn = self.lock();
+            jobs::log_error(&conn, "workers", "review_draft called with empty draft")?;
+            return Ok(());
+        }
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "draft_coaching"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Summarize),
+            )
+        };
+        let include_ai = enabled && !matches!(backend, crate::ai_pipeline::AiBackend::Disabled);
+        let db = self.db.clone();
+        let review = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                let backend_ref = &backend;
+                let chat = |msgs: Vec<crate::ai_provider::ChatMessage>,
+                            temp: f64,
+                            max_tokens: u32,
+                            json_mode: bool|
+                 -> CoachingChatFuture<'_> {
+                    Box::pin(async move {
+                        let res = backend_ref
+                            .chat_qa(msgs, temp, max_tokens, json_mode)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        Ok((res.content, res.model, res.latency_ms))
+                    })
+                };
+                let chat_for_review: Option<crate::coaching::CoachingChatFn<'_>> =
+                    if include_ai { Some(&chat) } else { None };
+                crate::coaching::review_draft(&conn, chat_for_review, conv_id, &draft, include_ai)
+                    .await
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?;
+        // review_draft's inner result: Ok(..) = review persisted; the
+        // &'static str reasons ("not_found", "empty_draft") were validated
+        // above, so an Err here still deserves a log line, not silence.
+        if let Err(reason) = review {
+            let conn = self.lock();
+            let _ = jobs::log_error(&conn, "workers", &format!("review_draft: {reason}"));
+            return Ok(());
+        }
+        // The inbox reads the persisted coaching_reviews row on reload.
+        if let Some(remote) = self.remote_id_for_local(conv_id) {
+            self.emit_conversation_updated_for_remote(remote);
+        }
+        tracing::info!(
+            operation = "review_draft",
+            conversation_id = conv_id,
+            include_ai,
+            "draft coaching review finished"
+        );
+        Ok(())
+    }
+
+    /// A3: the on-demand AI layer of post-resolution QA. Classify role;
+    /// user-triggered, so missing setup fails the job honestly.
+    async fn run_qa_ai_job(&self, conv_id: i64) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "post_resolution_qa"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Classify),
+            )
+        };
+        if !enabled {
+            tracing::info!(
+                operation = "qa_ai_layer",
+                "post-resolution QA feature off - skipped"
+            );
+            return Ok(());
+        }
+        if matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            let conn = self.lock();
+            jobs::log_error(
+                &conn,
+                "workers",
+                "qa_ai_layer: no Classify role endpoint routed (AI Center > Model-role routing)",
+            )?;
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                crate::quality::compute_qa_ai_layer(&conn, &backend, conv_id).await
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?;
+        tracing::info!(
+            operation = "qa_ai_layer",
+            conversation_id = conv_id,
+            error = outcome.error.as_deref().unwrap_or("none"),
+            "post-resolution QA AI layer finished"
+        );
+        if let Some(remote) = self.remote_id_for_local(conv_id) {
+            self.emit_conversation_updated_for_remote(remote);
+        }
+        Ok(())
+    }
+
+    /// A3: the interaction-intelligence AI stage (Classify role) —
+    /// observation + recommendation merged on top of the heuristic card.
+    /// Automatic (not user-triggered): missing setup completes silently in
+    /// the log, matching the other A2 triage jobs.
+    async fn run_interaction_job(&self, conv_id: i64) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "interaction_intelligence"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Classify),
+            )
+        };
+        if !enabled || matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            tracing::info!(
+                operation = "analyze_interaction",
+                conversation_id = conv_id,
+                "interaction intelligence skipped - feature off or no Classify endpoint"
+            );
+            return Ok(());
+        }
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                crate::ai_pipeline::analyze_interaction(&conn, &backend, conv_id)
+                    .await
+                    .map(|o| o.ai_enriched)
+                    .map_err(|e| Error::Other(e.to_string().into()))
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))??;
+        tracing::info!(
+            operation = "analyze_interaction",
+            conversation_id = conv_id,
+            "interaction analysis finished"
+        );
+        Ok(())
+    }
+
+    /// A5: one copilot chat turn on the 22-tool agent. Agent role. Failures
+    /// are non-retryable by construction here — `copilot::chat` persists the
+    /// user message before the model call, so the outer retry loop must not
+    /// re-run it; the failure is recorded on the job the UI polls.
+    async fn run_copilot_chat_job(&self, job_id: i64, payload: &serde_json::Value) -> Result<()> {
+        let question: String = payload
+            .get("question")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let conversation_id = payload.get("conversationId").and_then(|v| v.as_i64());
+        let session_id = payload.get("sessionId").and_then(|v| v.as_i64());
+        if question.trim().is_empty() {
+            let conn = self.lock();
+            jobs::fail(&conn, job_id, "copilot_chat: empty question", false)?;
+            return Ok(());
+        }
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "copilot"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Agent),
+            )
+        };
+        if !enabled {
+            let conn = self.lock();
+            jobs::fail(
+                &conn,
+                job_id,
+                "Copilot is switched off (AI Center > Features & kill switches).",
+                false,
+            )?;
+            return Ok(());
+        }
+        if matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            let conn = self.lock();
+            jobs::fail(
+                &conn,
+                job_id,
+                "No Agent role endpoint routed - assign one in AI Center > Model-role routing.",
+                false,
+            )?;
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let index = self.qdrant.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                crate::copilot::chat(
+                    &conn,
+                    &backend,
+                    index.as_deref(),
+                    &question,
+                    conversation_id,
+                    session_id,
+                )
+                .await
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()));
+        match outcome {
+            Ok(Ok(_value)) => {
+                // Session + messages are persisted; both chat surfaces
+                // re-read them on invalidation.
+                if let Some(conv) = conversation_id
+                    && let Some(remote) = self.remote_id_for_local(conv)
+                {
+                    self.emit_conversation_updated_for_remote(remote);
+                } else {
+                    use crate::events::ServerEvent;
+                    self.bus.emit(&ServerEvent::conversation_updated(
+                        None,
+                        None,
+                        None,
+                        None,
+                        "copilot_chat",
+                    ));
+                }
+                tracing::info!(operation = "copilot_chat", "copilot chat turn finished");
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                // Non-retryable: the user message is already persisted.
+                let conn = self.lock();
+                jobs::fail(&conn, job_id, &e.message, false)?;
+                let _ = jobs::log_error(
+                    &conn,
+                    "workers",
+                    &format!("copilot_chat failed: {}", e.message),
+                );
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A6: the golden-set runner on the routed Classify backend; the
+    /// fingerprint is stored after the run so maintenance only re-runs on
+    /// real prompt/role changes.
+    async fn run_golden_job(&self) -> Result<()> {
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "golden_eval"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Classify),
+            )
+        };
+        if !enabled {
+            tracing::info!("golden eval feature off - skipped");
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                crate::ai_eval::run_golden_set(&conn, &backend)
+                    .await
+                    .map_err(|e| Error::Other(e.to_string().into()))
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?;
+        let summary = outcome?;
+        {
+            let conn = self.lock();
+            let _ = crate::ai_eval::store_golden_fingerprint(&conn);
+        }
+        tracing::info!(
+            operation = "golden_eval",
+            passed = summary.get("passed").and_then(|v| v.as_i64()).unwrap_or(0),
+            failed = summary.get("failed").and_then(|v| v.as_i64()).unwrap_or(0),
+            "golden set run finished"
+        );
+        use crate::events::ServerEvent;
+        self.bus.emit(&ServerEvent::conversation_updated(
+            None,
+            None,
+            None,
+            None,
+            "golden_eval",
+        ));
+        Ok(())
+    }
+
+    /// K1: the deterministic gap pipeline — friction findings first, then
+    /// gap candidates ("asked often, documented nowhere" and friends).
+    async fn run_gap_rebuild_job(&self) -> Result<()> {
+        let enabled = {
+            let conn = self.lock();
+            crate::ai_hub::ai_feature_enabled(&conn, "gap_detection")
+        };
+        if !enabled {
+            tracing::info!("gap detection feature off - skipped");
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let (friction_scanned, friction_created, gaps_scanned, gaps_created) =
+            tokio::task::spawn_blocking(move || {
+                let conn = db.write_guard();
+                let (scanned, created) = crate::quality::rebuild_friction(&conn);
+                let (g_scanned, g_created) = crate::quality::rebuild_gaps(&conn, 90);
+                (scanned, created, g_scanned, g_created)
+            })
+            .await
+            .map_err(|e| Error::Other(e.to_string().into()))?;
+        tracing::info!(
+            operation = "rebuild_gaps",
+            friction_scanned,
+            friction_created,
+            gaps_scanned,
+            gaps_created,
+            "gap detection pipeline finished"
+        );
+        use crate::events::ServerEvent;
+        self.bus.emit(&ServerEvent::conversation_updated(
+            None,
+            None,
+            None,
+            None,
+            "rebuild_gaps",
+        ));
         Ok(())
     }
 

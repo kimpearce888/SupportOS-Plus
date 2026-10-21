@@ -265,6 +265,13 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m054_ai_runs_endpoint",
         apply: crate::ai_hub::apply_m054_ai_runs_endpoint,
     },
+    // Batch 13 A4: conversation_chunks gains chunk_kind ('thread' |
+    // 'resolution') so the retrieval spine can prefer resolution excerpts.
+    BootStep {
+        version: 46,
+        label: "m055_chunk_kind",
+        apply: crate::embeddings::apply_m055_chunk_kind,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

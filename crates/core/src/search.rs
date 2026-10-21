@@ -765,6 +765,247 @@ pub fn search(
     })
 }
 
+/// A4 retrieval spine: FTS search fused with real sqlite-vec hits.
+///
+/// The BM25 lanes run exactly as [`search`] does; when the retrieval feature
+/// is enabled, an Embed role is routed, and a vector index is available, the
+/// query is embedded and dense hits are fused per lane via the existing RRF
+/// k=60 math (see `hybrid_search::RRF_K`). The reported flags are real:
+/// `used_semantic` is set only when vector hits actually made the list, and
+/// every fused hit carries its lane provenance ("keyword match" /
+/// "semantic match") in `why`. Absent any part of the chain the response is
+/// the honest FTS-only result with `semantic_available: false` (or a
+/// one-line mode note explaining the fallback).
+pub fn search_with_semantics(
+    conn: &Connection,
+    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
+    query: &str,
+    scope: &str,
+    filters: &SearchFilters,
+) -> Result<SearchResponse> {
+    let mut response = search(conn, query, scope, filters)?;
+    let scope = if scope.is_empty() { "all" } else { scope };
+
+    let index = match index {
+        Some(ix) => ix,
+        None => {
+            response.semantic_available = false;
+            response.mode_note =
+                Some("FTS only — the vector index is off (Settings > Vector index).".into());
+            return Ok(response);
+        }
+    };
+    if !crate::ai_hub::ai_feature_enabled(conn, "retrieval") {
+        response.semantic_available = false;
+        response.mode_note =
+            Some("FTS only — semantic retrieval is disabled (AI Center > Features).".into());
+        return Ok(response);
+    }
+    let embed_settings = crate::embeddings::lm_studio_embedding_settings(conn)?;
+    if embed_settings.embedding_model.is_none() {
+        response.semantic_available = false;
+        response.mode_note = Some(
+            "FTS only — no embedding model routed (AI Center > Model-role routing, Embed role)."
+                .into(),
+        );
+        return Ok(response);
+    }
+    response.semantic_available = true;
+
+    let query_vec = match crate::embeddings::embed_query_text_blocking(conn, query) {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            response.mode_note = Some(
+                "FTS only — the embedding endpoint could not be reached for this query.".into(),
+            );
+            return Ok(response);
+        }
+        Err(e) => {
+            response.mode_note = Some(format!(
+                "FTS only — the embedding endpoint could not be reached for this query: {e}"
+            ));
+            return Ok(response);
+        }
+    };
+    let dense = index.search(&query_vec, 60);
+
+    // Map dense hits to per-lane semantic SearchHits.
+    let want_tickets = scope == "all" || scope == "tickets";
+    let want_knowledge = scope == "all" || scope == "knowledge";
+    let mut semantic_hits: Vec<SearchHit> = Vec::new();
+    for hit in dense {
+        let payload = match hit.payload.as_object() {
+            Some(p) => p,
+            None => continue,
+        };
+        let entity_type = payload.get("entity_type").and_then(|v| v.as_str());
+        let entity_id = payload.get("entity_id").and_then(|v| v.as_i64());
+        let Some(entity_id) = entity_id else { continue };
+        let text: String = payload
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .chars()
+            .take(240)
+            .collect();
+        match entity_type {
+            Some("conversation_chunk") if want_tickets => {
+                let Ok((number, subject, status)) = conn.query_row(
+                    "SELECT number, subject, status FROM conversations
+                          WHERE id = ?1 AND deleted_at IS NULL",
+                    params![entity_id],
+                    |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                ) else {
+                    continue;
+                };
+                semantic_hits.push(SearchHit {
+                    scope: "tickets".into(),
+                    id: entity_id,
+                    title: format!(
+                        "#{number} {}",
+                        subject.unwrap_or_else(|| "(no subject)".into())
+                    ),
+                    subtitle: status.unwrap_or_default(),
+                    snippet: text,
+                    score: (f64::from(hit.score) * 100.0).round() / 100.0,
+                    href: format!("/inbox/conversation/{entity_id}"),
+                    why: vec!["semantic match".into()],
+                });
+            }
+            Some("knowledge_chunk") if want_knowledge => {
+                let Ok((document_id, title)) = conn.query_row(
+                    "SELECT d.id, d.title FROM knowledge_chunks c
+                          JOIN knowledge_documents d ON d.id = c.document_id
+                          WHERE c.id = ?1",
+                    params![
+                        payload
+                            .get("chunk_id")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(0)
+                    ],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+                ) else {
+                    continue;
+                };
+                semantic_hits.push(SearchHit {
+                    scope: "knowledge".into(),
+                    id: document_id,
+                    title,
+                    subtitle: "Knowledge base".into(),
+                    snippet: text,
+                    score: (f64::from(hit.score) * 100.0).round() / 100.0,
+                    href: format!("/knowledge?doc={document_id}"),
+                    why: vec!["semantic match".into()],
+                });
+            }
+            Some("docs_chunk") if want_knowledge => {
+                let Ok((article_id, name)) = conn.query_row(
+                    "SELECT a.id, a.name FROM docs_articles a WHERE a.id = ?1",
+                    params![entity_id],
+                    |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+                ) else {
+                    continue;
+                };
+                semantic_hits.push(SearchHit {
+                    scope: "knowledge".into(),
+                    id: article_id,
+                    title: name,
+                    subtitle: "Help center article".into(),
+                    snippet: text,
+                    score: (f64::from(hit.score) * 100.0).round() / 100.0,
+                    href: format!("/knowledge/help-center/{article_id}"),
+                    why: vec!["semantic match".into()],
+                });
+            }
+            _ => {}
+        }
+    }
+    if semantic_hits.is_empty() {
+        response.mode_note =
+            Some("FTS only — the vector index has no indexed content for this query yet.".into());
+        return Ok(response);
+    }
+
+    // RRF fusion (k=60, same constant as hybrid_search): per lane, every hit
+    // scores 1/(k + rank) on each list it appears on. FTS rank is position in
+    // its lane; semantic rank is by cosine score.
+    let k = crate::hybrid_search::RRF_K;
+    let mut fused: Vec<SearchHit> = Vec::new();
+    for lane in ["tickets", "knowledge"] {
+        let fts_lane: Vec<&SearchHit> = response.hits.iter().filter(|h| h.scope == lane).collect();
+        let sem_lane: Vec<&SearchHit> = semantic_hits.iter().filter(|h| h.scope == lane).collect();
+        if sem_lane.is_empty() {
+            continue;
+        }
+        struct Fused {
+            hit: SearchHit,
+            rrf: f64,
+        }
+        let mut merged: Vec<Fused> = Vec::new();
+        let push_or_merge = |hit: &SearchHit, rrf: f64, merged: &mut Vec<Fused>| {
+            if let Some(existing) = merged
+                .iter_mut()
+                .find(|f| f.hit.scope == hit.scope && f.hit.id == hit.id)
+            {
+                existing.rrf += rrf;
+                for reason in &hit.why {
+                    if !existing.hit.why.contains(reason) {
+                        existing.hit.why.push(reason.clone());
+                    }
+                }
+            } else {
+                merged.push(Fused {
+                    hit: hit.clone(),
+                    rrf,
+                });
+            }
+        };
+        for (rank, hit) in fts_lane.iter().enumerate() {
+            push_or_merge(hit, 1.0 / (f64::from(k) + rank as f64 + 1.0), &mut merged);
+        }
+        for (rank, hit) in sem_lane.iter().enumerate() {
+            push_or_merge(hit, 1.0 / (f64::from(k) + rank as f64 + 1.0), &mut merged);
+        }
+        merged.sort_by(|a, b| {
+            b.rrf
+                .partial_cmp(&a.rrf)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let lane_limit = if lane == "tickets" { 40 } else { 10 };
+        for (i, f) in merged.into_iter().enumerate() {
+            if i >= lane_limit {
+                break;
+            }
+            let mut hit = f.hit;
+            hit.score = (f.rrf * 10_000.0).round() / 10_000.0;
+            fused.push(hit);
+        }
+        // The FTS-only hits of this lane are superseded by the fused list.
+        response.hits.retain(|h| h.scope != lane);
+    }
+    let fused_any = !fused.is_empty();
+    response.hits.extend(fused);
+    response.hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    response.total = response.hits.len();
+    if fused_any {
+        response.used_semantic = true;
+        response.mode_note = Some(format!(
+            "BM25 + sqlite-vec fused (RRF k={k}, embeddings local)"
+        ));
+    }
+    Ok(response)
+}
+
 pub fn universal_search(conn: &Connection, query: &str) -> Result<Vec<SearchResult>> {
     let query = cap_query(query);
     if query.trim().is_empty() {
@@ -1220,4 +1461,70 @@ pub fn index_customer(
         params![remote_id, first_name, last_name, email, organization],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod batch13_a4_search_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db_with_conversation() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9601, 96, 'Export timeout errors', 'The export throws errors.', 'active')",
+            [],
+        )
+        .expect("conversation");
+        apply_fts_migration(&conn).expect("fts");
+        rebuild_indexes(&conn).expect("index");
+        conn
+    }
+
+    /// A4: without an index the fused search degrades to the honest FTS-only
+    /// response — used_semantic false, a mode note explaining why, and the
+    /// FTS hits intact.
+    #[test]
+    fn fused_search_degrades_honestly_without_index() {
+        let conn = db_with_conversation();
+        let response =
+            search_with_semantics(&conn, None, "export", "all", &SearchFilters::default())
+                .expect("search");
+        assert!(!response.used_semantic, "no vector lane ran");
+        assert!(
+            response.mode_note.is_some(),
+            "the fallback is explained, not silent"
+        );
+        assert!(
+            !response.hits.is_empty(),
+            "the FTS lane still finds the conversation"
+        );
+        assert!(
+            response
+                .hits
+                .iter()
+                .all(|h| h.why.contains(&"keyword match".to_string())),
+            "lane provenance is reported"
+        );
+    }
+
+    /// A4: a disabled index is also an honest FTS-only answer (the
+    /// qdrant_enabled setting off).
+    #[test]
+    fn fused_search_with_disabled_index_stays_fts_only() {
+        let conn = db_with_conversation();
+        let dir = std::env::temp_dir().join(format!("spp-search-test-{}", std::process::id()));
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, false);
+        let response = search_with_semantics(
+            &conn,
+            Some(&index),
+            "export",
+            "all",
+            &SearchFilters::default(),
+        )
+        .expect("search");
+        assert!(!response.used_semantic, "a disabled index never fuses");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

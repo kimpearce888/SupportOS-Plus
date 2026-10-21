@@ -477,7 +477,42 @@ impl CustomersPage {
 
         ui.columns(2, |cols| {
             health_and_counts(&mut cols[0], &self.health, &self.kind_counts);
-            interaction_summary(&mut cols[1], self.interaction.as_ref());
+            // A3.4: the AI-stage recommendation (heuristic+ai merge) for the
+            // customer's latest analyzed conversation rides the interaction
+            // profile card.
+            let recommendation: Option<serde_json::Value> = _db.with_read(|conn| {
+                conn.query_row(
+                    "SELECT s.recommendation_json, s.sources
+                       FROM client_current_signals s
+                      WHERE s.customer_id = ?1 AND s.recommendation_json IS NOT NULL
+                      ORDER BY s.generated_at DESC LIMIT 1",
+                    rusqlite::params![customer_id],
+                    |r| {
+                        let raw: Option<String> = r.get(0)?;
+                        let sources: Option<String> = r.get(1)?;
+                        Ok(
+                            serde_json::from_str::<serde_json::Value>(&raw.unwrap_or_default())
+                                .ok()
+                                .map(|mut v| {
+                                    if let Some(obj) = v.as_object_mut() {
+                                        obj.insert(
+                                            "sources".into(),
+                                            serde_json::json!(sources.unwrap_or_default()),
+                                        );
+                                    }
+                                    v
+                                }),
+                        )
+                    },
+                )
+                .ok()
+                .flatten()
+            });
+            interaction_summary(
+                &mut cols[1],
+                self.interaction.as_ref(),
+                recommendation.as_ref(),
+            );
         });
         ui.add_space(10.0);
 
@@ -538,16 +573,41 @@ fn health_and_counts(ui: &mut egui::Ui, health: &Option<Value>, counts: &[(Strin
     });
 }
 
-fn interaction_summary(ui: &mut egui::Ui, interaction: Option<&Value>) {
+fn interaction_summary(
+    ui: &mut egui::Ui,
+    interaction: Option<&Value>,
+    recommendation: Option<&Value>,
+) {
     let t = design::tokens(ui);
     design::card(ui, |ui| {
         ui.horizontal(|ui| {
             Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
             design::section_title(ui, "Interaction profile");
             design::badge(ui, "AI", BadgeTone::Info);
+            // A3.4: the stage badge tells the truth about which layers ran.
+            if let Some(rec) = recommendation {
+                let sources = rec.get("sources").and_then(Value::as_str).unwrap_or("");
+                let tone = if sources.contains("ai") {
+                    BadgeTone::Success
+                } else {
+                    BadgeTone::Neutral
+                };
+                design::badge(
+                    ui,
+                    if sources.is_empty() {
+                        "heuristic"
+                    } else {
+                        sources
+                    },
+                    tone,
+                );
+            }
         });
         let Some(profile) = interaction else {
             design::hint_text(ui, "(no AI profile yet)");
+            if let Some(rec) = recommendation {
+                recommendation_block(ui, rec);
+            }
             return;
         };
         // The profile JSON carries dimension/value pairs; render whatever is
@@ -578,7 +638,59 @@ fn interaction_summary(ui: &mut egui::Ui, interaction: Option<&Value>) {
                 );
             }
         }
+        // A3.4: the AI-stage support approach on top of the wired heuristic
+        // stage — how to handle this customer, from the merged card.
+        if let Some(rec) = recommendation {
+            ui.add_space(6.0);
+            design::divider(ui);
+            recommendation_block(ui, rec);
+        }
     });
+}
+
+/// A3.4: the support-approach block — recommendation fields with their
+/// prompt version + model provenance, whatever is present.
+fn recommendation_block(ui: &mut egui::Ui, rec: &Value) {
+    let t = design::tokens(ui);
+    design::field_label(ui, "Support approach");
+    if let Some(approach) = rec.get("recommendation").and_then(Value::as_object) {
+        for (key, value) in approach {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{key}: {}",
+                    value.as_str().unwrap_or(&value.to_string())
+                ))
+                .size(13.0)
+                .color(t.foreground),
+            );
+        }
+    } else {
+        for (key, value) in rec.as_object().into_iter().flatten() {
+            if matches!(key.as_str(), "sources") {
+                continue;
+            }
+            ui.label(
+                egui::RichText::new(format!(
+                    "{key}: {}",
+                    value.as_str().unwrap_or(&value.to_string())
+                ))
+                .size(13.0)
+                .color(t.foreground),
+            );
+        }
+    }
+    let provenance: Vec<String> = ["prompt_version", "model"]
+        .iter()
+        .filter_map(|k| {
+            rec.get(*k)
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("{k} {v}"))
+        })
+        .collect();
+    if !provenance.is_empty() {
+        design::hint_text(ui, &provenance.join(" · "));
+    }
 }
 
 fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
