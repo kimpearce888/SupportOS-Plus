@@ -1482,3 +1482,109 @@ Verification (Rule 5):
 - Runner verification: code commit `48022b7f44b7f23b11561e15b87f5155e3a1b704` — `CI run 39669015404 (CI): success`.
 - Security: the staged diff was token-scanned clean before the push (no
   credentials in the commit).
+
+## Batch 17 — 2026-10-22 — Clean-source audit: items 6-10 (second five audit findings)
+
+**Source**: `ai/plan.md` items 6-10, executed five-at-a-time per `rule.md`
+on the owner's "continue". Audit IDs A1 / A2+J2 / A3+B2 / C1 / D1; full
+evidence in `SupportOS-Plus-v1.7.0-clean-audit.md` and the AUD-A..AUD-M
+worklog records.
+
+1. **Worker restart mid-tick permanently killed the job queue** (high|bug,
+   A1) — `stop()` aborts timer tasks at await points, and `tick()` /
+   the three sweep timers cleared their `processing`/`sweeping_*` guard
+   flags only on the happy-path last line: a settings-driven restart
+   that landed mid-tick (or a contained tick panic) stranded the flag set
+   forever, after which every future tick of that timer returned
+   instantly — queued replies/notes/AI jobs never dispatched until process
+   restart. Fixed twice over: (a) a RAII `TickGuard` latch now clears each
+   flag on every exit path — normal return, panic unwind (contained at
+   the task boundary), and abort during shutdown/restart; (b) `start()`
+   resets all four flags so a restart begins from a provably clean state.
+   workers.rs:339-341,346,387 + 145-149 (pre-fix line numbers).
+
+2. **Writer lane held across full LLM round-trips** (high|bug, A2+J2) —
+   all 14 background long-operation sites in workers.rs took the
+   exclusive DB writer mutex and held it across entire AI pipelines
+   (multi-call LLM round-trips, 120s timeouts); every UI `with_write`
+   (settings save, assignment, reply send, chip override) blocks on that
+   same mutex synchronously on the egui thread → the whole window froze
+   for the duration of AI jobs. New `DbHandle::long_op_guard()`
+   (`DbLongOpGuard`, Deref/DerefMut to Connection): file-backed databases
+   get a fresh, tuned connection on the same file (WAL reads, writes
+   serialized against the writer lane at the SQLite level inside the
+   shared 5s busy_timeout — ai_attributes' own transactions are short
+   and DB-only, verified), so no lane is pinned across network I/O;
+   in-memory databases keep the shared single connection (a second
+   `:memory:` handle would be an empty private DB). All 13
+   `block_ai_pipeline` sites + the deterministic gap-rebuild scan site
+   now use it; the manager's short-lane `lock()` accessor is untouched.
+   workers.rs:1883-1885 (+13 more sites), db.rs.
+
+3. **Duplicate outbound sends on ambiguous failure** (high|bug, A3+B2) —
+   ambiguous outcomes on non-idempotent POSTs (read timeouts, broken
+   pipe mid-body, 5xx — the server may have persisted the resource and
+   failed answering) were blind-retried in-client (up to 3x on
+   "timeout"/"error sending request" message matching AND 5xx) and then
+   re-queued by the outbound job layer via `retryable` — the customer
+   could receive the same reply twice. `request_inner` now computes a
+   replay-safety policy (`idempotent = method != POST`): connect-phase
+   transport failures (`e.is_connect()` — provably never delivered) and
+   replay-safe methods still retry in-client; ambiguous create failures
+   surface honestly ("Delivery could not be confirmed - the request was
+   NOT re-sent automatically to avoid duplicates...") with
+   `retryable: false` so nothing blindly re-POSTs. 429 keeps its safe
+   in-client retry (rate-limited requests are never processed); 401
+   token-refresh retry untouched. This also de-fangs the saved-reply
+   create re-POST (audit A6/plan item 30's root cause) and the campaign
+   create re-queue path (item 17's in-client half). helpscout_real.rs:
+   1156-1170/1247-1250/1290-1297 + workers.rs:751-768 (pre-fix).
+
+4. **`raw_json_hash` never written → stale analyses served forever**
+   (high|bug, C1) — `conversation_threads.raw_json_hash` existed in the
+   schema with zero writers and exactly one reader (the analysis-cache
+   signature); an in-place thread edit (edited body, state flip
+   re-synced through `upsert_thread`'s ON CONFLICT UPDATE) changed
+   neither the thread COUNT nor MAX(id), so the cached pre-edit analysis
+   was served as current forever. Fixed on both sides of the contract:
+   `upsert_thread` now writes `raw_json_hash` (SHA-256 of the thread's
+   serialized content) on INSERT and on every in-place update, and
+   `get_analysis_signature` folds EVERY live thread's hash into the
+   signature (not just the newest row's) so an edit to any thread
+   invalidates the cache. Pre-fix rows contribute an empty string —
+   deterministic, one honest re-analysis after upgrade.
+   ai_pipeline.rs:456-459 + sync_engine.rs:662-712 (pre-fix).
+
+5. **LM Studio probes never sent the stored API key** (high|bug, D1) —
+   `is_available()`/`list_models()` issued unauthenticated GET /models
+   while chat/embed attach `bearer_auth`, so keyed (BYOK cloud)
+   endpoints showed "offline" and attribute extraction silently degraded
+   to deterministic-only. Both probes now authenticate exactly like the
+   real calls. ai_lm_studio.rs:118-151 (pre-fix).
+
+Verification (Rule 5):
+
+- `cargo fmt --all --check` clean; `cargo clippy --workspace -- -D warnings`
+  clean (one iteration: clippy's own `explicit_auto_deref` suggestion was
+  rejected because auto-deref of the `expect` chain trips E0515 — the guard
+  was restructured as an enum, zero allows); `python3
+  scripts/gate_no_simulation.py` clean, all on the pinned 1.99.1
+  toolchain (reinstalled after the janitor rewind wiped ~/.cargo; default
+  re-set this session).
+- Fresh harness `scripts/verify_batch17.py` (committed; also archived at
+  /home/z/my-project/scripts/): 41/41 checks pass — TickGuard
+  acquire/Drop pairing, all four start() resets, all four tick entries
+  latch-converted with no orphan swap/trailing store; 14 long-op sites
+  bound to `db.long_op_guard()` with zero remaining `db.write_guard()`
+  pipeline acquisitions; replay-safety policy + all three retry sites +
+  honest ambiguity message + old string-match retry provably gone;
+  hash written on INSERT and UPDATE + all-thread signature fold with the
+  LIMIT-1 latest-row read provably gone; both probes attach the key with
+  chat unregressed.
+- Runner verification: code commit
+  `f9fd4c8` — CI run 39677607892: success (fmt/clippy/test/deny +
+  AppImage/deb build + smoke all green; the existing suite's
+  retryable-semantics assertions held — connect-phase failures remain
+  retryable).
+- Security: staged diff token-scanned clean before the push; remote
+  unmoved at push time (fetch-first).

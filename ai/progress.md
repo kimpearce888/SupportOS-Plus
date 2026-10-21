@@ -5,8 +5,9 @@
 
 ## Active items — none
 
-Batch 16 (clean-audit items 1-5: provider delegations, chunk_text UTF-8
-panic, not_equals inversion, dead 'customer_message' literal, no-simulation
-gate blind spots) is complete and verified; the record is in `completed.md`.
-The remaining 160 audit findings are queued in `plan.md` (items 6-165) and
-the next five start only on the owner's "continue".
+Batch 17 (clean-audit items 6-10: worker-restart tick guards, writer
+lane across LLM round-trips, duplicate-send replay safety, raw_json_hash
+writer + signature fold, LM Studio probe authentication) is complete and
+verified; the record is in `completed.md`. The remaining 155 audit
+findings are queued in `plan.md` (items 11-165) and the next five start
+only on the owner's "continue".
