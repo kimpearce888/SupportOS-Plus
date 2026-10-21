@@ -22,11 +22,11 @@ use std::sync::RwLock;
 
 use crate::error::Result;
 use crate::helpscout::{
-    ConversationCreated, ConversationPatch, ConversationQuery, CreateConversationInput,
-    CreateThreadInput, CustomerQuery, HelpScoutProvider, HsBeaconChat, HsConversation, HsCustomer,
-    HsDocArticle, HsDocCategory, HsDocCollection, HsField, HsFolder, HsMailbox, HsOrganization,
-    HsPropertyDef, HsRating, HsReportRow, HsSavedReply, HsTag, HsTeam, HsThread, HsUser,
-    HsUserStatus, HsWebhookConfig, HsWorkflow, Page, ThreadCreated,
+    AttachmentData, ConversationCreated, ConversationPatch, ConversationQuery,
+    CreateConversationInput, CreateThreadInput, CustomerQuery, HelpScoutProvider, HsBeaconChat,
+    HsConversation, HsCustomer, HsDocArticle, HsDocCategory, HsDocCollection, HsField, HsFolder,
+    HsMailbox, HsOrganization, HsPropertyDef, HsRating, HsReportRow, HsSavedReply, HsTag, HsTeam,
+    HsThread, HsUser, HsUserStatus, HsWebhookConfig, HsWorkflow, Page, ThreadCreated,
 };
 
 /// What the handle currently serves.
@@ -439,6 +439,68 @@ impl HelpScoutProvider for ProviderHandle {
 
     fn docs_configured(&self) -> bool {
         self.provider().docs_configured()
+    }
+
+    // Saved-reply CRUD, workflow runs and attachment downloads are
+    // enqueued by workers through the handle (operations library, post-
+    // sync attachment passes). Without these delegations the trait's
+    // rejecting defaults fired even with a live provider connected.
+    async fn create_saved_reply(&self, mailbox_id: i64, name: &str, text: &str) -> Result<i64> {
+        self.provider()
+            .create_saved_reply(mailbox_id, name, text)
+            .await
+    }
+
+    async fn update_saved_reply(
+        &self,
+        mailbox_id: i64,
+        saved_reply_id: i64,
+        name: &str,
+        text: &str,
+    ) -> Result<()> {
+        self.provider()
+            .update_saved_reply(mailbox_id, saved_reply_id, name, text)
+            .await
+    }
+
+    async fn delete_saved_reply(&self, mailbox_id: i64, saved_reply_id: i64) -> Result<()> {
+        self.provider()
+            .delete_saved_reply(mailbox_id, saved_reply_id)
+            .await
+    }
+
+    async fn delete_thread_schedule(&self, conversation_id: i64, thread_id: i64) -> Result<bool> {
+        self.provider()
+            .delete_thread_schedule(conversation_id, thread_id)
+            .await
+    }
+
+    async fn run_workflow(&self, workflow_id: i64, conversation_id: i64) -> Result<bool> {
+        self.provider()
+            .run_workflow(workflow_id, conversation_id)
+            .await
+    }
+
+    async fn get_attachment_data(
+        &self,
+        conversation_id: i64,
+        thread_id: i64,
+        attachment_id: i64,
+    ) -> Result<Option<AttachmentData>> {
+        self.provider()
+            .get_attachment_data(conversation_id, thread_id, attachment_id)
+            .await
+    }
+
+    async fn get_routing_configuration(
+        &self,
+        mailbox_id: i64,
+    ) -> Result<Option<serde_json::Value>> {
+        self.provider().get_routing_configuration(mailbox_id).await
+    }
+
+    async fn ping(&self) -> Result<bool> {
+        self.provider().ping().await
     }
 }
 

@@ -43,28 +43,43 @@ def is_comment(line: str) -> bool:
 
 
 def strip_test_regions(lines: list[str]) -> list[str]:
-    """Blank out #[cfg(test)] regions (brace-balanced)."""
+    """Blank out `#[cfg(test)]` regions, preserving line numbers.
+
+    Every consumed line becomes an empty string (not a removal), so the
+    line numbers the scanner reports match the real file. Two subtleties
+    the naive scan gets wrong:
+
+    * a `#[cfg(test)]` marker inside a // comment is not an attribute;
+      comment lines stay in the output for the comment skip to handle,
+    * `#[cfg(test)] mod x;` declares a module without braces — the
+      region ends at that declaration line instead of running on into
+      the next `{`-bearing production line.
+    """
     out: list[str] = []
     i = 0
     n = len(lines)
     while i < n:
         line = lines[i]
-        if "#[cfg(test)]" in line:
-            depth = 0
-            started = False
-            while i < n:
-                if not started and is_comment(lines[i]):
-                    i += 1
-                    continue
-                depth += lines[i].count("{") - lines[i].count("}")
-                if "{" in lines[i]:
-                    started = True
-                i += 1
-                if started and depth <= 0:
-                    break
+        if "#[cfg(test)]" not in line or is_comment(line):
+            out.append(line)
+            i += 1
             continue
-        out.append(line)
-        i += 1
+        start = i
+        depth = 0
+        started = False
+        while i < n:
+            if not started and is_comment(lines[i]):
+                i += 1
+                continue
+            depth += lines[i].count("{") - lines[i].count("}")
+            if "{" in lines[i]:
+                started = True
+            i += 1
+            if started and depth <= 0:
+                break
+            if not started and ";" in lines[i - 1] and " mod " in f" {lines[i - 1]}":
+                break
+        out.extend("" for _ in range(start, i))
     return out
 
 

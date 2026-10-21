@@ -571,7 +571,7 @@ fn metric_spec(metric: ReportMetricKey) -> MetricSpec {
             date_expr: "t.created_at",
             value_expr: "COUNT(*)",
             extra_where: &[
-                "t.type = 'customer_message'",
+                "t.type = 'customer'",
                 "t.deleted_at IS NULL",
                 "t.state = 'published'",
             ],
