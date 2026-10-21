@@ -21,28 +21,12 @@ audit records of 2026-10-21). Owner decision defaults D-a..D-g apply as recorded
 
 **Phase K — Learn & Advise (v1.6.0): the knowledge loop**
 
-*(K1 completed in batch 13.)*
-
-**K2. Real AI article drafting + review queue** — The AI drafts an article from the best
-resolutions with citations to them; the human review queue is the only path forward; UI in
-Knowledge.
-
-**K3. Docs API publish path** — One click upserts a Docs API draft (PUT /v1/articles/{id}/drafts),
-publishes on approval, verifies by re-syncing the article locally; freshness tracking scores
-every source.
-
-**K4. Weekly AI digest + anomaly alerts** — AI-written summary of volume, topics, sentiment trend,
-anomalies, workload, and what changed (report_narrative wired), generated on demand and on
-schedule, archived and searchable; lists new gaps and new articles.
-
-**K5. Help Scout Reports API behind capability detection** — The 33 GET endpoints render on
-Plus/Pro; Standard plans get one honest sentence instead of empty charts (decisions D-c, D-g).
+*(K1 completed in batch 13; K2, K3, K4, K5 completed in batch 14. Phase K — "Learn &
+Advise" — is complete.)*
 
 **Phase P — Power & Polish (v1.7.0): the long tail, honestly**
 
-**P1. Ratings and CSAT rework** — Reports happiness path (Plus/Pro), satisfaction webhook path
-(relay-ready ingestion), honest degradation on Standard; the misdesigned 30-second ratings timer
-retired. Fully resolves D11.
+*(P1 completed in batch 14.)*
 
 **P2. Live chat** — Real chats list and message send under the assigned-agent rule
 (PUT /v2/chats/{id}/messages/{uuid}).

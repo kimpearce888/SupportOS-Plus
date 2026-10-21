@@ -238,42 +238,8 @@ impl HelpScoutProvider for ProviderHandle {
         self.provider().get_rating(rating_id).await
     }
 
-    async fn get_company_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.provider().get_company_overall_report(start, end).await
-    }
-
-    async fn get_conversations_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.provider()
-            .get_conversations_overall_report(start, end)
-            .await
-    }
-
-    async fn get_happiness_ratings_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.provider()
-            .get_happiness_ratings_report(start, end)
-            .await
-    }
-
-    async fn get_productivity_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.provider()
-            .get_productivity_overall_report(start, end)
-            .await
+    async fn get_report(&self, key: &str, start: &str, end: &str) -> Result<Option<HsReportRow>> {
+        self.provider().get_report(key, start, end).await
     }
 
     async fn list_folders(&self, mailbox_id: i64) -> Result<Vec<HsFolder>> {
@@ -356,6 +322,23 @@ impl HelpScoutProvider for ProviderHandle {
 
     async fn list_doc_articles(&self, collection_id: i64) -> Result<Vec<HsDocArticle>> {
         self.provider().list_doc_articles(collection_id).await
+    }
+
+    async fn get_doc_article(&self, remote_id: i64) -> Result<Option<HsDocArticle>> {
+        self.provider().get_doc_article(remote_id).await
+    }
+
+    async fn upsert_doc_article_draft(
+        &self,
+        input: &crate::helpscout::DocArticleDraftInput,
+    ) -> Result<i64> {
+        self.provider().upsert_doc_article_draft(input).await
+    }
+
+    async fn publish_doc_article(&self, remote_id: i64, name: &str, text: &str) -> Result<()> {
+        self.provider()
+            .publish_doc_article(remote_id, name, text)
+            .await
     }
 
     async fn create_reply_thread(&self, input: CreateThreadInput) -> Result<ThreadCreated> {

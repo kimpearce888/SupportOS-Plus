@@ -554,6 +554,8 @@ impl HsCredentials {
         if !docs_api_key.trim().is_empty() {
             crate::settings::set_secret(conn, SECRET_DOCS_API_KEY, docs_api_key.trim().as_bytes())?;
         }
+        // K5: new credentials invalidate the Reports API capability probe.
+        crate::reports_api::reset_capability(conn);
         Ok(())
     }
 
@@ -574,6 +576,8 @@ impl HsCredentials {
         ] {
             removed += usize::from(crate::settings::delete_secret(conn, key)?);
         }
+        // K5: disconnecting invalidates the Reports API capability probe.
+        crate::reports_api::reset_capability(conn);
         Ok(removed)
     }
 
@@ -750,6 +754,100 @@ impl RealHelpScoutProvider {
             retryable: false,
         }
         .into())
+    }
+
+    /// K3: the Docs API write path - POST/PUT with a JSON body under the
+    /// same Basic-auth envelope and error mapping as the GET side. A 2xx
+    /// with an empty body (204) is `Ok(Value::Null)`; the caller decides
+    /// what a missing payload means.
+    async fn docs_request_send(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Value> {
+        if self.credentials.docs_api_key.is_empty() {
+            return Err(Error::Config(
+                "Docs API publishing is unavailable on this connection - no Docs API key is \
+                 configured."
+                    .into(),
+            ));
+        }
+        let basic = base64_of(&format!("{}:X", self.credentials.docs_api_key));
+        let url = format!(
+            "{}{path}",
+            self.credentials.docs_api_base.trim_end_matches('/')
+        );
+        let method_upper = method.to_ascii_uppercase();
+        let m: reqwest::Method = method_upper
+            .parse()
+            .map_err(|_| Error::Other(format!("invalid HTTP method {method}").into()))?;
+        let mut req = self
+            .client
+            .request(m, url)
+            .header("Authorization", format!("Basic {basic}"));
+        if let Some(payload) = body {
+            req = req
+                .header("Content-Type", "application/json")
+                .body(serde_json::to_string(&payload).unwrap_or_default());
+        }
+        let res = req.send().await.map_err(|e| -> crate::error::Error {
+            HsApiError {
+                status_code: 0,
+                message: format!("Network error contacting the Docs API: {e}"),
+                friendly: "The Help Scout Docs API is unreachable. Nothing was \
+                               published; the draft stays in the review queue."
+                    .into(),
+                retryable: true,
+            }
+            .into()
+        })?;
+        let status = res.status().as_u16();
+        let text = res.text().await.unwrap_or_default();
+        if (200..300).contains(&status) {
+            if text.is_empty() {
+                return Ok(Value::Null);
+            }
+            return serde_json::from_str(&text).map_err(|_| {
+                HsApiError {
+                    status_code: status,
+                    message: "Invalid JSON from the Docs API".into(),
+                    friendly: "The Docs API returned an unexpected response format. Nothing \
+                               is treated as published without a valid confirmation."
+                        .into(),
+                    retryable: false,
+                }
+                .into()
+            });
+        }
+        Err(HsApiError {
+            status_code: status,
+            message: format!("Docs API {method_upper} {path} -> {status}"),
+            friendly: friendly_error(status, &text, &method_upper),
+            retryable: false,
+        }
+        .into())
+    }
+
+    /// Map a Docs API article value onto the mirror struct (shared by the
+    /// K3 verify fetch; the list path keeps its ref-merge mapping).
+    fn doc_article_from_value(remote_id: i64, article: &Value) -> HsDocArticle {
+        HsDocArticle {
+            remote_id,
+            collection_id: article["collectionId"].as_i64().unwrap_or(0),
+            category_id: article["categories"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|c| c["id"].as_i64()),
+            number: article["number"].as_i64(),
+            slug: article["slug"].as_str().map(|s| s.to_string()),
+            name: article["name"].as_str().unwrap_or_default().to_string(),
+            status: article["status"].as_str().map(|s| s.to_string()),
+            text: article["text"].as_str().map(|s| s.to_string()),
+            views: article["viewCount"].as_i64(),
+            created_at: article["createdDate"].as_str().map(|s| s.to_string()),
+            updated_at: article["modifiedDate"].as_str().map(|s| s.to_string()),
+        }
     }
 
     async fn access_token(&self) -> Result<String> {
@@ -1032,33 +1130,6 @@ impl RealHelpScoutProvider {
         let method = method.to_string();
         let fut = self.request_inner(&path, &method, body, 3);
         self.queue.enqueue(priority, is_write, fut).await
-    }
-
-    async fn hs_range_report(
-        &self,
-        key: &str,
-        name: &str,
-        path: &str,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        match self
-            .request_pri(
-                &format!("{path}?start={start}&end={end}"),
-                "GET",
-                None,
-                PRIORITY_ANALYTICS,
-            )
-            .await
-        {
-            Ok(data) => Ok(Some(HsReportRow {
-                key: key.to_string(),
-                name: name.to_string(),
-                source: "helpscout".to_string(),
-                data,
-            })),
-            Err(_) => Ok(None),
-        }
     }
 
     async fn request_inner(
@@ -1705,64 +1776,122 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         }))
     }
 
-    async fn get_company_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.hs_range_report(
-            "hs_company_overall",
-            "Help Scout Company Overall",
-            "/v2/reports/company",
-            start,
-            end,
-        )
-        .await
+    /// K5: fetch one Reports API endpoint from the registry. Errors carry
+    /// the HTTP status (HsApiError) so the caller can classify a 403 plan
+    /// wall; `Ok(None)` is reserved for "this connection offers no report
+    /// data" (empty provider, handled by the trait default).
+    async fn get_report(&self, key: &str, start: &str, end: &str) -> Result<Option<HsReportRow>> {
+        let Some(spec) = crate::reports_api::report_spec(key) else {
+            return Err(Error::Config(format!(
+                "Unknown Help Scout report key {key:?}"
+            )));
+        };
+        let data = self
+            .request_pri(
+                &format!("{}?start={}&end={}", spec.path, start, end),
+                "GET",
+                None,
+                PRIORITY_ANALYTICS,
+            )
+            .await?;
+        Ok(Some(HsReportRow {
+            key: spec.key.to_string(),
+            name: spec.name.to_string(),
+            source: "helpscout".to_string(),
+            data,
+        }))
     }
 
-    async fn get_conversations_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.hs_range_report(
-            "hs_conversations_overall",
-            "Help Scout Conversations Overall",
-            "/v2/reports/conversations",
-            start,
-            end,
-        )
-        .await
+    /// K3: one full article by remote id (Docs API GET /v1/articles/{id})
+    /// for the publish-verify re-sync.
+    async fn get_doc_article(&self, remote_id: i64) -> Result<Option<HsDocArticle>> {
+        if self.credentials.docs_api_key.is_empty() {
+            return Ok(None);
+        }
+        let v = self
+            .docs_request(&format!("/v1/articles/{remote_id}"))
+            .await?;
+        let article = v["article"].clone();
+        if article.is_null() {
+            return Ok(None);
+        }
+        Ok(Some(Self::doc_article_from_value(remote_id, &article)))
     }
 
-    async fn get_happiness_ratings_report(
+    /// K3: upsert the review-queue draft into the Docs API. Creates a new
+    /// `notpublished` article (POST /v1/articles?reload=true returns the
+    /// created article) or updates the linked article's draft copy
+    /// (PUT /v1/articles/{id}/drafts). Returns the remote article id.
+    async fn upsert_doc_article_draft(
         &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.hs_range_report(
-            "hs_happiness_ratings",
-            "Help Scout Happiness Ratings",
-            "/v2/reports/happiness",
-            start,
-            end,
-        )
-        .await
+        input: &crate::helpscout::DocArticleDraftInput,
+    ) -> Result<i64> {
+        if self.credentials.docs_api_key.is_empty() {
+            return Err(Error::Config(
+                "Docs API publishing is unavailable on this connection - no Docs API key is \
+                 configured."
+                    .into(),
+            ));
+        }
+        if let Some(remote_id) = input.remote_id {
+            self.docs_request_send(
+                "PUT",
+                &format!("/v1/articles/{remote_id}/drafts"),
+                Some(serde_json::json!({ "text": input.text })),
+            )
+            .await?;
+            return Ok(remote_id);
+        }
+        let mut body = serde_json::json!({
+            "collectionId": input.collection_id,
+            "name": input.name,
+            "text": input.text,
+            "status": "notpublished",
+        });
+        if let Some(slug) = input.slug.as_deref().filter(|s| !s.trim().is_empty()) {
+            body["slug"] = serde_json::json!(slug);
+        }
+        let v = self
+            .docs_request_send("POST", "/v1/articles?reload=true", Some(body))
+            .await?;
+        let id = v["article"]["id"]
+            .as_i64()
+            .or_else(|| v["id"].as_i64())
+            .ok_or_else::<crate::error::Error, _>(|| {
+                HsApiError {
+                    status_code: 200,
+                    message: "Docs API created the article but returned no id".into(),
+                    friendly: "The article was created, but the response did not identify it. \
+                               Re-sync the collection before publishing."
+                        .into(),
+                    retryable: false,
+                }
+                .into()
+            })?;
+        Ok(id)
     }
 
-    async fn get_productivity_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        self.hs_range_report(
-            "hs_productivity_overall",
-            "Help Scout Productivity Overall",
-            "/v2/reports/productivity",
-            start,
-            end,
+    /// K3: publish the article with its final, human-approved text
+    /// (PUT /v1/articles/{id}; status published makes it live).
+    async fn publish_doc_article(&self, remote_id: i64, name: &str, text: &str) -> Result<()> {
+        if self.credentials.docs_api_key.is_empty() {
+            return Err(Error::Config(
+                "Docs API publishing is unavailable on this connection - no Docs API key is \
+                 configured."
+                    .into(),
+            ));
+        }
+        self.docs_request_send(
+            "PUT",
+            &format!("/v1/articles/{remote_id}"),
+            Some(serde_json::json!({
+                "name": name,
+                "text": text,
+                "status": "published",
+            })),
         )
-        .await
+        .await?;
+        Ok(())
     }
 
     async fn list_folders(&self, mailbox_id: i64) -> Result<Vec<HsFolder>> {

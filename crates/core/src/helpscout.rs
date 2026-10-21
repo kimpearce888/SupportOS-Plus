@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct HsUser {
@@ -250,6 +250,20 @@ pub struct HsReportRow {
     pub data: serde_json::Value,
 }
 
+/// K3: the article draft the review queue publishes through the Docs API.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DocArticleDraftInput {
+    /// The Docs API collection the article belongs to.
+    pub collection_id: i64,
+    pub name: String,
+    /// Markdown body (published as the article `text`).
+    pub text: String,
+    /// When set, the linked article is updated (PUT /v1/articles/{id}/drafts);
+    /// when absent a new `notpublished` article is created (POST /v1/articles).
+    pub remote_id: Option<i64>,
+    pub slug: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsFolder {
     pub remote_id: i64,
@@ -448,32 +462,15 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(None)
     }
 
-    async fn get_company_overall_report(
+    /// K5: fetch one Reports API endpoint (registry key from
+    /// `reports_api::REPORTS`) for a date range. `Ok(None)` means the
+    /// connection has no report data to offer (not connected, or the
+    /// endpoint returned nothing); a plan/permission wall surfaces as the
+    /// provider's API error so the caller can classify it (403 = plan
+    /// blocked) instead of silently rendering zeros.
+    async fn get_report(
         &self,
-        _start: &str,
-        _end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        Ok(None)
-    }
-
-    async fn get_conversations_overall_report(
-        &self,
-        _start: &str,
-        _end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        Ok(None)
-    }
-
-    async fn get_happiness_ratings_report(
-        &self,
-        _start: &str,
-        _end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        Ok(None)
-    }
-
-    async fn get_productivity_overall_report(
-        &self,
+        _key: &str,
         _start: &str,
         _end: &str,
     ) -> Result<Option<HsReportRow>> {
@@ -560,6 +557,36 @@ pub trait HelpScoutProvider: Send + Sync {
 
     async fn list_doc_articles(&self, _collection_id: i64) -> Result<Vec<HsDocArticle>> {
         Ok(Vec::new())
+    }
+
+    /// K3 verify + targeted re-sync: one full article by remote id. `None`
+    /// when the article is unreachable (the caller decides whether that is
+    /// an error); the default covers every connection without Docs write
+    /// access.
+    async fn get_doc_article(&self, _remote_id: i64) -> Result<Option<HsDocArticle>> {
+        Ok(None)
+    }
+
+    /// K3: upsert the draft into the Docs API — create a new `notpublished`
+    /// article (POST /v1/articles?reload=true) or update the linked
+    /// article's draft copy (PUT /v1/articles/{id}/drafts). Returns the
+    /// remote article id. The default rejects: a connection without the
+    /// Docs API never pretends to publish.
+    async fn upsert_doc_article_draft(&self, _input: &DocArticleDraftInput) -> Result<i64> {
+        Err(Error::Config(
+            "Docs API publishing is unavailable on this connection - no Docs API key is \
+             configured."
+                .into(),
+        ))
+    }
+
+    /// K3: publish the article with its final text (PUT /v1/articles/{id}).
+    async fn publish_doc_article(&self, _remote_id: i64, _name: &str, _text: &str) -> Result<()> {
+        Err(Error::Config(
+            "Docs API publishing is unavailable on this connection - no Docs API key is \
+             configured."
+                .into(),
+        ))
     }
 
     async fn create_reply_thread(&self, input: CreateThreadInput) -> Result<ThreadCreated>;
@@ -952,121 +979,6 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
             .iter()
             .find(|r| r.remote_id == rating_id)
             .cloned())
-    }
-
-    async fn get_company_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        let world = self.lock_world();
-        let in_range = world
-            .conversations
-            .iter()
-            .filter(|c| {
-                c.created_at
-                    .as_deref()
-                    .is_some_and(|t| t >= start && t <= end)
-            })
-            .count();
-        Ok(Some(HsReportRow {
-            key: "hs_company_overall".into(),
-            name: "Help Scout Company Overall".into(),
-            source: "helpscout".into(),
-            data: serde_json::json!({
-                "totalConversations": in_range,
-                "startDate": start,
-                "endDate": end
-            }),
-        }))
-    }
-
-    async fn get_conversations_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        let world = self.lock_world();
-        let in_range: Vec<&HsConversation> = world
-            .conversations
-            .iter()
-            .filter(|c| {
-                c.created_at
-                    .as_deref()
-                    .is_some_and(|t| t >= start && t <= end)
-            })
-            .collect();
-        let by_status = |s: &str| in_range.iter().filter(|c| c.status == s).count();
-        Ok(Some(HsReportRow {
-            key: "hs_conversations_overall".into(),
-            name: "Help Scout Conversations Overall".into(),
-            source: "helpscout".into(),
-            data: serde_json::json!({
-                "totalConversations": in_range.len(),
-                "byStatus": {
-                    "active": by_status("active"),
-                    "closed": by_status("closed"),
-                    "pending": by_status("pending")
-                }
-            }),
-        }))
-    }
-
-    async fn get_happiness_ratings_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        let world = self.lock_world();
-        let in_range: Vec<&HsRating> = world
-            .ratings
-            .iter()
-            .filter(|r| {
-                r.created_at
-                    .as_deref()
-                    .is_some_and(|t| t >= start && t <= end)
-            })
-            .collect();
-        let count = |v: &str| {
-            in_range
-                .iter()
-                .filter(|r| r.rating.as_deref() == Some(v))
-                .count()
-        };
-        Ok(Some(HsReportRow {
-            key: "hs_happiness_ratings".into(),
-            name: "Help Scout Happiness Ratings".into(),
-            source: "helpscout".into(),
-            data: serde_json::json!({
-                "great": count("great"),
-                "okay": count("okay"),
-                "notGood": count("not-good")
-            }),
-        }))
-    }
-
-    async fn get_productivity_overall_report(
-        &self,
-        start: &str,
-        end: &str,
-    ) -> Result<Option<HsReportRow>> {
-        let world = self.lock_world();
-        let replies = world
-            .threads
-            .iter()
-            .filter(|t| {
-                t.kind == "reply"
-                    && t.created_at
-                        .as_deref()
-                        .is_some_and(|c| c >= start && c <= end)
-            })
-            .count();
-        Ok(Some(HsReportRow {
-            key: "hs_productivity_overall".into(),
-            name: "Help Scout Productivity Overall".into(),
-            source: "helpscout".into(),
-            data: serde_json::json!({ "repliesSent": replies }),
-        }))
     }
 
     async fn list_folders(&self, mailbox_id: i64) -> Result<Vec<HsFolder>> {

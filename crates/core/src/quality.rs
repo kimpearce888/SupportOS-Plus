@@ -2479,3 +2479,187 @@ mod batch13_k1_tests {
         assert_eq!(rows_second, rows_first, "no duplicate rows across rebuilds");
     }
 }
+
+// ---------------------------------------------------------------------------
+// K2: best-resolution evidence for AI article drafting
+// ---------------------------------------------------------------------------
+
+/// One resolution citation: the closed conversation, its number/subject,
+/// and the excerpt of the final published agent reply (the same excerpt
+/// logic the A4 retrieval spine stores as a `resolution` chunk).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResolutionCitation {
+    pub conversation_local_id: i64,
+    pub number: i64,
+    pub subject: Option<String>,
+    pub closed_at: Option<String>,
+    pub excerpt: String,
+}
+
+/// The "best resolutions" a K2 article draft is grounded in: among the
+/// evidence conversations, the ones that are closed and carry a published
+/// reply, newest closure first, capped at `limit`. Conversations without a
+/// published reply are skipped — nothing is excerpted from open threads.
+pub fn best_resolutions(
+    conn: &Connection,
+    conversation_ids: &[i64],
+    limit: usize,
+) -> Vec<ResolutionCitation> {
+    if conversation_ids.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let placeholders = vec!["?"; conversation_ids.len()].join(",");
+    let rows: Vec<(i64, i64, Option<String>, Option<String>)> = conn
+        .prepare(&format!(
+            "SELECT c.id, c.number, c.subject, c.closed_at
+               FROM conversations c
+              WHERE c.id IN ({placeholders}) AND c.deleted_at IS NULL
+                AND c.status = 'closed' AND c.closed_at IS NOT NULL
+              ORDER BY c.closed_at DESC"
+        ))
+        .and_then(|mut stmt| {
+            stmt.query_map(rusqlite::params_from_iter(conversation_ids.iter()), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default();
+    let mut out: Vec<ResolutionCitation> = Vec::new();
+    for (id, number, subject, closed_at) in rows {
+        if out.len() >= limit {
+            break;
+        }
+        let excerpt = resolution_excerpt_of(conn, id);
+        if excerpt.is_empty() {
+            continue;
+        }
+        out.push(ResolutionCitation {
+            conversation_local_id: id,
+            number,
+            subject,
+            closed_at,
+            excerpt,
+        });
+    }
+    out
+}
+
+/// The final published reply of a closed conversation, text-stripped and
+/// capped — the shared excerpt logic with `embeddings::resolution_excerpt`
+/// (kept local here so quality has no dependency on the chunker).
+fn resolution_excerpt_of(conn: &Connection, conversation_id: i64) -> String {
+    let raw: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT body_text, body_html
+               FROM conversation_threads
+              WHERE conversation_id = ?1 AND type = 'reply' AND state = 'published'
+                AND deleted_at IS NULL AND COALESCE(body_text, body_html, '') <> ''
+              ORDER BY COALESCE(remote_created_at, created_at) DESC, id DESC
+              LIMIT 1",
+            params![conversation_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((body_text, body_html)) = raw else {
+        return String::new();
+    };
+    let body = body_text
+        .filter(|b| !b.trim().is_empty())
+        .or_else(|| {
+            body_html
+                .map(|h| crate::textutil::html_to_text(&h))
+                .filter(|t| !t.trim().is_empty())
+        })
+        .unwrap_or_default();
+    excerpt_of(body.trim(), 900)
+}
+
+#[cfg(test)]
+mod k2_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_closed_with_reply(conn: &Connection, remote: i64, days_ago: i64) -> i64 {
+        let at = format!(
+            "{}",
+            (chrono::Utc::now() - chrono::Duration::try_days(days_ago).unwrap_or_default())
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        );
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                        remote_created_at, closed_at)
+             VALUES (?1, ?1, 'Export timeouts on weekly report', 'p', 'closed', ?2, ?2)",
+            params![remote, at],
+        )
+        .expect("conversation");
+        let id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text, remote_created_at)
+             VALUES (?1, 'reply', 'published', 'Clear the export cache, then re-run with the
+               nightly profile; the timeout is the stale lock file.', ?2)",
+            params![id, at],
+        )
+        .expect("thread");
+        id
+    }
+
+    #[test]
+    fn best_resolutions_picks_closed_with_published_reply_only() {
+        let conn = db();
+        let first = seed_closed_with_reply(&conn, 101, 2);
+        let second = seed_closed_with_reply(&conn, 102, 1);
+        // An active conversation with a reply must be skipped entirely.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, remote_created_at)
+             VALUES (103, 103, 'Still open', 'p', 'active', '2026-10-20T08:00:00.000Z')",
+            [],
+        )
+        .expect("open");
+        let open = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text, remote_created_at)
+             VALUES (?1, 'reply', 'published', 'draft answer', '2026-10-20T08:05:00.000Z')",
+            params![open],
+        )
+        .expect("open thread");
+
+        let cites = best_resolutions(&conn, &[first, second, open, 999_999], 5);
+        assert_eq!(cites.len(), 2, "only the two closed conversations");
+        // Newest closure first.
+        assert_eq!(cites[0].number, 102);
+        assert_eq!(cites[1].number, 101);
+        assert!(
+            cites[0].excerpt.contains("nightly profile"),
+            "the final published reply is the excerpt"
+        );
+        // The limit caps the list.
+        assert_eq!(best_resolutions(&conn, &[first], 1).len(), 1);
+        assert!(best_resolutions(&conn, &[], 5).is_empty());
+    }
+
+    #[test]
+    fn best_resolutions_skips_closed_conversation_without_reply_text() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                        remote_created_at, closed_at)
+             VALUES (201, 201, 'Closed silently', 'p', 'closed',
+                     '2026-10-18T08:00:00.000Z', '2026-10-19T08:00:00.000Z')",
+            [],
+        )
+        .expect("closed no reply");
+        let id = conn.last_insert_rowid();
+        assert!(best_resolutions(&conn, &[id], 5).is_empty());
+    }
+}

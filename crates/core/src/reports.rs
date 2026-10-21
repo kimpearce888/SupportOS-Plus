@@ -2134,3 +2134,138 @@ pub fn list_graph_nodes(conn: &Connection, limit: Option<u32>) -> Result<Vec<Gra
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.into())
 }
+
+// ---------------------------------------------------------------------------
+// P1: the happiness / CSAT readout (webhook-sourced local truth)
+// ---------------------------------------------------------------------------
+
+/// The local happiness overview P1 renders: rating counts in range, the
+/// CSAT share (great / all ratings), and the recent ratings list. Every
+/// number comes from `ratings` rows the satisfaction webhook delivered —
+/// Help Scout exposes no list-ratings API to poll, so an empty table means
+/// "no ratings received yet", never "zero ratings happened".
+pub fn happiness_overview(conn: &Connection, days: i64) -> serde_json::Value {
+    let days = days.clamp(1, 365);
+    let since = format!(
+        "{}",
+        (chrono::Utc::now() - chrono::Duration::try_days(days).unwrap_or_default())
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+    );
+    let count = |rating: &str| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM ratings
+              WHERE rating = ?1 AND remote_created_at >= ?2",
+            params![rating, since],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+    };
+    let great = count("great");
+    let okay = count("okay");
+    let not_good = count("not-good");
+    let total = great + okay + not_good;
+    let csat = if total > 0 {
+        ((great as f64 / total as f64) * 100.0).round() as i64
+    } else {
+        0
+    };
+    let recent: Vec<serde_json::Value> = conn
+        .prepare(
+            "SELECT r.rating, r.comments, r.remote_created_at,
+                    c.number, COALESCE(cu.first_name || ' ' || cu.last_name, '')
+               FROM ratings r
+               LEFT JOIN conversations c ON c.id = r.conversation_id
+               LEFT JOIN customers cu ON cu.id = r.customer_local_id
+              WHERE r.remote_created_at >= ?1
+              ORDER BY r.remote_created_at DESC LIMIT 25",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map(params![since], |r| {
+                Ok(serde_json::json!({
+                    "rating": r.get::<_, Option<String>>(0)?,
+                    "comments": r.get::<_, Option<String>>(1)?,
+                    "created_at": r.get::<_, Option<String>>(2)?,
+                    "conversation_number": r.get::<_, Option<i64>>(3)?,
+                    "customer": r.get::<_, Option<String>>(4)?.filter(|s| !s.is_empty()),
+                }))
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default();
+    serde_json::json!({
+        "range_days": days,
+        "great": great,
+        "okay": okay,
+        "not_good": not_good,
+        "total": total,
+        "csat_percent": csat,
+        "recent": recent,
+        "source": "satisfaction webhook ratings (Help Scout has no list-ratings API)",
+    })
+}
+
+#[cfg(test)]
+mod p1_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    #[test]
+    fn happiness_overview_counts_and_csat_share() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, remote_created_at)
+             VALUES (900, 900, 'Rated conversation', 'p', 'closed', '2026-01-01T00:00:00.000Z')",
+            [],
+        )
+        .expect("conversation");
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        conn.execute(
+            "INSERT INTO ratings (remote_id, conversation_id, rating, comments, remote_created_at)
+             VALUES (801, 1, 'great', 'Fast help', ?1),
+                    (802, 1, 'great', NULL, ?1),
+                    (803, 1, 'okay', NULL, ?1)",
+            params![now],
+        )
+        .expect("ratings");
+
+        let v = happiness_overview(&conn, 30);
+        assert_eq!(v["great"], 2);
+        assert_eq!(v["okay"], 1);
+        assert_eq!(v["not_good"], 0);
+        assert_eq!(v["total"], 3);
+        assert_eq!(v["csat_percent"], 67, "2/3 great rounds to 67%");
+        let recent = v["recent"].as_array().expect("recent");
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[0]["conversation_number"], 900);
+    }
+
+    #[test]
+    fn happiness_overview_empty_is_absent_not_zero() {
+        let conn = db();
+        let v = happiness_overview(&conn, 30);
+        assert_eq!(v["total"], 0);
+        assert!(
+            v["source"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("no list-ratings API"),
+            "the honest source note must survive"
+        );
+        // A rating outside the range never counts.
+        conn.execute(
+            "INSERT INTO ratings (remote_id, rating, remote_created_at)
+             VALUES (804, 'great', '2020-01-01T00:00:00.000Z')",
+            [],
+        )
+        .expect("old rating");
+        assert_eq!(happiness_overview(&conn, 30)["total"], 0);
+    }
+}

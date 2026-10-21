@@ -279,7 +279,7 @@ pub fn backend_for_role(conn: &Connection, role: AiRole) -> AiBackend {
 /// The wired AI features with their settings keys. The first three keep the
 /// pre-hub keys the Settings page already writes; the rest are new A1/A2
 /// toggles living in the AI Center.
-pub const AI_FEATURES: [(&str, &str, bool); 14] = [
+pub const AI_FEATURES: [(&str, &str, bool); 16] = [
     ("ticket_analysis", "automatic_analysis_enabled", true),
     ("ai_note", "automatic_note_enabled", false),
     ("draft", "automatic_draft_enabled", false),
@@ -313,6 +313,15 @@ pub const AI_FEATURES: [(&str, &str, bool); 14] = [
     ("retrieval", "ai_feature_retrieval_enabled", true),
     ("golden_eval", "ai_feature_golden_eval_enabled", true),
     ("gap_detection", "ai_feature_gap_detection_enabled", true),
+    // Batch 14 (K2, K4): the article-draft review queue and the weekly
+    // digest. Both are on-demand-capable surfaces default ON (copilot
+    // precedent); the queue's human gate is in the data model, not here.
+    (
+        "article_drafting",
+        "ai_feature_article_drafting_enabled",
+        true,
+    ),
+    ("weekly_digest", "ai_feature_weekly_digest_enabled", true),
 ];
 
 /// Feature gate: the global kill switch (`ai_enabled`) dominates, then the

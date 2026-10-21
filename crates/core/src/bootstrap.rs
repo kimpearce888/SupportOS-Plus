@@ -272,6 +272,24 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m055_chunk_kind",
         apply: crate::embeddings::apply_m055_chunk_kind,
     },
+    // Batch 14 K2: the AI article-draft review queue.
+    BootStep {
+        version: 47,
+        label: "m056_article_drafts",
+        apply: crate::knowledge_store::apply_m056_article_drafts,
+    },
+    // Batch 14 K4: the weekly AI digest archive.
+    BootStep {
+        version: 48,
+        label: "m057_ai_digests",
+        apply: crate::digest::apply_m057_ai_digests,
+    },
+    // Batch 14 K5: the fetched Help Scout report cache.
+    BootStep {
+        version: 49,
+        label: "m058_hs_report_cache",
+        apply: crate::reports_api::apply_m058_hs_report_cache,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

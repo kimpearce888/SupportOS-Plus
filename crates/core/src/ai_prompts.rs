@@ -648,3 +648,55 @@ pub fn build_interaction_recommendation_user(
     out.push_str("\nRecommend a support approach for this conversation.");
     out
 }
+
+// ---------------------------------------------------------------------------
+// Batch 14 — K2 article drafting, K4 weekly digest
+// ---------------------------------------------------------------------------
+
+pub const PROMPT_VERSIONS_ARTICLE_DRAFT: &str = "article_draft_v1";
+
+/// K2: the model drafts a knowledge-base article grounded ONLY in the
+/// supplied resolutions. Every factual sentence must carry a [^N] marker
+/// bound to the numbered source; the review queue (a human) is the only
+/// path forward, so the draft is explicitly labelled as AI-generated.
+pub const ARTICLE_DRAFT_SYSTEM: &str = "You draft internal knowledge-base articles from real support resolutions. The numbered sources are the ONLY ground truth: never invent steps, commands, error messages or causes that do not appear in them. Every factual sentence MUST end with a [^N] citation marker referring to its source number. Where the sources disagree or a step is uncertain, write it as an open question for the reviewer instead of guessing. The article is a starting point for a human author who will review it before anything is published. Respond ONLY with JSON: {\"title\": \"...\", \"body_markdown\": \"...\"}. The body is Markdown; place the citations section header last and the model must NOT add its own signature or notes beyond the JSON fields.";
+
+pub fn build_article_draft_user(
+    question: &str,
+    resolutions: &[crate::quality::ResolutionCitation],
+) -> String {
+    let mut sources = String::new();
+    for (i, c) in resolutions.iter().enumerate() {
+        let subject = c.subject.as_deref().unwrap_or("(no subject)");
+        sources.push_str(&format!(
+            "[^{}] Conversation #{} \"{}\" (closed {}):\n{}\n\n",
+            i + 1,
+            c.number,
+            subject,
+            c.closed_at.as_deref().unwrap_or("unknown date"),
+            c.excerpt
+        ));
+    }
+    format!(
+        "A repeated support question with no adequate knowledge-base answer:\n\"{question}\"\n\n\
+         Resolutions from real closed conversations (the only ground truth):\n\n{sources}\n\n\
+         Draft the knowledge-base article that answers the question using these \
+         resolutions. Cite every factual claim with its [^N] marker. Where the \
+         resolutions are insufficient, say so explicitly for the reviewer."
+    )
+}
+
+pub const PROMPT_VERSIONS_WEEKLY_DIGEST: &str = "weekly_digest_v1";
+
+/// K4: same contract as the report narrative — SQL-computed numbers are
+/// authoritative, the model summarizes and never recalculates, and
+/// uncertainty is flagged rather than smoothed over.
+pub const WEEKLY_DIGEST_SYSTEM: &str = "You write the weekly support digest for a support lead. The computed facts given to you are authoritative - never recalculate, round or invent numbers, and do not omit anomalies. Write in plain, direct prose: what happened with volume, what topics dominated, how sentiment moved, which anomalies stand out, what the workload looked like, what changed in the knowledge base (new gaps, new or updated articles), and the one or two things that deserve attention next week. Flag any statement you are unsure about with \"requires verification\". The digest is clearly labelled as AI-generated. Respond ONLY with JSON: {\"narrative\": \"...\"} - 6 to 10 sentences.";
+
+pub fn build_weekly_digest_user(facts: &serde_json::Value) -> String {
+    format!(
+        "Weekly digest computed facts (authoritative, do not change):\n{}\n\n\
+         Write the weekly digest narrative from these facts.",
+        serde_json::to_string_pretty(facts).unwrap_or_else(|_| "{}".into())
+    )
+}

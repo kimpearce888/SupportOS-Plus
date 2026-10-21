@@ -26,16 +26,22 @@ pub enum Tab {
     TopQuestions,
     Quality,
     Radar,
+    Digest,
+    Happiness,
+    HelpScout,
 }
 
 impl Tab {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 9] = [
         Self::Overview,
         Self::Sla,
         Self::WhyContacting,
         Self::TopQuestions,
         Self::Quality,
         Self::Radar,
+        Self::Digest,
+        Self::Happiness,
+        Self::HelpScout,
     ];
 
     fn label(self) -> &'static str {
@@ -46,6 +52,9 @@ impl Tab {
             Self::TopQuestions => "Top questions",
             Self::Quality => "Quality",
             Self::Radar => "Issue radar",
+            Self::Digest => "Digest",
+            Self::Happiness => "Happiness",
+            Self::HelpScout => "Help Scout",
         }
     }
 }
@@ -80,6 +89,16 @@ pub struct ReportsPage {
     quality: Option<serde_json::Value>,
     /// A3.3: recent closed conversations with their QA rows.
     quality_rows: Vec<serde_json::Value>,
+    // K4: the digest archive.
+    digests: Vec<spp_core::digest::DigestRow>,
+    digest_search: String,
+    digest_pick: Option<i64>,
+    // P1: the local happiness readout.
+    happiness: Option<serde_json::Value>,
+    // K5: cached Help Scout report fetches + the capability verdict.
+    hs_capability: spp_core::reports_api::ReportsCapability,
+    hs_cached: Vec<(&'static str, &'static str, String, serde_json::Value)>,
+    hs_pick: usize,
     error: Option<String>,
 }
 
@@ -97,6 +116,13 @@ impl ReportsPage {
             radar: Vec::new(),
             quality: None,
             quality_rows: Vec::new(),
+            digests: Vec::new(),
+            digest_search: String::new(),
+            digest_pick: None,
+            happiness: None,
+            hs_capability: spp_core::reports_api::ReportsCapability::Unknown,
+            hs_cached: Vec::new(),
+            hs_pick: 0,
             error: None,
         }
     }
@@ -108,6 +134,10 @@ impl ReportsPage {
         self.why_contacting.clear();
         self.top_questions.clear();
         self.radar.clear();
+        self.digests.clear();
+        self.happiness = None;
+        self.hs_capability = spp_core::reports_api::ReportsCapability::Unknown;
+        self.hs_cached.clear();
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -148,6 +178,35 @@ impl ReportsPage {
         self.radar = radar;
         self.quality = quality;
         self.quality_rows = quality_rows;
+        let (digests, happiness, capability, hs_cached) = db.with_read(|conn| {
+            (
+                spp_core::digest::list_digests(
+                    conn,
+                    if self.digest_search.is_empty() {
+                        None
+                    } else {
+                        Some(self.digest_search.as_str())
+                    },
+                    30,
+                ),
+                Some(spp_core::reports::happiness_overview(conn, self.days)),
+                spp_core::reports_api::get_capability(conn),
+                spp_core::reports_api::REPORTS
+                    .iter()
+                    .filter_map(|spec| {
+                        spp_core::reports_api::cached_report(conn, spec.key).map(
+                            |(fetched_at, _start, _end, data)| {
+                                (spec.key, spec.name, fetched_at, data)
+                            },
+                        )
+                    })
+                    .collect(),
+            )
+        });
+        self.digests = digests;
+        self.happiness = happiness;
+        self.hs_capability = capability;
+        self.hs_cached = hs_cached;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
@@ -234,6 +293,9 @@ impl ReportsPage {
             Tab::TopQuestions => Self::list_ui(ui, &questions, "top questions"),
             Tab::Radar => self.radar_ui(ui),
             Tab::Quality => self.quality_ui(ui),
+            Tab::Digest => self.digest_ui(ui, db),
+            Tab::Happiness => self.happiness_ui(ui),
+            Tab::HelpScout => self.help_scout_ui(ui, db),
         }
     }
 
@@ -404,6 +466,365 @@ impl ReportsPage {
     /// recent closed conversations' deterministic QA cards. Computed
     /// locally from the mirror; the per-conversation AI layer stays on the
     /// inbox detail.
+    /// K4: the weekly AI digest archive — on-demand generation, search,
+    /// and the selected digest's narrative + facts + anomalies.
+    fn digest_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        design::hint_text(
+            ui,
+            "AI-written weekly summaries over SQL-computed facts — volume, topics, sentiment, \
+             anomalies, workload, and what changed. Archived and searchable.",
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if design::button_with_icon(
+                ui,
+                Icon::Sparkles,
+                "Generate digest now",
+                ButtonVariant::Primary,
+            )
+            .on_hover_text(
+                "Collects the deterministic facts and asks the routed model for the narrative \
+                 (facts are archived even without a model).",
+            )
+            .clicked()
+            {
+                let payload = r#"{"triggerKind":"manual","days":7}"#;
+                match db.with_write(|conn| {
+                    spp_core::jobs::enqueue_on(conn, "ai", "weekly_digest", payload, 3, 2)
+                }) {
+                    Ok(_) => self.sync_note = "digest requested…".into(),
+                    Err(e) => self.error = Some(format!("Could not queue the digest: {e}")),
+                }
+            }
+            let mut search_edit = self.digest_search.clone();
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut search_edit)
+                    .hint_text("search digests…")
+                    .desired_width(220.0),
+            );
+            if response.changed() {
+                self.digest_search = search_edit.clone();
+                let digests = db.with_read(|conn| {
+                    spp_core::digest::list_digests(
+                        conn,
+                        if search_edit.is_empty() {
+                            None
+                        } else {
+                            Some(search_edit.as_str())
+                        },
+                        30,
+                    )
+                });
+                self.digests = digests;
+            }
+        });
+        ui.add_space(6.0);
+        if self.digests.is_empty() {
+            design::empty_state(
+                ui,
+                Icon::Sparkles,
+                "no digests yet",
+                "Generate the first weekly digest, or wait for the scheduled one.",
+            );
+            return;
+        }
+
+        for digest in &self.digests {
+            let selected = self.digest_pick == Some(digest.id);
+            let status_chip = match digest.status.as_str() {
+                "complete" => "facts + narrative",
+                "facts_only" => "facts only (no model routed)",
+                _ => "model failed (facts kept)",
+            };
+            if design::chip(
+                ui,
+                selected,
+                &format!(
+                    "{} — {}",
+                    &digest.created_at[..16.max(digest.created_at.len())],
+                    status_chip
+                ),
+            )
+            .clicked()
+            {
+                self.digest_pick = Some(digest.id);
+            }
+        }
+        let Some(pick) = self.digest_pick else {
+            self.digest_pick = self.digests.first().map(|d| d.id);
+            return;
+        };
+        let Some(digest) = self.digests.iter().find(|d| d.id == pick) else {
+            return;
+        };
+        ui.add_space(6.0);
+        design::card_titled(
+            ui,
+            &format!(
+                "Digest {} → {}",
+                &digest.period_start[..10.min(digest.period_start.len())],
+                &digest.period_end[..10.min(digest.period_end.len())]
+            ),
+            Some("AI-generated narrative — numbers are SQL facts, not model output"),
+            |ui| {
+                match &digest.narrative {
+                    Some(n) => {
+                        ui.label(n);
+                    }
+                    None => {
+                        design::hint_text(
+                            ui,
+                            match digest.status.as_str() {
+                                "facts_only" => {
+                                    "No model was routed when this digest ran. Route \
+                                                 a Summarize model in AI Center, then generate a \
+                                                 new digest."
+                                }
+                                _ => "The model run failed; the facts below are the record.",
+                            },
+                        );
+                    }
+                }
+                ui.add_space(6.0);
+                let anomalies = digest.facts["anomalies"]["anomalies"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                if !anomalies.is_empty() {
+                    ui.label(egui::RichText::new("Anomalies").strong());
+                    for a in &anomalies {
+                        let detail = a["detail"].as_str().unwrap_or_default();
+                        ui.label(
+                            egui::RichText::new(format!("• {detail}"))
+                                .small()
+                                .color(ui.visuals().warn_fg_color),
+                        );
+                    }
+                    ui.add_space(4.0);
+                }
+                let new_gaps = digest.facts["what_changed"]["new_gap_candidates"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let new_articles = digest.facts["what_changed"]["changed_help_center_articles"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                ui.label(egui::RichText::new("What changed").strong());
+                if new_gaps.is_empty() && new_articles.is_empty() {
+                    ui.label(
+                        egui::RichText::new(
+                            "No new gaps or article changes since the previous digest.",
+                        )
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                } else {
+                    for g in &new_gaps {
+                        let q = g["question"].as_str().unwrap_or_default();
+                        ui.label(
+                            egui::RichText::new(format!("• new gap: {q}"))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
+                    for a in &new_articles {
+                        let name = a["name"].as_str().unwrap_or_default();
+                        ui.label(
+                            egui::RichText::new(format!("• article changed: {name}"))
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
+                }
+            },
+        );
+    }
+
+    /// P1: the happiness tab — local CSAT from webhook ratings (always
+    /// truthful, empty means "none received"), with the honest source
+    /// note; Plus/Pro users see remote happiness in the Help Scout tab.
+    fn happiness_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(data) = &self.happiness else {
+            ui.spinner();
+            return;
+        };
+        let great = i64_field(data, "great");
+        let okay = i64_field(data, "okay");
+        let not_good = i64_field(data, "not_good");
+        let total = i64_field(data, "total");
+        let csat = i64_field(data, "csat_percent");
+        let width = ui.available_width();
+        let cols = if width < 640.0 { 2 } else { 4 };
+        egui::Grid::new("p1-happiness")
+            .num_columns(cols)
+            .spacing(egui::vec2(10.0, 10.0))
+            .show(ui, |ui| {
+                design::metric_card(ui, "Great", &great.to_string(), None);
+                design::metric_card(ui, "Okay", &okay.to_string(), None);
+                design::metric_card(ui, "Not good", &not_good.to_string(), None);
+                design::metric_card(ui, "CSAT (great ÷ all)", &format!("{csat}%"), None);
+                ui.end_row();
+            });
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(format!(
+                "{} ratings received in the last {} days. {} — Help Scout has no list-ratings \
+                   API, so an empty table means none arrived, not zero happened.",
+                total,
+                i64_field(data, "range_days"),
+                "Ratings arrive via the satisfaction webhook",
+            ))
+            .small()
+            .color(ui.visuals().weak_text_color()),
+        );
+        if self.hs_capability == spp_core::reports_api::ReportsCapability::Available {
+            ui.label(
+                egui::RichText::new(
+                    "Your plan allows the Reports API — Help Scout's own happiness report is \
+                     in the Help Scout tab.",
+                )
+                .small()
+                .color(ui.visuals().hyperlink_color),
+            );
+        }
+        ui.add_space(8.0);
+        let recent = data["recent"].as_array().cloned().unwrap_or_default();
+        if recent.is_empty() {
+            design::empty_state(
+                ui,
+                Icon::HeartPulse,
+                "no ratings received in range",
+                "When a customer rates a conversation, the webhook delivers it here.",
+            );
+            return;
+        }
+        egui::Grid::new("p1-happiness-list")
+            .num_columns(4)
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Rating").strong());
+                ui.label(egui::RichText::new("Conversation").strong());
+                ui.label(egui::RichText::new("Customer").strong());
+                ui.label(egui::RichText::new("Comment").strong());
+                ui.end_row();
+                for r in &recent {
+                    let rating = str_field(r, "rating");
+                    ui.label(match rating.as_str() {
+                        "great" => egui::RichText::new("Great").color(ui.visuals().hyperlink_color),
+                        "not-good" => {
+                            egui::RichText::new("Not good").color(ui.visuals().error_fg_color)
+                        }
+                        _ => egui::RichText::new("Okay"),
+                    });
+                    let number = r["conversation_number"].as_i64();
+                    ui.label(number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()));
+                    ui.label(str_field(r, "customer"));
+                    ui.label(str_field(r, "comments"));
+                    ui.end_row();
+                }
+            });
+    }
+
+    /// K5: the Help Scout Reports API tab — the 32-endpoint registry behind
+    /// capability detection; Standard plans get the one honest sentence.
+    fn help_scout_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let banner = self.hs_capability.banner();
+        if !banner.is_empty() {
+            design::hint_text(ui, banner);
+            ui.add_space(6.0);
+        } else {
+            ui.label(
+                egui::RichText::new("Reports API available — fetched reports render below.")
+                    .small()
+                    .color(ui.visuals().hyperlink_color),
+            );
+            ui.add_space(6.0);
+        }
+        ui.horizontal(|ui| {
+            let specs = spp_core::reports_api::REPORTS;
+            let current = &specs[self.hs_pick.min(specs.len() - 1)];
+            egui::ComboBox::from_id_salt("k5-report-pick")
+                .selected_text(format!("{} — {}", current.family.label(), current.name))
+                .width(340.0)
+                .show_ui(ui, |ui| {
+                    for (i, spec) in specs.iter().enumerate() {
+                        ui.selectable_value(
+                            &mut self.hs_pick,
+                            i,
+                            format!("{} — {}", spec.family.label(), spec.name),
+                        );
+                    }
+                });
+            if ui
+                .add(egui::Button::new(egui::RichText::new(
+                    "Fetch from Help Scout",
+                )))
+                .on_hover_text(
+                    "GET the report for the selected range. A 403 answer means the plan does \
+                     not include the Reports API and is recorded as such.",
+                )
+                .clicked()
+            {
+                let start = spp_core::business_hours::iso_days_ago(self.days);
+                let end = spp_core::business_hours::now_iso_millis();
+                let payload = serde_json::json!({
+                    "key": spp_core::reports_api::REPORTS[self.hs_pick].key,
+                    "start": start,
+                    "end": end,
+                })
+                .to_string();
+                match db
+                    .with_write(|conn| spp_core::jobs::enqueue(conn, "fetch_hs_report", &payload))
+                {
+                    Ok(_) => self.sync_note = "fetching report…".into(),
+                    Err(e) => self.error = Some(format!("Could not queue the fetch: {e}")),
+                }
+            }
+        });
+        ui.add_space(8.0);
+        if self.hs_cached.is_empty() {
+            design::empty_state(
+                ui,
+                Icon::BarChart,
+                "no reports fetched yet",
+                "Pick a report and fetch it — results cache here with their range.",
+            );
+            return;
+        }
+        for (key, name, fetched_at, data) in &self.hs_cached {
+            let is_pick = spp_core::reports_api::REPORTS[self.hs_pick].key == *key;
+            ui.collapsing(
+                egui::RichText::new(format!("{name} — fetched {fetched_at}")).strong(),
+                |ui| {
+                    let flat = spp_core::reports_api::flatten_report(data);
+                    if flat.is_empty() {
+                        ui.label(
+                            egui::RichText::new(
+                                "The report returned no summary rows (drilldown-style reports \
+                                 paginate; fetch returns the raw page).",
+                            )
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                        );
+                        return;
+                    }
+                    egui::Grid::new(format!("k5-flat-{key}"))
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for (label, value) in flat.iter().take(40) {
+                                ui.label(egui::RichText::new(label.as_str()).small());
+                                ui.label(egui::RichText::new(value.as_str()).small().strong());
+                                ui.end_row();
+                            }
+                        });
+                    let _ = is_pick;
+                },
+            );
+        }
+    }
+
     fn quality_ui(&mut self, ui: &mut egui::Ui) {
         let Some(overview) = self.quality.clone() else {
             ui.spinner();
