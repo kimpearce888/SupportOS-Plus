@@ -453,15 +453,26 @@ pub fn get_analysis_signature(conn: &Connection, conversation_id: i64) -> String
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap_or((0, 0));
-    let last_hash: String = conn
-        .query_row(
-            "SELECT COALESCE(raw_json_hash, '') FROM conversation_threads
-              WHERE conversation_id = ?1 ORDER BY COALESCE(remote_created_at, created_at) DESC, id DESC LIMIT 1",
-            params![conversation_id],
-            |r| r.get(0),
-        )
-        .unwrap_or_default();
-    format!("{n}:{max_id}:{last_hash}")
+    // C1: fold EVERY live thread's content hash into the signature, not
+    // just the newest row's — an in-place edit to any thread (body edit,
+    // state flip re-synced through `upsert_thread`) must invalidate the
+    // cached analysis. Rows synced before the hash writer existed
+    // contribute an empty string, which keeps the signature deterministic
+    // for pre-fix data (one honest re-analysis after upgrade).
+    let mut hasher = Sha256::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT COALESCE(raw_json_hash, '') FROM conversation_threads
+          WHERE conversation_id = ?1 AND deleted_at IS NULL ORDER BY id",
+    ) {
+        let rows = stmt.query_map(params![conversation_id], |r| r.get::<_, String>(0));
+        if let Ok(rows) = rows {
+            for hash in rows.flatten() {
+                hasher.update(hash.as_bytes());
+                hasher.update(b"|");
+            }
+        }
+    }
+    format!("{n}:{max_id}:{}", hex(&hasher.finalize()))
 }
 
 #[derive(Debug, Clone)]

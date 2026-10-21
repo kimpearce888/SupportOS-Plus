@@ -1139,6 +1139,16 @@ impl RealHelpScoutProvider {
         body: Option<Value>,
         retries_left: u32,
     ) -> Result<Value> {
+        // A3/B2: replay safety. Requests that converge to the same result
+        // when replayed (GET/PUT/PATCH/DELETE — reads and full-replace or
+        // single-op updates in the Help Scout API) may be auto-retried
+        // after an ambiguous outcome. POSTs here create resources (reply
+        // threads, notes, conversations, saved replies): a replayed POST
+        // can double-deliver, so an ambiguous POST failure must surface
+        // instead of being silently retried here AND re-queued by the job
+        // layer — the customer could otherwise receive the same reply
+        // twice.
+        let idempotent = !method.eq_ignore_ascii_case("POST");
         let token = self.access_token().await?;
         let url = format!("{}{path}", self.api_base);
         let m: reqwest::Method = method
@@ -1159,11 +1169,14 @@ impl RealHelpScoutProvider {
             Ok(r) => r,
             Err(e) => {
                 let msg = e.to_string();
-                if retries_left > 0
-                    && (msg.contains("timeout")
-                        || msg.contains("Connection refused")
-                        || msg.contains("error sending request"))
-                {
+                // A3/B2: connect-phase failures (DNS, refused, TLS
+                // handshake) provably never reached the server — always
+                // safe to replay. Anything else (read timeout after the
+                // request went out, broken pipe mid-body) is ambiguous for
+                // creates: the server may have processed the request, so
+                // a POST is never replayed in-client.
+                let never_delivered = e.is_connect();
+                if retries_left > 0 && (never_delivered || idempotent) {
                     tokio::time::sleep(Duration::from_millis(1_500)).await;
                     return Box::pin(self.request_inner(path, method, body, retries_left - 1))
                         .await;
@@ -1171,8 +1184,15 @@ impl RealHelpScoutProvider {
                 return Err(HsApiError {
                     status_code: 0,
                     message: format!("Network error contacting Help Scout: {msg}"),
-                    friendly: "Help Scout is unreachable. Local data remains fully browsable - you are in offline mode for remote actions.".into(),
-                    retryable: true,
+                    friendly: if idempotent {
+                        "Help Scout is unreachable. Local data remains fully browsable - you are in offline mode for remote actions.".into()
+                    } else {
+                        "Delivery could not be confirmed - the request was NOT re-sent automatically to avoid duplicates. Check the conversation on the platform before retrying.".into()
+                    },
+                    // A3/B2: only provably-undelivered failures (and
+                    // replay-safe methods) may be re-queued by the job
+                    // layer; ambiguous create failures must not.
+                    retryable: never_delivered || idempotent,
                 }
                 .into());
             }
@@ -1244,7 +1264,11 @@ impl RealHelpScoutProvider {
             }
         }
 
-        if is_retryable(status) && retries_left > 0 && status != 429 {
+        // A3/B2: 5xx answers are ambiguous for creates (the server may
+        // have persisted and failed answering) — only replay-safe methods
+        // retry in-client here; a POST surfaces to the job layer as a
+        // non-retryable, honestly-described failure.
+        if is_retryable(status) && retries_left > 0 && status != 429 && idempotent {
             tokio::time::sleep(Duration::from_secs(2)).await;
             return Box::pin(self.request_inner(path, method, body, retries_left - 1)).await;
         }
@@ -1291,7 +1315,12 @@ impl RealHelpScoutProvider {
             status_code: status,
             message: format!("Help Scout {method} {path} -> {status}: {detail}"),
             friendly: friendly_error(status, &body_text, method),
+            // A3/B2: `retryable` means "provably safe to re-execute".
+            // 429 is never processed (safe); the retryable 5xx family is
+            // only safe to requeue for replay-safe methods — for creates
+            // it stays false so nothing blindly re-POSTs.
             retryable: is_retryable(status)
+                && (status == 429 || idempotent)
                 && !matches!(status, 400 | 401 | 403 | 404 | 409 | 412 | 413 | 415 | 423),
         }
         .into())

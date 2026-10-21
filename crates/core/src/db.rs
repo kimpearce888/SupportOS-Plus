@@ -211,6 +211,23 @@ impl DbHandle {
         DbWriteGuard { guard }
     }
 
+    /// Scoped long-operation connection — see [`DbLongOpGuard`]. For
+    /// background work that spans network round-trips (LLM pipelines), so
+    /// the exclusive UI writer lane is never pinned across them.
+    pub fn long_op_guard(&self) -> DbLongOpGuard<'_> {
+        let path = self.with_read(db_file_path);
+        if let Some(path) = path
+            && let Ok(conn) = open(&path)
+        {
+            return DbLongOpGuard {
+                lane: LongOpLane::Owned(conn),
+            };
+        }
+        DbLongOpGuard {
+            lane: LongOpLane::Shared(self.write_guard()),
+        }
+    }
+
     /// Filesystem path of the wrapped database, or `None` for
     /// in-memory/temporary databases.
     #[must_use]
@@ -255,6 +272,51 @@ impl Deref for DbWriteGuard<'_> {
 impl DerefMut for DbWriteGuard<'_> {
     fn deref_mut(&mut self) -> &mut Connection {
         &mut self.guard
+    }
+}
+
+/// Scoped connection for long-running background work — AI pipelines that
+/// span full LLM round-trips (audit A2).
+///
+/// File-backed databases get a fresh, tuned connection on the same file, so
+/// the exclusive writer lane is never held across network round-trips: this
+/// connection reads committed state per WAL, and its writes serialize
+/// against the writer lane at the SQLite level inside the shared 5-second
+/// busy_timeout. In-memory databases have no second connection (a second
+/// `:memory:` handle would be an empty private database), so the shared
+/// single connection is returned instead — identical to `write_guard`, the
+/// only lane that exists there.
+///
+/// Deref/DerefMut to [`Connection`], so call sites read exactly like
+/// `write_guard()` sites.
+pub struct DbLongOpGuard<'a> {
+    lane: LongOpLane<'a>,
+}
+
+enum LongOpLane<'a> {
+    /// File-backed database: a fresh, tuned connection on the same file.
+    Owned(Connection),
+    /// In-memory database: the shared single connection (`write_guard`).
+    Shared(DbWriteGuard<'a>),
+}
+
+impl Deref for DbLongOpGuard<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        match &self.lane {
+            LongOpLane::Owned(conn) => conn,
+            LongOpLane::Shared(guard) => guard,
+        }
+    }
+}
+
+impl DerefMut for DbLongOpGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        match &mut self.lane {
+            LongOpLane::Owned(conn) => conn,
+            LongOpLane::Shared(guard) => guard,
+        }
     }
 }
 

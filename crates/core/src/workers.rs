@@ -51,6 +51,33 @@ fn block_ai_pipeline<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
+/// A1: RAII latch over a per-tick `AtomicBool` guard. `tick()` and the
+/// sweep timers used to clear their flag only on the happy-path last
+/// line, so a mid-tick `stop()` (task abort at an await point) or a
+/// contained panic stranded the flag in the set state forever — every
+/// future tick of that timer then returned instantly and the job queue
+/// (or the sweep) silently died until process restart. Dropping the
+/// latch clears the flag on every exit path: normal return, panic
+/// unwind (contained at the task boundary), and abort during worker
+/// shutdown/restart.
+struct TickGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> TickGuard<'a> {
+    /// Acquire the tick guard; `None` means a previous tick of this timer
+    /// is still in flight and the caller must return immediately.
+    fn acquire(flag: &'a AtomicBool) -> Option<Self> {
+        (!flag.swap(true, Ordering::SeqCst)).then_some(Self { flag })
+    }
+}
+
+impl Drop for TickGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
+
 pub struct WorkerManager {
     db: crate::db::DbHandle,
     engine: Option<Arc<SyncEngine>>,
@@ -147,6 +174,14 @@ impl WorkerManager {
             return;
         }
         self.stopped.store(false, Ordering::SeqCst);
+        // A1: a restart used to inherit tick-guard flags stranded mid-tick
+        // by the abort inside `stop()`; every subsequent tick of that
+        // timer returned instantly and the queue/sweep never ran again
+        // until process restart. Restart from a provably clean state.
+        self.processing.store(false, Ordering::SeqCst);
+        self.sweeping_notifications.store(false, Ordering::SeqCst);
+        self.sweeping_customer_events.store(false, Ordering::SeqCst);
+        self.refreshing_connectors.store(false, Ordering::SeqCst);
         {
             let conn = self.lock();
             match jobs::recover_stale_jobs(&conn) {
@@ -343,9 +378,13 @@ impl WorkerManager {
     }
 
     pub async fn tick(&self) {
-        if self.stopped.load(Ordering::SeqCst) || self.processing.swap(true, Ordering::SeqCst) {
+        if self.stopped.load(Ordering::SeqCst) {
             return;
         }
+        // A1: the latch clears the flag on every exit path (see TickGuard).
+        let Some(_tick_guard) = TickGuard::acquire(&self.processing) else {
+            return;
+        };
         // Outbound dispatch runs before the background job kinds: a
         // queued user reply outranks any maintenance work.
         self.flush_outbound().await;
@@ -384,7 +423,6 @@ impl WorkerManager {
                 );
             }
         }
-        self.processing.store(false, Ordering::SeqCst);
     }
 
     /// Drain queued outbound jobs (replies, notes, status changes,
@@ -1075,11 +1113,13 @@ impl WorkerManager {
     }
 
     pub fn notification_sweep_tick(&self) {
-        if self.stopped.load(Ordering::SeqCst)
-            || self.sweeping_notifications.swap(true, Ordering::SeqCst)
-        {
+        if self.stopped.load(Ordering::SeqCst) {
             return;
         }
+        // A1: latch clears the guard on every exit path (see TickGuard).
+        let Some(_guard) = TickGuard::acquire(&self.sweeping_notifications) else {
+            return;
+        };
         let conn = self.lock();
         match crate::notification_sweep::sweep(&conn, Some(&self.bus)) {
             Ok(result) if result.created > 0 => {
@@ -1094,15 +1134,16 @@ impl WorkerManager {
                 tracing::warn!(error = %e, operation = "notification_sweep", "Notification sweep failed")
             }
         }
-        self.sweeping_notifications.store(false, Ordering::SeqCst);
     }
 
     pub fn customer_event_sweep_tick(&self) {
-        if self.stopped.load(Ordering::SeqCst)
-            || self.sweeping_customer_events.swap(true, Ordering::SeqCst)
-        {
+        if self.stopped.load(Ordering::SeqCst) {
             return;
         }
+        // A1: latch clears the guard on every exit path (see TickGuard).
+        let Some(_guard) = TickGuard::acquire(&self.sweeping_customer_events) else {
+            return;
+        };
         let conn = self.lock();
         match crate::customer_events::sweep(&conn) {
             Ok(created) if created > 0 => {
@@ -1117,15 +1158,17 @@ impl WorkerManager {
                 tracing::warn!(error = %e, operation = "customer_event_sweep", "Customer event sweep failed")
             }
         }
-        self.sweeping_customer_events.store(false, Ordering::SeqCst);
     }
 
     async fn connector_refresh_tick(&self) {
-        if self.stopped.load(Ordering::SeqCst)
-            || self.refreshing_connectors.swap(true, Ordering::SeqCst)
-        {
+        if self.stopped.load(Ordering::SeqCst) {
             return;
         }
+        // A1: latch clears the guard on every exit path, including the
+        // awaits below (see TickGuard).
+        let Some(_guard) = TickGuard::acquire(&self.refreshing_connectors) else {
+            return;
+        };
         let due: Vec<i64> = {
             let conn = self.lock();
             crate::connectors::due_for_refresh(&conn).unwrap_or_default()
@@ -1150,7 +1193,6 @@ impl WorkerManager {
                 ),
             }
         }
-        self.refreshing_connectors.store(false, Ordering::SeqCst);
     }
 
     async fn execute_job(&self, job_id: i64, kind: &str, payload: &str) {
@@ -1881,7 +1923,7 @@ impl WorkerManager {
         // task unchanged.
         let index = self.qdrant.clone();
         let (result, note_text, remote_id) = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 let remote: Option<i64> = conn
                     .query_row(
@@ -2079,7 +2121,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let mut conn = db.write_guard();
+            let mut conn = db.long_op_guard();
             block_ai_pipeline(async {
                 let remote: Option<i64> = conn
                     .query_row(
@@ -2139,7 +2181,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let extracted = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_pipeline::extract_memories(&conn, &backend, conv_id).await
             })
@@ -2175,7 +2217,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let clustered = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_pipeline::cluster_issues(&conn, &backend, 14)
                     .await
@@ -2226,7 +2268,7 @@ impl WorkerManager {
         let conversation_id = payload.get("conversationId").and_then(|v| v.as_i64());
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_pipeline::rewrite_composer_text(
                     &conn,
@@ -2296,7 +2338,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let outcome = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             let started = std::time::Instant::now();
             let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let usage_slot: std::sync::Arc<
@@ -2415,7 +2457,7 @@ impl WorkerManager {
         let include_ai = enabled && !matches!(backend, crate::ai_pipeline::AiBackend::Disabled);
         let db = self.db.clone();
         let review = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 let backend_ref = &backend;
                 let chat = |msgs: Vec<crate::ai_provider::ChatMessage>,
@@ -2488,7 +2530,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let outcome = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::quality::compute_qa_ai_layer(&conn, &backend, conv_id).await
             })
@@ -2529,7 +2571,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_pipeline::analyze_interaction(&conn, &backend, conv_id)
                     .await
@@ -2594,7 +2636,7 @@ impl WorkerManager {
         let db = self.db.clone();
         let index = self.qdrant.clone();
         let outcome = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::copilot::chat(
                     &conn,
@@ -2662,7 +2704,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let outcome = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_eval::run_golden_set(&conn, &backend)
                     .await
@@ -2707,7 +2749,7 @@ impl WorkerManager {
         let db = self.db.clone();
         let (friction_scanned, friction_created, gaps_scanned, gaps_created) =
             tokio::task::spawn_blocking(move || {
-                let conn = db.write_guard();
+                let conn = db.long_op_guard();
                 let (scanned, created) = crate::quality::rebuild_friction(&conn);
                 let (g_scanned, g_created) = crate::quality::rebuild_gaps(&conn, 90);
                 (scanned, created, g_scanned, g_created)
@@ -2764,7 +2806,7 @@ impl WorkerManager {
         }
         let db = self.db.clone();
         let draft_id = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_pipeline::draft_article(&conn, &backend, candidate_id).await
             })
@@ -3016,7 +3058,7 @@ impl WorkerManager {
         let db = self.db.clone();
         let trigger_kind_label = trigger_kind.clone();
         let digest_id = tokio::task::spawn_blocking(move || {
-            let conn = db.write_guard();
+            let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_pipeline::weekly_digest(&conn, &backend, &trigger_kind, days).await
             })

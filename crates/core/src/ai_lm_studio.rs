@@ -116,21 +116,26 @@ impl OpenAiCompatibleClient {
     }
 
     pub async fn is_available(&self) -> bool {
-        match self
-            .http
-            .get(format!("{}/models", self.base_url))
-            .send()
-            .await
-        {
+        // D1: probes must authenticate exactly like chat/embed — keyed
+        // (BYOK cloud) endpoints 401 the unauthenticated GET and showed
+        // "offline" while the same endpoint served real calls.
+        let mut req = self.http.get(format!("{}/models", self.base_url));
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+        match req.send().await {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
         }
     }
 
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        let resp = self
-            .http
-            .get(format!("{}/models", self.base_url))
+        // D1: same authentication as chat/embed — see `is_available`.
+        let mut req = self.http.get(format!("{}/models", self.base_url));
+        if let Some(ref key) = self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp = req
             .send()
             .await
             .map_err(|e| Error::Config(format!("LM Studio list_models failed: {e}")))?;
