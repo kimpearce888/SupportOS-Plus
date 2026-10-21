@@ -1170,7 +1170,7 @@ chain green on the freshly built binary (all 46 migrations incl. m055,
 boot services, workers, loopback listener; exit 0). CI run
 `39548532474` on `a50e73c`: both jobs success.
 
-### Batch 14 (K2, K3, K4, K5, P1) — 2026-10-21
+### Batch 14 (K2, K3, K4, K5, P1) — 2026-10-21 (commit `c384d2b`, CI run `39586925347`: success — both jobs green: "fmt, clippy, test, deny" and "AppImage + .deb build, smoke")
 
 Phase K completion batch plus the first Phase P item: the knowledge loop
 closes (draft → human review → Docs API publish → verify → freshness)
@@ -1337,8 +1337,10 @@ capability detection, and the honest happiness/CSAT path.
   sandbox host lacks libxkbcommon-x11.so.0/libxcb-xkb.so.1 and has no
   root to install them (the xtask's designed error, not a code
   defect). CI's packages job apt-installs exactly those libs and runs
-  both smokes on the runner — the same verification model as batches
-  12 and 13.
+  both smokes on the runner — confirmed: the "AppImage + .deb build,
+  smoke" job on run `39586925347` completed success, so the packaging
+  (AppImage + .deb) and both boot-chain smokes are verified on the
+  runner, the same verification model as batches 12 and 13.
 - The empty-provider report fabrication removal is the batch's one
   behavioral regression risk: the UI never called the four named
   methods (grep-verified), so no surface changes.
