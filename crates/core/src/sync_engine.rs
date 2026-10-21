@@ -659,7 +659,21 @@ fn rechunk_doc_article(
     Ok(())
 }
 
+/// C1: hex SHA-256 of the thread's serialized content — see
+/// `upsert_thread`.
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(data);
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn upsert_thread(conn: &Connection, conversation_local: i64, t: &HsThread) -> Result<()> {
+    // C1: content hash of the ingested thread, written on insert AND on
+    // every in-place re-sync update (edited body, state flip, moved
+    // conversation). The analysis-cache signature folds these hashes
+    // in, so an in-place edit invalidates cached analyses instead of
+    // serving stale ones forever.
+    let raw_json_hash = sha256_hex(serde_json::to_string(t).unwrap_or_default().as_bytes());
     let from_type: &str = if t.created_by_customer_id.is_some() {
         "customer"
     } else if t.created_by_user_id.is_some() {
@@ -684,8 +698,8 @@ fn upsert_thread(conn: &Connection, conversation_local: i64, t: &HsThread) -> Re
         "INSERT INTO conversation_threads
              (conversation_id, type, state, body_text, from_type,
               created_by_user_id, created_by_customer_id, created_by_system_user_id,
-              created_at, remote_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+              created_at, remote_id, raw_json_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(remote_id) DO UPDATE SET
             conversation_id = excluded.conversation_id, type = excluded.type,
             state = excluded.state,
@@ -696,7 +710,8 @@ fn upsert_thread(conn: &Connection, conversation_local: i64, t: &HsThread) -> Re
             created_at = excluded.created_at,
             -- DB-05 (M18): threads resurrect on upsert too
             -- (conversationRepo.ts:667 `deleted_at=NULL`).
-            deleted_at = NULL",
+            deleted_at = NULL,
+            raw_json_hash = excluded.raw_json_hash",
         params![
             conversation_local,
             t.kind,
@@ -707,7 +722,8 @@ fn upsert_thread(conn: &Connection, conversation_local: i64, t: &HsThread) -> Re
             created_by_customer_id,
             created_by_system_user_id,
             t.created_at,
-            t.remote_id
+            t.remote_id,
+            raw_json_hash
         ],
     )?;
     record_thread_event(
