@@ -1169,3 +1169,176 @@ ignored; `cargo deny check advisories licenses` ok; `SPP_SMOKE=1` boot
 chain green on the freshly built binary (all 46 migrations incl. m055,
 boot services, workers, loopback listener; exit 0). CI run
 `39548532474` on `a50e73c`: both jobs success.
+
+### Batch 14 (K2, K3, K4, K5, P1) — 2026-10-21
+
+Phase K completion batch plus the first Phase P item: the knowledge loop
+closes (draft → human review → Docs API publish → verify → freshness)
+and the reports layer gains the weekly AI digest, the Reports API behind
+capability detection, and the honest happiness/CSAT path.
+
+**K2. Real AI article drafting + review queue**
+- Work: `ai_pipeline::draft_article` drafts a knowledge article for a gap
+  candidate grounded ONLY in `quality::best_resolutions` — the closed,
+  published-reply evidence conversations (newest closure first, ≤ 6,
+  excerpt-capped), the same excerpt logic the A4 retrieval spine stores
+  as `resolution` chunks. The prompt (`ai_prompts::ARTICLE_DRAFT_SYSTEM`,
+  `article_draft_v1`) forces per-claim `[^N]` citations bound to numbered
+  sources and demands open questions instead of guesses where the
+  resolutions disagree. The draft lands in the new `article_drafts` table
+  (migration m056, boot step 47) as `drafted`; `decide_article_draft` is
+  the only exit (approved/rejected, one transition, decided_at + user);
+  a publish in flight can never be un-approved from under the publisher.
+  Honest refusals leave no run rows and no queue entries: unknown
+  candidate, duplicate queue row (`article_draft_exists_for_candidate`),
+  no grounded evidence ("nothing grounded to draft from" — an article
+  without resolutions would be invention), no routed Draft backend (the
+  composer's AI_DISABLED contract, checked before `start_run`). The
+  "draft_article" job (ai queue) + the Knowledge page's new "Article
+  drafts" tab complete the loop: pick an open gap, request the draft,
+  review title/body/citations, Approve or Reject. Feature:
+  `article_drafting` (AI Center grid, default on).
+- Tests: `ai_pipeline::batch14_k2_k4_tests::draft_article_refuses_honestly`
+  (all three refusals, zero run rows); `quality::k2_tests` (closed-with-
+  published-reply selection, newest-closure order, empty/open/silent
+  conversations skipped, limit cap); `workers::batch14_tests::
+  draft_article_job_skips_without_a_routed_backend`.
+
+**K3. Docs API publish path**
+- Work: the provider trait gains `get_doc_article` (GET
+  /v1/articles/{id}), `upsert_doc_article_draft` (POST
+  /v1/articles?reload=true creating a `notpublished` article, or PUT
+  /v1/articles/{id}/drafts for a linked article) and `publish_doc_article`
+  (PUT /v1/articles/{id} with status published); the real provider
+  implements them through a new `docs_request_send` (POST/PUT under the
+  same Basic-auth envelope + HsApiError mapping as the GET side; the
+  missing-key case refuses with the honest setup message, and the
+  trait defaults reject — an inert connection never pretends to
+  publish). The "publish_article_draft" job runs the chain:
+  approved-drafts-only guard (terminal failure otherwise) → collection
+  resolution → Docs API draft upsert (`draft_upserted`) → publish
+  (`published`) → verify by re-syncing the article through
+  `sync_engine::upsert_doc_article` so FTS + chunks re-index locally
+  (`verified`); every failure records `publish_failed` + the error on
+  the queue row. Freshness now scores every source: `freshness_report`
+  gained a `help_center` section scoring `docs_articles` with the same
+  staleness threshold as local documents. The Knowledge drafts tab
+  wires the UI: Approve unlocks (never performs) publishing; the
+  explicit publish button + collection picker queues the job.
+- Tests: `workers::batch14_tests::publish_job_runs_the_full_chain_and_verifies`
+  (create→publish→verify over the real provider + mock Docs API with
+  Basic-auth assertions, then the linked-article update path via PUT
+  /drafts), `publish_job_refuses_an_unapproved_draft` (row untouched,
+  nothing on the wire, job failed honestly).
+
+**K4. Weekly AI digest + anomaly alerts**
+- Work: new `digest` module (migration m057, boot step 48). Facts are
+  all SQL over the local mirror: volume (new/closed/backlog + previous-
+  period delta + per-day series), deterministic anomalies (any day > 2σ
+  above the period mean with ≥3 conversations; backlog jump > 50%
+  week-over-week with a floor of 10), topics (top issue clusters, top
+  tags), sentiment (latest completed ticket_analysis run per
+  conversation; absent-not-zero when no analyses exist), workload
+  (replies per user, busiest hour), happiness (webhook ratings), and
+  "what changed" (new gap candidates + changed help-center articles +
+  new local documents since the previous archived digest).
+  `ai_pipeline::weekly_digest` (prompt `weekly_digest_v1`, Summarize
+  role) hands the facts to the model under the report_narrative
+  contract (facts authoritative, never recalculated, "requires
+  verification" flags) and archives either `complete` (facts +
+  narrative) or `facts_only` (no backend routed — the deterministic
+  half is still archived; a failed model run archives `failed` with the
+  facts kept). The archive is searchable (narrative + facts JSON).
+  Generation is on demand (Reports → Digest → "Generate digest now")
+  and scheduled (maintenance: 7-day cadence, provider-gated, and only
+  when a model is genuinely configured — a fresh install never
+  archives weekly "model unavailable" rows). Feature: `weekly_digest`.
+- Tests: `digest::tests` (archive roundtrip + search through narrative
+  and facts, volume/anomaly/happiness collection with the loud day
+  flagged, out-of-window rows excluded, sentiment absent-not-zero);
+  `ai_pipeline::batch14_k2_k4_tests::weekly_digest_archives_facts_without_backend`;
+  `workers::batch14_tests::weekly_digest_job_writes_the_narrative_end_to_end`
+  (mock model server → status complete, narrative content asserted,
+  run row in the ledger).
+
+**K5. Help Scout Reports API behind capability detection**
+- Work: new `reports_api` module (migration m058, boot step 49): the
+  full documented endpoint registry — 32 unique GET paths (the docs
+  sitemap's "33 report endpoint pages" counts the reports index itself;
+  the verified 2026-10-21 research table's 30 rows include two
+  two-endpoint rows) across 7 families, each with key/name/path.
+  The four hard-coded named report trait methods (`get_company_overall_report`
+  & co.) are replaced by one registry-driven `get_report(key, start, end)`;
+  the empty provider's fabricated-from-InertWorld report impls are
+  DELETED (R6's honesty rule extends to reports: an inert connection
+  answers `Ok(None)`, never invented numbers) and `hs_range_report`
+  is retired. Capability detection: `ReportsCapability` (Unknown /
+  Available / PlanBlocked / NotConnected) persisted in settings,
+  written only from definitive evidence (HTTP 403 → PlanBlocked;
+  2xx → Available; empty provider → NotConnected; 401/network stay
+  Unknown and retry) and invalidated on every credential save/clear
+  (`store_in_envelope`/`clear_envelope` call `reset_capability`).
+  The "fetch_hs_report" job fetches, caches into `hs_report_cache`
+  (key, fetched_at, start, end, data — one row per key, overwritten),
+  and records the verdict; errors keep their HsApiError status so the
+  403 wall is classifiable. The Reports page's "Help Scout" tab renders
+  the registry picker + fetch button, the cached reports (flattened
+  label/value rows via `flatten_report`), and the capability banner —
+  decisions D-c/D-g: Standard plans get one honest sentence ("Your
+  Help Scout plan does not include the Reports API — it is available
+  on Plus and Pro plans…") instead of empty charts.
+- Tests: `reports_api::tests` (registry: 32 entries, unique keys/paths,
+  all under /v2/reports; capability roundtrip + reset + classification
+  table; cache upsert/overwrite + flatten); `workers::batch14_tests::
+  fetch_hs_report_job_classifies_capability` (200 → cached + Available;
+  403 → PlanBlocked), `fetch_hs_report_job_records_not_connected`.
+
+**P1. Ratings and CSAT rework**
+- Work: the local happiness readout `reports::happiness_overview` —
+  great/okay/not-good counts in range, CSAT share (great ÷ all), and
+  the recent ratings list, every number from `ratings` rows the
+  satisfaction webhook delivered (Help Scout has no list-ratings API;
+  an empty table means "none received", never "zero happened", and the
+  source note says so). The Reports page gains the "Happiness" tab
+  (metric cards + recent list + the Plus/Pro cross-link when the
+  capability probe says Available). The relay-ready ingestion path is
+  proven end to end over real TCP: `it_loopback::
+  satisfaction_webhook_ingests_over_tcp` (signed satisfaction.ratings
+  event through the loopback listener → verified → persisted →
+  fetch-by-id job enqueued; unsigned rejected), and
+  `workers::batch14_tests::satisfaction_ratings_job_fetches_and_stores_the_rating`
+  (the job fetches GET /v2/ratings/{id} through the real provider and
+  lands the row with conversation/customer joins). The misdesigned
+  30-second ratings poller stays retired (R6 removed refresh_ratings,
+  its re-entrancy flag, the dangling-rating sweep and the event chain;
+  verified absent). D11 fully resolved.
+- Tests: `reports::p1_tests` (counts + CSAT rounding + recent list;
+  empty-is-absent-not-zero; out-of-range ratings never count) plus the
+  two end-to-end tests above.
+
+**Verification (Rule 5)**
+- Local, pinned toolchain 1.99.1 (reinstalled after another sandbox
+  reset wiped ~/.cargo): `cargo fmt --all --check` clean; `cargo clippy
+  --workspace --all-targets -- -D warnings` clean; `cargo test
+  --workspace` green — app-shell 163, core 248 passed/4 ignored
+  (was 228+4; +20 new tests: 3 digest, 3 reports_api, 2 k2_tests,
+  2 batch14_k2_k4, 7 workers batch14, 1 it_loopback satisfaction,
+  plus 2 p1_tests counted within), catalog 6; `cargo clippy -p
+  supportos-plus-core --all-targets --features sandbox -- -D warnings`
+  clean; `cargo test -p supportos-plus-core --features sandbox` 253
+  passed/4 ignored; `cargo deny check advisories licenses` ok
+  (cargo-deny 0.20.2 reinstalled); `python3 scripts/gate_no_simulation.py`
+  clean; release build (`cargo run -p supportos-plus-xtask -- package`
+  compile stage) finished in 2m52s and `SPP_SMOKE=1
+  ./target/release/supportos-plus` exit 0 — all 49 migrations
+  (including m056/m057/m058) applied on a fresh DB, boot services,
+  background workers, loopback listener, clean shutdown.
+- Honest environment note: the local AppImage pack step refuses — the
+  sandbox host lacks libxkbcommon-x11.so.0/libxcb-xkb.so.1 and has no
+  root to install them (the xtask's designed error, not a code
+  defect). CI's packages job apt-installs exactly those libs and runs
+  both smokes on the runner — the same verification model as batches
+  12 and 13.
+- The empty-provider report fabrication removal is the batch's one
+  behavioral regression risk: the UI never called the four named
+  methods (grep-verified), so no surface changes.

@@ -448,10 +448,47 @@ pub fn freshness_report(conn: &Connection) -> Value {
         .filter(|r| r.get("freshness_status").and_then(|v| v.as_str()) == Some("stale"))
         .count() as i64;
     let fresh = rows.len() as i64 - stale;
+    // K3: freshness scores every source — the help-center mirror
+    // (`docs_articles`) is scored with the same staleness threshold so a
+    // published-but-rotting article is as visible as a stale local doc.
+    let help_center: Vec<Value> = conn
+        .prepare(
+            "SELECT a.id, a.name, a.status, a.remote_updated_at, c.name
+               FROM docs_articles a
+               LEFT JOIN docs_collections c ON c.id = a.collection_local_id
+              ORDER BY a.remote_updated_at DESC LIMIT 200",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| {
+                let updated: Option<String> = r.get(3)?;
+                let days_old = updated.as_deref().and_then(days_since);
+                let stale = days_old.is_some_and(|d| d > stale_days);
+                Ok(json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "title": r.get::<_, String>(1)?,
+                    "status": r.get::<_, Option<String>>(2)?,
+                    "updated_at": updated,
+                    "collection": r.get::<_, Option<String>>(4)?,
+                    "days_since_update": days_old,
+                    "freshness_status": if stale { "stale" } else { "fresh" },
+                }))
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default();
+    let help_center_stale = help_center
+        .iter()
+        .filter(|r| r.get("freshness_status").and_then(|v| v.as_str()) == Some("stale"))
+        .count() as i64;
     json!({
         "stale": stale,
         "fresh": fresh,
         "documents": rows,
+        "help_center": {
+            "stale": help_center_stale,
+            "total": help_center.len() as i64,
+            "articles": help_center,
+        },
         "thresholds": {
             "stale_days": stale_days,
             "unreviewed_days": unreviewed_days,
@@ -1253,4 +1290,222 @@ mod tests {
             "{err}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// K2: the AI article-draft review queue
+// ---------------------------------------------------------------------------
+
+/// Migration m056 (boot step 47): `article_drafts` — the K2 review queue.
+/// Every AI-drafted knowledge article lands here as `drafted` and moves to
+/// `approved` or `rejected` only by a human decision; the K3 publish path
+/// accepts approved drafts exclusively. Nothing in this table is ever
+/// visible to customers without that human click.
+pub fn apply_m056_article_drafts(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS article_drafts (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id             INTEGER REFERENCES knowledge_gap_candidates(id) ON DELETE SET NULL,
+            title                    TEXT NOT NULL,
+            body                     TEXT NOT NULL,
+            citations                TEXT NOT NULL DEFAULT '[]',
+            ai_run_id                INTEGER REFERENCES ai_runs(id),
+            status                   TEXT NOT NULL DEFAULT 'drafted'
+                     CHECK (status IN ('drafted','approved','rejected')),
+            created_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            decided_at               TEXT,
+            decided_by_user_local_id INTEGER,
+            -- K3 publish state machine: unpublished -> draft_upserted ->
+            -- published -> verified; publish_failed keeps the last error.
+            publish_state            TEXT NOT NULL DEFAULT 'unpublished'
+                     CHECK (publish_state IN ('unpublished','draft_upserted','published','verified','publish_failed')),
+            remote_article_id        INTEGER,
+            collection_local_id      INTEGER,
+            published_at             TEXT,
+            publish_error            TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_article_drafts_status
+            ON article_drafts (status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_article_drafts_candidate
+            ON article_drafts (candidate_id);",
+    )?;
+    Ok(())
+}
+
+/// A review-queue row as the UI renders it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ArticleDraftRow {
+    pub id: i64,
+    pub candidate_id: Option<i64>,
+    pub title: String,
+    pub body: String,
+    pub citations: Value,
+    pub ai_run_id: Option<i64>,
+    pub status: String,
+    pub created_at: String,
+    pub decided_at: Option<String>,
+    pub publish_state: String,
+    pub remote_article_id: Option<i64>,
+    pub collection_local_id: Option<i64>,
+    pub published_at: Option<String>,
+    pub publish_error: Option<String>,
+}
+
+fn article_draft_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ArticleDraftRow> {
+    let citations_raw: String = r.get(4)?;
+    Ok(ArticleDraftRow {
+        id: r.get(0)?,
+        candidate_id: r.get(1)?,
+        title: r.get(2)?,
+        body: r.get(3)?,
+        citations: serde_json::from_str(&citations_raw).unwrap_or_else(|_| json!([])),
+        ai_run_id: r.get(5)?,
+        status: r.get(6)?,
+        created_at: r.get(7)?,
+        decided_at: r.get(8)?,
+        publish_state: r.get(9)?,
+        remote_article_id: r.get(10)?,
+        collection_local_id: r.get(11)?,
+        published_at: r.get(12)?,
+        publish_error: r.get(13)?,
+    })
+}
+
+const ARTICLE_DRAFT_COLUMNS: &str = "id, candidate_id, title, body, citations, ai_run_id,
+    status, created_at, decided_at, publish_state, remote_article_id,
+    collection_local_id, published_at, publish_error";
+
+/// Insert a freshly AI-drafted article. Called only by the AI pipeline
+/// after a successful model run; the row starts `drafted`.
+pub fn insert_article_draft(
+    conn: &Connection,
+    candidate_id: Option<i64>,
+    title: &str,
+    body: &str,
+    citations: &Value,
+    ai_run_id: Option<i64>,
+) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO article_drafts
+             (candidate_id, title, body, citations, ai_run_id, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'drafted')",
+        params![
+            candidate_id,
+            title,
+            body,
+            serde_json::to_string(citations).unwrap_or_else(|_| "[]".into()),
+            ai_run_id
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// The review queue: newest first, optionally narrowed to one status.
+pub fn list_article_drafts(conn: &Connection, status: Option<&str>) -> Vec<ArticleDraftRow> {
+    let sql = format!(
+        "SELECT {ARTICLE_DRAFT_COLUMNS} FROM article_drafts
+         WHERE (?1 IS NULL OR status = ?1)
+         ORDER BY id DESC LIMIT 200"
+    );
+    conn.prepare(&sql)
+        .and_then(|mut stmt| {
+            stmt.query_map(params![status], article_draft_from_row)
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default()
+}
+
+#[must_use]
+pub fn article_draft_by_id(conn: &Connection, id: i64) -> Option<ArticleDraftRow> {
+    let sql = format!("SELECT {ARTICLE_DRAFT_COLUMNS} FROM article_drafts WHERE id = ?1");
+    conn.query_row(&sql, params![id], |r| article_draft_from_row(r).map(Some))
+        .unwrap_or(None)
+}
+
+/// The human decision — the only way out of the queue. A draft that was
+/// already decided cannot be re-decided; a publish in flight
+/// (`draft_upserted`/`published`/`verified`) cannot be un-approved from
+/// under the publisher.
+pub fn decide_article_draft(
+    conn: &Connection,
+    id: i64,
+    decision: &str,
+    user_local_id: Option<i64>,
+) -> Option<ArticleDraftRow> {
+    let ok_decision = matches!(decision, "approved" | "rejected");
+    if !ok_decision {
+        return None;
+    }
+    let changed = conn
+        .execute(
+            "UPDATE article_drafts
+             SET status = ?2, decided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                 decided_by_user_local_id = ?3
+             WHERE id = ?1 AND status = 'drafted'
+               AND publish_state = 'unpublished'",
+            params![id, decision, user_local_id],
+        )
+        .unwrap_or(0);
+    if changed == 0 {
+        return None;
+    }
+    article_draft_by_id(conn, id)
+}
+
+/// K3: record the publish state machine transitions. Only the worker
+/// driving the Docs API calls this.
+pub fn set_article_draft_publish_state(
+    conn: &Connection,
+    id: i64,
+    publish_state: &str,
+    remote_article_id: Option<i64>,
+    collection_local_id: Option<i64>,
+    publish_error: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE article_drafts
+         SET publish_state = ?2,
+             remote_article_id = COALESCE(?3, remote_article_id),
+             collection_local_id = COALESCE(?4, collection_local_id),
+             published_at = CASE WHEN ?2 IN ('published','verified')
+                                THEN strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                                ELSE published_at END,
+             publish_error = ?5
+         WHERE id = ?1",
+        params![
+            id,
+            publish_state,
+            remote_article_id,
+            collection_local_id,
+            publish_error
+        ],
+    )?;
+    Ok(())
+}
+
+/// True when an approved draft exists for the candidate (the queue refuses
+/// duplicates so a repeated "draft article" click does not stack rows).
+#[must_use]
+pub fn article_draft_exists_for_candidate(conn: &Connection, candidate_id: i64) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM article_drafts
+          WHERE candidate_id = ?1 AND status IN ('drafted','approved')",
+        params![candidate_id],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+/// Queue counts for the tab badge.
+#[must_use]
+pub fn article_draft_queue_counts(conn: &Connection) -> (i64, i64, i64) {
+    conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM article_drafts WHERE status = 'drafted'),
+                (SELECT COUNT(*) FROM article_drafts WHERE status = 'approved'),
+                (SELECT COUNT(*) FROM article_drafts WHERE publish_state IN ('published','verified'))",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )
+    .unwrap_or((0, 0, 0))
 }

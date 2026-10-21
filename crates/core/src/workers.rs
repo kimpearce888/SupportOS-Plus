@@ -949,6 +949,40 @@ impl WorkerManager {
                     let _ = crate::settings::set_i64(&conn, "ai_gaps_last_run", now_unix);
                 }
             }
+            // K4: the weekly digest cadence — once a week at most,
+            // feature-gated, provider-gated (the digest summarizes a
+            // synced mirror; an empty provider has nothing to summarize).
+            if crate::ai_hub::ai_feature_enabled(&conn, "weekly_digest") && provider_kind != "empty"
+            {
+                let last_run_unix =
+                    crate::settings::get_i64(&conn, "ai_digest_last_run", 0).unwrap_or(0);
+                let now_unix = chrono::Utc::now().timestamp();
+                if now_unix - last_run_unix >= 7 * 24 * 3600 {
+                    // Scheduled digests only run when a model is genuinely
+                    // configured (an explicit role assignment, or a legacy
+                    // base URL): a fresh install must not archive weekly
+                    // "model unavailable" rows. The on-demand button stays
+                    // ungated - its failure is visible setup truth, once.
+                    let model_configured =
+                        crate::ai_hub::resolve_role(&conn, crate::ai_hub::AiRole::Summarize)
+                            .is_some()
+                            || crate::settings::get_string(&conn, "lmstudio_base_url")
+                                .ok()
+                                .flatten()
+                                .is_some_and(|s| !s.is_empty());
+                    if model_configured {
+                        let _ = crate::jobs::enqueue_on(
+                            &conn,
+                            "ai",
+                            "weekly_digest",
+                            "{\"triggerKind\":\"scheduled\",\"days\":7}",
+                            3,
+                            2,
+                        );
+                        let _ = crate::settings::set_i64(&conn, "ai_digest_last_run", now_unix);
+                    }
+                }
+            }
             // A6: the golden set re-runs when the analysis prompt version
             // or the role map changed since the last run (upgrade → new
             // prompt constants; AI Center → new model routing).
@@ -1419,6 +1453,19 @@ impl WorkerManager {
                 }
                 "rebuild_gaps" => {
                     self.run_gap_rebuild_job().await?;
+                }
+                // Batch 14 (K2, K3, K4, K5)
+                "draft_article" => {
+                    self.run_draft_article_job(&payload).await?;
+                }
+                "publish_article_draft" => {
+                    self.run_publish_article_draft_job(job_id, &payload).await?;
+                }
+                "weekly_digest" => {
+                    self.run_weekly_digest_job(&payload).await?;
+                }
+                "fetch_hs_report" => {
+                    self.run_fetch_hs_report_job(&payload).await?;
                 }
                 "automation_action_awaiting_approval" => {
                     let approved = payload
@@ -2634,6 +2681,399 @@ impl WorkerManager {
         Ok(())
     }
 
+    /// K2: the AI article-draft job. Feature-gated + Draft-role routed;
+    /// skips honestly when either is missing. Refusals (no grounded
+    /// evidence, duplicate queue row, unrouted backend) fail the job with
+    /// the honest message - the Knowledge page surfaces it from the job
+    /// row, and nothing lands in the queue ungrounded.
+    async fn run_draft_article_job(&self, payload: &serde_json::Value) -> Result<()> {
+        let candidate_id = payload
+            .get("candidateId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        if candidate_id <= 0 {
+            let conn = self.lock();
+            jobs::fail(&conn, 0, "draft_article: no candidateId in payload", false)?;
+            return Ok(());
+        }
+        let (enabled, backend) = {
+            let conn = self.lock();
+            (
+                crate::ai_hub::ai_feature_enabled(&conn, "article_drafting"),
+                crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Draft),
+            )
+        };
+        if !enabled || matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
+            tracing::info!(
+                operation = "draft_article",
+                "article draft skipped - feature off or no Draft role endpoint routed"
+            );
+            return Ok(());
+        }
+        let db = self.db.clone();
+        let draft_id = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                crate::ai_pipeline::draft_article(&conn, &backend, candidate_id).await
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?
+        .map_err(|e| Error::Other(e.message.into()))?;
+        tracing::info!(
+            operation = "draft_article",
+            draft_id,
+            candidate_id,
+            "article draft queued for review"
+        );
+        use crate::events::ServerEvent;
+        self.bus.emit(&ServerEvent::conversation_updated(
+            None,
+            None,
+            None,
+            None,
+            "draft_article",
+        ));
+        Ok(())
+    }
+
+    /// K3: the publish chain - upsert the Docs API draft, publish the
+    /// human-approved text, verify by re-syncing the article into the
+    /// local mirror. Only approved drafts may publish; every failure
+    /// records `publish_failed` + the error on the queue row.
+    async fn run_publish_article_draft_job(
+        &self,
+        job_id: i64,
+        payload: &serde_json::Value,
+    ) -> Result<()> {
+        let draft_id = payload.get("draftId").and_then(|v| v.as_i64()).unwrap_or(0);
+        if draft_id <= 0 {
+            let conn = self.lock();
+            jobs::fail(
+                &conn,
+                job_id,
+                "publish_article_draft: no draftId in payload",
+                false,
+            )?;
+            return Ok(());
+        }
+        let (draft, collection_remote) = {
+            let conn = self.lock();
+            let Some(draft) = crate::knowledge_store::article_draft_by_id(&conn, draft_id) else {
+                jobs::fail(
+                    &conn,
+                    job_id,
+                    &format!("Article draft {draft_id} does not exist."),
+                    false,
+                )?;
+                return Ok(());
+            };
+            if draft.status != "approved" {
+                jobs::fail(
+                    &conn,
+                    job_id,
+                    &format!(
+                        "Article draft {draft_id} is not approved - the review queue is the \
+                         only path to publishing."
+                    ),
+                    false,
+                )?;
+                return Ok(());
+            }
+            let collection_remote = draft
+                .collection_local_id
+                .or_else(|| payload.get("collectionLocalId").and_then(|v| v.as_i64()))
+                .and_then(|local| {
+                    conn.query_row(
+                        "SELECT remote_id FROM docs_collections WHERE id = ?1",
+                        rusqlite::params![local],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .ok()
+                });
+            (draft, collection_remote)
+        };
+        let Some(collection_remote) = collection_remote else {
+            let conn = self.lock();
+            let _ = crate::knowledge_store::set_article_draft_publish_state(
+                &conn,
+                draft_id,
+                "publish_failed",
+                None,
+                None,
+                Some("No Help Center collection selected for the article."),
+            );
+            jobs::fail(
+                &conn,
+                job_id,
+                "No Help Center collection selected for the article.",
+                false,
+            )?;
+            return Ok(());
+        };
+
+        // Step 1: upsert the Docs API draft.
+        let input = crate::helpscout::DocArticleDraftInput {
+            collection_id: collection_remote,
+            name: draft.title.clone(),
+            text: draft.body.clone(),
+            remote_id: draft.remote_article_id,
+            slug: None,
+        };
+        let remote_id = match self.provider.upsert_doc_article_draft(&input).await {
+            Ok(id) => id,
+            Err(e) => {
+                let msg = e.to_string();
+                let conn = self.lock();
+                let _ = crate::knowledge_store::set_article_draft_publish_state(
+                    &conn,
+                    draft_id,
+                    "publish_failed",
+                    None,
+                    None,
+                    Some(&msg),
+                );
+                return Err(e);
+            }
+        };
+        {
+            let conn = self.lock();
+            crate::knowledge_store::set_article_draft_publish_state(
+                &conn,
+                draft_id,
+                "draft_upserted",
+                Some(remote_id),
+                None,
+                None,
+            )?;
+        }
+
+        // Step 2: publish the final approved text.
+        if let Err(e) = self
+            .provider
+            .publish_doc_article(remote_id, &draft.title, &draft.body)
+            .await
+        {
+            let msg = e.to_string();
+            let conn = self.lock();
+            let _ = crate::knowledge_store::set_article_draft_publish_state(
+                &conn,
+                draft_id,
+                "publish_failed",
+                Some(remote_id),
+                None,
+                Some(&msg),
+            );
+            return Err(e);
+        }
+        {
+            let conn = self.lock();
+            crate::knowledge_store::set_article_draft_publish_state(
+                &conn,
+                draft_id,
+                "published",
+                Some(remote_id),
+                None,
+                None,
+            )?;
+        }
+
+        // Step 3: verify by re-syncing the article into the local mirror
+        // (FTS + chunks re-index ride the same upsert path).
+        match self.provider.get_doc_article(remote_id).await {
+            Ok(Some(article)) => {
+                let collection_local = {
+                    let conn = self.lock();
+                    crate::sync_engine::local_id(&conn, "docs_collections", collection_remote)
+                };
+                if let Some(col_local) = collection_local {
+                    let mut conn = self.lock();
+                    crate::sync_engine::upsert_doc_article(&mut conn, &article, col_local)?;
+                }
+                let conn = self.lock();
+                crate::knowledge_store::set_article_draft_publish_state(
+                    &conn,
+                    draft_id,
+                    "verified",
+                    Some(remote_id),
+                    None,
+                    None,
+                )?;
+            }
+            verify => {
+                // The publish succeeded but the verify fetch failed - the
+                // row stays `published` with the reason recorded; the next
+                // full docs sync re-syncs it anyway.
+                let msg = match verify {
+                    Ok(None) => {
+                        "The article published but the verify fetch found no article.".to_string()
+                    }
+                    Err(ref e) => format!("Published, but the verify re-sync failed: {e}"),
+                    _ => unreachable!(),
+                };
+                tracing::warn!(operation = "publish_article_draft", draft_id, %msg);
+                let conn = self.lock();
+                crate::knowledge_store::set_article_draft_publish_state(
+                    &conn,
+                    draft_id,
+                    "published",
+                    Some(remote_id),
+                    None,
+                    Some(&msg),
+                )?;
+            }
+        }
+        tracing::info!(
+            operation = "publish_article_draft",
+            draft_id,
+            remote_id,
+            "article published and verified"
+        );
+        use crate::events::ServerEvent;
+        self.bus.emit(&ServerEvent::conversation_updated(
+            None,
+            None,
+            None,
+            None,
+            "publish_article_draft",
+        ));
+        Ok(())
+    }
+
+    /// K4: the digest job - manual or scheduled; the Summarize role writes
+    /// the narrative when routed, and the digest is archived either way.
+    async fn run_weekly_digest_job(&self, payload: &serde_json::Value) -> Result<()> {
+        let enabled = {
+            let conn = self.lock();
+            crate::ai_hub::ai_feature_enabled(&conn, "weekly_digest")
+        };
+        if !enabled {
+            tracing::info!("weekly digest feature off - skipped");
+            return Ok(());
+        }
+        let trigger_kind: String = payload
+            .get("triggerKind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("manual")
+            .to_string();
+        let days = payload.get("days").and_then(|v| v.as_i64()).unwrap_or(7);
+        let backend = {
+            let conn = self.lock();
+            crate::ai_hub::backend_for_role(&conn, crate::ai_hub::AiRole::Summarize)
+        };
+        let db = self.db.clone();
+        let trigger_kind_label = trigger_kind.clone();
+        let digest_id = tokio::task::spawn_blocking(move || {
+            let conn = db.write_guard();
+            block_ai_pipeline(async {
+                crate::ai_pipeline::weekly_digest(&conn, &backend, &trigger_kind, days).await
+            })
+        })
+        .await
+        .map_err(|e| Error::Other(e.to_string().into()))?
+        .map_err(|e| Error::Other(e.message.into()))?;
+        tracing::info!(
+            operation = "weekly_digest",
+            digest_id,
+            trigger_kind = %trigger_kind_label,
+            "digest archived"
+        );
+        use crate::events::ServerEvent;
+        self.bus.emit(&ServerEvent::conversation_updated(
+            None,
+            None,
+            None,
+            None,
+            "weekly_digest",
+        ));
+        Ok(())
+    }
+
+    /// K5: fetch one Reports API endpoint behind capability detection. A
+    /// 403 answer sets the plan-blocked verdict (one honest sentence in
+    /// the UI instead of empty charts); success caches the report and
+    /// marks the capability available; the empty provider records
+    /// not-connected.
+    async fn run_fetch_hs_report_job(&self, payload: &serde_json::Value) -> Result<()> {
+        let key: String = payload
+            .get("key")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let start: String = payload
+            .get("start")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let end: String = payload
+            .get("end")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if crate::reports_api::report_spec(&key).is_none() {
+            let conn = self.lock();
+            jobs::fail(&conn, 0, "fetch_hs_report: unknown report key", false)?;
+            return Ok(());
+        }
+        if self.provider.kind() == "empty" {
+            let conn = self.lock();
+            crate::reports_api::set_capability(
+                &conn,
+                crate::reports_api::ReportsCapability::NotConnected,
+            )?;
+            tracing::info!(
+                operation = "fetch_hs_report",
+                "no Help Scout connection - verdict recorded"
+            );
+            return Ok(());
+        }
+        match self.provider.get_report(&key, &start, &end).await {
+            Ok(Some(row)) => {
+                let conn = self.lock();
+                crate::reports_api::cache_report(&conn, &key, &start, &end, &row.data)?;
+                crate::reports_api::set_capability(
+                    &conn,
+                    crate::reports_api::ReportsCapability::Available,
+                )?;
+                tracing::info!(
+                    operation = "fetch_hs_report",
+                    key,
+                    "report fetched and cached"
+                );
+            }
+            Ok(None) => {
+                let conn = self.lock();
+                crate::reports_api::set_capability(
+                    &conn,
+                    crate::reports_api::ReportsCapability::NotConnected,
+                )?;
+            }
+            Err(e) => {
+                let status = if let crate::error::Error::Other(boxed) = &e {
+                    boxed
+                        .downcast_ref::<crate::helpscout_real::HsApiError>()
+                        .map(|hs| hs.status_code)
+                } else {
+                    None
+                };
+                let conn = self.lock();
+                if let Some(cap) = crate::reports_api::classify_fetch_error(status.unwrap_or(0)) {
+                    crate::reports_api::set_capability(&conn, cap)?;
+                }
+                return Err(e);
+            }
+        }
+        use crate::events::ServerEvent;
+        self.bus.emit(&ServerEvent::conversation_updated(
+            None,
+            None,
+            None,
+            None,
+            "fetch_hs_report",
+        ));
+        Ok(())
+    }
+
     async fn run_attachment_downloads(&self) {
         let rows: Vec<(i64, i64, Option<i64>, Option<i64>)> = {
             let conn = self.lock();
@@ -3032,5 +3472,584 @@ mod auto_sync_tests {
         assert_eq!(runs, 0, "the timer must not start a run");
         assert_eq!(checkpoints, 0, "the timer must not stamp watermarks");
         manager.stop();
+    }
+}
+
+#[cfg(test)]
+mod batch14_tests {
+    use super::*;
+    use crate::helpscout::HelpScoutProvider;
+    use crate::mockserver::{MockRequest, MockResponse};
+
+    fn secrets_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::settings::SECRETS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn temp_db() -> crate::db::DbHandle {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-workers-b14-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::db::DbHandle::new(conn)
+    }
+
+    fn creds_for(
+        mock: &crate::mockserver::MockServer,
+        docs_key: &str,
+    ) -> crate::helpscout_real::HsCredentials {
+        crate::helpscout_real::HsCredentials {
+            client_id: "b14-client".into(),
+            client_secret: "b14-secret".into(),
+            redirect_uri: format!("{}/oauth/callback", mock.url()),
+            api_base: mock.url(),
+            webhook_secret: "b14-hook".into(),
+            docs_api_key: docs_key.into(),
+            docs_api_base: mock.url(),
+        }
+    }
+
+    fn manager_with(
+        db: &crate::db::DbHandle,
+        provider: Arc<dyn HelpScoutProvider>,
+    ) -> Arc<WorkerManager> {
+        Arc::new(WorkerManager::new(
+            db.clone(),
+            None,
+            provider,
+            crate::eventing::EventBus::default(),
+            std::env::temp_dir(),
+            None,
+        ))
+    }
+
+    /// Route the Docs API publish chain: create (POST /v1/articles),
+    /// draft upsert (PUT /v1/articles/{id}/drafts), publish
+    /// (PUT /v1/articles/{id}), verify (GET /v1/articles/{id}).
+    fn docs_router() -> crate::mockserver::Handler {
+        std::sync::Arc::new(|req: &MockRequest| -> MockResponse {
+            match (req.method.as_str(), req.path.as_str()) {
+                ("POST", "/v1/articles") => MockResponse::json(
+                    200,
+                    serde_json::json!({
+                        "article": {
+                            "id": 909, "status": "notpublished",
+                            "name": "Fix the export timeout",
+                            "collectionId": 55
+                        }
+                    }),
+                ),
+                ("PUT", p) if p == "/v1/articles/909" || p == "/v1/articles/909/drafts" => {
+                    MockResponse::json(
+                        200,
+                        serde_json::json!({"article": {"id": 909, "status": "published"}}),
+                    )
+                }
+                ("GET", "/v1/articles/909") => MockResponse::json(
+                    200,
+                    serde_json::json!({
+                        "article": {
+                            "id": 909, "status": "published",
+                            "name": "Fix the export timeout",
+                            "text": "Clear the export cache and re-run.",
+                            "collectionId": 55,
+                            "slug": "fix-export-timeout",
+                            "number": 4,
+                            "viewCount": 0,
+                            "createdDate": "2026-10-21T00:00:00Z",
+                            "modifiedDate": "2026-10-21T00:00:00Z"
+                        }
+                    }),
+                ),
+                _ => crate::mockserver::not_found()(req),
+            }
+        })
+    }
+
+    /// Seed an approved review-queue draft plus its target collection;
+    /// returns (draft_id, collection_local_id).
+    fn seed_approved_draft(db: &crate::db::DbHandle) -> (i64, i64) {
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO docs_collections (remote_id, name) VALUES (55, 'Troubleshooting')",
+                [],
+            )
+            .expect("collection");
+            let collection_local = conn.last_insert_rowid();
+            let draft_id = crate::knowledge_store::insert_article_draft(
+                conn,
+                None,
+                "Fix the export timeout",
+                "Clear the export cache and re-run.",
+                &serde_json::json!([]),
+                None,
+            )
+            .expect("draft");
+            crate::knowledge_store::decide_article_draft(conn, draft_id, "approved", None)
+                .expect("approve");
+            (draft_id, collection_local)
+        })
+    }
+
+    /// K3: the full publish chain over the real provider + mock Docs API —
+    /// upsert (create), publish, verify re-sync — ending `verified` with
+    /// the article in the local mirror.
+    #[test]
+    fn publish_job_runs_the_full_chain_and_verifies() {
+        let _secrets = secrets_guard();
+        crate::settings::set_master_key_for_tests([11u8; 32]);
+        let db = temp_db();
+        let mock = crate::mockserver::MockServer::start(docs_router()).expect("mock");
+        let provider = crate::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
+            creds_for(&mock, "docs-key-1"),
+        );
+        provider
+            .save_tokens("b14-token", None, Some(3_600), None)
+            .expect("seed token");
+        let (draft_id, collection_local) = seed_approved_draft(&db);
+        db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "publish_article_draft",
+                &serde_json::json!({"draftId": draft_id, "collectionLocalId": collection_local})
+                    .to_string(),
+            )
+            .expect("enqueue");
+        });
+
+        let manager = manager_with(&db, Arc::new(provider));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+
+        let (state, remote, mirrored): (String, Option<i64>, Option<String>) =
+            db.with_read(|conn| {
+                conn.query_row(
+                    "SELECT publish_state, remote_article_id,
+                        (SELECT text FROM docs_articles WHERE remote_id = 909)
+                 FROM article_drafts WHERE id = ?1",
+                    rusqlite::params![draft_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap_or(("missing".into(), None, None))
+            });
+        assert_eq!(state, "verified", "the chain must reach verified");
+        assert_eq!(remote, Some(909));
+        assert!(
+            mirrored
+                .as_deref()
+                .unwrap_or_default()
+                .contains("export cache"),
+            "the verify re-sync mirrored the published text"
+        );
+
+        // The wire saw the create->publish->verify chain with Basic auth.
+        let hits = mock.hits();
+        let saw = |m: &str, p: &str| {
+            hits.iter().any(|h| {
+                h.method == m
+                    && h.path == p
+                    && h.header("authorization")
+                        .is_some_and(|a| a.starts_with("Basic "))
+            })
+        };
+        assert!(saw("POST", "/v1/articles"), "create must run first");
+        assert!(saw("PUT", "/v1/articles/909"), "publish");
+        assert!(saw("GET", "/v1/articles/909"), "verify re-sync");
+
+        // Re-publishing the now-linked draft takes the update path:
+        // PUT /v1/articles/{id}/drafts upserts the draft copy of the
+        // existing article (the K3 one-click upsert), then publishes.
+        db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "publish_article_draft",
+                &serde_json::json!({"draftId": draft_id, "collectionLocalId": collection_local})
+                    .to_string(),
+            )
+            .expect("re-enqueue");
+        });
+        rt.block_on(async { manager.tick().await });
+        let hits = mock.hits();
+        let saw = |m: &str, p: &str| {
+            hits.iter().any(|h| {
+                h.method == m
+                    && h.path == p
+                    && h.header("authorization")
+                        .is_some_and(|a| a.starts_with("Basic "))
+            })
+        };
+        assert!(
+            saw("PUT", "/v1/articles/909/drafts"),
+            "the linked-article update upserts the draft copy"
+        );
+        let state: String = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT publish_state FROM article_drafts WHERE id = ?1",
+                rusqlite::params![draft_id],
+                |r| r.get(0),
+            )
+            .unwrap_or("missing".into())
+        });
+        assert_eq!(state, "verified", "the update run re-verifies");
+    }
+
+    /// K3: the review queue is the only path — an unapproved draft refuses
+    /// with the row untouched and nothing sent to the Docs API.
+    #[test]
+    fn publish_job_refuses_an_unapproved_draft() {
+        let _secrets = secrets_guard();
+        crate::settings::set_master_key_for_tests([12u8; 32]);
+        let db = temp_db();
+        let mock = crate::mockserver::MockServer::start(docs_router()).expect("mock");
+        let provider = crate::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
+            creds_for(&mock, "docs-key-2"),
+        );
+        let draft_id = db.with_write(|conn| {
+            crate::knowledge_store::insert_article_draft(
+                conn,
+                None,
+                "Draft still in review",
+                "body",
+                &serde_json::json!([]),
+                None,
+            )
+            .expect("draft")
+        });
+        db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "publish_article_draft",
+                &serde_json::json!({"draftId": draft_id, "collectionLocalId": 1}).to_string(),
+            )
+            .expect("enqueue");
+        });
+        let manager = manager_with(&db, Arc::new(provider));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+
+        let (state, status): (String, String) = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT publish_state, status FROM article_drafts WHERE id = ?1",
+                rusqlite::params![draft_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or(("missing".into(), "missing".into()))
+        });
+        assert_eq!(state, "unpublished");
+        assert_eq!(status, "drafted");
+        assert!(mock.hits().is_empty(), "nothing reached the Docs API");
+        let failed: i64 = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM jobs WHERE type = 'publish_article_draft' AND status = 'failed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        });
+        assert_eq!(failed, 1, "the refusal fails the job honestly");
+    }
+
+    /// K5: the fetch job caches a 200 report and marks the capability
+    /// available; a 403 answer sets the plan-blocked verdict.
+    #[test]
+    fn fetch_hs_report_job_classifies_capability() {
+        let _secrets = secrets_guard();
+        crate::settings::set_master_key_for_tests([13u8; 32]);
+        let db = temp_db();
+        let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
+            |req: &MockRequest| -> MockResponse {
+                match req.path.as_str() {
+                    "/v2/reports/happiness" => MockResponse::json(
+                        200,
+                        serde_json::json!({
+                            "current": {"great": 20, "okay": 3, "notGood": 1},
+                            "previous": {"great": 12, "okay": 4, "notGood": 2}
+                        }),
+                    ),
+                    "/v2/reports/company" => {
+                        MockResponse::json(403, serde_json::json!({"message": "forbidden"}))
+                    }
+                    _ => crate::mockserver::not_found()(req),
+                }
+            },
+        ))
+        .expect("mock");
+        let provider =
+            crate::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds_for(&mock, ""));
+        provider
+            .save_tokens("b14-token", None, Some(3_600), None)
+            .expect("seed token");
+        let manager = manager_with(&db, Arc::new(provider));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "fetch_hs_report",
+                &serde_json::json!({
+                    "key": "happiness",
+                    "start": "2026-10-14T00:00:00Z",
+                    "end": "2026-10-21T00:00:00Z"
+                })
+                .to_string(),
+            )
+            .expect("enqueue happiness");
+        });
+        rt.block_on(async { manager.tick().await });
+        assert_eq!(
+            db.with_read(crate::reports_api::get_capability),
+            crate::reports_api::ReportsCapability::Available
+        );
+        let (_, _, _, data) = db
+            .with_read(|conn| crate::reports_api::cached_report(conn, "happiness"))
+            .expect("cached");
+        assert_eq!(data["current"]["great"], 20);
+
+        db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "fetch_hs_report",
+                &serde_json::json!({
+                    "key": "company",
+                    "start": "2026-10-14T00:00:00Z",
+                    "end": "2026-10-21T00:00:00Z"
+                })
+                .to_string(),
+            )
+            .expect("enqueue company");
+        });
+        rt.block_on(async { manager.tick().await });
+        assert_eq!(
+            db.with_read(crate::reports_api::get_capability),
+            crate::reports_api::ReportsCapability::PlanBlocked,
+            "the 403 wall must set the honest plan-blocked verdict"
+        );
+    }
+
+    /// K5: with no Help Scout connection at all the fetch job records the
+    /// not-connected verdict — not a silent empty chart.
+    #[test]
+    fn fetch_hs_report_job_records_not_connected() {
+        let db = temp_db();
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "fetch_hs_report",
+                &serde_json::json!({"key": "happiness", "start": "s", "end": "e"}).to_string(),
+            )
+            .expect("enqueue");
+        });
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+        assert_eq!(
+            db.with_read(crate::reports_api::get_capability),
+            crate::reports_api::ReportsCapability::NotConnected
+        );
+    }
+
+    /// K2: the draft job skips honestly when no Draft role backend is
+    /// routed — no queue row, no fabricated article.
+    #[test]
+    fn draft_article_job_skips_without_a_routed_backend() {
+        let db = temp_db();
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        db.with_write(|conn| {
+            jobs::enqueue_on(conn, "ai", "draft_article", r#"{"candidateId": 1}"#, 3, 2)
+                .expect("enqueue");
+        });
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+        let drafts: i64 = db.with_read(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM article_drafts", [], |r| r.get(0))
+                .unwrap_or(0)
+        });
+        assert_eq!(drafts, 0);
+    }
+
+    /// K4: the digest job runs end to end against a mock model server —
+    /// facts collected, narrative written, digest archived complete.
+    #[test]
+    fn weekly_digest_job_writes_the_narrative_end_to_end() {
+        let _secrets = secrets_guard();
+        crate::settings::set_master_key_for_tests([15u8; 32]);
+        let db = temp_db();
+        let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
+            |req: &MockRequest| -> MockResponse {
+                if req.method == "POST" && req.path == "/v1/chat/completions" {
+                    return MockResponse::json(
+                        200,
+                        serde_json::json!({
+                            "model": "test-model",
+                            "choices": [{
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "{\"narrative\": \"Volume held steady; the export-timeout cluster dominated; one volume spike stands out and the backlog grew.\"}"
+                                },
+                                "finish_reason": "stop"
+                            }],
+                            "usage": {"prompt_tokens": 100, "completion_tokens": 40, "total_tokens": 140}
+                        }),
+                    );
+                }
+                crate::mockserver::not_found()(req)
+            },
+        ))
+        .expect("mock");
+        // Route the Summarize role at the mock so the job uses a real,
+        // local backend instead of the unrouted legacy fallback.
+        db.with_write(|conn| {
+            crate::settings::set_string(conn, "lmstudio_base_url", &mock.url()).expect("base url");
+        });
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        db.with_write(|conn| {
+            jobs::enqueue_on(
+                conn,
+                "ai",
+                "weekly_digest",
+                r#"{"triggerKind":"manual","days":7}"#,
+                3,
+                2,
+            )
+            .expect("enqueue");
+        });
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+        let rows = db.with_read(|conn| crate::digest::list_digests(conn, None, 5));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, "complete", "facts + AI narrative archived");
+        assert_eq!(rows[0].trigger_kind, "manual");
+        assert!(
+            rows[0]
+                .narrative
+                .as_deref()
+                .unwrap_or_default()
+                .contains("export-timeout"),
+            "the narrative came from the model"
+        );
+        let runs: i64 = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM ai_runs WHERE type = 'weekly_digest' AND status = 'completed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        });
+        assert_eq!(runs, 1, "the model call is in the ledger");
+    }
+
+    /// P1: the satisfaction-webhook job fetches the rating by id through
+    /// the real provider and lands it in the local mirror — the
+    /// relay-ready ingestion path (a relay forwards the webhook; the
+    /// rating itself is fetched from Help Scout by id).
+    #[test]
+    fn satisfaction_ratings_job_fetches_and_stores_the_rating() {
+        let _secrets = secrets_guard();
+        crate::settings::set_master_key_for_tests([14u8; 32]);
+        let db = temp_db();
+        let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
+            |req: &MockRequest| -> MockResponse {
+                if req.method == "GET" && req.path == "/v2/ratings/501" {
+                    MockResponse::json(
+                        200,
+                        serde_json::json!({
+                            "id": 501,
+                            "conversationId": 900,
+                            "rating": "great",
+                            "comments": "Fast, clear help",
+                            "customer": {"id": 77, "firstName": "Rina", "lastName": "Chowdhury"},
+                            "createdAt": "2026-10-21T01:02:03Z"
+                        }),
+                    )
+                } else {
+                    crate::mockserver::not_found()(req)
+                }
+            },
+        ))
+        .expect("mock");
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status, remote_created_at)
+                 VALUES (900, 900, 'Rated conversation', 'p', 'closed', '2026-10-20T08:00:00.000Z')",
+                [],
+            )
+            .expect("conversation");
+        });
+        let provider =
+            crate::helpscout_real::RealHelpScoutProvider::new(db.clone(), creds_for(&mock, ""));
+        provider
+            .save_tokens("b14-token", None, Some(3_600), None)
+            .expect("seed token");
+        let manager = manager_with(&db, Arc::new(provider));
+        db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "sync_conversation_ratings",
+                &serde_json::json!({"ratingId": 501}).to_string(),
+            )
+            .expect("enqueue");
+        });
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+
+        let (rating, comment, conv_number): (String, Option<String>, Option<i64>) =
+            db.with_read(|conn| {
+                conn.query_row(
+                    "SELECT r.rating, r.comments, c.number
+                       FROM ratings r
+                       LEFT JOIN conversations c ON c.id = r.conversation_id
+                      WHERE r.remote_id = 501",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap_or(("missing".into(), None, None))
+            });
+        assert_eq!(rating, "great");
+        assert_eq!(comment.as_deref(), Some("Fast, clear help"));
+        assert_eq!(conv_number, Some(900));
+        assert!(
+            mock.hits().iter().any(|h| h.path == "/v2/ratings/501"),
+            "the rating is fetched by id from Help Scout"
+        );
     }
 }

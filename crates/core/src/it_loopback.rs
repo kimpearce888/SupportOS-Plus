@@ -485,3 +485,55 @@ fn oauth_callback_reports_token_endpoint_rejection() {
     assert_eq!(tokens, 0);
     server.stop();
 }
+
+// ---------------------------------------------------------------------------
+// P1: satisfaction-webhook ingress over real TCP (relay-ready ingestion)
+// ---------------------------------------------------------------------------
+
+/// A relay (P4's user-run tunnel) forwards Help Scout's
+/// `satisfaction.ratings` webhook to the loopback listener; the signed
+/// event must verify, persist, and enqueue the fetch-by-id job — the
+/// only ratings path the platform offers (there is no list-ratings API).
+#[test]
+fn satisfaction_webhook_ingests_over_tcp() {
+    let _secrets = install_master_key();
+    let db = fixture_db();
+    db.with_write(|conn| crate::settings::set_secret(conn, "webhook_secret", b"top-secret"))
+        .expect("store webhook secret");
+    let mut server = LoopbackServer::start(
+        db.clone(),
+        std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_empty()),
+        0,
+    )
+    .expect("start listener");
+    let port = server.port();
+
+    let secret = b"top-secret";
+    // The documented payload shape: a Rating object with ratingId plus the
+    // conversation reference.
+    let event_body =
+        r#"{"ratingId": 501, "conversationId": 900, "rating": "great", "comments": "Fast help"}"#;
+    let sig = crate::webhook::compute_signature(secret, event_body.as_bytes());
+    let (status, body) = post_webhook(port, Some(&sig), "satisfaction.ratings", event_body);
+    assert_eq!(status, 200, "signed satisfaction webhook accepted: {body}");
+
+    let (state, jobs): (String, i64) = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT (SELECT processing_state FROM webhook_events
+                         WHERE event_type = 'satisfaction.ratings'),
+                        (SELECT COUNT(*) FROM jobs
+                         WHERE type = 'sync_conversation_ratings')",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .unwrap_or(("missing".to_string(), 0))
+    });
+    assert_eq!(state, "processed");
+    assert_eq!(jobs, 1, "the fetch-by-id rating job is enqueued");
+
+    // Unsigned satisfaction events are rejected at the door, exactly like
+    // every other event kind.
+    let (status, body) = post_webhook(port, None, "satisfaction.ratings", event_body);
+    assert_ne!(status, 200, "unsigned events must not pass: {body}");
+    server.stop();
+}

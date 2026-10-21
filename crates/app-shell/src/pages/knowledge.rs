@@ -125,14 +125,16 @@ pub enum Tab {
     Sources,
     Freshness,
     HelpCenter,
+    Drafts,
 }
 
 impl Tab {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::Documents,
         Self::Sources,
         Self::Freshness,
         Self::HelpCenter,
+        Self::Drafts,
     ];
 
     fn label(self) -> &'static str {
@@ -141,6 +143,7 @@ impl Tab {
             Self::Sources => "Sources",
             Self::Freshness => "Freshness",
             Self::HelpCenter => "Help center",
+            Self::Drafts => "Article drafts",
         }
     }
 }
@@ -375,6 +378,12 @@ pub struct KnowledgePage {
     error: Option<String>,
     data_dir: Option<PathBuf>,
     import: ImportPanel,
+    // K2: the AI article-draft review queue.
+    drafts: Vec<spp_core::knowledge_store::ArticleDraftRow>,
+    gaps: Vec<(i64, String)>,
+    draft_pick: Option<i64>,
+    gap_pick: Option<i64>,
+    publish_collection_pick: Option<i64>,
 }
 
 impl KnowledgePage {
@@ -398,6 +407,11 @@ impl KnowledgePage {
             error: None,
             data_dir: None,
             import: ImportPanel::new(),
+            drafts: Vec::new(),
+            gaps: Vec::new(),
+            draft_pick: None,
+            gap_pick: None,
+            publish_collection_pick: None,
         }
     }
 
@@ -466,6 +480,8 @@ impl KnowledgePage {
         self.freshness = None;
         self.articles.clear();
         self.stats = DocsStats::default();
+        self.drafts.clear();
+        self.gaps.clear();
     }
 
     fn reload_all(&mut self, db: &DbHandle) {
@@ -696,6 +712,7 @@ impl KnowledgePage {
             Tab::Sources => self.sources_ui(ui, db),
             Tab::Freshness => self.freshness_ui(ui, db),
             Tab::HelpCenter => self.help_center_ui(ui, db),
+            Tab::Drafts => self.drafts_ui(ui, db),
         }
     }
 
@@ -819,6 +836,337 @@ impl KnowledgePage {
                 },
             );
         });
+    }
+
+    /// K2: load the review queue and the requestable open gaps.
+    fn reload_drafts(&mut self, db: &DbHandle) {
+        let (drafts, gaps) = db.with_read(|conn| {
+            let gaps: Vec<(i64, String)> = conn
+                .prepare(
+                    "SELECT id, query_text FROM knowledge_gap_candidates
+                      WHERE status = 'open' ORDER BY occurrence_count DESC, id DESC LIMIT 50",
+                )
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                })
+                .unwrap_or_default();
+            (
+                spp_core::knowledge_store::list_article_drafts(conn, None),
+                gaps,
+            )
+        });
+        self.drafts = drafts;
+        self.gaps = gaps;
+    }
+
+    /// K2: the AI article-draft review queue — the human gate between the
+    /// gap pipeline and the Docs API publish path (K3). Nothing leaves
+    /// this table without an explicit Approve, and nothing publishes
+    /// without an explicit publish click on an approved draft.
+    fn drafts_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        if self.drafts.is_empty() && self.gaps.is_empty() {
+            self.reload_drafts(db);
+        }
+        design::hint_text(
+            ui,
+            "AI drafts knowledge articles from real resolutions; a human review is the only \
+             path to publishing. Approved drafts publish to Help Scout through the Docs API.",
+        );
+        ui.add_space(8.0);
+
+        // --- Request a draft from an open gap ---
+        if !self.gaps.is_empty() {
+            design::card_titled(ui, "Draft an article from a gap", None, |ui| {
+                egui::ComboBox::from_id_salt("k2-gap-pick")
+                    .selected_text(
+                        self.gap_pick
+                            .and_then(|id| {
+                                self.gaps
+                                    .iter()
+                                    .find(|(gid, _)| *gid == id)
+                                    .map(|(_, q)| q.chars().take(60).collect::<String>())
+                            })
+                            .unwrap_or_else(|| "Select a gap…".into()),
+                    )
+                    .width(ui.available_width() - 140.0)
+                    .show_ui(ui, |ui| {
+                        for (id, question) in &self.gaps {
+                            let label: String = question.chars().take(80).collect();
+                            ui.selectable_value(&mut self.gap_pick, Some(*id), label);
+                        }
+                    });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(self.gap_pick.is_some(), egui::Button::new("Draft article"))
+                        .on_hover_text(
+                            "The AI grounds the article in the best resolutions of the gap's \
+                             evidence conversations, with citations. It lands here for review.",
+                        )
+                        .clicked()
+                        && let Some(candidate) = self.gap_pick
+                    {
+                        let payload = format!(r#"{{"candidateId": {candidate}}}"#);
+                        let enqueued = db.with_write(|conn| {
+                            spp_core::jobs::enqueue_on(conn, "ai", "draft_article", &payload, 3, 2)
+                        });
+                        match enqueued {
+                            Ok(_) => {
+                                self.status_message = Some(
+                                    "Article draft requested — it appears in the queue \
+                                         when the model finishes."
+                                        .into(),
+                                );
+                            }
+                            Err(e) => self.error = Some(format!("Could not queue the draft: {e}")),
+                        }
+                    }
+                });
+            });
+            ui.add_space(10.0);
+        }
+
+        if self.drafts.is_empty() {
+            design::empty_state(
+                ui,
+                Icon::BookOpen,
+                "no drafts yet",
+                "Drafted articles wait here for a human decision.",
+            );
+            return;
+        }
+
+        // --- The queue list ---
+        let mut reloaded = false;
+        for draft in &self.drafts {
+            let selected = self.draft_pick == Some(draft.id);
+            let status_chip = match draft.status.as_str() {
+                "approved" => "approved",
+                "rejected" => "rejected",
+                _ => "awaiting review",
+            };
+            let publish_chip = match draft.publish_state.as_str() {
+                "verified" => "published + verified",
+                "published" => "published",
+                "draft_upserted" => "draft in Help Scout",
+                "publish_failed" => "publish failed",
+                _ => "",
+            };
+            let row = egui::Frame::default()
+                .fill(if selected {
+                    ui.visuals().faint_bg_color
+                } else {
+                    egui::Color32::TRANSPARENT
+                })
+                .inner_margin(egui::Margin::same(6));
+            row.show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let _ = ui.selectable_label(
+                        selected,
+                        egui::RichText::new(format!("{} — {}", draft.id, draft.title)).strong(),
+                    );
+                    ui.label(egui::RichText::new(status_chip).small().color(
+                        if draft.status == "approved" {
+                            ui.visuals().hyperlink_color
+                        } else {
+                            ui.visuals().weak_text_color()
+                        },
+                    ));
+                    if !publish_chip.is_empty() {
+                        ui.label(egui::RichText::new(publish_chip).small().color(
+                            if draft.publish_state == "publish_failed" {
+                                ui.visuals().error_fg_color
+                            } else {
+                                ui.visuals().weak_text_color()
+                            },
+                        ));
+                    }
+                    if ui.small_button("Open").clicked() {
+                        self.draft_pick = Some(draft.id);
+                    }
+                });
+            });
+        }
+        ui.add_space(8.0);
+
+        // --- The reader + decisions ---
+        let Some(pick) = self.draft_pick else {
+            return;
+        };
+        let Some(draft) = self.drafts.iter().find(|d| d.id == pick).cloned() else {
+            return;
+        };
+        ui.separator();
+        design::card_titled(
+            ui,
+            &draft.title,
+            Some("AI-drafted — review before anything else"),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("k2-draft-body")
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        ui.label(&draft.body);
+                    });
+                if let Some(err) = &draft.publish_error {
+                    ui.add_space(4.0);
+                    design::error_text(ui, err);
+                }
+                ui.add_space(6.0);
+                let citations = draft
+                    .citations
+                    .as_array()
+                    .map(|a| a.to_vec())
+                    .unwrap_or_default();
+                if !citations.is_empty() {
+                    ui.collapsing(
+                        egui::RichText::new(format!("Citations ({})", citations.len())).small(),
+                        |ui| {
+                            for (i, c) in citations.iter().enumerate() {
+                                let number = c["number"].as_i64().unwrap_or_default();
+                                let subject = c["subject"].as_str().unwrap_or("(no subject)");
+                                let excerpt = c["excerpt"].as_str().unwrap_or("");
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "[^{}] Conversation #{number} — {subject}",
+                                        i + 1
+                                    ))
+                                    .small()
+                                    .strong(),
+                                );
+                                ui.label(
+                                    egui::RichText::new(
+                                        excerpt.chars().take(220).collect::<String>(),
+                                    )
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                                );
+                                ui.add_space(3.0);
+                            }
+                        },
+                    );
+                }
+                ui.add_space(6.0);
+                if draft.status == "drafted" {
+                    ui.horizontal(|ui| {
+                        if design::button_with_icon(
+                            ui,
+                            Icon::Check,
+                            "Approve",
+                            ButtonVariant::Primary,
+                        )
+                        .on_hover_text(
+                            "Approving unlocks the publish path — it never publishes by itself.",
+                        )
+                        .clicked()
+                        {
+                            let decided = db.with_write(|conn| {
+                                spp_core::knowledge_store::decide_article_draft(
+                                    conn, draft.id, "approved", None,
+                                )
+                            });
+                            match decided {
+                                Some(_) => {
+                                    self.status_message = Some(
+                                        "Draft approved. Publishing needs the explicit publish \
+                                     action below."
+                                            .into(),
+                                    );
+                                    reloaded = true;
+                                }
+                                None => self.error = Some("The draft was already decided.".into()),
+                            }
+                        }
+                        if ui.button("Reject").clicked() {
+                            let decided = db.with_write(|conn| {
+                                spp_core::knowledge_store::decide_article_draft(
+                                    conn, draft.id, "rejected", None,
+                                )
+                            });
+                            match decided {
+                                Some(_) => {
+                                    self.status_message = Some("Draft rejected.".into());
+                                    reloaded = true;
+                                }
+                                None => self.error = Some("The draft was already decided.".into()),
+                            }
+                        }
+                    });
+                } else if draft.status == "approved" {
+                    ui.separator();
+                    ui.label(egui::RichText::new("Publish to Help Scout (Docs API)").strong());
+                    if self.publish_collection_pick.is_none() && !self.collections.is_empty() {
+                        self.publish_collection_pick = self.collections.first().map(|(id, _)| *id);
+                    }
+                    if self.collections.is_empty() {
+                        design::hint_text(
+                            ui,
+                            "No Help Center collections are synced yet - sync the Help Center \
+                         (top right) or configure a Docs API key in Settings first.",
+                        );
+                    } else {
+                        egui::ComboBox::from_id_salt("k2-publish-collection")
+                            .selected_text(
+                                self.publish_collection_pick
+                                    .and_then(|id| {
+                                        self.collections
+                                            .iter()
+                                            .find(|(cid, _)| *cid == id)
+                                            .map(|(_, name)| name.clone())
+                                    })
+                                    .unwrap_or_else(|| "Select collection…".into()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for (id, name) in &self.collections {
+                                    ui.selectable_value(
+                                        &mut self.publish_collection_pick,
+                                        Some(*id),
+                                        name.clone(),
+                                    );
+                                }
+                            });
+                        ui.add_space(4.0);
+                        if ui
+                            .add_enabled(
+                                draft.publish_state != "verified",
+                                egui::Button::new("Publish to Help Center"),
+                            )
+                            .on_hover_text(
+                                "Upserts the draft into the Docs API, publishes the approved text, \
+                             then verifies by re-syncing the article here.",
+                            )
+                            .clicked()
+                            && let Some(collection) = self.publish_collection_pick
+                        {
+                            let payload = serde_json::json!({
+                                "draftId": draft.id,
+                                "collectionLocalId": collection,
+                            })
+                            .to_string();
+                            let enqueued = db.with_write(|conn| {
+                                spp_core::jobs::enqueue(conn, "publish_article_draft", &payload)
+                            });
+                            match enqueued {
+                                Ok(_) => {
+                                    self.status_message = Some(
+                                        "Publishing — upsert draft, publish, verify re-sync…"
+                                            .into(),
+                                    );
+                                    reloaded = true;
+                                }
+                                Err(e) => {
+                                    self.error = Some(format!("Could not queue the publish: {e}"))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        );
+        if reloaded {
+            self.reload_drafts(db);
+        }
     }
 
     fn freshness_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {

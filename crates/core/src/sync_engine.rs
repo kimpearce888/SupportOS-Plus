@@ -542,7 +542,7 @@ fn upsert_doc_categories(
     Ok(())
 }
 
-fn upsert_doc_article(
+pub(crate) fn upsert_doc_article(
     conn: &mut Connection,
     a: &crate::helpscout::HsDocArticle,
     collection_local: i64,

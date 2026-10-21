@@ -5,9 +5,8 @@
 
 ## Active items
 
-None — Batch 13 (A3, A4, A5, A6, K1) was completed and verified on
-2026-10-21 (CI run `39548532474` on `a50e73c`: success — both jobs green)
-and has moved to `completed.md`. Phase A ("Lights On") is complete and
-K1 ships with it. Per Rule 8, the next items (K2 and the remaining Phase
-K work) are selected from `plan.md` only after the owner says
-**continue**.
+None — Batch 14 (Phase K completion: K2, K3, K4, K5 + P1) was completed and
+verified locally on 2026-10-21 (all gates green; CI run recorded on the
+batch commit — see `completed.md`). Phase K — "Learn & Advise" — is
+complete. Per Rule 8, the next five items (Phase P remainder: P2, P3, P4,
+P5) are selected from `plan.md` only after the owner says **continue**.

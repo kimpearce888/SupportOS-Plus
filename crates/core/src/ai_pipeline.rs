@@ -2690,3 +2690,334 @@ mod batch13_a3_a6_tests {
         assert_eq!(state, "accepted");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Batch 14 — K2 article drafting, K4 weekly digest
+// ---------------------------------------------------------------------------
+
+/// K2: draft a knowledge-base article for a gap candidate from its best
+/// resolutions. The draft lands in the review queue (`article_drafts`,
+/// status `drafted`) — nothing is published, nothing touches the Docs API;
+/// a human decision is the only way forward. Returns the new queue row id.
+///
+/// Honest refusals (no error rows, no queue entries):
+/// - unknown candidate id, or a queue row already exists for it;
+/// - no closed-with-published-reply evidence → there is nothing grounded
+///   to draft from (an article without resolutions would be invention);
+/// - no routed Draft backend → the same honest setup error as the composer.
+pub async fn draft_article(
+    conn: &Connection,
+    backend: &AiBackend,
+    candidate_id: i64,
+) -> std::result::Result<i64, LmStudioError> {
+    let Some(candidate) = crate::quality::gap_by_id(conn, candidate_id) else {
+        return Err(LmStudioError::new(
+            format!("Gap candidate {candidate_id} does not exist."),
+            false,
+        ));
+    };
+    if crate::knowledge_store::article_draft_exists_for_candidate(conn, candidate_id) {
+        return Err(LmStudioError::new(
+            "An article draft for this gap is already in the review queue.",
+            false,
+        ));
+    }
+    let question = candidate["query_text"]
+        .as_str()
+        .or_else(|| candidate["question"].as_str())
+        .unwrap_or_default()
+        .to_string();
+    let evidence_ids: Vec<i64> = candidate["evidence_conversation_ids"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_i64()).collect::<Vec<i64>>())
+        .unwrap_or_default();
+    let resolutions = crate::quality::best_resolutions(conn, &evidence_ids, 6);
+    if resolutions.is_empty() {
+        return Err(LmStudioError::new(
+            "No closed conversations with a published reply among the evidence - \
+             there is nothing grounded to draft an article from. Close the \
+             conversations or wait for real resolutions.",
+            false,
+        ));
+    }
+    // The backend check precedes the run row (and follows the data-truth
+    // checks): a refused (unrouted) job must leave no trace in the ledger —
+    // the composer rewrite contract.
+    if matches!(backend, AiBackend::Disabled) {
+        return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false));
+    }
+    let run_id = start_run(
+        conn,
+        "article_draft",
+        None,
+        None,
+        crate::ai_prompts::PROMPT_VERSIONS_ARTICLE_DRAFT,
+        None,
+        &serde_json::json!([candidate_id]),
+    )
+    .map_err(|e| LmStudioError::new(e.to_string(), true))?;
+    let res = backend
+        .chat_json(
+            conn,
+            crate::ai_prompts::ARTICLE_DRAFT_SYSTEM,
+            &crate::ai_prompts::build_article_draft_user(&question, &resolutions),
+            true,
+            Some(3072),
+        )
+        .await;
+    let res = match res {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = fail_run(conn, run_id, &e.message);
+            return Err(e);
+        }
+    };
+    let json = res.json.clone().unwrap_or_else(|| serde_json::json!({}));
+    let title = json["title"].as_str().unwrap_or_default().trim();
+    let body = json["body_markdown"].as_str().unwrap_or_default().trim();
+    if title.is_empty() || body.is_empty() {
+        let _ = fail_run(
+            conn,
+            run_id,
+            "model returned no article (empty title or body)",
+        );
+        return Err(LmStudioError::new(
+            "The model did not return a usable article (empty title or body).",
+            false,
+        ));
+    }
+    let citations = serde_json::to_value(&resolutions).unwrap_or_else(|_| serde_json::json!([]));
+    let draft_id = crate::knowledge_store::insert_article_draft(
+        conn,
+        Some(candidate_id),
+        title,
+        body,
+        &citations,
+        Some(run_id),
+    )
+    .map_err(|e| LmStudioError::new(e.to_string(), true))?;
+    let _ = complete_run_with_usage(
+        conn,
+        run_id,
+        &serde_json::json!({ "draft_id": draft_id, "title": title }),
+        res.latency_ms,
+        res.usage.as_ref(),
+        backend.endpoint_id(),
+    );
+    Ok(draft_id)
+}
+
+/// K4: generate and archive one digest. Facts are always collected and
+/// stored (the deterministic half is useful alone); the AI narrative is
+/// written when the Summarize backend is routed, otherwise the digest is
+/// archived `facts_only` and the UI offers the narrative on demand.
+/// Returns the digest row id.
+pub async fn weekly_digest(
+    conn: &Connection,
+    backend: &AiBackend,
+    trigger_kind: &str,
+    days: i64,
+) -> std::result::Result<i64, LmStudioError> {
+    let (facts, start, end) = crate::digest::collect_facts(conn, days);
+    let (narrative, run_id, status) = match backend {
+        AiBackend::Disabled => (None, None, "facts_only"),
+        AiBackend::LmStudio { .. } => {
+            let rid = start_run(
+                conn,
+                "weekly_digest",
+                None,
+                None,
+                crate::ai_prompts::PROMPT_VERSIONS_WEEKLY_DIGEST,
+                None,
+                &serde_json::json!([trigger_kind, days]),
+            )
+            .map_err(|e| LmStudioError::new(e.to_string(), true))?;
+            match backend
+                .chat_json(
+                    conn,
+                    crate::ai_prompts::WEEKLY_DIGEST_SYSTEM,
+                    &crate::ai_prompts::build_weekly_digest_user(&facts),
+                    false,
+                    Some(2048),
+                )
+                .await
+            {
+                Ok(res) => {
+                    let narrative = res
+                        .json
+                        .as_ref()
+                        .and_then(|j| j.get("narrative"))
+                        .and_then(|n| n.as_str())
+                        .map(str::to_string)
+                        .or_else(|| {
+                            res.raw
+                                .as_deref()
+                                .map(|r| r.trim().to_string())
+                                .filter(|r| !r.is_empty())
+                        });
+                    let _ = complete_run_with_usage(
+                        conn,
+                        rid,
+                        &serde_json::json!({ "narrative": narrative }),
+                        res.latency_ms,
+                        res.usage.as_ref(),
+                        backend.endpoint_id(),
+                    );
+                    match narrative {
+                        Some(n) if !n.trim().is_empty() => (Some(n), Some(rid), "complete"),
+                        _ => (None, Some(rid), "failed"),
+                    }
+                }
+                Err(e) => {
+                    let _ = fail_run(conn, rid, &e.message);
+                    (None, Some(rid), "failed")
+                }
+            }
+        }
+    };
+    crate::digest::store_digest(
+        conn,
+        &crate::digest::NewDraft {
+            period_start: &start,
+            period_end: &end,
+            trigger_kind,
+            facts: &facts,
+            narrative: narrative.as_deref(),
+            ai_run_id: run_id,
+            status,
+        },
+    )
+    .map_err(|e| LmStudioError::new(e.to_string(), true))
+}
+
+#[cfg(test)]
+mod batch14_k2_k4_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_candidate_with_resolution(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                        remote_created_at, closed_at)
+             VALUES (701, 701, 'Export timeout on weekly report', 'p', 'closed',
+                     '2026-10-18T08:00:00.000Z', '2026-10-19T08:00:00.000Z')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text, remote_created_at)
+             VALUES (?1, 'reply', 'published',
+                     'Clear the export cache and re-run with the nightly profile.', '2026-10-19T07:00:00.000Z')",
+            params![conv],
+        )
+        .expect("thread");
+        conn.execute(
+            "INSERT INTO knowledge_gap_candidates (dedup_key, query_text, occurrence_count,
+                 kind, evidence_conversation_ids, detail, status, provenance)
+             VALUES ('k2:test', 'how do I fix the export timeout', 3, 'repeated_question_uncovered',
+                 ?, '{}', 'open', 'deterministic_local')",
+            params![serde_json::to_string(&[conv]).unwrap_or_default()],
+        )
+        .expect("candidate");
+        conn.last_insert_rowid()
+    }
+
+    /// K2: the honest refusals — unknown candidate, no grounded evidence,
+    /// disabled backend — never touch the queue or the run table.
+    #[test]
+    fn draft_article_refuses_honestly() {
+        let conn = db();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        // Unknown candidate.
+        let err = rt
+            .block_on(draft_article(&conn, &AiBackend::Disabled, 4242))
+            .expect_err("unknown candidate");
+        assert!(
+            err.message.contains("does not exist"),
+            "{err_message}",
+            err_message = err.message
+        );
+
+        // Real candidate but no backend routed.
+        let candidate = seed_candidate_with_resolution(&conn);
+        let err = rt
+            .block_on(draft_article(&conn, &AiBackend::Disabled, candidate))
+            .expect_err("no backend");
+        assert!(
+            err.message.contains("disabled"),
+            "the honest disabled message, got: {err_message}",
+            err_message = err.message
+        );
+        let runs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ai_runs WHERE type = 'article_draft'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(runs, 0, "no run row for a refused draft");
+
+        // A candidate whose evidence has no closed conversations with
+        // published replies has nothing grounded to draft from.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, remote_created_at)
+             VALUES (702, 702, 'Still open', 'p', 'active', '2026-10-20T08:00:00.000Z')",
+            [],
+        )
+        .expect("open");
+        let open = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO knowledge_gap_candidates (dedup_key, query_text, occurrence_count,
+                 kind, evidence_conversation_ids, detail, status, provenance)
+             VALUES ('k2:open', 'unresolved question', 2, 'repeated_question_uncovered',
+                 ?, '{}', 'open', 'deterministic_local')",
+            params![serde_json::to_string(&[open]).unwrap_or_default()],
+        )
+        .expect("candidate 2");
+        let open_candidate = conn.last_insert_rowid();
+        let err = rt
+            .block_on(draft_article(&conn, &AiBackend::Disabled, open_candidate))
+            .expect_err("no evidence");
+        assert!(
+            err.message.contains("nothing grounded"),
+            "grounded-evidence refusal, got: {err_message}",
+            err_message = err.message
+        );
+    }
+
+    /// K4: a disabled backend still archives the digest facts-only; a
+    /// digest with a narrative is complete. Both are searchable.
+    #[test]
+    fn weekly_digest_archives_facts_without_backend() {
+        let conn = db();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let id = rt
+            .block_on(weekly_digest(&conn, &AiBackend::Disabled, "manual", 7))
+            .expect("digest stored");
+        let row = crate::digest::digest_by_id(&conn, id).expect("row");
+        assert_eq!(row.status, "facts_only");
+        assert!(row.narrative.is_none());
+        assert_eq!(row.trigger_kind, "manual");
+        assert!(row.facts["volume"]["new_conversations"].is_number());
+        assert!(row.facts["what_changed"]["new_gap_candidates"].is_array());
+        // The archive is searchable through the facts JSON.
+        assert_eq!(
+            crate::digest::list_digests(&conn, Some("deterministic digest facts"), 5).len(),
+            1
+        );
+    }
+}
