@@ -17,34 +17,11 @@ audit records of 2026-10-21). Owner decision defaults D-a..D-g apply as recorded
 
 **Phase A — Lights On (v1.5.0): the AI becomes real**
 
-*(A1, A2 moved to progress.md — active batch 12.)*
-
-**A3. Wire batch 2** — Draft coaching (9 checks + AI layer) as composer pre-send review; rewrite
-(shorten/expand/warmer) and translation (11 languages, cached) in a composer AI menu; post-
-resolution QA's deterministic checks to their pages; interaction intelligence's AI stage on top
-of the wired heuristic stage in the Customers interaction profile.
-
-**A4. Retrieval spine** — Chunk-on-ingest: the conversation chunker gains its caller on the sync
-path; the evidence engine's semantic-hits hook receives real sqlite-vec hits so similar-issues
-becomes FTS+semantic re-ranked with match reasons; the search page drops its hardcoded
-semantic-false and fuses BM25 + vector hits via the existing RRF k=60 with real reported flags.
-Resolved conversations carry a resolution-excerpt chunk type. Privacy default: embeddings local.
-
-**A5. Copilot chat on the 22-tool agent** — The dead tool-calling agent (22 read-only allowlisted
-tools, redacted SQL, bounded loop, sessions, citations, audit trail) becomes the AI Center chat
-and the inbox assistant; answers cite real mirror rows.
-
-**A6. Feedback loop, golden-set runner, AI usage dashboard** — Feedback calls (accept,
-edit-distance, reject) wired to the composer and review queue so edit-rate is real; the golden-set
-runner executes the 9 seeded cases on demand, on prompt changes, and on model-role reassignment,
-writing scores to reports; the AI usage dashboard renders per-feature tokens, latency, cost,
-edit rate, and eval scores live.
+*(A1, A2 completed in batch 12; A3–A6 completed in batch 13. Phase A — "Lights On" — is complete.)*
 
 **Phase K — Learn & Advise (v1.6.0): the knowledge loop**
 
-**K1. Gap detection pipeline** — Cluster repeated unresolved patterns from resolved and reopened
-conversations (the orphaned quality.rs machinery wired to the sync/worker path): surfaces
-"asked often, documented nowhere" topics with counts and examples.
+*(K1 completed in batch 13.)*
 
 **K2. Real AI article drafting + review queue** — The AI drafts an article from the best
 resolutions with citations to them; the human review queue is the only path forward; UI in

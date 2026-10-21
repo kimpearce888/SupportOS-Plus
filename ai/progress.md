@@ -5,9 +5,9 @@
 
 ## Active items
 
-None — Batch 12 (R6, R7, R8, A1, A2) was completed and verified on
-2026-10-21 (CI run `39522823488` on `a2c5309`: success; run `39523717163`
-on `943a122`: success; Release run `39523722592` on tag `v1.4.0`: success,
-assets verified end to end) and has moved to `completed.md`. Phase R is
-complete; v1.4.0 is released. Per Rule 8, the next five items (A3, A4, A5,
-A6, K1) are selected from `plan.md` only after the owner says **continue**.
+None — Batch 13 (A3, A4, A5, A6, K1) was completed and verified on
+2026-10-21 (CI run `39548532474` on `a50e73c`: success — both jobs green)
+and has moved to `completed.md`. Phase A ("Lights On") is complete and
+K1 ships with it. Per Rule 8, the next items (K2 and the remaining Phase
+K work) are selected from `plan.md` only after the owner says
+**continue**.
