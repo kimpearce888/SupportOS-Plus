@@ -5,8 +5,8 @@
 
 ## Active items — none
 
-Batch 15 (the final batch: P2, P3, P4, P5) is complete and verified; `plan.md`
-is exhausted — every item of the approved v2 blueprint has been processed
-through this file into `completed.md`. Nothing is active. The engagement's one
-remaining owner action is the GitHub token revocation recorded under P5 in
-`completed.md` and in the final batch report.
+Batch 16 (clean-audit items 1-5: provider delegations, chunk_text UTF-8
+panic, not_equals inversion, dead 'customer_message' literal, no-simulation
+gate blind spots) is complete and verified; the record is in `completed.md`.
+The remaining 160 audit findings are queued in `plan.md` (items 6-165) and
+the next five start only on the owner's "continue".
