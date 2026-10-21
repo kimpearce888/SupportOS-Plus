@@ -1573,37 +1573,46 @@ fn condition_matches(
     match field {
         "subject" => {
             let subject = ctx.subject.as_deref().unwrap_or_default().to_lowercase();
-            if operator == "contains" {
-                subject.contains(&value)
-            } else {
-                subject == value
+            match operator {
+                "contains" => subject.contains(&value),
+                "equals" => subject == value,
+                // The UI accepts not_equals for every field; treating it
+                // as equality fired rules on exactly the excluded value.
+                "not_equals" => subject != value,
+                _ => false,
             }
         }
-        "body" => ctx
-            .preview
-            .as_deref()
-            .unwrap_or_default()
-            .to_lowercase()
-            .contains(&value),
-        "tag" => ctx
-            .tags
-            .as_deref()
-            .unwrap_or_default()
-            .to_lowercase()
-            .split(',')
-            .any(|t| {
-                if operator == "contains" {
-                    t.contains(&value)
-                } else {
-                    t.trim() == value
-                }
-            }),
-        "mailbox" => ctx
-            .mailbox_name
-            .as_deref()
-            .unwrap_or_default()
-            .to_lowercase()
-            .contains(&value),
+        "body" => {
+            let preview = ctx.preview.as_deref().unwrap_or_default().to_lowercase();
+            match operator {
+                "contains" => preview.contains(&value),
+                "not_equals" => !preview.contains(&value),
+                _ => false,
+            }
+        }
+        "tag" => {
+            let tags = ctx.tags.as_deref().unwrap_or_default().to_lowercase();
+            match operator {
+                "contains" => tags.split(',').any(|t| t.contains(&value)),
+                "equals" => tags.split(',').any(|t| t.trim() == value),
+                // "no tag equals the value": `any` here would fire on the
+                // first non-matching tag instead.
+                "not_equals" => tags.split(',').all(|t| t.trim() != value),
+                _ => false,
+            }
+        }
+        "mailbox" => {
+            let mailbox = ctx
+                .mailbox_name
+                .as_deref()
+                .unwrap_or_default()
+                .to_lowercase();
+            match operator {
+                "contains" => mailbox.contains(&value),
+                "not_equals" => !mailbox.contains(&value),
+                _ => false,
+            }
+        }
         "confidence" => {
             const LEVELS: [&str; 4] = ["unknown", "low", "medium", "high"];
             let current = analysis
@@ -1625,7 +1634,13 @@ fn condition_matches(
             .map(|k| k.to_lowercase().contains(&value))
             .unwrap_or(false),
         "ai_attribute" => attribute_matches(cond, raw_value, attributes),
-        "ai_verification" => verification == value,
+        "ai_verification" => {
+            if operator == "not_equals" {
+                verification != value
+            } else {
+                verification == value
+            }
+        }
         _ => false,
     }
 }

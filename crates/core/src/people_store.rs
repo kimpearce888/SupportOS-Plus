@@ -475,7 +475,7 @@ fn build_support_health_report(
                 "SELECT AVG(x.msgs) FROM (
                    SELECT c.id,
                           (SELECT COUNT(*) FROM conversation_threads t
-                            WHERE t.conversation_id = c.id AND t.type = 'customer_message'
+                            WHERE t.conversation_id = c.id AND t.type = 'customer'
                               AND t.deleted_at IS NULL AND t.state = 'published') AS msgs
                    FROM conversations c
                    WHERE {conv_scope} AND c.deleted_at IS NULL

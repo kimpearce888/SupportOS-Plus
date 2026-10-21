@@ -51,6 +51,12 @@ pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
             break;
         }
         start = end.saturating_sub(overlap);
+        // Backing up `overlap` bytes from a boundary-checked `end` can
+        // land inside a multibyte UTF-8 sequence; walking forward to the
+        // next boundary keeps every slice below panic-free.
+        while start < bytes.len() && !clean.is_char_boundary(start) {
+            start += 1;
+        }
     }
     chunks
 }
