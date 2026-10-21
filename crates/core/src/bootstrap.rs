@@ -290,6 +290,14 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m058_hs_report_cache",
         apply: crate::reports_api::apply_m058_hs_report_cache,
     },
+    // Batch 15 P2: the live Beacon chat mirror — chats arrive through the
+    // five beacon.chat.* webhook events (the platform has no list
+    // endpoint), so the mirror keeps even ended chats.
+    BootStep {
+        version: 50,
+        label: "m059_beacon_chats",
+        apply: crate::chats::apply_m059_beacon_chats,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

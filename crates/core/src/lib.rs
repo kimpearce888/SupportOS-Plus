@@ -33,6 +33,7 @@ pub mod automation;
 pub mod backup_service;
 pub mod bootstrap;
 pub mod business_hours;
+pub mod chats;
 pub mod coaching;
 pub mod config;
 pub mod connection_doctor;
@@ -112,6 +113,7 @@ pub mod vectorstore_sqlitevec;
 pub mod version_check;
 pub mod webhook;
 pub mod webhook_handler;
+pub mod webhook_health;
 pub mod workers;
 pub mod workload;
 

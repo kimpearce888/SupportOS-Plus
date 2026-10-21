@@ -23,7 +23,7 @@ use spp_core::db::DbHandle;
 use spp_core::workload::{CapacityModel, WorkloadSnapshot};
 
 use super::NavRequest;
-use crate::design::{self, ButtonVariant};
+use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
 /// Report tabs (web: the `active_tab` signal).
@@ -31,15 +31,17 @@ use crate::icons::Icon;
 enum Tab {
     Tiles,
     Workload,
+    Library,
 }
 
 impl Tab {
-    const ALL: [Self; 2] = [Self::Tiles, Self::Workload];
+    const ALL: [Self; 3] = [Self::Tiles, Self::Workload, Self::Library];
 
     fn label(self) -> &'static str {
         match self {
             Self::Tiles => "Tiles",
             Self::Workload => "Workload",
+            Self::Library => "Library",
         }
     }
 }
@@ -216,6 +218,7 @@ pub struct OperationsPage {
     capacity: Option<CapacityModel>,
     suggestions: Vec<spp_core::workload::SuggestedAssignee>,
     error: Option<String>,
+    library: Option<LibraryModel>,
 }
 
 impl OperationsPage {
@@ -228,6 +231,7 @@ impl OperationsPage {
             capacity: None,
             suggestions: Vec::new(),
             error: None,
+            library: None,
         }
     }
 
@@ -236,6 +240,7 @@ impl OperationsPage {
         self.snapshot = None;
         self.workload = None;
         self.suggestions.clear();
+        self.library = None;
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -301,6 +306,7 @@ impl OperationsPage {
         match self.tab {
             Tab::Tiles => nav = self.tiles_ui(ui),
             Tab::Workload => self.workload_ui(ui, db),
+            Tab::Library => self.library_ui(ui, db),
         }
         nav
     }
@@ -499,6 +505,404 @@ impl OperationsPage {
     }
 }
 
+/// One mailbox the Library tab manages (saved replies live per mailbox).
+#[derive(Debug, Clone, PartialEq)]
+struct LibraryMailbox {
+    local_id: i64,
+    remote_id: i64,
+    name: String,
+}
+
+/// One saved reply row (the `saved_replies` mirror).
+#[derive(Debug, Clone, PartialEq)]
+struct SavedReplyRow {
+    remote_id: i64,
+    mailbox_local_id: Option<i64>,
+    name: String,
+    preview: Option<String>,
+    text: Option<String>,
+}
+
+/// One workflow row (the `workflows` mirror).
+#[derive(Debug, Clone, PartialEq)]
+struct WorkflowRow {
+    remote_id: i64,
+    name: String,
+    kind: String,
+    status: String,
+}
+
+/// The create/edit form state (`None` remote id = create).
+#[derive(Debug, Clone, PartialEq)]
+struct ReplyEdit {
+    remote_id: Option<i64>,
+    name: String,
+    text: String,
+}
+
+/// The P3 Library tab state: saved replies CRUD + workflows surfaced.
+struct LibraryModel {
+    mailboxes: Vec<LibraryMailbox>,
+    selected_mailbox: usize,
+    replies: Vec<SavedReplyRow>,
+    reply_edit: Option<ReplyEdit>,
+    workflows: Vec<WorkflowRow>,
+    workflow_number: String,
+    notice: Option<String>,
+}
+
+/// Build the `saved_reply_write` job payload. The platform's required
+/// `name` rides in the payload; the job re-validates it before the wire.
+#[must_use]
+fn reply_write_payload(
+    action: &str,
+    mailbox_remote_id: i64,
+    reply_remote_id: Option<i64>,
+    name: &str,
+    text: &str,
+) -> String {
+    serde_json::json!({
+        "action": action,
+        "mailboxRemoteId": mailbox_remote_id,
+        "replyRemoteId": reply_remote_id,
+        "name": name,
+        "text": text,
+    })
+    .to_string()
+}
+
+/// One queued Library action, applied after the render closures so the
+/// egui borrows stay clean.
+enum LibraryAction {
+    None,
+    NewReply,
+    CancelEdit,
+    EditReply(i64),
+    SaveReply {
+        remote_id: Option<i64>,
+        name: String,
+        text: String,
+    },
+    DeleteReply(i64),
+    RunWorkflow {
+        workflow_remote_id: i64,
+        conversation_number: i64,
+    },
+}
+
+impl OperationsPage {
+    /// Load the Library tab's mirror data (mailboxes, saved replies,
+    /// workflows) — presentation only; every write goes through jobs.
+    fn reload_library(&mut self, db: &DbHandle) {
+        let (mailboxes, replies, workflows) = db.with_read(|conn| {
+            let mailboxes = conn
+                .prepare("SELECT id, remote_id, name FROM mailboxes ORDER BY name")
+                .and_then(|mut s| {
+                    s.query_map([], |r| {
+                        Ok(LibraryMailbox {
+                            local_id: r.get(0)?,
+                            remote_id: r.get(1)?,
+                            name: r.get(2)?,
+                        })
+                    })
+                    .map(|rows| rows.filter_map(Result::ok).collect())
+                })
+                .unwrap_or_default();
+            let replies = conn
+                .prepare(
+                    "SELECT remote_id, mailbox_local_id, name, preview, text
+                       FROM saved_replies ORDER BY name",
+                )
+                .and_then(|mut s| {
+                    s.query_map([], |r| {
+                        Ok(SavedReplyRow {
+                            remote_id: r.get(0)?,
+                            mailbox_local_id: r.get(1)?,
+                            name: r.get(2)?,
+                            preview: r.get(3)?,
+                            text: r.get(4)?,
+                        })
+                    })
+                    .map(|rows| rows.filter_map(Result::ok).collect())
+                })
+                .unwrap_or_default();
+            let workflows = conn
+                .prepare(
+                    "SELECT remote_id, name, type, status FROM workflows
+                      ORDER BY sort_order, name",
+                )
+                .and_then(|mut s| {
+                    s.query_map([], |r| {
+                        Ok(WorkflowRow {
+                            remote_id: r.get(0)?,
+                            name: r.get(1)?,
+                            kind: r.get(2)?,
+                            status: r.get(3)?,
+                        })
+                    })
+                    .map(|rows| rows.filter_map(Result::ok).collect())
+                })
+                .unwrap_or_default();
+            (mailboxes, replies, workflows)
+        });
+        self.library = Some(LibraryModel {
+            mailboxes,
+            selected_mailbox: 0,
+            replies,
+            reply_edit: None,
+            workflows,
+            workflow_number: String::new(),
+            notice: None,
+        });
+    }
+
+    /// P3: the Library tab — saved replies become manageable (create,
+    /// edit and delete go straight to the platform through the
+    /// `saved_reply_write` job; the table re-reads the platform's
+    /// post-write list when the event lands, never an optimistic local
+    /// edit), and workflows — synced all along but invisible — surface
+    /// with their type/status and a run action that resolves the
+    /// conversation number from the local mirror.
+    fn library_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        if self.library.is_none() {
+            self.reload_library(db);
+        }
+        let Some(library) = &mut self.library else {
+            ui.spinner();
+            return;
+        };
+        if library.mailboxes.is_empty() {
+            design::empty_state(
+                ui,
+                Icon::BookOpen,
+                "No mailboxes yet",
+                "Saved replies and workflows mirror per mailbox — connect Help \
+                 Scout and run a sync first.",
+            );
+            return;
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            for (idx, mailbox) in library.mailboxes.iter().enumerate() {
+                if design::chip(ui, library.selected_mailbox == idx, &mailbox.name).clicked() {
+                    library.selected_mailbox = idx;
+                }
+            }
+        });
+        let mailbox = library.mailboxes[library.selected_mailbox].clone();
+        if let Some(notice) = &library.notice {
+            design::hint_text(ui, notice);
+        }
+
+        let mut action = LibraryAction::None;
+
+        // ---- Saved replies: CRUD straight to the platform ----
+        design::section_title(ui, "Saved replies");
+        if design::button(ui, "new saved reply", ButtonVariant::Primary).clicked() {
+            action = LibraryAction::NewReply;
+        }
+        let rows: Vec<SavedReplyRow> = library
+            .replies
+            .iter()
+            .filter(|r| r.mailbox_local_id.is_none_or(|m| m == mailbox.local_id))
+            .cloned()
+            .collect();
+        for row in &rows {
+            ui.horizontal(|ui| {
+                ui.label(format!(
+                    "{} — {}",
+                    row.name,
+                    row.preview.as_deref().unwrap_or("(no preview)")
+                ));
+                if design::button(ui, "edit", ButtonVariant::Outline).clicked() {
+                    action = LibraryAction::EditReply(row.remote_id);
+                }
+                if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
+                    action = LibraryAction::DeleteReply(row.remote_id);
+                }
+            });
+        }
+        if rows.is_empty() && library.reply_edit.is_none() {
+            design::hint_text(
+                ui,
+                "no saved replies in this mailbox yet — the sync mirrors the platform's list",
+            );
+        }
+        if let Some(edit) = &mut library.reply_edit {
+            let title = if edit.remote_id.is_some() {
+                "Edit saved reply"
+            } else {
+                "New saved reply"
+            };
+            action = design::card_titled(
+                ui,
+                title,
+                Some(
+                    "writes go straight to Help Scout; the table re-reads the \
+                     platform's post-write list",
+                ),
+                |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut edit.name)
+                            .hint_text("name (required by the platform)"),
+                    );
+                    ui.add(
+                        egui::TextEdit::multiline(&mut edit.text)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("text (HTML)"),
+                    );
+                    let mut act = LibraryAction::None;
+                    ui.horizontal(|ui| {
+                        if edit.name.trim().is_empty() {
+                            design::hint_text(ui, "the platform requires a name");
+                        } else if design::button(ui, "save to Help Scout", ButtonVariant::Primary)
+                            .clicked()
+                        {
+                            act = LibraryAction::SaveReply {
+                                remote_id: edit.remote_id,
+                                name: edit.name.trim().to_string(),
+                                text: edit.text.trim().to_string(),
+                            };
+                        }
+                        if design::button(ui, "cancel", ButtonVariant::Outline).clicked() {
+                            act = LibraryAction::CancelEdit;
+                        }
+                    });
+                    act
+                },
+            )
+            .inner;
+        }
+
+        // ---- Workflows: surfaced with a run action ----
+        design::section_title(ui, "Workflows");
+        ui.horizontal(|ui| {
+            design::field_label(ui, "conversation #:");
+            ui.add(
+                egui::TextEdit::singleline(&mut library.workflow_number)
+                    .desired_width(110.0)
+                    .hint_text("e.g. 778"),
+            );
+        });
+        design::hint_text(
+            ui,
+            "the run resolves the number against the local mirror; the platform \
+             enforces same-inbox and manual-only (a 400 lands in the jobs table)",
+        );
+        let wf_rows = library.workflows.clone();
+        for wf in &wf_rows {
+            ui.horizontal(|ui| {
+                let tone = if wf.status == "active" {
+                    BadgeTone::Success
+                } else {
+                    BadgeTone::Neutral
+                };
+                design::badge(ui, &wf.status, tone);
+                ui.label(format!("{} · {}", wf.name, wf.kind));
+                let manual = wf.kind == "manual";
+                let number_ok = library.workflow_number.trim().parse::<i64>().is_ok();
+                if manual
+                    && number_ok
+                    && design::button(ui, "run", ButtonVariant::Outline).clicked()
+                    && let Ok(number) = library.workflow_number.trim().parse::<i64>()
+                {
+                    action = LibraryAction::RunWorkflow {
+                        workflow_remote_id: wf.remote_id,
+                        conversation_number: number,
+                    };
+                }
+            });
+        }
+        if wf_rows.is_empty() {
+            design::hint_text(ui, "no workflows mirrored yet");
+        }
+
+        // Apply the frame's action (outside the render closures).
+        match action {
+            LibraryAction::None => {}
+            LibraryAction::NewReply => {
+                library.reply_edit = Some(ReplyEdit {
+                    remote_id: None,
+                    name: String::new(),
+                    text: String::new(),
+                });
+            }
+            LibraryAction::CancelEdit => library.reply_edit = None,
+            LibraryAction::EditReply(remote_id) => {
+                if let Some(row) = library.replies.iter().find(|r| r.remote_id == remote_id) {
+                    library.reply_edit = Some(ReplyEdit {
+                        remote_id: Some(remote_id),
+                        name: row.name.clone(),
+                        text: row.text.clone().unwrap_or_default(),
+                    });
+                }
+            }
+            LibraryAction::SaveReply {
+                remote_id,
+                name,
+                text,
+            } => {
+                let what = if remote_id.is_some() {
+                    "update"
+                } else {
+                    "create"
+                };
+                let payload = reply_write_payload(what, mailbox.remote_id, remote_id, &name, &text);
+                match db.with_write(|conn| {
+                    spp_core::jobs::enqueue_on(conn, "sync", "saved_reply_write", &payload, 1, 2)
+                }) {
+                    Ok(_) => {
+                        library.reply_edit = None;
+                        library.notice = Some(
+                            "sent to Help Scout — the table re-reads the platform's \
+                             post-write list when it lands"
+                                .to_string(),
+                        );
+                    }
+                    Err(e) => library.notice = Some(format!("could not queue the write: {e}")),
+                }
+            }
+            LibraryAction::DeleteReply(remote_id) => {
+                let payload =
+                    reply_write_payload("delete", mailbox.remote_id, Some(remote_id), "", "");
+                match db.with_write(|conn| {
+                    spp_core::jobs::enqueue_on(conn, "sync", "saved_reply_write", &payload, 1, 2)
+                }) {
+                    Ok(_) => {
+                        library.notice = Some(
+                            "delete sent to Help Scout — the table re-reads the \
+                             platform's post-write list when it lands"
+                                .to_string(),
+                        );
+                    }
+                    Err(e) => library.notice = Some(format!("could not queue the delete: {e}")),
+                }
+            }
+            LibraryAction::RunWorkflow {
+                workflow_remote_id,
+                conversation_number,
+            } => {
+                let payload = serde_json::json!({
+                    "workflowRemoteId": workflow_remote_id,
+                    "conversationNumber": conversation_number,
+                })
+                .to_string();
+                match db.with_write(|conn| {
+                    spp_core::jobs::enqueue_on(conn, "sync", "run_workflow", &payload, 1, 2)
+                }) {
+                    Ok(_) => {
+                        library.notice = Some(format!(
+                            "workflow run requested on conversation #{conversation_number}"
+                        ));
+                    }
+                    Err(e) => library.notice = Some(format!("could not queue the run: {e}")),
+                }
+            }
+        }
+    }
+}
+
 impl Default for OperationsPage {
     fn default() -> Self {
         Self::new()
@@ -677,5 +1081,56 @@ mod tests {
             assert!(!tile_description(key).is_empty());
             let _band = tile_severity(key);
         }
+    }
+
+    #[test]
+    fn library_tab_mirrors_saved_replies_and_workflows() {
+        let db = fixture(vec![]);
+        db.with_write(|conn| {
+            spp_core::sync_engine::upsert_saved_reply(
+                conn,
+                None,
+                &spp_core::helpscout::HsSavedReply {
+                    remote_id: 11,
+                    name: "Refund path".into(),
+                    preview: Some("…here is how…".into()),
+                    text: Some("<p>…here is how…</p>".into()),
+                },
+            )
+            .expect("seed reply");
+            spp_core::sync_engine::upsert_workflow(
+                conn,
+                &spp_core::helpscout::HsWorkflow {
+                    remote_id: 21,
+                    mailbox_id: Some(3),
+                    name: "Escalate".into(),
+                    kind: "manual".into(),
+                    status: "active".into(),
+                    sort_order: 1,
+                },
+            )
+            .expect("seed workflow");
+        });
+
+        let mut page = OperationsPage::new();
+        page.reload_library(&db);
+        let library = page.library.as_ref().expect("library loaded");
+        assert_eq!(library.replies.len(), 1);
+        assert_eq!(library.replies[0].name, "Refund path");
+        assert_eq!(library.workflows.len(), 1);
+        assert_eq!(library.workflows[0].kind, "manual");
+
+        // The write payload carries the platform's required fields —
+        // `name` is enforced by the platform; the job re-checks it.
+        let payload = reply_write_payload("update", 3, Some(11), "Refund path v2", "<p>…</p>");
+        let v: serde_json::Value = serde_json::from_str(&payload).expect("json payload");
+        assert_eq!(v["action"], "update");
+        assert_eq!(v["mailboxRemoteId"], 3);
+        assert_eq!(v["replyRemoteId"], 11);
+        assert_eq!(v["name"], "Refund path v2");
+
+        // Invalidation clears the cached library like every other model.
+        page.invalidate();
+        assert!(page.library.is_none());
     }
 }

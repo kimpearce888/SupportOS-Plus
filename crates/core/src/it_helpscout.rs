@@ -1341,3 +1341,217 @@ fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
          seeded customer"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Batch 15 (P2/P3): live chats, saved replies, workflows, the Resource-Id fix
+// ---------------------------------------------------------------------------
+
+#[test]
+fn chat_get_and_send_roundtrip_the_documented_wire_contract() {
+    let _secrets = secrets_guard();
+    let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+        match (req.method.as_str(), req.path.as_str()) {
+            ("GET", "/v2/chats/chat-9") => MockResponse::json(
+                200,
+                json!({
+                    "id": "chat-9", "mailboxId": 3, "state": "open",
+                    "customer": {"id": 7, "first": "Kim", "last": "One"},
+                    "events": [{"id": "m-1", "type": "customer.message.created",
+                                 "text": "hi", "createdAt": "2026-10-21T10:00:00Z"}]
+                }),
+            ),
+            ("PUT", p) if p.starts_with("/v2/chats/chat-9/messages/") => {
+                MockResponse::json(201, json!({"ok": true}))
+            }
+            _ => MockResponse::json(404, json!({"message": "no route"})),
+        }
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+
+    let chat = runtime()
+        .block_on(async { p.get_chat("chat-9").await })
+        .expect("get_chat")
+        .expect("chat object");
+    assert_eq!(chat.id, "chat-9");
+    assert_eq!(chat.mailbox_id, 3);
+    assert_eq!(chat.state, "open");
+    assert_eq!(chat.customer.expect("customer").remote_id, 7);
+
+    runtime()
+        .block_on(async {
+            p.send_chat_message("chat-9", "m-uuid-1", "we are on it")
+                .await
+        })
+        .expect("send");
+
+    let hits = mock.hits();
+    let send = hits
+        .iter()
+        .find(|h| h.method == "PUT")
+        .expect("the PUT happened");
+    assert!(
+        send.path.starts_with("/v2/chats/chat-9/messages/m-uuid-1"),
+        "the caller-generated message id rides in the path: {}",
+        send.path
+    );
+    let body: Value = serde_json::from_str(&send.body).expect("send body json");
+    assert_eq!(body["text"], "we are on it");
+}
+
+#[test]
+fn chat_send_422_already_in_use_is_treated_as_delivered() {
+    let _secrets = secrets_guard();
+    let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
+        422,
+        json!({"message": "id value is already in use", "code": 422}),
+    )))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+
+    // The message id is ours, so the platform's 422 means a retry after a
+    // timeout already delivered — never a double-send.
+    let outcome =
+        runtime().block_on(async { p.send_chat_message("chat-9", "m-uuid-2", "retry me").await });
+    assert!(
+        outcome.is_ok(),
+        "422 must be Ok (already delivered): {outcome:?}"
+    );
+}
+
+#[test]
+fn saved_reply_crud_roundtrips_the_platforms_wire_contract() {
+    let _secrets = secrets_guard();
+    let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+        let path = req.path.as_str();
+        match req.method.as_str() {
+            "POST" if path.ends_with("/saved-replies") => MockResponse::json(
+                201,
+                json!({"id": 91, "name": "Refund path", "preview": "…"}),
+            )
+            .with_header("Resource-Id", "91"),
+            "PUT" if path.ends_with("/saved-replies/91") => {
+                MockResponse::json(200, json!({"id": 91}))
+            }
+            "DELETE" if path.ends_with("/saved-replies/91") => MockResponse::empty(204),
+            _ => MockResponse::json(404, json!({"message": "no route"})),
+        }
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+
+    let created = runtime()
+        .block_on(async { p.create_saved_reply(3, "Refund path", "<p>how</p>").await })
+        .expect("create saved reply");
+    assert_eq!(
+        created, 91,
+        "the new remote id comes from the Resource-Id header"
+    );
+
+    runtime()
+        .block_on(async {
+            p.update_saved_reply(3, 91, "Refund path v2", "<p>how v2</p>")
+                .await
+        })
+        .expect("update saved reply");
+    runtime()
+        .block_on(async { p.delete_saved_reply(3, 91).await })
+        .expect("delete saved reply");
+
+    let hits = mock.hits();
+    let post = hits
+        .iter()
+        .find(|h| h.method == "POST")
+        .expect("POST happened");
+    let body: Value = serde_json::from_str(&post.body).expect("create body json");
+    assert_eq!(body["name"], "Refund path", "the platform's required name");
+    assert_eq!(body["text"], "<p>how</p>");
+    let put = hits
+        .iter()
+        .find(|h| h.method == "PUT")
+        .expect("PUT happened");
+    assert!(
+        put.path.ends_with("/v2/mailboxes/3/saved-replies/91"),
+        "{}",
+        put.path
+    );
+    let delete = hits
+        .iter()
+        .find(|h| h.method == "DELETE")
+        .expect("DELETE happened");
+    assert!(
+        delete.path.ends_with("/saved-replies/91"),
+        "{}",
+        delete.path
+    );
+}
+
+#[test]
+fn workflow_run_roundtrips_the_documented_contract() {
+    let _secrets = secrets_guard();
+    let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+        match (req.method.as_str(), req.path.as_str()) {
+            ("POST", "/v2/workflows/7/run") => MockResponse::json(200, json!({})),
+            _ => MockResponse::json(404, json!({"message": "no route"})),
+        }
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+
+    let ran = runtime()
+        .block_on(async { p.run_workflow(7, 900).await })
+        .expect("run workflow");
+    assert!(ran);
+
+    let hits = mock.hits();
+    assert_eq!(hits.len(), 1);
+    let body: Value = serde_json::from_str(&hits[0].body).expect("run body json");
+    assert_eq!(
+        body["conversationIds"],
+        json!([900]),
+        "the resolved conversation remote id rides in conversationIds"
+    );
+}
+
+#[test]
+fn create_webhook_reads_the_resource_id_header_on_the_201_answer() {
+    let _secrets = secrets_guard();
+    let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+        match (req.method.as_str(), req.path.as_str()) {
+            // The documented 201: empty body, new hook id in Resource-Id.
+            ("POST", "/v2/webhooks") => MockResponse::empty(201).with_header("Resource-Id", "55"),
+            _ => MockResponse::json(404, json!({"message": "no route"})),
+        }
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+
+    let events = vec![
+        "convo.created".to_string(),
+        "beacon.chat.created".to_string(),
+    ];
+    let hook_id = runtime()
+        .block_on(async {
+            p.create_webhook("https://relay/hook", &events, "s", "lbl")
+                .await
+        })
+        .expect("create webhook");
+
+    // Before the fix this read the (empty) body and returned 0 for every
+    // created hook, making a successful registration look like a failure.
+    assert_eq!(hook_id, 55, "the Resource-Id header must be the answer");
+
+    let hits = mock.hits();
+    let body: Value = serde_json::from_str(&hits[0].body).expect("create body json");
+    assert_eq!(body["url"], "https://relay/hook");
+    assert_eq!(body["label"], "lbl");
+    assert_eq!(
+        body["events"],
+        json!(["convo.created", "beacon.chat.created"])
+    );
+}

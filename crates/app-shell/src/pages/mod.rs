@@ -23,6 +23,7 @@ pub mod inbox;
 pub mod incidents;
 pub mod issue_radar;
 pub mod knowledge;
+pub mod live_chats;
 pub mod notifications;
 pub mod onboarding;
 pub mod operations;
@@ -55,6 +56,9 @@ pub enum PageKey {
     Dashboard,
     Diagnostics,
     Inbox,
+    /// P2 (batch 15): live Beacon chats — the webhook-fed mirror and the
+    /// assigned-agent message send.
+    LiveChats,
     Customers,
     Knowledge,
     Reports,
@@ -84,6 +88,7 @@ impl PageKey {
             Self::Dashboard => "Dashboard",
             Self::Diagnostics => "Diagnostics",
             Self::Inbox => "Inbox",
+            Self::LiveChats => "Live chats",
             Self::Customers => "Customers",
             Self::Knowledge => "Knowledge",
             Self::Reports => "Reports",
@@ -108,10 +113,11 @@ impl PageKey {
     /// Sidebar order (port of the web nav: work queues first, reference
     /// pages last).
     #[must_use]
-    pub fn all() -> [Self; 22] {
+    pub fn all() -> [Self; 23] {
         [
             Self::Dashboard,
             Self::Inbox,
+            Self::LiveChats,
             Self::Operations,
             Self::Customers,
             Self::Organizations,
@@ -156,6 +162,7 @@ pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
         ServerEvent::SyncCompleted(_) => vec![
             // A finished sync can touch any mirrored table.
             PageKey::Inbox,
+            PageKey::LiveChats,
             PageKey::Dashboard,
             PageKey::Operations,
             PageKey::Reports,
@@ -177,6 +184,7 @@ pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
         ],
         ServerEvent::ConversationUpdated(_) => vec![
             PageKey::Inbox,
+            PageKey::LiveChats,
             PageKey::Dashboard,
             PageKey::Operations,
             PageKey::Reports,

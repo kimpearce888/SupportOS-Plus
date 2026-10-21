@@ -537,3 +537,59 @@ fn satisfaction_webhook_ingests_over_tcp() {
     assert_ne!(status, 200, "unsigned events must not pass: {body}");
     server.stop();
 }
+
+// P2: the live-chat mirror ingests over real TCP — the five
+// `beacon.chat.*` events are the platform's only push path for chats
+// (Help Scout has no list endpoint), so the relay → listener → mirror
+// chain is the whole story, verified end to end.
+#[test]
+fn beacon_chat_created_ingests_into_the_mirror_over_tcp() {
+    let _secrets = install_master_key();
+    let db = fixture_db();
+    db.with_write(|conn| crate::settings::set_secret(conn, "webhook_secret", b"chat-secret"))
+        .expect("store webhook secret");
+    let mut server = LoopbackServer::start(
+        db.clone(),
+        std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_empty()),
+        0,
+    )
+    .expect("start listener");
+    let port = server.port();
+
+    // The documented shape: the five beacon.chat.* events carry the Chat
+    // object; chat ids are UUID strings, unlike every numeric Inbox id.
+    let event_body = r#"{"chat": {"id": "b7e5-uuid-1", "mailboxId": 3, "state": "open",
+        "customer": {"id": 71, "first": "Kim", "last": "One"},
+        "events": [{"id": "m-1", "type": "customer.message.created",
+                     "text": "hello from beacon", "createdAt": "2026-10-21T11:00:00Z"}]}}"#;
+    let sig = crate::webhook::compute_signature(b"chat-secret", event_body.as_bytes());
+    let (status, body) = post_webhook(port, Some(&sig), "beacon.chat.created", event_body);
+    assert_eq!(status, 200, "signed beacon chat webhook accepted: {body}");
+
+    let (state, mirrored, messages): (String, i64, i64) = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT (SELECT processing_state FROM webhook_events
+                         WHERE event_type = 'beacon.chat.created'),
+                    (SELECT COUNT(*) FROM beacon_chats WHERE chat_id = 'b7e5-uuid-1'),
+                    (SELECT COUNT(*) FROM beacon_chat_messages
+                      WHERE chat_id = 'b7e5-uuid-1' AND text = 'hello from beacon')",
+            [],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .unwrap_or(("missing".to_string(), 0, 0))
+    });
+    assert_eq!(state, "processed");
+    assert_eq!(mirrored, 1, "the chat object must land in the m059 mirror");
+    assert_eq!(messages, 1, "the embedded customer message is stored");
+
+    // Unsigned chat events are rejected at the door like everything else.
+    let (status, body) = post_webhook(port, None, "beacon.chat.created", event_body);
+    assert_ne!(status, 200, "unsigned events must not pass: {body}");
+    server.stop();
+}

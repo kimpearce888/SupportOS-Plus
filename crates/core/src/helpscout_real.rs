@@ -1937,6 +1937,49 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             .unwrap_or_default())
     }
 
+    async fn create_saved_reply(&self, mailbox_id: i64, name: &str, text: &str) -> Result<i64> {
+        let v = self
+            .request_pri(
+                &format!("/v2/mailboxes/{mailbox_id}/saved-replies"),
+                "POST",
+                Some(json!({ "name": name, "text": text })),
+                PRIORITY_USER_SEND,
+            )
+            .await?;
+        Ok(v["resourceId"]
+            .as_i64()
+            .or_else(|| v["id"].as_i64())
+            .unwrap_or(0))
+    }
+
+    async fn update_saved_reply(
+        &self,
+        mailbox_id: i64,
+        saved_reply_id: i64,
+        name: &str,
+        text: &str,
+    ) -> Result<()> {
+        self.request_pri(
+            &format!("/v2/mailboxes/{mailbox_id}/saved-replies/{saved_reply_id}"),
+            "PUT",
+            Some(json!({ "name": name, "text": text })),
+            PRIORITY_USER_SEND,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_saved_reply(&self, mailbox_id: i64, saved_reply_id: i64) -> Result<()> {
+        self.request_pri(
+            &format!("/v2/mailboxes/{mailbox_id}/saved-replies/{saved_reply_id}"),
+            "DELETE",
+            None,
+            PRIORITY_USER_SEND,
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn list_workflows(&self) -> Result<Vec<HsWorkflow>> {
         self.list_all_v2("/v2/workflows", "workflows", |w| HsWorkflow {
             remote_id: w["id"].as_i64().unwrap_or(0),
@@ -1987,8 +2030,13 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 Some(json!({ "url": url, "events": events, "secret": secret, "label": label })),
             )
             .await?;
-        Ok(v["id"]
+        // The 201 answer carries the new hook's id in the Resource-Id
+        // header (the body is empty); request_inner surfaces it as
+        // `resourceId`. Reading the body first returned 0 for every
+        // created hook — the registration then looked like a failure.
+        Ok(v["resourceId"]
             .as_i64()
+            .or_else(|| v["id"].as_i64())
             .or_else(|| v["webhook"]["id"].as_i64())
             .unwrap_or(0))
     }
@@ -1997,6 +2045,58 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         self.request(&format!("/v2/webhooks/{remote_id}"), "DELETE", None)
             .await?;
         Ok(true)
+    }
+
+    async fn get_chat(&self, chat_id: &str) -> Result<Option<crate::helpscout::HsChat>> {
+        let res = self
+            .request_pri(
+                &format!("/v2/chats/{chat_id}"),
+                "GET",
+                None,
+                PRIORITY_INTERACTIVE,
+            )
+            .await;
+        match res {
+            Ok(v) => Ok(crate::chats::parse_chat_object(&v)),
+            Err(e) => {
+                // A chat that has collapsed into a conversation is gone
+                // from the Chat API — the mirror keeps the webhook's last
+                // word, and this fetch honestly reports it ended.
+                if is_not_found(&e) {
+                    return Ok(None);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    async fn send_chat_message(&self, chat_id: &str, message_id: &str, text: &str) -> Result<()> {
+        let res = self
+            .request_pri(
+                &format!("/v2/chats/{chat_id}/messages/{message_id}"),
+                "PUT",
+                Some(json!({ "text": text })),
+                PRIORITY_USER_SEND,
+            )
+            .await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // The message id is ours, so the platform's 422 "id value
+                // is already in use" answer means a retry after a
+                // timeout already delivered — treated as success, never
+                // a double-send. A 400 (someone else's chat) keeps its
+                // platform reason for the caller to surface.
+                if let crate::error::Error::Other(boxed) = &e
+                    && boxed
+                        .downcast_ref::<HsApiError>()
+                        .is_some_and(|hs| hs.status_code == 422)
+                {
+                    return Ok(());
+                }
+                Err(e)
+            }
+        }
     }
 
     async fn list_customer_property_definitions(&self) -> Result<Vec<HsPropertyDef>> {

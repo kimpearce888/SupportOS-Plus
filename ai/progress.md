@@ -3,10 +3,21 @@
 > Exactly five active items at any time, per `rule.md`. Items move here from `plan.md` (Rule 2)
 > and leave for `completed.md` only after verification (Rule 5).
 
-## Active items
+## Active items — Batch 15 (final): Phase P remainder (P2, P3, P4, P5)
 
-None — Batch 14 (Phase K completion: K2, K3, K4, K5 + P1) was completed and
-verified locally on 2026-10-21 (all gates green; CI run recorded on the
-batch commit — see `completed.md`). Phase K — "Learn & Advise" — is
-complete. Per Rule 8, the next five items (Phase P remainder: P2, P3, P4,
-P5) are selected from `plan.md` only after the owner says **continue**.
+Selected from `plan.md` on the owner's "continue" (2026-10-21). Four items, not five — the
+plan is otherwise exhausted (Rule 6: every item processed; Rule 1 caps at five).
+
+**P2. Live chat** — Real chats list and message send under the assigned-agent rule
+(PUT /v2/chats/{id}/messages/{uuid}).
+
+**P3. Saved replies CRUD + workflows surfaced** — Saved replies management UI over
+/v2/mailboxes/{id}/saved-replies; workflows surfaced in Operations.
+
+**P4. Webhook relay guide** — User-run tunnel documentation; hook health checks and automatic
+re-registration guarding silent deactivation. Closes D21.
+
+**P5. Remote and release hygiene** — Git origin restored (sandbox reset removed it locally;
+remote intact through v1.3.0), release cadence verified end to end, token rotation reminder to the
+owner. Note: per decision D-f the origin restore defaults to END of Phase R so v1.4.0 ships
+through CI; if executed there, this item reduces to release-cadence verification + token reminder.

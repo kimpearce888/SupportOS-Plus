@@ -79,6 +79,7 @@ impl Icon {
         match key {
             K::Dashboard => Self::Dashboard,
             K::Inbox => Self::Inbox,
+            K::LiveChats => Self::Send,
             K::Operations => Self::Activity,
             K::Customers => Self::Users,
             K::Organizations => Self::Building,

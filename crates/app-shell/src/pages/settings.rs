@@ -401,6 +401,12 @@ pub struct SettingsPage {
     hs_docs_api_key: String,
     hs_form_loaded: bool,
     hs_show_secrets: bool,
+    /// P4: the public relay URL the webhook health check re-registers to.
+    webhook_public_url: String,
+    /// Mirrors the relay URL field's one-time load (like `hs_form_loaded`).
+    wh_loaded: bool,
+    /// The last webhook health check outcome (P4), re-read on invalidation.
+    wh_outcome: Option<spp_core::webhook_health::WebhookHealthOutcome>,
     /// Application data directory: the demo purge clears the vector
     /// store that lives next to the database.
     data_dir: Option<PathBuf>,
@@ -466,6 +472,9 @@ impl SettingsPage {
             hs_docs_api_key: String::new(),
             hs_form_loaded: false,
             hs_show_secrets: false,
+            webhook_public_url: String::new(),
+            wh_loaded: false,
+            wh_outcome: None,
             data_dir: None,
             purge_armed: false,
             provider: None,
@@ -566,6 +575,20 @@ impl SettingsPage {
             self.hs_docs_api_key = stored.docs_api_key;
             self.hs_form_loaded = true;
         }
+        // P4: the relay URL form + the last health outcome.
+        if !self.wh_loaded {
+            self.webhook_public_url = db.with_read(|conn| {
+                spp_core::settings::get_string(conn, "webhook_public_url")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+            });
+            self.wh_loaded = true;
+        }
+        self.wh_outcome = db
+            .with_read(spp_core::webhook_health::load_outcome)
+            .ok()
+            .flatten();
         if self.lmstudio_base_url.is_empty() {
             let (base, chat, embed) = db.with_read(|conn| {
                 (
@@ -1437,6 +1460,75 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
+        // P4 (D21): the webhook relay + the self-healing guard.
+        design::card_titled(
+            ui,
+            "Webhook relay & health",
+            Some(
+                "the listener stays loopback-only by design; a user-run relay \
+                 bridges the NAT, and the health check re-registers the hook \
+                 when the platform silently drops it",
+            ),
+            |ui| {
+                design::field_label(ui, "public relay URL:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.webhook_public_url)
+                        .hint_text("https://your-relay → forwards to this app's loopback listener"),
+                );
+                ui.horizontal(|ui| {
+                    if design::button(ui, "save relay URL", ButtonVariant::Outline).clicked() {
+                        self.save_webhook_relay_url(db);
+                    }
+                    if design::button(ui, "check now", ButtonVariant::Primary).clicked() {
+                        self.queue_webhook_health_check(db);
+                    }
+                });
+                // The user-run tunnel guide: what to run, how to prove the
+                // chain, and the honest limit on secret rotation.
+                design::hint_text(
+                    ui,
+                    "relay options: cloudflared tunnel --url http://127.0.0.1:PORT · \
+                     ngrok http 127.0.0.1:PORT · ssh -N -R 80:127.0.0.1:PORT serveo.net \
+                     — the registered URL must forward to the loopback listener",
+                );
+                design::hint_text(
+                    ui,
+                    "prove the chain from outside: curl -X POST <relay>/webhook -d '{}' \
+                     must answer 401 (signature check) — anything else means the relay \
+                     is not reaching the app",
+                );
+                design::hint_text(
+                    ui,
+                    "one honest limit: the API never reveals a hook's stored secret, so \
+                     rotating the local webhook secret needs a re-register — the check \
+                     does that for you when it finds the hook stale",
+                );
+                match &self.wh_outcome {
+                    Some(outcome) => {
+                        let tone = if outcome.is_healthy() {
+                            BadgeTone::Success
+                        } else {
+                            BadgeTone::Neutral
+                        };
+                        ui.horizontal(|ui| {
+                            design::field_label(ui, "last check:");
+                            design::badge(ui, &outcome.verdict, tone);
+                            ui.label(format!("· {}", outcome.checked_at));
+                        });
+                        design::hint_text(ui, &outcome.detail);
+                    }
+                    None => {
+                        design::hint_text(
+                            ui,
+                            "the webhook guard has not run yet (it checks every ~6 hours, \
+                             or press check now)",
+                        );
+                    }
+                }
+            },
+        );
+        ui.add_space(10.0);
+
         // Workspace reset (1.2.0): one click, two-step confirmation.
         design::card_titled(
             ui,
@@ -1479,6 +1571,42 @@ impl SettingsPage {
                 }
             },
         );
+    }
+
+    /// Save the public relay URL the health check re-registers to (P4).
+    fn save_webhook_relay_url(&mut self, db: &DbHandle) {
+        let url = self.webhook_public_url.trim().to_string();
+        let saved =
+            db.with_write(|conn| spp_core::settings::set_string(conn, "webhook_public_url", &url));
+        match saved {
+            Ok(()) => {
+                self.message =
+                    Some("relay URL saved — the next health check registers the hook there".into());
+            }
+            Err(e) => self.error = Some(format!("could not save the relay URL: {e}")),
+        }
+    }
+
+    /// Queue the on-demand webhook health check (P4): the job runs within
+    /// seconds and stores the outcome this card reads.
+    fn queue_webhook_health_check(&mut self, db: &DbHandle) {
+        let queued = db.with_write(|conn| {
+            spp_core::jobs::enqueue_on(
+                conn,
+                "sync",
+                "webhook_health_check",
+                "{\"triggerKind\":\"manual\"}",
+                1,
+                2,
+            )
+        });
+        match queued {
+            Ok(_) => {
+                self.message =
+                    Some("webhook health check queued — the outcome lands here in a moment".into());
+            }
+            Err(e) => self.error = Some(format!("could not queue the check: {e}")),
+        }
     }
 
     /// The Connection Doctor card (R1): a run button, the five steps
