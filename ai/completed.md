@@ -874,3 +874,170 @@ per Rule 5 nothing below counted as done before this verification.
   `cargo update -p rustls-webpki` (`0.103.15` → `0.103.16`) as commit `91479ef`.
 - **CI run `39508562660` on `91479ef`: success on both jobs** (fmt, clippy, test,
   deny + AppImage/.deb build with clean smoke boots). `main` is green.
+
+### Batch 12 (R6, R7, R8, A1, A2) — 2026-10-21 (commits `a2c5309`+`943a122`, CI runs `39522823488`+`39523717163`: success; Release run `39523722592` on `v1.4.0`: success; verify_release: ALL CHECKS PASSED)
+
+Phase R completion batch plus the first two Phase A items. v1.4.0 shipped
+from this batch (Phase R, "Prove It").
+
+**R6. Honest stubs (D11, D12)**
+- Work: `INITIAL_SYNC_ORDER` drops the chats/attachments/ratings stages —
+  Help Scout exposes **no list endpoints** for Beacon chats
+  (`GET /v2/chats/{id}` only) or ratings (`GET /v2/ratings/{id}` only);
+  both arrive via webhooks and are fetched by id (the satisfaction-webhook
+  job was always the real ratings path and stays). The real provider's
+  `list_ratings`/`list_beacon_chats` now return explicit platform-reality
+  errors instead of silent empty lists; the `report_data` match arm is gone
+  (unknown resources already error). Migration m052 deletes the stale
+  checkpoint rows so Sync Health stops rendering stages that can never
+  run. The misdesigned 30-second ratings poller is retired
+  (`refresh_ratings`, its re-entrancy flag, `is_dangling_rating`, the
+  `RatingsRefreshed` event chain and its test; `upsert_rating_row` stays —
+  the webhook path uses it). Reports carries a one-line provenance note:
+  ratings come from the satisfaction webhook; Help Scout's own happiness
+  reports need a Plus/Pro plan and are not fetched. Note: P1's
+  "30-second timer retired" clause is thereby delivered early; P1 retains
+  the happiness-report path and CSAT rework.
+- Tests: `helpscout_real::r6_honest_stub_tests` (both stubs must refuse
+  with the platform reality); `it_sync` checkpoint assertion tightened to
+  exactly `INITIAL_SYNC_ORDER.len()` (19).
+
+**R7. Token encryption, residue purge, version transparency, no-simulation gate (D13, D14)**
+- Work: `save_tokens` seals access/refresh tokens into the AES-256-GCM
+  envelope (`helpscout_oauth_access_token`/`helpscout_oauth_refresh_token`);
+  the `oauth_tokens` row keeps metadata only, columns permanently empty.
+  Migration m053 (boot step 44) seals pre-1.4.0 plaintext tokens and
+  scrubs the columns the first time a master key exists; `token_row` reads
+  envelope-first with the plaintext columns as a transitional fallback
+  (a missing/corrupt envelope surfaces as an error, never silence).
+  `revoke` and the settings disconnect purge the envelope entirely.
+  `require_auth` goes through the new envelope-backed
+  `helpscout_real::has_stored_tokens`; the legacy `oauth.rs` module is
+  deleted (its one caller migrated). Residue purged: the
+  `FakeAiProvider`/`NoopAiProvider` demo doubles (zero callers), the
+  "Simulated attachment content…" fabrication (the empty provider now
+  refuses — the inert world has no bytes to give), the dead simulated
+  rating handler (with R6), the legacy verified-draft and
+  interaction-signal CRUD (zero callers; the tables stay as inert
+  schema), the stale boot comment in `main.rs`, stale "demo mode"
+  comments, and user-visible copy reworded ("seeded content", the
+  onboarding honesty line). Version transparency: new
+  `core::version_check` (semver-aware comparison with pre-release
+  handling; strictly user-initiated release check with a 404-honest
+  private-repo message) + the Settings "About & updates" card; the app
+  never phones home on its own. The CI gate
+  `scripts/gate_no_simulation.py` scans production code for
+  simulated/fake/demo markers (comments and `#[cfg(test)]` regions
+  excluded, explicit justified allowlist for the m050 purge machinery),
+  self-tested to catch a planted violation, wired into both `ci.yml` and
+  `release.yml`.
+- Tests: `helpscout_real::r7_token_envelope_tests`
+  (m053 seals-and-scrubs; without a key the legacy row stays intact);
+  `it_helpscout`/`it_loopback` reworked to assert the encrypted shape
+  (envelope holds the token, columns empty, disconnect/revocation purge)
+  under the process-wide secrets lock; `version_check` comparison tests.
+
+**R8. Unified refresh, adaptive cadence, freshness ring (D6, D10, D18)**
+- Work: `spawn_sync_action` returns whether it started — a click during a
+  running sync is answered everywhere (Inbox, Sync Health, Onboarding),
+  never swallowed. The Dashboard/Reports/Customers/Organizations "Reload"
+  buttons became real "Sync now" scoped fetches (engine handed to those
+  pages; the completion toast reports the outcome; without an engine they
+  degrade to a labeled local re-read). The fixed auto-sync interval is
+  replaced by adaptive cadence: 30 s while changes arrive, doubling
+  back-off toward the configured ceiling; `SYNC_INTERVAL_MINUTES` is
+  finally consumed as the ceiling fallback and both divergent defaults
+  are unified at 1 minute (the setting relabeled "max quiet sync
+  interval" with the behavior on hover). Every successful send nudges the
+  timer for an immediate poll (`WorkerManager::nudge_sync` +
+  `tokio::sync::Notify`; no macros feature needed — `timeout` over
+  `notified()`). The header gains the global freshness ring —
+  "syncing…" / "synced Ns ago" / "never synced", tone-colored by age,
+  clickable through to Sync Health — reading the new
+  `sync_engine::last_sync_age_seconds`.
+- Tests: `sync_engine::r8_freshness_tests` (never-synced vs stamped;
+  the newest ok checkpoint wins).
+
+**A1. Provider hub**
+- Work: new `core::ai_hub` — endpoints as a list (seeded from the legacy
+  `lmstudio_*` settings: local LM Studio + optional Ollama; user-added
+  OpenAI-compatible cloud endpoints BYOK with keys in the encrypted
+  envelope, referenced by key name only), the five model roles of
+  blueprint Table 6 (Embed/Classify/Summarize/Draft/Agent) with
+  per-role endpoint+model routing and a legacy single-model fallback,
+  per-endpoint health probes (`list_models` → green/red with model count
+  and latency), the feature registry (`ai_feature_enabled` under the
+  global `ai_enabled` kill switch; analysis/note/draft keep their
+  existing settings keys, attributes/memory/clustering/copilot are new
+  AI Center toggles), and the cost ledger: `ChatOptsResult` now carries
+  token usage → `complete_run_with_usage` persists
+  `ai_runs.token_usage` + the new `endpoint_id` (m054) →
+  `usage_ledger` aggregates tokens/latency/estimated spend per feature
+  per day, priced by the endpoint's USD/mtok fields. All backend call
+  sites route through `backend_for_role`: workers jobs (Analyze→Classify,
+  Draft→Draft, Note→Summarize, each feature-gated at execution),
+  automation (Classify), the composer availability check (Draft), and
+  each AI job checks its own kill switch at execution, not just enqueue.
+  AI Center renders the hub: endpoint rows with probe/set-key/remove,
+  the add-endpoint BYOK form, the role-routing grid, the feature
+  toggles + global kill switch, and the ledger table.
+- Tests: `ai_hub::tests` ×4 — legacy seeding + role resolution with a
+  BYOK key; endpoint removal clears its key and assignments; the kill
+  switch dominates and per-feature defaults hold; the ledger prices a
+  run by endpoint and leaves legacy rows at zero.
+
+**A2. Wire batch 1**
+- Work: the 14-key attribute extraction is live — job kind
+  `extract_attributes` runs `ai_attributes::compute_with_backend`
+  (deterministic records always land with no model configured; the AI
+  layer fills intent/product/feature/issue/customer_goal/response_style
+  through the Classify role), enqueued after every completed analysis
+  (or directly on customer-thread arrival when analysis is off) and
+  backfilled for up to 50 attribute-less conversations after each
+  initial sync — the Attributes tab and the `ai_attribute` automation
+  conditions read live rows. The inbox header renders triage chips
+  (intent/urgency/frustration/escalation/cluster with confidence and
+  source; heuristic sentiment where no attribute exists) — clicking an
+  attribute chip opens the catalog vocabulary and a human override
+  supersedes the machine row (source "human", confidence high; "unknown"
+  clears it). Issue clustering is real: job `cluster_issues` runs the
+  orphaned `cluster_issues` pipeline over the last 14 days, triggered
+  daily by the maintenance timer (once per ~20 h, feature-gated) and
+  manually via the new Issue Radar "Cluster now" button (with honest
+  disabled/queued messages). Customer memory extraction runs as job
+  `extract_memories` (Summarize role, feature-gated, skipped honestly
+  without an endpoint), and its output lands in the inbox "know before
+  you reply" briefing panel and in the evidence pack: `EvidenceContext`
+  gains a `customer_memory` block, quarantine-filtered through
+  `ai_memory_guard`, rendered into every analysis/draft/verification
+  prompt as "DURABLE CUSTOMER FACTS".
+- Tests: `ai_attributes::a2_wiring_tests` (deterministic snapshot lands
+  with a disabled backend; a human override supersedes and the current
+  row reads source=human) and
+  `ai_evidence::a2_memory_feed_tests` (the evidence pack carries the
+  durable fact and the memory guard keeps health-quarantined material
+  out of the rendered prompt).
+
+**Verification (Rule 5)**
+- Local, pinned 1.99.1: `cargo fmt --all --check` clean; `cargo clippy
+  --workspace --all-targets -- -D warnings` clean (two late let-return
+  lints fixed); `cargo test --workspace` green — 163 app-shell + 214
+  core (+11 new tests since batch 11) + 6 xtask; sandbox feature clippy
+  clean and 219 tests green; `cargo-deny 0.20.2 check advisories
+  licenses` ok; `scripts/gate_no_simulation.py` clean (and self-tested
+  to catch a planted violation).
+- First push (`a2c5309`): CI run `39522823488` — both jobs success on the
+  runner (the no-simulation gate runs first, before the toolchain).
+- Tag `v1.4.0` (initially at `a2c5309`): the Release run failed at the
+  new gate step — the ubuntu:22.04 build container ships no `python3`
+  (exit 127). Fixed by adding `python3` to the container's install step
+  (`943a122`); tag deleted and recreated at the fix commit.
+- CI run `39523717163` on `943a122`: success both jobs.
+- **Release run `39523722592` on `v1.4.0`: success on all six jobs**
+  (build+test+package on the glibc 2.35 baseline, .deb verified in
+  clean debian:12/ubuntu:22.04/ubuntu:24.04 containers, AppImage
+  verified, published). `verify_release.py v1.4.0`: ALL CHECKS PASSED —
+  all four assets re-downloaded, SHA-256 verified against both
+  SHA256SUMS.txt and the GitHub API digests, BUILD-INFO matches the tag
+  commit `943a122…`; assets archived under
+  `download/SupportOS-Plus-v1.4.0/`.
