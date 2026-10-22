@@ -1850,3 +1850,142 @@ Verification (Rule 5):
   smokes, all green on the runner).
 - Security: staged diff token-scanned clean before the push; remote
   unmoved at push time (fetch-first).
+
+## Batch 20 — clean-audit items 21-25 (HIGH tier: vector point-id collisions, the never-enqueued activity rebuild, auto-sync toast spam, the stale composer-AI fill, the phantom "waiting" status)
+
+_Completed 2026-10-22. Code commit `a5d0d1b` — CI run `39863156425`:
+success (both jobs: fmt/clippy/test/deny and AppImage/deb build + smoke,
+all green on the runner). Local verification: fmt/clippy (plain + sandbox
+feature)/tests/gate/deny all green on the pinned 1.99.1 toolchain; the
+fresh harness `scripts/verify_batch20.py` (committed; also archived at
+`/home/z/my-project/scripts/`) passes all 45 checks._
+
+**21. Vector point-id collisions across entity families** (high|bug) —
+all three chunk families (knowledge/docs/conversation) upsert into the
+single `supportos_vectors` collection with their raw per-table row ids as
+the point id, so knowledge chunk 7 and conversation chunk 7 landed on the
+same key and the upsert's DELETE+INSERT silently overwrote whichever
+family wrote first — permanent, invisible vector loss. Point ids are now
+namespaced by family (`namespaced_chunk_point_id`: knowledge band 0, docs
+band 1, conversation band 2, stride 1e9 — an out-of-band chunk id fails
+loudly instead of aliasing into a neighbour), `vector_point` derives every
+production id through it and stamps `index_version: 2`, and the store
+itself refuses a same-id write whose payload declares a different
+`entity_type` ("cross-family point-id collision") so a future
+regression-to-raw-ids is loud, not silent. Existing databases are
+migrated once (`ensure_vector_id_schema_v2`, marker setting
+`vector_id_schema`): the colliding collection is dropped, all three chunk
+tables are reset to `not_indexed` (attempt counters included), and the
+re-embed pipeline is restarted for every family — the corrupted vectors
+are unrecoverable, so re-embedding is the honest repair. The migration
+only runs while the vector store is live (enabled + openable); a disabled
+index never consumes the marker, so pre-v2 vectors cannot survive a
+disable/enable cycle into the namespaced era.
+vectorstore_sqlitevec.rs, embeddings.rs.
+
+**22. `rebuild_activity` never enqueued** (high|gap) — the worker arm
+existed (workers.rs:1391) but no code path ever enqueued the job, so the
+derived response-state columns (first_customer_message_at,
+customer_waiting_since, response_state, …) stayed at their schema
+defaults forever on every database; the only writer that ever touched
+them was the per-action ticket_ops path from batch 19. The rebuild now
+rides along with the other post-sync jobs in
+`on_after_initial_sync` (threads just landed → derive the activity events
+and recompute every conversation), and a one-time maintenance repair
+(`enqueue_activity_rebuild_repair_once`, marker
+`activity_rebuild_repaired`, gated on conversations > 0 so fresh installs
+are not double-fed) backfills the databases that synced before this fix.
+The job itself is idempotent (dedup-keyed inserts + recompute), so the
+overlap of the two paths is harmless. workers.rs.
+
+**23. Toast on every auto-sync completion** (high|bug) —
+`SyncCompleted` carried no notion of who started the run, so the shell
+toasted "Sync finished / Up to date" for the adaptive timer's ~30-second
+busy ticks (~one toast a minute forever) and for the post-write
+mirror-refresh nudges. `SyncCompletedEvent` now carries a `trigger`
+(`SyncTrigger::Manual | Auto | Refresh`, serde-defaulted to manual so
+legacy serialized payloads keep their visible outcome), every emitter
+declares itself (engine entry points take the trigger; the timer says
+Auto; the job lane and the manual buttons say Manual; the saved-reply
+re-read and webhook-health refreshes say Refresh), and
+`sync_completed_toast` returns None for non-manual triggers — page
+invalidation is untouched, the toast lane only speaks for runs the user
+asked for. events.rs, eventing.rs, sync_engine.rs, workers.rs, app.rs,
+pages/settings.rs, pages/sync_health.rs.
+
+**24. Composer-AI poll filled from a stale/foreign run** (high|bug) —
+on job completion the inbox polled `ai_runs` with
+`ORDER BY id DESC LIMIT 1` and `conversation_id = X OR conversation_id IS
+NULL`, i.e. the newest matching run from ANY conversation or session: a
+foreign historical run's text filled the composer, cache-hit
+translations (which write no run row at all) resurrected an older run's
+text, and the feature-off path claimed "Composer updated by the AI
+transform" with somebody else's output. The job is the unit of work the
+UI polls, so its result now belongs on the job row: `jobs` gains a
+`result` column (fresh schema + lazy heal for old databases via the
+ensure hook), `complete_with_result` pins the transform output at
+completion, both handlers return their text (`Ok(None)` = honest
+no-output), and the poll reads `SELECT status, error, result FROM jobs
+WHERE id = ?1` — never `ai_runs`. A completed job without a result says
+exactly that. jobs.rs, workers.rs, pages/inbox.rs.
+
+**25. "waiting" is not in the platform's status vocabulary** (high|bug)
+— the Settings "status after reply" dropdown offered
+`waiting (await agent)`, but Help Scout's statuses are
+open/pending/closed: every reply sent with that setting rode the wire as
+`status: "waiting"` and was rejected by the platform (and silently
+mapped by the loopback). The option is now `open (await agent)` — the
+platform's own await-agent status; the stored legacy `waiting` value
+loads as `open` (settings loader) and maps to `open` at send time, so
+old installs stop sending the phantom status without any manual
+migration; the loopback world maps `open`/legacy `waiting` onto its
+`active`. pages/settings.rs, pages/inbox.rs, helpscout.rs.
+
+Verification (Rule 5):
+
+- `cargo fmt --all --check` clean; `cargo clippy --workspace
+  --all-targets -- -D warnings` clean; clippy with the `sandbox`
+  feature clean; `python3 scripts/gate_no_simulation.py` clean; cargo
+  deny 0.20.2 advisories + licenses ok — all on the pinned 1.99.1
+  toolchain.
+- Tests: core 310 passed / 0 failed / 4 ignored (16 new batch-20
+  regressions: namespaced ids keep chunk families apart on the same
+  chunk id; the cross-family overwrite is refused loudly while
+  same-family replace still works; unknown families and band overflow
+  fail at mapping time; the one-time migration drops the collection,
+  resets all three chunk families including attempt counters, restarts
+  the re-embed pipeline for every family, and never runs twice; a
+  disabled index does not consume the migration; rebuild_activity is
+  enqueued after the initial sync; the maintenance repair fires once
+  and only for existing mirrors; the completed event carries and
+  round-trips its trigger with legacy-payload compatibility; the toast
+  mapper stays silent for auto and refresh triggers across all
+  outcome shapes; complete_with_result pins output to the job row and
+  refuses terminal re-completion; old databases gain the result column
+  lazily; the loopback maps open/waiting onto active); sandbox-feature
+  suite 315 passed / 0 failed / 4 ignored; app-shell 174 passed /
+  0 failed (4 new: the composer poll fills from the job's own result
+  and stays empty on a resultless completion despite a newer foreign
+  ai_runs row; open is the await-agent statusAfter and legacy waiting
+  maps onto it; the stored waiting setting loads as open); xtask 6;
+  catalog 0.
+- Fresh harness `scripts/verify_batch20.py` (committed; also archived
+  at /home/z/my-project/scripts/): all 45 checks pass — the namespacing
+  helper with its three family bands and stride bound, the store's
+  cross-family refusal, index_version 2 payloads, error propagation at
+  both upsert sites, the marker-gated migration with its live-store
+  gating / family resets / pipeline restart / call ordering, the
+  post-sync and one-time repair enqueues with the handler still wired,
+  the SyncTrigger enum on the event with serde defaults and the
+  constructor/engine/timer/job-lane/refresh/manual-UI wiring, the
+  Option-returning toast mapper with the shell gating, the result
+  column in fresh and healed schemas with the pinned completion and
+  surfaced QueueJob field, the dispatcher's capture-and-complete
+  routing, the handlers' Result<Option<String>> shape, the poll's
+  job-row read with the ai_runs scrape gone, and the open/waiting
+  vocabulary across the dropdown, loader, submit path, and loopback.
+- Runner verification: code commit `a5d0d1b` — CI run `39863156425`:
+  success, both jobs (fmt/clippy/test/deny + AppImage/deb build and
+  smokes, all green on the runner).
+- Security: staged diff token-scanned clean before the push; remote
+  unmoved at push time (fetch-first).
