@@ -861,6 +861,10 @@ fn embed_pending_chunks(
     table: &str,
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
+    // Audit item 21: run the one-time point-id-schema migration before
+    // the pending list is read, so freshly reset chunks are picked up in
+    // this same pass.
+    ensure_vector_id_schema_v2(conn, qdrant)?;
     let pending = list_pending_chunks(conn, table)?;
     if pending.is_empty() {
         return Ok(0);
@@ -903,7 +907,7 @@ fn embed_pending_chunks(
                     let vector = vectors.get(i).unwrap_or(&empty);
                     vector_point(table, chunk, vector, &model)
                 })
-                .collect();
+                .collect::<Result<Vec<_>>>()?;
             let q = qdrant.expect("checked is_some above");
             let _ = q.ensure_collection(dim);
             let ok = q.upsert(&points);
@@ -947,7 +951,7 @@ fn embed_pending_chunks(
                 }
                 Some(vector_point(table, chunk, v, &model))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         if !points.is_empty() {
             let q = qdrant.expect("checked is_some above");
             let _ = q.ensure_collection(points[0].vector.len());
@@ -957,21 +961,77 @@ fn embed_pending_chunks(
     Ok(embedded)
 }
 
+/// Clean-audit item 21: the vector store's point-id space is namespaced
+/// per chunk family (knowledge/docs/conversation) now. Databases whose
+/// chunks were embedded before that carry colliding, silently overwritten
+/// vectors — unrecoverable, since the overwritten family's embedding was
+/// never re-read. One time only (marker setting `vector_id_schema`), the
+/// shared collection is dropped and every chunk is reset to
+/// `not_indexed` so the normal pending pipeline re-embeds the corpus
+/// under collision-free ids. The migration runs only when the vector
+/// store is actually live (enabled and openable); a disabled index
+/// re-checks on the first pass after it is re-enabled, so pre-v2 vectors
+/// can never survive into the namespaced era.
+fn ensure_vector_id_schema_v2(
+    conn: &Connection,
+    qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
+) -> Result<()> {
+    const VERSION: i64 = 2;
+    if crate::settings::get_i64(conn, "vector_id_schema", 0).unwrap_or(0) >= VERSION {
+        return Ok(());
+    }
+    let migrated = qdrant.is_some_and(|q| q.drop_collection());
+    if !migrated {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE knowledge_chunks SET embedding_state = 'not_indexed'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE docs_chunks SET embedding_state = 'not_indexed', embedding_attempts = 0",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE conversation_chunks
+          SET embedding_state = 'not_indexed', embedding_attempts = 0",
+        [],
+    )?;
+    crate::settings::set_i64(conn, "vector_id_schema", VERSION)?;
+    // Restart the re-embed pipeline for every family: this pass covers
+    // its own table, the queued jobs cover the other two (a no-op pass
+    // when nothing is pending — the normal guard rails apply).
+    for kind in [
+        "embed_knowledge_chunks",
+        "embed_docs_chunks",
+        "embed_conversation_chunks",
+    ] {
+        let _ = crate::jobs::enqueue_on(conn, "embeddings", kind, "{}", 4, 2);
+    }
+    tracing::info!(
+        operation = "vector_id_schema_v2",
+        "vector collection dropped and all chunks reset — the corpus re-embeds \
+         under namespaced point ids (audit item 21)"
+    );
+    Ok(())
+}
+
 fn vector_point(
     table: &str,
     chunk: &PendingChunk,
     vector: &[f32],
     model: &str,
-) -> crate::vectorstore_sqlitevec::VectorPoint {
+) -> Result<crate::vectorstore_sqlitevec::VectorPoint> {
+    let entity_type = entity_type_for(table);
     let mut payload = serde_json::json!({
-        "entity_type": entity_type_for(table),
+        "entity_type": entity_type,
         "entity_id": chunk.entity_id,
         "chunk_id": chunk.id,
         "title": chunk.title,
         "text": utf16_slice(&chunk.content, 0, 2000),
         "visibility": chunk.visibility,
         "embedding_model": model,
-        "index_version": 1
+        "index_version": 2
     });
     if table == "conversation_chunks" {
         payload
@@ -979,11 +1039,14 @@ fn vector_point(
             .expect("payload is an object")
             .insert("number".to_string(), chunk.number.into());
     }
-    crate::vectorstore_sqlitevec::VectorPoint {
-        id: chunk.id,
+    Ok(crate::vectorstore_sqlitevec::VectorPoint {
+        // Audit item 21: namespaced by family, so knowledge/docs/
+        // conversation chunks can never land on the same point id in
+        // the single shared collection.
+        id: crate::vectorstore_sqlitevec::namespaced_chunk_point_id(entity_type, chunk.id)?,
         vector: vector.to_vec(),
         payload,
-    }
+    })
 }
 
 fn set_chunk_state(
@@ -1022,6 +1085,186 @@ pub fn embed_pending_conversation_chunks(
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     embed_pending_chunks(conn, "conversation_chunks", qdrant)
+}
+
+#[cfg(test)]
+mod batch20_audit21_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn temp_data_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-embed-audit21-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// A pre-v2 database: chunks already 'indexed' (their vectors lived in
+    /// the shared collection under colliding raw per-table ids) and a
+    /// live vector collection holding a stale point.
+    fn pre_v2_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO knowledge_sources (name, kind) VALUES ('src', 'local_file')",
+            [],
+        )
+        .expect("source");
+        let source = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, content)
+             VALUES (?1, 'Runbook', 'restart the widget')",
+            params![source],
+        )
+        .expect("doc");
+        let doc = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO knowledge_chunks (document_id, chunk_index, content, embedding_state)
+             VALUES (?1, 0, 'restart the widget', 'indexed')",
+            params![doc],
+        )
+        .expect("knowledge chunk");
+        conn.execute(
+            "INSERT INTO docs_chunks (article_id, chunk_index, content, embedding_state,
+                                      embedding_attempts)
+             VALUES (1, 0, 'billing article', 'indexed', 3)",
+            [],
+        )
+        .expect("docs chunk");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9301, 93, 'Broken export', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_chunks (conversation_id, chunk_index, content,
+                                              embedding_state, embedding_attempts)
+             VALUES (?1, 0, 'the export fails', 'indexed', 2)",
+            params![conv],
+        )
+        .expect("conversation chunk");
+        conn
+    }
+
+    /// Audit item 21: the first embed pass on a pre-v2 database drops the
+    /// colliding collection, resets every chunk family to `not_indexed`
+    /// (attempt counters included), restarts the re-embed pipeline for all
+    /// three families, and stamps the marker so it never runs twice.
+    #[test]
+    fn audit21_migration_drops_resets_and_stamps_once() {
+        let conn = pre_v2_db();
+        let dir = temp_data_dir("migrate");
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
+        // Pre-v2 vectors exist in the shared collection.
+        assert!(index.ensure_collection(2));
+        assert!(index.upsert(&[crate::vectorstore_sqlitevec::VectorPoint {
+            id: 1,
+            vector: vec![1.0, 0.0],
+            payload: serde_json::json!({"entity_type": "knowledge_chunk", "entity_id": 1}),
+        }]));
+        assert_eq!(index.try_point_count().expect("count"), Some(1));
+
+        // No embedding model is routed, so the pass embeds nothing — but
+        // the migration still runs first.
+        embed_pending_knowledge(&conn, Some(&index)).expect("embed pass");
+
+        assert_eq!(
+            crate::settings::get_i64(&conn, "vector_id_schema", 0).unwrap_or(0),
+            2,
+            "the schema marker must be stamped"
+        );
+        assert_eq!(
+            index.try_point_count().expect("count after"),
+            None,
+            "the pre-v2 collection must be gone"
+        );
+        for (table, has_attempts) in [
+            ("knowledge_chunks", false),
+            ("docs_chunks", true),
+            ("conversation_chunks", true),
+        ] {
+            let state: String = conn
+                .query_row(
+                    &format!("SELECT embedding_state FROM {table} LIMIT 1"),
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("state row");
+            assert_eq!(state, "not_indexed", "{table} must be reset for re-embed");
+            if has_attempts {
+                let attempts: i64 = conn
+                    .query_row(
+                        &format!("SELECT embedding_attempts FROM {table} LIMIT 1"),
+                        [],
+                        |r| r.get(0),
+                    )
+                    .expect("attempts row");
+                assert_eq!(attempts, 0, "{table} attempt counter must be reset");
+            }
+        }
+        let queued: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM jobs
+                  WHERE type IN ('embed_knowledge_chunks', 'embed_docs_chunks',
+                                 'embed_conversation_chunks')
+                    AND status = 'queued'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("job count");
+        assert_eq!(queued, 3, "the re-embed pipeline restarts for every family");
+
+        // Second pass: the marker holds — no further reset or enqueue.
+        conn.execute(
+            "UPDATE knowledge_chunks SET embedding_state = 'indexed'",
+            [],
+        )
+        .expect("pretend a re-embed happened");
+        embed_pending_docs(&conn, Some(&index)).expect("second pass");
+        let state: String = conn
+            .query_row(
+                "SELECT embedding_state FROM knowledge_chunks LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("state row");
+        assert_eq!(state, "indexed", "the migration must not run a second time");
+    }
+
+    /// Audit item 21: a disabled vector index never stamps the marker —
+    /// so pre-v2 vectors cannot survive into the namespaced era by way of
+    /// a disable/enable cycle; the migration re-checks once it matters.
+    #[test]
+    fn audit21_disabled_index_does_not_stamp_the_marker() {
+        let conn = pre_v2_db();
+        let dir = temp_data_dir("disabled");
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, false);
+        embed_pending_knowledge(&conn, Some(&index)).expect("embed pass");
+        assert_eq!(
+            crate::settings::get_i64(&conn, "vector_id_schema", 0).unwrap_or(0),
+            0,
+            "a disabled index must not consume the migration"
+        );
+        let state: String = conn
+            .query_row(
+                "SELECT embedding_state FROM knowledge_chunks LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("state row");
+        assert_eq!(
+            state, "indexed",
+            "chunk-table states are untouched while the index is off"
+        );
+    }
 }
 
 #[cfg(test)]

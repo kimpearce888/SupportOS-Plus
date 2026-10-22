@@ -250,7 +250,12 @@ mod tests {
 
     #[test]
     fn sync_without_rows_keeps_knowledge_clean() {
-        let pages = invalidated_pages(&ServerEvent::sync_completed("incremental", 0, 0));
+        let pages = invalidated_pages(&ServerEvent::sync_completed(
+            "incremental",
+            0,
+            0,
+            spp_core::events::SyncTrigger::Auto,
+        ));
         assert!(pages.contains(&PageKey::Dashboard));
         assert!(pages.contains(&PageKey::Inbox));
         // v1.4.0: Knowledge is part of the sync-complete set regardless
@@ -266,8 +271,8 @@ mod tests {
         // invalidation set.
         let mut covered: Vec<PageKey> = Vec::new();
         let probes = vec![
-            ServerEvent::sync_completed("incremental", 0, 0),
-            ServerEvent::sync_completed("initial", 5, 0),
+            ServerEvent::sync_completed("incremental", 0, 0, spp_core::events::SyncTrigger::Auto),
+            ServerEvent::sync_completed("initial", 5, 0, spp_core::events::SyncTrigger::Manual),
             ServerEvent::conversation_updated(None, None, None, None, "probe"),
             ServerEvent::sync_progress("probe", 0, 1, 0, 0),
             ServerEvent::outbound_job_finished(1, "create_reply", None, true, None),
@@ -317,6 +322,7 @@ mod tests {
             kind: "incremental".into(),
             processed: 3,
             errors: 0,
+            trigger: spp_core::events::SyncTrigger::Auto,
             at: "2026-01-01T00:00:00Z".into(),
         });
         let pages = invalidated_pages(&event);

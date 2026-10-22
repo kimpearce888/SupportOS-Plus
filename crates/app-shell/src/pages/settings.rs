@@ -67,8 +67,12 @@ pub struct GeneralSettings {
     pub automatic_reply_sending: bool,
     /// v1.4.0 (R4, D9): the status a conversation moves to when a reply
     /// is sent (decision D-b). `pending` matches Help Scout semantics
-    /// (awaiting the customer), `waiting` keeps it waiting on the agent,
-    /// `keep` leaves the status untouched (the pre-1.4.0 behavior).
+    /// (awaiting the customer), `open` is the platform's own status for
+    /// "await agent" (clean-audit item 25: the pre-fix dropdown offered
+    /// `waiting`, which is in neither Help Scout's nor the loopback
+    /// provider's status vocabulary — every send with it configured was
+    /// rejected by the platform), `keep` leaves the status untouched
+    /// (the pre-1.4.0 behavior).
     pub reply_status_after: String,
     pub log_level: String,
     pub display_timezone: String,
@@ -168,12 +172,13 @@ impl GeneralSettings {
             reply_status_after: spp_core::settings::get_string(conn, "reply_status_after")
                 .ok()
                 .flatten()
-                .map(|v| {
-                    if ["pending", "waiting", "keep"].contains(&v.as_str()) {
-                        v
-                    } else {
-                        defaults.reply_status_after.clone()
-                    }
+                .map(|v| match v.as_str() {
+                    // Audit item 25: `waiting` was never a platform status —
+                    // map the stored legacy value onto the real one so old
+                    // installs stop sending it.
+                    "waiting" => "open".to_string(),
+                    "pending" | "open" | "keep" => v,
+                    _ => defaults.reply_status_after.clone(),
                 })
                 .unwrap_or_else(|| defaults.reply_status_after.clone()),
             log_level: spp_core::settings::get_string(conn, "log_level")
@@ -807,10 +812,10 @@ impl SettingsPage {
                 };
                 let result = if state == "NEW" {
                     tracing::info!(state, "activation: starting the initial sync");
-                    runtime.block_on(engine.initial_sync())
+                    runtime.block_on(engine.initial_sync(spp_core::events::SyncTrigger::Manual))
                 } else {
                     tracing::info!(state, "activation: starting an incremental sync");
-                    runtime.block_on(engine.incremental_sync())
+                    runtime.block_on(engine.incremental_sync(spp_core::events::SyncTrigger::Manual))
                 };
                 if let Err(e) = result {
                     let msg = e.to_string();
@@ -1121,9 +1126,13 @@ impl SettingsPage {
                     .width(190.0)
                     .selected_text(general.reply_status_after.clone())
                     .show_ui(ui, |ui| {
+                        // Audit item 25: `open` is Help Scout's own status
+                        // for "await agent" — the old `waiting` option was
+                        // not in the platform's vocabulary and every send
+                        // configured with it failed on the wire.
                         for (value, label) in [
                             ("pending", "pending (await customer)"),
-                            ("waiting", "waiting (await agent)"),
+                            ("open", "open (await agent)"),
                             ("keep", "keep current status"),
                         ] {
                             ui.selectable_value(
@@ -2199,6 +2208,33 @@ mod tests {
         let reloaded = db.with_read(GeneralSettings::load);
         assert_eq!(reloaded, changed);
         assert_ne!(reloaded, GeneralSettings::default());
+    }
+
+    /// Clean-audit item 25: `waiting` was never in the platform's status
+    /// vocabulary. The loader maps a stored legacy value onto the real
+    /// await-agent status (`open`) so old installs stop offering and
+    /// sending the phantom one; unknown values still fall back to the
+    /// default.
+    #[test]
+    fn audit25_legacy_waiting_setting_loads_as_open() {
+        let db = fixture(Vec::new());
+        for (stored, expected) in [
+            ("waiting", "open"),
+            ("open", "open"),
+            ("pending", "pending"),
+            ("keep", "keep"),
+            ("garbage", "pending"),
+        ] {
+            db.with_write(|conn| {
+                spp_core::settings::set_string(conn, "reply_status_after", stored)
+            })
+            .expect("set");
+            let loaded = db.with_read(GeneralSettings::load);
+            assert_eq!(
+                loaded.reply_status_after, expected,
+                "stored '{stored}' must load as '{expected}'"
+            );
+        }
     }
 
     #[test]

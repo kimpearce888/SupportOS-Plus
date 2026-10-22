@@ -932,9 +932,11 @@ impl WorkerManager {
         // prevents a second run from stacking behind it.
         let result = if state == "NEW" {
             tracing::info!(state, "first sync: starting the initial pull");
-            engine.initial_sync().await
+            engine.initial_sync(crate::events::SyncTrigger::Auto).await
         } else {
-            engine.incremental_sync().await
+            engine
+                .incremental_sync(crate::events::SyncTrigger::Auto)
+                .await
         };
         match result {
             Ok(results) => {
@@ -982,6 +984,9 @@ impl WorkerManager {
             let conn = db_handle.write_guard();
             crate::maintenance::compute_trends(&conn)?;
             let _ = crate::maintenance::refresh_products(&conn);
+            // Clean-audit item 22, repair half — see
+            // [`enqueue_activity_rebuild_repair_once`].
+            enqueue_activity_rebuild_repair_once(&conn);
             // A2: issue clustering cadence — once a day at most, feature-
             // gated, provider-gated (the job itself skips honestly when
             // no Classify endpoint is routed).
@@ -1233,17 +1238,31 @@ impl WorkerManager {
             })
         };
         let outcome: Result<()> = async {
+            // Clean-audit item 24: the composer-AI transforms (rewrite /
+            // translate) return the transformed text; it is pinned to the
+            // job row so the inbox poll reads THIS job's result instead
+            // of scraping the newest matching `ai_runs` row (which could
+            // be a stale or foreign historical run — or absent entirely
+            // on cache hits and feature-off paths, which used to make
+            // the poll fill the composer with a foreign run's text).
+            let mut composer_result: Option<String> = None;
             match kind {
                 "initial_sync" => {
                     self.run_engine(|e| async move {
-                        e.initial_sync().await.map(|_| ())
+                        e.initial_sync(crate::events::SyncTrigger::Manual)
+                            .await
+                            .map(|_| ())
                     })
                     .await?;
                     self.on_after_initial_sync();
                 }
                 "incremental_sync" => {
-                    self.run_engine(|e| async move { e.incremental_sync().await.map(|_| ()) })
-                        .await?;
+                    self.run_engine(|e| async move {
+                        e.incremental_sync(crate::events::SyncTrigger::Manual)
+                            .await
+                            .map(|_| ())
+                    })
+                    .await?;
                 }
                 "reconciliation" => {
                     self.run_engine(|e| async move { e.reconcile().await.map(|_| ()) })
@@ -1490,10 +1509,10 @@ impl WorkerManager {
                 // and role at execution (enqueue-time gates are not
                 // trusted on their own). ----
                 "rewrite_composer" => {
-                    self.run_rewrite_job(&payload).await?;
+                    composer_result = self.run_rewrite_job(&payload).await?;
                 }
                 "translate_composer" => {
-                    self.run_translate_job(&payload).await?;
+                    composer_result = self.run_translate_job(&payload).await?;
                 }
                 "review_draft" => {
                     let Some(conv_id) = num("conversationId") else {
@@ -1644,8 +1663,12 @@ impl WorkerManager {
                     }
                 }
                 "sync.conversations" => {
-                    self.run_engine(|e| async move { e.incremental_sync().await.map(|_| ()) })
-                        .await?;
+                    self.run_engine(|e| async move {
+                        e.incremental_sync(crate::events::SyncTrigger::Manual)
+                            .await
+                            .map(|_| ())
+                    })
+                    .await?;
                 }
                 _ => {
                     let conn = self.lock();
@@ -1654,7 +1677,10 @@ impl WorkerManager {
                 }
             }
             let conn = self.lock();
-            jobs::complete(&conn, job_id)?;
+            match composer_result {
+                Some(text) => jobs::complete_with_result(&conn, job_id, &text)?,
+                None => jobs::complete(&conn, job_id)?,
+            }
             tracing::debug!(
                 operation = kind,
                 latency_ms = started.elapsed().as_millis() as u64,
@@ -1682,6 +1708,15 @@ impl WorkerManager {
             crate::settings::get_i64(&conn, "attachment_auto_download", 1).unwrap_or(1) != 0;
         let _ = jobs::enqueue_on(&conn, "embeddings", "embed_knowledge_chunks", "{}", 4, 2);
         let _ = jobs::enqueue_on(&conn, "embeddings", "embed_conversation_chunks", "{}", 4, 2);
+        // Clean-audit item 22: `rebuild_activity` existed as a worker job
+        // but nothing ever enqueued it, so the derived response-state
+        // columns (first_customer_message_at, customer_waiting_since,
+        // response_state, …) stayed at their schema defaults forever —
+        // the only writer that ever touched them was the per-action
+        // ticket_ops path. The threads just landed in the mirror; derive
+        // the activity events and refresh every conversation's columns
+        // from them (idempotent: dedup-keyed inserts + recompute).
+        let _ = jobs::enqueue_on(&conn, "sync", "rebuild_activity", "{}", 3, 2);
         if auto_download {
             let _ = jobs::enqueue_on(
                 &conn,
@@ -2260,7 +2295,14 @@ impl WorkerManager {
     /// A3: composer rewrite (shorten/expand/warmer/more_direct). Draft role;
     /// user-triggered, so an unrouted role fails the job with the setup truth
     /// instead of a silent skip — the composer is polling the job row.
-    async fn run_rewrite_job(&self, payload: &serde_json::Value) -> Result<()> {
+    ///
+    /// Clean-audit item 24: returns the rewritten text so the dispatcher
+    /// pins it to the job row (`jobs.result`) — the poll reads exactly
+    /// this job's output. `Ok(None)` means "completed without output"
+    /// (feature off / no endpoint / empty input): the poll then says so
+    /// honestly instead of filling the composer from a stale or foreign
+    /// historical run.
+    async fn run_rewrite_job(&self, payload: &serde_json::Value) -> Result<Option<String>> {
         let (enabled, backend) = {
             let conn = self.lock();
             (
@@ -2278,12 +2320,12 @@ impl WorkerManager {
                 operation = "rewrite_composer",
                 "rewrite skipped - draft feature off or no Draft role endpoint routed"
             );
-            return Ok(());
+            return Ok(None);
         }
         if text.trim().is_empty() {
             let conn = self.lock();
             jobs::log_error(&conn, "workers", "rewrite_composer called with empty text")?;
-            return Ok(());
+            return Ok(None);
         }
         let instruction: String = payload
             .get("instruction")
@@ -2292,7 +2334,7 @@ impl WorkerManager {
             .to_string();
         let conversation_id = payload.get("conversationId").and_then(|v| v.as_i64());
         let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
+        let rewritten = tokio::task::spawn_blocking(move || {
             let conn = db.long_op_guard();
             block_ai_pipeline(async {
                 crate::ai_pipeline::rewrite_composer_text(
@@ -2303,25 +2345,28 @@ impl WorkerManager {
                     &instruction,
                 )
                 .await
-                .map(|rewritten| {
-                    tracing::info!(
-                        operation = "rewrite_composer",
-                        chars = rewritten.chars().count(),
-                        "composer rewrite finished"
-                    );
-                })
                 .map_err(|e| Error::Other(e.to_string().into()))
             })
         })
         .await
         .map_err(|e| Error::Other(e.to_string().into()))??;
-        Ok(())
+        tracing::info!(
+            operation = "rewrite_composer",
+            chars = rewritten.chars().count(),
+            "composer rewrite finished"
+        );
+        Ok(Some(rewritten))
     }
 
     /// A3: composer translation (18 languages, cached). Draft role; the run
     /// row records only actual model calls — a cache hit costs nothing and
     /// says so in its own response.
-    async fn run_translate_job(&self, payload: &serde_json::Value) -> Result<()> {
+    ///
+    /// Clean-audit item 24: returns the translated text so the dispatcher
+    /// pins it to the job row (`jobs.result`). Cache hits write NO
+    /// `ai_runs` row at all — the old poll's newest-run scrape picked a
+    /// stale or foreign run's text on exactly those paths.
+    async fn run_translate_job(&self, payload: &serde_json::Value) -> Result<Option<String>> {
         let (enabled, backend) = {
             let conn = self.lock();
             (
@@ -2334,7 +2379,7 @@ impl WorkerManager {
                 operation = "translate_composer",
                 "translation skipped - feature off or no Draft role endpoint routed"
             );
-            return Ok(());
+            return Ok(None);
         }
         let text: String = payload
             .get("text")
@@ -2359,7 +2404,7 @@ impl WorkerManager {
                 "workers",
                 "translate_composer called with empty text or target language",
             )?;
-            return Ok(());
+            return Ok(None);
         }
         let db = self.db.clone();
         let outcome = tokio::task::spawn_blocking(move || {
@@ -2451,7 +2496,7 @@ impl WorkerManager {
                     chars = translated.chars().count(),
                     "composer translation finished"
                 );
-                Ok(())
+                Ok(Some(translated))
             }
             Err(message) => Err(Error::Other(message.into())),
         }
@@ -3374,8 +3419,12 @@ impl WorkerManager {
             );
         }
         use crate::events::ServerEvent;
-        self.bus
-            .emit(&ServerEvent::sync_completed("incremental", 0, 0));
+        self.bus.emit(&ServerEvent::sync_completed(
+            "incremental",
+            0,
+            0,
+            crate::events::SyncTrigger::Refresh,
+        ));
         Ok(())
     }
 
@@ -3525,8 +3574,12 @@ impl WorkerManager {
                         None,
                     ));
                 } else {
-                    self.bus
-                        .emit(&ServerEvent::sync_completed("incremental", 0, 0));
+                    self.bus.emit(&ServerEvent::sync_completed(
+                        "incremental",
+                        0,
+                        0,
+                        crate::events::SyncTrigger::Refresh,
+                    ));
                 }
                 Ok(())
             }
@@ -3796,6 +3849,28 @@ enum AiJob {
     Note,
 }
 
+/// Clean-audit item 22, repair half: databases that finished their
+/// initial sync before this fix never ran `rebuild_activity` — the job
+/// existed but nothing ever enqueued it, so the derived response-state
+/// columns (first_customer_message_at, customer_waiting_since,
+/// response_state, …) are still NULL/schema defaults. One-time repair
+/// for any database that already carries conversations; fresh installs
+/// are covered by the `on_after_initial_sync` enqueue instead.
+fn enqueue_activity_rebuild_repair_once(conn: &Connection) {
+    let conversations: i64 = conn
+        .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
+        .unwrap_or(0);
+    let repaired = crate::settings::get_i64(conn, "activity_rebuild_repaired", 0).unwrap_or(0);
+    if conversations > 0 && repaired == 0 {
+        let _ = jobs::enqueue_on(conn, "sync", "rebuild_activity", "{}", 3, 2);
+        let _ = crate::settings::set_i64(conn, "activity_rebuild_repaired", 1);
+        tracing::info!(
+            operation = "maintenance",
+            "one-time activity rebuild enqueued for the pre-fix mirror (audit item 22)"
+        );
+    }
+}
+
 fn parse_iso_to_unix(s: &str) -> Option<i64> {
     let s = s.trim();
     if s.len() < 19 {
@@ -3865,6 +3940,103 @@ pub fn start_workers(
     ));
     manager.start();
     manager
+}
+
+#[cfg(test)]
+mod batch20_audit22_tests {
+    use super::*;
+
+    fn temp_db() -> crate::db::DbHandle {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-workers-b20-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::db::DbHandle::new(conn)
+    }
+
+    fn manager(db: &crate::db::DbHandle) -> Arc<WorkerManager> {
+        Arc::new(WorkerManager::new(
+            db.clone(),
+            None,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+            crate::eventing::EventBus::default(),
+            std::env::temp_dir(),
+            None,
+        ))
+    }
+
+    fn rebuild_activity_jobs(db: &crate::db::DbHandle) -> i64 {
+        db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM jobs WHERE type = 'rebuild_activity'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        })
+    }
+
+    /// Audit item 22: `on_after_initial_sync` enqueues the rebuild — the
+    /// threads just landed, so the derived response-state columns get
+    /// computed from them instead of staying at schema defaults forever.
+    #[test]
+    fn audit22_rebuild_activity_is_enqueued_after_initial_sync() {
+        let db = temp_db();
+        let manager = manager(&db);
+        manager.on_after_initial_sync();
+        assert_eq!(
+            rebuild_activity_jobs(&db),
+            1,
+            "the activity rebuild must ride along with the post-sync jobs"
+        );
+    }
+
+    /// Audit item 22, repair half: an existing database (conversations
+    /// already mirrored) gets a one-time rebuild from the maintenance
+    /// sweep; an empty one does not (fresh installs are covered by the
+    /// post-initial-sync enqueue); and the marker makes it exactly once.
+    #[test]
+    fn audit22_repair_runs_once_and_only_for_existing_mirrors() {
+        let db = temp_db();
+
+        // Empty database: no repair, no marker consumed.
+        db.with_write(|conn| enqueue_activity_rebuild_repair_once(conn));
+        assert_eq!(rebuild_activity_jobs(&db), 0, "nothing to rebuild yet");
+        assert_eq!(
+            db.with_read(|conn| {
+                crate::settings::get_i64(conn, "activity_rebuild_repaired", 0).unwrap_or(0)
+            }),
+            0,
+            "the marker must not be consumed by an empty database"
+        );
+
+        // Existing mirror: repair enqueues once.
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (9401, 94, 'Pre-fix mirror', 'preview', 'active')",
+                [],
+            )
+            .expect("conversation")
+        });
+        db.with_write(|conn| enqueue_activity_rebuild_repair_once(conn));
+        assert_eq!(rebuild_activity_jobs(&db), 1);
+
+        // Marker holds: a second sweep never re-enqueues.
+        db.with_write(|conn| enqueue_activity_rebuild_repair_once(conn));
+        assert_eq!(
+            rebuild_activity_jobs(&db),
+            1,
+            "the repair is strictly one-time"
+        );
+    }
 }
 
 #[cfg(test)]

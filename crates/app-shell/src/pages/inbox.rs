@@ -1707,45 +1707,36 @@ impl InboxPage {
     /// Poll the in-flight composer-AI job (A3): completed jobs move their
     /// durable results into page state; failed jobs surface their exact
     /// error; running/queued jobs keep the working note.
+    ///
+    /// Clean-audit item 24: the rewrite/translate branch reads the job's
+    /// OWN `jobs.result` row. The old query scraped the newest matching
+    /// `ai_runs` row (`ORDER BY id DESC LIMIT 1`, any conversation via
+    /// `conversation_id IS NULL`) — a stale or foreign historical run
+    /// filled the composer, cache-hit translations (which write no run
+    /// row at all) picked an older run's text, and feature-off paths
+    /// claimed "Composer updated" with somebody else's output.
     fn poll_pending_ai(&mut self, db: &DbHandle) {
         let Some(p) = self.pending_ai.clone() else {
             return;
         };
-        let (status, error): (String, Option<String>) = db.with_read(|conn| {
-            conn.query_row(
-                "SELECT status, error FROM jobs WHERE id = ?1",
-                rusqlite::params![p.job_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap_or(("missing".into(), None))
-        });
+        let (status, error, result): (String, Option<String>, Option<String>) =
+            db.with_read(|conn| {
+                conn.query_row(
+                    "SELECT status, error, result FROM jobs WHERE id = ?1",
+                    rusqlite::params![p.job_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap_or(("missing".into(), None, None))
+            });
         match status.as_str() {
             "queued" | "running" => {}
             "completed" => {
                 self.pending_ai = None;
                 match p.kind {
                     "rewrite_composer" | "translate_composer" => {
-                        let run_kind = if p.kind == "rewrite_composer" {
-                            "draft_rewrite"
-                        } else {
-                            "translation"
-                        };
-                        let output: Option<String> = db.with_read(|conn| {
-                            conn.query_row(
-                                "SELECT response_json FROM ai_runs
-                                  WHERE type = ?1 AND status = 'completed'
-                                    AND (conversation_id = ?2 OR conversation_id IS NULL)
-                                  ORDER BY id DESC LIMIT 1",
-                                rusqlite::params![run_kind, p.conversation_id],
-                                |r| r.get::<_, String>(0),
-                            )
-                            .ok()
-                            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-                            .and_then(|v| {
-                                v.get("output").and_then(|o| o.as_str()).map(str::to_string)
-                            })
-                        });
-                        match output {
+                        // This job's own output — never a neighbouring or
+                        // historical run's (audit item 24).
+                        match result {
                             Some(text) if !text.trim().is_empty() => {
                                 self.composer_body = text;
                                 self.status_message =
@@ -2712,7 +2703,12 @@ pub fn submit_reply(
             .trim_matches('"')
             .to_string();
         let status_after = match status_after.as_str() {
-            "waiting" => json!("waiting"),
+            // Audit item 25: Help Scout's own status vocabulary is
+            // open/pending/closed — `waiting` never existed there, so a
+            // reply configured with it was rejected on the wire. `open`
+            // is the real "await agent" status; a stored legacy `waiting`
+            // maps onto it.
+            "open" | "waiting" => json!("open"),
             "keep" => serde_json::Value::Null,
             // default: pending (await customer) — Help Scout semantics
             _ => json!("pending"),
@@ -3197,5 +3193,123 @@ mod tests {
             }
             other => panic!("expected rejection, got {other:?}"),
         }
+    }
+
+    /// Clean-audit item 24: the composer poll reads THIS job's `jobs.result`
+    /// row. The old query scraped the newest matching `ai_runs` row (any
+    /// conversation, any session) — a foreign historical run filled the
+    /// composer and claimed "Composer updated by the AI transform."
+    #[test]
+    fn audit24_poll_fills_the_composer_from_the_jobs_own_result() {
+        let db = fixture(vec![seeded().0]);
+        // The bait: a newer, foreign, GLOBAL draft_rewrite run that the old
+        // newest-run scrape would have picked.
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO ai_runs (type, conversation_id, status, model, prompt_version,
+                                       input_hash, input_refs, created_at, started_at,
+                                       response_json)
+                 VALUES ('draft_rewrite', NULL, 'completed', 'some-model', 'draft_rewrite_v1',
+                         'bait', '[]', datetime('now'), datetime('now'),
+                         '{\"output\":\"FOREIGN HISTORICAL TEXT\",\"instruction\":\"warmer\"}')",
+                [],
+            )
+            .expect("foreign run");
+        });
+        // This job's own pinned result.
+        let job_id = db.with_write(|conn| {
+            spp_core::jobs::enqueue_on(conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue")
+        });
+        db.with_write(|conn| {
+            conn.execute(
+                "UPDATE jobs SET status = 'completed', completed_at = datetime('now'),
+                                 result = 'THE JOB RESULT' WHERE id = ?1",
+                rusqlite::params![job_id],
+            )
+            .expect("complete with result")
+        });
+
+        let mut page = InboxPage {
+            pending_ai: Some(PendingComposerAi {
+                job_id,
+                kind: "rewrite_composer",
+                conversation_id: 1,
+            }),
+            ..Default::default()
+        };
+        page.poll_pending_ai(&db);
+        assert_eq!(page.composer_body, "THE JOB RESULT");
+        assert!(page.pending_ai.is_none(), "the poll resolves the job");
+        assert!(!page.status_is_error, "a real result is a success");
+
+        // A completed job with NO result (feature off / cache hit that wrote
+        // nothing) says so honestly instead of falling back to ai_runs.
+        let job_id2 = db.with_write(|conn| {
+            spp_core::jobs::enqueue_on(conn, "ai", "translate_composer", "{}", 3, 2)
+                .expect("enqueue")
+        });
+        db.with_write(|conn| {
+            conn.execute(
+                "UPDATE jobs SET status = 'completed', completed_at = datetime('now') WHERE id = ?1",
+                rusqlite::params![job_id2],
+            )
+            .expect("complete without result")
+        });
+        page.composer_body.clear();
+        page.pending_ai = Some(PendingComposerAi {
+            job_id: job_id2,
+            kind: "translate_composer",
+            conversation_id: 1,
+        });
+        page.poll_pending_ai(&db);
+        assert!(
+            page.composer_body.is_empty(),
+            "no foreign text may leak into the composer"
+        );
+        assert!(page.status_is_error, "the honest no-result message shows");
+    }
+
+    /// Clean-audit item 25: `open` is the platform's own await-agent status
+    /// and rides the wire; the legacy phantom `waiting` maps onto it —
+    /// never onto a status Help Scout would reject.
+    #[test]
+    fn audit25_open_is_the_await_agent_status_and_legacy_waiting_maps_to_it() {
+        let db = fixture(vec![seeded().0]);
+        let bus = EventBus::new(8);
+        let detail = db
+            .with_read(|conn| spp_core::inbox::get_conversation(conn, 1))
+            .expect("detail")
+            .expect("conversation 1 exists");
+
+        let status_after_for = |text: &str| -> serde_json::Value {
+            let outcome = submit_reply(&db, &bus, &detail, text, "", "");
+            assert!(matches!(outcome, ActionOutcome::Success(_)));
+            let payload: String = db.with_read(|conn| {
+                conn.query_row(
+                    "SELECT payload FROM outbound_jobs ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("job row")
+            });
+            serde_json::from_str(&payload).expect("payload json")
+        };
+
+        db.with_write(|conn| spp_core::settings::set_string(conn, "reply_status_after", "open"))
+            .expect("set open");
+        let parsed = status_after_for("open setting text");
+        assert_eq!(
+            parsed["statusAfter"], "open",
+            "the await-agent status must be the platform's own `open`"
+        );
+
+        // A stored legacy "waiting" must never reach the wire.
+        db.with_write(|conn| spp_core::settings::set_string(conn, "reply_status_after", "waiting"))
+            .expect("set legacy waiting");
+        let parsed = status_after_for("legacy waiting text");
+        assert_eq!(
+            parsed["statusAfter"], "open",
+            "the legacy phantom status maps onto the real one"
+        );
     }
 }

@@ -49,6 +49,48 @@ use crate::vectorstore::{
 /// qdrant era so settings/xtask output stay recognizable).
 pub const VECTOR_COLLECTION: &str = "supportos_vectors";
 
+/// Point-id namespacing (clean-audit item 21): all three chunk families
+/// upsert into the single [`VECTOR_COLLECTION`] collection, and their
+/// per-table row ids are independent sequences — knowledge chunk 7 and
+/// conversation chunk 7 used to land on the same `point_id`, so the
+/// upsert's DELETE+INSERT silently overwrote whichever family had written
+/// first. Production writes now derive the point id from the family band
+/// below, making ids unique across families by construction. The stride
+/// bounds each family at one billion chunks — far beyond any real corpus
+/// — and a chunk id that would cross into the next band fails loudly
+/// instead of colliding.
+const POINT_ID_STRIDE: i64 = 1_000_000_000;
+
+#[must_use]
+fn chunk_family_band(entity_type: &str) -> Option<i64> {
+    match entity_type {
+        "knowledge_chunk" => Some(0),
+        "docs_chunk" => Some(1),
+        "conversation_chunk" => Some(2),
+        _ => None,
+    }
+}
+
+/// Collision-free vector point id for `(entity_type, chunk_id)` — the
+/// storage key every chunk-family writer must use for the shared
+/// collection (audit item 21).
+pub fn namespaced_chunk_point_id(entity_type: &str, chunk_id: i64) -> Result<i64> {
+    let band = chunk_family_band(entity_type).ok_or_else(|| {
+        Error::Config(format!(
+            "vector point ids must be namespaced by a known chunk family \
+             (knowledge_chunk/docs_chunk/conversation_chunk); got '{entity_type}'"
+        ))
+    })?;
+    if !(0..POINT_ID_STRIDE).contains(&chunk_id) {
+        return Err(Error::Config(format!(
+            "chunk id {chunk_id} for entity family '{entity_type}' exceeds the \
+             point-id band stride ({POINT_ID_STRIDE}); refusing to map it into a \
+             neighbouring family's id space"
+        )));
+    }
+    Ok(band * POINT_ID_STRIDE + chunk_id)
+}
+
 /// Directory the sqlite-vec database lives in, for a given data dir.
 #[must_use]
 pub fn store_dir(data_dir: &Path) -> PathBuf {
@@ -387,6 +429,31 @@ impl VectorStore for SqliteVecStore {
         let mut conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
         let tx = conn.transaction()?;
         let table = vec_table_for(collection);
+        // Audit item 21 guard: refuse the silent cross-family overwrite.
+        // With namespaced point ids this never fires; a future writer that
+        // goes back to raw per-table ids gets a loud failure instead of
+        // quiet data loss. Rows without an entity_type cannot be compared
+        // and keep the old replace semantics.
+        if let Some(new_family) = entity_type.as_ref() {
+            let stored_family: Option<String> = tx
+                .query_row(
+                    "SELECT entity_type FROM vec_payload
+                      WHERE collection = ?1 AND point_id = ?2",
+                    params![collection, id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten();
+            if let Some(old_family) = stored_family
+                && old_family != *new_family
+            {
+                return Err(Error::Config(format!(
+                    "vector point id {id} in collection '{collection}' already belongs \
+                     to entity family '{old_family}'; refusing to overwrite it with \
+                     '{new_family}' (cross-family point-id collision)"
+                )));
+            }
+        }
         tx.execute(
             &format!("DELETE FROM {table} WHERE point_id = ?1"),
             params![id],
@@ -1132,5 +1199,126 @@ mod tests {
 
         assert!(index.drop_collection());
         assert_eq!(index.try_point_count().expect("count"), None);
+    }
+
+    // --- clean-audit item 21: point-id namespacing + collision guard ---
+
+    /// Audit item 21: knowledge chunk 7 and conversation chunk 7 are two
+    /// different vectors that used to land on the same point id (raw
+    /// per-table row ids in one shared collection) — the second upsert
+    /// silently overwrote the first. Namespaced ids keep both.
+    #[test]
+    fn audit21_namespaced_point_ids_keep_chunk_families_apart() {
+        let (_dir, store) = seeded_store("audit21-ns", 2);
+        let knowledge_id = namespaced_chunk_point_id("knowledge_chunk", 7).expect("namespaced id");
+        let conversation_id =
+            namespaced_chunk_point_id("conversation_chunk", 7).expect("namespaced id");
+        assert_ne!(knowledge_id, conversation_id);
+
+        store
+            .upsert(
+                VECTOR_COLLECTION,
+                point(knowledge_id, vec![1.0, 0.0], "knowledge_chunk", 3),
+            )
+            .expect("knowledge upsert");
+        store
+            .upsert(
+                VECTOR_COLLECTION,
+                point(conversation_id, vec![0.0, 1.0], "conversation_chunk", 7),
+            )
+            .expect("conversation upsert");
+
+        assert_eq!(
+            store.try_point_count(VECTOR_COLLECTION).expect("count"),
+            Some(2),
+            "both families' chunk 7 must coexist"
+        );
+        assert_eq!(
+            store
+                .count_by_entity_type(VECTOR_COLLECTION, "knowledge_chunk")
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .count_by_entity_type(VECTOR_COLLECTION, "conversation_chunk")
+                .unwrap(),
+            1
+        );
+        // Each id retrieves its own payload, not its neighbour's.
+        assert_eq!(
+            store
+                .payload_of(VECTOR_COLLECTION, &knowledge_id.to_string())
+                .expect("payload")["entity_type"],
+            "knowledge_chunk"
+        );
+        assert_eq!(
+            store
+                .payload_of(VECTOR_COLLECTION, &conversation_id.to_string())
+                .expect("payload")["entity_type"],
+            "conversation_chunk"
+        );
+    }
+
+    /// Audit item 21 guard: even if a future writer goes back to raw ids,
+    /// the store refuses the silent cross-family overwrite instead of
+    /// quietly destroying the earlier family's vector.
+    #[test]
+    fn audit21_cross_family_point_id_overwrite_is_refused() {
+        let (_dir, store) = seeded_store("audit21-guard", 2);
+        store
+            .upsert(
+                VECTOR_COLLECTION,
+                point(1, vec![1.0, 0.0], "knowledge_chunk", 10),
+            )
+            .expect("first family upsert");
+
+        let err = store
+            .upsert(
+                VECTOR_COLLECTION,
+                point(1, vec![0.0, 1.0], "conversation_chunk", 10),
+            )
+            .expect_err("cross-family overwrite must be refused");
+        assert!(
+            err.to_string().contains("cross-family point-id collision"),
+            "the refusal must be legible: {err}"
+        );
+
+        // Same-family re-upsert still replaces (the legitimate case).
+        store
+            .upsert(
+                VECTOR_COLLECTION,
+                point(1, vec![0.5, 0.5], "knowledge_chunk", 11),
+            )
+            .expect("same family replace");
+        assert_eq!(
+            store.try_point_count(VECTOR_COLLECTION).expect("count"),
+            Some(1)
+        );
+        assert_eq!(
+            store
+                .payload_of(VECTOR_COLLECTION, &"1".to_string())
+                .expect("payload")["entity_id"],
+            11
+        );
+    }
+
+    /// Audit item 21: unknown families and band-overflowing chunk ids fail
+    /// loudly at mapping time — never a silent id alias.
+    #[test]
+    fn audit21_unknown_family_and_band_overflow_are_loud() {
+        assert!(namespaced_chunk_point_id("thread", 1).is_err());
+        assert!(namespaced_chunk_point_id("", 1).is_err());
+        assert!(namespaced_chunk_point_id("knowledge_chunk", 1_000_000_000).is_err());
+        // In-band ids of every family map deterministically.
+        assert_eq!(namespaced_chunk_point_id("knowledge_chunk", 0).unwrap(), 0);
+        assert_eq!(
+            namespaced_chunk_point_id("docs_chunk", 5).unwrap(),
+            1_000_000_005
+        );
+        assert_eq!(
+            namespaced_chunk_point_id("conversation_chunk", 5).unwrap(),
+            2_000_000_005
+        );
     }
 }

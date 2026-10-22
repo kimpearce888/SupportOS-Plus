@@ -14,12 +14,46 @@ pub struct RatingReceivedEvent {
     pub at: String,
 }
 
+/// What started a sync run (clean-audit item 23): the completed event
+/// used to be indistinguishable between the user's button press and the
+/// ~30-second adaptive auto-sync timer, so the app toasted "sync
+/// finished" roughly once a minute forever. Emitters must say who asked
+/// for the run; the toast lane only fires for [`SyncTrigger::Manual`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncTrigger {
+    /// A user action asked for the run (Sync Now buttons, activation,
+    /// onboarding, the enqueued initial-sync job).
+    #[default]
+    Manual,
+    /// The adaptive background timer fired on its own.
+    Auto,
+    /// Not a real sync at all — a post-write mirror re-read nudging the
+    /// UI to refresh (saved-reply writes, webhook health checks).
+    Refresh,
+}
+
+impl SyncTrigger {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Auto => "auto",
+            Self::Refresh => "refresh",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncCompletedEvent {
     pub kind: String,
     pub processed: u32,
     pub errors: u32,
+    /// Who asked for the run (audit item 23). Defaults to `manual` when
+    /// absent so old serialized payloads keep their visible outcome.
+    #[serde(default)]
+    pub trigger: SyncTrigger,
     pub at: String,
 }
 
@@ -191,11 +225,12 @@ impl ServerEvent {
     }
 
     #[must_use]
-    pub fn sync_completed(kind: &str, processed: u32, errors: u32) -> Self {
+    pub fn sync_completed(kind: &str, processed: u32, errors: u32, trigger: SyncTrigger) -> Self {
         Self::SyncCompleted(SyncCompletedEvent {
             kind: kind.to_string(),
             processed,
             errors,
+            trigger,
             at: Self::now_iso(),
         })
     }
@@ -322,4 +357,45 @@ impl ServerEvent {
 
 pub trait EventEmitter: Send + Sync {
     fn emit(&self, event: &ServerEvent) -> Result<(), String>;
+}
+
+#[cfg(test)]
+mod batch20_audit23_tests {
+    use super::*;
+
+    /// Audit item 23: the trigger is part of the event. Manual runs are
+    /// the toastable ones; auto timer ticks and post-write refreshes say
+    /// who they are on the wire.
+    #[test]
+    fn audit23_sync_completed_carries_and_roundtrips_the_trigger() {
+        for trigger in [SyncTrigger::Manual, SyncTrigger::Auto, SyncTrigger::Refresh] {
+            let event = ServerEvent::sync_completed("incremental", 7, 0, trigger);
+            let ServerEvent::SyncCompleted(e) = &event else {
+                panic!("wrong variant")
+            };
+            assert_eq!(e.trigger, trigger);
+            assert_eq!(e.trigger.as_str(), trigger.as_str());
+
+            // The wire JSON speaks camelCase strings and round-trips.
+            let json = serde_json::to_string(e).expect("serialize");
+            assert!(
+                json.contains(&format!("\"trigger\":\"{}\"", trigger.as_str())),
+                "wire payload must carry the trigger: {json}"
+            );
+            let back: SyncCompletedEvent = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back.trigger, trigger);
+            assert_eq!(back, *e);
+        }
+    }
+
+    /// Audit item 23: payloads serialized before the field existed (no
+    /// `trigger` key) deserialize to `manual` — old records keep their
+    /// visible outcome instead of failing the whole event.
+    #[test]
+    fn audit23_legacy_payload_without_trigger_defaults_to_manual() {
+        let legacy = r#"{"kind":"initial","processed":25,"errors":0,"at":"2026-01-01T00:00:00Z"}"#;
+        let e: SyncCompletedEvent = serde_json::from_str(legacy).expect("legacy deserializes");
+        assert_eq!(e.trigger, SyncTrigger::Manual);
+        assert_eq!(e.processed, 25);
+    }
 }

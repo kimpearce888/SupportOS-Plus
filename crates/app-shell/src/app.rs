@@ -489,8 +489,13 @@ impl eframe::App for ShellApp {
                 spp_core::events::ServerEvent::SyncCompleted(e) => {
                     // v1.4.0 (R5, D20): see `sync_completed_toast` — a
                     // zero-record completion is a visible result.
-                    let (kind, title, detail) = sync_completed_toast(e);
-                    self.toasts.push(kind, title, detail);
+                    // Clean-audit item 23: only runs the USER asked for
+                    // toast; the adaptive auto-sync timer (~30 s busy
+                    // cadence) and the post-write mirror refreshes keep
+                    // their page invalidation without a toast per tick.
+                    if let Some((kind, title, detail)) = sync_completed_toast(e) {
+                        self.toasts.push(kind, title, detail);
+                    }
                 }
                 spp_core::events::ServerEvent::OutboundJobFinished(e) => {
                     if e.success {
@@ -687,29 +692,37 @@ fn human_outbound_kind(kind: &str) -> &str {
 /// v1.4.0 (R5, D20): map a finished sync to its toast. A zero-record
 /// completion is a *visible* result now — "up to date, nothing new" —
 /// where it used to be indistinguishable from a dead connection.
+///
+/// Clean-audit item 23: `None` means "say nothing" — auto-sync timer
+/// runs and post-write mirror refreshes complete every few seconds and
+/// are not user-visible outcomes. Only manual runs (buttons,
+/// activation, the enqueued initial-sync job) produce a toast.
 #[must_use]
 fn sync_completed_toast(
     e: &spp_core::events::SyncCompletedEvent,
-) -> (crate::toasts::ToastKind, String, Option<String>) {
+) -> Option<(crate::toasts::ToastKind, String, Option<String>)> {
+    if e.trigger != spp_core::events::SyncTrigger::Manual {
+        return None;
+    }
     if e.processed > 0 {
         let detail = match e.kind.as_str() {
             "initial" => "Your Help Scout history is in the local mirror now.".to_string(),
             "docs" => "Help Center articles refreshed.".to_string(),
             _ => "Latest changes pulled from Help Scout.".to_string(),
         };
-        (
+        Some((
             crate::toasts::ToastKind::Success,
             format!("Sync finished: {} record(s) updated", e.processed),
             Some(detail),
-        )
+        ))
     } else if e.errors > 0 {
-        (
+        Some((
             crate::toasts::ToastKind::Warning,
             "Sync finished with errors".to_string(),
             Some("See Diagnostics for the exact failures.".to_string()),
-        )
+        ))
     } else {
-        (
+        Some((
             crate::toasts::ToastKind::Info,
             "Up to date — nothing new from Help Scout".to_string(),
             Some(
@@ -717,7 +730,7 @@ fn sync_completed_toast(
                  This is what a healthy, quiet account looks like."
                     .to_string(),
             ),
-        )
+        ))
     }
 }
 
@@ -1224,7 +1237,7 @@ mod tests {
     fn invalidation_batch_marks_each_page_once() {
         // Two events that both invalidate the inbox must not double-apply.
         let events = vec![
-            ServerEvent::sync_completed("incremental", 1, 0),
+            ServerEvent::sync_completed("incremental", 1, 0, spp_core::events::SyncTrigger::Manual),
             ServerEvent::conversation_updated(Some(1), Some(1), None, None, "sync"),
         ];
         let mut dirty: Vec<PageKey> = Vec::new();
@@ -1258,22 +1271,28 @@ mod tests {
     #[test]
     fn r5_d20_zero_record_syncs_and_error_runs_have_visible_outcomes() {
         // Healthy quiet account: "up to date" is said out loud now.
-        let (kind, title, _) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
+        let Some((kind, title, _)) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
             kind: "incremental".into(),
             processed: 0,
             errors: 0,
+            trigger: spp_core::events::SyncTrigger::Manual,
             at: "2026-10-20T00:00:00Z".into(),
-        });
+        }) else {
+            panic!("a manual run must always toast")
+        };
         assert!(matches!(kind, crate::toasts::ToastKind::Info));
         assert!(title.contains("Up to date"), "title: {title}");
 
         // A run that failed something says so and points at Diagnostics.
-        let (kind, _, detail) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
+        let Some((kind, _, detail)) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
             kind: "incremental".into(),
             processed: 0,
             errors: 2,
+            trigger: spp_core::events::SyncTrigger::Manual,
             at: "2026-10-20T00:00:00Z".into(),
-        });
+        }) else {
+            panic!("a manual run must always toast")
+        };
         assert!(matches!(kind, crate::toasts::ToastKind::Warning));
         assert!(
             detail.as_deref().is_some_and(|d| d.contains("Diagnostics")),
@@ -1281,14 +1300,42 @@ mod tests {
         );
 
         // Rows landed: the success copy is unchanged.
-        let (kind, title, _) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
+        let Some((kind, title, _)) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
             kind: "initial".into(),
             processed: 25_000,
             errors: 0,
+            trigger: spp_core::events::SyncTrigger::Manual,
             at: "2026-10-20T00:00:00Z".into(),
-        });
+        }) else {
+            panic!("a manual run must always toast")
+        };
         assert!(matches!(kind, crate::toasts::ToastKind::Success));
         assert!(title.contains("25000"), "title: {title}");
+    }
+
+    /// Clean-audit item 23: the adaptive auto-sync timer and the
+    /// post-write mirror refreshes complete constantly — they must not
+    /// toast. Same payloads, different trigger, no toast.
+    #[test]
+    fn audit23_auto_and_refresh_sync_completions_never_toast() {
+        for trigger in [
+            spp_core::events::SyncTrigger::Auto,
+            spp_core::events::SyncTrigger::Refresh,
+        ] {
+            for (processed, errors) in [(0_u32, 0_u32), (12, 0), (0, 3)] {
+                assert!(
+                    sync_completed_toast(&spp_core::events::SyncCompletedEvent {
+                        kind: "incremental".into(),
+                        processed,
+                        errors,
+                        trigger,
+                        at: "2026-10-20T00:00:00Z".into(),
+                    })
+                    .is_none(),
+                    "trigger {trigger:?} with processed={processed} errors={errors} must stay silent"
+                );
+            }
+        }
     }
 
     #[test]

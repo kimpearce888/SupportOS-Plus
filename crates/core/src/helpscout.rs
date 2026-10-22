@@ -1318,6 +1318,13 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
         conv.updated_at = Some(now);
         if !input.draft {
             conv.status = match input.status_after.as_deref() {
+                // Audit item 25: `open` is the v2 status the real provider
+                // accepts; this loopback world models it as v1 `active`
+                // (the same status its list_conversations "open" filter
+                // already matches). `waiting` was never a status in
+                // either vocabulary and now maps to `active` too, so a
+                // legacy stored setting cannot poison the mirror.
+                Some("open" | "waiting") => "active".into(),
                 Some("active" | "closed" | "pending" | "spam") => input
                     .status_after
                     .clone()
@@ -1655,4 +1662,64 @@ fn not_found_remote(method: &str) -> crate::error::Error {
         retryable: false,
     }
     .into()
+}
+
+#[cfg(test)]
+mod batch20_audit25_tests {
+    use super::*;
+
+    /// Seed one conversation into the inert world and return the provider.
+    fn provider_with_conversation() -> EmptyHelpScoutProvider {
+        let provider = EmptyHelpScoutProvider::new();
+        {
+            let mut world = provider.lock_world();
+            world.conversations.push(HsConversation {
+                remote_id: 101,
+                number: 779,
+                subject: Some("Status vocabulary".into()),
+                status: "active".into(),
+                ..Default::default()
+            });
+        }
+        provider
+    }
+
+    fn reply_status_after(provider: &EmptyHelpScoutProvider, status: &str) -> String {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(provider.create_reply_thread(CreateThreadInput {
+            conversation_id: 101,
+            text: "reply".into(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            draft: false,
+            status_after: Some(status.into()),
+            assign_to: None,
+            customer_id: None,
+        }))
+        .expect("reply created");
+        let world = provider.lock_world();
+        world
+            .conversations
+            .iter()
+            .find(|c| c.remote_id == 101)
+            .expect("conversation")
+            .status
+            .clone()
+    }
+
+    /// Clean-audit item 25: the loopback world speaks the platform's
+    /// vocabulary. `open` (the real v2 await-agent status) and the legacy
+    /// phantom `waiting` both land on the world's `active` — never an
+    /// unknown status string the mirror cannot reason about.
+    #[test]
+    fn audit25_loopback_maps_open_and_legacy_waiting_onto_active() {
+        let provider = provider_with_conversation();
+        assert_eq!(reply_status_after(&provider, "open"), "active");
+        assert_eq!(reply_status_after(&provider, "waiting"), "active");
+        assert_eq!(reply_status_after(&provider, "pending"), "pending");
+        assert_eq!(reply_status_after(&provider, "closed"), "closed");
+    }
 }

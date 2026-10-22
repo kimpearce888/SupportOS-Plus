@@ -930,13 +930,20 @@ impl SyncEngine {
         self.db.write_guard()
     }
 
-    fn emit_sync_completed(&self, kind: &str, processed: i64, errors: i64) {
+    fn emit_sync_completed(
+        &self,
+        kind: &str,
+        processed: i64,
+        errors: i64,
+        trigger: crate::events::SyncTrigger,
+    ) {
         if let Some(bus) = &self.bus {
             use crate::events::ServerEvent;
             bus.emit(&ServerEvent::sync_completed(
                 kind,
                 processed.max(0) as u32,
                 errors.max(0) as u32,
+                trigger,
             ));
         }
     }
@@ -1038,7 +1045,13 @@ impl SyncEngine {
     /// the Knowledge page's "Sync Help Center now" button runs this
     /// instead of a full engine pass. Emits `SyncCompleted("docs", ...)`
     /// so the page reloads itself when the articles land.
-    pub async fn sync_docs_only(&self) -> Result<Vec<ResourceSyncResult>> {
+    ///
+    /// `trigger` (audit item 23) says who started the run; the shell only
+    /// toasts completions the user asked for.
+    pub async fn sync_docs_only(
+        &self,
+        trigger: crate::events::SyncTrigger,
+    ) -> Result<Vec<ResourceSyncResult>> {
         self.guard_provider_connected()?;
         if self
             .running
@@ -1135,7 +1148,7 @@ impl SyncEngine {
                 None,
             );
         }
-        self.emit_sync_completed("docs", processed, failed);
+        self.emit_sync_completed("docs", processed, failed, trigger);
         Ok(results)
     }
 
@@ -1188,7 +1201,13 @@ impl SyncEngine {
         })
     }
 
-    pub async fn initial_sync(&self) -> Result<Vec<ResourceSyncResult>> {
+    /// `trigger` (audit item 23) says who started the run — the shell's
+    /// completion toast only fires for user-initiated runs, so the
+    /// adaptive auto-sync timer no longer toasts ~once a minute.
+    pub async fn initial_sync(
+        &self,
+        trigger: crate::events::SyncTrigger,
+    ) -> Result<Vec<ResourceSyncResult>> {
         self.guard_provider_connected()?;
         if self
             .running
@@ -1360,7 +1379,7 @@ impl SyncEngine {
                     None,
                 );
             }
-            self.emit_sync_completed("initial", processed, failed);
+            self.emit_sync_completed("initial", processed, failed, trigger);
             Ok(())
         }
         .await;
@@ -1386,7 +1405,13 @@ impl SyncEngine {
         Ok(results)
     }
 
-    pub async fn incremental_sync(&self) -> Result<Vec<ResourceSyncResult>> {
+    /// `trigger` (audit item 23) says who started the run — the shell's
+    /// completion toast only fires for user-initiated runs, so the
+    /// adaptive auto-sync timer no longer toasts ~once a minute.
+    pub async fn incremental_sync(
+        &self,
+        trigger: crate::events::SyncTrigger,
+    ) -> Result<Vec<ResourceSyncResult>> {
         self.guard_provider_connected()?;
         if self
             .running
@@ -1487,7 +1512,7 @@ impl SyncEngine {
                     None,
                 );
             }
-            self.emit_sync_completed("incremental", processed, failed);
+            self.emit_sync_completed("incremental", processed, failed, trigger);
             Ok(())
         }
         .await;
@@ -2480,18 +2505,18 @@ mod tests {
         let rt = runtime();
 
         let err = rt
-            .block_on(engine.initial_sync())
+            .block_on(engine.initial_sync(crate::events::SyncTrigger::Manual))
             .expect_err("the engine must refuse to run against the empty provider");
         assert!(
             err.to_string().contains("not connected"),
             "the refusal must be legible: {err}"
         );
         let err = rt
-            .block_on(engine.incremental_sync())
+            .block_on(engine.incremental_sync(crate::events::SyncTrigger::Manual))
             .expect_err("incremental must refuse too");
         assert!(err.to_string().contains("not connected"));
         let err = rt
-            .block_on(engine.sync_docs_only())
+            .block_on(engine.sync_docs_only(crate::events::SyncTrigger::Manual))
             .expect_err("docs-only must refuse too");
         assert!(err.to_string().contains("not connected"));
         assert!(
