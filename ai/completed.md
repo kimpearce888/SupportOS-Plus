@@ -1989,3 +1989,113 @@ Verification (Rule 5):
   smokes, all green on the runner).
 - Security: staged diff token-scanned clean before the push; remote
   unmoved at push time (fetch-first).
+
+## Batch 21 — clean-audit items 26-30 (HIGH tier: the custom-objects form that could never create an object, the phantom field types; MEDIUM tier: the stale-thread mass-delete, phantom tags_changed events, duplicate saved replies)
+
+**26. Custom-objects form sends numbers as JSON strings — object creation
+always fails** (high|bug)
+— the create/edit form serialised every field value as
+`Value::String`, but `validate_properties` requires real JSON scalars:
+a number field got `value.as_f64() → None` ("Invalid number") and a
+boolean field `value.is_boolean() → false`, so any type with a number
+or boolean field could never hold an object — creation failed on every
+attempt. The form now looks each key up in the selected type's own
+field definitions and coerces the trimmed input: integers parse as
+JSON integers (then finite decimals as f64 — `inf`/`nan` and garbage
+refuse with a clear form error before any write), booleans accept
+true/false/1/0/yes/no/on/off and reject the rest, and text-ish fields
+stay strings. The object table renders non-string scalars with their
+JSON form instead of the string-only path that showed them blank.
+pages/custom_objects.rs.
+
+**27. Custom-objects type builder offers checkbox/url types core
+rejects** (high|bug)
+— the field-type chips included `checkbox` and `url`, but
+`validate_properties` treats both as "Unknown field type", so a type
+built with them created fine and then refused every object forever.
+The builder now offers exactly the core's canonical six — text,
+long_text (previously unreachable from the UI), number, date, select,
+boolean. Types that already carry the phantom names keep working:
+the core validates `checkbox` as boolean and `url` as text (legacy
+aliases, still rejecting wrong value types and still refusing any
+other unknown name), and the form coerces through the same aliases.
+pages/custom_objects.rs, custom_objects.rs (core).
+
+**28. Stale-thread deletion treats one unpaginated page as the full
+thread set** (med|bug)
+— the real provider's `list_threads` issued one GET on
+`/v3/conversations/{id}/threads` and returned page 1 only; the sync's
+stale-thread sweep then deleted every local thread whose remote id was
+not on that page — on a conversation longer than one page, threads
+51+ were mass-deleted from the mirror on every re-ingest. The read now
+follows the HAL `_links.next` link in the same loop shape
+`list_system_users` uses, stopping when a page has no next link (or
+comes back empty), so the sweep compares against the real full set.
+helpscout_real.rs.
+
+**29. `tags_changed` emitted with `prev=null` on every re-ingest**
+(med|bug)
+— the re-ingest diff emitted `tags_changed` with `previous: null` and
+`next: <current tags>`, so the comparison was `null != ["x"]` on every
+pass: a phantom tag event per conversation per incremental sync,
+consuming dedup keys and polluting the activity feed. The mirror's
+pre-write tag set is now read (conversation_tags ⋈ tags) before the
+rewrite and compared as a normalized set — sorted and deduplicated, so
+a pure platform-side reorder is not an event — with only real
+membership changes firing, carrying the true previous value.
+sync.rs.
+
+**30. Retried saved-reply create re-POSTs (duplicates on the
+platform)** (med|bug)
+— the saved-reply create job POSTed straight to
+`/v2/mailboxes/{id}/saved-replies`, and the v2 API has no
+client-supplied id: whenever the POST landed but the response or the
+post-write re-read failed, the retry re-POSTed the same payload and
+the platform gained a duplicate reply. The create is now idempotent by
+its natural key (mailbox + name + text): the job pre-reads the
+mailbox's saved replies, and a reply with the exact name and text is
+recognized as this job's own earlier write — the POST is skipped and
+the re-read completes the job into the mirror. A fresh create still
+POSTs. workers.rs.
+
+Verification (Rule 5):
+
+- `cargo fmt --all --check` clean; `cargo clippy --workspace
+  --all-targets -- -D warnings` clean; clippy with the `sandbox`
+  feature clean; `python3 scripts/gate_no_simulation.py` clean; cargo
+  deny 0.20.2 advisories + licenses ok — all on the pinned 1.99.1
+  toolchain.
+- Tests: core 317 passed / 0 failed / 4 ignored (7 new batch-21
+  regressions: legacy checkbox/url fields accept objects while
+  wrong-typed values and unknown field names are still refused; the
+  threads read follows the HAL next link across pages and hits each
+  page exactly once; tags_changed stays silent on first ingest, on
+  reordered and repeated tag payloads, and on stable re-ingests while
+  firing once with the true previous set on a membership change; the
+  retried saved-reply create never re-POSTs after a failed re-read and
+  completes via the twin check with the reply landing in the mirror);
+  sandbox-feature suite 322 passed / 0 failed / 4 ignored; app-shell
+  179 passed / 0 failed (5 new: the builder offers exactly the six
+  canonical types; number/boolean form inputs become real JSON scalars
+  (42 → number, 1.5 → 1.5, true → bool, select/text stay strings);
+  garbage numbers and booleans produce clear form errors and no object;
+  the truth-word matrix for booleans; legacy checkbox/url types keep
+  working from the form); xtask 6; catalog 0.
+- Fresh harness `scripts/verify_batch21.py` (committed; also archived
+  at /home/z/my-project/scripts/): all 27 checks pass — the
+  field-definition lookup and pre-write coercion with the blanket
+  string serialisation gone, the int-preserving/finite-f64 number path,
+  the truth-word boolean path, scalar rendering in the object table,
+  the canonical six-type vocabulary with no phantom variants, the
+  core's legacy aliases with the unknown-name refusal intact, the HAL
+  loop shape with accumulation and the page-boundary stop, the
+  pre-write tag capture ordered before the rewrite, normalized-set
+  comparison on both sides with the null emission gone, the tag-name
+  join, the natural-key twin match with the re-POST skip and the fresh
+  POST preserved, and the re-read stage still running for every
+  action.
+- Runner verification: code commit `766578c` — CI run `39870507850`:
+  success, both jobs (fmt/clippy/test/deny + AppImage/deb build and
+  smoke, all green on the runner).
+- Security: staged diff token-scanned clean before the push; remote
+  unmoved at push time (fetch-first).

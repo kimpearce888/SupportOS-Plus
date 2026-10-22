@@ -5,12 +5,12 @@
 
 ## Active items — none
 
-Batch 20 (clean-audit items 21-25: vector point-id namespacing with the
-cross-family refusal guard and the one-time re-embed migration, the
-rebuild_activity enqueue after initial sync plus the one-time repair for
-pre-fix mirrors, the SyncTrigger field that keeps auto-sync and
-mirror-refresh completions silent, the job-row-pinned composer-AI
-result, and the phantom "waiting" status replaced by the platform's own
-`open`) is complete and verified; the record is in `completed.md`. The
-remaining 140 audit findings are queued in `plan.md` (items 26-165) and
-the next five start only on the owner's "continue".
+Batch 21 (clean-audit items 26-30: the custom-objects form's
+type-aware value coercion, the type builder's canonical field-type
+vocabulary with legacy checkbox/url aliases, the paginated threads read
+that stops the stale-thread sweep from mass-deleting threads past page
+1, the tags_changed diff carrying the mirror's real pre-write tag set,
+and the saved-reply create made idempotent by its natural key) is
+complete and verified; the record is in `completed.md`. The remaining
+135 audit findings are queued in `plan.md` (items 31-165) and the next
+five start only on the owner's "continue".
