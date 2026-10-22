@@ -28,11 +28,6 @@ the remote mailbox id) — verified and recorded in `completed.md`.
 
 ### HIGH — shipped features broken / silent permanent failure
 
-16. [high|bug] Recipient `attempts` never incremented → infinite retry storm + head-of-line block — outreach.rs:1833
-17. [high|bug] No claim/idempotency across campaign sends → duplicate emails on crash/ambiguous retry — outreach.rs:1653,1727-1756
-18. [high|bug] UI-created rules poison the engine's trigger deserialization — automation silently never runs — automation.rs:1081-1087
-19. [high|bug] Approved automation write actions never reach Help Scout; sync reverts them — automation.rs:1448-1452,1365-1374
-20. [high|bug] Activity events keyed by REMOTE id in a LOCAL-id column; derived response-state corrupted on every user action — ticket_ops.rs:135-140,195-200,269-274 + activity.rs:169-172
 21. [high|bug] Vector point-id collisions across entity families silently overwrite vectors in the single collection — vectorstore_sqlitevec.rs:390-397
 22. [high|gap] `rebuild_activity` job never enqueued → derived response-state columns permanently NULL/defaults — activity.rs:413 + workers.rs:1324
 23. [high|bug] Toast pushed for every auto-sync completion (~one/minute forever) — app.rs:489-494 (needs trigger field on the event)

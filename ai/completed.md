@@ -1704,3 +1704,149 @@ Verification (Rule 5):
   green on the runner).
 - Security: staged diff token-scanned clean before the push; remote
   unmoved at push time (fetch-first).
+
+## Batch 19 — clean-audit items 16-20 (HIGH tier: outreach attempts/claim, automation trigger poisoning, platform-pushing write actions, local-id activity keys)
+
+_Completed 2026-10-22. Code commit `0de77ff` — CI run 39797355477:
+success (both jobs). All five fixes carry fresh regression tests
+(15 new) plus the batch harness (`scripts/verify_batch19.py`, committed;
+also archived at `/home/z/my-project/scripts/`)._
+
+1. **Recipient `attempts` never incremented** (high|bug) — every
+   `record_outcome` state UPDATE wrote the ledger row but never touched
+   `outreach_recipients.attempts`, so it stayed 0 forever:
+   `classify_error`'s `attempts + 1 >= SEND_MAX_ATTEMPTS` cap on
+   429/5xx answers could never fire and the send-loop backstop read
+   `attempt_no = 0 + 1` every time — rate-limit and server errors were
+   retryable without limit, and because `pick_batch` orders by id the
+   same stuck recipients filled every batch (infinite retry storm +
+   head-of-line block). Every outcome now spends an attempt
+   (`attempts = attempts + 1`) and refreshes the new staleness clock.
+   outreach.rs:1737-1771 (pre-fix 1727-1756).
+
+2. **No claim/idempotency across campaign sends** (high|bug) —
+   `pick_batch` handed rows to a send loop that does network I/O
+   before recording, with no in-flight state, so a crash (or any
+   second picker) re-picked the same 'queued' rows and sent duplicate
+   emails; the half-built recovery machinery was triple-dead: nothing
+   ever set 'sending', the reconcile sweep's stale query bound the
+   TEXT of a datetime() expression as a comparison parameter (never a
+   past timestamp), and the `updated_at` column it filtered on does
+   not exist. Now: picked rows are atomically claimed
+   (`state='sending'` + `updated_at`, only while still pickable — a
+   raced claim simply sends nothing); `updated_at` ships in the fresh
+   schema and is lazily healed on old databases (constant-default
+   ALTER + created_at backfill — SQLite rejects expression defaults
+   on ADD COLUMN, which the pre-existing segments helper also trips
+   over); every batch run first runs the recovery sweep
+   (`reconcile_recipient_states`, extracted from the now-wired
+   `campaign_reconcile`): stale claims older than 10 minutes probe the
+   platform mirror by customer+subject first — a crashed send that
+   landed is recovered as 'sent' (no duplicate), a genuinely
+   undelivered one returns to 'queued' for a bounded retry, ambiguous
+   'unknown' rows are reconciled the same way, and exhausted ones
+   terminate honestly in 'failed' instead of lingering forever. The
+   contradictory "safe to retry" → state='failed' branch now actually
+   returns rows to the queue. outreach.rs:952-1222,1649-1696,1901-1962
+   (pre-fix 1649-1673 + the dead reconcile arm).
+
+3. **UI-created rules poisoned the engine's trigger deserialization**
+   (high|bug) — the UI's rule form still serializes the M007 tagged
+   enum (`{"kind":"tag_added","tag":"x"}`) while the live engine
+   (`fire_trigger_for_conversation`) demands a JSON string, and
+   `list_rule_records` propagated the FIRST parse error — so every
+   UI-created rule killed the whole engine evaluation, silently
+   (both fire sites swallow errors with `let _ =`). Trigger parsing
+   now accepts both generations (the legacy enum maps to
+   status_changed / tag_added / sla_risk), and `list_rule_records`
+   skips an unparsable row with a warning instead of aborting —
+   `get_rule_record` stays strict so the editor still surfaces real
+   corruption. Documented limitation: the legacy trigger KINDS have no
+   fire sites yet (nothing fires "status_changed"/"tag_added"/
+   "sla_risk"); UI rules are now visible and inert, not toxic —
+   wiring those fire sites is new-feature work outside this item.
+   automation.rs:1068-1091,1168-1199 (pre-fix 1081-1087,1147).
+
+4. **Approved automation write actions never reached Help Scout**
+   (high|bug) — `execute_approved_action` ran the typed local mirror
+   write (`ticket_ops::execute`) and stopped, and `add_tag` wrote the
+   local tag list and stopped; the next sync reverted both. The manual
+   inbox path queues an outbound push after the same local write —
+   now automation does too: approved set_status/assign enqueue
+   `update_status`/`assign` outbound jobs (LOCAL conversation id in
+   the payload, deterministic idempotency keys
+   `automation_status_/assign_{id}`; a failed enqueue propagates so
+   the approval job retries honestly), the add_tag arm enqueues a new
+   `update_tags` outbound job, and the outbound worker learned the
+   `update_tags` kind (provider push + sync-back + honest empty-list
+   rejection) with its own audit action name. The eval-mode gate and
+   the no-connected-provider guard on the outbound lane cover
+   automation pushes exactly like manual ones. automation.rs:1407-1434
+   (add_tag),1476-1560 (approved), workers.rs:726-749,770-776
+   (pre-fix 1365-1374,1448-1452).
+
+5. **Activity events keyed by REMOTE id in a LOCAL-id column**
+   (high|bug) — `activity_events.conversation_id` is a LOCAL-id
+   column (that is what `rebuild_all` writes and the by-local-id
+   reader consumes), but every ticket_ops execute_* inserted the
+   REMOTE id there and then recomputed the derived response state
+   from that wrong-keyed event set — so every user/automation action
+   wiped `first_customer_message_at`/`last_customer_reply_at`/etc. on
+   the correct conversations row while its real event history stayed
+   invisible, and a numeric local/remote id collision would corrupt a
+   different conversation's timeline. ticket_ops now resolves the
+   local id once (`conversation_local_id`), keys all three event
+   inserts with it, and refreshes derived columns through
+   `update_derived_columns_by_local_id`; the remote-keyed
+   `derive_response_state`/`update_derived_columns` twins are deleted
+   (zero callers after the fix). Fixing the inserts exposed a second
+   latent defect in the same lines: the dedup_key concatenation
+   `... || ?actor_id || ...` becomes SQL NULL for anonymous/
+   automation actors (actor_id NULL), so the plain INSERTs errored
+   and the INSERT OR IGNORE silently dropped the event — automation
+   actions never left an activity event at all. All three keys now
+   COALESCE the actor id. ticket_ops.rs:107-298, activity.rs:318-324
+   (pre-fix ticket_ops.rs:135-140,195-200,269-274 + activity.rs:149-260).
+   Note: historical remote-keyed rows may linger in existing
+   databases as invisible orphans (harmless — every reader is
+   local-keyed now); a one-time cleanup was deliberately NOT added to
+   keep this batch surgical.
+
+Verification (Rule 5):
+
+- `cargo fmt --all --check` clean; `cargo clippy --workspace
+  --all-targets -- -D warnings` clean; clippy with the `sandbox`
+  feature clean; `python3 scripts/gate_no_simulation.py` clean; cargo
+  deny 0.20.2 advisories + licenses ok — all on the pinned 1.99.1
+  toolchain (reinstalled once more after the janitor sweep wiped
+  ~/.cargo between sessions).
+- Tests: core 298 passed / 0 failed / 4 ignored (15 new batch-19
+  regressions: retryable failures spend attempts and terminate at the
+  cap; a fresh claim is invisible to a second pick; a stale claim that
+  landed recovers as sent from the mirror without a re-send; a stale
+  claim that never landed requeues and sends exactly once; a
+  reconciled unknown returns to the queue under the cap; an exhausted
+  unknown fails honestly; the staleness column is ensured by the batch
+  run; legacy UI rules parse and no longer poison the engine; a single
+  poisoned rule cannot kill the evaluation; approved set_status/assign
+  and automation add_tag all queue their platform pushes with the
+  right payloads; status/note/assign events are keyed by the local id;
+  user actions preserve the derived customer history; an unknown
+  remote conversation is rejected); sandbox-feature suite 303 passed
+  / 0 failed / 4 ignored; app-shell 170 passed / 0 failed; xtask 6;
+  catalog 0.
+- Fresh harness `scripts/verify_batch19.py` (committed; also archived
+  at /home/z/my-project/scripts/): all checks pass — attempt-spending
+  in all four outcome arms, the atomic claim with its pickable-state
+  guard, the constant-default ALTER + backfill heal, the inlined
+  staleness threshold with the mirror-probe recovery, the wired-in
+  recovery-only reconcile, dual-generation trigger parsing, the
+  skip-with-warning listing, the three platform-push enqueues with
+  their idempotency keys, the outbound update_tags lane and audit
+  name, local-id event keying, COALESCE'd dedup keys, and the deleted
+  remote-keyed machinery.
+- Runner verification: code commit `0de77ff` — CI run 39797355477:
+  success, both jobs (fmt/clippy/test/deny + AppImage/deb build and
+  smokes, all green on the runner).
+- Security: staged diff token-scanned clean before the push; remote
+  unmoved at push time (fetch-first).
