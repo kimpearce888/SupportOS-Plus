@@ -1812,16 +1812,61 @@ pub async fn send_batch(
     }
 
     let Some(mailbox_local_id) = mailbox_local_id else {
+        // Scoped: the writer guard must be dropped before
+        // finalize_if_drained re-acquires the lane (let-else keeps
+        // bindings alive until the block ends, and holding the guard
+        // across the call self-deadlocks the same-thread mutex).
+        {
+            let c = conn.write_guard();
+            for row in &batch {
+                record_outcome(
+                    &c,
+                    campaign_id,
+                    row,
+                    row.attempts + 1,
+                    &SendOutcome::FailedPermanent(
+                        "Campaign has no sending mailbox configured.".into(),
+                    ),
+                    Some("no mailbox"),
+                );
+            }
+        }
+        return finalize_if_drained(conn, campaign_id);
+    };
+
+    // Audit item 15: the campaign stores the LOCAL mirror row id of the
+    // mailbox, but the platform's `mailboxId` must be the REMOTE Help
+    // Scout mailbox id — the local row id (1, 2, ...) is not a valid
+    // mailbox on the account, so every send failed. Resolve the remote
+    // id once per batch; a mailbox that never synced is a permanent,
+    // honestly-reported failure for the whole batch.
+    let mailbox_remote_id: Option<i64> = {
         let c = conn.write_guard();
-        for row in &batch {
-            record_outcome(
-                &c,
-                campaign_id,
-                row,
-                row.attempts + 1,
-                &SendOutcome::FailedPermanent("Campaign has no sending mailbox configured.".into()),
-                Some("no mailbox"),
-            );
+        c.query_row(
+            "SELECT remote_id FROM mailboxes WHERE id = ?1",
+            [mailbox_local_id],
+            |r| r.get(0),
+        )
+        .ok()
+    };
+    let Some(mailbox_remote_id) = mailbox_remote_id else {
+        // Scoped the same way: drop the writer lane before finalizing.
+        {
+            let c = conn.write_guard();
+            for row in &batch {
+                record_outcome(
+                    &c,
+                    campaign_id,
+                    row,
+                    row.attempts + 1,
+                    &SendOutcome::FailedPermanent(
+                        "Sending mailbox has no remote id (not synced) - cannot create \
+                         conversations on the platform."
+                            .into(),
+                    ),
+                    Some("mailbox not synced"),
+                );
+            }
         }
         return finalize_if_drained(conn, campaign_id);
     };
@@ -1868,7 +1913,7 @@ pub async fn send_batch(
         let r_body = rendered["body"].as_str().unwrap_or(&body).to_string();
 
         let input = crate::helpscout::CreateConversationInput {
-            mailbox_id: mailbox_local_id,
+            mailbox_id: mailbox_remote_id,
             customer_id: customer_remote_id,
             subject: r_subject,
             body: r_body,
@@ -2058,4 +2103,237 @@ fn finalize_if_drained(conn: &crate::db::DbHandle, campaign_id: i64) -> serde_js
             "sent": sent, "failed": failed, "skipped": skipped, "unknown": unknown
         }
     })
+}
+
+/// Clean-audit batch 18 (item 15): campaign sends must pass the REMOTE
+/// Help Scout mailbox id (never the local mirror row id), and a mailbox
+/// that never synced must fail the batch honestly.
+#[cfg(test)]
+mod batch18_tests {
+    use super::*;
+    use crate::db::DbHandle;
+    use crate::error::Error;
+    use crate::helpscout::{
+        ConversationPatch, ConversationQuery, CreateThreadInput, CustomerQuery, HelpScoutProvider,
+        HsBeaconChat, HsDocArticle, HsMailbox, HsRating, HsTag, HsTeam, HsUser, Page,
+        ThreadCreated,
+    };
+    use std::sync::Mutex;
+
+    /// Records every `CreateConversationInput` it is asked to send.
+    struct RecordingSender {
+        created: Mutex<Vec<crate::helpscout::CreateConversationInput>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HelpScoutProvider for RecordingSender {
+        fn kind(&self) -> &'static str {
+            "recording"
+        }
+        async fn get_me(&self) -> Result<HsUser> {
+            Err(Error::Other("not needed".into()))
+        }
+        async fn list_mailboxes(&self) -> Result<Vec<HsMailbox>> {
+            Ok(Vec::new())
+        }
+        async fn list_users(&self) -> Result<Vec<HsUser>> {
+            Ok(Vec::new())
+        }
+        async fn list_teams(&self) -> Result<Vec<HsTeam>> {
+            Ok(Vec::new())
+        }
+        async fn list_tags(&self) -> Result<Vec<HsTag>> {
+            Ok(Vec::new())
+        }
+        async fn list_conversations(
+            &self,
+            _query: &ConversationQuery,
+        ) -> Result<Page<crate::helpscout::HsConversation>> {
+            Ok(Page {
+                items: Vec::new(),
+                next_cursor: None,
+            })
+        }
+        async fn list_customers(
+            &self,
+            _query: &CustomerQuery,
+        ) -> Result<Page<crate::helpscout::HsCustomer>> {
+            Ok(Page {
+                items: Vec::new(),
+                next_cursor: None,
+            })
+        }
+        async fn list_beacon_chats(&self) -> Result<Vec<HsBeaconChat>> {
+            Ok(Vec::new())
+        }
+        async fn list_docs(&self) -> Result<Vec<HsDocArticle>> {
+            Ok(Vec::new())
+        }
+        async fn list_ratings(&self) -> Result<Vec<HsRating>> {
+            Ok(Vec::new())
+        }
+        async fn create_reply_thread(
+            &self,
+            _input: CreateThreadInput,
+        ) -> Result<crate::helpscout::ThreadCreated> {
+            Err(Error::Other("not needed".into()))
+        }
+        async fn create_note_thread(&self, _input: CreateThreadInput) -> Result<ThreadCreated> {
+            Err(Error::Other("not needed".into()))
+        }
+        async fn update_conversation(
+            &self,
+            _conversation_id: i64,
+            _patch: ConversationPatch,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+        async fn create_conversation(
+            &self,
+            input: crate::helpscout::CreateConversationInput,
+        ) -> Result<crate::helpscout::ConversationCreated> {
+            self.created
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(input);
+            Ok(crate::helpscout::ConversationCreated {
+                conversation_id: 777_001,
+                number: 4242,
+                thread_id: 9001,
+            })
+        }
+    }
+
+    fn db() -> DbHandle {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        DbHandle::new(conn)
+    }
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    }
+
+    /// Seeds a mailbox with REMOTE id 2024 and a queued campaign with one
+    /// ready recipient. Returns (mailbox_local_id, campaign_id).
+    fn seed_campaign(conn: &Connection) -> (i64, i64) {
+        conn.execute(
+            "INSERT INTO mailboxes (remote_id, name) VALUES (2024, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        let mailbox_local = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO outreach_campaigns (name, subject, body, mailbox_local_id, tags, status)
+             VALUES ('winter check', 'Quick question', 'Hello!', ?1, '[]', 'queued')",
+            params![mailbox_local],
+        )
+        .expect("campaign");
+        let campaign = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO outreach_recipients
+                 (campaign_id, customer_local_id, customer_remote_id, email, snapshot, state)
+             VALUES (?1, 1, 5501, 'person@example.com', '{}', 'selected')",
+            params![campaign],
+        )
+        .expect("recipient");
+        (mailbox_local, campaign)
+    }
+
+    #[test]
+    fn campaign_sends_pass_the_remote_mailbox_id() {
+        let db = db();
+        let (mailbox_local, campaign) = db.with_write(|c| seed_campaign(c));
+        let recorder = Arc::new(RecordingSender {
+            created: Mutex::new(Vec::new()),
+        });
+        let sender: Arc<dyn crate::helpscout::HelpScoutProvider> = recorder.clone();
+        let summary = rt().block_on(async { send_batch(&db, &sender, campaign).await });
+
+        let created = recorder.created.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(
+            created.len(),
+            1,
+            "one platform conversation per recipient: {summary}"
+        );
+        assert_ne!(
+            created[0].mailbox_id, mailbox_local,
+            "the LOCAL mirror row id must never reach the platform"
+        );
+        assert_eq!(
+            created[0].mailbox_id, 2024,
+            "the platform must receive the REMOTE mailbox id"
+        );
+        assert_eq!(created[0].customer_id, 5501);
+
+        let state: String = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT state FROM outreach_recipients WHERE campaign_id = ?1",
+                    params![campaign],
+                    |r| r.get(0),
+                )
+            })
+            .expect("recipient row");
+        assert_eq!(state, "sent", "the send is recorded as delivered");
+    }
+
+    #[test]
+    fn an_unsynced_mailbox_fails_the_batch_honestly() {
+        let db = db();
+        // A campaign whose mailbox references a local row that does not
+        // exist (pruned / never synced): nothing may be sent, and the
+        // recipient must carry a permanent, honest failure.
+        let campaign = db.with_write(|c| {
+            // The live schema foreign-keys campaigns to mailboxes, but a
+            // dangling mailbox reference is still constructable in the
+            // wild (best-effort `let _ =` deletes); simulate that state.
+            c.execute("PRAGMA foreign_keys = OFF", []).expect("fk off");
+            c.execute(
+                "INSERT INTO outreach_campaigns
+                     (name, subject, body, mailbox_local_id, tags, status)
+                 VALUES ('broken', 'Hi', 'Body', 999, '[]', 'queued')",
+                [],
+            )
+            .expect("campaign");
+            c.execute("PRAGMA foreign_keys = ON", []).expect("fk on");
+            let campaign = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO outreach_recipients
+                     (campaign_id, customer_local_id, customer_remote_id, email, snapshot, state)
+                 VALUES (?1, 1, 5501, 'person@example.com', '{}', 'selected')",
+                params![campaign],
+            )
+            .expect("recipient");
+            campaign
+        });
+        let recorder = Arc::new(RecordingSender {
+            created: Mutex::new(Vec::new()),
+        });
+        let sender: Arc<dyn crate::helpscout::HelpScoutProvider> = recorder.clone();
+        let summary = rt().block_on(async { send_batch(&db, &sender, campaign).await });
+
+        let created = recorder.created.lock().unwrap_or_else(|p| p.into_inner());
+        assert!(
+            created.is_empty(),
+            "nothing may be sent with an unsynced mailbox: {created:?}"
+        );
+        let (state, error): (String, Option<String>) = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT state, last_error FROM outreach_recipients WHERE campaign_id = ?1",
+                    params![campaign],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .expect("recipient row");
+        assert_eq!(state, "failed", "permanent failure, no silent retry loop");
+        assert!(
+            error.as_deref().unwrap_or("").contains("not synced"),
+            "the error says what happened: {error:?} / {summary}"
+        );
+    }
 }

@@ -412,6 +412,9 @@ pub struct SettingsPage {
     data_dir: Option<PathBuf>,
     /// Two-step confirmation state for the demo purge.
     purge_armed: bool,
+    /// Two-step confirmation state for backup restores (audit item
+    /// 11): holds the backup file path awaiting the second click.
+    restore_armed: Option<String>,
     /// The swappable provider handle (v1.4.0 R3): credential saves and
     /// clears activate/deactivate the provider through it in-session.
     /// `None` in tests that exercise the page without boot services.
@@ -477,6 +480,7 @@ impl SettingsPage {
             wh_outcome: None,
             data_dir: None,
             purge_armed: false,
+            restore_armed: None,
             provider: None,
             engine: None,
             bus: None,
@@ -2103,7 +2107,6 @@ impl SettingsPage {
                 design::hint_text(ui, "(no backups yet)");
                 return;
             }
-            let mut restored: Option<String> = None;
             egui::ScrollArea::vertical()
                 .id_salt("settings-backups")
                 .show(ui, |ui| {
@@ -2127,14 +2130,38 @@ impl SettingsPage {
                                 && let Some(dir) = &self.backups_dir
                             {
                                 let path = dir.join(str_field(backup, "file"));
-                                restored = Some(path.display().to_string());
+                                // Audit item 11: the first click only ARMS
+                                // the restore — a single unconfirmed click
+                                // must never replace the live database.
+                                self.restore_armed = Some(path.display().to_string());
                             }
                         });
                         ui.add_space(2.0);
                     }
                 });
-            if let Some(path) = restored {
-                self.restore_backup(db, &path);
+            // Second step of the two-step restore confirmation (audit
+            // item 11): nothing is swapped until the user reads the
+            // consequence and clicks again.
+            if let Some(path) = self.restore_armed.clone() {
+                ui.add_space(6.0);
+                design::error_text(
+                    ui,
+                    &format!(
+                        "Restore {}? The current database will be REPLACED by this backup \
+                         (verified first). Restart SupportOS+ afterwards to use it.",
+                        path
+                    ),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if design::button(ui, "cancel", ButtonVariant::Ghost).clicked() {
+                        self.restore_armed = None;
+                    }
+                    if design::button(ui, "really restore", ButtonVariant::Destructive).clicked() {
+                        self.restore_armed = None;
+                        self.restore_backup(db, &path);
+                    }
+                });
             }
         });
     }
@@ -2522,5 +2549,72 @@ mod tests {
             !page.doctor_running,
             "bare pages skip the network side effects"
         );
+    }
+
+    /// Clean-audit batch 18 (item 11): a restore runs against a
+    /// file-backed database only through the armed two-step path, a
+    /// verified backup lands, and an unverified file is refused with
+    /// the live database left untouched.
+    #[test]
+    fn restore_backup_lands_a_verified_file_and_refuses_junk() {
+        let tmp = std::env::temp_dir().join(format!(
+            "spp-restore-page-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&tmp).expect("tmp dir");
+        let db_path = tmp.join("live.db");
+        let mut file_conn = rusqlite::Connection::open(&db_path).expect("file db");
+        spp_core::bootstrap::apply_all(&mut file_conn).expect("migrations");
+        drop(file_conn);
+        let db = DbHandle::new(rusqlite::Connection::open(&db_path).expect("reopen file db"));
+
+        let mut page = SettingsPage::new();
+        // The first click arms; the confirm card runs restore_backup —
+        // simulate having armed and confirmed.
+        page.restore_armed = None;
+
+        // 1) A real backup restores cleanly.
+        let backups_dir = tmp.join("backups");
+        let result = db.with_read(|conn| spp_core::backup_service::backup(conn, &backups_dir));
+        assert!(result.ok, "backup for the test: {}", result.message);
+        let backup_path = result.path.expect("backup path");
+        page.restore_backup(&db, &backup_path);
+        assert!(
+            page.message
+                .as_deref()
+                .is_some_and(|m| m.contains("restored") && m.contains("restart")),
+            "success reports the restart requirement: {:?}",
+            page.message
+        );
+
+        // 2) An unverified file is refused before the live db is touched.
+        page.message = None;
+        page.error = None;
+        let junk = tmp.join("junk.db");
+        std::fs::write(&junk, b"definitely not a database").expect("junk");
+        page.restore_backup(&db, junk.to_str().expect("path"));
+        assert!(
+            page.error
+                .as_deref()
+                .is_some_and(|e| e.contains("integrity") || e.contains("refused")),
+            "the refusal is reported in-app: {:?}",
+            page.error
+        );
+        let still_live: bool = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_state'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n > 0)
+            .unwrap_or(false)
+        });
+        assert!(still_live, "the live database survived the refusal");
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

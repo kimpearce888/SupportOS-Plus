@@ -507,7 +507,21 @@ fn waiting_stats(
     cfg: Option<&EffectiveConfig>,
 ) -> Result<SlaWaitingStats> {
     let mut stmt = conn.prepare(
-        "SELECT COALESCE(c.updated_at, c.created_at) AS since
+        // Audit item 13: "waiting" means waiting for a reply to the
+        // customer's last message. `updated_at` flips on every status
+        // change, tag edit, assignment or sync touch, which silently
+        // reset the waiting clock and understated SLA pressure; the
+        // honest since-point is the newest published customer thread,
+        // falling back to the conversation's own creation time when the
+        // customer has not spoken yet.
+        "SELECT COALESCE(
+             (SELECT MAX(COALESCE(t.remote_created_at, t.created_at))
+                FROM conversation_threads t
+               WHERE t.conversation_id = c.id
+                 AND t.type = 'customer'
+                 AND t.state = 'published'
+                 AND t.deleted_at IS NULL),
+             c.created_at) AS since
          FROM conversations c
          WHERE c.mailbox_local_id = ?1 AND c.status IN ('active','pending') AND c.deleted_at IS NULL",
     )?;
@@ -722,4 +736,109 @@ pub fn sla_alerts(conn: &Connection) -> Result<SlaAlerts> {
         unconfigured_mailboxes: unconfigured,
         note: ALERTS_NOTE,
     })
+}
+
+/// Clean-audit batch 18 (item 13): waiting statistics measure from the
+/// customer's last message, not from any `updated_at` touch.
+#[cfg(test)]
+mod batch18_tests {
+    use super::*;
+    use rusqlite::params;
+
+    const OLD: &str = "2026-01-01T00:00:00.000Z";
+
+    /// Seeds one mailbox with three waiting conversations:
+    /// - A: customer message at OLD, updated_at OLD
+    /// - B: customer message at OLD, but updated_at is RECENT (a status
+    ///   or sync touch — what the old query wrongly treated as the
+    ///   waiting start)
+    /// - C: no customer threads at all, created_at OLD (fallback path)
+    fn db_with_waiting_conversations() -> (Connection, i64, String) {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO mailboxes (remote_id, name) VALUES (501, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        let mailbox = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name, email)
+             VALUES (701, 'Pat', 'Waiter', 'pat@example.com')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        let recent = now_iso_millis();
+        for (remote, subject, updated_at) in [
+            (601_i64, "A plain wait", Some(OLD.to_string())),
+            (602_i64, "B touched recently", Some(recent.clone())),
+            (603_i64, "C never answered", None),
+        ] {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                            mailbox_local_id, customer_local_id,
+                                            created_at, updated_at)
+                 VALUES (?1, ?1, ?2, 'p', 'active', ?3, ?6, ?4, ?5)",
+                params![remote, subject, mailbox, OLD, updated_at, customer],
+            )
+            .expect("conversation");
+            let conv = conn.last_insert_rowid();
+            if subject != "C never answered" {
+                conn.execute(
+                    "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
+                                                       remote_created_at)
+                     VALUES (?1, 'customer', 'published', 'still waiting for an answer', ?2)",
+                    params![conv, OLD],
+                )
+                .expect("customer thread");
+            }
+        }
+        (conn, mailbox, recent)
+    }
+
+    #[test]
+    fn waiting_stats_measure_from_the_last_customer_message() {
+        let (conn, mailbox, recent) = db_with_waiting_conversations();
+        let now = now_iso_millis();
+        let expected = wall_minutes_between(OLD, &now).expect("expected wall minutes");
+
+        let stats = waiting_stats(&conn, mailbox, None).expect("waiting stats");
+        assert_eq!(stats.count, 3, "all three conversations are waiting");
+        let avg = stats.avg_business_min.expect("avg") as f64;
+        assert!(
+            (avg - expected).abs() <= 2.0,
+            "waiting must run from the last customer message ({expected} min), not from a \
+             recent updated_at touch (got {avg}; the recent touch was {recent})"
+        );
+        let oldest = stats.oldest_business_min.expect("oldest") as f64;
+        assert!(
+            (oldest - expected).abs() <= 2.0,
+            "oldest wait runs from the customer's message: {oldest} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn waiting_stats_let_recently_touched_conversations_show_their_real_wait() {
+        // Conversation B alone: its updated_at is RECENT, its customer
+        // message is OLD. Under the old query this conversation looked
+        // fresh-again after every status/tag/sync touch; it must not.
+        let (conn, mailbox, recent) = db_with_waiting_conversations();
+        let now = now_iso_millis();
+        let expected = wall_minutes_between(OLD, &now).expect("expected wall minutes");
+        let touched_recently =
+            wall_minutes_between(&recent, &now).expect("minutes since the touch");
+
+        let stats = waiting_stats(&conn, mailbox, None).expect("waiting stats");
+        let avg = stats.avg_business_min.expect("avg") as f64;
+        assert!(
+            expected - touched_recently > 60.0 * 24.0,
+            "the fixture must be old enough to discriminate: {expected} vs {touched_recently}"
+        );
+        assert!(
+            (avg - expected).abs() <= 2.0,
+            "a touched conversation keeps its real wait ({expected} min), not the \
+             since-last-touch age ({touched_recently}): got {avg}"
+        );
+    }
 }

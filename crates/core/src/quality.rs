@@ -335,21 +335,30 @@ fn closest_document(conn: &Connection, question: &str) -> Option<(i64, String, S
     .ok()
 }
 
+/// Audit item 14: count asking conversations that showed real
+/// clarification / follow-up friction. The wired writer of that signal
+/// is the interaction engine's `client_support_outcomes` table (real
+/// `follow_up_count` / `clarification_count` columns, written on every
+/// customer reply and baseline rebuild). The previous query joined
+/// `friction_scores` — a table whose only writer
+/// (`reports::compute_friction`) has no runtime caller and serializes
+/// different JSON keys — through a remote-id join, so the count was
+/// always zero and the "repeated_question_unsolved" gap could never
+/// fire. Both sides of this count now speak LOCAL conversation ids
+/// (`ai_runs.conversation_id` and `client_support_outcomes` are both
+/// local), so no namespace translation is needed at all.
 fn friction_among(conn: &Connection, conversation_ids: &[i64]) -> usize {
     if conversation_ids.is_empty() {
         return 0;
     }
     let placeholders = vec!["?"; conversation_ids.len()].join(",");
     let sql = format!(
-        "SELECT COUNT(*) FROM friction_scores f
-         JOIN conversations c ON c.remote_id = f.conversation_id
-         WHERE c.id IN ({placeholders})
-           AND (json_extract(f.factors_json, '$.clarification_count') > 0
-                OR json_extract(f.factors_json, '$.follow_up_count') > 0)"
+        "SELECT COUNT(*) FROM client_support_outcomes
+         WHERE conversation_id IN ({placeholders})
+           AND (follow_up_count > 0 OR clarification_count > 0)"
     );
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return 0,
+    let Ok(mut stmt) = conn.prepare(&sql) else {
+        return 0;
     };
     let n: i64 = stmt
         .query_row(rusqlite::params_from_iter(conversation_ids.iter()), |r| {
@@ -1633,15 +1642,25 @@ pub fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) -> Opti
                 if history_complete { "" } else { " (pre-sync history unknown)" })
         ]
     });
-    let _ = conn.execute(
-        "DELETE FROM post_resolution_qa WHERE conversation_id = ?1",
-        params![conversation_id],
-    );
-    let _ = conn.execute(
-        "INSERT INTO post_resolution_qa (conversation_id, deterministic, computed_at)
-         VALUES (?1, ?2, datetime('now'))",
+    // Audit item 12: the >=20h maintenance rebuild (workers.rs calls
+    // rebuild_qa for every closed conversation) used to DELETE the whole
+    // row and re-INSERT only the deterministic half — wiping the stored
+    // AI layer (ai / ai_run_id / recomputed_at) on every sweep, which is
+    // permanent whenever the AI stage cannot re-run. Update the
+    // deterministic layer in place instead; only insert when the row
+    // does not exist yet, and never touch the AI-checked columns.
+    let updated = conn.execute(
+        "UPDATE post_resolution_qa SET deterministic = ?2, computed_at = datetime('now')
+         WHERE conversation_id = ?1",
         params![conversation_id, deterministic.to_string()],
     );
+    if updated.unwrap_or(0) == 0 {
+        let _ = conn.execute(
+            "INSERT INTO post_resolution_qa (conversation_id, deterministic, computed_at)
+             VALUES (?1, ?2, datetime('now'))",
+            params![conversation_id, deterministic.to_string()],
+        );
+    }
     Some(deterministic)
 }
 
@@ -2661,5 +2680,232 @@ mod k2_tests {
         .expect("closed no reply");
         let id = conn.last_insert_rowid();
         assert!(best_resolutions(&conn, &[id], 5).is_empty());
+    }
+}
+
+/// Clean-audit batch 18 (audit items 12 and 14): the QA rebuild must
+/// not wipe stored AI layers, and the "repeated_question_unsolved" gap
+/// must actually fire on real interaction-engine data.
+#[cfg(test)]
+mod batch18_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// Two closed conversations whose latest ticket_analysis carries the
+    /// same primary_question — the input shape of the gap pipeline.
+    fn db_with_question(question: &str) -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        for i in 0..2 {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (?1, ?1, 'Recurring issue', 'preview', 'closed')",
+                params![9300 + i],
+            )
+            .expect("conversation");
+            let conv = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO ai_runs (type, conversation_id, status, model, prompt_version,
+                                      input_hash, response_json, created_at, started_at)
+                 VALUES ('ticket_analysis', ?1, 'completed', 'm', 'ticket_analysis_v1',
+                         'seeded', ?2, datetime('now'), datetime('now'))",
+                params![conv, format!("{{\"primary_question\": \"{question}\"}}")],
+            )
+            .expect("analysis run");
+        }
+        conn
+    }
+
+    fn conversation_ids(conn: &Connection) -> Vec<i64> {
+        conn.prepare("SELECT id FROM conversations ORDER BY id")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |r| r.get::<_, i64>(0))
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            })
+            .unwrap_or_default()
+    }
+
+    fn candidate_kinds(conn: &Connection) -> Vec<String> {
+        conn.prepare("SELECT kind FROM knowledge_gap_candidates")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |r| r.get::<_, String>(0))
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            })
+            .unwrap_or_default()
+    }
+
+    fn seed_knowledge_hit(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO knowledge_sources (name) VALUES ('test source')",
+            [],
+        )
+        .expect("source");
+        let source = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, content)
+             VALUES (?1, 'Key rotation', 'Rotate the gateway keys from the console.')",
+            params![source],
+        )
+        .expect("document");
+        let document = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO fts_knowledge (title, content, chunk_id, document_id, visibility)
+             VALUES ('Key rotation',
+                     'How to rotate the gateway keys from the console when they expire.',
+                     NULL, ?1, 'internal_only')",
+            params![document],
+        )
+        .expect("fts row");
+    }
+
+    fn seed_outcome(conn: &Connection, conversation: i64, follow_ups: i64, clarifications: i64) {
+        conn.execute(
+            "INSERT INTO client_support_outcomes
+                 (customer_id, conversation_id, follow_up_count, clarification_count)
+             VALUES (1, ?1, ?2, ?3)",
+            params![conversation, follow_ups, clarifications],
+        )
+        .expect("outcome");
+    }
+
+    /// Audit item 14, positive case: the question is documented (so the
+    /// UNCOVERED arm is skipped), but every asking conversation kept
+    /// showing follow-up / clarification friction in the interaction
+    /// engine — the live data path the gap arm now reads — so the
+    /// "repeated_question_unsolved" candidate must fire.
+    #[test]
+    fn repeated_unsolved_question_becomes_gap_on_real_interaction_data() {
+        let conn = db_with_question("how do I rotate the gateway keys");
+        seed_knowledge_hit(&conn);
+        for id in conversation_ids(&conn) {
+            seed_outcome(&conn, id, 1, 0);
+        }
+        let (_, created) = rebuild_gaps(&conn, 90);
+        let kinds = candidate_kinds(&conn);
+        assert!(
+            created >= 1 && kinds.iter().any(|k| k == "repeated_question_unsolved"),
+            "the unsolved kind must land on friction outcomes: created={created} kinds={kinds:?}"
+        );
+    }
+
+    /// Audit item 14, negative control: a documented question whose
+    /// askers all resolved cleanly (no follow-ups, no clarifications)
+    /// must NOT become an "unsolved" gap — the answer demonstrably
+    /// solved it.
+    #[test]
+    fn cleanly_resolved_repeated_questions_stay_out_of_the_unsolved_gap() {
+        let conn = db_with_question("how do I rotate the gateway keys");
+        seed_knowledge_hit(&conn);
+        for id in conversation_ids(&conn) {
+            seed_outcome(&conn, id, 0, 0);
+        }
+        rebuild_gaps(&conn, 90);
+        let kinds = candidate_kinds(&conn);
+        assert!(
+            !kinds.iter().any(|k| k == "repeated_question_unsolved"),
+            "no friction outcomes means no unsolved gap: {kinds:?}"
+        );
+    }
+
+    /// Audit item 12: the >=20h maintenance rebuild recomputes the
+    /// deterministic QA layer for every closed conversation — it must
+    /// UPDATE in place instead of wiping the row, so a stored AI layer
+    /// survives the sweep (the AI stage is on-demand only).
+    #[test]
+    fn qa_recompute_preserves_the_stored_ai_layer() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9501, 95, 'QA ticket', 'preview', 'closed')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        for (kind, body) in [
+            ("customer", "the export keeps failing every single night"),
+            ("reply", "Nightly exports are repaired from Settings."),
+        ] {
+            conn.execute(
+                "INSERT INTO conversation_threads (conversation_id, type, state, body_text)
+                 VALUES (?1, ?2, 'published', ?3)",
+                params![conv, kind, body],
+            )
+            .expect("thread");
+        }
+
+        compute_qa_deterministic(&conn, conv).expect("first compute");
+        // An AI layer stored by an earlier on-demand check:
+        conn.execute(
+            "UPDATE post_resolution_qa
+                SET ai = '{\"answered\":\"yes\"}', ai_run_id = 42,
+                    checked_at = '2026-01-02T00:00:00Z', recomputed_at = '2026-01-02T00:00:00Z'
+              WHERE conversation_id = ?1",
+            params![conv],
+        )
+        .expect("seed ai layer");
+
+        // The >=20h sweep recomputes the deterministic layer:
+        compute_qa_deterministic(&conn, conv).expect("second compute");
+
+        let (rows, ai, ai_run_id, recomputed): (i64, Option<String>, Option<i64>, Option<String>) =
+            conn.query_row(
+                "SELECT COUNT(*), ai, ai_run_id, recomputed_at FROM post_resolution_qa
+                  WHERE conversation_id = ?1",
+                params![conv],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .expect("qa row");
+        assert_eq!(rows, 1, "exactly one row survives a recompute");
+        assert_eq!(
+            ai.as_deref(),
+            Some("{\"answered\":\"yes\"}"),
+            "the stored AI layer must survive the maintenance rebuild"
+        );
+        assert_eq!(ai_run_id, Some(42));
+        assert_eq!(recomputed.as_deref(), Some("2026-01-02T00:00:00Z"));
+
+        // The deterministic half was refreshed in place:
+        let (det, computed_at): (String, Option<String>) = conn
+            .query_row(
+                "SELECT deterministic, computed_at FROM post_resolution_qa
+                  WHERE conversation_id = ?1",
+                params![conv],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("deterministic row");
+        assert!(det.contains("\"conversation_local_id\""), "{det}");
+        assert!(computed_at.is_some());
+    }
+
+    /// Audit item 12, fresh-row path: a conversation without a QA row
+    /// still gets one on first compute.
+    #[test]
+    fn qa_compute_still_inserts_when_the_row_is_missing() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9502, 96, 'QA ticket two', 'preview', 'closed')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text)
+             VALUES (?1, 'customer', 'published', 'where are my invoices stored')",
+            params![conv],
+        )
+        .expect("thread");
+
+        assert!(compute_qa_deterministic(&conn, conv).is_some());
+        let rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM post_resolution_qa WHERE conversation_id = ?1",
+                params![conv],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(rows, 1);
     }
 }
