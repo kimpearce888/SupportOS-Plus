@@ -2174,21 +2174,32 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_threads(&self, conversation_id: i64) -> Result<Vec<HsThread>> {
-        let v = self
-            .request(
-                &format!("/v3/conversations/{conversation_id}/threads"),
-                "GET",
-                None,
-            )
-            .await?;
-        Ok(v["_embedded"]["threads"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|t| Self::map_thread(t, conversation_id))
-                    .collect()
-            })
-            .unwrap_or_default())
+        // Clean-audit item 28: the v3 threads collection is paginated, and
+        // the old single-page read treated page 1 as the conversation's
+        // full thread set — the sync's stale-thread sweep then deleted
+        // every thread past page 1 as "gone from the platform" on every
+        // re-ingest. Follow the HAL next link (the same loop
+        // `list_system_users` uses) until the pages run out.
+        let mut out: Vec<HsThread> = Vec::new();
+        let mut path = format!("/v3/conversations/{conversation_id}/threads");
+        loop {
+            let v = self.request(&path, "GET", None).await?;
+            let embedded = v["_embedded"]["threads"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let n = embedded.len();
+            out.extend(
+                embedded
+                    .iter()
+                    .map(|t| Self::map_thread(t, conversation_id)),
+            );
+            match hal_next_path(&v) {
+                Some(next) if n > 0 => path = next,
+                _ => break,
+            }
+        }
+        Ok(out)
     }
 
     async fn get_customer(&self, customer_id: i64) -> Result<Option<HsCustomer>> {

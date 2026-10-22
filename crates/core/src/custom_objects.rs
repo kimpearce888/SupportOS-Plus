@@ -433,6 +433,14 @@ pub fn validate_properties(
             "number" => value.as_f64().is_some_and(f64::is_finite),
             "date" => value.as_str().is_some_and(valid_iso_date),
             "boolean" => value.is_boolean(),
+            // Clean-audit item 27 (legacy aliases): the shell's type
+            // builder used to offer `checkbox` and `url`, which this
+            // matcher rejected as unknown — types built with them could
+            // never hold an object. The builder now offers only the
+            // canonical vocabulary above; these aliases keep types that
+            // were already created with the phantom names usable.
+            "checkbox" => value.is_boolean(),
+            "url" => value.as_str().is_some_and(|s| s.chars().count() <= 300),
             "select" => value.as_str().is_some_and(|s| {
                 def.options
                     .as_ref()
@@ -1037,4 +1045,90 @@ pub fn report(conn: &Connection) -> Result<Value> {
         "total_objects": total_objects,
         "total_links": total_links,
     }))
+}
+
+#[cfg(test)]
+mod batch21_audit27_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn field(key: &str, field_type: &str) -> FieldInput {
+        FieldInput {
+            key: key.into(),
+            label: key.into(),
+            field_type: field_type.into(),
+            required: false,
+            options: None,
+        }
+    }
+
+    /// Audit item 27: the shell's type builder offered `checkbox` and
+    /// `url`, which validate_properties rejected as unknown field types —
+    /// types built with them could never hold an object. The builder now
+    /// offers the canonical vocabulary, and these legacy aliases keep
+    /// pre-existing types working.
+    #[test]
+    fn audit27_legacy_checkbox_and_url_field_types_accept_objects() {
+        let conn = conn();
+        let (type_id, _) = create_type(
+            &conn,
+            "Legacy Builder Types",
+            None,
+            &[field("shipped", "checkbox"), field("docs", "url")],
+        )
+        .expect("type with legacy field names");
+
+        let mut properties = Map::new();
+        properties.insert("shipped".into(), Value::Bool(true));
+        properties.insert("docs".into(), Value::String("https://example.com/x".into()));
+        let object_id =
+            create_object(&conn, type_id, "LGTM", &properties, &[]).expect("legacy fields work");
+        assert!(object_id > 0);
+    }
+
+    /// The aliases validate like their canonical equivalents: a string in
+    /// a legacy checkbox field is still a type error, not a silent pass.
+    #[test]
+    fn audit27_legacy_aliases_still_reject_wrong_value_types() {
+        let conn = conn();
+        let (type_id, _) = create_type(
+            &conn,
+            "Legacy Strict",
+            None,
+            &[field("shipped", "checkbox")],
+        )
+        .expect("type");
+
+        let mut properties = Map::new();
+        properties.insert("shipped".into(), Value::String("yes".into()));
+        let err = create_object(&conn, type_id, "Nope", &properties, &[])
+            .expect_err("a string is not a checkbox value");
+        assert!(
+            err.to_string().contains("Invalid checkbox"),
+            "the error must name the field: {err}"
+        );
+    }
+
+    /// Unknown field types outside the legacy aliases are still refused —
+    /// the alias list must not become a catch-all.
+    #[test]
+    fn audit27_unknown_field_types_are_still_rejected() {
+        let conn = conn();
+        let (type_id, _) =
+            create_type(&conn, "Mystery", None, &[field("vibe", "telepathy")]).expect("type");
+
+        let mut properties = Map::new();
+        properties.insert("vibe".into(), Value::String("strong".into()));
+        let err = create_object(&conn, type_id, "Nope", &properties, &[])
+            .expect_err("unknown field type must be refused");
+        assert!(
+            err.to_string().contains("Unknown field type telepathy"),
+            "the error must name the type: {err}"
+        );
+    }
 }

@@ -3345,9 +3345,30 @@ impl WorkerManager {
                     )?;
                     return Ok(());
                 }
-                self.provider
-                    .create_saved_reply(mailbox_remote_id, &name, &text)
-                    .await?;
+                // Clean-audit item 30: the v2 saved-replies API has no
+                // client-supplied id, so a retried create used to re-POST
+                // the payload and duplicate the reply on the platform —
+                // most often when the create itself had landed but the
+                // response or the post-write re-read timed out. The
+                // create is idempotent by its natural key instead: when
+                // the mailbox already holds a reply with this exact name
+                // and text, that twin is this job's earlier write, so the
+                // POST is skipped and the re-read below reflects it.
+                let existing = self.provider.list_saved_replies(mailbox_remote_id).await?;
+                let already_landed = existing
+                    .iter()
+                    .any(|r| r.name == name && r.text.clone().unwrap_or_default() == text);
+                if already_landed {
+                    tracing::info!(
+                        operation = "saved_reply_write",
+                        mailbox = mailbox_remote_id,
+                        "create already landed on the platform; skipping the re-POST"
+                    );
+                } else {
+                    self.provider
+                        .create_saved_reply(mailbox_remote_id, &name, &text)
+                        .await?;
+                }
             }
             "update" => {
                 if name.trim().is_empty() {
