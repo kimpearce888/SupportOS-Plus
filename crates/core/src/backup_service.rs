@@ -176,26 +176,113 @@ pub fn prune_backups(backups_dir: &Path, keep: usize) -> usize {
     removed
 }
 
+/// Structural probe for a restore source: a SupportOS database always
+/// carries the base-schema `app_state` table. A foreign-but-valid SQLite
+/// file (an export from some other tool, a half-copied unrelated `.db`)
+/// would pass a bare integrity check yet brick the app once swapped in,
+/// so it is refused before anything on disk is touched.
+fn looks_like_supportos_db(path: &Path) -> bool {
+    Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .and_then(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_state'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+        })
+        .map(|n| n > 0)
+        .unwrap_or(false)
+}
+
 pub fn restore(db_path: &Path, backup_path: &Path) -> Value {
     if !backup_path.exists() {
         return json!({ "ok": false, "message": "Backup file not found." });
     }
+    // Audit item 11: never swap an unverified file over the live
+    // database. The integrity check catches truncated copies and
+    // non-databases; the structural probe catches foreign SQLite files.
+    // Both run BEFORE anything on disk is modified.
+    if !verify_backup(backup_path) {
+        return json!({
+            "ok": false,
+            "message": "Restore refused: the backup file failed its integrity check. \
+                         The live database was not touched."
+        });
+    }
+    if !looks_like_supportos_db(backup_path) {
+        return json!({
+            "ok": false,
+            "message": "Restore refused: the file is a database, but not a SupportOS \
+                         backup. The live database was not touched."
+        });
+    }
     if let Some(parent) = db_path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let restore_tmp = format!("{}.restore-tmp", db_path.to_string_lossy());
+    let db_str = db_path.to_string_lossy();
+    let restore_tmp = format!("{db_str}.restore-tmp");
+    let prev = format!("{db_str}.restore-prev");
+    // Stage the verified copy and fsync it BEFORE anything is swapped,
+    // so a power cut cannot leave a half-written file in place.
     if fs::copy(backup_path, &restore_tmp).is_err() {
         return json!({ "ok": false, "message": "Restore failed: could not stage the backup." });
     }
-    if fs::rename(&restore_tmp, db_path).is_err() {
-        return json!({ "ok": false, "message": "Restore failed: could not swap the database into place." });
+    if fs::File::open(&restore_tmp)
+        .and_then(|f| f.sync_all())
+        .is_err()
+    {
+        let _ = fs::remove_file(&restore_tmp);
+        return json!({ "ok": false, "message": "Restore failed: could not flush the staged backup." });
+    }
+    // A stale prev from an earlier restore must not block the rename.
+    let _ = fs::remove_file(&prev);
+    let _ = fs::remove_file(format!("{prev}-wal"));
+    let _ = fs::remove_file(format!("{prev}-shm"));
+    // Move the LIVE database and its WAL/SHM aside as one unit. This
+    // closes the stale-WAL window: the previous code renamed the new
+    // database into place first and only then deleted the old `-wal`,
+    // so a crash in between would have paired the fresh file with the
+    // old WAL and replayed foreign pages onto it. With the live side
+    // moved first, between the renames the db path simply does not
+    // exist — SQLite treats that as "open fresh", never as a
+    // cross-generation pair.
+    if db_path.exists() && fs::rename(db_path, &prev).is_err() {
+        let _ = fs::remove_file(&restore_tmp);
+        return json!({
+            "ok": false,
+            "message": "Restore failed: could not set the live database aside."
+        });
     }
     for ext in ["-wal", "-shm"] {
-        let p = format!("{}{ext}", db_path.to_string_lossy());
-        if Path::new(&p).exists() {
-            let _ = fs::remove_file(&p);
+        let live = format!("{db_str}{ext}");
+        if Path::new(&live).exists() {
+            let _ = fs::rename(&live, format!("{prev}{ext}"));
         }
     }
+    if fs::rename(&restore_tmp, db_path).is_err() {
+        // Roll back: the live database (and its WAL) return to place.
+        if Path::new(&prev).exists() {
+            let _ = fs::rename(&prev, db_path);
+        }
+        for ext in ["-wal", "-shm"] {
+            let side = format!("{prev}{ext}");
+            if Path::new(&side).exists() {
+                let _ = fs::rename(&side, format!("{db_str}{ext}"));
+            }
+        }
+        return json!({ "ok": false, "message": "Restore failed: could not swap the database into place." });
+    }
+    // Durability: fsync the swapped file and the directory entry that
+    // now names it.
+    let _ = fs::File::open(db_path).and_then(|f| f.sync_all());
+    if let Some(parent) = db_path.parent() {
+        let _ = fs::File::open(parent).and_then(|d| d.sync_all());
+    }
+    // Success: the pre-restore database is discarded along with its
+    // moved-aside WAL/SHM (the backup file itself remains on disk).
+    let _ = fs::remove_file(&prev);
+    let _ = fs::remove_file(format!("{prev}-wal"));
+    let _ = fs::remove_file(format!("{prev}-shm"));
     json!({ "ok": true, "message": "Database restored. Restart SupportOS to use the restored data." })
 }
 
@@ -456,7 +543,9 @@ mod tests {
         let source = dir.join("source.db");
         let conn = Connection::open(&source).expect("source db");
         conn.execute_batch(
-            "CREATE TABLE marker (id INTEGER PRIMARY KEY, note TEXT);
+            "CREATE TABLE app_state (id INTEGER PRIMARY KEY, schema_version INTEGER);
+             INSERT INTO app_state (id, schema_version) VALUES (1, 42);
+             CREATE TABLE marker (id INTEGER PRIMARY KEY, note TEXT);
              INSERT INTO marker (note) VALUES ('restorable');",
         )
         .expect("source data");
@@ -477,6 +566,12 @@ mod tests {
         assert!(target.exists());
         assert!(!dir.join("target.db-wal").exists());
         assert!(!dir.join("target.db-shm").exists());
+        // Audit item 11: no staging or previous-generation residue may
+        // outlive a successful restore.
+        assert!(!dir.join("target.db.restore-tmp").exists());
+        assert!(!dir.join("target.db.restore-prev").exists());
+        assert!(!dir.join("target.db.restore-prev-wal").exists());
+        assert!(!dir.join("target.db.restore-prev-shm").exists());
 
         let check =
             Connection::open_with_flags(&target, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -495,6 +590,86 @@ mod tests {
         let result = restore(&dir.join("new.db"), &dir.join("nope.db"));
         assert_eq!(result["ok"], json!(false));
         assert!(result["message"].as_str().unwrap().contains("not found"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Audit item 11: an unverified file (junk / truncated copy) must be
+    /// refused before the live database is touched.
+    #[test]
+    fn restore_refuses_an_unverified_file_and_keeps_the_live_db() {
+        let dir = temp_dir("restore-junk");
+        let target = dir.join("target.db");
+        let conn = Connection::open(&target).expect("live db");
+        conn.execute_batch(
+            "CREATE TABLE app_state (id INTEGER PRIMARY KEY, schema_version INTEGER);
+             INSERT INTO app_state (id, schema_version) VALUES (1, 7);
+             CREATE TABLE marker (id INTEGER PRIMARY KEY, note TEXT);
+             INSERT INTO marker (note) VALUES ('live data');",
+        )
+        .expect("live data");
+        drop(conn);
+        let junk = dir.join("junk.db");
+        fs::write(&junk, b"this is not a sqlite database at all").expect("junk");
+
+        let result = restore(&target, &junk);
+        assert_eq!(result["ok"], json!(false));
+        assert!(result["message"].as_str().unwrap().contains("integrity"));
+
+        // The live database is untouched and still opens with its data.
+        let check =
+            Connection::open_with_flags(&target, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .expect("live db opens");
+        let note: String = check
+            .query_row("SELECT note FROM marker", [], |r| r.get(0))
+            .expect("marker row");
+        assert_eq!(note, "live data");
+        assert!(!dir.join("target.db.restore-tmp").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Audit item 11: a VALID SQLite file that is not a SupportOS backup
+    /// passes integrity_check — the structural probe is what must catch
+    /// it before the swap.
+    #[test]
+    fn restore_refuses_a_foreign_sqlite_database() {
+        let dir = temp_dir("restore-foreign");
+        let target = dir.join("target.db");
+        let live = Connection::open(&target).expect("live db");
+        live.execute_batch(
+            "CREATE TABLE app_state (id INTEGER PRIMARY KEY, schema_version INTEGER);
+             INSERT INTO app_state (id, schema_version) VALUES (1, 7);
+             CREATE TABLE marker (id INTEGER PRIMARY KEY, note TEXT);
+             INSERT INTO marker (note) VALUES ('live data');",
+        )
+        .expect("live data");
+        drop(live);
+        let foreign = dir.join("foreign.db");
+        let other = Connection::open(&foreign).expect("foreign db");
+        other
+            .execute_batch(
+                "CREATE TABLE totally_unrelated (payload TEXT);
+                 INSERT INTO totally_unrelated (payload) VALUES ('hi');",
+            )
+            .expect("foreign data");
+        drop(other);
+
+        let result = restore(&target, &foreign);
+        assert_eq!(result["ok"], json!(false));
+        assert!(
+            result["message"]
+                .as_str()
+                .unwrap()
+                .contains("not a SupportOS")
+        );
+
+        let check =
+            Connection::open_with_flags(&target, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .expect("live db opens");
+        let note: String = check
+            .query_row("SELECT note FROM marker", [], |r| r.get(0))
+            .expect("marker row");
+        assert_eq!(note, "live data");
+        assert!(!dir.join("target.db.restore-tmp").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
