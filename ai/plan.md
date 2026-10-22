@@ -25,14 +25,20 @@ Batch 18 = items 11–15 (backup restore verified+confirmed+fsync+WAL-safe,
 QA rebuild preserves AI layers, SLA waiting from last customer message,
 repeated_question_unsolved reads wired friction data, campaign sends use
 the remote mailbox id) — verified and recorded in `completed.md`.
+Batch 19 = items 16–20 (outreach attempts spent on every outcome, the
+atomic 'sending' claim with mirror-probing crash recovery, the
+dual-generation trigger parser, approved write actions reaching Help
+Scout through the outbound push lane, activity events keyed by the local
+conversation id) — verified and recorded in `completed.md`.
+Batch 20 = items 21–25 (vector point-id namespacing per chunk family +
+cross-family refusal + the one-time re-embed migration, rebuild_activity
+enqueued after initial sync and repaired once for pre-fix mirrors, the
+SyncTrigger field ending auto-sync toast spam, the composer-AI result
+pinned to the job row, the phantom "waiting" status replaced by the
+platform's own `open`) — verified and recorded in `completed.md`.
 
 ### HIGH — shipped features broken / silent permanent failure
 
-21. [high|bug] Vector point-id collisions across entity families silently overwrite vectors in the single collection — vectorstore_sqlitevec.rs:390-397
-22. [high|gap] `rebuild_activity` job never enqueued → derived response-state columns permanently NULL/defaults — activity.rs:413 + workers.rs:1324
-23. [high|bug] Toast pushed for every auto-sync completion (~one/minute forever) — app.rs:489-494 (needs trigger field on the event)
-24. [high|bug] Inbox AI-transform poll fills the composer from a stale/foreign historical run — pages/inbox.rs:1736-1750
-25. [high|bug] "waiting" status option is not in the platform's own status vocabulary — pages/settings.rs:1122 + core inbox.rs:2714
 26. [high|bug] Custom-objects form sends numbers as JSON strings — object creation always fails — pages/custom_objects.rs:286-292
 27. [high|bug] Custom-objects type builder offers checkbox/url types core rejects — pages/custom_objects.rs:24-52
 
