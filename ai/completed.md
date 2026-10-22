@@ -1588,3 +1588,119 @@ Verification (Rule 5):
   retryable).
 - Security: staged diff token-scanned clean before the push; remote
   unmoved at push time (fetch-first).
+
+---
+
+## Batch 18 — clean-audit items 11-15 (HIGH tier: backup restore, QA wipe, SLA waiting, the never-firing gap, campaign mailbox)
+
+_Completed 2026-10-22. Code commit `6366425` — CI run 39778901297:
+success. All five fixes carry fresh regression tests plus the batch
+harness (scripts/verify_batch18.py, committed; also archived at
+/home/z/my-project/scripts/)._
+
+1. **Backup restore swapped an unverified file over the live database**
+   (high|bug) — `restore()` copied the chosen backup to a temp file and
+   renamed it over the live DB with no integrity check, no fsync, a
+   stale-WAL window (the new file was renamed in BEFORE the old `-wal`
+   was deleted, so a crash in between would replay the old WAL onto
+   the fresh content), and one unconfirmed UI click. Now: the backup
+   must pass integrity_check AND a SupportOS structural probe (the
+   base-schema `app_state` table — a foreign SQLite file is refused)
+   before anything on disk is touched; the staged copy is fsynced
+   before any swap; the live database AND its WAL/SHM move aside as
+   one unit (between the renames the db path does not exist, so no
+   cross-generation WAL pairing is possible); the swapped file and
+   its directory entry are fsynced; a failed swap rolls the live
+   database back; no residue survives success; and the Settings
+   restore button is a two-step confirm (arm → "really restore"
+   Destructive) that states the consequence before the second click.
+   backup_service.rs:179-284 + pages/settings.rs (pre-fix
+   backup_service.rs:186-198 + settings.rs:2124-2131).
+
+2. **The >=20h QA rebuild wiped every stored AI layer** (high|bug) —
+   `compute_qa_deterministic` DELETEd the whole `post_resolution_qa`
+   row and re-INSERTed only the deterministic half, so the maintenance
+   sweep (workers.rs, every 20 hours while the feature flag is on)
+   destroyed the on-demand AI layer (ai / ai_run_id / recomputed_at)
+   for every closed conversation — permanent whenever the AI stage
+   could not re-run. The recompute now UPDATEs the deterministic layer
+   in place (an INSERT only when the row is missing) and never touches
+   the AI-checked columns. quality.rs:1645-1663 (pre-fix 1636-1644).
+
+3. **SLA waiting stats measured from `updated_at`** (high|bug) — any
+   status change, tag edit, assignment or sync touch refreshed
+   `updated_at` and reset the waiting clock, silently understating SLA
+   pressure. Waiting now runs from the newest published, non-deleted
+   CUSTOMER thread (MAX(COALESCE(remote_created_at, created_at))),
+   falling back to the conversation's own created_at when the customer
+   has not spoken. The maintained `customer_waiting_since` column was
+   deliberately NOT used as the source: it is derived by the activity
+   machinery that audit items 20/22 show is currently broken (never
+   enqueued / corrupted), while the thread-derived value is ground
+   truth from the raw mirror. sla.rs:509-527 (pre-fix 510).
+
+4. **"repeated_question_unsolved" could never fire** (high|bug) — the
+   gap arm counted friction through `friction_scores`, a table whose
+   only writer (`reports::compute_friction`) has no runtime caller,
+   whose serialized JSON keys never matched the query
+   (`message_count`/`resolution_hours`/`reopen_count`/`escalated` vs
+   the queried `clarification_count`/`follow_up_count`), joined
+   through a remote-id namespace — so the count was structurally
+   always zero and the documented gap kind never triggered. It now
+   reads the WIRED interaction engine (`client_support_outcomes`:
+   real columns, written on every customer reply and baseline
+   rebuild, UNIQUE per conversation) with local ids on both sides, so
+   a documented question whose askers kept showing follow-up or
+   clarification friction becomes a real gap candidate — and
+   cleanly-resolved questions provably do not. quality.rs:338-369
+   (pre-fix 344-348).
+
+5. **Campaign sends passed the LOCAL mailbox row id as the remote
+   `mailboxId`** (high|bug) — `CreateConversationInput.mailbox_id`
+   went straight to the platform carrying the campaign's local mirror
+   row id (1, 2, ...), which is not a valid Help Scout mailbox, so
+   every campaign send failed. `send_batch` now resolves
+   `mailboxes.remote_id` once per batch and sends that; a mailbox that
+   never synced fails the whole batch permanently and honestly
+   ("mailbox not synced") instead of sending garbage. Implementing the
+   fix exposed a latent self-deadlock in BOTH early-fail branches: the
+   let-else kept the writer guard alive across `finalize_if_drained`,
+   which re-acquires the same non-reentrant write lane — the
+   no-mailbox path would have hung the outreach worker thread forever.
+   Both branches now scope the guard. outreach.rs:1814-1871 (pre-fix
+   1871).
+
+Verification (Rule 5):
+
+- `cargo fmt --all --check` clean; `cargo clippy --workspace
+  --all-targets -- -D warnings` clean (one iteration: two
+  `doc_overindented_list_items` in a test doc comment); clippy with
+  the `ui-screenshot` and `sandbox` features clean; `python3
+  scripts/gate_no_simulation.py` clean — all on the pinned 1.99.1
+  toolchain (reinstalled after the janitor rewind wiped ~/.cargo).
+- Fresh harness `scripts/verify_batch18.py` (committed; also archived
+  at /home/z/my-project/scripts/): 31/31 checks pass — pre-swap
+  integrity + structural verification, staged fsync, live-db-before-
+  new-file ordering, WAL-moves-aside-with-the-db, post-swap file and
+  directory fsync, rollback, residue cleanup, the two-step UI arming;
+  in-place QA update with the row-wiping DELETE provably gone and the
+  AI-layer writer untouched; customer-thread since with the
+  updated_at shape gone; the gap arm on client_support_outcomes with
+  real columns and no json_extract; remote-mailbox resolution, the
+  honest not-synced branch, and scoped writer guards on both
+  early-fail paths.
+- Tests: core 283 passed / 0 failed / 4 ignored (8 new batch-18
+  regressions: the unsolved gap fires on real interaction data + the
+  clean-resolution negative control, the AI layer survives the
+  recompute + the fresh-row insert path, waiting-from-last-customer-
+  message + the recently-touched discrimination, the remote mailbox
+  id reaches the platform + the unsynced mailbox fails honestly);
+  sandbox-feature suite 288 passed / 0 failed / 4 ignored; app-shell
+  170 passed / 0 failed (incl. the new page-level restore test: a
+  verified backup lands with the restart message, junk is refused
+  with the live database untouched); xtask 6; catalog 0.
+- Runner verification: code commit `6366425` — CI run 39778901297:
+  success (fmt/clippy/test/deny + AppImage/deb build + smoke, all
+  green on the runner).
+- Security: staged diff token-scanned clean before the push; remote
+  unmoved at push time (fetch-first).

@@ -5,9 +5,11 @@
 
 ## Active items — none
 
-Batch 17 (clean-audit items 6-10: worker-restart tick guards, writer
-lane across LLM round-trips, duplicate-send replay safety, raw_json_hash
-writer + signature fold, LM Studio probe authentication) is complete and
-verified; the record is in `completed.md`. The remaining 155 audit
-findings are queued in `plan.md` (items 11-165) and the next five start
-only on the owner's "continue".
+Batch 18 (clean-audit items 11-15: verified+confirmed+fsync+WAL-safe
+backup restore, QA rebuild preserving stored AI layers, SLA waiting
+from the last customer message, the repeated_question_unsolved gap
+reading wired friction data, campaign sends using the remote mailbox
+id + the latent send_batch writer-lane deadlock fix) is complete and
+verified; the record is in `completed.md`. The remaining 150 audit
+findings are queued in `plan.md` (items 16-165) and the next five
+start only on the owner's "continue".
