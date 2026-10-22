@@ -21,14 +21,13 @@ blind spots) — verified and recorded in `completed.md`.
 Batch 17 = items 6–10 (worker-restart guard flags, writer-lane-across-LLM,
 duplicate-send idempotency, raw_json_hash writer, LM Studio probe API key) —
 verified and recorded in `completed.md`.
+Batch 18 = items 11–15 (backup restore verified+confirmed+fsync+WAL-safe,
+QA rebuild preserves AI layers, SLA waiting from last customer message,
+repeated_question_unsolved reads wired friction data, campaign sends use
+the remote mailbox id) — verified and recorded in `completed.md`.
 
 ### HIGH — shipped features broken / silent permanent failure
 
-11. [high|bug] Backup restore: unverified file swapped over live DB, no fsync, stale-WAL window, single unconfirmed click — backup_service.rs:186-198 + pages/settings.rs:2124-2131
-12. [high|bug] Auto QA rebuild wipes stored AI QA layers every ≥20h — quality.rs:1637-1644
-13. [high|bug] SLA waiting stats use `updated_at` instead of last-customer-message — sla.rs:510
-14. [high|bug] "repeated_question_unsolved" gap can never fire (no writer + wrong JSON keys + id-namespace join) — quality.rs:344-348
-15. [high|bug] Campaign sends pass the LOCAL mailbox row id as remote `mailboxId` — all sends fail — outreach.rs:1871
 16. [high|bug] Recipient `attempts` never incremented → infinite retry storm + head-of-line block — outreach.rs:1833
 17. [high|bug] No claim/idempotency across campaign sends → duplicate emails on crash/ambiguous retry — outreach.rs:1653,1727-1756
 18. [high|bug] UI-created rules poison the engine's trigger deserialization — automation silently never runs — automation.rs:1081-1087
