@@ -723,6 +723,30 @@ impl WorkerManager {
                         })
                 }
             }
+            // Audit item 19: automation-approved tag adds push through
+            // the same outbound lane the manual inbox uses — a typed
+            // local write with no push used to be reverted by the next
+            // sync. The payload carries the LOCAL conversation id (the
+            // lane's resolver owns local→remote) and the full tag list,
+            // mirroring how update_tags works on the platform.
+            "update_tags" => {
+                let tags: Vec<String> = payload["tags"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if tags.is_empty() {
+                    Err(Error::Other("tag update with an empty tag list".into()))
+                } else {
+                    self.provider
+                        .update_tags(remote_id, tags)
+                        .await
+                        .map(|_| format!("tags updated on conversation {remote_id}"))
+                }
+            }
             other => Err(Error::Other(
                 format!("unknown outbound job kind {other}").into(),
             )),
@@ -747,6 +771,7 @@ impl WorkerManager {
                         "create_reply" => "reply_sent",
                         "create_note" => "note_sent",
                         "update_status" => "status_changed",
+                        "update_tags" => "tags_updated",
                         _ => "conversation_assigned",
                     };
                     let _ = crate::jobs::audit(

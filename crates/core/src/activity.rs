@@ -146,119 +146,6 @@ pub fn now_iso() -> String {
         .to_string()
 }
 
-pub fn derive_response_state(
-    conn: &Connection,
-    conversation_remote_id: i64,
-) -> Result<ResponseState> {
-    let status: Option<String> = conn
-        .query_row(
-            "SELECT status FROM conversations WHERE remote_id = ?1",
-            params![conversation_remote_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
-    if status.as_deref() == Some("closed") {
-        return Ok(ResponseState::Closed);
-    }
-
-    let last_event: Option<(String, String)> = conn
-        .query_row(
-            "SELECT event_type, actor_type FROM activity_events
-             WHERE conversation_id = ?1
-             ORDER BY julianday(occurred_at) DESC
-             LIMIT 1",
-            params![conversation_remote_id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-        )
-        .ok();
-
-    match last_event {
-        None => Ok(ResponseState::NeedsFirstResponse),
-        Some((_event_type, actor_type)) => {
-            if actor_type == "customer" {
-                Ok(ResponseState::CustomerWaiting)
-            } else if actor_type == "agent" {
-                Ok(ResponseState::AgentWaiting)
-            } else {
-                Ok(ResponseState::NeedsFirstResponse)
-            }
-        }
-    }
-}
-
-pub fn update_derived_columns(conn: &Connection, conversation_remote_id: i64) -> Result<()> {
-    let state = derive_response_state(conn, conversation_remote_id)?;
-
-    let first_customer_message_at: Option<String> = conn
-        .query_row(
-            "SELECT MIN(occurred_at) FROM activity_events
-             WHERE conversation_id = ?1 AND actor_type = 'customer'",
-            params![conversation_remote_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
-    let first_response_at: Option<String> = conn
-        .query_row(
-            "SELECT MIN(occurred_at) FROM activity_events
-             WHERE conversation_id = ?1 AND actor_type = 'agent' AND event_type = 'reply'",
-            params![conversation_remote_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
-    let last_customer_reply_at: Option<String> = conn
-        .query_row(
-            "SELECT MAX(occurred_at) FROM activity_events
-             WHERE conversation_id = ?1 AND actor_type = 'customer'",
-            params![conversation_remote_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
-    let last_human_agent_response_at: Option<String> = conn
-        .query_row(
-            "SELECT MAX(occurred_at) FROM activity_events
-             WHERE conversation_id = ?1 AND actor_type = 'agent'",
-            params![conversation_remote_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
-    let customer_waiting_since = match state {
-        ResponseState::CustomerWaiting => last_customer_reply_at.clone(),
-        _ => None,
-    };
-
-    conn.execute(
-        "UPDATE conversations SET
-            first_customer_message_at = ?1,
-            first_response_at = ?2,
-            last_customer_reply_at = ?3,
-            last_human_agent_response_at = ?4,
-            customer_waiting_since = ?5,
-            response_state = ?6
-         WHERE remote_id = ?7",
-        params![
-            first_customer_message_at,
-            first_response_at,
-            last_customer_reply_at,
-            last_human_agent_response_at,
-            customer_waiting_since,
-            state.as_str(),
-            conversation_remote_id,
-        ],
-    )?;
-
-    Ok(())
-}
-
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 pub struct RebuildSummary {
     pub conversations: i64,
@@ -315,7 +202,13 @@ fn derive_mirror_event(t: &MirrorThread) -> Option<(String, String, Option<i64>)
     }
 }
 
-fn update_derived_columns_by_local_id(conn: &Connection, conv_local: i64) -> Result<()> {
+/// Audit item 20: this is the ONLY derived-columns entry point.
+/// `activity_events.conversation_id` is keyed on the LOCAL
+/// `conversations.id` (see `rebuild_all`); the old remote-id-keyed
+/// twin computed the response state from the wrong event set and
+/// wiped the derived timestamps on every user action — removed. All
+/// callers resolve the local id first (see ticket_ops).
+pub fn update_derived_columns_by_local_id(conn: &Connection, conv_local: i64) -> Result<()> {
     let status: Option<String> = conn
         .query_row(
             "SELECT status FROM conversations WHERE id = ?1",

@@ -429,6 +429,7 @@ pub fn apply_m031(conn: &Connection) -> Result<()> {
             hs_conversation_number INTEGER,
             sent_at         TEXT,
             replied_at      TEXT,
+            updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             UNIQUE (campaign_id, customer_local_id)
         );
@@ -949,7 +950,13 @@ pub fn campaign_retry_failed(conn: &Connection, campaign_id: i64) -> serde_json:
     }})
 }
 
-pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Value {
+/// Audit items 16 + 17: recover recipients whose delivery state is
+/// stranded or ambiguous — resolve 'unknown' rows against the platform
+/// mirror (sent / safe-retry / exhausted) and recover 'sending' rows left
+/// behind by a crash (mirror match → 'sent', otherwise bounded requeue).
+/// Returns (resolved_sent, returned_to_queue, still_unknown). Pure state
+/// repair: no continuation job is enqueued here.
+fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64, i64) {
     type UnknownRow = (i64, Option<i64>, Option<String>, Option<String>);
     let unknowns: Vec<UnknownRow> = conn
         .prepare(
@@ -1014,10 +1021,17 @@ pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Va
                 );
                 resolved_sent += 1;
             }
+            // Audit item 17: reconciliation proved NOT delivered and
+            // attempts remain, so the row returns to the retryable pool —
+            // 'failed' here contradicted the branch guard, the message and
+            // the `returned` counter (and, with attempts always 0 before
+            // item 16, it fired every time, so no reconciled row ever
+            // actually retried). Item 16's attempts cap bounds the retry.
             None if attempts < MAX_ATTEMPTS => {
                 let _ = conn.execute(
-                    "UPDATE outreach_recipients SET state = 'failed',
-                         last_error = 'Reconciled: not delivered, safe to retry'
+                    "UPDATE outreach_recipients SET state = 'queued',
+                         last_error = 'Reconciled: not delivered, safe to retry',
+                         updated_at = datetime('now')
                        WHERE id = ?1",
                     [rid],
                 );
@@ -1030,7 +1044,18 @@ pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Va
                 );
                 returned += 1;
             }
+            // Reconciliation proved not delivered AND the attempts are
+            // exhausted: the honest terminal state is 'failed' with the
+            // reason recorded (previously the row lingered in 'unknown'
+            // forever, re-logged by every reconcile pass).
             None => {
+                let _ = conn.execute(
+                    "UPDATE outreach_recipients SET state = 'failed',
+                         last_error = 'Reconciled: not delivered and attempts exhausted',
+                         updated_at = datetime('now')
+                       WHERE id = ?1",
+                    [rid],
+                );
                 log_event(
                     conn,
                     campaign_id,
@@ -1044,30 +1069,107 @@ pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Va
         let _ = email;
     }
 
-    let stale_threshold = "datetime('now', '-10 minutes')";
-    let stale_requeued: i64 = conn
-        .execute(
-            "UPDATE outreach_recipients
-                SET state = 'queued', last_error = 'Requeued: stale sending state (reconcile)'
-              WHERE campaign_id = ?1 AND state = 'sending'
-                AND updated_at < ?2",
-            rusqlite::params![campaign_id, stale_threshold],
+    // Audit item 17: rows stranded in 'sending' by a crash. The original
+    // bulk requeue was doubly dead code: it compared `updated_at` against
+    // the literal TEXT of a datetime() expression bound as a parameter
+    // (never a past timestamp), and the column itself only exists from
+    // this batch on. Probe the platform mirror first — a crashed send
+    // that actually landed is marked 'sent' (no duplicate email), and
+    // only a genuinely undelivered row returns to 'queued' for a
+    // bounded retry.
+    let campaign_subject: Option<String> = conn
+        .query_row(
+            "SELECT subject FROM outreach_campaigns WHERE id = ?1",
+            [campaign_id],
+            |r| r.get(0),
         )
-        .unwrap_or(0)
-        .try_into()
-        .unwrap_or(0);
-    if stale_requeued > 0 {
+        .ok();
+    let stale_sending: Vec<(i64, Option<i64>)> = conn
+        .prepare(
+            "SELECT id, customer_remote_id FROM outreach_recipients
+              WHERE campaign_id = ?1 AND state = 'sending'
+                AND updated_at < datetime('now', '-10 minutes')",
+        )
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map(|rows| rows.filter_map(|x| x.ok()).collect())
+                .ok()
+        })
+        .unwrap_or_default();
+    let mut stale_requeued: i64 = 0;
+    let mut stale_resolved_sent: i64 = 0;
+    for (rid, customer_remote) in stale_sending {
+        let probeable_subject = campaign_subject
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let match_conv: Option<(i64, Option<i64>)> = match (customer_remote, probeable_subject) {
+            (Some(cr), Some(subject)) => conn
+                .query_row(
+                    "SELECT remote_id, number FROM conversations
+                      WHERE customer_local_id = (SELECT id FROM customers WHERE remote_id = ?1)
+                        AND LOWER(TRIM(COALESCE(subject, ''))) = LOWER(TRIM(COALESCE(?2, '')))
+                      LIMIT 1",
+                    rusqlite::params![cr, subject],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .ok(),
+            _ => None,
+        };
+        match match_conv {
+            Some((remote, number)) => {
+                let _ = conn.execute(
+                    "UPDATE outreach_recipients SET state = 'sent',
+                         hs_conversation_remote_id = ?1, hs_conversation_number = ?2,
+                         sent_at = datetime('now'),
+                         last_error = 'Recovered: crashed send had landed (mirror match)',
+                         updated_at = datetime('now')
+                       WHERE id = ?3",
+                    rusqlite::params![remote, number, rid],
+                );
+                log_event(
+                    conn,
+                    campaign_id,
+                    Some(rid),
+                    "recipient_reconciled_sent",
+                    Some("stale sending recovered as sent from the platform mirror"),
+                );
+                stale_resolved_sent += 1;
+            }
+            None => {
+                let _ = conn.execute(
+                    "UPDATE outreach_recipients SET state = 'queued',
+                         last_error = 'Requeued: stale sending state (reconcile; no platform match)',
+                         updated_at = datetime('now')
+                       WHERE id = ?1",
+                    [rid],
+                );
+                stale_requeued += 1;
+            }
+        }
+    }
+    if stale_requeued > 0 || stale_resolved_sent > 0 {
         log_event(
             conn,
             campaign_id,
             None,
             "recipient_stale_sending_requeued",
             Some(&format!(
-                "{stale_requeued} recipient(s) requeued from stale sending state"
+                "{stale_resolved_sent} recovered as sent, {stale_requeued} requeued from stale sending state"
             )),
         );
     }
 
+    (resolved_sent, returned, still_unknown)
+}
+
+/// The full public reconcile pass: recover stranded/ambiguous recipients
+/// (`reconcile_recipient_states`), then either keep the batch chain going
+/// or complete the campaign honestly. The send loop calls only the recovery
+/// portion so it never double-enqueues the continuation job.
+pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Value {
+    let (resolved_sent, returned, still_unknown) = reconcile_recipient_states(conn, campaign_id);
     let remaining = count_remaining(conn, campaign_id);
     if remaining > 0 {
         let _ = crate::jobs::enqueue_on(
@@ -1110,7 +1212,11 @@ pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Va
             );
         }
     }
-    serde_json::json!({ "resolvedSent": resolved_sent, "returnedToQueue": returned, "stillUnknown": still_unknown })
+    serde_json::json!({
+        "resolvedSent": resolved_sent,
+        "returnedToQueue": returned,
+        "stillUnknown": still_unknown
+    })
 }
 
 pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
@@ -1646,6 +1752,13 @@ fn skip_ineligible_recipients(conn: &Connection, campaign_id: i64) -> i64 {
     no_email + on_dnc
 }
 
+/// Audit item 17: the send loop does network I/O between the pick and the
+/// outcome write, so a crash (or a second worker) would re-pick the same
+/// 'queued' rows and send duplicate emails. Claim each picked row by
+/// moving it to the 'sending' state before it leaves the database guard;
+/// a row whose claim UPDATE changed nothing was raced away and is simply
+/// not sent. Rows stranded in 'sending' by a crash are recovered by the
+/// reconcile sweep's staleness arm (mirror probe, then bounded requeue).
 fn pick_batch(conn: &Connection, campaign_id: i64) -> Vec<BatchRow> {
     let mut stmt = match conn.prepare(
         "SELECT id, customer_local_id, customer_remote_id, email, snapshot, attempts
@@ -1668,8 +1781,24 @@ fn pick_batch(conn: &Connection, campaign_id: i64) -> Vec<BatchRow> {
             })
         })
         .ok();
-    rows.map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+    let picked: Vec<BatchRow> = rows
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default();
+    let mut claimed = Vec::with_capacity(picked.len());
+    for row in picked {
+        let claimed_now = conn
+            .execute(
+                "UPDATE outreach_recipients
+                    SET state = 'sending', updated_at = datetime('now')
+                  WHERE id = ?1 AND state IN ('selected','queued')",
+                params![row.recipient_id],
+            )
+            .unwrap_or(0);
+        if claimed_now > 0 {
+            claimed.push(row);
+        }
+    }
+    claimed
 }
 
 fn classify_error(e: &crate::error::Error, attempts: i64) -> SendOutcome {
@@ -1724,32 +1853,47 @@ fn record_outcome(
         ],
     );
 
+    // Audit item 16: every recorded outcome is a spent attempt. The
+    // recipient row's `attempts` is the counter `classify_error` and the
+    // exhaustion backstop read; without this increment it stayed 0
+    // forever, so 429/5xx answers were retryable without limit and the
+    // same stuck recipients filled every batch (infinite retry storm
+    // + head-of-line block).
+    //
+    // Audit item 17: `updated_at` is the claim/staleness clock the
+    // reconcile sweep reads (a claimed row that never finished is
+    // re-queued only once it is provably stale).
     let _ = match outcome {
         SendOutcome::Sent { remote_id, number } => conn.execute(
             "UPDATE outreach_recipients
                 SET state = 'sent',
+                    attempts = attempts + 1,
                     hs_conversation_remote_id = ?1,
                     hs_conversation_number = ?2,
                     sent_at = datetime('now'),
-                    last_error = NULL
+                    last_error = NULL,
+                    updated_at = datetime('now')
               WHERE id = ?3",
             params![remote_id, number, row.recipient_id],
         ),
         SendOutcome::FailedPermanent(msg) => conn.execute(
             "UPDATE outreach_recipients
-                SET state = 'failed', last_error = ?1
+                SET state = 'failed', attempts = attempts + 1, last_error = ?1,
+                    updated_at = datetime('now')
               WHERE id = ?2",
             params![msg, row.recipient_id],
         ),
         SendOutcome::FailedRetryable(msg) => conn.execute(
             "UPDATE outreach_recipients
-                SET state = 'queued', last_error = ?1
+                SET state = 'queued', attempts = attempts + 1, last_error = ?1,
+                    updated_at = datetime('now')
               WHERE id = ?2",
             params![msg, row.recipient_id],
         ),
         SendOutcome::Unknown(msg) => conn.execute(
             "UPDATE outreach_recipients
-                SET state = 'unknown', last_error = ?1
+                SET state = 'unknown', attempts = attempts + 1, last_error = ?1,
+                    updated_at = datetime('now')
               WHERE id = ?2",
             params![msg, row.recipient_id],
         ),
@@ -1774,6 +1918,35 @@ fn datetime_now() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+/// Audit item 17: `updated_at` on outreach_recipients is the claim and
+/// staleness clock. Databases created before this batch lack the column
+/// (the reconcile sweep's stale-state query referenced it and silently
+/// no-opped), so it is ensured lazily at the top of every campaign batch
+/// run — the same self-healing pattern `ensure_main_rule_columns` uses.
+fn ensure_recipient_updated_at(conn: &Connection) -> Result<()> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?",
+            params!["outreach_recipients", "updated_at"],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !exists {
+        // ALTER TABLE ADD COLUMN only accepts CONSTANT defaults — SQLite
+        // rejects the expression default (`DEFAULT (strftime(...))`) the
+        // schema used at CREATE time. Add the column nullable and backfill
+        // the clock from each row's created_at, which is the correct
+        // zero-point for staleness accounting.
+        conn.execute_batch(
+            "ALTER TABLE outreach_recipients ADD COLUMN updated_at TEXT;
+             UPDATE outreach_recipients
+                SET updated_at = COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+              WHERE updated_at IS NULL;",
+        )?;
+    }
+    Ok(())
+}
+
 pub async fn send_batch(
     conn: &crate::db::DbHandle,
     provider: &Arc<dyn crate::helpscout::HelpScoutProvider>,
@@ -1781,6 +1954,25 @@ pub async fn send_batch(
 ) -> serde_json::Value {
     let (campaign, mailbox_local_id, tags, subject, body, batch) = {
         let c = conn.write_guard();
+        // Audit items 16 + 17: self-heal before every batch. Ensure the
+        // claim/staleness clock column, then run the reconcile sweep —
+        // crash-stranded 'sending' rows are recovered (mirror probe →
+        // 'sent', or bounded requeue) and ambiguous 'unknown' rows are
+        // resolved against the platform mirror BEFORE anything new is
+        // picked, so no send is retried blindly.
+        if let Err(e) = ensure_recipient_updated_at(&c) {
+            log_event(
+                &c,
+                campaign_id,
+                None,
+                "recipient_schema_ensure_failed",
+                Some(&e.to_string()),
+            );
+        }
+        // Recovery only — the continuation/completion logic stays with
+        // finalize_if_drained at the end of the batch, so this can never
+        // double-enqueue the next batch job.
+        let _ = reconcile_recipient_states(&c, campaign_id);
         let _ = skip_ineligible_recipients(&c, campaign_id);
         let Some(camp) = get_outreach_campaign(&c, campaign_id).unwrap_or_default() else {
             return serde_json::json!({ "ok": false, "message": "Campaign not found." });
@@ -2335,5 +2527,403 @@ mod batch18_tests {
             error.as_deref().unwrap_or("").contains("not synced"),
             "the error says what happened: {error:?} / {summary}"
         );
+    }
+}
+
+/// Clean-audit batch 19 (items 16 + 17): recipient attempts are spent and
+/// counted, picked rows are claimed against duplicate sends, and
+/// crash-stranded / ambiguous rows recover through the reconcile sweep.
+#[cfg(test)]
+mod batch19_tests {
+    use super::*;
+    use crate::db::DbHandle;
+    use crate::error::Error;
+    use crate::helpscout::{
+        ConversationPatch, ConversationQuery, CreateThreadInput, CustomerQuery, HelpScoutProvider,
+        HsBeaconChat, HsDocArticle, HsMailbox, HsRating, HsTag, HsTeam, HsUser, Page,
+        ThreadCreated,
+    };
+    use crate::helpscout_real::HsApiError;
+    use std::sync::Mutex;
+
+    /// Fails the first N `create_conversation` calls with a retryable 500,
+    /// then records and succeeds — lets one mock drive both the retry-storm
+    /// and the happy-path tests.
+    struct ScriptedProvider {
+        failures_remaining: Mutex<i64>,
+        created: Mutex<Vec<crate::helpscout::CreateConversationInput>>,
+    }
+
+    impl ScriptedProvider {
+        fn always_failing() -> Arc<Self> {
+            Arc::new(Self {
+                failures_remaining: Mutex::new(i64::MAX),
+                created: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn succeeding() -> Arc<Self> {
+            Arc::new(Self {
+                failures_remaining: Mutex::new(0),
+                created: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn sends(&self) -> usize {
+            self.created.lock().unwrap_or_else(|p| p.into_inner()).len()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl HelpScoutProvider for ScriptedProvider {
+        fn kind(&self) -> &'static str {
+            "scripted"
+        }
+        async fn get_me(&self) -> Result<HsUser> {
+            Err(Error::Other("not needed".into()))
+        }
+        async fn list_mailboxes(&self) -> Result<Vec<HsMailbox>> {
+            Ok(Vec::new())
+        }
+        async fn list_users(&self) -> Result<Vec<HsUser>> {
+            Ok(Vec::new())
+        }
+        async fn list_teams(&self) -> Result<Vec<HsTeam>> {
+            Ok(Vec::new())
+        }
+        async fn list_tags(&self) -> Result<Vec<HsTag>> {
+            Ok(Vec::new())
+        }
+        async fn list_conversations(
+            &self,
+            _query: &ConversationQuery,
+        ) -> Result<Page<crate::helpscout::HsConversation>> {
+            Ok(Page {
+                items: Vec::new(),
+                next_cursor: None,
+            })
+        }
+        async fn list_customers(
+            &self,
+            _query: &CustomerQuery,
+        ) -> Result<Page<crate::helpscout::HsCustomer>> {
+            Ok(Page {
+                items: Vec::new(),
+                next_cursor: None,
+            })
+        }
+        async fn list_beacon_chats(&self) -> Result<Vec<HsBeaconChat>> {
+            Ok(Vec::new())
+        }
+        async fn list_docs(&self) -> Result<Vec<HsDocArticle>> {
+            Ok(Vec::new())
+        }
+        async fn list_ratings(&self) -> Result<Vec<HsRating>> {
+            Ok(Vec::new())
+        }
+        async fn create_reply_thread(
+            &self,
+            _input: CreateThreadInput,
+        ) -> Result<crate::helpscout::ThreadCreated> {
+            Err(Error::Other("not needed".into()))
+        }
+        async fn create_note_thread(&self, _input: CreateThreadInput) -> Result<ThreadCreated> {
+            Err(Error::Other("not needed".into()))
+        }
+        async fn update_conversation(
+            &self,
+            _conversation_id: i64,
+            _patch: ConversationPatch,
+        ) -> Result<bool> {
+            Ok(false)
+        }
+        async fn create_conversation(
+            &self,
+            input: crate::helpscout::CreateConversationInput,
+        ) -> Result<crate::helpscout::ConversationCreated> {
+            let mut left = self
+                .failures_remaining
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if *left > 0 {
+                *left -= 1;
+                return Err(Error::Other(Box::new(HsApiError {
+                    status_code: 500,
+                    message: "backend exploded".into(),
+                    friendly: "Help Scout returned a server error".into(),
+                    retryable: true,
+                })));
+            }
+            drop(left);
+            self.created
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(input);
+            Ok(crate::helpscout::ConversationCreated {
+                conversation_id: 778_001,
+                number: 5252,
+                thread_id: 9101,
+            })
+        }
+    }
+
+    fn db() -> DbHandle {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        DbHandle::new(conn)
+    }
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    }
+
+    /// Seeds a synced mailbox and a queued campaign with one ready
+    /// recipient. Returns (campaign_id, recipient_id).
+    fn seed_campaign(conn: &Connection) -> (i64, i64) {
+        conn.execute(
+            "INSERT INTO mailboxes (remote_id, name) VALUES (2024, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        let mailbox_local = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO outreach_campaigns (name, subject, body, mailbox_local_id, tags, status)
+             VALUES ('spring check', 'Quick question', 'Hello!', ?1, '[]', 'queued')",
+            params![mailbox_local],
+        )
+        .expect("campaign");
+        let campaign = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO outreach_recipients
+                 (campaign_id, customer_local_id, customer_remote_id, email, snapshot, state)
+             VALUES (?1, 1, 5501, 'person@example.com', '{}', 'selected')",
+            params![campaign],
+        )
+        .expect("recipient");
+        let recipient = conn.last_insert_rowid();
+        (campaign, recipient)
+    }
+
+    fn recipient_row(conn: &Connection, recipient: i64) -> (String, i64, Option<String>) {
+        conn.query_row(
+            "SELECT state, attempts, last_error FROM outreach_recipients WHERE id = ?1",
+            params![recipient],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("recipient row")
+    }
+
+    #[test]
+    fn retryable_failures_spend_attempts_and_terminate() {
+        let db = db();
+        let (campaign, recipient) = db.with_write(|c| seed_campaign(c));
+        let provider: Arc<dyn crate::helpscout::HelpScoutProvider> =
+            ScriptedProvider::always_failing();
+
+        let mut last = serde_json::Value::Null;
+        for _ in 0..5 {
+            last = rt().block_on(async { send_batch(&db, &provider, campaign).await });
+        }
+
+        let (state, attempts, error) = db.with_read(|c| recipient_row(c, recipient));
+        assert_eq!(
+            attempts, 3,
+            "exactly SEND_MAX_ATTEMPTS sends happen, then the recipient is parked: {last}"
+        );
+        assert_eq!(
+            state, "failed",
+            "the 429/5xx retry storm terminates at the cap instead of looping forever"
+        );
+        assert!(
+            error.as_deref().unwrap_or("").contains("exhausted")
+                || error.as_deref().unwrap_or("").contains("500"),
+            "the failure is recorded honestly: {error:?} / {last}"
+        );
+    }
+
+    #[test]
+    fn a_fresh_claimed_row_is_invisible_to_a_second_pick() {
+        let db = db();
+        let (campaign, recipient) = db.with_write(|c| {
+            let (campaign, recipient) = seed_campaign(c);
+            // Simulate a crash AFTER the claim: the row is 'sending' with a
+            // fresh claim timestamp, so neither pick_batch nor the stale
+            // sweep may touch it, and no duplicate send may go out.
+            c.execute(
+                "UPDATE outreach_recipients SET state = 'sending',
+                     updated_at = datetime('now')
+                   WHERE id = ?1",
+                params![recipient],
+            )
+            .expect("claim");
+            (campaign, recipient)
+        });
+        let provider = ScriptedProvider::succeeding();
+        let sender: Arc<dyn crate::helpscout::HelpScoutProvider> = provider.clone();
+        rt().block_on(async { send_batch(&db, &sender, campaign).await });
+
+        assert_eq!(
+            provider.sends(),
+            0,
+            "a fresh 'sending' row is never re-picked"
+        );
+        let (state, _attempts, _error) = db.with_read(|c| recipient_row(c, recipient));
+        assert_eq!(state, "sending", "the in-flight claim is left alone");
+    }
+
+    #[test]
+    fn a_stale_claimed_row_that_landed_is_recovered_as_sent() {
+        let db = db();
+        let (campaign, recipient) = db.with_write(|c| {
+            let (campaign, recipient) = seed_campaign(c);
+            c.execute(
+                "INSERT INTO customers (remote_id, first_name, last_name, email)
+                 VALUES (5501, 'Pat', 'Person', 'person@example.com')",
+                [],
+            )
+            .expect("customer");
+            let customer_local = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                     customer_local_id)
+                 VALUES (99001, 99, 'Quick question', 'preview', 'active', ?1)",
+                params![customer_local],
+            )
+            .expect("landed conversation");
+            c.execute(
+                "UPDATE outreach_recipients SET state = 'sending',
+                     updated_at = datetime('now', '-11 minutes')
+                   WHERE id = ?1",
+                params![recipient],
+            )
+            .expect("stale claim");
+            (campaign, recipient)
+        });
+        let provider = ScriptedProvider::succeeding();
+        let sender: Arc<dyn crate::helpscout::HelpScoutProvider> = provider.clone();
+        rt().block_on(async { send_batch(&db, &sender, campaign).await });
+
+        assert_eq!(
+            provider.sends(),
+            0,
+            "a crashed send that provably landed is marked sent, never re-sent"
+        );
+        let (state, _attempts, _error) = db.with_read(|c| recipient_row(c, recipient));
+        assert_eq!(state, "sent", "recovered from the platform mirror");
+        let remote: i64 = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT hs_conversation_remote_id FROM outreach_recipients WHERE id = ?1",
+                    params![recipient],
+                    |r| r.get(0),
+                )
+            })
+            .expect("recovered remote id");
+        assert_eq!(remote, 99001, "the mirrored conversation id is recorded");
+    }
+
+    #[test]
+    fn a_stale_claimed_row_that_never_landed_is_requeued_and_sent_once() {
+        let db = db();
+        let (campaign, recipient) = db.with_write(|c| {
+            let (campaign, recipient) = seed_campaign(c);
+            c.execute(
+                "UPDATE outreach_recipients SET state = 'sending',
+                     updated_at = datetime('now', '-11 minutes')
+                   WHERE id = ?1",
+                params![recipient],
+            )
+            .expect("stale claim");
+            (campaign, recipient)
+        });
+        let provider = ScriptedProvider::succeeding();
+        let sender: Arc<dyn crate::helpscout::HelpScoutProvider> = provider.clone();
+        let summary = rt().block_on(async { send_batch(&db, &sender, campaign).await });
+
+        assert_eq!(
+            provider.sends(),
+            1,
+            "the genuinely undelivered row is requeued and sent exactly once: {summary}"
+        );
+        let (state, attempts, _error) = db.with_read(|c| recipient_row(c, recipient));
+        assert_eq!(state, "sent");
+        assert_eq!(attempts, 1, "the recovery send spends an attempt");
+    }
+
+    #[test]
+    fn a_reconciled_unknown_returns_to_the_queue_under_the_cap() {
+        let db = db();
+        let (campaign, recipient) = db.with_write(|c| {
+            let (campaign, recipient) = seed_campaign(c);
+            c.execute(
+                "UPDATE outreach_recipients SET state = 'unknown', attempts = 0
+                   WHERE id = ?1",
+                params![recipient],
+            )
+            .expect("unknown");
+            (campaign, recipient)
+        });
+        let provider = ScriptedProvider::succeeding();
+        let sender: Arc<dyn crate::helpscout::HelpScoutProvider> = provider.clone();
+        rt().block_on(async { send_batch(&db, &sender, campaign).await });
+
+        let (state, _attempts, _error) = db.with_read(|c| recipient_row(c, recipient));
+        assert_eq!(
+            state, "sent",
+            "a provably-undelivered unknown returns to the queue and is sent (was 'failed')"
+        );
+    }
+
+    #[test]
+    fn a_reconciled_unknown_with_exhausted_attempts_fails_honestly() {
+        let db = db();
+        let (campaign, recipient) = db.with_write(|c| {
+            let (campaign, recipient) = seed_campaign(c);
+            c.execute(
+                "UPDATE outreach_recipients SET state = 'unknown', attempts = 3
+                   WHERE id = ?1",
+                params![recipient],
+            )
+            .expect("unknown exhausted");
+            (campaign, recipient)
+        });
+        let provider = ScriptedProvider::succeeding();
+        let sender: Arc<dyn crate::helpscout::HelpScoutProvider> = provider.clone();
+        rt().block_on(async { send_batch(&db, &sender, campaign).await });
+
+        assert_eq!(provider.sends(), 0, "attempts exhausted: no blind re-send");
+        let (state, attempts, error) = db.with_read(|c| recipient_row(c, recipient));
+        assert_eq!(
+            state, "failed",
+            "the terminal state is honest, not a lingering 'unknown'"
+        );
+        assert_eq!(attempts, 3);
+        assert!(
+            error.as_deref().unwrap_or("").contains("exhausted"),
+            "the reason is recorded: {error:?}"
+        );
+    }
+
+    #[test]
+    fn the_staleness_clock_column_is_ensured_by_the_batch_run() {
+        let db = db();
+        let (campaign, _recipient) = db.with_write(|c| seed_campaign(c));
+        let provider: Arc<dyn crate::helpscout::HelpScoutProvider> = ScriptedProvider::succeeding();
+        rt().block_on(async { send_batch(&db, &provider, campaign).await });
+
+        let has_column: bool = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) > 0 FROM pragma_table_info('outreach_recipients')
+                      WHERE name = 'updated_at'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("pragma");
+        assert!(has_column, "the claim/staleness clock column exists");
     }
 }
