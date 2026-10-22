@@ -36,17 +36,13 @@ enqueued after initial sync and repaired once for pre-fix mirrors, the
 SyncTrigger field ending auto-sync toast spam, the composer-AI result
 pinned to the job row, the phantom "waiting" status replaced by the
 platform's own `open`) — verified and recorded in `completed.md`.
-
-### HIGH — shipped features broken / silent permanent failure
-
-26. [high|bug] Custom-objects form sends numbers as JSON strings — object creation always fails — pages/custom_objects.rs:286-292
-27. [high|bug] Custom-objects type builder offers checkbox/url types core rejects — pages/custom_objects.rs:24-52
+Batch 21 = items 26-30 (custom-objects form payload typing, the type
+builder's phantom checkbox/url field types, stale-thread deletion
+pagination, tags_changed prev-state on re-ingest, retried saved-reply
+create idempotency) — verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
-28. [med|bug] Stale-thread deletion treats one unpaginated page as the full thread set — sync_engine.rs:2346-2348
-29. [med|bug] `tags_changed` emitted with `prev=null` on every re-ingest — sync.rs:292-296
-30. [med|bug] Retried saved-reply create re-POSTs (duplicates on the platform) — workers.rs:3236,1602
 31. [med|gap] `api_concurrency` setting parsed/saved but never applied — api_queue.rs:94-97
 32. [med|bug] Webhook secret capped to 40 chars at registration but verified with the full secret — webhook_health.rs:255,168
 33. [med|bug] Team id written into the user-assignee slot; `assigned_team_id` unconsumed — helpscout_real.rs:1392-1394
