@@ -8,12 +8,15 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: fmt, clippy, test, deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # 1.4.0 R7 (D14): production code must never reintroduce simulated/
       # fake/demo data markers. Runs before anything expensive.
@@ -29,7 +32,7 @@ jobs:
           rustc --version
 
       - name: Cache cargo state
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # Phase 4 cutover is done: the Leptos/WASM ui crate and the Tauri
       # app are gone, the egui app-shell needs no system deps, so every
@@ -54,7 +57,7 @@ jobs:
         run: cargo test -p supportos-plus-core --features sandbox
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: cargo-deny
 
@@ -65,7 +68,7 @@ jobs:
     name: AppImage + .deb build, smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install pinned Rust toolchain
         # rust-toolchain.toml is the single source of truth for the exact
@@ -76,7 +79,7 @@ jobs:
           rustc --version
 
       - name: Cache cargo state
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install the libraries the AppImage bundles
         # The AppImage bundles libxkbcommon/-x11/libxcb-xkb from the
@@ -120,14 +123,14 @@ jobs:
           SPP_SMOKE=1 /tmp/deb-payload/usr/bin/supportos-plus
 
       - name: Upload AppImage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: SupportOS-Plus-x86_64.AppImage
           path: target/appimage/SupportOS-Plus-x86_64.AppImage
           if-no-files-found: error
 
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: supportos-plus_amd64.deb
           path: target/deb/supportos-plus_*_amd64.deb
