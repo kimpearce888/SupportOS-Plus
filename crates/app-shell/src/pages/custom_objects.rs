@@ -20,34 +20,41 @@ use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
 /// Field types offered by the type builder (web: the field type select).
+///
+/// Clean-audit item 27: this list is exactly the vocabulary the core's
+/// `validate_properties` accepts (`custom_objects.rs`) — the builder used
+/// to offer `checkbox` and `url`, which the core rejected as unknown
+/// field types, so any type built with them could never hold an object.
+/// `long_text` is included because the core accepts it and the builder
+/// was previously the only way to add fields to a type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldType {
     Text,
+    LongText,
     Number,
     Date,
     Select,
-    Checkbox,
-    Url,
+    Boolean,
 }
 
 impl FieldType {
     const ALL: [Self; 6] = [
         Self::Text,
+        Self::LongText,
         Self::Number,
         Self::Date,
         Self::Select,
-        Self::Checkbox,
-        Self::Url,
+        Self::Boolean,
     ];
 
     fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
+            Self::LongText => "long_text",
             Self::Number => "number",
             Self::Date => "date",
             Self::Select => "select",
-            Self::Checkbox => "checkbox",
-            Self::Url => "url",
+            Self::Boolean => "boolean",
         }
     }
 }
@@ -283,13 +290,42 @@ impl CustomObjectsPage {
             self.error = Some("object title required".into());
             return;
         }
+        // Clean-audit item 26: the form used to serialise every field
+        // value as a JSON string, so number and boolean fields always
+        // failed the core's type validation ("Invalid number", …) and
+        // object creation never succeeded. Coerce each raw input against
+        // the selected type's own field definitions.
+        let field_types: Vec<(String, String)> = self
+            .types
+            .iter()
+            .find(|t| t.id == type_id)
+            .map(|t| {
+                t.fields
+                    .iter()
+                    .map(|f| (f.key.clone(), f.field_type.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut properties = serde_json::Map::new();
         for (key, value) in &self.new_object_fields {
             let value = value.trim();
             if value.is_empty() {
                 continue;
             }
-            properties.insert(key.clone(), serde_json::Value::String(value.to_string()));
+            let field_type = field_types
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, t)| t.as_str())
+                .unwrap_or("text");
+            match coerce_property_value(field_type, value) {
+                Ok(v) => {
+                    properties.insert(key.clone(), v);
+                }
+                Err(e) => {
+                    self.error = Some(e);
+                    return;
+                }
+            }
         }
         let links: Vec<LinkInput> = Vec::new();
         let result = db.with_write(|conn| {
@@ -451,12 +487,18 @@ impl CustomObjectsPage {
                         });
                         if let Some(props) = object.get("properties").and_then(|p| p.as_object()) {
                             for (key, value) in props {
+                                // Item 26 follow-through: number and
+                                // boolean properties are real scalars now,
+                                // so render them with their JSON form
+                                // instead of the string-only path that
+                                // showed them blank.
+                                let rendered = match value {
+                                    serde_json::Value::String(s) => s.clone(),
+                                    other => other.to_string(),
+                                };
                                 ui.monospace(
-                                    egui::RichText::new(format!(
-                                        "{key}: {}",
-                                        value.as_str().unwrap_or_default()
-                                    ))
-                                    .color(tokens.foreground),
+                                    egui::RichText::new(format!("{key}: {rendered}"))
+                                        .color(tokens.foreground),
                                 );
                             }
                         }
@@ -611,6 +653,40 @@ impl Default for CustomObjectsPage {
     }
 }
 
+/// Coerce one trimmed form input into the JSON scalar the core's
+/// `validate_properties` expects for that field type (clean-audit item 26):
+/// numbers arrive as JSON numbers, booleans as JSON bools, everything
+/// else as strings. The legacy `checkbox`/`url` field names coerce through
+/// their canonical equivalents (`boolean`/`text`) so types created before
+/// item 27 keep accepting objects from this form.
+fn coerce_property_value(
+    field_type: &str,
+    value: &str,
+) -> std::result::Result<serde_json::Value, String> {
+    match field_type {
+        "number" => {
+            if let Ok(i) = value.parse::<i64>() {
+                Ok(serde_json::Value::from(i))
+            } else if let Ok(f) = value.parse::<f64>()
+                && f.is_finite()
+            {
+                Ok(serde_json::Value::from(f))
+            } else {
+                Err(format!("'{value}' is not a valid number"))
+            }
+        }
+        "boolean" | "checkbox" => match value.to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Ok(serde_json::Value::from(true)),
+            "false" | "0" | "no" | "off" => Ok(serde_json::Value::from(false)),
+            _ => Err(format!("'{value}' is not a boolean (true/false)")),
+        },
+        // text, long_text, url (legacy), date, select and unknown fields
+        // stay strings — the core's own validation rejects bad dates and
+        // off-option selects with a precise message.
+        _ => Ok(serde_json::Value::from(value)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,5 +796,221 @@ mod tests {
         };
         let error = draft.to_input().unwrap_err();
         assert!(error.contains("key required"));
+    }
+    /// Audit item 27: the builder's vocabulary is exactly what the core's
+    /// `validate_properties` accepts — the phantom `checkbox`/`url` chips
+    /// are gone, and the previously unreachable `long_text` is offered.
+    #[test]
+    fn field_type_builder_offers_exactly_the_core_vocabulary() {
+        let offered: Vec<&str> = FieldType::ALL.iter().map(|f| f.as_str()).collect();
+        assert_eq!(
+            offered,
+            vec!["text", "long_text", "number", "date", "select", "boolean"],
+            "the chips must match spp_core::custom_objects::validate_properties"
+        );
+        for name in ["checkbox", "url"] {
+            assert!(
+                !offered.contains(&name),
+                "the core rejects {name} as an unknown field type — the builder must not offer it"
+            );
+        }
+    }
+
+    /// Audit item 26: the form used to serialise every value as a JSON
+    /// string, so number and boolean fields always failed the core's type
+    /// validation and object creation never succeeded. Number inputs now
+    /// arrive as JSON numbers and boolean inputs as JSON bools.
+    #[test]
+    fn number_and_boolean_form_inputs_become_real_json_scalars() {
+        let db = fixture(Vec::new());
+        let mut page = CustomObjectsPage::new();
+        page.reload_types(&db);
+
+        page.new_type_name = "Inventory".into();
+        page.new_fields = vec![
+            FieldDraft {
+                key: "sku".into(),
+                label: "SKU".into(),
+                field_type: FieldType::Text,
+                required: false,
+                options: String::new(),
+            },
+            FieldDraft {
+                key: "qty".into(),
+                label: "Qty".into(),
+                field_type: FieldType::Number,
+                required: false,
+                options: String::new(),
+            },
+            FieldDraft {
+                key: "in_stock".into(),
+                label: "In stock".into(),
+                field_type: FieldType::Boolean,
+                required: false,
+                options: String::new(),
+            },
+            FieldDraft {
+                key: "unit_cost".into(),
+                label: "Unit cost".into(),
+                field_type: FieldType::Number,
+                required: false,
+                options: String::new(),
+            },
+            FieldDraft {
+                key: "stage".into(),
+                label: "Stage".into(),
+                field_type: FieldType::Select,
+                required: false,
+                options: "live, eol".into(),
+            },
+        ];
+        page.create_type(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+
+        page.new_object_title = "Widget".into();
+        assert_eq!(page.new_object_fields.len(), 5);
+        for (key, value) in page.new_object_fields.iter_mut() {
+            *value = match key.as_str() {
+                "sku" => "A-100".into(),
+                "qty" => "42".into(),
+                "in_stock" => "true".into(),
+                "unit_cost" => "1.5".into(),
+                "stage" => "live".into(),
+                other => unreachable!("unexpected field {other}"),
+            };
+        }
+        page.create_object(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert_eq!(page.objects_total, 1);
+
+        let props = &page.objects[0]["properties"];
+        assert!(
+            props["qty"].is_number(),
+            "qty must be a JSON number, got {}",
+            props["qty"]
+        );
+        assert_eq!(props["qty"].as_i64(), Some(42));
+        assert_eq!(props["unit_cost"].as_f64(), Some(1.5));
+        assert_eq!(props["in_stock"].as_bool(), Some(true));
+        assert_eq!(props["sku"], serde_json::json!("A-100"));
+        assert_eq!(props["stage"], serde_json::json!("live"));
+    }
+
+    /// Item 26: garbage in a number field is a clear form error instead of
+    /// a failed platform-side object create.
+    #[test]
+    fn number_form_input_rejects_garbage_with_a_clear_error() {
+        let db = fixture(Vec::new());
+        let (type_id, _) = db.with_write(|conn| {
+            spp_core::custom_objects::create_type(
+                conn,
+                "Rmas",
+                None,
+                &[field("count", "number", false, None)],
+            )
+            .expect("type")
+        });
+        let mut page = CustomObjectsPage::new();
+        page.reload_types(&db);
+        page.select_type(&db, type_id);
+
+        page.new_object_title = "Bad".into();
+        page.new_object_fields = vec![("count".into(), "not-a-number".into())];
+        page.create_object(&db);
+        let error = page.error.as_deref().unwrap_or_default().to_string();
+        assert!(
+            error.contains("not a valid number"),
+            "the form must explain the bad number: {error}"
+        );
+        assert_eq!(page.objects_total, 0);
+
+        // The same field accepts a decimal once corrected.
+        page.error = None;
+        page.new_object_fields = vec![("count".into(), "2.25".into())];
+        page.create_object(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert_eq!(page.objects_total, 1);
+        assert_eq!(page.objects[0]["properties"]["count"].as_f64(), Some(2.25));
+    }
+
+    /// Item 26: boolean fields accept the obvious truthy/falsy words, and
+    /// anything else is a form error.
+    #[test]
+    fn boolean_form_inputs_accept_common_truth_words() {
+        let db = fixture(Vec::new());
+        let (type_id, _) = db.with_write(|conn| {
+            spp_core::custom_objects::create_type(
+                conn,
+                "Flags",
+                None,
+                &[field("done", "boolean", false, None)],
+            )
+            .expect("type")
+        });
+        let mut page = CustomObjectsPage::new();
+        page.reload_types(&db);
+        page.select_type(&db, type_id);
+
+        for (input, expected) in [("yes", true), ("no", false), ("TRUE", true), ("0", false)] {
+            page.new_object_title = format!("Flag {input}");
+            page.new_object_fields = vec![("done".into(), input.into())];
+            page.create_object(&db);
+            assert!(page.error.is_none(), "{input} must parse: {:?}", page.error);
+            assert_eq!(
+                page.objects[0]["properties"]["done"].as_bool(),
+                Some(expected),
+                "{input} must coerce to {expected}"
+            );
+        }
+
+        page.new_object_title = "Broken".into();
+        page.new_object_fields = vec![("done".into(), "maybe".into())];
+        page.create_object(&db);
+        let error = page.error.as_deref().unwrap_or_default().to_string();
+        assert!(
+            error.contains("not a boolean"),
+            "the form must explain the bad boolean: {error}"
+        );
+    }
+
+    /// Item 27 (legacy): types created back when the builder offered the
+    /// phantom `checkbox`/`url` names keep working through this form — the
+    /// page coerces them via their canonical equivalents and the core's
+    /// alias validation accepts the values.
+    #[test]
+    fn legacy_checkbox_and_url_fields_work_from_the_form() {
+        let db = fixture(Vec::new());
+        let (type_id, _) = db.with_write(|conn| {
+            spp_core::custom_objects::create_type(
+                conn,
+                "Legacy Builder Types",
+                None,
+                &[
+                    field("shipped", "checkbox", false, None),
+                    field("docs", "url", false, None),
+                ],
+            )
+            .expect("type")
+        });
+        let mut page = CustomObjectsPage::new();
+        page.reload_types(&db);
+        page.select_type(&db, type_id);
+
+        page.new_object_title = "Legacy".into();
+        page.new_object_fields = vec![
+            ("shipped".into(), "true".into()),
+            ("docs".into(), "https://example.com/x".into()),
+        ];
+        page.create_object(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert_eq!(page.objects_total, 1);
+        assert_eq!(
+            page.objects[0]["properties"]["shipped"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            page.objects[0]["properties"]["docs"],
+            serde_json::json!("https://example.com/x")
+        );
     }
 }

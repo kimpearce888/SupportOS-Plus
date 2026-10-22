@@ -1555,3 +1555,194 @@ fn create_webhook_reads_the_resource_id_header_on_the_201_answer() {
         json!(["convo.created", "beacon.chat.created"])
     );
 }
+
+// ---------------------------------------------------------------------------
+// Clean-audit batch 21 (items 28 and 30)
+// ---------------------------------------------------------------------------
+
+/// Audit item 28: `list_threads` used to read only page 1 of the v3
+/// threads collection and hand it to the sync's stale-thread sweep as the
+/// conversation's full thread set — every thread past page 1 was deleted
+/// from the mirror as "gone from the platform". The read now follows the
+/// HAL next link until the pages run out.
+#[test]
+fn list_threads_follows_hal_pagination_to_the_last_page() {
+    let _secrets = secrets_guard();
+    let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+        match (req.method.as_str(), req.path.as_str()) {
+            ("GET", "/v3/conversations/101/threads") if req.query_param("page").is_none() => {
+                MockResponse::json(
+                    200,
+                    json!({
+                        "_embedded": {"threads": [
+                            {"id": 501, "type": "customer", "status": "active",
+                             "state": "published", "body": "<p>one</p>",
+                             "createdByCustomer": {"id": 900},
+                             "createdAt": "2026-10-01T10:00:00Z"}
+                        ]},
+                        "_links": {"next": {"href": "/v3/conversations/101/threads?page=2"}}
+                    }),
+                )
+            }
+            ("GET", "/v3/conversations/101/threads")
+                if req.query_param("page").as_deref() == Some("2") =>
+            {
+                MockResponse::json(
+                    200,
+                    json!({
+                        "_embedded": {"threads": [
+                            {"id": 502, "type": "customer", "status": "active",
+                             "state": "published", "body": "<p>two</p>",
+                             "createdByCustomer": {"id": 900},
+                             "createdAt": "2026-10-01T11:00:00Z"},
+                            {"id": 503, "type": "message", "status": "active",
+                             "state": "published", "body": "<p>three</p>",
+                             "createdBy": {"id": 42, "type": "user"},
+                             "createdAt": "2026-10-01T12:00:00Z"}
+                        ]}
+                    }),
+                )
+            }
+            _ => MockResponse::json(404, json!({"error": "unexpected path"})),
+        }
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+
+    let threads = runtime()
+        .block_on(async { p.list_threads(101).await })
+        .expect("list_threads");
+    assert_eq!(
+        threads.iter().map(|t| t.remote_id).collect::<Vec<_>>(),
+        vec![501, 502, 503],
+        "both pages must arrive — page 1 alone is not the thread set"
+    );
+
+    assert_eq!(mock.hit_count("GET", "/v3/conversations/101/threads"), 2);
+    let page2 = mock
+        .hits()
+        .iter()
+        .any(|h| h.query_param("page").as_deref() == Some("2"));
+    assert!(page2, "the HAL next link must be followed exactly once");
+}
+
+/// Audit item 30: a retried saved-reply create re-POSTed the payload and
+/// duplicated the reply on the platform whenever the first attempt's POST
+/// had landed but the response or the post-write re-read failed. The
+/// create is now idempotent by its natural key (mailbox + name + text):
+/// the retry finds its own earlier write and skips the re-POST.
+#[test]
+fn retried_saved_reply_create_never_reposts() {
+    let _secrets = secrets_guard();
+    // GET sequence on /saved-replies:
+    //   1 — attempt 1 pre-check: the mailbox holds nothing yet
+    //   2 — attempt 1 post-create re-read: 404 (a non-retryable answer,
+    //       so it surfaces through the in-client GET retry layer — the
+    //       POST landed, the job still fails and is requeued)
+    //   3 — attempt 2 pre-check: the platform now holds the twin
+    //   4 — attempt 2 post-create re-read: success, job completes
+    let gets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = Arc::clone(&gets);
+    let mock = MockServer::start(Arc::new(move |req: &crate::mockserver::MockRequest| {
+        let path = req.path.as_str();
+        match req.method.as_str() {
+            "GET" if path.ends_with("/saved-replies") => {
+                let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                match n {
+                    1 => MockResponse::json(200, json!({"_embedded": {"savedReplies": []}})),
+                    2 => MockResponse::json(404, json!({"message": "re-read 404"})),
+                    _ => MockResponse::json(
+                        200,
+                        json!({"_embedded": {"savedReplies": [
+                            {"id": 91, "name": "Refund path", "text": "<p>how</p>"}
+                        ]}}),
+                    ),
+                }
+            }
+            "POST" if path.ends_with("/saved-replies") => {
+                MockResponse::json(201, json!({"id": 91, "name": "Refund path"}))
+                    .with_header("Resource-Id", "91")
+            }
+            _ => MockResponse::json(404, json!({"message": "no route"})),
+        }
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+    let manager = crate::workers::WorkerManager::new(
+        db.clone(),
+        None,
+        Arc::new(p) as Arc<dyn HelpScoutProvider>,
+        crate::eventing::EventBus::default(),
+        std::env::temp_dir(),
+        None,
+    );
+
+    let payload = json!({
+        "action": "create",
+        "mailboxRemoteId": 3,
+        "name": "Refund path",
+        "text": "<p>how</p>"
+    })
+    .to_string();
+    db.with_write(|conn| {
+        crate::jobs::enqueue_on(conn, "sync", "saved_reply_write", &payload, 1, 3)
+    })
+    .expect("enqueue");
+
+    // Attempt 1: pre-check (empty) → POST lands → re-read 500s → the job
+    // is requeued as retryable.
+    runtime().block_on(async { manager.tick().await });
+    let posts_after_first = mock.hits().iter().filter(|h| h.method == "POST").count();
+    assert_eq!(posts_after_first, 1, "the first attempt POSTs once");
+    let status: String = db
+        .with_read(|conn| {
+            conn.query_row(
+                "SELECT status FROM jobs WHERE type = 'saved_reply_write'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .expect("job row");
+    assert_eq!(status, "queued", "the failed re-read must requeue the job");
+
+    // Fast-forward past the retry backoff and run the retry.
+    db.with_write(|conn| {
+        conn.execute(
+            "UPDATE jobs SET run_at = NULL WHERE type = 'saved_reply_write'",
+            [],
+        )
+        .expect("clear backoff")
+    });
+    runtime().block_on(async { manager.tick().await });
+
+    let posts_after_retry = mock.hits().iter().filter(|h| h.method == "POST").count();
+    assert_eq!(
+        posts_after_retry, 1,
+        "the retried create must NOT re-POST — the platform already holds the twin"
+    );
+    let status: String = db
+        .with_read(|conn| {
+            conn.query_row(
+                "SELECT status FROM jobs WHERE type = 'saved_reply_write'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .expect("job row");
+    assert_eq!(status, "completed", "the retry completes via the re-read");
+    let mirrored: i64 = db
+        .with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM saved_replies WHERE remote_id = 91",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .expect("mirror row");
+    assert_eq!(
+        mirrored, 1,
+        "the re-read still lands the reply in the mirror"
+    );
+}

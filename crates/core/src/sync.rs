@@ -217,10 +217,18 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
             |r| r.get(0),
         )
         .ok();
-    if let Some(conv_local) = local {
-        crate::conversation_ops::write_conversation_tags(conn, conv_local, &c.tags);
-    }
-    if let (Some(prev), Some(conv_local)) = (previous, local) {
+    // Clean-audit item 29: read the pre-write tag set so tags_changed can
+    // carry a real previous value — it used to ride with previous=null and
+    // fired on every re-ingest, tags unchanged or not.
+    let previous_tags: Option<Vec<String>> = match local {
+        Some(conv_local) => {
+            let tags = conversation_tag_names(conn, conv_local)?;
+            crate::conversation_ops::write_conversation_tags(conn, conv_local, &c.tags);
+            Some(tags)
+        }
+        None => None,
+    };
+    if let (Some(prev), Some(conv_local), Some(prev_tags)) = (previous, local, previous_tags) {
         let observed_at = crate::activity::now_iso();
         let emit_diff = |event_type: &str,
                          prev_val: &serde_json::Value,
@@ -289,13 +297,39 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
             &serde_json::json!(prev.thread_count),
             &serde_json::json!(c.thread_count),
         )?;
+        // Item 29: the tag comparison uses normalized sets (sorted +
+        // deduplicated), so a pure reorder of the platform's tag array is
+        // not an event — only membership changes are.
         emit_diff(
             "tags_changed",
-            &serde_json::json!(null),
-            &serde_json::json!(c.tags),
+            &serde_json::json!(normalized_tag_set(&prev_tags)),
+            &serde_json::json!(normalized_tag_set(&c.tags)),
         )?;
     }
     Ok(())
+}
+
+/// The mirror's current tag names for one conversation (item 29: the
+/// previous state for the tags_changed diff).
+fn conversation_tag_names(conn: &Connection, conversation_id: i64) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.name FROM conversation_tags ct
+           JOIN tags t ON t.id = ct.tag_id
+          WHERE ct.conversation_id = ?1",
+    )?;
+    let names = stmt
+        .query_map(params![conversation_id], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(names)
+}
+
+/// Sort + dedupe a tag list so set comparisons ignore the platform's
+/// ordering and repeated names.
+fn normalized_tag_set(tags: &[String]) -> Vec<String> {
+    let mut set = tags.to_vec();
+    set.sort();
+    set.dedup();
+    set
 }
 
 pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
@@ -478,4 +512,96 @@ pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
     }
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod batch21_audit29_tests {
+    use super::*;
+    use crate::helpscout::HsConversation;
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn conv(tags: &[&str]) -> HsConversation {
+        HsConversation {
+            remote_id: 101,
+            number: 778,
+            status: "active".into(),
+            mailbox_id: 1,
+            customer_id: 900,
+            tags: tags.iter().map(|t| (*t).to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn tags_events(conn: &Connection) -> Vec<serde_json::Value> {
+        let mut stmt = conn
+            .prepare("SELECT metadata FROM activity_events WHERE event_type = 'tags_changed'")
+            .expect("prepare");
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .expect("query")
+            .filter_map(std::result::Result::ok)
+            .map(|m| serde_json::from_str(&m).expect("metadata json"))
+            .collect()
+    }
+
+    /// Audit item 29: `tags_changed` rode with previous=null and fired on
+    /// every re-ingest — tags unchanged or not. It now carries the mirror's
+    /// real pre-write tag set (as a normalized set, so reorders are not
+    /// events) and fires only on membership changes.
+    #[test]
+    fn audit29_tags_changed_fires_only_when_the_tag_set_changes() {
+        let conn = conn();
+
+        // First ingest: no previous row, so no diff events at all.
+        upsert_conversation(&conn, &conv(&["login", "urgent"])).expect("first ingest");
+        assert!(
+            tags_events(&conn).is_empty(),
+            "the first ingest must not emit tags_changed"
+        );
+
+        // Re-ingest with the same tags in a different order: a reorder is
+        // not a change — no event.
+        upsert_conversation(&conn, &conv(&["urgent", "login"])).expect("reordered re-ingest");
+        assert!(
+            tags_events(&conn).is_empty(),
+            "an unchanged (reordered) tag set must not emit tags_changed"
+        );
+
+        // A real membership change fires exactly one event with the real
+        // previous state instead of null.
+        upsert_conversation(&conn, &conv(&["login"])).expect("changed tags");
+        let events = tags_events(&conn);
+        assert_eq!(events.len(), 1, "one membership change, one event");
+        assert_eq!(
+            events[0]["previous"],
+            serde_json::json!(["login", "urgent"]),
+            "previous must be the mirror's pre-write tag set"
+        );
+        assert_eq!(events[0]["next"], serde_json::json!(["login"]));
+
+        // Re-ingesting the new set again stays silent.
+        upsert_conversation(&conn, &conv(&["login"])).expect("stable re-ingest");
+        assert_eq!(
+            tags_events(&conn).len(),
+            1,
+            "a stable tag set must not emit more events"
+        );
+    }
+
+    /// The normalized comparison also dedupes repeated names, so a
+    /// platform payload repeating a tag is not a change either.
+    #[test]
+    fn audit29_repeated_tag_names_are_not_a_change() {
+        let conn = conn();
+        upsert_conversation(&conn, &conv(&["vip"])).expect("first ingest");
+        upsert_conversation(&conn, &conv(&["vip", "vip"])).expect("duplicated tag payload");
+        assert!(
+            tags_events(&conn).is_empty(),
+            "repeated names are the same tag set"
+        );
+    }
 }
