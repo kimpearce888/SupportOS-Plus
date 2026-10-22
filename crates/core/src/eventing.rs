@@ -60,8 +60,16 @@ pub fn notify_conversation_updated(bus: &EventBus, event: &ConversationUpdatedEv
     bus.emit(&ServerEvent::ConversationUpdated(event.clone()));
 }
 
-pub fn notify_sync_completed(bus: &EventBus, kind: &str, processed: u32, errors: u32) {
-    bus.emit(&ServerEvent::sync_completed(kind, processed, errors));
+pub fn notify_sync_completed(
+    bus: &EventBus,
+    kind: &str,
+    processed: u32,
+    errors: u32,
+    trigger: crate::events::SyncTrigger,
+) {
+    bus.emit(&ServerEvent::sync_completed(
+        kind, processed, errors, trigger,
+    ));
 }
 
 pub fn notify_sync_progress(

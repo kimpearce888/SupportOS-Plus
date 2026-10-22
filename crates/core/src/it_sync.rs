@@ -288,7 +288,11 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     let engine = engine(&db, &mock).with_bus(bus.clone());
 
     let results = runtime()
-        .block_on(async { engine.initial_sync().await })
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
         .expect("initial_sync");
 
     // Every resource completed without an error.
@@ -410,11 +414,17 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
         "checkpoints recorded: {checkpointed}"
     );
 
-    // The sync_completed event was broadcast.
+    // The sync_completed event was broadcast — with the trigger the
+    // caller passed (audit item 23: manual runs are the toastable ones).
     let mut saw_sync_completed = false;
     while let Ok(event) = rx.try_recv() {
-        if matches!(event, crate::events::ServerEvent::SyncCompleted { .. }) {
+        if let crate::events::ServerEvent::SyncCompleted(e) = event {
             saw_sync_completed = true;
+            assert_eq!(
+                e.trigger,
+                crate::events::SyncTrigger::Manual,
+                "the event must carry who asked for the run"
+            );
         }
     }
     assert!(saw_sync_completed, "sync_completed must be broadcast");
@@ -438,13 +448,21 @@ fn initial_sync_is_idempotent_on_rerun() {
     let engine = engine(&db, &mock);
 
     let _ = runtime()
-        .block_on(async { engine.initial_sync().await })
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
         .expect("first sync");
     let before = count(&db, "SELECT COUNT(*) FROM conversation_threads");
     assert_eq!(before, 4);
 
     let _ = runtime()
-        .block_on(async { engine.initial_sync().await })
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
         .expect("second sync");
     assert_eq!(
         count(&db, "SELECT COUNT(*) FROM conversations"),
@@ -507,7 +525,11 @@ fn incremental_sync_picks_up_changed_conversations() {
     let engine = engine(&db, &mock);
 
     runtime()
-        .block_on(async { engine.initial_sync().await })
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
         .expect("initial sync");
 
     // The customer asks for an update upstream: subject + a new thread.
@@ -519,7 +541,11 @@ fn incremental_sync_picks_up_changed_conversations() {
     mock.set_handler(fixture_handler(&fix));
 
     let results = runtime()
-        .block_on(async { engine.incremental_sync().await })
+        .block_on(async {
+            engine
+                .incremental_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
         .expect("incremental sync");
     let failed: Vec<String> = results
         .iter()
@@ -564,7 +590,11 @@ fn hard_upstream_failure_is_reported_not_swallowed() {
     )));
 
     let results = runtime()
-        .block_on(async { engine.initial_sync().await })
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
         .expect("run completes structurally");
     let account = results
         .iter()

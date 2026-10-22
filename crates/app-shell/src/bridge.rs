@@ -129,9 +129,15 @@ mod tests {
             counter.fetch_add(1, Ordering::SeqCst);
         });
 
-        let first = ServerEvent::sync_completed("test", 3, 0);
+        let first =
+            ServerEvent::sync_completed("test", 3, 0, spp_core::events::SyncTrigger::Manual);
         bus.emit(&first);
-        bus.emit(&ServerEvent::sync_completed("test", 4, 0));
+        bus.emit(&ServerEvent::sync_completed(
+            "test",
+            4,
+            0,
+            spp_core::events::SyncTrigger::Manual,
+        ));
         wait_for_pending(&bridge, 2);
         wait_for_counter(&repaints, 2);
 
@@ -158,13 +164,23 @@ mod tests {
         });
 
         for i in 0..8u32 {
-            bus.emit(&ServerEvent::sync_completed("burst", i, 0));
+            bus.emit(&ServerEvent::sync_completed(
+                "burst",
+                i,
+                0,
+                spp_core::events::SyncTrigger::Auto,
+            ));
         }
         wait_for_pending(&bridge, 1);
         assert!(!bridge.drain().is_empty());
 
         // The bridge must still deliver events emitted after the lag.
-        bus.emit(&ServerEvent::sync_completed("after", 99, 0));
+        bus.emit(&ServerEvent::sync_completed(
+            "after",
+            99,
+            0,
+            spp_core::events::SyncTrigger::Auto,
+        ));
         let deadline = Instant::now() + Duration::from_secs(5);
         let delivered = loop {
             let drained = bridge.drain();
@@ -189,7 +205,12 @@ mod tests {
         let bus = EventBus::new(16);
         let ctx = egui::Context::default();
         let bridge = TaskBridge::spawn(&bus, &ctx);
-        bus.emit(&ServerEvent::sync_completed("ctx", 1, 0));
+        bus.emit(&ServerEvent::sync_completed(
+            "ctx",
+            1,
+            0,
+            spp_core::events::SyncTrigger::Manual,
+        ));
         wait_for_pending(&bridge, 1);
         assert_eq!(bridge.drain().len(), 1);
     }

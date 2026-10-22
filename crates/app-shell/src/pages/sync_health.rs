@@ -216,11 +216,11 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
                     rt.block_on(async move {
                         match action {
                             SyncAction::Initial => engine
-                                .initial_sync()
+                                .initial_sync(spp_core::events::SyncTrigger::Manual)
                                 .await
                                 .map(|_| "Initial sync completed.".to_string()),
                             SyncAction::Incremental => engine
-                                .incremental_sync()
+                                .incremental_sync(spp_core::events::SyncTrigger::Manual)
                                 .await
                                 .map(|_| "Incremental sync completed.".to_string()),
                             SyncAction::Reconcile => engine
@@ -288,7 +288,12 @@ pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
             let result = runtime
                 .map_err(|e| spp_core::Error::Config(e.to_string()))
                 .and_then(|rt| {
-                    rt.block_on(async move { engine.sync_docs_only().await.map(|_| ()) })
+                    rt.block_on(async move {
+                        engine
+                            .sync_docs_only(spp_core::events::SyncTrigger::Manual)
+                            .await
+                            .map(|_| ())
+                    })
                 });
             if let Err(e) = result {
                 db.with_write(|conn| {
