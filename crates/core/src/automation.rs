@@ -1065,6 +1065,31 @@ fn read_rule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RuleRow> {
     ))
 }
 
+/// Audit item 18: the trigger column carries TWO generations of shapes.
+/// The modern engine stores a JSON string ("customer_reply"); the
+/// UI's rule form (a port of the web prototype) still serializes the M007
+/// tagged enum ({"kind":"tag_added","tag":"x"}) via `create_rule`.
+/// The engine previously demanded the string shape and errored on every
+/// UI-created rule, and one failed rule aborted `list_rule_records` —
+/// so the whole automation engine silently never ran. Accept both
+/// shapes: the string as-is, the legacy enum mapped to its kind name
+/// (status_changed / tag_added / sla_risk).
+fn parse_trigger_json(raw: &str) -> Result<String> {
+    if let Ok(s) = serde_json::from_str::<String>(raw) {
+        return Ok(s);
+    }
+    if let Ok(t) = serde_json::from_str::<Trigger>(raw) {
+        return Ok(match t {
+            Trigger::StatusChanged { .. } => "status_changed".to_string(),
+            Trigger::TagAdded { .. } => "tag_added".to_string(),
+            Trigger::SlaRisk => "sla_risk".to_string(),
+        });
+    }
+    Err(crate::error::Error::Config(format!(
+        "trigger deserialization failed: {raw}"
+    )))
+}
+
 fn parse_rule_record(row: RuleRow) -> Result<RuleRecord> {
     let (
         id,
@@ -1078,8 +1103,7 @@ fn parse_rule_record(row: RuleRow) -> Result<RuleRecord> {
         last_run_at,
         run_count,
     ) = row;
-    let trigger: String = serde_json::from_str(&trigger_json)
-        .map_err(|e| crate::error::Error::Config(format!("trigger deserialization failed: {e}")))?;
+    let trigger: String = parse_trigger_json(&trigger_json)?;
     let actions: serde_json::Value = serde_json::from_str(&action_json)
         .map_err(|e| crate::error::Error::Config(format!("actions deserialization failed: {e}")))?;
     let conditions: serde_json::Value = serde_json::from_str(&conditions_json).map_err(|e| {
@@ -1144,7 +1168,25 @@ pub fn list_rule_records(conn: &Connection) -> Result<Vec<RuleRecord>> {
     let rows = stmt
         .query_map([], read_rule_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    rows.into_iter().map(parse_rule_record).collect()
+    // Audit item 18: one malformed rule must never take the whole engine
+    // down. `list_rule_records` previously propagated the first parse
+    // error, and the fire sites swallow errors with `let _ =` — every
+    // trigger evaluation died silently on a single poisoned row. Skip
+    // the row with a warning instead; the strict `get_rule_record` still
+    // surfaces the corruption to the editor UI.
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| match parse_rule_record(r) {
+            Ok(rec) => Some(rec),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "skipping unparsable automation rule; the engine continues"
+                );
+                None
+            }
+        })
+        .collect())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1369,6 +1411,23 @@ fn execute_non_destructive(
                 if !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
                     tags.push(tag.to_string());
                     crate::conversation_ops::write_conversation_tags(conn, conversation_id, &tags);
+                    // Audit item 19: the local mirror write is only half the
+                    // action. The manual inbox path queues an outbound push
+                    // after its typed local write; the automation path wrote
+                    // the mirror and stopped, so the next sync reverted the
+                    // tag. Queue the same outbound push the inbox uses (the
+                    // worker resolves the remote conversation id, pushes,
+                    // and pulls the platform truth back into the mirror).
+                    crate::conversation_ops::create_outbound_job_keyed(
+                        conn,
+                        "update_tags",
+                        &serde_json::json!({
+                            "conversationId": conversation_id,
+                            "tags": tags,
+                        }),
+                        Some(conversation_id),
+                        Some(&format!("automation_tags_{conversation_id}")),
+                    )?;
                 }
             }
             Ok(true)
@@ -1414,6 +1473,25 @@ pub fn execute_approved_action(
             let Some(conversation_remote_id) = remote else {
                 return Ok(false);
             };
+            // Hoisted so the outbound enqueue below can carry it: the
+            // local mirror write and the platform push must agree on the
+            // assignee (the outbound worker resolves the remote user id
+            // and honestly fails for unsynced users).
+            let assignee_local_id: Option<i64> = if kind == "set_status" {
+                None
+            } else {
+                params
+                    .get("userId")
+                    .and_then(|u| u.as_i64())
+                    .and_then(|id| {
+                        conn.query_row(
+                            "SELECT id FROM users WHERE id = ?1 OR remote_id = ?1",
+                            params![id],
+                            |r| r.get(0),
+                        )
+                        .ok()
+                    })
+            };
             let op = if kind == "set_status" {
                 let new_status = params
                     .get("status")
@@ -1427,17 +1505,6 @@ pub fn execute_approved_action(
                     actor_id: None,
                 }
             } else {
-                let assignee_local_id: Option<i64> = params
-                    .get("userId")
-                    .and_then(|u| u.as_i64())
-                    .and_then(|id| {
-                        conn.query_row(
-                            "SELECT id FROM users WHERE id = ?1 OR remote_id = ?1",
-                            params![id],
-                            |r| r.get(0),
-                        )
-                        .ok()
-                    });
                 crate::ticket_ops::TicketOperation::Assign {
                     conversation_remote_id,
                     assignee_local_id,
@@ -1446,7 +1513,47 @@ pub fn execute_approved_action(
                 }
             };
             match crate::ticket_ops::execute(conn, &op) {
-                Ok(crate::ticket_ops::OperationResult::Success { .. }) => Ok(true),
+                Ok(crate::ticket_ops::OperationResult::Success { .. }) => {
+                    // Audit item 19: an approved write action must reach
+                    // Help Scout. The typed local write alone was silently
+                    // reverted by the next sync — the manual inbox path
+                    // queues an outbound push after the same local write,
+                    // and this is that queue entry: the worker resolves
+                    // the remote conversation id, pushes the change, and
+                    // pulls the platform truth back into the mirror.
+                    // A failed enqueue propagates so the approval job
+                    // retries instead of reporting a silent half-action.
+                    let (job_kind, payload, key) = if kind == "set_status" {
+                        (
+                            "update_status",
+                            serde_json::json!({
+                                "conversationId": conversation_id,
+                                "status": params
+                                    .get("status")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("closed"),
+                            }),
+                            format!("automation_status_{conversation_id}"),
+                        )
+                    } else {
+                        (
+                            "assign",
+                            serde_json::json!({
+                                "conversationId": conversation_id,
+                                "userId": assignee_local_id,
+                            }),
+                            format!("automation_assign_{conversation_id}"),
+                        )
+                    };
+                    crate::conversation_ops::create_outbound_job_keyed(
+                        conn,
+                        job_kind,
+                        &payload,
+                        Some(conversation_id),
+                        Some(&key),
+                    )?;
+                    Ok(true)
+                }
                 Ok(crate::ticket_ops::OperationResult::Rejected { .. }) => Ok(false),
                 Err(_) => Ok(false),
             }
@@ -1890,4 +1997,253 @@ pub fn fire_trigger_for_conversation(
         }
     }
     Ok(runs)
+}
+
+/// Clean-audit batch 19 (items 18 + 19): UI-created rules must not poison
+/// the engine's trigger deserialization, and approved write actions must
+/// reach the platform through the outbound push the manual inbox uses.
+#[cfg(test)]
+mod batch19_tests {
+    use super::*;
+    use crate::db::DbHandle;
+
+    fn db() -> DbHandle {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        DbHandle::new(conn)
+    }
+
+    fn seed_conversation(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9101, 91, 'Export broken', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        conn.last_insert_rowid()
+    }
+
+    fn insert_rule(conn: &Connection, name: &str, trigger_json: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO automation_rules (name, trigger_json, action_json, enabled, conditions)
+             VALUES (?1, ?2, '[]', 1, '[]')",
+            params![name, trigger_json],
+        )
+        .expect("rule");
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn ui_created_legacy_rules_parse_instead_of_poisoning_the_engine() {
+        let db = db();
+        db.with_write(|c| {
+            insert_rule(c, "modern", "\"customer_reply\"");
+            insert_rule(c, "ui legacy", r#"{"kind":"tag_added","tag":"vip"}"#);
+        });
+
+        let records = db
+            .with_read(crate::automation::list_rule_records)
+            .expect("the engine must survive every stored rule shape");
+        assert_eq!(records.len(), 2, "both real generations parse: {records:?}");
+        let legacy = records
+            .iter()
+            .find(|r| r.name == "ui legacy")
+            .expect("the UI-created rule is visible to the engine");
+        assert_eq!(
+            legacy.trigger, "tag_added",
+            "the legacy M007 enum maps to its kind name"
+        );
+    }
+
+    #[test]
+    fn a_single_poisoned_rule_no_longer_kills_the_whole_engine() {
+        let db = db();
+        let conversation = db.with_write(|c| seed_conversation(c));
+        db.with_write(|c| {
+            crate::settings::set_bool(c, "automation_enabled", true).expect("enable");
+            // A real action so the engine records the run ("manual_review_queue"
+            // is the cheapest non-destructive kind — no AI, no approval).
+            c.execute(
+                "INSERT INTO automation_rules (name, trigger_json, action_json, enabled, conditions)
+                 VALUES ('healthy', '\"customer_reply\"',
+                         '[{\"kind\":\"manual_review_queue\",\"params\":{}}]', 1, '[]')",
+                [],
+            )
+            .expect("healthy rule");
+            insert_rule(c, "poison", "this is not valid json {{{");
+        });
+
+        // Pre-fix this call returned Err (list_rule_records propagated the
+        // poisoned row) and every fire site swallowed it with `let _ =` —
+        // automation silently never ran. Now the healthy rule is evaluated.
+        let runs =
+            db.with_write(|c| fire_trigger_for_conversation(c, "customer_reply", conversation));
+        assert!(
+            runs.is_ok(),
+            "one malformed rule must not abort the engine: {runs:?}"
+        );
+        // The healthy record ran through the pipeline (recorded, whatever
+        // its outcome); the poisoned row was skipped with a warning.
+        let names: Vec<String> = db.with_read(|c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT name FROM automation_runs r
+                          JOIN automation_rules ar ON ar.id = r.rule_id
+                          WHERE ar.name = 'healthy'",
+                )
+                .expect("runs query");
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).expect("map");
+            rows.filter_map(|x| x.ok()).collect()
+        });
+        assert_eq!(names.len(), 1, "the healthy rule was evaluated: {names:?}");
+    }
+
+    #[test]
+    fn an_approved_set_status_queues_the_platform_push() {
+        let db = db();
+        let conversation = db.with_write(|c| seed_conversation(c));
+        let executed = db
+            .with_write(|c| {
+                execute_approved_action(
+                    c,
+                    conversation,
+                    &serde_json::json!({
+                        "kind": "set_status",
+                        "params": { "status": "closed" },
+                    }),
+                )
+            })
+            .expect("approved action");
+        assert!(executed, "the local half succeeds");
+
+        let (_kind, key, payload): (String, String, String) = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT kind, idempotency_key, payload FROM outbound_jobs
+                      WHERE kind = 'update_status'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+            })
+            .expect("the outbound push is queued");
+        assert_eq!(key, format!("automation_status_{conversation}"));
+        let payload: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert_eq!(
+            payload["conversationId"], conversation,
+            "the lane gets the LOCAL id"
+        );
+        assert_eq!(payload["status"], "closed");
+        let status: String = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT status FROM conversations WHERE id = ?1",
+                    params![conversation],
+                    |r| r.get(0),
+                )
+            })
+            .expect("conversation");
+        assert_eq!(status, "closed", "the typed local write happened too");
+    }
+
+    #[test]
+    fn an_approved_assign_queues_the_platform_push() {
+        let db = db();
+        let conversation = db.with_write(|c| {
+            let id = seed_conversation(c);
+            c.execute(
+                "INSERT INTO users (remote_id, first_name, last_name, email)
+                 VALUES (77, 'Al', 'Agent', 'al@example.com')",
+                [],
+            )
+            .expect("user");
+            id
+        });
+        let user_local: i64 = db
+            .with_read(|c| {
+                c.query_row("SELECT id FROM users WHERE remote_id = 77", [], |r| {
+                    r.get(0)
+                })
+            })
+            .expect("user");
+
+        let executed = db
+            .with_write(|c| {
+                execute_approved_action(
+                    c,
+                    conversation,
+                    &serde_json::json!({
+                        "kind": "assign",
+                        "params": { "userId": 77 },
+                    }),
+                )
+            })
+            .expect("approved action");
+        assert!(executed);
+
+        let (_kind, payload): (String, String) = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT kind, payload FROM outbound_jobs WHERE kind = 'assign'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .expect("the assign push is queued");
+        let payload: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert_eq!(payload["conversationId"], conversation);
+        assert_eq!(
+            payload["userId"], user_local,
+            "the push carries the LOCAL assignee id for the lane's remote resolution"
+        );
+        let assignee: Option<i64> = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT assignee_local_id FROM conversations WHERE id = ?1",
+                    params![conversation],
+                    |r| r.get(0),
+                )
+            })
+            .expect("conversation");
+        assert_eq!(assignee, Some(user_local), "the local write agrees");
+    }
+
+    #[test]
+    fn an_automation_add_tag_queues_the_platform_push() {
+        let db = db();
+        let conversation = db.with_write(|c| seed_conversation(c));
+
+        let executed = db
+            .with_write(|c| {
+                execute_non_destructive(
+                    c,
+                    "add_tag",
+                    &serde_json::json!({ "tag": "vip" }),
+                    conversation,
+                    false,
+                )
+            })
+            .expect("add_tag");
+        assert!(executed);
+
+        let tags =
+            db.with_read(|c| crate::conversation_ops::read_conversation_tags(c, conversation));
+        assert_eq!(tags, vec!["vip".to_string()], "the local write happened");
+
+        let (_kind, payload): (String, String) = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT kind, payload FROM outbound_jobs WHERE kind = 'update_tags'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .expect("the tag push is queued — otherwise sync reverts the tag");
+        let payload: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert_eq!(payload["conversationId"], conversation);
+        assert_eq!(
+            payload["tags"],
+            serde_json::json!(["vip"]),
+            "the full tag list reaches the platform push"
+        );
+    }
 }
