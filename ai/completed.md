@@ -3137,3 +3137,172 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   AND the AppImage/deb build with the SPP_SMOKE shell smoke). The
   batch-opening commit `f3da4c9` and the tracking commit `a24ce00`
   also ran green (runs `39987498920` and `39994712702`: success).
+
+### Batch 28 — 2026-10-23 (code commit `d823fcf`)
+
+**87. Ratings upsert never re-links conversation/customer on conflict**
+(low|bug)
+— the satisfaction webhook routinely beats the conversation sync: the
+rating is fetched and stored while its conversation/customer are not
+yet mirrored, so the row lands with NULL links. Every later
+re-delivery of the same rating hit the `ON CONFLICT(remote_id)` clause
+that only touched `rating`/`comments`/`last_synced_at` — the NULL
+links were permanent. The conflict path now upgrades them:
+`conversation_id = COALESCE(excluded.conversation_id,
+ratings.conversation_id)` (and the same for `customer_local_id` and
+`user_local_id`), so a re-delivery with freshly-resolved ids links the
+rating, while a re-fetch that cannot resolve them anymore never
+downgrades an existing link to NULL. core/workers.rs.
+
+**88. Cancelled initial sync recorded LIVE; threads backfill never
+re-runs** (low|bug)
+— two halves of one stranded state. (a) A cancelled initial sync fell
+through to the same verdict as a completed one: a mid-run cancel with
+zero resource errors stamped `sync_state = LIVE` and the run row
+`finished, LIVE`, so the auto-sync timer never re-ran the initial pass.
+(b) `sync_missing_threads` ran only inside the initial sync — the
+conversations the cancel (or a crash, or a rate-limited page) left
+thread-less were never backfilled, because incrementals did not run
+the pass. Now: a cancelled run lands the state machine in
+`CATCHING_UP` (incrementals continue the pull), records the run row as
+`CANCELLED`, says "cancelled partway" in the audit log, and recovery
+counts a CANCELLED run as data-on-record; and the bounded threads
+backfill (200 conversations/pass, same bound as the initial path)
+rides every incremental too, draining any stranded backlog at the sync
+cadence. core/sync_engine.rs.
+
+**89. Threads pass hardcodes failed:0 then gets stamped ok**
+(low|bug)
+— `sync_missing_threads` returned `failed: 0, error: None` no matter
+how many conversations failed their re-fetch: the caller's
+`record_success` then stamped the checkpoint `status = 'ok'`,
+`last_error = NULL` right over the per-row `record_failure` the pass
+had written, and the run's error count never saw the failures. The
+pass now counts its unreachable conversations and returns the honest
+`failed` with a summarized error, which the standard resource
+bookkeeping (initial loop and incremental `finish_resource` alike)
+records once; the per-row `record_failure` inside the pass is gone
+(no double count), each failure stays in the warn log with its
+conversation id and error. core/sync_engine.rs.
+
+**90. Post-initial-sync AI backfill covers only first 50 conversations**
+(low|gap)
+— `on_after_initial_sync` capped both backfill queries at `LIMIT 50`:
+with more than 50 unanalyzed conversations (any sizeable import), the
+51st onward never gained an analysis or an attributes snapshot — the
+hook runs exactly once after the initial sync and nothing else ever
+re-selected them. Both caps are gone; every unanalyzed, non-deleted
+conversation is enqueued (the ai queue serializes the work at its own
+pace, the attributes lane needs no model at all).
+core/workers.rs.
+
+**91. Platform-side deletions never propagate (saved replies/orgs/
+workflows)** (low|gap)
+— the sync upserted these full-list resources forever without ever
+noticing a row that had vanished from the platform's listing: a
+deleted saved reply, workflow or organization kept serving locally
+forever. The three arms now collect the seen remote ids and stamp
+`deleted_at` on rows absent from the complete, successfully fetched
+list (`prune_missing_rows`, one shared helper); an EMPTY list is
+deliberately not a wipe signal (a degraded or permission-downgraded
+answer must not blank the mirror); a re-listed row comes back to life
+(the upserts clear `deleted_at`); and the saved-replies listing now
+walks every page (`list_all_v2`) before pruning, so a mailbox holding
+more replies than one v2 page is never falsely pruned.
+core/sync_engine.rs, core/helpscout_real.rs.
+
+**92. Dead "-> 404" mapping in get_rating** (low|bug)
+— the not-found branch matched the literal `-> 404` substring of the
+error's Display text — but `HsApiError`'s Display prints the FRIENDLY
+message ("Help Scout reports this record no longer exists…"), so the
+mapping never fired: a genuinely absent rating surfaced as an Err,
+which since batch 27's item 85 means a failed, retried job instead of
+the honest `Ok(None)` logged no-op every other 404-tolerant fetch
+returns. `get_rating` now uses the structured `is_not_found` check
+(status-code based, same as get_chat/get_conversation).
+core/helpscout_real.rs.
+
+**93. OAuth TTL sweeper + redirect-URI verifier dead; states never
+expire** (low|gap)
+— three dead pieces of the OAuth state machinery. (a)
+`sweep_consumed` had zero callers: `oauth_states` grew forever. (b)
+Unconsumed states never expired — a state issued weeks ago stayed
+redeemable for the process's lifetime, while the callback's failure
+page promised "it may have expired". (c) The recorded `redirect_uri`
+was never verified — the table doc said "we store it here to verify"
+and nothing read it. Now: states live ten minutes
+(`STATE_TTL_SECONDS`), consumed or not — `consume_state` enforces the
+TTL itself and the sweeper (`sweep_states`, covering abandoned-old and
+consumed-old alike) runs on every new authorization; and the callback
+verifies the redeemed state's redirect port against the listener that
+actually serves the request (`LoopbackCtx` carries the bound port), so
+a state issued for one loopback port does not redeem on another
+listener. core/oauth_state.rs, core/loopback.rs.
+
+**94. Webhook prune deletes unprocessed pending events under backlog**
+(low|bug)
+— `prune_webhook_events` kept the newest N rows regardless of state,
+and under a backlog the OLDEST rows are exactly the pending ones: an
+offline weekend's burst had its head deleted before the drain ever
+reached it. Only terminally-done rows are prunable now (processed, or
+failed with the 5-attempt retry budget spent); rows that still owe
+processing survive at any age, and the newest `keep` of everything
+stay as diagnostic history. core/webhook.rs.
+
+**95. weekly_digest completes the ledger row despite failed narrative**
+(low|bug)
+— the digest path called `complete_run_with_usage` BEFORE deciding
+whether the narrative was usable: a model answer with no narrative
+left an `ai_runs` row saying "completed" (and priced in the cost
+ledger) while the digest row said "failed". The verdict now decides
+the ledger — a usable narrative completes the run with its usage, an
+unusable one fails it with the honest reason, and the digest row and
+the ledger row tell the same story. core/ai_pipeline.rs.
+
+**96. Empty `{}` analysis accepted+cached; eval gate disagrees**
+(low|bug)
+— `parse_ticket_analysis` happily parses `{}` into an all-empty
+analysis, so a model answer with no usable field was COMPLETED and
+CACHED — and then served from the cache forever (the golden-eval gate
+already rejected the same output: "at least one non-empty core
+field"). The pipeline now enforces the identical gate
+(`analysis_has_core_content`: summary/intent/customer_goal, one
+non-empty suffices) before anything is persisted — an empty answer
+fails the run with the honest reason and caches nothing, and the
+cache-hit path applies the same filter so a legacy completed row with
+an empty output degrades to a fresh computation instead of being
+served forever. core/ai_pipeline.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 426 passed / 0 failed / 4 ignored (17 new batch-28
+  regressions: the rating upsert re-linking on conflict and never
+  downgrading an existing link; the cancelled initial sync landing
+  CATCHING_UP with a CANCELLED run row and recovery counting it, the
+  incremental draining a thread-less conversation, and the threads
+  pass counting its unreachable conversation with an honestly failed
+  checkpoint; the post-sync backfill covering all 60 conversations and
+  skipping the deleted one; platform deletions propagating and
+  restoring across saved replies/workflows/organizations with the
+  empty-list wipe guard; get_rating mapping a real 404 to Ok(None)
+  while a 400 keeps its status; the callback rejecting a state issued
+  for another port, the stale state expiring, and the sweeper removing
+  both dead kinds on every new authorization; the prune keeping
+  pending events under backlog and pruning only terminal rows outside
+  the window; the digest ledger matching the narrative verdict in both
+  directions; and the empty analysis rejected-not-cached plus the
+  legacy empty cache row degrading to fresh computation);
+  sandbox-feature suite 431 passed / 0 failed / 4 ignored; app-shell
+  209 passed / 0 failed; xtask 6; catalog 0.
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4043 shapes painted.
+- Fresh harness `scripts/verify_batch28.py` (committed): all 50
+  checks pass; the batch-25, batch-26 and batch-27 harnesses still
+  pass.
+- `cargo deny check advisories licenses`: ok (the CDLA-Permissive-2.0
+  note is the pre-existing unmatched-allowance warning, not a failure).
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).

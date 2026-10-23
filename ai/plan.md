@@ -107,7 +107,7 @@ the dead 404 mapping in get_rating, the dead OAuth TTL sweeper with its
 never-expiring states, the webhook prune deleting unprocessed pending
 events under backlog, the weekly_digest ledger row completed despite a
 failed narrative, and the empty `{}` analysis accepted and cached
-against its eval gate) — opened, in `progress.md`.
+against its eval gate) — verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
