@@ -3312,3 +3312,153 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   (fmt/clippy/test/deny AND the AppImage/deb build with the SPP_SMOKE
   shell smoke); tracking commit `e30d0ec` — CI run `40022682471`:
   success, both jobs green.
+
+### Batch 29 — 2026-10-23 (code commit `f1289fb`)
+
+**97. Rewrite paths bypass redaction** (low|issue)
+— the two rewrite lanes (the composer's pre-send "shorten/warmer/…"
+menu and the stored-draft rewrite) handed the agent's draft text
+straight to the model through a raw `chat_with_opts` call — while every
+other lane already crossed the `redaction_enabled`-gated
+`redact_text` boundary. Drafts routinely quote what customers sent:
+card numbers, CVVs, API keys pasted into a reply for reference. The
+model request now crosses the same boundary both paths share (a
+`redact_for_model` helper reading the same setting, default on, with
+findings logged through the operation log), and the setting stays the
+honest switch — redaction off passes the text through verbatim.
+core/ai_pipeline.rs.
+
+**98. Tool args: as_i64 rejects schema-valid floats** (low|issue)
+— the tool schemas declare `"type": "number"`, and models routinely
+emit whole values as JSON floats (`"number": 95.0`), which
+`Value::as_i64` rejects — so a schema-valid argument came back
+"Invalid number" and the tool call failed. A shared `arg_i64` reader
+now accepts any integral encoding (exact-integer floats inside i64's
+range), never truncates a fraction (`9.5` still rejects), and all
+thirteen argument sites plus `clamp_limit` read through it.
+core/ai_tools.rs.
+
+**99. get_issue_clusters returns 3× the documented limit with a query**
+(low|issue)
+— the schema documents limit as "Max clusters (default 5, max 10)",
+but the SQL multiplied by three whenever a query was present — up to
+30 clusters came back from a call whose contract said ten. The
+multiplier is gone; the LIMIT binds the clamped limit alone, with or
+without a query. core/ai_tools.rs.
+
+**100. Knowledge chunks: no attempts cap → infinite retry** (low|issue)
+— `knowledge_chunks` had no `embedding_attempts` column at all (its
+two sibling tables carry one), its pending selection had no cap, and
+its failure lane reset only the state — a chunk the embedding backend
+kept rejecting (oversized, backend error) was re-selected and
+re-attempted on every embed pass, forever. Migration m061 (boot step
+52) adds the column idempotently for existing installs, the pending
+selection caps at five attempts like the siblings, `mark_chunk_failed`
+counts attempts for every family, and the vector-id-v2 re-embed
+migration resets the counter with the rest. core/embeddings.rs,
+core/bootstrap.rs.
+
+**101. Malformed 200 → literal "Unknown" content** (low|issue)
+— a well-formed JSON 200 whose choices were empty (or whose single
+choice carried `content: null`) parsed as a SUCCESSFUL completion whose
+content was the fabricated literal string "Unknown" — which downstream
+lanes then persisted as if the model had written it. `parse_chat_response`
+returns `Result` now: no choices and no content are labeled errors
+("malformed 200 body"), never fabricated text; a readable body parses
+unchanged. core/ai_lm_studio.rs.
+
+**102. Draft signature picks an arbitrary agent's name** (low|issue)
+— the local copilot's draft signature resolved `SELECT u.first_name
+FROM users u ORDER BY u.id LIMIT 1`: whichever teammate happened to
+hold the lowest row id signed every copilot draft, not the agent
+working the ticket. The signature now resolves the conversation's
+actual `assignee_local_id`; an unassigned conversation falls back to
+the honest "Support" instead of a random colleague's name.
+core/ai_local.rs.
+
+**103. Org member_count capped by LIMIT 100** (low|bug)
+— `get_organization_detail` derived member_count and the
+open/conversation totals from its 100-row members list, so an org with
+250 members reported 100 and summed only the first page. The members
+list stays a display list (capped at 100), but the totals now come from
+an unbounded aggregate over every member, computed in the same
+per-member terms the list rows use. core/people_store.rs.
+
+**104. last-activity/resolution subqueries miss deleted_at** (low|bug)
+— two soft-delete blind spots: the customer list's
+`MAX(last_activity_at)` subquery and its recency sort both read every
+conversation of the customer, deleted ones included — a soft-deleted
+ticket with a newer stamp shadowed the live activity and could pin a
+customer to the top of the recency sort; and the customer detail's
+resolution excerpt picked the newest `reply`-type thread without
+filtering `deleted_at` — a deleted reply spoke for how a closed ticket
+was resolved. All three subqueries filter soft-deleted rows now.
+core/people_store.rs.
+
+**105. Org name linking case-sensitive vs NOCASE elsewhere** (low|bug)
+— every customer-to-organization name comparison was binary while the
+org list itself sorts `COLLATE NOCASE` (and the platform matches org
+names case-insensitively): a customer created as "acme corp" never
+linked to the stored org "Acme Corp" — no id link at creation, no
+re-link on patch or backfill, and the org detail/list counted the
+member as belonging to nobody. All the linking sites (create/update/
+timeline backfill, the members SQL, the org-list counts, and the
+rename propagation) compare `COLLATE NOCASE` now. core/people_store.rs.
+
+**106. CSV export lacks formula-injection guard** (low|issue)
+— the conversations CSV export quoted its cells but never guarded
+them: a conversation subject like `=HYPERLINK("http://evil","click")`
+or `@WEBSERVICE(...)` (customer-controlled text) executed when the
+exported file was opened in a spreadsheet. `csv_cell` now applies the
+OWASP guard — cells starting with a formula trigger (`=`, `+`, `-`,
+`@`, TAB, CR) are single-quote-prefixed into inert text — then the
+normal CSV quoting on top; ordinary cells pass through unchanged.
+core/backup_service.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `python3 scripts/gate_no_simulation.py`: clean.
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 440 passed / 0 failed / 4 ignored (14 new batch-29
+  regressions: the rewrite prompt redacting a quoted card number and
+  CVV through the boundary with the setting as the honest switch; the
+  integral-float tool argument resolving its conversation while 9.5
+  still rejects, and the fraction/string/oversized-float decode table;
+  the cluster LIMIT never inflated by a query across four
+  argument/seed combinations; the m061 column landing idempotently at
+  boot, the capped chunk leaving the pending queue, and the failed
+  knowledge chunk counting its attempt; the malformed 200 with no
+  choices or no content failing with labeled errors while a readable
+  body parses; the assignee — not the lowest-id teammate — signing the
+  draft and the unassigned conversation falling back to "Support"; the
+  120-member org reporting exact member/open/conversation totals with
+  a 100-row display list; the deleted conversation's newer stamp
+  ignored by the list row and the recency sort; the deleted thread
+  never serving as a closed conversation's resolution; the
+  case-differing organization linking at creation, counting through
+  the members SQL, and counting in the org list; and the =, +, @, -
+  cells quote-prefixed in the exported CSV with ordinary cells
+  untouched); sandbox-feature suite 445 passed / 0 failed / 4
+  ignored; app-shell 209 passed / 0 failed; xtask 6; catalog 0.
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4043 shapes painted (boot step m061 exercised by the boot chain).
+- Fresh harness `scripts/verify_batch29.py` (committed): all 51
+  checks pass; the batch-18, batch-19, batch-21, batch-23, batch-24,
+  batch-25, batch-26, batch-27 and batch-28 harnesses still pass.
+  Pre-existing harness notes, proven against pre-batch HEAD by a
+  stash-run and unrelated to this batch: batch-17's script holds an
+  absolute path from the original engagement machine (its checks are
+  environment-bound); batch-20's item-21 "upsert sites" needle counts
+  a `collect` form that batch-24's per-chunk partitioning restructured
+  (the error-propagation property itself still holds — the mapping
+  call still returns through `?` at both sites); batch-22's flake
+  needle expects a one-line `now_iso` literal that rustfmt has since
+  wrapped. None of these regressions involve batch-29 code.
+- `cargo deny check advisories licenses`: ok (the CDLA-Permissive-2.0
+  note is the pre-existing unmatched-allowance warning, not a failure).
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).
+- Runner verification: follows once CI on code commit `f1289fb`
+  completes (recorded below when the runs finish).
