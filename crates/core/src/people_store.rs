@@ -25,12 +25,12 @@ pub fn list_organizations(
                 o.remote_updated_at, o.local_created_at, o.local_updated_at,
                 (SELECT COUNT(*) FROM customers cu
                   WHERE (cu.organization_id = o.id
-                         OR (cu.organization_id IS NULL AND cu.organization = o.name))
+                         OR (cu.organization_id IS NULL AND cu.organization = o.name COLLATE NOCASE))
                     AND cu.deleted_at IS NULL) AS customer_count,
                 (SELECT COUNT(*) FROM conversations c
                   JOIN customers cu ON cu.id = c.customer_local_id
                   WHERE (cu.organization_id = o.id
-                         OR (cu.organization_id IS NULL AND cu.organization = o.name))
+                         OR (cu.organization_id IS NULL AND cu.organization = o.name COLLATE NOCASE))
                     AND cu.deleted_at IS NULL) AS conversation_count
          FROM organizations o
          WHERE o.deleted_at IS NULL
@@ -67,7 +67,7 @@ fn org_row_to_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 }
 
 const ORG_MEMBERS_SQL: &str = "(cu.organization_id = ?1
-    OR (cu.organization_id IS NULL AND cu.organization = (SELECT name FROM organizations WHERE id = ?1)))";
+    OR (cu.organization_id IS NULL AND cu.organization = (SELECT name FROM organizations WHERE id = ?1) COLLATE NOCASE))";
 
 pub fn get_organization_detail(conn: &Connection, org_id: i64) -> Result<Option<Value>> {
     let org: Option<Value> = {
@@ -76,12 +76,12 @@ pub fn get_organization_detail(conn: &Connection, org_id: i64) -> Result<Option<
                     o.remote_updated_at, o.local_created_at, o.local_updated_at,
                     (SELECT COUNT(*) FROM customers cu
                       WHERE (cu.organization_id = o.id
-                             OR (cu.organization_id IS NULL AND cu.organization = o.name))
+                             OR (cu.organization_id IS NULL AND cu.organization = o.name COLLATE NOCASE))
                         AND cu.deleted_at IS NULL) AS customer_count,
                     (SELECT COUNT(*) FROM conversations c
                       JOIN customers cu ON cu.id = c.customer_local_id
                       WHERE (cu.organization_id = o.id
-                             OR (cu.organization_id IS NULL AND cu.organization = o.name))
+                             OR (cu.organization_id IS NULL AND cu.organization = o.name COLLATE NOCASE))
                         AND cu.deleted_at IS NULL) AS conversation_count
              FROM organizations o
              WHERE o.id = ?1 AND o.deleted_at IS NULL",
@@ -134,15 +134,28 @@ pub fn get_organization_detail(conn: &Connection, org_id: i64) -> Result<Option<
         .filter_map(|r| r.ok())
         .collect();
 
-    let member_count = members.len() as i64;
-    let open_total: i64 = members
-        .iter()
-        .filter_map(|m| m.get("open_count").and_then(|v| v.as_i64()))
-        .sum();
-    let conversation_total: i64 = members
-        .iter()
-        .filter_map(|m| m.get("conversation_count").and_then(|v| v.as_i64()))
-        .sum();
+    // Clean-audit item 103: the members LIST stays capped at 100 rows for
+    // display, but the org's counts must be exact — the pre-fix code
+    // derived member_count and the open/conversation totals from the
+    // capped list, so an org with 250 members reported 100 and summed
+    // only the first page. The totals now come from an unbounded aggregate
+    // over every member, in the same per-member terms the list rows use.
+    let (member_total, open_total, conversation_total): (i64, i64, i64) = conn
+        .query_row(
+            &format!(
+                "SELECT COUNT(*),
+                        COALESCE(SUM((SELECT COUNT(*) FROM conversations c
+                           WHERE c.customer_local_id = cu.id AND c.deleted_at IS NULL)), 0),
+                        COALESCE(SUM((SELECT COUNT(*) FROM conversations c
+                           WHERE c.customer_local_id = cu.id AND c.status = 'active' AND c.deleted_at IS NULL)), 0)
+                   FROM customers cu
+                  WHERE {ORG_MEMBERS_SQL} AND cu.deleted_at IS NULL"
+            ),
+            params![org_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap_or((0, 0, 0));
+    let member_count = member_total;
 
     if let Some(obj) = org.as_object_mut() {
         obj.insert("members".into(), Value::Array(members));
@@ -751,13 +764,14 @@ pub fn list_customers_summary(
                   WHERE cv.customer_local_id = c.id AND cv.status IN ('active','pending')
                     AND cv.deleted_at IS NULL) AS open_conversation_count,
                 (SELECT MAX(cv.last_activity_at) FROM conversations cv
-                  WHERE cv.customer_local_id = c.id) AS last_activity_at,
+                  WHERE cv.customer_local_id = c.id AND cv.deleted_at IS NULL) AS last_activity_at,
                 (SELECT AVG(CASE r.rating WHEN 'great' THEN 5 WHEN 'okay' THEN 3 WHEN 'not-good' THEN 1 END)
                    FROM ratings r WHERE r.customer_local_id = c.id) AS average_rating
          FROM customers c
          {where_sql}
          ORDER BY COALESCE(
-             (SELECT MAX(cv.last_activity_at) FROM conversations cv WHERE cv.customer_local_id = c.id),
+             (SELECT MAX(cv.last_activity_at) FROM conversations cv
+              WHERE cv.customer_local_id = c.id AND cv.deleted_at IS NULL),
              c.local_created_at,
              c.created_at) DESC
          LIMIT ?2 OFFSET ?3"
@@ -985,7 +999,7 @@ pub fn get_customer_detail(conn: &Connection, customer_id: i64) -> Result<Option
         "SELECT cv.number, cv.subject,
                 (SELECT t.body_text FROM conversation_threads t
                   WHERE t.conversation_id = cv.id AND t.type = 'reply'
-                    AND t.state = 'published'
+                    AND t.state = 'published' AND t.deleted_at IS NULL
                   ORDER BY COALESCE(t.remote_created_at, t.created_at) DESC LIMIT 1) AS resolution,
                 cv.closed_at
          FROM conversations cv
@@ -1143,7 +1157,7 @@ pub fn create_customer(conn: &Connection, new: &NewCustomer) -> Result<i64> {
             job_title, phone, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5,
                  (SELECT o.id FROM organizations o
-                   WHERE o.name = ?5 AND o.deleted_at IS NULL LIMIT 1),
+                   WHERE o.name = ?5 COLLATE NOCASE AND o.deleted_at IS NULL LIMIT 1),
                  ?6, ?7, ?8, ?8)",
         params![
             remote_id,
@@ -1248,7 +1262,7 @@ pub fn update_customer(conn: &Connection, customer_id: i64, patch: &CustomerPatc
         conn.execute(
             "UPDATE customers SET organization_id = (
                 SELECT o.id FROM organizations o
-                 WHERE o.name = customers.organization AND o.deleted_at IS NULL LIMIT 1)
+                 WHERE o.name = customers.organization COLLATE NOCASE AND o.deleted_at IS NULL LIMIT 1)
              WHERE id = ?1",
             params![customer_id],
         )?;
@@ -1369,7 +1383,7 @@ pub fn update_organization(
         conn.execute(
             "UPDATE customers SET organization = ?2, updated_at = ?3
              WHERE organization_id = ?1
-                OR (organization_id IS NULL AND organization = (SELECT name FROM organizations WHERE id = ?1))",
+                OR (organization_id IS NULL AND organization = (SELECT name FROM organizations WHERE id = ?1) COLLATE NOCASE)",
             params![org_id, new_name, now],
         )?;
     }
@@ -1389,7 +1403,7 @@ pub fn timeline_rebuild(conn: &Connection) -> Result<usize> {
     conn.execute(
         "UPDATE customers SET organization_id = (
             SELECT o.id FROM organizations o
-             WHERE o.name = customers.organization AND o.deleted_at IS NULL LIMIT 1)
+             WHERE o.name = customers.organization COLLATE NOCASE AND o.deleted_at IS NULL LIMIT 1)
          WHERE organization_id IS NULL AND organization IS NOT NULL AND organization != ''",
         [],
     )?;
@@ -1525,6 +1539,240 @@ mod batch24_audit47_tests {
         assert!(
             result.is_err(),
             "a failed email-set write must fail the patch, not vanish"
+        );
+    }
+}
+
+#[cfg(test)]
+mod batch29_audit103_104_105_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn test_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// Clean-audit item 103: the members LIST stays capped at 100 rows for
+    /// display, but member_count and the conversation totals must be exact
+    /// — the pre-fix code derived them from the capped list, so a
+    /// 250-member org reported 100 and summed only the first page.
+    #[test]
+    fn audit103_member_counts_are_exact_past_the_display_cap() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO organizations (remote_id, name) VALUES (700, 'BigCorp')",
+            [],
+        )
+        .expect("org");
+        let org = conn.last_insert_rowid();
+        for i in 0..120 {
+            conn.execute(
+                "INSERT INTO customers (remote_id, first_name, organization_id)
+                 VALUES (?1, ?2, ?3)",
+                params![900 + i, format!("m{i}"), org],
+            )
+            .expect("customer");
+            let customer = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, status, customer_local_id)
+                 VALUES (?1, ?2, 'open issue', 'active', ?3)",
+                params![9100 + i, 1000 + i, customer],
+            )
+            .expect("conversation");
+        }
+        let detail = get_organization_detail(&conn, org)
+            .expect("detail")
+            .expect("org exists");
+        assert_eq!(
+            detail.get("member_count").and_then(Value::as_i64),
+            Some(120),
+            "member_count must be the exact member total, not the 100-row display cap"
+        );
+        assert_eq!(
+            detail
+                .get("members")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(100),
+            "the members list stays a display list"
+        );
+        assert_eq!(
+            detail
+                .get("open_conversation_count")
+                .and_then(Value::as_i64),
+            Some(120),
+            "the open total must sum every member, not the first page"
+        );
+        assert_eq!(
+            detail.get("conversation_count").and_then(Value::as_i64),
+            Some(120),
+            "the conversation total must sum every member, not the first page"
+        );
+    }
+
+    /// Clean-audit item 104: a soft-deleted conversation must not speak for
+    /// the customer's last activity — neither in the list row nor in the
+    /// recency sort.
+    #[test]
+    fn audit104_deleted_conversations_do_not_drive_last_activity() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (80, 'Ada', 'Lovelace')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        // The LIVE conversation: last activity a day ago.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, status, customer_local_id,
+                                        last_activity_at)
+             VALUES (9501, 95, 'Live ticket', 'active', ?1, '2026-10-23T10:00:00Z')",
+            params![customer],
+        )
+        .expect("live conversation");
+        // The DELETED conversation: last activity now — must be ignored.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, status, customer_local_id,
+                                        last_activity_at, deleted_at)
+             VALUES (9502, 96, 'Deleted ticket', 'active', ?1, '2026-10-24T09:00:00Z',
+                     datetime('now'))",
+            params![customer],
+        )
+        .expect("deleted conversation");
+        let (rows, total) = list_customers_summary(&conn, None, 1, 50).expect("summary");
+        assert_eq!(total, 1);
+        let last = rows[0]
+            .get("last_activity_at")
+            .cloned()
+            .and_then(|v| v.as_str().map(str::to_string));
+        assert_eq!(
+            last.as_deref(),
+            Some("2026-10-23T10:00:00Z"),
+            "the deleted conversation's newer stamp must not shadow the live one: {last:?}"
+        );
+    }
+
+    /// Clean-audit item 104: the customer detail's resolution excerpt must
+    /// ignore soft-deleted reply threads — a deleted reply never speaks
+    /// for how a closed ticket was resolved.
+    #[test]
+    fn audit104_deleted_threads_do_not_serve_as_resolutions() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (81, 'Alan', 'Turing')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, status, customer_local_id)
+             VALUES (9601, 96, 'Refund please', 'closed', ?1)",
+            params![customer],
+        )
+        .expect("closed conversation");
+        let conversation = conn.last_insert_rowid();
+        // The live, older reply — the true resolution.
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
+                                               created_at)
+             VALUES (?1, 'reply', 'published', 'Refunded in full.', '2026-10-20T10:00:00Z')",
+            params![conversation],
+        )
+        .expect("live reply");
+        // The newer but DELETED reply — must never surface.
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
+                                               created_at, deleted_at)
+             VALUES (?1, 'reply', 'published', 'WRONG ANSWER (deleted)', '2026-10-21T10:00:00Z',
+                     datetime('now'))",
+            params![conversation],
+        )
+        .expect("deleted reply");
+        let detail = get_customer_detail(&conn, customer)
+            .expect("detail")
+            .expect("customer exists");
+        let resolutions = detail
+            .get("resolutions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(resolutions.len(), 1, "one closed conversation");
+        let resolution = resolutions[0]
+            .get("resolution")
+            .cloned()
+            .and_then(|v| v.as_str().map(str::to_string));
+        assert_eq!(
+            resolution.as_deref(),
+            Some("Refunded in full."),
+            "the deleted thread must not speak for the resolution: {resolution:?}"
+        );
+    }
+
+    /// Clean-audit item 105: the customer-to-organization name link is
+    /// case-insensitive everywhere — a customer created as "acme corp"
+    /// links to the stored org "Acme Corp", and the org list counts the
+    /// case-differing member both ways.
+    #[test]
+    fn audit105_org_name_linking_is_case_insensitive() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO organizations (remote_id, name) VALUES (700, 'Acme Corp')",
+            [],
+        )
+        .expect("org");
+        let org = conn.last_insert_rowid();
+        // Create with a case-different name: the INSERT-time link fires.
+        let id = create_customer(
+            &conn,
+            &NewCustomer {
+                first_name: Some("Ada".into()),
+                last_name: Some("Lovelace".into()),
+                email: None,
+                organization: Some("acme corp".into()),
+                job_title: None,
+                phone: None,
+            },
+        )
+        .expect("customer");
+        let linked: Option<i64> = conn
+            .query_row(
+                "SELECT organization_id FROM customers WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .expect("row");
+        assert_eq!(
+            linked,
+            Some(org),
+            "the case-differing organization text must link to the stored org"
+        );
+
+        // The name-based fallback (organization_id NULL) matches NOCASE too.
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name, organization)
+             VALUES (90, 'Grace', 'Hopper', 'ACME CORP')",
+            [],
+        )
+        .expect("fallback customer");
+        let detail = get_organization_detail(&conn, org)
+            .expect("detail")
+            .expect("org exists");
+        assert_eq!(
+            detail.get("member_count").and_then(Value::as_i64),
+            Some(2),
+            "both the id-linked and the case-differing name-linked member count"
+        );
+
+        // The org list's customer_count sees the same members.
+        let orgs = list_organizations(&conn, None, 200).expect("orgs");
+        assert_eq!(orgs.len(), 1);
+        assert_eq!(
+            orgs[0].get("customer_count").and_then(Value::as_i64),
+            Some(2)
         );
     }
 }
