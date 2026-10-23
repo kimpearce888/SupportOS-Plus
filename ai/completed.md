@@ -2584,3 +2584,208 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   AppImage/deb build with both boot-chain smoke tests).
 - Security: staged diff token-scanned clean before each push; remote
   unmoved at push time (fetch-first).
+
+## Batch 25 — clean-audit items 57-66 (MEDIUM tier: the trigger pair that fired on every customer thread, the knowledge lane a single multi-chunk document could flood, the fused ranking that buried its own semantic hits, the vector points that outlived their chunks, the type edit that bricked its objects, the mention parser that disagreed with its scanner, the sanitizer that leaked the text it claimed to drop, the rebuild that wrote every thread twice, the sweep cursor that sailed past its backlog, and the text extractor that swallowed bodies and double-decoded)
+
+**57. new_conversation + customer_reply both fire on every customer
+thread, no once-guard** (med|bug)
+— `on_conversation_changed` fired BOTH the `new_conversation` and
+`customer_reply` triggers whenever the newest non-deleted thread was
+from the customer: a customer's reply re-ran "new conversation" rules
+(auto-acks re-sent), the very first customer message already fired
+"customer reply" rules, and a tag change or status flip on a
+customer-latest conversation re-fired the pair. The pair now carries a
+once-guard: `conversations.automation_last_customer_thread_id`
+(migration m060, boot step 51) records the newest customer thread whose
+firing the conversation has consumed — the first customer thread ever
+seen fires `new_conversation` (once per conversation), every later one
+fires `customer_reply` (once per thread), and a sync that delivers no
+new customer thread fires neither. The decision lives in
+`automation::customer_thread_trigger_decision` (a pure function,
+pinned by its own decision-matrix tests); a failed firing stays
+unrecorded so the next change retries it, and the AI-enqueue block
+that shares the guard's outer condition is unchanged.
+automation.rs, workers.rs, bootstrap.rs.
+
+**58. Knowledge FTS lane never dedupes per document** (med|bug)
+— `fts_knowledge` holds one row per CHUNK, and `search_knowledge_raw`
+LIMITed raw chunk rows: a document split into ten matching chunks
+consumed ten of the twenty slots (half the "top 20" could be one
+document) while single-chunk documents were pushed out entirely. Rows
+are now consumed rank-ordered and deduped per document — the best
+(lowest-rank) chunk speaks for its document — until the requested
+number of DISTINCT documents is collected (the lazy iterator stops
+there, so nothing over-reads). The visibility filter is unchanged.
+search.rs.
+
+**59. Fused RRF scores sorted against FTS-only 1.0 scores** (med|bug)
+— `search_with_semantics` ends by sorting the whole response by score,
+but only the tickets/knowledge lanes get fused RRF scores
+(≈ 0.016–0.033); the never-fused lanes (customers, issues,
+saved_replies, ai) kept their FTS-era constant 1.0, so every one of
+them outranked every fused hit — the response said "BM25 + sqlite-vec
+fused" while the semantic results sat at the bottom of the list. When
+fusion ran, the surviving FTS-only lanes are re-scored onto the same
+RRF scale (1/(k + rank + 1) by lane rank — exactly how the fusion
+loop scored their FTS halves), so the final sort interleaves lanes
+meaningfully: a hit found by both lists (≈ 0.0325) outranks any
+single-lane hit (≈ 0.0164). No fusion → nothing is re-scored.
+search.rs.
+
+**60. Orphaned vectors never cleaned; stale chunk text keeps matching**
+(med|bug)
+— every re-chunk lane (`rechunk_conversation`, `rechunk_doc_article`,
+the knowledge re-import and delete) replaces chunk rows with NEW ids,
+and none of them could reach a vector-store handle — the old points
+stayed in the store forever, serving their stale text snapshots to
+the semantic lanes (conversation/docs hits serve the payload text
+directly) or crowding the dense top-k away from live chunks. The
+store gains `prune_family_except` (batched deletes inside one
+transaction, both halves: vec table + payload table) and a
+`VectorIndex::prune_orphaned_points` facade; the sweep runs from
+`embed_pending_chunks` — which holds both the main database (the live
+chunk ids → namespaced point ids) and the store — BEFORE the pending
+check, so pure deletions (nothing left to embed) are swept too; the
+knowledge-delete UI path enqueues the embed pass a pure deletion
+otherwise never gets. All three families are covered (their re-chunk
+lanes all enqueue embed jobs).
+vectorstore_sqlitevec.rs, embeddings.rs, app-shell/pages/knowledge.rs.
+
+**61. Removing a type field bricks property updates of existing
+objects** (med|bug)
+— `patch_object` merged the object's STORED properties into
+`validate_properties`, which rejects unknown keys — the moment a type
+lost a field, every existing object still storing that field's value
+failed EVERY future patch with "Unrecognized key: …" (even patches of
+unrelated fields, even title-only patches, which also re-validate).
+Stored keys whose fields no longer exist are dropped from the merge
+before validation (the object's stored data converges to the current
+schema on write); the patch INPUT is still validated strictly —
+setting a field the type does not have remains an error.
+custom_objects.rs.
+
+**62. parse_mentions diverges from scan_for_mentions (ASCII-only, no
+boundary)** (med|bug)
+— the notification parser and the display scanner disagreed about
+what a mention IS: parse_mentions tokenized on ASCII only (a username
+like "josé" was recorded by the scanner but never resolved to a
+notification — the token stopped at 'é'), had no left boundary (the
+'@' inside "support@jane.doe" fired a mention for user jane.doe), and
+dropped the `@team:name` prefixed form entirely (the token stopped at
+the colon and the bare-name window never matched a "team:…" candidate
+— the scanner recorded "@team:billing" in the thread's mentions_json
+while nobody was notified). The parser now: takes Unicode word
+characters in tokens (scanner `\w` parity; '.'/'-' stay for the
+directory's dotted name keys), skips an '@' preceded by a word
+character, resolves the `@team:([\w-]{1,64})` run the scanner's regex
+matches (consuming it whole even when the team is unresolvable), and
+never resolves a bare "@team" as a USER mention (mirroring the
+scanner's exclusion). The bare multi-word team-name window matching
+stays — parse's richer team form the regex cannot express.
+mentions.rs.
+
+**63. rm_tags is a no-op in ammonia 4.x; title/textarea content leaks
+visible** (med|bug)
+— `sanitize` called `.rm_tags([scripty family])`, but in ammonia 4.x
+`rm_tags` removes tags from the ALLOWLIST — a no-op for tags that
+were never allowed. Ammonia's default strips disallowed tags but
+keeps their content, so the text inside a pasted `<title>`,
+`<textarea>`, `<noscript>`, `<select>`… rendered as visible spans in
+the thread body (the function's own doc comment always claimed
+"scripty tags together with their content"). The family now rides
+`add_clean_content_tags`, whose entire subtree ammonia removes
+(script/style remain covered by the builder defaults); no allowlisted
+tag overlaps the list, so the documented panic condition cannot
+trigger. richtext.rs.
+
+**64. rebuild_indexes double-inserts every thread into fts_threads**
+(med|bug)
+— `rebuild_indexes_tx` ran the per-conversation indexer (which writes
+each non-deleted conversation's threads into fts_threads) and THEN a
+bulk `INSERT INTO fts_threads SELECT … FROM conversation_threads` —
+every live thread landed in the index twice per rebuild, doubling the
+FTS5 corpus statistics and skewing rank across every thread search.
+The bulk insert is gone; the per-conversation loop is the single
+writer (threads of deleted conversations, which the loop skips, stay
+out of the index exactly like the search lanes' outer filters expect)
+and the fts_indexed bookkeeping UPDATE is unchanged. The sync
+engine's own backfill already guarded with NOT EXISTS — the rebuild
+was the only double-writer. search.rs.
+
+**65. Notification sweep advances cursor past unprocessed events
+(>500 skipped forever)** (med|bug)
+— `sweep` read at most 500 activity events per pass but then set the
+cursor to `max_event_id` unconditionally: any backlog beyond 500 rows
+was skipped FOREVER (the cursor sailed past it; the next sweep started
+at the ceiling). The event lane now reads one row PAST the cap
+(EVENT_SWEEP_CAP): when the surplus row exists, only the first 500 run
+and the cursor parks at the 500th row's id — the remainder is next
+sweep's work; when the read matched everything (or nothing —
+non-matching event types can never be selected by the filter), the
+cursor may safely advance to the ceiling. The first-run anchor
+(cursor := max_event_id on a fresh install, skip history) is
+untouched. notification_sweep.rs.
+
+**66. textutil: bare `<` swallows the rest of the body; double entity
+decode** (med|bug)
+— two defects in `html_to_text`: (a) ANY '<' switched the scanner
+into tag mode — "price <100 USD…", "a < b" — and with no closing '>'
+the rest of the body vanished from every AI prompt, quality metric
+and interaction signal built on the text; (b) entities decoded
+through sequential `str::replace` calls, so `&amp;lt;` became `&lt;`
+by the `&amp;` pass and then `<` by the `&lt;` pass — a double decode
+of text the author had carefully escaped. A '<' now opens a tag only
+when the HTML5 tokenizer would say so (followed by a letter, '/', '!'
+or '?'); anything else is literal text, and a plausible tag opening
+that never closes within 500 bytes is flushed back out as text
+instead of swallowing the document. Entities decode in a single pass
+(the known set is unchanged — the fix is the decoder, not the
+vocabulary): an '&' commits to a decode only when a ';' terminates a
+known candidate, everything else is emitted verbatim and never
+re-scanned. textutil.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 395 passed / 0 failed / 4 ignored (31 new batch-25
+  regressions: the once-guard decision matrix — first-ever customer
+  thread → new_conversation, later → customer_reply, consumed →
+  silence, no customer thread → silence — and m060's idempotent
+  column; the multi-chunk document occupying ONE slot while
+  single-chunk documents stay visible and the dedupe respecting the
+  visibility filter; the FTS-only lanes re-scored onto the RRF scale
+  with a both-lists fused hit outranking single-lane hits, and the
+  helper leaving fused-lane scopes alone; the orphan sweep removing
+  exactly the dead points of one family (other families untouched,
+  idempotent, empty-live-set wipes the family) and the facade
+  removing the stale point while a disabled index reports
+  unavailable; the type-field removal no longer bricking patches
+  (unrelated-key and title-only patches survive, the stale stored key
+  drops on write) while unknown INPUT keys still fail; José resolving
+  on Unicode tokens, the email not firing, @team:billing and
+  @team:tier-2 resolving, an unresolvable @team: consuming its run
+  without leaking the tail, bare @team never a user mention, and the
+  scanner/parser agreeing on a mixed body; title/textarea/noscript/
+  select content no longer leaking into rendered spans with
+  surrounding content surviving and script/style subtrees still
+  removed; the rebuild writing three live threads as exactly three
+  fts rows that still match; the 502-event backlog processing exactly
+  500 with the cursor parked at the 500th row (the 501st untouched
+  until the next sweep drains it and reaches the ceiling), the small
+  backlog advancing fully, and non-matching events alone still
+  advancing the cursor; and the bare-'<' bodies surviving verbatim,
+  the runaway never-closing tag flushed back as text, entities
+  decoding exactly once (&amp;lt; stays &lt;), unrecognized entity
+  runs staying verbatim, and the known entities decoding as before);
+  sandbox-feature suite 400 passed / 0 failed / 4 ignored; app-shell
+  180 passed / 0 failed; xtask 6; catalog 0.
+- Fresh harness `scripts/verify_batch25.py` (committed; also archived
+  at /home/z/my-project/scripts/): all 50 checks pass; the batch-24
+  harness still passes.
+- Runner verification: rule-2 commit `4fb70a1` — CI run `39904667467`:
+  success; code commit `ddcf3e2` — CI run `39910801578`: success, both
+  jobs green (fmt/clippy/test workspace + sandbox + deny, and the
+  AppImage/deb build with both boot-chain smoke tests).
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).
