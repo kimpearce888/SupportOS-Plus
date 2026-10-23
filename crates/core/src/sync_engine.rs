@@ -109,7 +109,7 @@ pub fn recover_interrupted_state(conn: &Connection) -> bool {
     }
     let has_runs: bool = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sync_runs WHERE state IN ('LIVE','ERROR','CATCHING_UP'))",
+            "SELECT EXISTS(SELECT 1 FROM sync_runs WHERE state IN ('LIVE','ERROR','CATCHING_UP','CANCELLED'))",
             [],
             |r| r.get(0),
         )
@@ -454,7 +454,8 @@ pub fn upsert_organization(conn: &Connection, o: &crate::helpscout::HsOrganizati
          VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now'))
          ON CONFLICT(remote_id) DO UPDATE SET name = excluded.name, domains = excluded.domains,
            remote_created_at = excluded.remote_created_at, remote_updated_at = excluded.remote_updated_at,
-           last_seen_at = datetime('now'), last_synced_at = datetime('now')",
+           last_seen_at = datetime('now'), last_synced_at = datetime('now'),
+           deleted_at = NULL",
         params![o.remote_id, o.name, domains, o.created_at, o.updated_at],
     )?;
     Ok(())
@@ -470,7 +471,7 @@ pub fn upsert_saved_reply(
          VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
          ON CONFLICT(remote_id) DO UPDATE SET mailbox_local_id = excluded.mailbox_local_id,
            name = excluded.name, preview = excluded.preview, text = excluded.text,
-           last_synced_at = datetime('now')",
+           last_synced_at = datetime('now'), deleted_at = NULL",
         params![r.remote_id, mailbox_local, r.name, r.preview, r.text],
     )?;
     Ok(())
@@ -483,10 +484,37 @@ pub fn upsert_workflow(conn: &Connection, w: &crate::helpscout::HsWorkflow) -> R
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
          ON CONFLICT(remote_id) DO UPDATE SET mailbox_local_id = excluded.mailbox_local_id,
            name = excluded.name, type = excluded.type, status = excluded.status,
-           sort_order = excluded.sort_order, last_synced_at = datetime('now')",
+           sort_order = excluded.sort_order, last_synced_at = datetime('now'),
+           deleted_at = NULL",
         params![w.remote_id, mailbox_local, w.name, w.kind, w.status, w.sort_order],
     )?;
     Ok(())
+}
+
+/// Clean-audit item 91: platform-side deletions propagate. These mirrors
+/// are full-list resources — a row whose remote id is absent from the
+/// platform's (complete, successfully fetched) list was deleted up there,
+/// so it is stamped deleted locally instead of serving it forever. The
+/// empty list is deliberately NOT a wipe signal (a degraded or
+/// permission-downgraded answer must not blank the mirror); a genuinely
+/// emptied platform leaves stale rows until the resource returns data.
+/// Soft-deleted rows come back to life on the next listing (the upserts
+/// clear `deleted_at`).
+fn prune_missing_rows(conn: &Connection, table: &str, seen: &[i64]) -> Result<u64> {
+    if seen.is_empty() {
+        return Ok(0);
+    }
+    let placeholders = vec!["?".to_string(); seen.len()].join(", ");
+    let sql = format!(
+        "UPDATE {table} SET deleted_at = datetime('now')
+          WHERE deleted_at IS NULL AND remote_id NOT IN ({placeholders})"
+    );
+    let params: Vec<&dyn rusqlite::types::ToSql> = seen
+        .iter()
+        .map(|id| id as &dyn rusqlite::types::ToSql)
+        .collect();
+    let n = conn.execute(&sql, params.as_slice())?;
+    Ok(u64::try_from(n).unwrap_or(0))
 }
 
 fn upsert_user_status(
@@ -1170,6 +1198,7 @@ impl SyncEngine {
             rows.filter_map(|r| r.ok()).collect()
         };
         let mut processed = 0i64;
+        let mut failed = 0i64;
         for (local, remote) in candidates {
             if self.cancelled() {
                 break;
@@ -1186,9 +1215,18 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     // A single unreachable conversation must not fail the
-                    // pass; the failure is visible in diagnostics.
-                    let conn = self.lock();
-                    record_failure(&conn, &resource, &e.to_string(), 1);
+                    // pass — but it must be COUNTED (clean-audit item 89:
+                    // the pre-fix pass hardcoded failed: 0 with error: None,
+                    // so the caller's record_success stamped 'ok' over the
+                    // per-row record_failure and the run's error count
+                    // never saw these). The resource-level bookkeeping in
+                    // the caller records the summarized failure once.
+                    failed += 1;
+                    tracing::warn!(
+                        conversation_remote = remote,
+                        error = %e,
+                        "thread backfill: conversation re-fetch failed"
+                    );
                 }
             }
         }
@@ -1196,8 +1234,10 @@ impl SyncEngine {
         Ok(ResourceSyncResult {
             resource,
             processed,
-            failed: 0,
-            error: None,
+            failed,
+            error: (failed > 0).then(|| {
+                format!("{failed} conversation(s) could not be re-fetched for thread backfill")
+            }),
         })
     }
 
@@ -1338,10 +1378,23 @@ impl SyncEngine {
                     stage_records,
                 );
             }
+            let cancelled = self.cancelled();
             let failed = results.iter().filter(|r| r.error.is_some()).count() as i64;
             {
                 let conn = self.lock();
-                let new_state = if failed == 0 {
+                // Clean-audit item 88: a cancelled initial sync used to fall
+                // through to the same verdict as a completed one — a
+                // mid-run cancel with zero resource errors was stamped
+                // LIVE (and the run row "finished, LIVE"), so the
+                // auto-sync timer never re-ran the initial pass and the
+                // thread-less conversations the cancel stranded were
+                // never backfilled. A cancelled run now records the
+                // partial truth: the mirror is CATCHING_UP (incrementals
+                // — which run the threads backfill too — drain it), and
+                // the run row says CANCELLED.
+                let new_state = if cancelled {
+                    "CATCHING_UP"
+                } else if failed == 0 {
                     "LIVE"
                 } else if failed < results.len() as i64 / 2 {
                     "CATCHING_UP"
@@ -1353,7 +1406,13 @@ impl SyncEngine {
                     &conn,
                     run_id,
                     RunUpdate {
-                        state: Some(if failed == 0 { "LIVE" } else { "ERROR" }),
+                        state: Some(if cancelled {
+                            "CANCELLED"
+                        } else if failed == 0 {
+                            "LIVE"
+                        } else {
+                            "ERROR"
+                        }),
                         resources_done: None,
                         resources_total: None,
                         records_processed: None,
@@ -1372,9 +1431,12 @@ impl SyncEngine {
                 }
                 let _ = crate::audit::log_event(
                     &conn,
-                    if failed == 0 { "info" } else { "warn" },
+                    if cancelled || failed > 0 { "warn" } else { "info" },
                     "sync",
-                    &format!("Initial sync finished: {processed} records processed, {failed} resource(s) failed"),
+                    &format!(
+                        "Initial sync {}: {processed} records processed, {failed} resource(s) failed",
+                        if cancelled { "cancelled partway" } else { "finished" }
+                    ),
                     None,
                     None,
                 );
@@ -1431,7 +1493,9 @@ impl SyncEngine {
         };
         let mut results: Vec<ResourceSyncResult> = Vec::new();
         let outcome: Result<()> = async {
-            let total = INCREMENTAL_REFERENCE_ORDER.len() as u32 + 2;
+            // +3 beyond the reference set: customers, conversations, and
+            // the threads backfill (clean-audit item 88 — see below).
+            let total = INCREMENTAL_REFERENCE_ORDER.len() as u32 + 3;
             for resource in INCREMENTAL_REFERENCE_ORDER {
                 if self.cancelled() {
                     break;
@@ -1479,6 +1543,25 @@ impl SyncEngine {
                     total,
                     results.iter().map(|x| x.processed).sum::<i64>(),
                     processed as u32,
+                );
+            }
+            {
+                // Clean-audit item 88: the threads backfill used to run
+                // only inside the initial sync — a cancelled or crashed
+                // first run left its thread-less conversations stranded
+                // forever, because nothing ever re-ran the bounded pass.
+                // It now rides every incremental too, so the backlog
+                // drains at the sync cadence (200 conversations/pass,
+                // same bound as the initial path).
+                let r = self.sync_missing_threads().await;
+                let stage_records = r.as_ref().map_or(0, |x| x.processed).max(0) as u32;
+                let _ = self.finish_resource("threads", r, &mut results);
+                self.emit_progress(
+                    "threads",
+                    results.len() as u32,
+                    total,
+                    results.iter().map(|x| x.processed).sum::<i64>(),
+                    stage_records,
                 );
             }
             let failed = results.iter().filter(|r| r.error.is_some()).count() as i64;
@@ -2003,8 +2086,14 @@ impl SyncEngine {
             "organizations" => {
                 let orgs = self.provider.list_organizations().await?;
                 let conn = self.lock();
+                let mut seen: Vec<i64> = Vec::with_capacity(orgs.len());
                 for o in &orgs {
                     upsert_organization(&conn, o)?;
+                    seen.push(o.remote_id);
+                }
+                let pruned = prune_missing_rows(&conn, "organizations", &seen)?;
+                if pruned > 0 {
+                    tracing::debug!(deleted = pruned, "organizations removed platform-side");
                 }
                 Ok(ResourceSyncResult {
                     resource,
@@ -2025,13 +2114,22 @@ impl SyncEngine {
             "saved_replies" => {
                 let mbs = self.provider.list_mailboxes().await?;
                 let mut processed = 0;
+                let mut seen: Vec<i64> = Vec::new();
                 for m in &mbs {
                     let replies = self.provider.list_saved_replies(m.remote_id).await?;
                     let conn = self.lock();
                     let mailbox_local = local_id(&conn, "mailboxes", m.remote_id);
                     for r in &replies {
                         upsert_saved_reply(&conn, mailbox_local, r)?;
+                        seen.push(r.remote_id);
                         processed += 1;
+                    }
+                }
+                {
+                    let conn = self.lock();
+                    let pruned = prune_missing_rows(&conn, "saved_replies", &seen)?;
+                    if pruned > 0 {
+                        tracing::debug!(deleted = pruned, "saved replies removed platform-side");
                     }
                 }
                 Ok(ResourceSyncResult {
@@ -2044,8 +2142,14 @@ impl SyncEngine {
             "workflows" => {
                 let wfs = self.provider.list_workflows().await?;
                 let conn = self.lock();
+                let mut seen: Vec<i64> = Vec::with_capacity(wfs.len());
                 for w in &wfs {
                     upsert_workflow(&conn, w)?;
+                    seen.push(w.remote_id);
+                }
+                let pruned = prune_missing_rows(&conn, "workflows", &seen)?;
+                if pruned > 0 {
+                    tracing::debug!(deleted = pruned, "workflows removed platform-side");
                 }
                 Ok(ResourceSyncResult {
                     resource,

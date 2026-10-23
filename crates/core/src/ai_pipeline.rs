@@ -910,8 +910,14 @@ pub async fn analyze_ticket(
         // one. The cache now serves exactly the hash-matched run's own
         // output and sources; an unparseable cached row degrades to a
         // fresh computation instead of serving mismatched data.
+        // Clean-audit item 96 adds the content gate: a cached run whose
+        // output parses into an EMPTY analysis (the pre-fix pipeline
+        // accepted and cached `{}` answers) degrades to a fresh
+        // computation too, so the bad row ages out instead of being
+        // served forever.
         && let Some(cached_json) = serde_json::from_str::<serde_json::Value>(&cached.output).ok()
         && let Some(analysis) = parse_ticket_analysis(Some(&cached_json))
+        && analysis_has_core_content(&analysis)
     {
         let sources = sources_for_run(conn, cached.id).unwrap_or_default();
         return Ok(AnalyzeOutcome {
@@ -976,6 +982,24 @@ pub async fn analyze_ticket(
             ));
         }
     };
+    // Clean-audit item 96: `parse_ticket_analysis` happily parses an
+    // empty `{}` into an all-empty analysis, so a model answer with no
+    // usable field was COMPLETED and CACHED — and then served from the
+    // cache forever. The eval gate (ai_eval.rs) already rejected the
+    // same output ("at least one non-empty core field"); the pipeline
+    // now enforces the identical gate before anything is persisted.
+    if !analysis_has_core_content(&analysis) {
+        let _ = fail_run(
+            conn,
+            run_id,
+            "AI analysis returned no usable core field (summary/intent/customer_goal all empty)",
+        );
+        return Err(LmStudioError::new(
+            "The local model returned an empty analysis (no summary, intent, or customer goal). \
+             Try a stronger model or retry.",
+            false,
+        ));
+    }
     complete_run_with_usage(
         conn,
         run_id,
@@ -994,6 +1018,21 @@ pub async fn analyze_ticket(
         cached: false,
         run_id,
     })
+}
+
+/// Clean-audit item 96: the content gate the golden eval already
+/// enforced (`ai_eval.rs`: "at least one non-empty core field") — now
+/// applied by the analysis pipeline itself. A parseable-but-empty
+/// analysis (`{}`) is not a usable answer; it must not be completed,
+/// cached, or served.
+fn analysis_has_core_content(a: &TicketAnalysis) -> bool {
+    [
+        a.summary.as_deref(),
+        a.intent.as_deref(),
+        a.customer_goal.as_deref(),
+    ]
+    .into_iter()
+    .any(|v| v.is_some_and(|s| !s.trim().is_empty()))
 }
 
 pub fn parse_ticket_analysis(json: Option<&serde_json::Value>) -> Option<TicketAnalysis> {
@@ -3026,17 +3065,35 @@ pub async fn weekly_digest(
                                 .map(|r| r.trim().to_string())
                                 .filter(|r| !r.is_empty())
                         });
-                    let _ = complete_run_with_usage(
-                        conn,
-                        rid,
-                        &serde_json::json!({ "narrative": narrative }),
-                        res.latency_ms,
-                        res.usage.as_ref(),
-                        backend.endpoint_id(),
-                    );
+                    // Clean-audit item 95: the pre-fix path completed the
+                    // ledger row FIRST (complete_run_with_usage) and only
+                    // then decided whether the narrative was usable — so
+                    // a model answer with no narrative left an ai_runs
+                    // row saying "completed" while the digest row said
+                    // "failed" (and the cost ledger priced a success that
+                    // never happened). The verdict now decides the
+                    // ledger: a usable narrative completes the run, an
+                    // unusable one fails it.
                     match narrative {
-                        Some(n) if !n.trim().is_empty() => (Some(n), Some(rid), "complete"),
-                        _ => (None, Some(rid), "failed"),
+                        Some(n) if !n.trim().is_empty() => {
+                            let _ = complete_run_with_usage(
+                                conn,
+                                rid,
+                                &serde_json::json!({ "narrative": n }),
+                                res.latency_ms,
+                                res.usage.as_ref(),
+                                backend.endpoint_id(),
+                            );
+                            (Some(n), Some(rid), "complete")
+                        }
+                        _ => {
+                            let _ = fail_run(
+                                conn,
+                                rid,
+                                "the model returned no usable narrative for the digest",
+                            );
+                            (None, Some(rid), "failed")
+                        }
                     }
                 }
                 Err(e) => {
@@ -3608,5 +3665,227 @@ mod batch23_audit_tests {
             !uncapped.contains("NOTE: the window holds"),
             "no sampling note when everything is listed: {uncapped}"
         );
+    }
+}
+
+/// Clean-audit batch 28 (items 95/96): the weekly-digest ledger verdict
+/// matching the narrative outcome, and the empty `{}` analysis rejected
+/// instead of accepted-and-cached.
+#[cfg(test)]
+mod batch28_ai_tests {
+    use super::*;
+    use rusqlite::Connection;
+    use serde_json::json;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_conversation(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9801, 98, 'Password reset loop', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, created_at)
+             VALUES (?1, 'customer', 'Every reset email sends me back to the login.', '2026-10-22T10:00:00Z')",
+            params![conv],
+        )
+        .expect("thread");
+        conv
+    }
+
+    fn chat_body(content: &str) -> crate::mockserver::MockResponse {
+        crate::mockserver::MockResponse::json(
+            200,
+            json!({
+                "model": "test-model",
+                "choices": [{
+                    "message": {"role": "assistant", "content": content}
+                }],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+            })
+            .to_string(),
+        )
+    }
+
+    fn backend(mock: &crate::mockserver::MockServer) -> AiBackend {
+        AiBackend::LmStudio {
+            client: crate::ai_lm_studio::OpenAiCompatibleClient::new_with_timeout(
+                mock.url(),
+                5_000,
+            ),
+            model: Some("test-model".into()),
+            endpoint_id: None,
+        }
+    }
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
+
+    fn latest_run(conn: &Connection, kind: &str) -> (String, String, String) {
+        conn.query_row(
+            "SELECT status, response_json, COALESCE(error, '') FROM ai_runs WHERE type = ?1 ORDER BY id DESC LIMIT 1",
+            params![kind],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .expect("run row")
+    }
+
+    /// Item 96: a model answer of `{}` parses into an all-empty analysis
+    /// — the pre-fix pipeline completed AND cached it, and the cache
+    /// served the empty analysis forever (the eval gate already rejected
+    /// the same output). The pipeline now fails the run and caches
+    /// nothing.
+    #[test]
+    fn audit96_empty_analysis_object_is_rejected_not_cached() {
+        let conn = db();
+        let conv = seed_conversation(&conn);
+        let mock = crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![
+            chat_body("{}"),
+            chat_body(
+                "{\"summary\": \"Customer is stuck in a reset loop\", \
+                 \"intent\": \"get_account_access\", \"urgency\": \"high\"}",
+            ),
+        ]))
+        .expect("mock");
+
+        // First attempt: the empty object is rejected, the run fails.
+        let err = rt()
+            .block_on(analyze_ticket(&conn, &backend(&mock), None, conv, false))
+            .expect_err("an all-empty analysis is not a usable answer");
+        assert!(
+            err.message.contains("empty analysis"),
+            "the failure names the real problem: {}",
+            err.message
+        );
+        let (status, _response, error) = latest_run(&conn, "ticket_analysis");
+        assert_eq!(status, "failed", "the ledger row records the failure");
+        assert!(
+            error.contains("no usable core field"),
+            "the failure reason is honest: {error}"
+        );
+
+        // Second attempt with a real answer succeeds — the rejected
+        // answer was never cached (a cache hit would have served the
+        // empty analysis again without touching the mock).
+        let outcome = rt()
+            .block_on(analyze_ticket(&conn, &backend(&mock), None, conv, false))
+            .expect("a content-bearing analysis is accepted");
+        assert!(!outcome.cached, "the empty answer was not cached");
+        assert_eq!(
+            outcome.analysis.summary.as_deref(),
+            Some("Customer is stuck in a reset loop")
+        );
+        let (status, _, _) = latest_run(&conn, "ticket_analysis");
+        assert_eq!(status, "completed", "the good answer completes its run");
+    }
+
+    /// Item 96, cache path: a completed row whose stored output parses
+    /// into an EMPTY analysis (written by the pre-fix pipeline) no longer
+    /// satisfies the cache — the conversation degrades to a fresh
+    /// computation instead of serving the empty analysis forever.
+    #[test]
+    fn audit96_cached_empty_analysis_degrades_to_fresh_computation() {
+        let conn = db();
+        let conv = seed_conversation(&conn);
+        // A pre-fix database: a completed, hash-matched run whose output
+        // is exactly the empty object.
+        let signature = get_analysis_signature(&conn, conv);
+        let hash = input_hash(conv, &signature);
+        conn.execute(
+            "INSERT INTO ai_runs (type, conversation_id, status, model, prompt_version,
+                                  input_hash, response_json, started_at, created_at)
+             VALUES ('ticket_analysis', ?1, 'completed', 'test-model', ?2, ?3, '{}',
+                     datetime('now'), datetime('now'))",
+            params![conv, PROMPT_VERSIONS_TICKET_ANALYSIS, hash],
+        )
+        .expect("pre-fix run");
+
+        let mock =
+            crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![chat_body(
+                "{\"intent\": \"get_account_access\", \"summary\": \"Reset loop\"}",
+            )]))
+            .expect("mock");
+
+        let outcome = rt()
+            .block_on(analyze_ticket(&conn, &backend(&mock), None, conv, false))
+            .expect("the stale empty cache degrades to a fresh computation");
+        assert!(
+            !outcome.cached,
+            "the empty cached output is not a cache hit"
+        );
+        assert_eq!(
+            outcome.analysis.intent.as_deref(),
+            Some("get_account_access"),
+            "the fresh answer is served"
+        );
+    }
+
+    /// Item 95: the digest's ledger row matches the narrative verdict.
+    /// A model answer with no usable narrative used to COMPLETE the
+    /// ai_runs row (and price it in the cost ledger) while the digest
+    /// row said "failed" — the verdict now decides the ledger.
+    #[test]
+    fn audit95_weekly_digest_ledger_matches_the_narrative_verdict() {
+        // Case A: the model returns an empty answer — no narrative.
+        {
+            let conn = db();
+            let mock =
+                crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![chat_body(
+                    "",
+                )]))
+                .expect("mock");
+            let id = rt()
+                .block_on(weekly_digest(&conn, &backend(&mock), "manual", 7))
+                .expect("the digest still archives its facts");
+            let row = crate::digest::digest_by_id(&conn, id).expect("digest row");
+            assert_eq!(row.status, "failed");
+            assert!(row.narrative.is_none());
+            let (status, _, _) = latest_run(&conn, "weekly_digest");
+            assert_eq!(
+                status, "failed",
+                "the ledger row tells the same story as the digest row"
+            );
+        }
+
+        // Case B: a real narrative completes both rows.
+        {
+            let conn = db();
+            let mock =
+                crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![chat_body(
+                    "{\"narrative\": \"A quiet week: volume down, SLA met.\"}",
+                )]))
+                .expect("mock");
+            let id = rt()
+                .block_on(weekly_digest(&conn, &backend(&mock), "manual", 7))
+                .expect("digest stored");
+            let row = crate::digest::digest_by_id(&conn, id).expect("digest row");
+            assert_eq!(row.status, "complete");
+            assert_eq!(
+                row.narrative.as_deref(),
+                Some("A quiet week: volume down, SLA met.")
+            );
+            let (status, _, _) = latest_run(&conn, "weekly_digest");
+            assert_eq!(
+                status, "completed",
+                "the run row completes with the narrative"
+            );
+        }
     }
 }

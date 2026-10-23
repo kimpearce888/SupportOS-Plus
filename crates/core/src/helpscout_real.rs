@@ -1818,8 +1818,16 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         {
             Ok(v) => v,
             Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("-> 404") {
+                // Clean-audit item 92: the pre-fix branch matched the
+                // literal "-> 404" substring of the error's Display —
+                // but HsApiError's Display prints the FRIENDLY text
+                // ("Help Scout reports this record no longer exists…"),
+                // so the mapping never fired and a genuinely-absent
+                // rating surfaced as an error (retried, then failed)
+                // instead of the honest Ok(None). is_not_found checks
+                // the structured status code like every other 404-tolerant
+                // fetch in this file.
+                if is_not_found(&e) {
                     return Ok(None);
                 }
                 return Err(e);
@@ -1999,26 +2007,22 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_saved_replies(&self, mailbox_id: i64) -> Result<Vec<HsSavedReply>> {
-        let v = self
-            .request(
-                &format!("/v2/mailboxes/{mailbox_id}/saved-replies"),
-                "GET",
-                None,
-            )
-            .await?;
-        Ok(v["_embedded"]["savedReplies"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|r| HsSavedReply {
-                        remote_id: r["id"].as_i64().unwrap_or(0),
-                        name: r["name"].as_str().unwrap_or_default().to_string(),
-                        preview: r["preview"].as_str().map(|s| s.to_string()),
-                        text: r["text"].as_str().map(|s| s.to_string()),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        // Clean-audit item 91: this listing feeds the deletion sweep (a
+        // saved reply absent from the complete list is deleted
+        // platform-side), so it must walk EVERY page — a mailbox holding
+        // more replies than one v2 page would otherwise get its
+        // later-page replies falsely pruned.
+        self.list_all_v2(
+            &format!("/v2/mailboxes/{mailbox_id}/saved-replies"),
+            "savedReplies",
+            |r| HsSavedReply {
+                remote_id: r["id"].as_i64().unwrap_or(0),
+                name: r["name"].as_str().unwrap_or_default().to_string(),
+                preview: r["preview"].as_str().map(|s| s.to_string()),
+                text: r["text"].as_str().map(|s| s.to_string()),
+            },
+        )
+        .await
     }
 
     async fn create_saved_reply(&self, mailbox_id: i64, name: &str, text: &str) -> Result<i64> {
