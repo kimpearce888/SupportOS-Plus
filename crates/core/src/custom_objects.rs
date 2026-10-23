@@ -590,6 +590,18 @@ pub fn patch_object(
                 .as_object()
                 .cloned()
                 .unwrap_or_default();
+            // Clean-audit item 61: keys whose fields were since REMOVED from
+            // the type must not brick every future patch. The pre-fix merge
+            // carried them into validate_properties, which rejects unknown
+            // keys — so the moment a type lost a field, every existing
+            // object still storing that field's value could no longer be
+            // patched AT ALL (even for unrelated keys). Stale stored keys
+            // are dropped here; the patch input itself is still validated
+            // strictly (setting a field the type does not have stays an
+            // error).
+            let live_fields: std::collections::HashSet<&str> =
+                type_detail.fields.iter().map(|f| f.key.as_str()).collect();
+            merged.retain(|key, _| live_fields.contains(key.as_str()));
             for (k, v) in input {
                 merged.insert(k.clone(), v.clone());
             }
@@ -1129,6 +1141,124 @@ mod batch21_audit27_tests {
         assert!(
             err.to_string().contains("Unknown field type telepathy"),
             "the error must name the type: {err}"
+        );
+    }
+}
+
+/// Clean-audit batch 25 (item 61): removing a type field must not brick
+/// property updates of existing objects — the pre-fix `patch_object`
+/// merged the object's STORED properties into the validation, and any key
+/// whose field had since been removed from the type failed the whole patch
+/// with "Unrecognized key" forever.
+#[cfg(test)]
+mod batch25_item61_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn field(key: &str, field_type: &str) -> FieldInput {
+        FieldInput {
+            key: key.into(),
+            label: key.into(),
+            field_type: field_type.into(),
+            required: false,
+            options: None,
+        }
+    }
+
+    #[test]
+    fn removing_a_type_field_no_longer_bricks_patches_of_existing_objects() {
+        let conn = conn();
+        let (type_id, _) = create_type(
+            &conn,
+            "Shipping",
+            None,
+            &[field("carrier", "text"), field("insured", "boolean")],
+        )
+        .expect("type");
+
+        let mut properties = Map::new();
+        properties.insert("carrier".into(), Value::String("DHL".into()));
+        properties.insert("insured".into(), Value::Bool(true));
+        let object_id = create_object(&conn, type_id, "Order 7", &properties, &[])
+            .expect("object with both fields");
+
+        // The owner removes the `insured` field from the type.
+        patch_type(
+            &conn,
+            type_id,
+            None,
+            None,
+            Some(&[field("carrier", "text")]),
+        )
+        .expect("field removed from the type");
+
+        // Pre-fix: this patch of the UNRELATED `carrier` key failed with
+        // "Unrecognized key: insured" — the stored stale value poisoned
+        // every future update of the object.
+        let mut patch = Map::new();
+        patch.insert("carrier".into(), Value::String("UPS".into()));
+        let updated = patch_object(&conn, object_id, None, Some(&patch), None)
+            .expect("the object stays patchable after its type lost a field")
+            .expect("the object still exists");
+        assert_eq!(
+            updated["properties"]["carrier"], "UPS",
+            "the patched field took the new value"
+        );
+        assert!(
+            updated["properties"].get("insured").is_none(),
+            "the stale stored key for the removed field is dropped on write: {}",
+            updated["properties"]
+        );
+    }
+
+    #[test]
+    fn a_title_only_patch_also_survives_a_removed_field() {
+        let conn = conn();
+        let (type_id, _) = create_type(
+            &conn,
+            "Contracts",
+            None,
+            &[field("vendor", "text"), field("legacy_code", "text")],
+        )
+        .expect("type");
+        let mut properties = Map::new();
+        properties.insert("vendor".into(), Value::String("Acme".into()));
+        properties.insert("legacy_code".into(), Value::String("X-1".into()));
+        let object_id =
+            create_object(&conn, type_id, "Contract", &properties, &[]).expect("object");
+        patch_type(&conn, type_id, None, None, Some(&[field("vendor", "text")]))
+            .expect("legacy_code removed");
+
+        let updated = patch_object(&conn, object_id, Some("Contract 2026"), None, None)
+            .expect("even a properties-free patch re-validates cleanly now")
+            .expect("object exists");
+        assert_eq!(updated["title"], "Contract 2026");
+    }
+
+    #[test]
+    fn setting_a_field_the_type_never_had_is_still_an_error() {
+        let conn = conn();
+        let (type_id, _) =
+            create_type(&conn, "Strict", None, &[field("carrier", "text")]).expect("type");
+        let mut properties = Map::new();
+        properties.insert("carrier".into(), Value::String("DHL".into()));
+        let object_id = create_object(&conn, type_id, "Order", &properties, &[]).expect("object");
+
+        // The strictness for the PATCH INPUT itself is untouched: you
+        // cannot set a field the type does not have.
+        let mut patch = Map::new();
+        patch.insert("carrier".into(), Value::String("UPS".into()));
+        patch.insert("telepathy".into(), Value::String("no".into()));
+        let err = patch_object(&conn, object_id, None, Some(&patch), None)
+            .expect_err("unknown keys in the patch input stay invalid");
+        assert!(
+            err.to_string().contains("Unrecognized key"),
+            "the input validation is unchanged: {err}"
         );
     }
 }

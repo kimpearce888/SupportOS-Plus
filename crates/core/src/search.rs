@@ -587,11 +587,18 @@ pub fn search_knowledge_raw(
         fts_query(query)
     };
     let vis_sql = visibility.map_or("", |_| "AND f.visibility = ?2");
-    let limit_idx = if visibility.is_some() { 3 } else { 2 };
+    // Clean-audit item 58: `fts_knowledge` holds one row PER CHUNK, so a
+    // multi-chunk document matched on several chunks used to flood the
+    // LIMIT with copies of itself (a 10-chunk document was "half" of a
+    // LIMIT 20 result) while single-chunk documents were pushed out. The
+    // rows are consumed rank-ordered and deduped per document — the best
+    // (lowest-rank) chunk speaks for its document — until `limit` DISTINCT
+    // documents have been collected.
     let sql = format!(
         "SELECT f.document_id, f.title, snippet(fts_knowledge, 1, '[', ']', '…', 14) AS snippet, f.visibility
-           FROM fts_knowledge f WHERE fts_knowledge MATCH ?1 {vis_sql} ORDER BY rank LIMIT ?{limit_idx}"
+           FROM fts_knowledge f WHERE fts_knowledge MATCH ?1 {vis_sql} ORDER BY rank"
     );
+    let limit = limit.max(0) as usize;
     let mut stmt = conn.prepare(&sql)?;
     let map_row = |r: &rusqlite::Row<'_>| -> rusqlite::Result<KnowledgeRawHit> {
         Ok(KnowledgeRawHit {
@@ -602,11 +609,21 @@ pub fn search_knowledge_raw(
         })
     };
     let rows = match visibility {
-        Some(v) => stmt.query_map(params![fts, v, limit], map_row)?,
-        None => stmt.query_map(params![fts, limit], map_row)?,
+        Some(v) => stmt.query_map(params![fts, v], map_row)?,
+        None => stmt.query_map(params![fts], map_row)?,
+    };
+    let mut hits: Vec<KnowledgeRawHit> = Vec::new();
+    let mut seen_documents: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for row in rows {
+        let hit = row?;
+        if seen_documents.insert(hit.document_id) {
+            hits.push(hit);
+            if hits.len() >= limit {
+                break;
+            }
+        }
     }
-    .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+    Ok(hits)
 }
 
 pub fn search_knowledge(
@@ -990,6 +1007,18 @@ pub fn search_with_semantics(
         response.hits.retain(|h| h.scope != lane);
     }
     let fused_any = !fused.is_empty();
+    // Clean-audit item 59: the final sort ranks the whole response by score,
+    // but the fused lanes carry RRF-scale scores (≈ 0.016–0.033) while the
+    // untouched FTS-only lanes (customers/issues/saved_replies/ai) still
+    // carried their FTS-era constant 1.0 — every one of them outranked every
+    // fused hit, so the response claimed "BM25 + sqlite-vec fused" while the
+    // semantic results sat at the bottom of the list. When fusion ran, the
+    // surviving FTS-only lanes are re-scored onto the same RRF scale (by
+    // their rank within the lane, exactly how the fused lanes scored their
+    // FTS halves), so the cross-lane ordering is meaningful.
+    if fused_any {
+        rescore_fts_only_lanes_to_rrf_scale(&mut response.hits, k);
+    }
     response.hits.extend(fused);
     response.hits.sort_by(|a, b| {
         b.score
@@ -1004,6 +1033,23 @@ pub fn search_with_semantics(
         ));
     }
     Ok(response)
+}
+
+/// Clean-audit item 59: put the FTS-only lanes on the RRF scale the fused
+/// lanes score on — `1/(k + rank + 1)` by rank within each lane, the same
+/// formula the fusion loop applied to the FTS halves of the fused lanes.
+/// Only the lanes that never fused are touched (the fused lanes were already
+/// retained out of `hits` by the caller).
+fn rescore_fts_only_lanes_to_rrf_scale(hits: &mut [SearchHit], k: u32) {
+    const FTS_ONLY_LANES: [&str; 4] = ["customers", "issues", "saved_replies", "ai"];
+    let mut rank_by_lane: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for hit in hits.iter_mut() {
+        if FTS_ONLY_LANES.contains(&hit.scope.as_str()) {
+            let rank = rank_by_lane.entry(hit.scope.as_str()).or_insert(0);
+            hit.score = 1.0 / (f64::from(k) + *rank as f64 + 1.0);
+            *rank += 1;
+        }
+    }
 }
 
 pub fn universal_search(conn: &Connection, query: &str) -> Result<Vec<SearchResult>> {
@@ -1288,13 +1334,13 @@ fn rebuild_indexes_tx(conn: &Connection) -> Result<usize> {
     }
     let conv_count = conv_ids.len();
 
+    // Clean-audit item 64: this bulk insert used to run right after the
+    // per-conversation loop above — but `index_conversation_fts` already
+    // inserts every non-deleted conversation's threads into `fts_threads`,
+    // so every live thread was inserted TWICE per rebuild (FTS5 corpus
+    // statistics doubled; matched threads double-counted). The loop is the
+    // single writer now; the flag bookkeeping below stays as it was.
     if table_exists(conn, "conversation_threads")? {
-        conn.execute(
-            "INSERT INTO fts_threads (body, thread_id, conversation_id)
-             SELECT t.body_text, t.id, t.conversation_id FROM conversation_threads t
-              WHERE t.body_text IS NOT NULL AND LENGTH(t.body_text) > 0 AND t.deleted_at IS NULL",
-            [],
-        )?;
         conn.execute(
             "UPDATE conversation_threads SET fts_indexed = 1
               WHERE body_text IS NOT NULL AND LENGTH(body_text) > 0",
@@ -1526,5 +1572,287 @@ mod batch13_a4_search_tests {
         .expect("search");
         assert!(!response.used_semantic, "a disabled index never fuses");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Clean-audit batch 25: item 58 (the knowledge FTS lane never deduped per
+/// document — one multi-chunk document flooded the LIMIT), item 59 (fused
+/// RRF scores were sorted against FTS-only constant-1.0 scores), item 64
+/// (rebuild_indexes double-inserted every thread into fts_threads).
+#[cfg(test)]
+mod batch25_search_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        apply_fts_migration(&conn).expect("fts");
+        conn
+    }
+
+    /// One knowledge source; documents get explicit chunk rows in both
+    /// knowledge_chunks and fts_knowledge exactly the way the ingest lane
+    /// writes them.
+    fn seed_knowledge(conn: &Connection, docs: &[(&str, &[&str])]) {
+        conn.execute(
+            "INSERT INTO knowledge_sources (name, kind) VALUES ('src', 'local_file')",
+            [],
+        )
+        .expect("source");
+        let source_id = conn.last_insert_rowid();
+        for (title, chunks) in docs {
+            conn.execute(
+                "INSERT INTO knowledge_documents (source_id, title, visibility, content)
+                 VALUES (?1, ?2, 'internal_only', ?3)",
+                params![source_id, title, chunks.join("\n\n")],
+            )
+            .expect("document");
+            let document_id = conn.last_insert_rowid();
+            for (index, content) in chunks.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO knowledge_chunks (document_id, chunk_index, content, chunk_version)
+                     VALUES (?1, ?2, ?3, 2)",
+                    params![document_id, index as i64, content],
+                )
+                .expect("chunk");
+                let chunk_id = conn.last_insert_rowid();
+                conn.execute(
+                    "INSERT INTO fts_knowledge (title, content, chunk_id, document_id, visibility)
+                     VALUES (?1, ?2, ?3, ?4, 'internal_only')",
+                    params![title, content, chunk_id, document_id],
+                )
+                .expect("fts row");
+            }
+        }
+    }
+
+    /// Item 58: a document split into several matching chunks must occupy
+    /// ONE result slot (its best chunk), not flood the limit with copies of
+    /// itself while other matching documents are pushed out entirely.
+    #[test]
+    fn audit58_knowledge_hits_dedupe_per_document() {
+        let conn = db();
+        seed_knowledge(
+            &conn,
+            &[
+                // A 6-chunk document, every chunk mentioning "invoice".
+                (
+                    "Invoice manual",
+                    &[
+                        "invoice one",
+                        "invoice two",
+                        "invoice three",
+                        "invoice four",
+                        "invoice five",
+                        "invoice six",
+                    ],
+                ),
+                // Two single-chunk documents that also match "invoice".
+                ("Invoice FAQ", &["the invoice cycle"]),
+                ("Invoice policy", &["pay the invoice in 30 days"]),
+            ],
+        );
+        let hits =
+            search_knowledge_raw(&conn, "invoice", None, 3, "and").expect("knowledge search");
+        assert_eq!(
+            hits.len(),
+            3,
+            "three DISTINCT documents fill the limit of three: {hits:?}"
+        );
+        let mut document_ids: Vec<i64> = hits.iter().map(|h| h.document_id).collect();
+        document_ids.sort();
+        document_ids.dedup();
+        assert_eq!(
+            document_ids.len(),
+            3,
+            "every hit is a different document: {hits:?}"
+        );
+        // Pre-fix: the 6-chunk manual would have consumed the whole LIMIT 3
+        // by itself, and the FAQ/policy documents would be invisible.
+        assert!(
+            hits.iter().any(|h| h.title == "Invoice FAQ")
+                && hits.iter().any(|h| h.title == "Invoice policy"),
+            "single-chunk documents are not crowded out: {hits:?}"
+        );
+    }
+
+    /// Item 58, visibility filter: the dedupe respects the filter.
+    #[test]
+    fn audit58_dedupe_respects_the_visibility_filter() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO knowledge_sources (name, kind) VALUES ('src', 'local_file')",
+            [],
+        )
+        .expect("source");
+        let source_id = conn.last_insert_rowid();
+        for (title, visibility) in [
+            ("Safe doc", "customer_safe"),
+            ("Internal doc", "internal_only"),
+        ] {
+            conn.execute(
+                "INSERT INTO knowledge_documents (source_id, title, visibility, content)
+                 VALUES (?1, ?2, ?3, 'billing content')",
+                params![source_id, title, visibility],
+            )
+            .expect("document");
+            let document_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO knowledge_chunks (document_id, chunk_index, content, chunk_version)
+                 VALUES (?1, 0, 'billing content', 2)",
+                params![document_id],
+            )
+            .expect("chunk");
+            let chunk_id = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO fts_knowledge (title, content, chunk_id, document_id, visibility)
+                 VALUES (?1, 'billing content', ?2, ?3, ?4)",
+                params![title, chunk_id, document_id, visibility],
+            )
+            .expect("fts row");
+        }
+        let hits = search_knowledge_raw(&conn, "billing", Some("customer_safe"), 5, "and")
+            .expect("search");
+        assert_eq!(hits.len(), 1, "only the customer-safe document matches");
+        assert_eq!(hits[0].title, "Safe doc");
+        assert_eq!(hits[0].visibility, "customer_safe");
+    }
+
+    fn hit(scope: &str, id: i64, score: f64) -> SearchHit {
+        SearchHit {
+            scope: scope.into(),
+            id,
+            title: format!("{scope} {id}"),
+            subtitle: String::new(),
+            snippet: String::new(),
+            score,
+            href: String::new(),
+            why: vec!["keyword match".into()],
+        }
+    }
+
+    /// Item 59: after a fusion ran, the surviving FTS-only lanes are
+    /// re-scored onto the RRF scale — the pre-fix constant 1.0 outranked
+    /// every fused hit (RRF scores peak around 0.033) and pushed the
+    /// "semantic" results to the bottom of a response that claimed fusion.
+    #[test]
+    fn audit59_fts_only_lanes_rescore_to_the_rrf_scale() {
+        let k = crate::hybrid_search::RRF_K;
+        let mut hits = vec![
+            hit("customers", 1, 1.0),
+            hit("customers", 2, 1.0),
+            hit("issues", 7, 1.0),
+            hit("saved_replies", 9, 1.0),
+        ];
+        rescore_fts_only_lanes_to_rrf_scale(&mut hits, k);
+        let expected = |rank: usize| 1.0 / (f64::from(k) + rank as f64 + 1.0);
+        assert!(
+            (hits[0].score - expected(0)).abs() < 1e-12,
+            "customers rank 0: {}",
+            hits[0].score
+        );
+        assert!(
+            (hits[1].score - expected(1)).abs() < 1e-12,
+            "customers rank 1: {}",
+            hits[1].score
+        );
+        assert!(
+            (hits[2].score - expected(0)).abs() < 1e-12,
+            "issues rank 0: {}",
+            hits[2].score
+        );
+        assert!(
+            (hits[3].score - expected(0)).abs() < 1e-12,
+            "saved_replies rank 0: {}",
+            hits[3].score
+        );
+        // A hit that appeared on BOTH fused lists (1/61 + 1/62 ≈ 0.0325)
+        // now outranks any single-list FTS-only hit (1/61 ≈ 0.0164) —
+        // before the fix the FTS-only 1.0 beat everything fused.
+        let fused_both = 1.0 / (f64::from(k) + 1.0) + 1.0 / (f64::from(k) + 2.0);
+        let mut all = hits.clone();
+        all.push(hit("tickets", 42, fused_both));
+        all.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        assert_eq!(
+            all[0].id, 42,
+            "the hit found by BOTH lanes ranks first on the shared scale"
+        );
+    }
+
+    /// Item 59: lanes that never fuse are untouched when no fusion ran
+    /// (the caller gates the rescore on `fused_any` — this pins the
+    /// helper's own lane list).
+    #[test]
+    fn audit59_rescore_leaves_unknown_lanes_alone() {
+        let k = crate::hybrid_search::RRF_K;
+        let mut hits = vec![hit("tickets", 5, 0.5), hit("customers", 1, 1.0)];
+        rescore_fts_only_lanes_to_rrf_scale(&mut hits, k);
+        assert_eq!(
+            hits[0].score, 0.5,
+            "the tickets lane (fused lanes' scope) is not re-scored by the helper"
+        );
+        let expected = 1.0 / (f64::from(k) + 1.0);
+        assert!(
+            (hits[1].score - expected).abs() < 1e-12,
+            "the customers lane IS re-scored onto the RRF scale: {}",
+            hits[1].score
+        );
+    }
+
+    /// Item 64: a rebuild inserts every live thread exactly once — the
+    /// pre-fix rebuild ran the per-conversation indexer (which writes each
+    /// conversation's threads) AND a bulk INSERT over all threads, so every
+    /// thread landed in fts_threads twice.
+    #[test]
+    fn audit64_rebuild_inserts_each_thread_exactly_once() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (7001, 70, 'Exports', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conversation_id = conn.last_insert_rowid();
+        for body in [
+            "first thread body",
+            "second thread body",
+            "third thread body",
+        ] {
+            conn.execute(
+                "INSERT INTO conversation_threads
+                    (conversation_id, remote_id, type, body_text, created_at)
+                 VALUES (?1, NULL, 'customer', ?2, '2026-10-01 10:00:00')",
+                params![conversation_id, body],
+            )
+            .expect("thread");
+        }
+        rebuild_indexes(&conn).expect("rebuild");
+        let fts_rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM fts_threads", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(
+            fts_rows, 3,
+            "three live threads, three fts rows — pre-fix this was 6"
+        );
+        let distinct_thread_ids: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT thread_id) FROM fts_threads",
+                [],
+                |r| r.get(0),
+            )
+            .expect("distinct");
+        assert_eq!(distinct_thread_ids, 3, "no thread id appears twice");
+        // The threads still match after the rebuild.
+        let found = search_conversations(&conn, "second thread", &SearchFilters::default(), 10)
+            .expect("search");
+        assert!(
+            found.iter().any(|h| h.id == conversation_id),
+            "the rebuilt index still finds the thread text"
+        );
     }
 }
