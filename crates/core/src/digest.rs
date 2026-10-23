@@ -579,7 +579,11 @@ mod tests {
         let conn = db();
         // Six days of quiet volume plus one loud day (10x the rest) — the
         // spike detector must flag exactly that day. All seeds are
-        // relative to *now* because the collection window is.
+        // relative to *now* because the collection window is. The loud
+        // day seeds at *now* itself, not a fixed 09:00 wall-clock: before
+        // 09:00 UTC a fixed hour lands in the future, outside the
+        // collection window, and the test flakes (observed 2026-10-23
+        // 00:18 UTC during batch 22's verification).
         let day_iso = |days_back: i64| {
             (chrono::Utc::now() - chrono::Duration::try_days(days_back).unwrap_or_default())
                 .format("%Y-%m-%dT09:00:00.000Z")
@@ -588,9 +592,10 @@ mod tests {
         for days_back in [6, 5, 4, 3, 2, 1] {
             let _ = seed_conversation(&conn, days_back, &day_iso(days_back), "active");
         }
-        let loud_day = day_iso(0).get(0..10).unwrap_or("").to_string();
+        let now_iso = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S.000Z").to_string();
+        let loud_day = now_iso.get(0..10).unwrap_or("").to_string();
         for n in 0..10 {
-            let _ = seed_conversation(&conn, 100 + n, &day_iso(0), "active");
+            let _ = seed_conversation(&conn, 100 + n, &now_iso, "active");
         }
         conn.execute(
             "INSERT INTO ratings (remote_id, conversation_id, rating, remote_created_at)

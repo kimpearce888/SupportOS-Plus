@@ -133,6 +133,14 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
         .assignee_id
         .filter(|rid| *rid > 0)
         .and_then(|rid| crate::sync_engine::local_id(conn, "users", rid));
+    // Clean-audit item 33: `assigned_team_id` used to be parsed and
+    // dropped — team assignments were invisible in the mirror. Resolve
+    // the team's local id and persist it (the column has existed since
+    // m040's breadth sweep; the sync simply never wrote it).
+    let assigned_team_local = c
+        .assigned_team_id
+        .filter(|rid| *rid > 0)
+        .and_then(|rid| crate::sync_engine::local_id(conn, "teams", rid));
     struct PreviousRow {
         assignee: Option<i64>,
         status: Option<String>,
@@ -163,10 +171,10 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
         .ok();
     conn.execute(
         "INSERT INTO conversations (remote_id, number, subject, preview, status, state, type,
-            source_type, source_via, mailbox_local_id, assignee_local_id, customer_local_id,
-            priority, created_at,
+            source_type, source_via, mailbox_local_id, assignee_local_id, assigned_team_local_id,
+            customer_local_id, priority, created_at,
             updated_at, closed_at, snoozed_until, thread_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
          ON CONFLICT(remote_id) DO UPDATE SET
             number = excluded.number,
             subject = excluded.subject,
@@ -178,6 +186,7 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
             source_via = excluded.source_via,
             mailbox_local_id = excluded.mailbox_local_id,
             assignee_local_id = excluded.assignee_local_id,
+            assigned_team_local_id = excluded.assigned_team_local_id,
             customer_local_id = excluded.customer_local_id,
             priority = excluded.priority,
             created_at = excluded.created_at,
@@ -201,6 +210,7 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
             c.source_via,
             mailbox_local,
             assignee_local,
+            assigned_team_local,
             customer_local,
             c.priority,
             c.created_at,
@@ -603,5 +613,162 @@ mod batch21_audit29_tests {
             tags_events(&conn).is_empty(),
             "repeated names are the same tag set"
         );
+    }
+}
+
+/// Clean-audit item 33: a team assignment lands in its own column —
+/// `assigned_team_local_id` — and never in the user-assignee slot, even
+/// when a team and a user share the same platform id. The inbox surfaces
+/// the team by name.
+#[cfg(test)]
+mod batch22_audit33_tests {
+    use super::*;
+    use crate::helpscout::HsConversation;
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        // The collision case: user 42 and team 42 are different platform
+        // objects with the same id.
+        conn.execute(
+            "INSERT INTO mailboxes (remote_id, name) VALUES (1, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (900, 'Ada', 'Lovelace')",
+            [],
+        )
+        .expect("customer");
+        conn.execute(
+            "INSERT INTO users (remote_id, first_name, last_name)
+             VALUES (42, 'Grace', 'Hopper')",
+            [],
+        )
+        .expect("user");
+        conn.execute(
+            "INSERT INTO teams (remote_id, name) VALUES (42, 'Billing')",
+            [],
+        )
+        .expect("team");
+        conn
+    }
+
+    fn team_assigned_conv() -> HsConversation {
+        HsConversation {
+            remote_id: 555,
+            number: 1001,
+            status: "active".into(),
+            mailbox_id: 1,
+            customer_id: 900,
+            // The mapper's output shape for a team assignment: the user
+            // slot empty, the team id in its own field.
+            assignee_id: None,
+            assignee_type: Some("team".into()),
+            assigned_team_id: Some(42),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn team_assignment_lands_in_its_own_column_not_the_user_slot() {
+        let conn = conn();
+        upsert_conversation(&conn, &team_assigned_conv()).expect("upsert");
+
+        let (assignee, team): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT assignee_local_id, assigned_team_local_id
+                 FROM conversations WHERE remote_id = 555",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        let team_local: i64 = conn
+            .query_row("SELECT id FROM teams WHERE remote_id = 42", [], |r| {
+                r.get(0)
+            })
+            .expect("team local id");
+        assert_eq!(
+            assignee, None,
+            "the user slot is empty — team 42 never masquerades as user 42"
+        );
+        assert_eq!(
+            team,
+            Some(team_local),
+            "the team lands in its own column, resolved to the team's local id"
+        );
+
+        // The inbox list shows the team, not 'unassigned' and not Grace
+        // Hopper (user 42 — the collision the pre-fix code resolved to).
+        let (items, total) =
+            crate::inbox::list_conversations(&conn, &crate::inbox::InboxFilters::default())
+                .expect("list");
+        assert_eq!(total, 1);
+        assert_eq!(items[0].assignee_id, None);
+        assert_eq!(items[0].assignee_name, None);
+        assert_eq!(items[0].assigned_team_id, Some(team_local));
+        assert_eq!(
+            items[0].assigned_team_name.as_deref(),
+            Some("Billing"),
+            "the team is surfaced by name"
+        );
+
+        // The detail view carries the same honesty.
+        let conv_local: i64 = conn
+            .query_row(
+                "SELECT id FROM conversations WHERE remote_id = 555",
+                [],
+                |r| r.get(0),
+            )
+            .expect("local id");
+        let detail = crate::inbox::get_conversation(&conn, conv_local)
+            .expect("detail")
+            .expect("found");
+        assert_eq!(detail.assignee_name, None);
+        assert_eq!(detail.assigned_team_name.as_deref(), Some("Billing"));
+
+        // A later user assignment flips the columns honestly: the team
+        // slot clears, the user slot fills.
+        let mut user_assigned = team_assigned_conv();
+        user_assigned.assignee_id = Some(42);
+        user_assigned.assignee_type = Some("user".into());
+        user_assigned.assigned_team_id = None;
+        upsert_conversation(&conn, &user_assigned).expect("re-upsert");
+        let (assignee, team): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT assignee_local_id, assigned_team_local_id
+                 FROM conversations WHERE remote_id = 555",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row after re-upsert");
+        let user_local: i64 = conn
+            .query_row("SELECT id FROM users WHERE remote_id = 42", [], |r| {
+                r.get(0)
+            })
+            .expect("user local id");
+        assert_eq!(assignee, Some(user_local));
+        assert_eq!(team, None, "the team column clears on a user assignment");
+    }
+
+    /// An unknown team id (not yet mirrored) degrades to 'no team'
+    /// rather than poisoning the user slot or the row.
+    #[test]
+    fn unknown_team_id_degrades_to_no_team() {
+        let conn = conn();
+        let mut c = team_assigned_conv();
+        c.assigned_team_id = Some(9999); // not in the teams mirror
+        upsert_conversation(&conn, &c).expect("upsert");
+        let (assignee, team): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT assignee_local_id, assigned_team_local_id
+                 FROM conversations WHERE remote_id = 555",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(assignee, None);
+        assert_eq!(team, None, "an unmirrored team stores NULL, not garbage");
     }
 }

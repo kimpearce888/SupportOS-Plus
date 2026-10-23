@@ -96,6 +96,14 @@ impl ApiQueue {
         self.pump();
     }
 
+    /// The currently effective concurrency limit (audit item 31: the
+    /// `api_concurrency` setting was parsed and saved but never applied —
+    /// this getter exists so the wiring is observable and testable).
+    #[must_use]
+    pub fn concurrency(&self) -> usize {
+        self.concurrency.load(Ordering::Relaxed)
+    }
+
     pub fn snapshot(&self) -> Value {
         self.stats.snapshot()
     }

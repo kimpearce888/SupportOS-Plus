@@ -63,6 +63,18 @@ pub trait LocalAiProvider: Send + Sync {
 
     async fn chat(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse>;
 
+    /// Structured-output chat (clean-audit item 34): json_mode where the
+    /// endpoint supports it, with the pipeline's deterministic
+    /// temperature. Callers that expect a JSON document go through here
+    /// — a plain `chat` lets the model wrap its answer in markdown
+    /// fences or prose, which is exactly how the attribute extraction
+    /// used to lose every result. The default delegates to `chat`, so
+    /// endpoints without structured output keep working and the caller
+    /// still parses defensively.
+    async fn chat_structured(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse> {
+        self.chat(model, messages).await
+    }
+
     async fn embed(&self, model: &str, text: &str) -> Result<EmbedResponse>;
 
     async fn is_available(&self) -> bool;

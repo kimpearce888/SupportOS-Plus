@@ -298,6 +298,13 @@ fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
     let signature = req.header("x-helpscout-signature");
     let event_type = req.header("x-helpscout-event").unwrap_or("unknown");
 
+    // Audit item 32: registration caps the secret at the platform's 40
+    // characters — verification must resolve through the same canonical
+    // `effective_secret`, or any secret longer than the cap fails every
+    // signature check (the platform signs with the truncation) until ten
+    // discards deactivate the hook.
+    let secret = crate::webhook::effective_secret(&secret);
+
     let result = ctx.db.with_write(|conn| {
         webhook_handler::process_webhook(conn, secret.as_bytes(), &req.body, signature, event_type)
     });
@@ -1116,5 +1123,102 @@ mod tests {
         let closed_port = probe.local_addr().expect("addr").port();
         drop(probe);
         assert!(!listener_answers(closed_port), "a closed port must fail");
+    }
+}
+
+/// Clean-audit item 32: the loopback verifies signatures with the same
+/// canonical `effective_secret` registration uses — a stored secret over
+/// the platform's 40-character cap verifies against its truncation
+/// (what the platform actually signs with), never against the full string
+/// that no registration ever held.
+#[cfg(test)]
+mod batch22_audit32_tests {
+    use super::*;
+
+    fn request(method: &str, target: &str, headers: &[(&str, &str)], body: &[u8]) -> Request {
+        Request {
+            method: method.to_string(),
+            path: target.split('?').next().unwrap_or_default().to_string(),
+            query: target
+                .split_once('?')
+                .map(|(_, q)| q.to_string())
+                .unwrap_or_default(),
+            headers: headers
+                .iter()
+                .map(|(k, v)| (k.to_ascii_lowercase(), v.to_string()))
+                .collect(),
+            body: body.to_vec(),
+        }
+    }
+
+    fn ctx() -> LoopbackCtx {
+        let mut conn = Connection::open_in_memory().expect("in-memory connection");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        LoopbackCtx {
+            db: DbHandle::new(conn),
+            oauth: None,
+        }
+    }
+
+    #[test]
+    fn webhook_secret_over_the_cap_verifies_against_the_truncation() {
+        let c = ctx();
+        let key_path =
+            std::env::temp_dir().join(format!("spp-loopback-b22-key-{}.key", std::process::id()));
+        crate::settings::init_master_key(&key_path).expect("init master key");
+
+        // A 60-character secret — over the platform's 40-char cap. The
+        // health check registers the hook with the first 40 characters,
+        // so the platform signs deliveries with the truncation.
+        let long_secret: String = "s".repeat(60);
+        c.db.with_write(|conn| {
+            crate::settings::set_secret(conn, "webhook_secret", long_secret.as_bytes())
+        })
+        .expect("store webhook secret");
+
+        let body = br#"{"objectID":777}"#;
+        let effective = crate::webhook::effective_secret(&long_secret);
+        assert_eq!(effective.chars().count(), 40, "the cap applied");
+
+        // Signed with the truncation (what the platform holds): accepted.
+        let good_sig = crate::webhook::compute_signature(effective.as_bytes(), body);
+        let r = handle_request(
+            &request(
+                "POST",
+                "/webhook",
+                &[
+                    ("X-Helpscout-Signature", &good_sig),
+                    ("X-Helpscout-Event", "convo.created"),
+                ],
+                body,
+            ),
+            &c,
+        );
+        assert_eq!(
+            r.status, 200,
+            "the pre-fix loopback rejected exactly this delivery (verify-full vs register-capped)"
+        );
+
+        // Signed with the FULL stored secret — a signature no platform
+        // registration can ever produce for this account: still rejected,
+        // proving the verification boundary is the canonical truncation,
+        // not the raw stored value.
+        let wrong_sig = crate::webhook::compute_signature(long_secret.as_bytes(), body);
+        let r = handle_request(
+            &request(
+                "POST",
+                "/webhook",
+                &[
+                    ("X-Helpscout-Signature", &wrong_sig),
+                    ("X-Helpscout-Event", "convo.created"),
+                ],
+                body,
+            ),
+            &c,
+        );
+        assert_eq!(r.status, 401, "the full-secret signature never verified");
+
+        // Cleanup: drop the key file so parallel tests don't reuse it.
+        let _ = std::fs::remove_file(&key_path);
     }
 }

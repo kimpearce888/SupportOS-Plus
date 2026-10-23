@@ -61,9 +61,6 @@ pub const REQUIRED_EVENTS: &[&str] = &[
 /// The label the registered hook carries on the platform.
 const HOOK_LABEL: &str = "SupportOS-Plus";
 
-/// The platform caps webhook secrets at 40 characters.
-const SECRET_CAP: usize = 40;
-
 /// `application_settings` keys backing the cadence and the last outcome.
 const KEY_LAST_RUN: &str = "webhook_health_last_run";
 const KEY_OUTCOME: &str = "webhook_health_last_outcome";
@@ -163,10 +160,14 @@ pub fn cadence_due(conn: &Connection) -> Result<bool> {
 }
 
 /// Cap the stored secret at the platform's 40 characters (registration
-/// answers 400 for anything longer — the platform's own rule).
+/// answers 400 for anything longer — the platform's own rule). Audit
+/// item 32: the same cap now also applies at signature verification
+/// ([`crate::webhook::effective_secret`] is the one canonical
+/// definition), so a secret longer than the cap verifies against the
+/// same truncation the platform holds instead of failing forever.
 #[must_use]
 fn capped_secret(secret: &str) -> String {
-    secret.chars().take(SECRET_CAP).collect()
+    crate::webhook::effective_secret(secret)
 }
 
 /// The pure classification of the account's hooks against ours:

@@ -64,6 +64,31 @@ impl LocalAiProvider for LmStudioProvider {
         self.client.chat(model, messages).await
     }
 
+    // Clean-audit item 34: JSON-expecting callers (the attribute
+    // extraction) ride the same structured lane the pipeline's chat_json
+    // uses — json_mode + deterministic temperature — instead of a plain
+    // chat whose answer is free to arrive wrapped in fences or prose.
+    async fn chat_structured(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse> {
+        let res = self
+            .client
+            .chat_with_opts(
+                Some(model),
+                messages,
+                ChatOpts {
+                    temperature: Some(0.15),
+                    max_tokens: Some(2048),
+                    json_mode: true,
+                },
+            )
+            .await?;
+        Ok(ChatResponse {
+            content: res.content.unwrap_or_default(),
+            model: res.model,
+            usage: res.usage,
+            finish_reason: None,
+        })
+    }
+
     async fn embed(&self, model: &str, text: &str) -> Result<EmbedResponse> {
         self.client.embed(model, text).await
     }

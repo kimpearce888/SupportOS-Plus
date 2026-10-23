@@ -5,8 +5,8 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 use crate::api_queue::{
-    ApiQueue, DEFAULT_CONCURRENCY, PRIORITY_ANALYTICS, PRIORITY_INDEXING, PRIORITY_INTERACTIVE,
-    PRIORITY_SYNC, PRIORITY_USER_SEND,
+    ApiQueue, PRIORITY_ANALYTICS, PRIORITY_INDEXING, PRIORITY_INTERACTIVE, PRIORITY_SYNC,
+    PRIORITY_USER_SEND,
 };
 use crate::error::{Error, Result};
 
@@ -599,6 +599,33 @@ fn base64_of(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
 }
 
+/// The API concurrency a new provider should start at (audit item 31).
+///
+/// Precedence: the stored `api_concurrency` setting (written by the
+/// Settings form, range 1..=8) over the `SYNC_API_CONCURRENCY` env
+/// default. A stored value below 1 clamps to 1; a missing or unparsable
+/// stored value falls back to the env default (the legacy behavior —
+/// `DEFAULT_CONCURRENCY` — whenever the env var is unset).
+fn stored_api_concurrency(db: &crate::db::DbHandle) -> usize {
+    let env_default = crate::config::load_env_config().sync.api_concurrency.max(1) as usize;
+    let stored = db.with_read(|conn| {
+        crate::settings::get_i64(
+            conn,
+            "api_concurrency",
+            i64::try_from(env_default).unwrap_or(2),
+        )
+    });
+    match stored {
+        Ok(n) if n >= 1 => n as usize,
+        // Stored 0 or negative (only reachable by hand-editing the
+        // settings table — the form clamps to 1..=8): run serialized,
+        // never wide-open.
+        Ok(_) => 1,
+        // Unparsable stored value: fall back to the env default.
+        Err(_) => env_default,
+    }
+}
+
 fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -632,11 +659,15 @@ impl RealHelpScoutProvider {
     #[must_use]
     pub fn new(db: crate::db::DbHandle, credentials: HsCredentials) -> Self {
         let limiter = Arc::new(HsRateLimiter::new(Some(db.clone())));
-        let queue = ApiQueue::new(Arc::clone(&limiter), DEFAULT_CONCURRENCY);
-        let docs_queue = ApiQueue::new(
-            Arc::new(HsRateLimiter::new(Some(db.clone()))),
-            DEFAULT_CONCURRENCY,
-        );
+        // Audit item 31: the `api_concurrency` setting was parsed and
+        // saved but never applied — every provider ran the hard-coded
+        // default forever, boot or mid-session activation alike.
+        // Resolve it at construction (stored setting over the
+        // SYNC_API_CONCURRENCY env default) so every construction path
+        // starts at the configured width.
+        let concurrency = stored_api_concurrency(&db);
+        let queue = ApiQueue::new(Arc::clone(&limiter), concurrency);
+        let docs_queue = ApiQueue::new(Arc::new(HsRateLimiter::new(Some(db.clone()))), concurrency);
         Self {
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(60))
@@ -652,8 +683,21 @@ impl RealHelpScoutProvider {
         }
     }
 
+    /// Resize both API queues' concurrency limit live (audit item 31:
+    /// previously only the conversations queue was resizable — and
+    /// nothing ever called this — while the docs queue ran at the
+    /// hard-coded default forever). Values below 1 clamp to 1.
     pub fn set_api_concurrency(&self, n: usize) {
         self.queue.set_concurrency(n);
+        self.docs_queue.set_concurrency(n);
+    }
+
+    /// The concurrency limit both queues currently run at (audit item
+    /// 31 observability: settings saves can assert the live value
+    /// moved instead of trusting the write).
+    #[must_use]
+    pub fn api_concurrency(&self) -> usize {
+        self.queue.concurrency()
     }
 
     /// A fresh handle to the provider's HTTP client (v1.4.0 R1: the
@@ -1407,6 +1451,15 @@ impl RealHelpScoutProvider {
 
     fn map_conversation(v: &Value) -> HsConversation {
         let assignee_type = v["assignee"]["type"].as_str().map(|s| s.to_string());
+        // Clean-audit item 33: a team-typed assignee is a TEAM id — it
+        // must never land in the user-assignee slot (team 42 and user 42
+        // are different platform objects; writing the team id there made
+        // team-assigned conversations either look unassigned — the id
+        // matches no user — or assigned to the WRONG user on an id
+        // collision). The user slot stays empty for team assignments;
+        // `assigned_team_id` carries the team, and the sync writes it to
+        // `conversations.assigned_team_local_id`.
+        let assignee_is_team = assignee_type.as_deref() == Some("team");
         HsConversation {
             remote_id: v["id"].as_i64().unwrap_or(0),
             number: v["number"].as_i64().unwrap_or(0),
@@ -1418,15 +1471,17 @@ impl RealHelpScoutProvider {
             status: v["status"].as_str().unwrap_or("active").to_string(),
             state: v["state"].as_str().map(|s| s.to_string()),
             mailbox_id: v["mailboxId"].as_i64().unwrap_or(0),
-            assignee_id: v["assignee"]["id"].as_i64(),
+            assignee_id: if assignee_is_team {
+                None
+            } else {
+                v["assignee"]["id"].as_i64()
+            },
             assignee_type: assignee_type.clone(),
-            assigned_team_id: v["assignedTeam"]["id"].as_i64().or(
-                if assignee_type.as_deref() == Some("team") {
-                    v["assignee"]["id"].as_i64()
-                } else {
-                    None
-                },
-            ),
+            assigned_team_id: v["assignedTeam"]["id"].as_i64().or(if assignee_is_team {
+                v["assignee"]["id"].as_i64()
+            } else {
+                None
+            }),
             customer_id: v["primaryCustomer"]["id"].as_i64().unwrap_or(0),
             priority: None,
             created_at: v["createdAt"].as_str().map(|s| s.to_string()),
@@ -3103,5 +3158,130 @@ mod r7_token_envelope_tests {
         );
         assert!(has_stored_tokens(&conn).expect("probe"));
         crate::settings::set_master_key_for_tests([7u8; 32]);
+    }
+}
+
+/// Clean-audit batch 22 (items 31 + 33): the `api_concurrency` setting
+/// reaches the provider's queues (it was parsed, saved, and applied
+/// nowhere), and a team-typed assignee never lands in the user-assignee
+/// slot while `assigned_team_id` finally gets consumed.
+#[cfg(test)]
+mod batch22_audit_tests {
+    use super::*;
+    use crate::api_queue::DEFAULT_CONCURRENCY;
+
+    fn migrated_conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn provider_with(conn: Connection, setting: Option<i64>) -> RealHelpScoutProvider {
+        if let Some(n) = setting {
+            crate::settings::set_i64(&conn, "api_concurrency", n).expect("store setting");
+        }
+        RealHelpScoutProvider::new(crate::db::DbHandle::new(conn), HsCredentials::default())
+    }
+
+    /// Item 31: the stored setting reaches BOTH queues at construction —
+    /// the conversations queue and the docs queue used to run at the
+    // hard-coded default forever, no matter what the form saved.
+    #[test]
+    fn api_concurrency_setting_reaches_both_provider_queues() {
+        // Unset: the historical default.
+        let p = provider_with(migrated_conn(), None);
+        assert_eq!(p.api_concurrency(), DEFAULT_CONCURRENCY);
+        assert_eq!(
+            p.docs_queue.concurrency(),
+            DEFAULT_CONCURRENCY,
+            "the docs queue follows the same default"
+        );
+
+        // Stored 5: both queues start at 5.
+        let p = provider_with(migrated_conn(), Some(5));
+        assert_eq!(p.api_concurrency(), 5);
+        assert_eq!(
+            p.docs_queue.concurrency(),
+            5,
+            "the docs queue follows the setting"
+        );
+
+        // A live resize reaches both queues, not just the main one.
+        p.set_api_concurrency(3);
+        assert_eq!(p.api_concurrency(), 3);
+        assert_eq!(
+            p.docs_queue.concurrency(),
+            3,
+            "the live resize covers the docs queue"
+        );
+
+        // Stored 0 (hand-edited settings table): serialized, never 0.
+        let p = provider_with(migrated_conn(), Some(0));
+        assert_eq!(p.api_concurrency(), 1, "stored 0 clamps to 1");
+
+        // Unparsable stored value: falls back to the env default.
+        let conn = migrated_conn();
+        crate::settings::set_string(&conn, "api_concurrency", "not-a-number").expect("garbage");
+        let p =
+            RealHelpScoutProvider::new(crate::db::DbHandle::new(conn), HsCredentials::default());
+        assert_eq!(
+            p.api_concurrency(),
+            DEFAULT_CONCURRENCY,
+            "garbage falls back to the default"
+        );
+    }
+
+    /// Item 33: a team-typed assignee is a TEAM id — the user slot stays
+    /// empty and the team id rides `assigned_team_id`; a user-typed
+    /// assignee keeps the user slot; `assignedTeam` alongside a user
+    /// assignee fills the team field without touching the user slot.
+    #[test]
+    fn map_conversation_keeps_team_ids_out_of_the_user_slot() {
+        // Team assignment: assignee {id: 42, type: "team"}.
+        let team_assigned = serde_json::json!({
+            "id": 101, "number": 7, "status": "active", "mailboxId": 1,
+            "assignee": {"id": 42, "type": "team"},
+            "primaryCustomer": {"id": 900}
+        });
+        let c = RealHelpScoutProvider::map_conversation(&team_assigned);
+        assert_eq!(c.assignee_id, None, "the user slot stays empty for a team");
+        assert_eq!(c.assignee_type.as_deref(), Some("team"));
+        assert_eq!(
+            c.assigned_team_id,
+            Some(42),
+            "the team id rides its own field"
+        );
+
+        // User assignment: assignee {id: 55, type: "user"}.
+        let user_assigned = serde_json::json!({
+            "id": 102, "number": 8, "status": "active", "mailboxId": 1,
+            "assignee": {"id": 55, "type": "user"},
+            "primaryCustomer": {"id": 900}
+        });
+        let c = RealHelpScoutProvider::map_conversation(&user_assigned);
+        assert_eq!(c.assignee_id, Some(55));
+        assert_eq!(c.assigned_team_id, None);
+
+        // User assignee + a separate assignedTeam: both slots hold their
+        // own id — neither leaks into the other.
+        let both = serde_json::json!({
+            "id": 103, "number": 9, "status": "active", "mailboxId": 1,
+            "assignee": {"id": 55, "type": "user"},
+            "assignedTeam": {"id": 42},
+            "primaryCustomer": {"id": 900}
+        });
+        let c = RealHelpScoutProvider::map_conversation(&both);
+        assert_eq!(c.assignee_id, Some(55));
+        assert_eq!(c.assigned_team_id, Some(42));
+
+        // assignedTeam alone (no assignee): team field only.
+        let team_only = serde_json::json!({
+            "id": 104, "number": 10, "status": "active", "mailboxId": 1,
+            "assignedTeam": {"id": 77},
+            "primaryCustomer": {"id": 900}
+        });
+        let c = RealHelpScoutProvider::map_conversation(&team_only);
+        assert_eq!(c.assignee_id, None);
+        assert_eq!(c.assigned_team_id, Some(77));
     }
 }
