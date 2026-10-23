@@ -4,30 +4,30 @@ These rules govern how the plan (`plan.md`) is executed. They are mandatory and 
 
 Statuses: an item moves `plan.md` → `progress.md` → implementation → verification → `completed.md`.
 
-## Rule 1 — Five items at a time
+## Rule 1 — ten items at a time
 
-Fix **exactly five items at a time** from `plan.md`.
+Fix **exactly ten items at a time** from `plan.md`.
 
-Never work on more than five plan items simultaneously.
+Never work on more than ten plan items simultaneously.
 
 ## Rule 2 — Start of work
 
 Before starting an item:
 
-1. Select the next five items from `plan.md`.
-2. Remove those five items from `plan.md`.
-3. Add those five items to `progress.md`.
+1. Select the next ten items from `plan.md`.
+2. Remove those ten items from `plan.md`.
+3. Add those ten items to `progress.md`.
 4. Begin implementation only after the items have been moved to `progress.md`.
 
 ## Rule 3 — During work
 
 Only work on the items currently recorded in `progress.md`.
 
-Do not start another item until the current five items have been completed and verified.
+Do not start another item until the current ten items have been completed and verified.
 
 ## Rule 4 — Completion
 
-After the current five items are fixed and verified:
+After the current ten items are fixed and verified:
 
 1. Remove those items from `progress.md`.
 2. Add those items to `completed.md`.
@@ -51,23 +51,23 @@ Do not skip, merge, or silently discard items.
 At all times:
 
 * `plan.md` = remaining TODO items
-* `progress.md` = exactly five active items
+* `progress.md` = exactly ten active items
 * `completed.md` = completed and verified items
 
 The same item must never exist in more than one of these files at the same time.
 
 ## Rule 8 — Do not automatically start the next items
 
-After completing the current five items, **do not begin the next items automatically**.
+After completing the current ten items, **do not begin the next items automatically**.
 
 Instead:
 
-1. Finish and verify the current five items.
+1. Finish and verify the current ten items.
 2. Update `progress.md` and `completed.md`.
 3. Give the user a clear summary of the completed work and verification result.
-4. Tell the user to say **`continue`** to proceed to the next five items in `plan.md`.
+4. Tell the user to say **`continue`** to proceed to the next ten items in `plan.md`.
 
-When the user says **`continue`**, resume the workflow by selecting the next five items from `plan.md`.
+When the user says **`continue`**, resume the workflow by selecting the next ten items from `plan.md`.
 
 ## Rule 9 — Blocked work
 
@@ -89,4 +89,4 @@ After stopping, wait for the user to say:
 
 `continue`
 
-Then process the next five items.
+Then process the next ten items.
