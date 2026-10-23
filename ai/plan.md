@@ -43,11 +43,6 @@ create idempotency) — verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
-31. [med|gap] `api_concurrency` setting parsed/saved but never applied — api_queue.rs:94-97
-32. [med|bug] Webhook secret capped to 40 chars at registration but verified with the full secret — webhook_health.rs:255,168
-33. [med|bug] Team id written into the user-assignee slot; `assigned_team_id` unconsumed — helpscout_real.rs:1392-1394
-34. [med|bug] Attribute extraction parses raw output without fence-stripping/json_mode — ai_attributes.rs:817-818
-35. [med|issue] Attribute extraction bypasses the prompt-redaction boundary — ai_attributes.rs:776-787
 36. [med|bug] customer_messages includes soft-deleted threads, takes OLDEST 30 — ai_attributes.rs:690-692
 37. [med|issue] Extraction runs stuck `queued`, invisible to the cost ledger — ai_attributes.rs:966-968
 38. [med|bug] Cache-hit path mixes hash-matched run id with newest run's analysis — ai_pipeline.rs:872-877

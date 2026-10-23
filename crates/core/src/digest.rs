@@ -592,7 +592,9 @@ mod tests {
         for days_back in [6, 5, 4, 3, 2, 1] {
             let _ = seed_conversation(&conn, days_back, &day_iso(days_back), "active");
         }
-        let now_iso = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S.000Z").to_string();
+        let now_iso = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S.000Z")
+            .to_string();
         let loud_day = now_iso.get(0..10).unwrap_or("").to_string();
         for n in 0..10 {
             let _ = seed_conversation(&conn, 100 + n, &now_iso, "active");
