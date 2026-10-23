@@ -3460,5 +3460,8 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   note is the pre-existing unmatched-allowance warning, not a failure).
 - Security: staged diff token-scanned clean before each push; remote
   unmoved at push time (fetch-first).
-- Runner verification: follows once CI on code commit `f1289fb`
-  completes (recorded below when the runs finish).
+- Runner verification: batch-opening commit `0a237eb` — CI run
+  `40028572277`: success; code commit `f1289fb` — CI run `40035215617`:
+  success, both jobs green (fmt/clippy/test/deny AND the AppImage/deb
+  build with the SPP_SMOKE shell smoke); tracking commit `61ff279` —
+  CI run `40035306132`: success, both jobs green.
