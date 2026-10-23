@@ -1839,32 +1839,85 @@ impl WorkerManager {
 
     fn on_conversation_changed(&self, conversation_local_id: i64) {
         let result: Result<()> = (|| {
-            let last_thread_type: Option<String> = {
+            // Clean-audit item 57: the trigger pair carries a once-guard.
+            // The pre-fix code fired BOTH `new_conversation` and
+            // `customer_reply` whenever the newest non-deleted thread was
+            // from the customer — every reply re-sent "new conversation"
+            // rules (auto-acks), and the very first customer message already
+            // fired "customer reply" rules. The guard remembers, per
+            // conversation, the newest customer thread that already fired
+            // (conversations.automation_last_customer_thread_id, m060):
+            // the first customer thread ever seen fires `new_conversation`,
+            // every LATER customer thread fires `customer_reply`, and a
+            // sync that introduces no new customer thread (a tag change, a
+            // status flip, a re-sync) fires neither.
+            let (last_thread_type, latest_customer_thread, last_fired): (
+                Option<String>,
+                Option<i64>,
+                Option<i64>,
+            ) = {
                 let conn = self.lock();
-                conn.query_row(
-                    "SELECT type FROM conversation_threads
-                      WHERE conversation_id = ?1 AND deleted_at IS NULL
-                      ORDER BY created_at DESC, id DESC LIMIT 1",
-                    rusqlite::params![conversation_local_id],
-                    |r| r.get(0),
-                )
-                .ok()
+                let last_thread_type: Option<String> = conn
+                    .query_row(
+                        "SELECT type FROM conversation_threads
+                          WHERE conversation_id = ?1 AND deleted_at IS NULL
+                          ORDER BY created_at DESC, id DESC LIMIT 1",
+                        rusqlite::params![conversation_local_id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let latest_customer_thread: Option<i64> = conn
+                    .query_row(
+                        "SELECT id FROM conversation_threads
+                          WHERE conversation_id = ?1 AND deleted_at IS NULL
+                            AND type = 'customer'
+                          ORDER BY created_at DESC, id DESC LIMIT 1",
+                        rusqlite::params![conversation_local_id],
+                        |r| r.get(0),
+                    )
+                    .ok()
+                    .flatten();
+                let last_fired: Option<i64> = conn
+                    .query_row(
+                        "SELECT automation_last_customer_thread_id
+                           FROM conversations WHERE id = ?1",
+                        rusqlite::params![conversation_local_id],
+                        |r| r.get(0),
+                    )
+                    .ok()
+                    .flatten();
+                (last_thread_type, latest_customer_thread, last_fired)
             };
             if last_thread_type.as_deref() != Some("customer") {
                 return Ok(());
             }
-            {
+            // The once-guard decision (clean-audit item 57): `new_conversation`
+            // for the first customer thread ever seen, `customer_reply` for a
+            // later one, nothing when this customer thread already fired.
+            let trigger = crate::automation::customer_thread_trigger_decision(
+                last_fired,
+                latest_customer_thread,
+            );
+            if let Some(trigger) = trigger {
+                let newest_customer_thread =
+                    latest_customer_thread.expect("decision guarantees a thread id");
                 let mut conn = self.lock();
-                let _ = crate::automation::fire_trigger_for_conversation(
+                let fired = crate::automation::fire_trigger_for_conversation(
                     &mut conn,
-                    "new_conversation",
+                    trigger,
                     conversation_local_id,
                 );
-                let _ = crate::automation::fire_trigger_for_conversation(
-                    &mut conn,
-                    "customer_reply",
-                    conversation_local_id,
-                );
+                // Record the thread as consumed only when the rules actually
+                // ran; a failed firing (context load error and friends) stays
+                // unrecorded so the next change retries it.
+                if fired.is_ok() {
+                    conn.execute(
+                        "UPDATE conversations
+                            SET automation_last_customer_thread_id = ?1
+                          WHERE id = ?2",
+                        rusqlite::params![newest_customer_thread, conversation_local_id],
+                    )?;
+                }
             }
             {
                 let conn = self.lock();

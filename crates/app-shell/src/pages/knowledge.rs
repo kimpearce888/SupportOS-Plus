@@ -531,9 +531,26 @@ impl KnowledgePage {
 
     /// Delete a knowledge document.
     pub fn delete_document(&mut self, db: &DbHandle, id: i64) {
-        let deleted = db
-            .with_write(|conn| spp_core::knowledge_store::delete_document(conn, id))
-            .unwrap_or(false);
+        let deleted = db.with_write(|conn| {
+            let removed = spp_core::knowledge_store::delete_document(conn, id).unwrap_or(false);
+            if removed {
+                // Clean-audit item 60: the delete hard-deletes the
+                // document's chunk rows, orphaning their vector points
+                // (which keep matching with their stale text snapshots).
+                // Nothing is pending to embed, so the orphan sweep rides
+                // an explicit embed pass — fire-and-forget like the
+                // import side effects.
+                let _ = spp_core::jobs::enqueue_on(
+                    conn,
+                    "embeddings",
+                    "embed_knowledge_chunks",
+                    "{}",
+                    4,
+                    2,
+                );
+            }
+            removed
+        });
         self.status_message = Some(if deleted {
             format!("Document {id} deleted.")
         } else {

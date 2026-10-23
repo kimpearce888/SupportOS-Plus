@@ -245,6 +245,65 @@ impl SqliteVecStore {
         Self::open(&store_dir(data_dir).join("vectors.db"))
     }
 
+    /// Clean-audit item 60: remove every point of `entity_type` whose point
+    /// id is NOT in `live_point_ids` — the orphaned vectors of chunks that
+    /// were deleted or re-chunked (a re-chunk hands every chunk a new id, so
+    /// the old points keep matching with stale text snapshots forever). The
+    /// re-chunk lanes replace chunk rows in bulk and none of them could reach
+    /// a store handle, so the sweep runs from the embed pipeline, which
+    /// holds both the main database (the live chunk ids) and the store.
+    ///
+    /// Deletes run in bounded batches (SQLite parameter limits) inside one
+    /// transaction. Returns how many points were removed.
+    pub fn prune_family_except(
+        &self,
+        collection: &str,
+        entity_type: &str,
+        live_point_ids: &[i64],
+    ) -> Result<u64> {
+        let mut conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
+        let table = vec_table_for(collection);
+        let all_point_ids: Vec<i64> = {
+            let mut stmt = conn.prepare(
+                "SELECT point_id FROM vec_payload
+                  WHERE collection = ?1 AND entity_type = ?2",
+            )?;
+            stmt.query_map(params![collection, entity_type], |r| r.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        let live: std::collections::HashSet<i64> = live_point_ids.iter().copied().collect();
+        let orphans: Vec<i64> = all_point_ids
+            .into_iter()
+            .filter(|point_id| !live.contains(point_id))
+            .collect();
+        if orphans.is_empty() {
+            return Ok(0);
+        }
+        let tx = conn.transaction()?;
+        let mut removed = 0u64;
+        for batch in orphans.chunks(500) {
+            let placeholders: Vec<String> = batch.iter().map(|_| "?".to_string()).collect();
+            let in_list = placeholders.join(", ");
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE point_id IN ({in_list})"),
+                rusqlite::params_from_iter(batch.iter()),
+            )?;
+            let mut payload_bound = vec![collection.to_string()];
+            payload_bound.extend(batch.iter().map(|id| id.to_string()));
+            tx.execute(
+                &format!(
+                    "DELETE FROM vec_payload
+                      WHERE collection = ?1 AND point_id IN ({in_list})"
+                ),
+                rusqlite::params_from_iter(payload_bound.iter()),
+            )?;
+            removed += batch.len() as u64;
+        }
+        tx.commit()?;
+        Ok(removed)
+    }
+
     /// Purge the vector store of a data directory: drop every vec0
     /// collection table and clear the payload/metadata bookkeeping
     /// (the demo-data purge, 1.1.3). Safe on a missing store (creates
@@ -844,6 +903,18 @@ impl VectorIndex {
             .is_ok()
     }
 
+    /// Clean-audit item 60: remove this `entity_type` family's points whose
+    /// ids are not in `live_point_ids` — orphaned vectors of deleted or
+    /// re-chunked rows (whose payloads still carry the stale text snapshot
+    /// the semantic lanes serve). Returns the number of points removed, or
+    /// `None` when the store is disabled or cannot be opened.
+    pub fn prune_orphaned_points(&self, entity_type: &str, live_point_ids: &[i64]) -> Option<u64> {
+        let store = self.store_handle()?;
+        store
+            .prune_family_except(VECTOR_COLLECTION, entity_type, live_point_ids)
+            .ok()
+    }
+
     pub fn count_by_entity(&self, entity_type: &str) -> usize {
         let Some(store) = self.store_handle() else {
             return 0;
@@ -1207,6 +1278,127 @@ mod tests {
     /// different vectors that used to land on the same point id (raw
     /// per-table row ids in one shared collection) — the second upsert
     /// silently overwrote the first. Namespaced ids keep both.
+    /// Clean-audit item 60: prune_family_except removes a family's points
+    /// whose ids are not in the live set — the orphaned vectors of deleted
+    /// or re-chunked rows — while leaving other families and live points
+    /// untouched.
+    #[test]
+    fn audit60_prune_family_except_removes_only_orphans_of_that_family() {
+        let (_dir, store) = seeded_store("prune60", 2);
+        // knowledge_chunk family: point ids are band|chunk-id (band 0, so
+        // point id == chunk id here). Chunks 1 and 2 belong to document
+        // 100, chunk 3 to document 101.
+        for (point_id, entity_id) in [(1, 100), (2, 100), (3, 101)] {
+            store
+                .upsert(
+                    VECTOR_COLLECTION,
+                    point(point_id, vec![1.0, 0.0], "knowledge_chunk", entity_id),
+                )
+                .expect("upsert knowledge");
+        }
+        // docs_chunk family (band 1) shares the collection.
+        store
+            .upsert(
+                VECTOR_COLLECTION,
+                point(1_000_000_001, vec![0.0, 1.0], "docs_chunk", 200),
+            )
+            .expect("upsert docs");
+
+        // Document 100 was re-chunked: its old chunk points (1 and 2) are
+        // orphaned; only chunk 3's point (id 3) is still live.
+        let removed = store
+            .prune_family_except(VECTOR_COLLECTION, "knowledge_chunk", &[3])
+            .expect("prune");
+        assert_eq!(removed, 2, "the two orphaned knowledge points are gone");
+
+        assert_eq!(
+            store.try_point_count(VECTOR_COLLECTION).unwrap(),
+            Some(2),
+            "the surviving knowledge point and the docs point remain"
+        );
+        assert_eq!(
+            store
+                .count_by_entity_type(VECTOR_COLLECTION, "knowledge_chunk")
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .count_by_entity_type(VECTOR_COLLECTION, "docs_chunk")
+                .unwrap(),
+            1,
+            "other families are never touched by the sweep"
+        );
+        // Idempotent: a second sweep with the same live set removes nothing.
+        let removed = store
+            .prune_family_except(VECTOR_COLLECTION, "knowledge_chunk", &[3])
+            .expect("prune again");
+        assert_eq!(removed, 0);
+        // An empty live set wipes the whole family.
+        let removed = store
+            .prune_family_except(VECTOR_COLLECTION, "knowledge_chunk", &[])
+            .expect("prune all");
+        assert_eq!(removed, 1);
+        assert_eq!(
+            store.try_point_count(VECTOR_COLLECTION).unwrap(),
+            Some(1),
+            "only the docs point is left"
+        );
+    }
+
+    /// Item 60, facade level: the VectorIndex wrapper reports the removal
+    /// and stays silent (None) only when the store cannot be opened.
+    #[test]
+    fn audit60_vector_index_prune_facade_removes_orphans() {
+        let dir = temp_data_dir("prune-facade");
+        let index = VectorIndex::new(&dir, true);
+        index.ensure_collection(2);
+        assert!(
+            index.upsert(&[
+                VectorPoint {
+                    id: namespaced_chunk_point_id("knowledge_chunk", 7).unwrap(),
+                    vector: vec![1.0, 0.0],
+                    payload: serde_json::json!({
+                        "entity_type": "knowledge_chunk",
+                        "entity_id": 1,
+                        "chunk_id": 7,
+                        "text": "stale text",
+                    }),
+                },
+                VectorPoint {
+                    id: namespaced_chunk_point_id("knowledge_chunk", 9).unwrap(),
+                    vector: vec![0.0, 1.0],
+                    payload: serde_json::json!({
+                        "entity_type": "knowledge_chunk",
+                        "entity_id": 1,
+                        "chunk_id": 9,
+                        "text": "live text",
+                    }),
+                },
+            ]),
+            "upsert both points"
+        );
+        assert_eq!(index.count_by_entity("knowledge_chunk"), 2);
+
+        // Chunk 7 was deleted/re-chunked away; only chunk 9 is live.
+        let live = [namespaced_chunk_point_id("knowledge_chunk", 9).unwrap()];
+        let removed = index
+            .prune_orphaned_points("knowledge_chunk", &live)
+            .expect("the enabled store sweeps");
+        assert_eq!(removed, 1);
+        assert_eq!(index.count_by_entity("knowledge_chunk"), 1);
+
+        // A disabled index reports nothing and removes nothing.
+        let disabled = VectorIndex::new(&dir, false);
+        let live = [namespaced_chunk_point_id("knowledge_chunk", 9).unwrap()];
+        assert!(
+            disabled
+                .prune_orphaned_points("knowledge_chunk", &live)
+                .is_none(),
+            "the disabled store is reported as unavailable"
+        );
+    }
+
     #[test]
     fn audit21_namespaced_point_ids_keep_chunk_families_apart() {
         let (_dir, store) = seeded_store("audit21-ns", 2);

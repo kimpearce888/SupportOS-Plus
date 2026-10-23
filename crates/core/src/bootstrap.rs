@@ -298,6 +298,16 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m059_beacon_chats",
         apply: crate::chats::apply_m059_beacon_chats,
     },
+    // Clean-audit item 57: the automation once-guard's memory. The newest
+    // customer thread id a conversation has already fired triggers for, so
+    // `new_conversation` fires at most once per conversation and
+    // `customer_reply` at most once per customer thread — the pre-fix code
+    // fired BOTH on every customer-latest sync.
+    BootStep {
+        version: 51,
+        label: "m060_automation_once_guard",
+        apply: crate::automation::apply_m060_automation_once_guard,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

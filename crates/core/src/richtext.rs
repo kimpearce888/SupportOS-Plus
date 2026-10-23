@@ -128,9 +128,19 @@ fn sanitize(html: &str) -> String {
     builder
         .tags(tags)
         .tag_attributes(tag_attributes)
-        .rm_tags([
-            "script", "style", "title", "textarea", "noscript", "iframe", "object", "embed", "svg",
-            "math", "form", "input", "button", "select", "option", "template",
+        // Clean-audit item 63: `rm_tags` removes tags from the ALLOWLIST —
+        // a no-op for tags that were never allowed. The intent (per this
+        // function's own doc comment: "scripty tags together with their
+        // content") is `clean_content_tags`: the tag AND its entire subtree
+        // are removed. The pre-fix behavior stripped only the tags
+        // themselves, so the text inside `<title>`, `<textarea>`,
+        // `<noscript>`, … leaked into the rendered spans as visible text
+        // (a page's `<title>` showed up in a thread body). `ammonia`
+        // defaults clean the content of script/style; this list adds the
+        // rest of the scripty family to it.
+        .add_clean_content_tags([
+            "title", "textarea", "noscript", "iframe", "object", "embed", "svg", "math", "form",
+            "input", "button", "select", "option", "template",
         ])
         .url_schemes(schemes)
         .link_rel(None);
@@ -693,5 +703,57 @@ mod tests {
     fn pre_separator_after_block_is_lazy_no_trailing_newline() {
         let spans = html_to_spans("<p>only</p>");
         assert_eq!(spans, vec![Span::styled("only", SpanStyle::default())]);
+    }
+
+    /// Clean-audit item 63: `rm_tags` is ammonia's ALLOWLIST-removal API —
+    /// a no-op for tags that were never allowed. The pre-fix sanitize kept
+    /// leaking the CONTENT of `<title>`, `<textarea>`, `<noscript>`, … as
+    /// visible text (only the tags themselves were stripped). The fix routes
+    /// the scripty family through `clean_content_tags`, whose entire subtree
+    /// ammonia removes.
+    #[test]
+    fn audit63_title_and_textarea_content_no_longer_leaks_visible() {
+        fn plain_text(html: &str) -> String {
+            let spans = html_to_spans(html);
+            spans
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        }
+        assert!(
+            !plain_text("<p>ok</p><title>Page title</title>").contains("Page title"),
+            "a pasted <title> must not render its text"
+        );
+        assert!(
+            !plain_text("<p>ok</p><textarea>user typed draft</textarea>").contains("user typed"),
+            "a pasted <textarea> must not render its text"
+        );
+        assert!(
+            !plain_text("<p>ok</p><noscript>enable js</noscript>").contains("enable js"),
+            "noscript content is dropped with its subtree"
+        );
+        assert!(
+            !plain_text("<p>ok</p><select><option>opt</option></select>").contains("opt"),
+            "select/option content is dropped with the subtree"
+        );
+        // The surrounding legitimate content survives.
+        assert!(
+            plain_text("<p>ok</p><textarea>draft</textarea><p>after</p>").contains("after"),
+            "content after the dropped subtree survives"
+        );
+    }
+
+    #[test]
+    fn audit63_script_and_style_subtrees_stay_removed() {
+        fn plain_text(html: &str) -> String {
+            html_to_spans(html)
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        }
+        assert!(!plain_text("<p>a</p><script>alert(1)</script>").contains("alert"));
+        assert!(!plain_text("<p>a</p><style>p{color:red}</style>").contains("color"));
     }
 }

@@ -575,6 +575,50 @@ fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &st
     Ok(())
 }
 
+/// Migration m060 (boot step 51, clean-audit item 57): `conversations` gains
+/// `automation_last_customer_thread_id` — the id of the customer thread whose
+/// trigger firing the conversation has already consumed. The pre-fix
+/// `on_conversation_changed` fired BOTH the `new_conversation` and
+/// `customer_reply` triggers on every customer-latest sync (a reply re-sent
+/// the "new conversation" auto-ack; a tag change re-fired both). The column
+/// is the once-guard's memory: the newest customer thread fires
+/// `new_conversation` the first time it is ever seen for the conversation and
+/// `customer_reply` afterwards, at most once per thread.
+pub fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> {
+    add_column_if_missing(
+        conn,
+        "conversations",
+        "automation_last_customer_thread_id",
+        "INTEGER",
+    )
+}
+
+/// The once-guard decision for `on_conversation_changed` (clean-audit
+/// item 57): given the conversation's already-consumed customer thread id
+/// (`conversations.automation_last_customer_thread_id`) and the newest
+/// non-deleted customer thread the change delivered, decide which trigger —
+/// if any — this change should fire.
+///
+/// * `None` customer thread — nothing customer-flavored happened: no trigger.
+/// * the newest customer thread was already consumed — a re-sync, a tag
+///   change, a status flip: no trigger (the pre-fix code re-fired BOTH
+///   triggers on every one of these).
+/// * the first customer thread ever seen for the conversation:
+///   `new_conversation`, once per conversation.
+/// * a later customer thread: `customer_reply`, once per thread.
+#[must_use]
+pub fn customer_thread_trigger_decision(
+    last_fired: Option<i64>,
+    newest_customer_thread: Option<i64>,
+) -> Option<&'static str> {
+    match newest_customer_thread {
+        None => None,
+        Some(thread) if last_fired == Some(thread) => None,
+        Some(_) if last_fired.is_none() => Some("new_conversation"),
+        Some(_) => Some("customer_reply"),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationIssue {
     pub path: String,
@@ -2245,5 +2289,78 @@ mod batch19_tests {
             serde_json::json!(["vip"]),
             "the full tag list reaches the platform push"
         );
+    }
+}
+
+/// Clean-audit batch 25 (item 57): the `new_conversation` /
+/// `customer_reply` trigger pair carries a once-guard — the pre-fix
+/// `on_conversation_changed` fired BOTH triggers on every customer-latest
+/// sync, so a customer's reply re-ran "new conversation" rules (auto-acks
+/// re-sent) and a tag change re-fired the pair.
+#[cfg(test)]
+mod batch25_item57_tests {
+    use super::*;
+
+    #[test]
+    fn the_first_customer_thread_ever_seen_fires_new_conversation() {
+        assert_eq!(
+            customer_thread_trigger_decision(None, Some(41)),
+            Some("new_conversation"),
+            "no thread has ever fired for this conversation — the first customer thread is THE new conversation"
+        );
+    }
+
+    #[test]
+    fn a_later_customer_thread_fires_customer_reply_only() {
+        assert_eq!(
+            customer_thread_trigger_decision(Some(41), Some(57)),
+            Some("customer_reply"),
+            "a thread the guard has not consumed is a reply, never a second new_conversation"
+        );
+    }
+
+    #[test]
+    fn a_consumed_customer_thread_fires_nothing() {
+        assert_eq!(
+            customer_thread_trigger_decision(Some(57), Some(57)),
+            None,
+            "a re-sync / tag change / status flip that delivers no new customer thread must stay silent — the pre-fix code re-fired both triggers here"
+        );
+    }
+
+    #[test]
+    fn a_conversation_without_customer_threads_fires_nothing() {
+        assert_eq!(
+            customer_thread_trigger_decision(None, None),
+            None,
+            "no customer thread at all — nothing to fire"
+        );
+        assert_eq!(
+            customer_thread_trigger_decision(Some(12), None),
+            None,
+            "guard set but the customer thread vanished (deleted): stay silent"
+        );
+    }
+
+    #[test]
+    fn m060_adds_the_once_guard_column_idempotently() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        let has_column = |c: &Connection| {
+            let mut stmt = c
+                .prepare("PRAGMA table_info(conversations)")
+                .expect("pragma");
+            stmt.query_map([], |r| r.get::<_, String>(1))
+                .expect("map")
+                .filter_map(|x| x.ok())
+                .any(|col| col == "automation_last_customer_thread_id")
+        };
+        assert!(
+            has_column(&conn),
+            "the once-guard column exists after bootstrap"
+        );
+        // Idempotent on re-run (fresh DBs and upgraded DBs converge).
+        apply_m060_automation_once_guard(&conn).expect("second apply is a no-op");
+        assert!(has_column(&conn));
     }
 }

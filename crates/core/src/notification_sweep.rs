@@ -41,22 +41,43 @@ pub fn sweep(conn: &Connection, bus: Option<&crate::eventing::EventBus>) -> Resu
         }
     };
 
-    let result = run_sub_sweeps(conn, bus, cursor, &sweep_at);
+    let (created, processed_to) = run_sub_sweeps(conn, bus, cursor, &sweep_at)?;
 
-    crate::settings::set_i64(conn, CURSOR_KEY, max_event_id(conn))?;
+    // Clean-audit item 65: the cursor used to jump to `max_event_id` no
+    // matter what the event sweep actually read. The event lane reads at
+    // most 500 rows per sweep; with a bigger backlog the remainder was
+    // skipped FOREVER (the cursor sailed past it). The cursor now stops
+    // where the sweep's read stopped: at the 500th row when the cap hit,
+    // or at the table's ceiling when every matching event was processed
+    // (`processed_to` is `None` only when the read provably matched
+    // nothing, which is also safe to advance past — the type filter can
+    // never select those rows).
+    let ceiling = max_event_id(conn);
+    let next_cursor = match processed_to {
+        Some(cap) => cap.min(ceiling).max(cursor),
+        None => ceiling.max(cursor),
+    };
+    crate::settings::set_i64(conn, CURSOR_KEY, next_cursor)?;
     crate::settings::set_string(conn, SWEEP_AT_KEY, &now)?;
 
-    result.map(|created| SweepOutcome { created })
+    Ok(SweepOutcome { created })
 }
+
+/// `(created, processed_to)`: `processed_to` is the event id the
+/// conversation-events sweep's read stopped at when the 500-row cap hit
+/// (the cursor must not advance past it), or `None` when the read matched
+/// everything it could (or nothing at all).
+type SubSweepOutcome = (u32, Option<i64>);
 
 fn run_sub_sweeps(
     conn: &Connection,
     bus: Option<&crate::eventing::EventBus>,
     cursor: i64,
     sweep_at: &str,
-) -> Result<u32> {
+) -> Result<SubSweepOutcome> {
     let mut created = 0u32;
-    created += sweep_conversation_events(conn, bus, cursor)?;
+    let (event_created, processed_to) = sweep_conversation_events(conn, bus, cursor)?;
+    created += event_created;
     created += sweep_sla(conn, bus)?;
     created += sweep_automation_approvals(conn, bus)?;
     created += sweep_failed_jobs(conn, bus, sweep_at)?;
@@ -66,7 +87,7 @@ fn run_sub_sweeps(
     created += sweep_issue_spikes(conn, bus, sweep_at)?;
     created += sweep_ai_escalations(conn, bus, sweep_at)?;
     created += sweep_ratings(conn, bus, sweep_at)?;
-    Ok(created)
+    Ok((created, processed_to))
 }
 
 struct EventRow {
@@ -109,38 +130,70 @@ fn load_conversation(conn: &Connection, id_or_remote: i64) -> Result<Option<Conv
     Ok(row)
 }
 
+/// The event lane's read cap: at most this many activity events are
+/// processed per sweep (clean-audit item 65 — the remainder stays queued
+/// behind the cursor instead of being skipped forever).
+const EVENT_SWEEP_CAP: usize = 500;
+
 fn sweep_conversation_events(
     conn: &Connection,
     bus: Option<&crate::eventing::EventBus>,
     after_event_id: i64,
-) -> Result<u32> {
-    let events: Vec<EventRow> = {
+) -> Result<(u32, Option<i64>)> {
+    // Clean-audit item 65: fetch one row PAST the cap. If it exists, the
+    // backlog exceeds what this sweep can process — only the first
+    // EVENT_SWEEP_CAP rows run, and the 500th row's id is returned so the
+    // caller parks the cursor there (the old code advanced the cursor to
+    // max_event_id and the >500 remainder was never looked at again).
+    let mut events: Vec<(i64, EventRow)> = {
         let mut stmt = conn.prepare(
-            "SELECT e.conversation_id, e.thread_local_id, e.event_type,
+            "SELECT e.id, e.conversation_id, e.thread_local_id, e.event_type,
                     e.actor_id, e.metadata, e.dedup_key
              FROM activity_events e
              WHERE e.id > ?1
                AND e.event_type IN ('customer_message', 'internal_note', 'assignment_changed')
-             ORDER BY e.id LIMIT 500",
+             ORDER BY e.id LIMIT ?2",
         )?;
 
-        stmt.query_map(params![after_event_id], |r| {
-            Ok(EventRow {
-                conversation_id: r.get(0)?,
-                thread_local_id: r.get(1)?,
-                event_type: r.get(2)?,
-                actor_local_id: r.get(3)?,
-                metadata: r.get(4)?,
-                dedup_key: r.get(5)?,
-            })
+        stmt.query_map(params![after_event_id, (EVENT_SWEEP_CAP + 1) as i64], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                EventRow {
+                    conversation_id: r.get(1)?,
+                    thread_local_id: r.get(2)?,
+                    event_type: r.get(3)?,
+                    actor_local_id: r.get(4)?,
+                    metadata: r.get(5)?,
+                    dedup_key: r.get(6)?,
+                },
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     if events.is_empty() {
-        return Ok(0);
+        return Ok((0, None));
     }
+    let hit_cap = events.len() > EVENT_SWEEP_CAP;
+    if hit_cap {
+        events.truncate(EVENT_SWEEP_CAP);
+    }
+    let processed_to = if hit_cap {
+        // Park the cursor at the last event this sweep actually processed;
+        // the surplus row (and anything behind it) is next sweep's work.
+        Some(
+            events
+                .last()
+                .map(|(id, _)| *id)
+                .expect("hit_cap implies at least one row"),
+        )
+    } else {
+        // Every matching event after the cursor was processed; non-matching
+        // events can never be selected by the filter, so the caller may
+        // safely advance to the table ceiling.
+        None
+    };
     let mut created = 0u32;
-    for e in &events {
+    for (_, e) in &events {
         let Some(conv) = load_conversation(conn, e.conversation_id)? else {
             continue;
         };
@@ -245,7 +298,7 @@ fn sweep_conversation_events(
             _ => {}
         }
     }
-    Ok(created)
+    Ok((created, processed_to))
 }
 
 fn sweep_sla(conn: &Connection, bus: Option<&crate::eventing::EventBus>) -> Result<u32> {
@@ -860,5 +913,169 @@ fn trim(s: &str, max: usize) -> String {
         format!("{cut}…")
     } else {
         t.to_string()
+    }
+}
+
+/// Clean-audit batch 25 (item 65): the sweep cursor must never advance past
+/// events it did not process — the pre-fix `sweep` jumped the cursor to
+/// `max_event_id` after reading at most 500 rows, so any backlog beyond 500
+/// was skipped forever.
+#[cfg(test)]
+mod batch25_item65_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        // A settled sync state so the sweep runs its lanes instead of
+        // initializing its cursor and returning.
+        crate::sync_engine::set_state(&conn, "LIVE");
+        conn
+    }
+
+    fn seed_backlog(conn: &Connection, count: usize) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (501, 51, 'Backlog', 'p', 'active')",
+            [],
+        )
+        .expect("conversation");
+        for i in 0..count {
+            conn.execute(
+                "INSERT INTO activity_events
+                    (conversation_id, event_type, actor_type, occurred_at, dedup_key,
+                     thread_local_id, source, metadata)
+                 VALUES (1, 'customer_message', 'customer', '2026-10-23T00:00:00Z', ?1,
+                         NULL, 'test', NULL)",
+                params![format!("evt-{i:04}")],
+            )
+            .expect("event");
+        }
+        conn.query_row("SELECT MAX(id) FROM activity_events", [], |r| r.get(0))
+            .expect("max id")
+    }
+
+    fn notification_exists(conn: &Connection, dedup: &str) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM notifications WHERE dedup_key = ?1",
+            params![dedup],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false)
+    }
+
+    #[test]
+    fn a_backlog_beyond_the_cap_is_not_skipped_forever() {
+        let conn = conn();
+        let max_id = seed_backlog(&conn, 502);
+        // An already-initialized sweep (the very first sweep on a fresh DB
+        // only anchors its cursor at the ceiling; this test drives the
+        // steady-state behavior).
+        crate::settings::set_i64(&conn, CURSOR_KEY, 0).expect("cursor seeded");
+        crate::settings::set_string(&conn, SWEEP_AT_KEY, "2026-10-23 00:00:00")
+            .expect("sweep_at seeded");
+        let id_of_500th: i64 = conn
+            .query_row(
+                "SELECT id FROM activity_events WHERE dedup_key = 'evt-0499'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("the 500th event");
+
+        // First sweep: reads 501 rows, processes the first 500, and the
+        // cursor parks at the 500th event's id — NOT at max_event_id.
+        let outcome = sweep(&conn, None).expect("first sweep");
+        assert_eq!(
+            outcome.created, 500,
+            "exactly the cap's worth of events processed"
+        );
+        let cursor = crate::settings::get_i64(&conn, CURSOR_KEY, -1).expect("cursor");
+        assert_eq!(
+            cursor, id_of_500th,
+            "the cursor stops where the read stopped, not at the table ceiling ({max_id})"
+        );
+        assert!(cursor < max_id, "the two surplus events stay queued");
+        assert!(
+            notification_exists(&conn, "n:evt:customer_replied:evt-0499"),
+            "the 500th event was processed"
+        );
+        assert!(
+            !notification_exists(&conn, "n:evt:customer_replied:evt-0500"),
+            "the 501st event was NOT processed by the first sweep (pre-fix it was skipped forever)"
+        );
+
+        // Second sweep drains the remainder and then reaches the ceiling.
+        let outcome = sweep(&conn, None).expect("second sweep");
+        assert_eq!(outcome.created, 2, "the two surplus events run now");
+        let cursor = crate::settings::get_i64(&conn, CURSOR_KEY, -1).expect("cursor");
+        assert_eq!(
+            cursor, max_id,
+            "the cursor reaches the ceiling once drained"
+        );
+        assert!(notification_exists(
+            &conn,
+            "n:evt:customer_replied:evt-0500"
+        ));
+        assert!(notification_exists(
+            &conn,
+            "n:evt:customer_replied:evt-0501"
+        ));
+
+        // Third sweep is quiet.
+        let outcome = sweep(&conn, None).expect("third sweep");
+        assert_eq!(outcome.created, 0, "nothing left to process");
+    }
+
+    #[test]
+    fn a_small_backlog_advances_the_cursor_to_the_ceiling() {
+        let conn = conn();
+        let max_id = seed_backlog(&conn, 3);
+        crate::settings::set_i64(&conn, CURSOR_KEY, 0).expect("cursor seeded");
+        crate::settings::set_string(&conn, SWEEP_AT_KEY, "2026-10-23 00:00:00")
+            .expect("sweep_at seeded");
+        let outcome = sweep(&conn, None).expect("sweep");
+        assert_eq!(outcome.created, 3);
+        let cursor = crate::settings::get_i64(&conn, CURSOR_KEY, -1).expect("cursor");
+        assert_eq!(cursor, max_id, "no cap hit — the cursor advances fully");
+        assert!(notification_exists(
+            &conn,
+            "n:evt:customer_replied:evt-0002"
+        ));
+    }
+
+    #[test]
+    fn non_matching_events_alone_advance_the_cursor() {
+        let conn = conn();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (502, 52, 'Quiet', 'p', 'active')",
+            [],
+        )
+        .expect("conversation");
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO activity_events
+                    (conversation_id, event_type, actor_type, occurred_at, dedup_key,
+                     thread_local_id, source, metadata)
+                 VALUES (1, 'status_changed', 'user', '2026-10-23T00:00:00Z', ?1,
+                         NULL, 'test', NULL)",
+                params![format!("quiet-{i}")],
+            )
+            .expect("event");
+        }
+        let max_id: i64 = conn
+            .query_row("SELECT MAX(id) FROM activity_events", [], |r| r.get(0))
+            .expect("max");
+        crate::settings::set_i64(&conn, CURSOR_KEY, 0).expect("cursor seeded");
+        crate::settings::set_string(&conn, SWEEP_AT_KEY, "2026-10-23 00:00:00")
+            .expect("sweep_at seeded");
+        let outcome = sweep(&conn, None).expect("sweep");
+        assert_eq!(outcome.created, 0, "no notification-bearing events");
+        let cursor = crate::settings::get_i64(&conn, CURSOR_KEY, -1).expect("cursor");
+        assert_eq!(
+            cursor, max_id,
+            "the filter can never select those rows — the cursor advances"
+        );
     }
 }

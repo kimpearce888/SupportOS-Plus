@@ -856,6 +856,52 @@ fn mark_chunk_failed(conn: &Connection, table: &str, chunk_id: i64) -> Result<()
     Ok(())
 }
 
+/// Clean-audit item 60: sweep the vector store's `table` family for points
+/// whose backing chunk row no longer exists. Re-chunk lanes
+/// (`rechunk_conversation`, `rechunk_doc_article`, the knowledge
+/// re-import/delete) replace chunk rows in bulk with NEW ids and none of
+/// them could reach a store handle — the orphaned old points kept serving
+/// their stale text snapshots in every semantic search (or, for families
+/// that re-verify the chunk, crowding the dense top-k). The sweep runs from
+/// the embed pipeline, which holds both the main database (the live chunk
+/// ids) and the store.
+fn prune_orphaned_vectors(
+    conn: &Connection,
+    table: &str,
+    qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
+) {
+    use crate::vectorstore_sqlitevec::namespaced_chunk_point_id;
+    let Some(index) = qdrant else {
+        return;
+    };
+    let entity_type = entity_type_for(table);
+    let live_chunk_ids: Vec<i64> = {
+        let Ok(mut stmt) = conn.prepare(&format!("SELECT id FROM {table}")) else {
+            return;
+        };
+        stmt.query_map([], |r| r.get::<_, i64>(0))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    };
+    let live_point_ids: Vec<i64> = live_chunk_ids
+        .iter()
+        // A chunk id that cannot map into its family's point-id band never
+        // produced a point (the upsert fails loudly on those), so leaving
+        // it out of the live set is correct.
+        .filter_map(|chunk_id| namespaced_chunk_point_id(entity_type, *chunk_id).ok())
+        .collect();
+    if let Some(removed) = index.prune_orphaned_points(entity_type, &live_point_ids)
+        && removed > 0
+    {
+        tracing::info!(
+            operation = "prune_orphaned_vectors",
+            family = entity_type,
+            removed,
+            "orphaned vector points removed (their chunks were deleted or re-chunked)"
+        );
+    }
+}
+
 fn embed_pending_chunks(
     conn: &Connection,
     table: &str,
@@ -865,6 +911,12 @@ fn embed_pending_chunks(
     // the pending list is read, so freshly reset chunks are picked up in
     // this same pass.
     ensure_vector_id_schema_v2(conn, qdrant)?;
+    // Clean-audit item 60: sweep this family's orphaned vector points —
+    // chunks deleted or re-chunked out from under the store (a re-chunk
+    // hands every chunk a NEW id, so the old points kept matching with
+    // their stale text snapshots forever). Runs before the pending check
+    // so pure deletions (nothing left to embed) are still swept.
+    prune_orphaned_vectors(conn, table, qdrant);
     let pending = list_pending_chunks(conn, table)?;
     if pending.is_empty() {
         return Ok(0);
