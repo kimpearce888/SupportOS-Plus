@@ -119,22 +119,14 @@ resolution subqueries missing deleted_at, the org-name linking that
 ignores NOCASE, and the CSV export without a formula-injection guard) —
 verified and recorded in `completed.md`.
 
+Batch 30 = items 107-116 — in progress (moved to `progress.md`).
+
 ### MEDIUM — wrong behavior on realistic paths
 
 56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of any batch until then)
 
 ### LOW — edge cases, provable minor defects
 
-107. [low|bug] redact_string byte-slicing panic (dead caller) — config.rs:304-306
-108. [low|bug] Digest doc counts: space-format vs ISO-T lexical comparison — digest.rs:471
-109. [low|bug] New-conv windows key on local_created_at; deleted-filter claim false — reports.rs:133,251-256
-110. [low|issue] %W year-boundary week split — reports.rs:236
-111. [low|issue] LIMIT caps silently undercount alert claims — analytics.rs:219,241-246
-112. [low|issue] Concentration denominator counts NULL-customer conversations — analytics.rs:483,512
-113. [low|issue] open_closed_distribution drops pending — issue_impact.rs:85
-114. [low|issue] email_domain filter unanchored, op ignored — segment.rs:1575
-115. [low|bug] campaign_reconcile references nonexistent updated_at column — outreach.rs:1047-1054
-116. [low|bug] ORDER BY remote_created_at never populated by sync (2 sites) — interaction_current.rs:808, interaction_engine.rs:1448
 117. [low|bug] refresh_replies can count the campaign's own message (clock skew) — outreach.rs:1146-1150
 118. [low|bug] Duplicate graph edges for mutual links — support_graph.rs:1883-1884
 119. [low|bug] Tag-filter case-folding asymmetry (Rust Unicode vs SQL ASCII LOWER) — saved_views.rs:1692-1698
