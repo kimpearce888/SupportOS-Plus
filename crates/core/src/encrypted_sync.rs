@@ -399,6 +399,13 @@ fn decrypt_to_temp(
     bundle_path: &Path,
     passphrase: &str,
 ) -> std::result::Result<PathBuf, String> {
+    // Clean-audit item 48: `.import-*.tmp` files hold DECRYPTED plaintext
+    // databases. A crash (or the pre-fix verify error paths) could leave
+    // them behind forever. Every decrypt entry point sweeps stale
+    // leftovers — only temps whose embedded creation timestamp is at
+    // least an hour old, so a concurrent verify/import's fresh temp is
+    // never touched.
+    sweep_stale_import_temps(bundles_dir);
     if !bundle_path.exists() {
         return Err("Bundle file not found.".into());
     }
@@ -461,6 +468,36 @@ fn decrypt_to_temp(
     Ok(temp_path)
 }
 
+/// Clean-audit item 48: remove leftover decrypted-plaintext import temps
+/// from crashed runs. The `.import-{millis}.tmp` name embeds the creation
+/// time; anything at least an hour old is definitively stale (a verify or
+/// import finishes in seconds) and is deleted. Fresh temps are left alone
+/// so a concurrent operation keeps working.
+fn sweep_stale_import_temps(bundles_dir: &Path) {
+    const STALE_AFTER_MS: i64 = 60 * 60 * 1000;
+    let Ok(entries) = fs::read_dir(bundles_dir) else {
+        return;
+    };
+    let cutoff = chrono::Utc::now().timestamp_millis() - STALE_AFTER_MS;
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(stem) = name
+            .strip_prefix(".import-")
+            .and_then(|s| s.strip_suffix(".tmp"))
+        else {
+            continue;
+        };
+        let Ok(created_ms) = stem.parse::<i64>() else {
+            continue;
+        };
+        if created_ms < cutoff {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 fn integrity_check(path: &Path) -> bool {
     Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .and_then(|test| test.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)))
@@ -483,35 +520,43 @@ pub fn verify_bundle(
         let info = snapshot_info(&temp)?;
         let schema = schema_version_of_file(&temp);
         let snap = Connection::open_with_flags(&temp, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        let check = check_schema_compatibility(conn, &snap)?;
-        let _ = fs::remove_file(&temp);
-        match check {
-            SchemaCheck::Incompatible { bundle, local } => Ok(json!({
+        let check = check_schema_compatibility(conn, &snap);
+        // Release the file handle before the temp is removed (Windows
+        // refuses to delete open files).
+        drop(snap);
+        let check = check?;
+        Ok(match check {
+            SchemaCheck::Incompatible { bundle, local } => json!({
                 "ok": false,
                 "message": format!(
                     "The bundle was created by an incompatible database schema (bundle fingerprint {}, local {}). Importing it could corrupt your data - nothing was changed.",
                     fp_short(&bundle),
                     fp_short(&local)
                 )
-            })),
-            SchemaCheck::CompatibleAncestor => Ok(json!({
+            }),
+            SchemaCheck::CompatibleAncestor => json!({
                 "ok": true,
                 "message": format!(
                     "Bundle verified: {} conversations, {} customers, schema {} — an older compatible schema that will be brought up to date on restart.",
                     info.conversations, info.customers, schema
                 ),
                 "info": info
-            })),
-            SchemaCheck::Identical => Ok(json!({
+            }),
+            SchemaCheck::Identical => json!({
                 "ok": true,
                 "message": format!(
                     "Bundle verified: {} conversations, {} customers, schema {}.",
                     info.conversations, info.customers, schema
                 ),
                 "info": info
-            })),
-        }
+            }),
+        })
     })();
+    // Clean-audit item 48: the decrypted plaintext temp is removed on
+    // EVERY path. The pre-fix code only cleaned the success path — a
+    // failed snapshot_info, schema-version read, or schema check leaked
+    // the fully decrypted database into the bundles directory forever.
+    let _ = fs::remove_file(&temp);
     result
         .unwrap_or_else(|e| json!({ "ok": false, "message": format!("Verification failed: {e}") }))
 }
@@ -843,6 +888,109 @@ mod tests {
         let result = verify_bundle(&conn, &dir, &bundle, "passphrase-ok");
         assert_eq!(result["ok"], json!(false));
         assert!(result["message"].as_str().unwrap().contains("modified"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Hand-craft a valid bundle whose decrypted payload is arbitrary
+    /// bytes — decryption succeeds, but snapshot_info fails on it, which
+    /// is exactly the error path that used to leak the plaintext temp.
+    fn craft_bundle_with_plaintext(dir: &Path, passphrase: &str, plain: &[u8]) -> PathBuf {
+        let salt = crypto::random_salt();
+        let key = derive_key(passphrase, &salt).expect("key");
+        let (iv, ciphertext) = crypto::encrypt(&key, plain).expect("encrypt");
+        let header = BundleHeader {
+            v: FORMAT_VERSION,
+            kdf: KdfParams {
+                name: "scrypt".into(),
+                n: SCRYPT_N,
+                r: 8,
+                p: 1,
+                salt: B64.encode(salt),
+            },
+            cipher: "aes-256-gcm".into(),
+            iv: B64.encode(iv),
+            created_at: now_iso(),
+            app_version: None,
+            conversations: None,
+            customers: None,
+            sha256: None,
+            schema_fingerprint: None,
+        };
+        let header_bytes = serde_json::to_vec(&header).expect("header");
+        let mut out = Vec::with_capacity(MAGIC.len() + 4 + header_bytes.len() + ciphertext.len());
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&(header_bytes.len() as u32).to_be_bytes());
+        out.extend_from_slice(&header_bytes);
+        out.extend_from_slice(&ciphertext);
+        let path = dir.join("crafted.sosync");
+        fs::write(&path, out).expect("write bundle");
+        path
+    }
+
+    fn import_temps(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .expect("read dir")
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(".import-") && n.ends_with(".tmp"))
+            .collect()
+    }
+
+    /// Clean-audit item 48: a verify that decrypts fine but fails later
+    /// (the payload is not a SQLite database) must still remove the
+    /// decrypted plaintext temp — the pre-fix code only cleaned the
+    /// success path and leaked the plaintext database to disk.
+    #[test]
+    fn audit48_verify_error_path_removes_the_plaintext_temp() {
+        let dir = temp_dir("leak");
+        let conn = Connection::open_in_memory().expect("memory db");
+        let bundle = craft_bundle_with_plaintext(
+            &dir,
+            "passphrase-ok",
+            b"this is definitely not a sqlite database",
+        );
+        let result = verify_bundle(&conn, &dir, &bundle, "passphrase-ok");
+        assert_eq!(result["ok"], json!(false), "verify must fail on garbage");
+        assert!(
+            import_temps(&dir).is_empty(),
+            "the decrypted plaintext temp must be removed on error paths"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Clean-audit item 48: the success path keeps the bundles directory
+    /// free of plaintext temps too.
+    #[test]
+    fn audit48_verify_success_path_leaves_no_temp() {
+        let dir = temp_dir("clean");
+        let src = dir.join("a.db");
+        let conn = schema_db(&src);
+        let exported = export_bundle(&conn, &dir, "passphrase-ok");
+        assert!(exported.ok, "export failed: {}", exported.message);
+        let bundle = PathBuf::from(exported.path.expect("bundle path"));
+        let ok = verify_bundle(&conn, &dir, &bundle, "passphrase-ok");
+        assert_eq!(ok["ok"], json!(true), "verify: {}", ok["message"]);
+        assert!(
+            import_temps(&dir).is_empty(),
+            "no plaintext temp survives a successful verify"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Clean-audit item 48: the sweep removes only stale temps — anything
+    /// at least an hour old goes, fresh temps (a concurrent verify/import)
+    /// stay untouched.
+    #[test]
+    fn audit48_sweep_removes_only_stale_temps() {
+        let dir = temp_dir("sweep");
+        let now = chrono::Utc::now().timestamp_millis();
+        let stale = dir.join(format!(".import-{}.tmp", now - 2 * 60 * 60 * 1000));
+        let fresh = dir.join(format!(".import-{}.tmp", now));
+        fs::write(&stale, b"stale plaintext").expect("stale");
+        fs::write(&fresh, b"fresh plaintext").expect("fresh");
+        sweep_stale_import_temps(&dir);
+        assert!(!stale.exists(), "the two-hour-old temp is swept");
+        assert!(fresh.exists(), "the fresh temp survives the sweep");
         let _ = fs::remove_dir_all(&dir);
     }
 

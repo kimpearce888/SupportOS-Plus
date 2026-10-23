@@ -1195,6 +1195,17 @@ pub fn update_customer(conn: &Connection, customer_id: i64, patch: &CustomerPatc
     if !exists {
         return Ok(false);
     }
+    // Clean-audit item 47: the old primary email must be captured BEFORE
+    // the UPDATE below overwrites the column — the email-set maintenance
+    // needs it to replace exactly that one row, never the whole set.
+    let old_email: Option<String> = conn
+        .query_row(
+            "SELECT email FROM customers WHERE id = ?1",
+            params![customer_id],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
@@ -1243,16 +1254,29 @@ pub fn update_customer(conn: &Connection, customer_id: i64, patch: &CustomerPatc
         )?;
     }
     if let Some(email) = patch.email.as_ref() {
-        let _ = conn.execute(
-            "DELETE FROM customer_emails WHERE customer_id = ?1",
-            params![customer_id],
-        );
+        // Clean-audit item 47: this used to DELETE every stored email for
+        // the customer and swallow both statements' errors — one patch of
+        // the primary email destroyed every secondary address the platform
+        // sync had recorded (personal/other), and a failed INSERT silently
+        // left the customer with none. The patch's email field is the
+        // PRIMARY address: only that one value is replaced in the
+        // customer_emails set, every other row survives, and failures now
+        // propagate instead of discarding the customer's contact data.
         if let Some(e) = email.as_deref().filter(|e| !e.trim().is_empty()) {
-            let _ = conn.execute(
+            if let Some(old) = old_email.as_deref().filter(|o| !o.trim().is_empty())
+                && !old.trim().eq_ignore_ascii_case(e.trim())
+            {
+                conn.execute(
+                    "DELETE FROM customer_emails
+                      WHERE customer_id = ?1 AND value = ?2",
+                    params![customer_id, old.trim()],
+                )?;
+            }
+            conn.execute(
                 "INSERT OR IGNORE INTO customer_emails (customer_id, value, type)
                  VALUES (?1, ?2, 'work')",
                 params![customer_id, e.trim()],
-            );
+            )?;
         }
     }
     let changed_fields: Vec<Value> = [
@@ -1370,4 +1394,137 @@ pub fn timeline_rebuild(conn: &Connection) -> Result<usize> {
         [],
     )?;
     Ok(events)
+}
+
+#[cfg(test)]
+mod batch24_audit47_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// A customer whose email set mirrors what a platform sync records:
+    /// a primary work address plus a secondary personal address.
+    fn customer_with_two_emails() -> (Connection, i64) {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        let id = create_customer(
+            &conn,
+            &NewCustomer {
+                first_name: Some("Ada".into()),
+                last_name: Some("Lovelace".into()),
+                email: Some("ada@work.example".into()),
+                organization: None,
+                job_title: None,
+                phone: None,
+            },
+        )
+        .expect("customer");
+        conn.execute(
+            "INSERT INTO customer_emails (customer_id, value, type)
+             VALUES (?1, 'ada@personal.example', 'personal')",
+            params![id],
+        )
+        .expect("secondary email");
+        (conn, id)
+    }
+
+    fn stored_emails(conn: &Connection, id: i64) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT value FROM customer_emails WHERE customer_id = ?1 ORDER BY value")
+            .expect("prepare");
+        let rows: Vec<String> = stmt
+            .query_map(params![id], |r| r.get(0))
+            .expect("rows")
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+        rows
+    }
+
+    /// Clean-audit item 47: patching the primary email must replace only
+    /// that address in the stored set — the platform-synced secondary
+    /// survives, the old primary is swapped for the new one, and the
+    /// customers.email column follows the patch.
+    #[test]
+    fn audit47_email_patch_preserves_secondary_emails() {
+        let (conn, id) = customer_with_two_emails();
+        let applied = update_customer(
+            &conn,
+            id,
+            &CustomerPatch {
+                email: Some(Some("ada@newwork.example".into())),
+                ..CustomerPatch::default()
+            },
+        )
+        .expect("patch");
+        assert!(applied, "the customer exists, the patch applies");
+        let primary: Option<String> = conn
+            .query_row(
+                "SELECT email FROM customers WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .expect("primary");
+        assert_eq!(primary.as_deref(), Some("ada@newwork.example"));
+        assert_eq!(
+            stored_emails(&conn, id),
+            vec![
+                "ada@newwork.example".to_string(),
+                "ada@personal.example".to_string(),
+            ],
+            "the old primary is replaced in place; the secondary survives"
+        );
+    }
+
+    /// Clean-audit item 47: clearing the primary email must not shred the
+    /// stored set — the addresses the platform sync recorded stay.
+    #[test]
+    fn audit47_clearing_the_primary_keeps_the_stored_set() {
+        let (conn, id) = customer_with_two_emails();
+        update_customer(
+            &conn,
+            id,
+            &CustomerPatch {
+                email: Some(None),
+                ..CustomerPatch::default()
+            },
+        )
+        .expect("patch");
+        let primary: Option<String> = conn
+            .query_row(
+                "SELECT email FROM customers WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .expect("primary");
+        assert_eq!(primary, None, "the primary column is cleared");
+        assert_eq!(
+            stored_emails(&conn, id),
+            vec![
+                "ada@personal.example".to_string(),
+                "ada@work.example".to_string(),
+            ],
+            "the stored set is untouched"
+        );
+    }
+
+    /// Clean-audit item 47: a failing email write must surface as an
+    /// error instead of being silently swallowed.
+    #[test]
+    fn audit47_email_write_failures_propagate() {
+        let (conn, id) = customer_with_two_emails();
+        conn.execute("DROP TABLE customer_emails", [])
+            .expect("drop emails table");
+        let result = update_customer(
+            &conn,
+            id,
+            &CustomerPatch {
+                email: Some(Some("ada@newwork.example".into())),
+                ..CustomerPatch::default()
+            },
+        );
+        assert!(
+            result.is_err(),
+            "a failed email-set write must fail the patch, not vanish"
+        );
+    }
 }

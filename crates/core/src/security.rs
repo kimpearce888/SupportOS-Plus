@@ -105,11 +105,27 @@ pub fn sanitize_thread_html(dirty: &str) -> String {
     builder.set_tag_attribute_value("a", "target", "_blank");
     builder.attribute_filter(move |element, attribute, value| {
         if attribute == "style" {
-            if value.is_empty() || dangerous_css.is_match(value) {
+            if value.is_empty() {
                 return None;
             }
-            let clipped: String = value.chars().take(2000).collect();
-            return Some(std::borrow::Cow::Owned(clipped));
+            // Clean-audit item 50: the blocklist must see through CSS-level
+            // obfuscation. It used to run on the raw attribute value, so a
+            // comment inside a keyword (`ur/*x*/l(`) or a backslash escape
+            // (`\75 rl(`) sailed past it while the CSS engine still read
+            // `url(`. The list now runs on the decoded form of everything
+            // that can survive the 2000-char clip; the original clipped
+            // value is kept only when the decoded form is clean.
+            let clip: String = value.chars().take(2000).collect();
+            let decoded = match normalize_css_for_blocklist(&clip) {
+                Some(d) => d,
+                // Still escaping after the decode bound — adversarial
+                // layering, not a legitimate stylesheet.
+                None => return None,
+            };
+            if dangerous_css.is_match(&decoded) {
+                return None;
+            }
+            return Some(std::borrow::Cow::Owned(clip));
         }
         if element == "img" && attribute == "src" && value.trim().starts_with("data:text/html") {
             return None;
@@ -123,6 +139,60 @@ pub fn sanitize_thread_html(dirty: &str) -> String {
         Some(std::borrow::Cow::Borrowed(value))
     });
     builder.clean(&pre).to_string()
+}
+
+/// Clean-audit item 50: decode CSS-level obfuscation so the
+/// dangerous-CSS blocklist cannot be bypassed. CSS comments (`/*…*/`)
+/// may appear between any two tokens — `ur/*x*/l(` still means `url(` —
+/// and backslash escapes spell any character: `\75 rl(` is `url(`,
+/// `behavior\3a` is `behavior:`. Comments are stripped first, then
+/// escapes are decoded to a fixpoint. `None` means the value was still
+/// carrying escapes after [`CSS_DECODE_PASSES`] productive rounds —
+/// impossible for a legitimate stylesheet (each productive round strictly
+/// shortens the value) and a sign of layered-escape evasion, so the
+/// caller rejects the attribute outright.
+fn normalize_css_for_blocklist(value: &str) -> Option<String> {
+    const CSS_DECODE_PASSES: usize = 64;
+    let comment_re = Regex::new(r"(?s)/\*.*?\*/").expect("static css comment regex");
+    let escape_re =
+        Regex::new(r"\\(?:[0-9A-Fa-f]{1,6}[ \t\r\n]?|[\s\S])").expect("static css escape regex");
+    let mut current = comment_re.replace_all(value, "").into_owned();
+    for _ in 0..CSS_DECODE_PASSES {
+        if !current.contains('\\') {
+            return Some(current);
+        }
+        let next = escape_re
+            .replace_all(&current, |caps: &regex::Captures<'_>| -> String {
+                let m = caps.get(0).expect("whole match").as_str();
+                let body = &m[1..];
+                let hex: String = body.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
+                if hex.is_empty() {
+                    // `\<char>`: the character itself.
+                    return body
+                        .chars()
+                        .next()
+                        .map(|c| c.to_string())
+                        .unwrap_or_default();
+                }
+                u32::from_str_radix(&hex, 16)
+                    .ok()
+                    .and_then(char::from_u32)
+                    .map(|c| c.to_string())
+                    .unwrap_or_default()
+            })
+            .into_owned();
+        if next == current {
+            // No decodable escape left (a lone trailing backslash can
+            // hide nothing) — the blocklist runs on what we have.
+            return Some(current);
+        }
+        current = next;
+    }
+    if current.contains('\\') {
+        None
+    } else {
+        Some(current)
+    }
 }
 
 const IMG_START_TAG_RE: &str = r#"(?is)<img\b(?:[^>"']|"[^"]*"|'[^']*')*>"#;
@@ -506,6 +576,24 @@ pub fn validate_ssrf_full(raw_url: &str) -> crate::error::Result<()> {
     Ok(())
 }
 
+/// Clean-audit item 51: the async twin of [`validate_ssrf_full`]. The
+/// sync version blocks the thread on getaddrinfo — correct on worker
+/// threads, catastrophic on an async executor (a slow resolver stalls
+/// every task on that worker). Async callers must use this variant: the
+/// literal checks stay inline (pure CPU, no I/O) and the DNS resolution
+/// runs on the blocking pool via [`check_url_resolved`].
+pub async fn validate_ssrf_full_async(raw_url: &str) -> crate::error::Result<()> {
+    let result = check_url_resolved(raw_url).await;
+    if result.ok {
+        Ok(())
+    } else {
+        Err(crate::error::Error::Config(format!(
+            "SSRF guard: {}",
+            result.reason.unwrap_or_else(|| "refused".into())
+        )))
+    }
+}
+
 pub struct RedactionPattern {
     pub name: &'static str,
     pub regex: Regex,
@@ -581,4 +669,206 @@ pub fn redact_text(text: &str, enabled: bool) -> (String, Vec<Value>) {
         }
     }
     (out, redactions)
+}
+
+#[cfg(test)]
+mod batch24_audit50_tests {
+    use super::*;
+
+    /// The sanitized output of a `<span style="…">` must not carry the
+    /// dangerous construct — the attribute is dropped entirely on a hit.
+    fn style_survives(style: &str) -> bool {
+        let dirty = format!(r#"<span style="{style}">hi</span>"#);
+        let clean = sanitize_thread_html(&dirty);
+        clean.contains("style=")
+    }
+
+    /// Clean-audit item 50: CSS comments between tokens must not hide
+    /// blocklisted constructs from the filter (`ur/*x*/l(` is `url(`).
+    #[test]
+    fn audit50_comment_bypass_is_blocked() {
+        assert!(
+            !style_survives("background: ur/*x*/l(javascript:alert(1))"),
+            "a comment inside 'url(' must not bypass the blocklist"
+        );
+        assert!(
+            !style_survives("color:red; @im/* */port 'evil.css'"),
+            "a comment inside '@import' must not bypass the blocklist"
+        );
+        assert!(
+            !style_survives("width: expr/* */ession(alert(1))"),
+            "a comment inside 'expression(' must not bypass the blocklist"
+        );
+        assert!(
+            !style_survives("position /* */: fixed"),
+            "a comment before the colon must not bypass the blocklist"
+        );
+    }
+
+    /// Clean-audit item 50: backslash escapes must not hide blocklisted
+    /// constructs (`\75 rl(` is `url(`, `behavior\3a` is `behavior:`).
+    #[test]
+    fn audit50_css_escape_bypass_is_blocked() {
+        assert!(
+            !style_survives("background: \\75 rl(javascript:alert(1))"),
+            "'\\75 rl(' decodes to 'url(' and must be blocked"
+        );
+        assert!(
+            !style_survives("background: \\75rl(javascript:alert(1))"),
+            "'\\75rl(' decodes to 'url(' and must be blocked"
+        );
+        assert!(
+            !style_survives("behavior\\3a url(#default#time2)"),
+            "'behavior\\3a' decodes to 'behavior:' and must be blocked"
+        );
+        assert!(
+            !style_survives("color: \\65 xpression(alert(1))"),
+            "'\\65 xpression(' decodes to 'expression(' and must be blocked"
+        );
+        assert!(
+            !style_survives("background: url(\\6a avascript:alert(1))"),
+            "an escaped scheme inside url() is still a javascript: url"
+        );
+    }
+
+    /// Clean-audit item 50: layered escapes (`\5c` decodes to a literal
+    /// backslash, building the next escape layer) must not outlast the
+    /// decoder — the attribute is rejected once the bound is hit.
+    #[test]
+    fn audit50_layered_escape_bypass_is_blocked() {
+        // `\5c\75 rl(` decodes in two rounds: `\` + `url(` → `url(`.
+        assert!(
+            !style_survives("background: \\5c\\75 rl(javascript:alert(1))"),
+            "layered escapes resolving to 'url(' must be blocked"
+        );
+        // Deep layering beyond the decode bound is rejected outright.
+        let mut deep = String::from("background: ");
+        for _ in 0..80 {
+            deep.push_str("\\5c");
+        }
+        deep.push_str("75 rl(javascript:alert(1))");
+        assert!(
+            !style_survives(&deep),
+            "escape layering beyond the decode bound must be rejected"
+        );
+    }
+
+    /// Clean-audit item 50: legitimate styling — including legitimate
+    /// escape usage such as `content: "\2014"` — still survives.
+    #[test]
+    fn audit50_benign_styles_survive() {
+        assert!(style_survives("color: red; font-size: 12px"));
+        assert!(style_survives("margin-top: 4px; text-align: center"));
+        assert!(style_survives("content: \"\\2014\""));
+        assert!(style_survives(
+            "font-family: \"Helvetica Neue\", sans-serif"
+        ));
+    }
+
+    /// Clean-audit item 50, unit level: the decoder resolves comments,
+    /// escapes, and layering to what a CSS engine would read.
+    #[test]
+    fn audit50_normalize_decodes_the_css_engine_view() {
+        assert_eq!(
+            normalize_css_for_blocklist("ur/*x*/l(").as_deref(),
+            Some("url(")
+        );
+        assert_eq!(
+            normalize_css_for_blocklist("\\75 rl(").as_deref(),
+            Some("url(")
+        );
+        assert_eq!(
+            normalize_css_for_blocklist("\\5c\\75 rl(").as_deref(),
+            Some("url(")
+        );
+        assert_eq!(
+            normalize_css_for_blocklist("behavior\\3a x").as_deref(),
+            // CSS consumes the single space after a hex escape, so
+            // `\3a x` is `:x` — exactly what the engine reads.
+            Some("behavior:x")
+        );
+        assert_eq!(
+            normalize_css_for_blocklist("color/*c*/: red").as_deref(),
+            Some("color: red")
+        );
+        assert_eq!(
+            normalize_css_for_blocklist("font-size: 12px").as_deref(),
+            Some("font-size: 12px")
+        );
+    }
+}
+
+#[cfg(test)]
+mod batch24_audit51_tests {
+    use super::*;
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+    }
+
+    /// Clean-audit item 51: the async guard refuses loopback/private
+    /// literals and non-http schemes without any DNS round-trip
+    /// (deterministic, offline) — same verdicts as the sync guard.
+    #[test]
+    fn audit51_async_guard_refuses_internal_literals() {
+        let rt = rt();
+        rt.block_on(async {
+            for url in [
+                "http://localhost/inbox",
+                "http://127.0.0.1/inbox",
+                "http://192.168.1.10/inbox",
+                "http://[::1]/inbox",
+                "file:///etc/passwd",
+            ] {
+                let err = validate_ssrf_full_async(url).await.expect_err(url);
+                let msg = err.to_string();
+                assert!(msg.contains("SSRF guard:"), "{url}: {msg}");
+            }
+        });
+    }
+
+    /// Clean-audit item 51: a public IPv4 literal passes without DNS
+    /// (deterministic, offline) — identical verdict to the sync guard.
+    #[test]
+    fn audit51_async_guard_accepts_public_literal() {
+        let rt = rt();
+        rt.block_on(async {
+            validate_ssrf_full_async("http://93.184.216.34/feed.json")
+                .await
+                .expect("public IP literal must pass without DNS");
+        });
+    }
+
+    /// Clean-audit item 51: the connector validation — an async fn that
+    /// used to call the blocking sync guard on the executor — now runs
+    /// the off-thread guard end to end.
+    #[test]
+    fn audit51_connector_validation_runs_the_async_guard() {
+        let rt = rt();
+        rt.block_on(async {
+            let refused = crate::connectors::validate_config(
+                std::path::Path::new("/tmp"),
+                "http",
+                None,
+                Some("http://localhost/feed.json"),
+            )
+            .await;
+            let refused_msg = refused.as_deref().unwrap_or_default().to_string();
+            assert!(
+                refused_msg.contains("URL refused"),
+                "localhost must be refused: {refused_msg}"
+            );
+            let ok = crate::connectors::validate_config(
+                std::path::Path::new("/tmp"),
+                "http",
+                None,
+                Some("http://93.184.216.34/feed.json"),
+            )
+            .await;
+            assert!(ok.is_none(), "public literal must pass: {ok:?}");
+        });
+    }
 }

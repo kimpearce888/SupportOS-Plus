@@ -262,9 +262,21 @@ fn anomaly_facts(conn: &Connection, start: &str, end: &str) -> Value {
         .unwrap_or(0);
     let backlog_week_ago: i64 = conn
         .query_row(
+            // Clean-audit item 55: the backlog "a week ago" must count
+            // what was open AT that moment, not what is open NOW. The
+            // pre-fix query filtered on the CURRENT status, so every
+            // ticket that was open a week ago and got closed during the
+            // period vanished from the baseline — the week-over-week
+            // comparison then flagged false "backlog jumps" whenever old
+            // tickets were simply worked down. Honest baseline: the
+            // conversation existed before the period start, was not
+            // deleted, and was open at the start — either still open
+            // now, or closed at/after the period start.
             "SELECT COUNT(*) FROM conversations
-              WHERE status IN ('active','pending') AND deleted_at IS NULL
-                AND COALESCE(remote_created_at, created_at) < ?1",
+              WHERE COALESCE(remote_created_at, created_at) < ?1
+                AND deleted_at IS NULL
+                AND ((closed_at IS NULL AND status IN ('active','pending'))
+                     OR (closed_at IS NOT NULL AND closed_at >= ?1))",
             params![start],
             |r| r.get(0),
         )
@@ -639,5 +651,136 @@ mod tests {
                 .unwrap_or_default()
                 .contains("absent, not zero")
         );
+    }
+}
+
+/// Clean-audit item 55: the backlog-jump baseline must be the backlog AS
+/// IT WAS a week ago. The pre-fix query counted only currently-open old
+/// tickets, so every ticket closed during the period vanished from the
+/// baseline — a team that worked down old tickets with flat volume got
+/// told its backlog "jumped" 50%+.
+#[cfg(test)]
+mod batch24_audit55_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    struct Bounds {
+        start: String,
+        end: String,
+        mid: String,
+    }
+
+    fn bounds() -> Bounds {
+        let end = Utc::now();
+        let start = end - chrono::Duration::try_days(7).unwrap_or_default();
+        let mid = end - chrono::Duration::try_days(3).unwrap_or_default();
+        let fmt = |d: chrono::DateTime<Utc>| d.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        Bounds {
+            start: fmt(start),
+            end: fmt(end),
+            mid: fmt(mid),
+        }
+    }
+
+    const OLD: &str = "2026-01-01T00:00:00.000Z";
+
+    fn insert(
+        conn: &Connection,
+        remote: i64,
+        created: &str,
+        status: &str,
+        closed_at: Option<&str>,
+    ) {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                        remote_created_at, closed_at)
+             VALUES (?1, ?1, 's', 'p', ?2, ?3, ?4)",
+            params![remote, status, created, closed_at],
+        )
+        .expect("conversation");
+    }
+
+    /// The false-positive shape: a week ago 12 tickets were open; during
+    /// the week 9 of them were closed and 9 new ones arrived (volume
+    /// flat, backlog flat at 12). The pre-fix baseline only saw the 3
+    /// still-open old tickets (3 < 12 + 6 → "jump from 3 to 12") and the
+    /// digest claimed a >50% backlog jump that never happened.
+    #[test]
+    fn audit55_worked_down_backlog_is_not_a_jump() {
+        let conn = db();
+        let b = bounds();
+        // 12 old tickets: 3 still open, 9 closed mid-period (they WERE
+        // open a week ago).
+        for i in 0..3 {
+            insert(&conn, 100 + i, OLD, "active", None);
+        }
+        for i in 0..9 {
+            insert(&conn, 200 + i, OLD, "closed", Some(&b.mid));
+        }
+        // 9 new tickets during the period, still open.
+        for i in 0..9 {
+            insert(&conn, 300 + i, &b.mid, "active", None);
+        }
+        let facts = anomaly_facts(&conn, &b.start, &b.end);
+        let anomalies = facts["anomalies"].as_array().expect("anomalies");
+        assert!(
+            anomalies.iter().all(|a| a["kind"] != json!("backlog_jump")),
+            "a flat backlog must not be reported as a jump: {anomalies:?}"
+        );
+    }
+
+    /// The control: a genuine jump still fires — 10 old tickets still
+    /// open, 6 new during the period (16 > 10 + 5).
+    #[test]
+    fn audit55_genuine_backlog_jump_still_fires() {
+        let conn = db();
+        let b = bounds();
+        for i in 0..10 {
+            insert(&conn, 400 + i, OLD, "active", None);
+        }
+        for i in 0..6 {
+            insert(&conn, 500 + i, &b.mid, "active", None);
+        }
+        let facts = anomaly_facts(&conn, &b.start, &b.end);
+        let anomalies = facts["anomalies"].as_array().expect("anomalies");
+        let jump = anomalies
+            .iter()
+            .find(|a| a["kind"] == json!("backlog_jump"))
+            .expect("the genuine jump must be reported");
+        assert_eq!(jump["from"], json!(10));
+        assert_eq!(jump["to"], json!(16));
+    }
+
+    /// Tickets closed BEFORE the period are honestly excluded from the
+    /// week-ago baseline (they were not open then either).
+    #[test]
+    fn audit55_previously_closed_tickets_stay_excluded() {
+        let conn = db();
+        let b = bounds();
+        let older_close = "2025-12-01T00:00:00.000Z";
+        // 10 old open + 4 closed long before the period + 6 new open:
+        // baseline must be 10, not 14.
+        for i in 0..10 {
+            insert(&conn, 600 + i, OLD, "active", None);
+        }
+        for i in 0..4 {
+            insert(&conn, 700 + i, OLD, "closed", Some(older_close));
+        }
+        for i in 0..6 {
+            insert(&conn, 800 + i, &b.mid, "active", None);
+        }
+        let facts = anomaly_facts(&conn, &b.start, &b.end);
+        let anomalies = facts["anomalies"].as_array().expect("anomalies");
+        let jump = anomalies
+            .iter()
+            .find(|a| a["kind"] == json!("backlog_jump"))
+            .expect("16 > 10 + 5 fires the jump");
+        assert_eq!(jump["from"], json!(10), "only the 10 open-at-start count");
     }
 }

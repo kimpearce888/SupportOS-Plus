@@ -1196,13 +1196,31 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
             })
             .unwrap_or_default();
         if related.len() >= 2 {
+            // Clean-audit item 52: this used to join the conversation's
+            // tags to THEMSELVES (ct1 and ct2 were both constrained to the
+            // current conversation), so the "shared" tag was just an
+            // arbitrary tag of the current conversation — the message
+            // could name a tag none of the related conversations carry.
+            // The query now returns a tag that exists on the current
+            // conversation AND on at least one related conversation of
+            // the same customer (same 90-day window and liveness rules
+            // as the related list above).
             let shared_tag: Option<String> = conn
                 .query_row(
-                    "SELECT tg.name FROM conversation_tags ct1
-                     JOIN conversation_tags ct2 ON ct2.conversation_id = ?1
-                     JOIN tags tg ON tg.id = ct1.tag_id AND tg.id = ct2.tag_id
-                     WHERE ct1.conversation_id = ?1 LIMIT 1",
-                    params![conversation_id],
+                    "SELECT tg.name FROM tags tg
+                     WHERE EXISTS (SELECT 1 FROM conversation_tags ct1
+                                    WHERE ct1.conversation_id = ?1
+                                      AND ct1.tag_id = tg.id)
+                       AND EXISTS (SELECT 1 FROM conversation_tags ct2
+                                     JOIN conversations c2 ON c2.id = ct2.conversation_id
+                                    WHERE ct2.tag_id = tg.id
+                                      AND c2.customer_local_id = ?2
+                                      AND c2.deleted_at IS NULL
+                                      AND c2.id <> ?1
+                                      AND COALESCE(c2.remote_created_at, c2.created_at)
+                                          >= datetime('now', '-90 days'))
+                     ORDER BY tg.name LIMIT 1",
+                    params![conversation_id, customer_local],
                     |r| r.get(0),
                 )
                 .ok();
@@ -2907,5 +2925,131 @@ mod batch18_tests {
             )
             .expect("count");
         assert_eq!(rows, 1);
+    }
+}
+
+#[cfg(test)]
+mod batch24_audit52_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// A customer with a current conversation and two recent related
+    /// conversations. The current conversation carries two tags —
+    /// "aaa-current-only" (on nothing else) and "shared-billing" (also on
+    /// both related conversations). The pre-fix query returned an
+    /// arbitrary tag of the current conversation (the self-join had no
+    /// cross-conversation constraint), so "aaa-current-only" — the
+    /// alphabetically first, never shared — could be presented as the
+    /// shared tag.
+    fn db_with_shared_tag_pattern() -> (Connection, i64) {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (501, 'Grace', 'Hopper')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        let mut ids = Vec::new();
+        for number in [9001, 9002, 9003] {
+            conn.execute(
+                "INSERT INTO conversations
+                     (remote_id, number, subject, preview, status, customer_local_id,
+                      created_at, remote_created_at)
+                 VALUES (?1, ?2, 'Billing recurs', 'preview', 'closed', ?3,
+                         datetime('now'), datetime('now'))",
+                params![number, number, customer],
+            )
+            .expect("conversation");
+            ids.push(conn.last_insert_rowid());
+        }
+        let (current, rel_a, rel_b) = (ids[0], ids[1], ids[2]);
+        for name in ["aaa-current-only", "shared-billing"] {
+            conn.execute(
+                "INSERT INTO tags (remote_id, name) VALUES (?1, ?2)",
+                params![name.len() as i64, name],
+            )
+            .expect("tag");
+            let tag = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO conversation_tags (conversation_id, tag_id) VALUES (?1, ?2)",
+                params![current, tag],
+            )
+            .expect("current tag");
+        }
+        conn.execute(
+            "INSERT INTO tags (remote_id, name) VALUES (99, 'shared-billing-alt')",
+            [],
+        )
+        .expect("tag alt");
+        let shared = conn
+            .query_row(
+                "SELECT id FROM tags WHERE name = 'shared-billing'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .expect("shared tag id");
+        for rel in [rel_a, rel_b] {
+            conn.execute(
+                "INSERT INTO conversation_tags (conversation_id, tag_id) VALUES (?1, ?2)",
+                params![rel, shared],
+            )
+            .expect("related tag");
+        }
+        (conn, current)
+    }
+
+    /// Clean-audit item 52: the tag named by the
+    /// repeated_unresolved_interactions detail must be shared with the
+    /// related conversations — never a current-conversation-only tag.
+    #[test]
+    fn audit52_shared_tag_is_shared_with_related_conversations() {
+        let (conn, current) = db_with_shared_tag_pattern();
+        let findings = analyze_friction(&conn, current);
+        let finding = findings
+            .iter()
+            .find(|f| f["kind"] == json!("repeated_unresolved_interactions"))
+            .expect("the repeated-unresolved finding fires for 3 conversations");
+        let detail = finding["detail"].as_str().expect("detail");
+        assert!(
+            detail.contains("\"shared-billing\""),
+            "the genuinely shared tag is named: {detail}"
+        );
+        assert!(
+            !detail.contains("aaa-current-only"),
+            "a current-only tag must never be presented as shared: {detail}"
+        );
+    }
+
+    /// Clean-audit item 52, degenerate corner: when the related
+    /// conversations exist but the current conversation carries no tag,
+    /// no tag is named (the related list is empty, so the finding itself
+    /// does not fire — but the shared-tag lookup must not invent one).
+    #[test]
+    fn audit52_no_tag_is_named_when_nothing_is_shared() {
+        let (conn, _current) = db_with_shared_tag_pattern();
+        // Strip every tag from the current conversation: the related
+        // query now finds nothing, and the finding must not fire at all.
+        conn.execute(
+            "DELETE FROM conversation_tags WHERE conversation_id = (
+                 SELECT id FROM conversations WHERE number = 9001)",
+            [],
+        )
+        .expect("strip tags");
+        let current: i64 = conn
+            .query_row(
+                "SELECT id FROM conversations WHERE number = 9001",
+                [],
+                |r| r.get(0),
+            )
+            .expect("current id");
+        let findings = analyze_friction(&conn, current);
+        assert!(
+            findings
+                .iter()
+                .all(|f| f["kind"] != json!("repeated_unresolved_interactions")),
+            "no related conversations means no finding"
+        );
     }
 }

@@ -75,12 +75,14 @@ const KEEP_TABLES: &[&str] = &[
 ];
 
 /// What the reset did: rows deleted, tables emptied (only tables that
-/// actually held rows), vector collections and payload entries dropped.
+/// actually held rows), vector collections and payload entries dropped,
+/// downloaded attachment files removed from disk.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResetReport {
     pub rows_deleted: u64,
     pub tables_cleared: usize,
     pub vectors_dropped: u64,
+    pub attachment_files_deleted: u64,
 }
 
 /// Delete all business content from the database (workspace reset).
@@ -116,8 +118,39 @@ pub fn reset_workspace_data(conn: &mut Connection, data_dir: Option<&Path>) -> R
                  (content is re-embedded through the pending pipeline)"
             ),
         }
+        // Clean-audit item 49: the attachments table is purged above, but
+        // the downloaded files survived on disk — customer documents kept
+        // sitting in data_dir/attachments after the user wiped the
+        // workspace. The directory is now emptied with the same best-effort
+        // posture as the vector purge.
+        report.attachment_files_deleted = purge_attachment_files(&dir.join("attachments"));
     }
     Ok(report)
+}
+
+/// Clean-audit item 49: remove every downloaded attachment file from
+/// `data_dir/attachments`. Best effort like the vector purge — an
+/// undeletable entry is skipped with a warning, never failing the reset;
+/// subdirectories are left to their owner (none exist today).
+fn purge_attachment_files(attachments_dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(attachments_dir) else {
+        return 0;
+    };
+    let mut removed = 0_u64;
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        match std::fs::remove_file(entry.path()) {
+            Ok(()) => removed += 1,
+            Err(e) => tracing::warn!(
+                path = %entry.path().display(),
+                error = %e,
+                "attachment file purge failed; remove it manually"
+            ),
+        }
+    }
+    removed
 }
 
 fn purge_in_transaction(conn: &mut Connection) -> Result<ResetReport> {
@@ -430,6 +463,46 @@ mod tests {
             report.vectors_dropped >= 2,
             "collection + payload row: {report:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Clean-audit item 49: downloaded attachment files are business
+    /// content on disk — the reset must empty data_dir/attachments along
+    /// with the attachments table, or customer documents keep sitting in
+    /// the data directory after the user wiped the workspace.
+    #[test]
+    fn audit49_reset_removes_downloaded_attachment_files() {
+        let mut conn = migrated_conn();
+        let dir = std::env::temp_dir().join(format!(
+            "spp-purge-att-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_millis()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let attachments = dir.join("attachments");
+        std::fs::create_dir_all(&attachments).expect("attachments dir");
+        let file_a = attachments.join("12-34-invoice.pdf");
+        let file_b = attachments.join("13-35-screenshot.png");
+        std::fs::write(&file_a, b"customer document").expect("write a");
+        std::fs::write(&file_b, b"customer image").expect("write b");
+        // An unrelated subdirectory is not ours to touch.
+        let other = dir.join("vectors");
+        std::fs::create_dir_all(&other).expect("other dir");
+
+        let report = reset_workspace_data(&mut conn, Some(&dir)).expect("reset with attachments");
+        assert_eq!(
+            report.attachment_files_deleted, 2,
+            "both downloaded files are removed: {report:?}"
+        );
+        assert!(
+            !file_a.exists() && !file_b.exists(),
+            "no attachment survives"
+        );
+        assert!(
+            attachments.exists(),
+            "the (now empty) attachments directory itself stays"
+        );
+        assert!(other.exists(), "unrelated data-dir content is untouched");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

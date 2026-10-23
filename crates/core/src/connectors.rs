@@ -638,7 +638,9 @@ pub async fn validate_config(
 ) -> Option<String> {
     if kind == "http" {
         let url = url.unwrap_or("");
-        return match crate::security::validate_ssrf_full(url) {
+        // Clean-audit item 51: this is an async context — the blocking
+        // getaddrinfo of the sync guard must not run on the executor.
+        return match crate::security::validate_ssrf_full_async(url).await {
             Ok(()) => None,
             Err(e) => Some(format!("URL refused: {e}")),
         };
@@ -756,7 +758,9 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
         }
         "http" => {
             let url = config.get("url").and_then(|v| v.as_str()).unwrap_or("");
-            crate::security::validate_ssrf_full(url)?;
+            // Clean-audit item 51: fetch_rows rides the async refresh
+            // pipeline — the DNS-based SSRF guard must resolve off-thread.
+            crate::security::validate_ssrf_full_async(url).await?;
             let client = reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
