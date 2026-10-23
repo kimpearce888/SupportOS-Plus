@@ -405,11 +405,18 @@ impl WorkerManager {
                     "job panicked (contained at the worker boundary): marking failed"
                 );
                 let conn = self.lock();
+                // Clean-audit item 86: a panic is a code defect, not a
+                // transient fault — it recurs deterministically on
+                // re-run, and each retry re-executed the job's early
+                // side effects (a panicking copilot chat re-persisted
+                // the user's message once per attempt). The contained
+                // job fails terminally; the honest error sits on the
+                // job row for the UI to surface.
                 let _ = jobs::fail(
                     &conn,
                     job.id,
                     "job panicked (contained at worker boundary)",
-                    true,
+                    false,
                 );
                 drop(conn);
                 // R5 (D4): a panicking background job used to be visible
@@ -1328,46 +1335,68 @@ impl WorkerManager {
                 "sync_conversation_ratings" => {
                     let rating_id = num("ratingId");
                     let conv_remote = num("conversationId").or_else(|| num("remoteId"));
-                    if let Some(rating_id) = rating_id
-                        && let Ok(Some(r)) = self.provider.get_rating(rating_id).await {
-                            let (inserted, conv_local, conv_number, customer_local) = {
-                                let conn = self.lock();
-                                let conv_local = r
-                                    .conversation_id
-                                    .and_then(|id| if id > 0 { crate::sync_engine::conversation_local_id(&conn, id) } else { None });
-                                let conv_number = conv_local.and_then(|local| {
-                                    conn.query_row(
-                                        "SELECT number FROM conversations WHERE id = ?1",
-                                        rusqlite::params![local],
-                                        |row| row.get::<_, i64>(0),
+                    // Clean-audit item 85: a failed rating fetch used to be
+                    // swallowed whole (`let Ok(Some(r))` matched nothing on
+                    // an Err) — the satisfaction webhook fires once, the
+                    // one fetch failed once, and the rating was lost
+                    // forever while the job still reported success. An Err
+                    // now fails the job so the queue's retry machinery
+                    // re-fetches it (exponential backoff, max_attempts);
+                    // a rating that genuinely does not exist platform-side
+                    // (Ok(None)) stays a logged no-op.
+                    if let Some(rating_id) = rating_id {
+                        match self.provider.get_rating(rating_id).await {
+                            Ok(Some(r)) => {
+                                let (inserted, conv_local, conv_number, customer_local) = {
+                                    let conn = self.lock();
+                                    let conv_local = r
+                                        .conversation_id
+                                        .and_then(|id| if id > 0 { crate::sync_engine::conversation_local_id(&conn, id) } else { None });
+                                    let conv_number = conv_local.and_then(|local| {
+                                        conn.query_row(
+                                            "SELECT number FROM conversations WHERE id = ?1",
+                                            rusqlite::params![local],
+                                            |row| row.get::<_, i64>(0),
+                                        )
+                                        .ok()
+                                    });
+                                    let customer_local = r
+                                        .customer_id
+                                        .and_then(|id| if id > 0 { crate::sync_engine::local_id(&conn, "customers", id) } else { None });
+                                    let user_local = r
+                                        .user_id
+                                        .and_then(|id| if id > 0 { crate::sync_engine::local_id(&conn, "users", id) } else { None });
+                                    (
+                                        upsert_rating_row(&conn, &r, conv_local, customer_local, user_local)?,
+                                        conv_local,
+                                        conv_number,
+                                        customer_local,
                                     )
-                                    .ok()
-                                });
-                                let customer_local = r
-                                    .customer_id
-                                    .and_then(|id| if id > 0 { crate::sync_engine::local_id(&conn, "customers", id) } else { None });
-                                let user_local = r
-                                    .user_id
-                                    .and_then(|id| if id > 0 { crate::sync_engine::local_id(&conn, "users", id) } else { None });
-                                (
-                                    upsert_rating_row(&conn, &r, conv_local, customer_local, user_local)?,
-                                    conv_local,
-                                    conv_number,
-                                    customer_local,
-                                )
-                            };
-                            if inserted {
-                                crate::eventing::notify_rating_received(
-                                    &self.bus,
-                                    r.rating.as_deref(),
-                                    conv_local,
-                                    conv_number,
-                                    customer_local,
-                                    r.customer_name.as_deref(),
-                                    r.comment.as_deref(),
+                                };
+                                if inserted {
+                                    crate::eventing::notify_rating_received(
+                                        &self.bus,
+                                        r.rating.as_deref(),
+                                        conv_local,
+                                        conv_number,
+                                        customer_local,
+                                        r.customer_name.as_deref(),
+                                        r.comment.as_deref(),
+                                    );
+                                }
+                            }
+                            Ok(None) => {
+                                tracing::info!(
+                                    operation = "sync_conversation_ratings",
+                                    rating_id,
+                                    "rating absent platform-side - nothing to store"
                                 );
                             }
+                            Err(e) => {
+                                return Err(e);
+                            }
                         }
+                    }
                     if let Some(conv_remote) = conv_remote {
                         self.run_engine(|e| async move {
                             e.sync_single_conversation(conv_remote).await.map(|_| ())
@@ -1554,7 +1583,7 @@ impl WorkerManager {
                 }
                 // Batch 14 (K2, K3, K4, K5)
                 "draft_article" => {
-                    self.run_draft_article_job(&payload).await?;
+                    self.run_draft_article_job(job_id, &payload).await?;
                 }
                 "publish_article_draft" => {
                     self.run_publish_article_draft_job(job_id, &payload).await?;
@@ -1563,7 +1592,7 @@ impl WorkerManager {
                     self.run_weekly_digest_job(&payload).await?;
                 }
                 "fetch_hs_report" => {
-                    self.run_fetch_hs_report_job(&payload).await?;
+                    self.run_fetch_hs_report_job(job_id, &payload).await?;
                 }
                 // Batch 15 (P2, P3, P4): live chat sends, saved reply
                 // writes, workflow runs, the webhook relay guard.
@@ -1669,6 +1698,13 @@ impl WorkerManager {
                             .map(|_| ())
                     })
                     .await?;
+                }
+                // Test-only job kind: exercises the panic containment
+                // boundary (clean-audit item 86) end-to-end through the
+                // real `tick` path without shipping any test hook.
+                #[cfg(test)]
+                "__test_panic" => {
+                    panic!("intentional test panic (batch 27 item 86)");
                 }
                 _ => {
                     let conn = self.lock();
@@ -2903,14 +2939,22 @@ impl WorkerManager {
     /// evidence, duplicate queue row, unrouted backend) fail the job with
     /// the honest message - the Knowledge page surfaces it from the job
     /// row, and nothing lands in the queue ungrounded.
-    async fn run_draft_article_job(&self, payload: &serde_json::Value) -> Result<()> {
+    async fn run_draft_article_job(&self, job_id: i64, payload: &serde_json::Value) -> Result<()> {
         let candidate_id = payload
             .get("candidateId")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
         if candidate_id <= 0 {
             let conn = self.lock();
-            jobs::fail(&conn, 0, "draft_article: no candidateId in payload", false)?;
+            // Clean-audit item 84: the failure lands on the REAL job row —
+            // the pre-fix literal id 0 updated nothing, so the job sat in
+            // 'running' forever with its honest error written nowhere.
+            jobs::fail(
+                &conn,
+                job_id,
+                "draft_article: no candidateId in payload",
+                false,
+            )?;
             return Ok(());
         }
         let (enabled, backend) = {
@@ -3211,7 +3255,11 @@ impl WorkerManager {
     /// the UI instead of empty charts); success caches the report and
     /// marks the capability available; the empty provider records
     /// not-connected.
-    async fn run_fetch_hs_report_job(&self, payload: &serde_json::Value) -> Result<()> {
+    async fn run_fetch_hs_report_job(
+        &self,
+        job_id: i64,
+        payload: &serde_json::Value,
+    ) -> Result<()> {
         let key: String = payload
             .get("key")
             .and_then(|v| v.as_str())
@@ -3229,7 +3277,9 @@ impl WorkerManager {
             .to_string();
         if crate::reports_api::report_spec(&key).is_none() {
             let conn = self.lock();
-            jobs::fail(&conn, 0, "fetch_hs_report: unknown report key", false)?;
+            // Clean-audit item 84: same as draft_article — the real job
+            // row takes the failure, not literal id 0.
+            jobs::fail(&conn, job_id, "fetch_hs_report: unknown report key", false)?;
             return Ok(());
         }
         if self.provider.kind() == "empty" {
@@ -4764,5 +4814,221 @@ mod batch14_tests {
             mock.hits().iter().any(|h| h.path == "/v2/ratings/501"),
             "the rating is fetched by id from Help Scout"
         );
+    }
+}
+
+/// Clean-audit batch 27 (items 84/85/86): the jobs::fail calls carrying
+/// the real job id instead of literal 0, the rating fetch errors
+/// surfaced with a requeue instead of being swallowed, and the panic
+/// containment failing terminally instead of re-running side effects.
+#[cfg(test)]
+mod batch27_workers_tests {
+    use super::*;
+    use crate::helpscout::HelpScoutProvider;
+    use crate::mockserver::{MockRequest, MockResponse};
+
+    fn secrets_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::settings::SECRETS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn temp_db() -> crate::db::DbHandle {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-workers-b27-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::db::DbHandle::new(conn)
+    }
+
+    fn manager_with(
+        db: &crate::db::DbHandle,
+        provider: Arc<dyn HelpScoutProvider>,
+    ) -> Arc<WorkerManager> {
+        Arc::new(WorkerManager::new(
+            db.clone(),
+            None,
+            provider,
+            crate::eventing::EventBus::default(),
+            std::env::temp_dir(),
+            None,
+        ))
+    }
+
+    fn job_state(db: &crate::db::DbHandle, id: i64) -> (String, Option<String>, i64) {
+        db.with_read(|conn| {
+            conn.query_row(
+                "SELECT status, error, attempt FROM jobs WHERE id = ?1",
+                rusqlite::params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("job row")
+        })
+    }
+
+    fn run_one_tick(manager: &Arc<WorkerManager>) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+    }
+
+    /// Item 84: `draft_article` without a candidateId used to call
+    /// `jobs::fail(&conn, 0, …)` — the failure updated nothing and the
+    /// real job row sat in 'running' forever with its honest error
+    /// written nowhere.
+    #[test]
+    fn draft_article_missing_candidate_fails_the_real_job_row() {
+        let db = temp_db();
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        let id = db.with_write(|conn| jobs::enqueue(conn, "draft_article", "{}").expect("enqueue"));
+        run_one_tick(&manager);
+
+        let (status, error, _) = job_state(&db, id);
+        assert_eq!(status, "failed", "the real job row takes the failure");
+        assert!(
+            error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("no candidateId"),
+            "the honest error is on the row: {error:?}"
+        );
+    }
+
+    /// Item 84: same defect on the `fetch_hs_report` path.
+    #[test]
+    fn fetch_hs_report_unknown_key_fails_the_real_job_row() {
+        let db = temp_db();
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        let id = db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "fetch_hs_report",
+                &serde_json::json!({"key": "not_a_real_key"}).to_string(),
+            )
+            .expect("enqueue")
+        });
+        run_one_tick(&manager);
+
+        let (status, error, _) = job_state(&db, id);
+        assert_eq!(status, "failed");
+        assert!(
+            error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("unknown report key"),
+            "the honest error is on the row: {error:?}"
+        );
+    }
+
+    /// Item 85: a failed rating fetch used to be swallowed (`let
+    /// Ok(Some(r))` matched nothing) — the rating was lost forever while
+    /// the job reported success. The error now requeues the job (the
+    /// queue's retry machinery re-fetches it).
+    #[test]
+    fn rating_fetch_failure_requeues_the_job_instead_of_swallowing() {
+        let _secrets = secrets_guard();
+        crate::settings::set_master_key_for_tests([27u8; 32]);
+        let db = temp_db();
+        // The platform answers 500 for the rating — a transient fetch
+        // failure, exactly the case the pre-fix code swallowed.
+        let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
+            |req: &MockRequest| -> MockResponse {
+                if req.method == "GET" && req.path == "/v2/ratings/501" {
+                    MockResponse::json(500, serde_json::json!({"error": "boom"}))
+                } else {
+                    crate::mockserver::not_found()(req)
+                }
+            },
+        ))
+        .expect("mock");
+        let provider = crate::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
+            crate::helpscout_real::HsCredentials {
+                client_id: "b27-client".into(),
+                client_secret: "b27-secret".into(),
+                redirect_uri: format!("{}/oauth/callback", mock.url()),
+                api_base: mock.url(),
+                webhook_secret: "b27-hook".into(),
+                docs_api_key: String::new(),
+                docs_api_base: mock.url(),
+            },
+        );
+        provider
+            .save_tokens("b27-token", None, Some(3_600), None)
+            .expect("seed token");
+        let manager = manager_with(&db, Arc::new(provider));
+        let id = db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "sync_conversation_ratings",
+                &serde_json::json!({"ratingId": 501}).to_string(),
+            )
+            .expect("enqueue")
+        });
+        run_one_tick(&manager);
+
+        let (status, error, attempt) = job_state(&db, id);
+        assert_eq!(
+            status, "queued",
+            "the fetch failure requeues the job for a retry"
+        );
+        assert_eq!(attempt, 1, "one attempt spent");
+        assert!(
+            error.is_some(),
+            "the failure is recorded on the row, not swallowed: {error:?}"
+        );
+        let ratings: i64 = db.with_read(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM ratings", [], |r| r.get(0))
+                .unwrap_or(0)
+        });
+        assert_eq!(ratings, 0, "nothing stored yet — the retry will fetch it");
+    }
+
+    /// Item 86: the panic containment used to mark the job retryable —
+    /// a deterministic panic re-ran once per attempt, re-executing
+    /// early side effects (a panicking copilot chat re-persisted the
+    /// user's message every retry). The contained job now fails
+    /// terminally.
+    #[test]
+    fn panicking_job_fails_terminally_instead_of_requeueing() {
+        let db = temp_db();
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        let id = db.with_write(|conn| jobs::enqueue(conn, "__test_panic", "{}").expect("enqueue"));
+        run_one_tick(&manager);
+
+        let (status, error, attempt) = job_state(&db, id);
+        assert_eq!(
+            status, "failed",
+            "a contained panic is terminal, not retryable"
+        );
+        assert_eq!(attempt, 1, "exactly one attempt — no re-runs");
+        assert!(
+            error.as_deref().unwrap_or_default().contains("panicked"),
+            "the honest panic error sits on the row: {error:?}"
+        );
+
+        // A later tick must not resurrect it.
+        run_one_tick(&manager);
+        let (status, _, attempt) = job_state(&db, id);
+        assert_eq!(status, "failed", "the failed job stays failed");
+        assert_eq!(attempt, 1, "no second execution of the panicking job");
     }
 }

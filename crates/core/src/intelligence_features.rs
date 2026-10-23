@@ -131,7 +131,9 @@ pub fn add_issue_link(
 pub fn refresh_known_issue_counts(conn: &Connection, known_issue_id: i64) -> Result<()> {
     conn.execute(
         "UPDATE known_issues SET
-            conversation_count = (SELECT COUNT(*) FROM known_issue_links WHERE known_issue_id = ?1),
+            conversation_count = (SELECT COUNT(*) FROM known_issue_links kil
+                                  JOIN conversations c ON c.id = kil.conversation_id
+                                  WHERE kil.known_issue_id = ?1),
             first_seen_at = (SELECT MIN(COALESCE(c.remote_created_at, c.created_at)) FROM known_issue_links kil
                                JOIN conversations c ON c.id = kil.conversation_id WHERE kil.known_issue_id = ?1),
             last_seen_at = (SELECT MAX(COALESCE(c.remote_created_at, c.created_at)) FROM known_issue_links kil

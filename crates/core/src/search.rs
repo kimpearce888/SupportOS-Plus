@@ -337,7 +337,17 @@ pub fn tokenize(q: &str, min_chars: usize, max_tokens: usize) -> Vec<String> {
         .collect()
 }
 
-fn escape_like(q: &str) -> String {
+/// Escape a user-supplied LIKE pattern body so `%`, `_` and the escape
+/// character `\` match literally (the pattern's wrapping `%…%` and the
+/// query's `ESCAPE '\\'` clause stay in charge of the wildcarding).
+///
+/// Clean-audit item 83: the inbox query filter, the customers search
+/// and the saved-replies mirror search interpolated raw input into LIKE
+/// patterns — a `%`/`_` in the search text acted as a wildcard and a
+/// trailing `\` escaped the wrapping percent, silently breaking the
+/// search. Shared by every LIKE-with-user-input call site.
+#[must_use]
+pub fn escape_like(q: &str) -> String {
     let mut out = String::with_capacity(q.len());
     for c in q.chars() {
         if matches!(c, '\\' | '%' | '_') {

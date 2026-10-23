@@ -159,7 +159,11 @@ pub fn search_customers(
     limit: Option<u32>,
 ) -> Result<Vec<Customer>> {
     let limit = limit.unwrap_or(20).min(100);
-    let q = format!("%{query}%");
+    // Clean-audit item 83: the search text is a LITERAL — the pattern
+    // body is escaped so `%`/`_` the user typed match themselves and a
+    // trailing `\` cannot escape the wrapping percent (the ESCAPE
+    // clause was already declared but the input was never escaped).
+    let q = format!("%{}%", crate::search::escape_like(query));
     let mut stmt = conn.prepare(
         "SELECT id, remote_id, first_name, last_name, email, organization,
                 job_title, phone, created_at, updated_at
@@ -189,4 +193,64 @@ pub fn search_customers(
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.into());
     items
+}
+
+/// Clean-audit item 83: `search_customers` interpolated raw query text
+/// into the LIKE pattern despite the declared `ESCAPE '\'` clause —
+/// `%`/`_` acted as wildcards and a trailing `\` escaped the wrapping
+/// percent.
+#[cfg(test)]
+mod batch27_audit83_tests {
+    use super::*;
+
+    fn seeded() -> rusqlite::Connection {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        for (id, name, email) in [
+            (1, "Ada%", "ada@work.example"),
+            (2, "Grace_z", "grace@navy.example"),
+            (3, "Back\\slash", "kim@example.com"),
+        ] {
+            conn.execute(
+                "INSERT INTO customers (id, remote_id, first_name, last_name, email)
+                 VALUES (?1, ?1 * 10, ?2, 'Last', ?3)",
+                rusqlite::params![id, name, email],
+            )
+            .expect("customer");
+        }
+        conn
+    }
+
+    fn names_matching(conn: &rusqlite::Connection, query: &str) -> Vec<String> {
+        search_customers(conn, query, None)
+            .expect("search")
+            .into_iter()
+            .filter_map(|c| c.first_name)
+            .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn percent_and_underscore_match_literally() {
+        let conn = seeded();
+        assert_eq!(
+            names_matching(&conn, "Ada%"),
+            vec!["Ada%".to_string()],
+            "a literal % finds only Ada%, nobody else"
+        );
+        assert_eq!(
+            names_matching(&conn, "Grace_z"),
+            vec!["Grace_z".to_string()],
+            "a literal _ is not a wildcard"
+        );
+    }
+
+    #[test]
+    fn backslash_containing_names_are_findable() {
+        let conn = seeded();
+        assert_eq!(
+            names_matching(&conn, "Back\\"),
+            vec!["Back\\slash".to_string()],
+            "the trailing backslash no longer escapes the wrapping percent"
+        );
+    }
 }

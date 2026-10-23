@@ -190,7 +190,11 @@ pub fn list_conversations(
         params_vec.push(number.into());
     }
     if let Some(ref query) = filters.query {
-        let q = format!("%{query}%");
+        // Clean-audit item 83: the search text is a LITERAL — a `%` or
+        // `_` the user typed must not act as a wildcard, and a trailing
+        // `\` must not escape the wrapping percent (the pre-fix pattern
+        // silently matched the wrong rows or nothing).
+        let q = format!("%{}%", crate::search::escape_like(query));
         where_parts
             .push("(c.subject LIKE ? ESCAPE '\\' OR c.preview LIKE ? ESCAPE '\\')".to_string());
         params_vec.push(q.clone().into());
@@ -358,4 +362,81 @@ pub fn get_conversation(
 
 fn params_from_iter_ref(values: &[rusqlite::types::Value]) -> impl rusqlite::Params + use<'_> {
     rusqlite::params_from_iter(values.iter().cloned())
+}
+
+/// Clean-audit item 83: the inbox query filter interpolated raw search
+/// text into the LIKE pattern despite the declared `ESCAPE '\'` clause —
+/// a `%`/`_` the user typed acted as a wildcard and a trailing `\`
+/// escaped the wrapping percent, silently matching the wrong rows.
+#[cfg(test)]
+mod batch27_audit83_tests {
+    use super::*;
+
+    fn seeded() -> (rusqlite::Connection, ()) {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        let subjects: [&str; 4] = [
+            "rate is 50% now",
+            "invoice 5050 attached",
+            "cannot login_a_b here",
+            "path C:\\temp missing",
+        ];
+        for (i, subject) in subjects.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview)
+                 VALUES (?1, ?1, ?2, ?2)",
+                rusqlite::params![i64::try_from((i + 1) * 100).expect("id"), subject],
+            )
+            .expect("conversation");
+        }
+        (conn, ())
+    }
+
+    fn subjects_matching(conn: &rusqlite::Connection, query: &str) -> Vec<String> {
+        let filters = InboxFilters {
+            query: Some(query.into()),
+            ..Default::default()
+        };
+        let (items, _) = list_conversations(conn, &filters).expect("list");
+        items
+            .into_iter()
+            .filter_map(|i| i.subject)
+            .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn percent_in_the_query_matches_literally() {
+        let (conn, ()) = seeded();
+        let hits = subjects_matching(&conn, "50%");
+        assert_eq!(
+            hits,
+            vec!["rate is 50% now".to_string()],
+            "a literal % finds only the row that contains it — not 'invoice 5050'"
+        );
+    }
+
+    #[test]
+    fn underscore_in_the_query_matches_literally() {
+        let (conn, ()) = seeded();
+        let hits = subjects_matching(&conn, "login_a_b");
+        assert_eq!(
+            hits,
+            vec!["cannot login_a_b here".to_string()],
+            "a literal _ is not a single-character wildcard"
+        );
+    }
+
+    #[test]
+    fn trailing_backslash_finds_backslash_rows() {
+        let (conn, ()) = seeded();
+        // The pre-fix pattern wrapped the text as `%path C:\temp%` — the
+        // trailing `\` escaped the wrapping percent and the search found
+        // nothing (or errored). Escaped, it finds the real backslash row.
+        let hits = subjects_matching(&conn, "path C:\\temp");
+        assert_eq!(
+            hits,
+            vec!["path C:\\temp missing".to_string()],
+            "backslash-containing searches work"
+        );
+    }
 }

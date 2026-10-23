@@ -314,12 +314,23 @@ impl AutomationPage {
     }
 
     fn decide(&mut self, db: &DbHandle, approval_id: i64, approve: bool) {
-        // The web route decided as the me user; Ada (5) stands in.
+        // Clean-audit item 80: the decision is attributed to the REAL
+        // acting user — `me_remote_id` (captured at the OAuth callback)
+        // resolved through the same helper the notifications page uses.
+        // The pre-fix code hardcoded user 5, so every decision by anyone
+        // was recorded as Ada's in the approvals table. Ada remains the
+        // stand-in ONLY when no identity has been captured yet
+        // (client-credentials/demo sessions).
+        let actor = db
+            .with_read(spp_core::notifications::me_user_local_id)
+            .ok()
+            .flatten()
+            .unwrap_or(5);
         let result = db.with_write(|conn| {
             if approve {
-                spp_core::automation::approve(conn, approval_id, 5)
+                spp_core::automation::approve(conn, approval_id, actor)
             } else {
-                spp_core::automation::reject(conn, approval_id, 5)
+                spp_core::automation::reject(conn, approval_id, actor)
             }
         });
         if let Err(e) = result {
@@ -841,5 +852,83 @@ mod tests {
         };
         assert!(!note.requires_approval());
         assert!(action_description(&note).starts_with("send note: "));
+    }
+}
+
+/// Clean-audit item 80: approvals were attributed to hardcoded user 5 —
+/// every decision by anyone was recorded as Ada's. The decision now
+/// carries the real acting user (`me_remote_id` resolved to a local id),
+/// with Ada kept only as the no-identity stand-in.
+#[cfg(test)]
+mod batch27_audit80_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    /// Insert one rule + one pending approval row and return the
+    /// approval's id (the approvals table references the rules table).
+    fn seed_approval(conn: &rusqlite::Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO automation_rules (name, trigger_json, action_json)
+             VALUES ('t', '{\"kind\":\"sla_risk\"}', '{\"kind\":\"add_tag\",\"tag\":\"x\"}')",
+            [],
+        )
+        .expect("seed rule");
+        let rule_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO automation_approvals (rule_id, conversation_id, proposed_action_json)
+             VALUES (?1, 1, '{}')",
+            rusqlite::params![rule_id],
+        )
+        .expect("seed approval");
+        conn.last_insert_rowid()
+    }
+
+    fn decided_by(conn: &rusqlite::Connection, id: i64) -> Option<i64> {
+        conn.query_row(
+            "SELECT decided_by_user_id FROM automation_approvals WHERE id = ?1",
+            rusqlite::params![id],
+            |r| r.get(0),
+        )
+        .expect("read decision")
+    }
+
+    #[test]
+    fn approvals_attribute_to_the_real_acting_user() {
+        let db = fixture(Vec::new());
+        // Grace (local id 6, remote 506) is the signed-in user.
+        db.with_write(|conn| {
+            spp_core::settings::set_string(conn, "me_remote_id", "506").expect("me");
+        });
+
+        let approval = db.with_write(|conn| seed_approval(conn));
+        let mut page = AutomationPage::new();
+        page.decide(&db, approval, true);
+
+        assert!(
+            page.error.is_none(),
+            "the decision must succeed: {:?}",
+            page.error
+        );
+        assert_eq!(
+            db.with_read(|conn| decided_by(conn, approval)),
+            Some(6),
+            "the approval carries the ACTING user (Grace), not Ada"
+        );
+    }
+
+    #[test]
+    fn no_identity_falls_back_to_the_demo_stand_in() {
+        let db = fixture(Vec::new());
+        let approval = db.with_write(|conn| seed_approval(conn));
+
+        let mut page = AutomationPage::new();
+        page.decide(&db, approval, false);
+
+        assert!(page.error.is_none(), "decision failed: {:?}", page.error);
+        assert_eq!(
+            db.with_read(|conn| decided_by(conn, approval)),
+            Some(5),
+            "without a captured identity the Ada stand-in decides (pre-fix behavior)"
+        );
     }
 }

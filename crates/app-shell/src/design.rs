@@ -723,6 +723,50 @@ pub fn hint_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
+/// A minimal pager: `‹ prev   page 2 of 7   next ›` (clean-audit items
+/// 78/82: the Inbox and Customers lists were hard-capped at one page of
+/// rows with no way to reach the rest). Renders nothing when everything
+/// fits on one page. Returns the page delta to apply (-1, 0, +1).
+pub fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
+    if pages <= 1 {
+        return 0;
+    }
+    let mut delta = 0;
+    ui.horizontal(|ui| {
+        let t = tokens(ui);
+        // The disabled ends render as inert muted glyphs so the control
+        // keeps its shape at either boundary (no layout jump).
+        if page > 0 {
+            if button(ui, "‹ prev", ButtonVariant::Outline).clicked() {
+                delta = -1;
+            }
+        } else {
+            ui.label(
+                egui::RichText::new("‹ prev")
+                    .small()
+                    .color(t.muted_foreground),
+            );
+        }
+        ui.label(
+            egui::RichText::new(format!("page {} of {}", page + 1, pages))
+                .small()
+                .color(t.muted_foreground),
+        );
+        if page + 1 < pages {
+            if button(ui, "next ›", ButtonVariant::Outline).clicked() {
+                delta = 1;
+            }
+        } else {
+            ui.label(
+                egui::RichText::new("next ›")
+                    .small()
+                    .color(t.muted_foreground),
+            );
+        }
+    });
+    delta
+}
+
 /// The standard page header: page title, optional subtitle, right-side
 /// actions, and breathing room before the content.
 pub fn page_header(
