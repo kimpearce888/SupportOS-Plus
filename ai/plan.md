@@ -40,6 +40,12 @@ Batch 21 = items 26-30 (custom-objects form payload typing, the type
 builder's phantom checkbox/url field types, stale-thread deletion
 pagination, tags_changed prev-state on re-ingest, retried saved-reply
 create idempotency) — verified and recorded in `completed.md`.
+Batch 22 = items 31-35 (api_concurrency applied at construction and on
+live save, the webhook secret cap shared by registration and
+verification, team ids kept out of the user-assignee slot with
+assigned_team_id consumed, fenced/prose extraction parsing on the
+json_mode lane, the extraction prompt crossing the redaction boundary)
+— verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
