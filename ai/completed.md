@@ -2229,3 +2229,184 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   the runner).
 - Security: staged diff token-scanned clean before each push; remote
   unmoved at push time (fetch-first).
+
+## Batch 23 — clean-audit items 36-45 (MEDIUM tier: the extraction window that read the oldest deleted messages, the ledger-invisible extraction runs, the cache hit that mixed two runs' data, the draft that became a raw envelope, the unreachable interaction-strategy section, the AI rows relayed as human-written, the unbounded cluster prompt, the ledger-invisible copilot, the dangling tool_call ids, the swallowed message-insert failure)
+
+Batch size note: the owner raised `rule.md`'s batch size from five to
+ten items on 2026-10-23 (commit `8c66cb8`) — this is the first
+ten-item batch.
+
+**36. customer_messages includes soft-deleted threads, takes OLDEST 30**
+(med|bug)
+— the attribute extraction's message window was
+`ORDER BY created_at ASC LIMIT 30` with no deleted filter: a
+long-running ticket's recent context (the half that says what the
+customer wants now) fell out of the window in favor of the oldest
+messages, and soft-deleted threads kept feeding the prompt. The window
+is now the NEWEST 30 live customer messages (`deleted_at IS NULL`),
+presented oldest-first (the prompt's declared order and the
+deterministic layer's `messages.first()` customer_goal both expect
+chronological). Whitespace-only bodies are filtered SQL-side with an
+explicit charset (`TRIM(..., char(32)||char(9)||char(10)||char(13))`)
+so they cannot consume LIMIT slots the Rust-side trim would then drop
+(SQLite's default TRIM only strips spaces — a tab/newline-only body
+used to take a slot and vanish, quietly shrinking the window to 29).
+ai_attributes.rs.
+
+**37. Extraction runs stuck `queued`, invisible to the cost ledger**
+(med|issue)
+— `store_extraction_run` INSERTed bare columns into `ai_runs`; the
+`status` column added by db_breadth defaults to `'queued'`, so every
+extraction run landed "queued" forever with no type (default
+'analysis'), no latency, no token usage, no endpoint — the cost
+ledger's `WHERE status='completed'` never saw a single one. The run
+row now lands as a completed `attributes` run carrying the ledger's
+raw material: conversation, latency, `token_usage` (from the
+provider's response) and `endpoint_id` (threaded from the backend
+through `compute_with_backend` → `compute` → `finish_computation`),
+and `run_extraction` returns the full `ExtractionOutput`
+(content + latency + usage, latency measured around the structured
+chat call) instead of just the text.
+`lookup_cached_extraction` only treats completed runs as cache hits,
+so pre-fix stuck rows self-heal: the next computation re-runs and
+stores a proper completed row.
+ai_attributes.rs.
+
+**38. Cache-hit path mixes hash-matched run id with newest run's
+analysis** (med|bug)
+— `analyze_ticket`'s cache hit paired `cached.id` (the hash-matched
+run) with `get_latest_analysis`'s NEWEST completed analysis for the
+conversation — after the conversation evolved and its content
+signature reverted, or a force re-run stored a newer row, the served
+analysis came from a different run than its provenance claimed, and
+the sources were the newest run's while the id pointed at the older
+one. The cache hit now parses the hash-matched run's OWN
+`response_json` and loads its OWN `ai_sources` rows (new
+`sources_for_run`); an unparseable cached row degrades to a fresh
+computation instead of serving mismatched data.
+ai_pipeline.rs.
+
+**39. Draft fallback stores the raw JSON envelope as the draft**
+(med|bug)
+— when the model's answer parsed as JSON but carried no "draft" key
+(a wrong-key envelope like `{"reply": ...}`), the fallback stored
+`res.raw` — the whole envelope — as the customer-facing draft. The
+raw text is now only accepted when NO parseable JSON exists at all
+(a plain-prose answer); a parsed envelope without a usable draft
+field fails loudly ("The local model returned JSON without a draft
+field") with the run marked failed and no draft row created. A bare
+JSON string answer still counts as the draft.
+ai_pipeline.rs.
+
+**40. Interaction-strategy prompt block hard-coded None; section
+unreachable** (med|gap)
+— `build_interaction_strategy_block` returned a literal `None`, so
+the draft prompt's COMMUNICATION APPROACH section — and the entire
+interaction-recommendation machinery feeding it — never reached a
+prompt. The block now renders real strategy data: the conversation's
+stored AI interaction recommendation, falling back to the
+deterministic `heuristic_recommendation` computed from its stored
+signals (with baseline, changes and human overrides), plus the
+customer's durable communication preferences and the facts they
+already provided in this conversation (via `extract_provided_facts`
+over the newest customer threads, so the draft never re-asks).
+ai_pipeline.rs.
+
+**41. get_customer_memory relays AI rows as "human-written"**
+(med|issue)
+— the tool's summary note claimed "human-written entries are the only
+persisted rows" while the memory extraction writes `source='ai'`
+rows into the same `customer_memory` table — the consuming model
+treated machine-extracted facts as human statements. The note now
+says exactly what each entry's own `source` means: 'human' rows were
+written by support staff; 'ai' rows are machine-extracted,
+confidence-tagged and not human-verified, to be treated as leads to
+verify rather than customer statements.
+ai_tools.rs.
+
+**42. Cluster prompt has no conversation cap → context blowup at
+volume** (med|issue)
+— `cluster_issues` loaded EVERY conversation in the window into one
+prompt; a busy week of thousands of tickets blew the model's context
+window and the run failed. The list is now capped to the newest 250
+conversations of the window (SQL LIMIT, newest-first, presented in
+stable number order), and the prompt says the sampling out loud ("the
+window holds N conversations; only the newest 250 are listed (context
+cap). Cluster only the listed ones.") so the model does not treat the
+sample as the population. `build_issue_cluster_user` gained the
+window's true conversation count (a cheap COUNT query) to decide
+whether the note is needed.
+ai_pipeline.rs, ai_prompts.rs.
+
+**43. Copilot runs invisible to the cost ledger (no usage/endpoint)**
+(med|bug)
+— the copilot chat completed its `ai_runs` row through bare
+`complete_run` (no token usage, no endpoint) while the backend
+destructure dropped `endpoint_id` on the floor: every copilot chat
+was invisible to `usage_ledger`. Usage is now accumulated across
+every chat round — tool rounds plus the final answer, including the
+budget-forced final round — and recorded on the run row together
+with the backend's endpoint id through `complete_run_with_usage`.
+copilot.rs.
+
+**44. Tool-budget cutoff leaves dangling tool_call ids (400 on strict
+servers)** (med|bug)
+— when a model round asked for more tool calls than the budget
+allowed, the execution loop `break`ed: the assistant message carried
+N tool_calls but only the executed ones got tool-role responses, and
+the follow-up request — with dangling ids — was rejected by strict
+OpenAI-compatible servers (400). Every un-executed tool_call now gets
+an explicit refusal result ("Tool budget reached - this call was not
+executed. Answer from the evidence you already have.") carrying its
+id, so the wire invariant holds: every assistant tool_call id is
+answered.
+copilot.rs.
+
+**45. insert_message swallows INSERT failure, echoes stale rowid**
+(med|bug)
+— `insert_message` did `let _ = conn.execute(INSERT ...)` and then
+echoed `conn.last_insert_rowid()` — on a failed INSERT (disk error,
+schema drift) the response presented the id of whatever row was last
+successfully inserted on the connection as the new message's id. The
+INSERT result is now checked: success reports the row's real id; a
+failure reports a null id with the error text surfaced through
+`persist_error` (and a warning logged), never a fabricated one.
+copilot.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 336 passed / 0 failed / 4 ignored (11 new batch-23
+  regressions: the extraction window is the newest 30 live messages,
+  chronological, with soft-deleted and whitespace-only threads
+  excluded and the oldest falling out; a fresh extraction lands as a
+  completed 'attributes' run with type/status/latency/token_usage/
+  endpoint/conversation all asserted plus the ledger row; a stuck
+  'queued' row with a matching hash is a cache miss that self-heals
+  into a completed row; the ticket-analysis cache hit serves the
+  hash-matched run's own analysis and sources under its own id; the
+  wrong-key envelope fails loudly with a failed run and no draft row
+  while a prose answer still becomes the draft verbatim; the
+  interaction-strategy block renders the heuristic path with
+  COMMUNICATION APPROACH and ALREADY PROVIDED sections and then the
+  stored AI recommendation's tone/strategy/avoid; the customer-memory
+  note no longer claims human-only and both source labels relay; the
+  cluster prompt declares the cap when the window exceeds the sample
+  and stays silent otherwise; the copilot run row accumulates usage
+  across both rounds (17/8/25 from 10/5/15 + 7/3/10) with the
+  endpoint recorded and the ledger row visible; the budget refusal
+  answers every one of 10 requested tool_call ids with 8 executed +
+  2 explicit refusals asserted on the follow-up request wire; and
+  insert_message reports a real id on success and null +
+  persist_error when the INSERT fails); sandbox-feature suite 341
+  passed / 0 failed / 4 ignored; app-shell 180 passed / 0 failed;
+  xtask 6; catalog 0.
+- Fresh harness `scripts/verify_batch23.py` (committed; also archived
+  at /home/z/my-project/scripts/): all 37 checks pass.
+- Runner verification: rule-2 commit `d65fa3c` — CI run `39885201407`:
+  success; code commit `c7a753e` — CI run `39890385424`: success, both
+  jobs (fmt/clippy/test/deny + AppImage/deb build and smoke, all green
+  on the runner).
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).
