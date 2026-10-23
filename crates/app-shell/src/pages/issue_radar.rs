@@ -125,6 +125,11 @@ pub fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
 /// Create a known issue (the create route's insert + link + refresh
 /// sequence, in-process).
 ///
+/// Clean-audit item 81: conversation ids are validated against the
+/// conversations table INSIDE the transaction — a dangling id gains no
+/// link row (the pre-fix code inserted links for nonexistent
+/// conversations, and `refresh_known_issue_counts` then counted them).
+///
 /// # Errors
 /// Propagates SQL failures.
 pub fn create_known_issue(
@@ -143,9 +148,12 @@ pub fn create_known_issue(
     )?;
     let id = tx.last_insert_rowid();
     for conv_id in conversation_ids {
+        // Item 81: the link materializes only when the conversation
+        // exists — the INSERT selects from conversations itself, so a
+        // dangling id inserts zero rows instead of a dead link.
         tx.execute(
             "INSERT OR IGNORE INTO known_issue_links (known_issue_id, conversation_id, link_type)
-             VALUES (?1, ?2, 'human')",
+             SELECT ?1, c.id, 'human' FROM conversations c WHERE c.id = ?2",
             rusqlite::params![id, conv_id],
         )?;
     }
@@ -234,10 +242,44 @@ impl IssueRadarPage {
             self.error = Some("Title is required (max 300 characters).".into());
             return;
         }
-        let conversation_ids: Vec<i64> = self
+        // Clean-audit item 81: parse, dedupe (order-preserving) and
+        // validate the ids against the conversations table — dangling
+        // ids are reported to the user instead of silently gaining
+        // link rows that counted toward the issue.
+        let mut parsed: Vec<i64> = Vec::new();
+        for id in self
             .new_conversation_ids
             .split(',')
             .filter_map(|id| id.trim().parse::<i64>().ok().filter(|v| *v > 0))
+        {
+            if !parsed.contains(&id) {
+                parsed.push(id);
+            }
+        }
+        let existing: std::collections::HashSet<i64> = db.with_read(|conn| {
+            parsed
+                .iter()
+                .filter(|id| {
+                    conn.query_row(
+                        "SELECT 1 FROM conversations WHERE id = ?1",
+                        rusqlite::params![id],
+                        |_| Ok(()),
+                    )
+                    .is_ok()
+                })
+                .copied()
+                .collect()
+        });
+        let conversation_ids: Vec<i64> = parsed
+            .iter()
+            .copied()
+            .filter(|id| existing.contains(id))
+            .collect();
+        let skipped: Vec<String> = parsed
+            .iter()
+            .copied()
+            .filter(|id| !existing.contains(id))
+            .map(|id| id.to_string())
             .collect();
         let symptoms = optional(&self.new_symptoms);
         let workaround = optional(&self.new_workaround);
@@ -259,6 +301,16 @@ impl IssueRadarPage {
                 self.new_symptoms.clear();
                 self.new_workaround.clear();
                 self.new_conversation_ids.clear();
+                if skipped.is_empty() {
+                    self.notice = None;
+                } else {
+                    self.notice = Some(format!(
+                        "known issue created; linked {} conversation(s) — unknown id(s) \
+                         skipped: {}",
+                        conversation_ids.len(),
+                        skipped.join(", ")
+                    ));
+                }
                 self.reload(db);
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -936,5 +988,118 @@ mod tests {
     fn known_issue_optional_text_helper() {
         assert_eq!(optional("  hi  ").as_deref(), Some("hi"));
         assert_eq!(optional("   "), None);
+    }
+}
+
+/// Clean-audit item 81: known-issue links accepted dangling conversation
+/// ids and counted them — a link to a nonexistent conversation gained a
+/// row and inflated `conversation_count`. Links now materialize only
+/// for existing conversations, counts join the conversations table, and
+/// the create form tells the user which ids were skipped.
+#[cfg(test)]
+mod batch27_audit81_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    #[test]
+    fn dangling_ids_gain_no_links_and_do_not_count() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Login broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let id = db.with_write(|conn| {
+            create_known_issue(
+                conn,
+                "Login loop",
+                None,
+                None,
+                "investigating",
+                &[1, 99, 100], // 99/100 do not exist
+            )
+            .expect("known issue")
+        });
+
+        let links: Vec<i64> = db.with_read(|conn| {
+            conn.prepare("SELECT conversation_id FROM known_issue_links ORDER BY conversation_id")
+                .expect("prepare")
+                .query_map([], |r| r.get(0))
+                .expect("query")
+                .filter_map(Result::ok)
+                .collect()
+        });
+        assert_eq!(
+            links,
+            vec![1],
+            "only the existing conversation gained a link"
+        );
+
+        let known = db.with_read(load_known);
+        assert_eq!(known[0].id, id);
+        assert_eq!(known[0].conversation_count, 1, "dangling ids never counted");
+    }
+
+    #[test]
+    fn pre_fix_dangling_links_no_longer_count() {
+        let db = fixture(Vec::new());
+        // A pre-fix database: a known issue with two link rows, one of
+        // them dangling (conversation 99 never existed).
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO known_issues (name, status, title, provenance)
+                 VALUES ('Legacy', 'identified', 'Legacy', 'human_local')",
+                [],
+            )
+            .expect("known");
+            let kid = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO known_issue_links (known_issue_id, conversation_id, link_type)
+                 VALUES (?1, 99, 'human')",
+                rusqlite::params![kid],
+            )
+            .expect("dangling link");
+            spp_core::intelligence_features::refresh_known_issue_counts(conn, kid)
+                .expect("refresh");
+        });
+        let known = db.with_read(load_known);
+        assert_eq!(
+            known[0].conversation_count, 0,
+            "the refresh counts only links whose conversation exists"
+        );
+    }
+
+    #[test]
+    fn page_create_reports_skipped_unknown_ids() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Login broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let mut page = IssueRadarPage::new();
+        page.new_title = "Login loop".into();
+        // 1 exists; 7 does not; 1 repeated must dedupe.
+        page.new_conversation_ids = "1, 7, 1".into();
+        page.create(&db);
+
+        assert!(page.error.is_none(), "create failed: {:?}", page.error);
+        let notice = page.notice.clone().expect("the skipped id is reported");
+        assert!(notice.contains("7"), "notice lists id 7: {notice}");
+        assert!(notice.contains("1 conversation"), "linked one: {notice}");
+
+        let links: i64 = db.with_read(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM known_issue_links", [], |r| r.get(0))
+                .expect("links")
+        });
+        assert_eq!(links, 1, "dedupe + existence check both applied");
     }
 }

@@ -163,6 +163,11 @@ pub fn conversations_for(
     Ok(spp_core::inbox::list_conversations(conn, &filters)?.0)
 }
 
+/// Rows per customers page (clean-audit item 82: the search fetched
+/// page 1 only — customer 51+ was unreachable behind the 50-row cap;
+/// the cap is now a page size with prev/next controls under the table).
+const CUSTOMERS_PAGE_SIZE: i64 = 50;
+
 /// The interactive customers page state.
 pub struct CustomersPage {
     /// R8 (D5): outcome note for the page's "Sync now" action — the
@@ -174,6 +179,9 @@ pub struct CustomersPage {
     applied_query: Option<String>,
     rows: Vec<CustomerRow>,
     total: i64,
+    /// Clean-audit item 82: the 1-based results page the pager is on
+    /// (a new search resets it to 1; the pager moves it).
+    page: i64,
     profile: Option<Value>,
     interaction: Option<Value>,
     health: Option<Value>,
@@ -195,6 +203,7 @@ impl CustomersPage {
             applied_query: None,
             rows: Vec::new(),
             total: 0,
+            page: 1,
             profile: None,
             interaction: None,
             health: None,
@@ -217,12 +226,19 @@ impl CustomersPage {
             spp_core::people_store::list_customers_summary(
                 conn,
                 self.applied_query.as_deref(),
-                1,
-                50,
+                self.page,
+                CUSTOMERS_PAGE_SIZE,
             )
         });
         match result {
             Ok((summaries, total)) => {
+                // Clean-audit item 82: a page past the last one (the data
+                // shrank underneath) falls back to the last page that
+                // still holds rows instead of rendering a dead end.
+                if summaries.is_empty() && self.page > 1 && total > 0 {
+                    self.page = (total + CUSTOMERS_PAGE_SIZE - 1) / CUSTOMERS_PAGE_SIZE;
+                    return self.reload_search(db);
+                }
                 self.rows = summaries.iter().map(row_from_summary).collect();
                 self.total = total;
                 self.error = None;
@@ -369,6 +385,7 @@ impl CustomersPage {
                 } else {
                     Some(trimmed.to_string())
                 };
+                self.page = 1;
                 self.reload_search(db);
             }
         });
@@ -385,47 +402,68 @@ impl CustomersPage {
         }
         let rows = self.rows.clone();
         let mut clicked: Option<i64> = None;
-        design::card_titled(
-            ui,
-            &format!("{} customers (of {})", rows.len(), self.total),
-            None,
-            |ui| {
-                let t = design::tokens(ui);
-                egui::ScrollArea::vertical().show_rows(ui, 28.0, rows.len(), |ui, range| {
-                    design::table(
-                        ui,
-                        "customer-results",
-                        &["name", "email", "conversations", "last contact", ""],
-                        26.0,
-                        |ui| {
-                            for row in rows[range].iter().cloned() {
-                                ui.label(
-                                    egui::RichText::new(row.display_name.as_str())
-                                        .size(13.0)
-                                        .strong()
-                                        .color(t.foreground),
-                                );
-                                ui.label(
-                                    egui::RichText::new(row.email.as_deref().unwrap_or("—"))
-                                        .size(13.0)
-                                        .color(t.foreground),
-                                );
-                                design::td_num(ui, &row.conversation_count.to_string());
-                                ui.label(
-                                    egui::RichText::new(row.last_contact.as_deref().unwrap_or("—"))
-                                        .size(13.0)
-                                        .color(t.muted_foreground),
-                                );
-                                if design::button(ui, "open", ButtonVariant::Outline).clicked() {
-                                    clicked = Some(row.id);
-                                }
-                                ui.end_row();
+        // Clean-audit item 82: the card title reports the visible RANGE
+        // once pagination is in play ("51-100 of 1234"), like the inbox.
+        let title = if self.total > CUSTOMERS_PAGE_SIZE {
+            let from = (self.page - 1) * CUSTOMERS_PAGE_SIZE + 1;
+            let to = from - 1 + self.rows.len() as i64;
+            format!("{from}-{to} of {} customers", self.total)
+        } else {
+            format!("{} customers (of {})", rows.len(), self.total)
+        };
+        design::card_titled(ui, &title, None, |ui| {
+            let t = design::tokens(ui);
+            egui::ScrollArea::vertical().show_rows(ui, 28.0, rows.len(), |ui, range| {
+                design::table(
+                    ui,
+                    "customer-results",
+                    &["name", "email", "conversations", "last contact", ""],
+                    26.0,
+                    |ui| {
+                        for row in rows[range].iter().cloned() {
+                            ui.label(
+                                egui::RichText::new(row.display_name.as_str())
+                                    .size(13.0)
+                                    .strong()
+                                    .color(t.foreground),
+                            );
+                            ui.label(
+                                egui::RichText::new(row.email.as_deref().unwrap_or("—"))
+                                    .size(13.0)
+                                    .color(t.foreground),
+                            );
+                            design::td_num(ui, &row.conversation_count.to_string());
+                            ui.label(
+                                egui::RichText::new(row.last_contact.as_deref().unwrap_or("—"))
+                                    .size(13.0)
+                                    .color(t.muted_foreground),
+                            );
+                            if design::button(ui, "open", ButtonVariant::Outline).clicked() {
+                                clicked = Some(row.id);
                             }
-                        },
-                    );
-                });
-            },
+                            ui.end_row();
+                        }
+                    },
+                );
+            });
+        });
+        // Clean-audit item 82: prev/next under the table — page 1 used to
+        // be the only page the search ever fetched.
+        let pages = u32::try_from((self.total + CUSTOMERS_PAGE_SIZE - 1) / CUSTOMERS_PAGE_SIZE)
+            .unwrap_or(1);
+        let delta = design::pager(
+            ui,
+            u32::try_from(self.page).unwrap_or(1).saturating_sub(1),
+            pages,
         );
+        if delta != 0
+            && let Some(next) = self.page.checked_add(delta.into())
+            && next >= 1
+            && next <= i64::from(pages)
+        {
+            self.page = next;
+            self.reload_search(db);
+        }
         if let Some(id) = clicked {
             self.open_profile(db, id);
         }
@@ -435,6 +473,7 @@ impl CustomersPage {
         if design::button(ui, "← back to search", ButtonVariant::Outline).clicked() {
             self.mode = Mode::Search;
             self.rows.clear();
+            self.page = 1;
             return;
         }
         let Some(profile) = self.profile.clone() else {
@@ -892,5 +931,68 @@ mod tests {
         page.reload_search(&db);
         assert!(page.rows.is_empty());
         assert!(page.error.is_none());
+    }
+}
+
+/// Clean-audit item 82: the customers search fetched page 1 only —
+/// customer 51+ was unreachable behind the hard-coded 50-row page. The
+/// fetch now takes the pager's page (with a clamp when the data shrinks
+/// underneath).
+#[cfg(test)]
+mod batch27_audit82_tests {
+    use super::*;
+    use crate::testsupport::empty_db;
+
+    fn seed_customers(conn: &mut rusqlite::Connection, count: i64) {
+        for i in 1..=count {
+            conn.execute(
+                "INSERT INTO customers (id, remote_id, first_name, last_name, email)
+                 VALUES (?1, ?1, ?2, 'Customer', ?3)",
+                rusqlite::params![i, format!("First{i}"), format!("c{i}@example.com")],
+            )
+            .expect("customer");
+        }
+    }
+
+    #[test]
+    fn page_two_reaches_customers_past_the_cap() {
+        let db = empty_db();
+        db.with_write(|conn| seed_customers(conn, 55));
+
+        let mut page = CustomersPage::new();
+        page.reload_search(&db);
+        assert_eq!(page.total, 55, "the total counts every customer");
+        assert_eq!(page.rows.len(), 50, "page 1 holds the page size");
+        let page_one_ids: std::collections::HashSet<i64> = page.rows.iter().map(|r| r.id).collect();
+        assert_eq!(page_one_ids.len(), 50, "no duplicates on page 1");
+
+        page.page = 2;
+        page.reload_search(&db);
+        assert_eq!(page.rows.len(), 5, "page 2 holds the rest");
+        assert_eq!(page.total, 55);
+        let mut seen = page_one_ids;
+        for row in &page.rows {
+            assert!(seen.insert(row.id), "no customer appears on two pages");
+        }
+        assert_eq!(seen.len(), 55, "every customer is reachable");
+    }
+
+    #[test]
+    fn a_page_past_the_end_falls_back_to_the_last_page() {
+        let db = empty_db();
+        db.with_write(|conn| seed_customers(conn, 55));
+
+        let mut page = CustomersPage::new();
+        page.reload_search(&db);
+        assert_eq!(page.rows.len(), 50);
+
+        // The data shrinks to 12 while the user sits on page 2.
+        db.with_write(|conn| {
+            conn.execute("DELETE FROM customers WHERE id > 12", [])
+                .expect("delete");
+        });
+        page.reload_search(&db);
+        assert_eq!(page.page, 1, "the past-the-end page clamped");
+        assert_eq!(page.rows.len(), 12, "the last-page rows render");
     }
 }

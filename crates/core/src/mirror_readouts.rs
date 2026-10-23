@@ -203,10 +203,15 @@ pub fn saved_replies(conn: &Connection, q: Option<&str>) -> Result<Vec<Value>> {
     ensure_tables(conn)?;
     let base_sql = "SELECT id, remote_id, mailbox_local_id, name, preview, text, chat_text FROM saved_replies WHERE deleted_at IS NULL";
     if let Some(q) = q.filter(|s| !s.is_empty()) {
+        // Clean-audit item 83: the search text is a LITERAL — the
+        // pattern body is escaped and the ESCAPE clause declared (the
+        // pre-fix query had neither, so `%`/`_` in the input acted as
+        // wildcards over the mirror).
+        let like = crate::search::escape_like(q);
         let mut stmt = conn.prepare(&format!(
-            "{base_sql} AND lower(name) LIKE '%' || lower(?1) || '%' ORDER BY name"
+            "{base_sql} AND lower(name) LIKE '%' || lower(?1) || '%' ESCAPE '\\' ORDER BY name"
         ))?;
-        let out: Vec<Value> = stmt.query_map([q], reply_row)?.flatten().collect();
+        let out: Vec<Value> = stmt.query_map([&like], reply_row)?.flatten().collect();
         Ok(out)
     } else {
         let mut stmt = conn.prepare(&format!("{base_sql} ORDER BY name"))?;
@@ -225,4 +230,69 @@ fn reply_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "text": r.get::<_, Option<String>>(5)?,
         "chat_text": r.get::<_, Option<String>>(6)?,
     }))
+}
+
+/// Clean-audit item 83: the saved-replies mirror search had neither an
+/// ESCAPE clause nor escaping — `%`/`_` in the input acted as wildcards
+/// over the mirror.
+#[cfg(test)]
+mod batch27_audit83_tests {
+    use super::*;
+
+    fn seeded() -> rusqlite::Connection {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        ensure_tables(&conn).expect("tables");
+        conn.execute(
+            "INSERT INTO mailboxes (id, remote_id, name) VALUES (1, 101, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        for (id, name) in [
+            (1, "Refund policy"),
+            (2, "50% off apology"),
+            (3, "Greetings_z"),
+        ] {
+            conn.execute(
+                "INSERT INTO saved_replies (id, remote_id, mailbox_local_id, name)
+                 VALUES (?1, ?1, 1, ?2)",
+                rusqlite::params![id, name],
+            )
+            .expect("reply");
+        }
+        conn
+    }
+
+    fn names_matching(conn: &rusqlite::Connection, q: &str) -> Vec<String> {
+        saved_replies(conn, Some(q))
+            .expect("replies")
+            .into_iter()
+            .filter_map(|v| v.get("name").and_then(|n| n.as_str().map(str::to_string)))
+            .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn percent_and_underscore_match_literally() {
+        let conn = seeded();
+        assert_eq!(
+            names_matching(&conn, "50%"),
+            vec!["50% off apology".to_string()],
+            "a literal % finds only the discount reply"
+        );
+        assert_eq!(
+            names_matching(&conn, "Greetings_z"),
+            vec!["Greetings_z".to_string()],
+            "a literal _ is not a wildcard"
+        );
+    }
+
+    #[test]
+    fn plain_searches_still_match() {
+        let conn = seeded();
+        assert_eq!(
+            names_matching(&conn, "refund"),
+            vec!["Refund policy".to_string()],
+            "case-insensitive substring matching is unchanged"
+        );
+    }
 }

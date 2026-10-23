@@ -396,6 +396,17 @@ pub fn save_business_hours(
 pub struct SettingsPage {
     tab: Tab,
     general: Option<GeneralSettings>,
+    /// Clean-audit item 77: the last PERSISTED snapshot of the General
+    /// form. The form is dirty when it differs from this snapshot — and
+    /// a dirty form is user state: `reload` keeps it instead of
+    /// re-reading persisted values over unsaved edits (a sync
+    /// invalidation used to drop the form wholesale and the next
+    /// render's reload silently reverted whatever the user was typing).
+    general_persisted: Option<GeneralSettings>,
+    /// Clean-audit item 77: an invalidation is pending its mirror
+    /// refresh (the mirrors re-read on the next render without ever
+    /// clobbering the form).
+    stale: bool,
     helpscout: Option<HelpScoutStatus>,
     authorize_url: Option<String>,
     /// Help Scout credential form (1.1.3). The three secrets render as
@@ -472,6 +483,8 @@ impl SettingsPage {
         Self {
             tab: Tab::General,
             general: None,
+            general_persisted: None,
+            stale: false,
             helpscout: None,
             authorize_url: None,
             hs_client_id: String::new(),
@@ -557,7 +570,15 @@ impl SettingsPage {
 
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
-        self.general = None;
+        // Clean-audit item 77: the pre-fix invalidation dropped the
+        // General form (`general = None`), so the next render's reload
+        // silently re-read the persisted values over unsaved edits — a
+        // sync landing while the user typed lost their changes. The
+        // form is user state now: invalidation only marks the page
+        // stale; the mirrors (connection status, business hours,
+        // backups) re-read on the next render, and the dirty guard in
+        // `reload` keeps the form.
+        self.stale = true;
         self.helpscout = None;
         self.hours.clear();
         self.backups.clear();
@@ -571,7 +592,18 @@ impl SettingsPage {
                 load_business_hours(conn),
             )
         });
-        self.general = Some(general);
+        // Clean-audit item 77: a dirty General form (one that differs
+        // from the last persisted snapshot) is user state — keep it and
+        // its snapshot; only a clean or absent form takes the fresh
+        // read. Every mirror below refreshes unconditionally.
+        let dirty = self
+            .general
+            .as_ref()
+            .is_some_and(|g| self.general_persisted.as_ref() != Some(g));
+        if !dirty {
+            self.general = Some(general.clone());
+            self.general_persisted = Some(general);
+        }
         self.helpscout = Some(helpscout);
         self.hours = hours;
         // Prefill the credential form once from the envelope (like the
@@ -631,8 +663,12 @@ impl SettingsPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.general.is_none() {
+        // Clean-audit item 77: a pending invalidation refreshes the
+        // mirrors too, not just a first load (the form survives either
+        // way — see the dirty guard in `reload`).
+        if self.general.is_none() || self.stale {
             self.reload(db);
+            self.stale = false;
         }
     }
 
@@ -655,6 +691,11 @@ impl SettingsPage {
         let result = db.with_write(|conn| general.save(conn));
         match result {
             Ok(()) => {
+                // Clean-audit item 77: the saved form is the new
+                // persisted snapshot — the form reads clean from here
+                // on (until edited again), so a later invalidation or
+                // reload may take fresh reads without losing anything.
+                self.general_persisted = Some(general.clone());
                 if interval_before != general.sync_interval_minutes
                     && let Some(workers) = self.workers.clone()
                 {
@@ -2736,6 +2777,108 @@ mod batch22_audit31_tests {
             rebuilt.api_concurrency(),
             6,
             "construction applies the stored setting"
+        );
+    }
+}
+
+/// Clean-audit item 77: a sync invalidation must never revert unsaved
+/// General-tab edits — the pre-fix `invalidate` dropped the form
+/// (`general = None`), so the next render's reload silently re-read the
+/// persisted values over whatever the user was typing.
+#[cfg(test)]
+mod batch27_audit77_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    #[test]
+    fn invalidation_keeps_unsaved_general_edits() {
+        let db = fixture(Vec::new());
+        let mut page = SettingsPage::new();
+
+        // First load: the form mirrors the persisted settings.
+        page.ensure_loaded(&db);
+        let loaded_interval = page.general.as_ref().expect("loaded").sync_interval_minutes;
+
+        // The user types an edit (say the sync interval) and saves nothing.
+        page.general.as_mut().expect("form").sync_interval_minutes = 720;
+
+        // A sync event lands → the shell invalidates the page.
+        page.invalidate();
+
+        // Next render: mirrors re-read, the unsaved edit survives.
+        page.ensure_loaded(&db);
+        assert_eq!(
+            page.general
+                .as_ref()
+                .expect("form kept")
+                .sync_interval_minutes,
+            720,
+            "the unsaved edit survives the invalidation + reload"
+        );
+        assert!(
+            page.helpscout.is_some(),
+            "the connection-status mirror still refreshed"
+        );
+        assert!(
+            !page.stale,
+            "the pending invalidation was consumed by the reload"
+        );
+
+        // And the DB still holds the persisted value (nothing was saved).
+        assert_eq!(
+            db.with_read(|conn| { spp_core::settings::get_i64(conn, "sync_interval_minutes", 1) })
+                .unwrap_or(1),
+            loaded_interval,
+            "the invalidation saved nothing behind the user's back"
+        );
+    }
+
+    #[test]
+    fn invalidation_refreshes_a_clean_form_from_the_db() {
+        let db = fixture(Vec::new());
+        let mut page = SettingsPage::new();
+        page.ensure_loaded(&db);
+
+        // Another surface persists a new interval while the form is clean.
+        db.with_write(|conn| spp_core::settings::set_i64(conn, "sync_interval_minutes", 45))
+            .expect("write");
+
+        page.invalidate();
+        page.ensure_loaded(&db);
+
+        assert_eq!(
+            page.general.as_ref().expect("form").sync_interval_minutes,
+            45,
+            "a clean form still takes the fresh read"
+        );
+    }
+
+    #[test]
+    fn saved_edits_clear_the_dirty_guard() {
+        let db = fixture(Vec::new());
+        let mut page = SettingsPage::new();
+        page.ensure_loaded(&db);
+
+        // Edit + save: the snapshot must catch up so a later
+        // invalidation takes fresh reads instead of pinning the form.
+        page.general.as_mut().expect("form").api_concurrency = 4;
+        page.save_general(&db);
+        assert!(page.error.is_none(), "save failed: {:?}", page.error);
+
+        // A DB-side change after the save must reach the form.
+        db.with_write(|conn| spp_core::settings::set_i64(conn, "sync_interval_minutes", 30))
+            .expect("write");
+        page.invalidate();
+        page.ensure_loaded(&db);
+
+        let general = page.general.as_ref().expect("form");
+        assert_eq!(
+            general.sync_interval_minutes, 30,
+            "fresh read after save (form was clean)"
+        );
+        assert_eq!(
+            general.api_concurrency, 4,
+            "the SAVED edit is the persisted value now"
         );
     }
 }

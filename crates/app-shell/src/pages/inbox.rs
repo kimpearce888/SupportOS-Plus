@@ -86,12 +86,18 @@ pub struct FilterBar {
     pub ops: Option<String>,
 }
 
+/// Rows per inbox page (clean-audit item 78: the list was hard-capped
+/// at 50 with no pagination — conversation 51+ was unreachable; the cap
+/// is now a page size with prev/next controls under the list).
+pub const INBOX_PAGE_SIZE: u32 = 50;
+
 /// Map the filter bar to the core `InboxFilters`.
 ///
 /// The operations-tile fragment needs the waiting-threshold setting, so
 /// the bar compiles against a connection (same as the HTTP route).
+/// `page` is the 0-based list page (item 78).
 #[must_use]
-pub fn filters_from_bar(bar: &FilterBar, conn: &rusqlite::Connection) -> InboxFilters {
+pub fn filters_from_bar(bar: &FilterBar, page: u32, conn: &rusqlite::Connection) -> InboxFilters {
     let mut filters = InboxFilters {
         status: bar
             .view
@@ -106,8 +112,8 @@ pub fn filters_from_bar(bar: &FilterBar, conn: &rusqlite::Connection) -> InboxFi
         tag: bar.tag.clone(),
         query: bar.query.clone(),
         number: bar.number,
-        limit: Some(50),
-        offset: Some(0),
+        limit: Some(INBOX_PAGE_SIZE),
+        offset: Some(page.saturating_mul(INBOX_PAGE_SIZE)),
         extra_where: None,
         extra_params: Vec::new(),
     };
@@ -270,6 +276,9 @@ pub struct InboxPage {
     number_edit: String,
     list: Vec<ConversationListItem>,
     total: u32,
+    /// Clean-audit item 78: the 0-based list page the pager is on
+    /// (filters reset it to 0; the pager moves it).
+    page: u32,
     selected: Option<i64>,
     detail: Option<ConversationDetail>,
     composer_mode: ComposerMode,
@@ -338,6 +347,23 @@ pub struct InboxPage {
     assistant_pending: Option<i64>,
     /// Last assistant error (job failure text, verbatim).
     assistant_error: Option<String>,
+    /// Clean-audit item 79: per-conversation composer drafts. Clicking
+    /// another row used to wipe the typed reply silently — the composer
+    /// state (body/cc/bcc/mode + AI-draft provenance) now travels with
+    /// its conversation and is restored on reselect. A successful submit
+    /// drops the stash (the text was sent); the stash never outlives the
+    /// session.
+    drafts: std::collections::HashMap<i64, StashedDraft>,
+}
+
+/// One stashed composer draft (clean-audit item 79).
+#[derive(Debug, Clone)]
+struct StashedDraft {
+    mode: ComposerMode,
+    body: String,
+    cc: String,
+    bcc: String,
+    inserted_draft: Option<(i64, String)>,
 }
 
 /// One in-flight composer-AI job the inbox polls (A3/A6). Jobs carry
@@ -383,6 +409,7 @@ impl InboxPage {
             number_edit: String::new(),
             list: Vec::new(),
             total: 0,
+            page: 0,
             selected: None,
             detail: None,
             composer_mode: ComposerMode::Reply,
@@ -418,6 +445,7 @@ impl InboxPage {
             assistant_input: String::new(),
             assistant_pending: None,
             assistant_error: None,
+            drafts: std::collections::HashMap::new(),
         }
     }
 
@@ -462,11 +490,20 @@ impl InboxPage {
             self.reload_refs(db);
         }
         let result = db.with_read(|conn| {
-            let filters = filters_from_bar(&self.bar, conn);
+            let filters = filters_from_bar(&self.bar, self.page, conn);
             spp_core::inbox::list_conversations(conn, &filters)
         });
         match result {
             Ok((items, total)) => {
+                // Clean-audit item 78: a page past the last one (the data
+                // shrank underneath — deletions, a narrowing sync) falls
+                // back to the last page that still holds rows instead of
+                // rendering an empty dead end. One recursive step: the
+                // clamped page always has rows.
+                if items.is_empty() && self.page > 0 && total > 0 {
+                    self.page = (total - 1) / INBOX_PAGE_SIZE;
+                    return self.reload_list(db);
+                }
                 self.list = items;
                 self.total = total;
                 self.status = None;
@@ -746,15 +783,48 @@ impl InboxPage {
 
     /// Select a conversation and load its detail.
     pub fn select(&mut self, db: &DbHandle, id: i64) {
+        // Clean-audit item 79: the outgoing conversation's typed draft is
+        // stashed, not wiped — peeking at another row loses nothing, and
+        // reselecting restores the text exactly (body/cc/bcc/mode + the
+        // AI-draft provenance, so accept/edit-distance feedback still
+        // records against the real row). Clicking the row that is
+        // ALREADY open touches the composer not at all — typing
+        // continues.
+        let switching = self.selected != Some(id);
+        if switching && let Some(prev) = self.selected {
+            self.drafts.insert(
+                prev,
+                StashedDraft {
+                    mode: self.composer_mode,
+                    body: std::mem::take(&mut self.composer_body),
+                    cc: std::mem::take(&mut self.composer_cc),
+                    bcc: std::mem::take(&mut self.composer_bcc),
+                    inserted_draft: self.inserted_draft.take(),
+                },
+            );
+        }
         self.selected = Some(id);
-        self.composer_body.clear();
-        self.composer_cc.clear();
-        self.composer_bcc.clear();
+        if switching {
+            if let Some(stash) = self.drafts.get(&id).cloned() {
+                self.composer_mode = stash.mode;
+                self.composer_body = stash.body;
+                self.composer_cc = stash.cc;
+                self.composer_bcc = stash.bcc;
+                self.inserted_draft = stash.inserted_draft;
+            } else {
+                // No stash: the incoming conversation starts from the
+                // default composer (reply mode, clean fields).
+                self.composer_mode = ComposerMode::Reply;
+                self.composer_body.clear();
+                self.composer_cc.clear();
+                self.composer_bcc.clear();
+                self.inserted_draft = None;
+            }
+        }
         self.status_message = None;
         // A3/A6: per-conversation AI state resets with the selection —
-        // provenance, pending jobs and cards belong to the previous
-        // conversation, never the new one.
-        self.inserted_draft = None;
+        // pending jobs and cards belong to the previous conversation,
+        // never the new one.
         self.pending_ai = None;
         self.coaching_review = None;
         self.qa_review = None;
@@ -812,6 +882,13 @@ impl InboxPage {
                 self.composer_body.clear();
                 self.composer_cc.clear();
                 self.composer_bcc.clear();
+                // Clean-audit item 79: the sent conversation's stash is
+                // spent — reselecting starts from a clean composer
+                // instead of resurrecting the reply that already went
+                // out.
+                if let Some(id) = self.selected {
+                    self.drafts.remove(&id);
+                }
             }
             // Rejections keep the typed text (the user fixes the problem
             // and re-sends; wiping the composer destroyed their work).
@@ -904,7 +981,16 @@ impl InboxPage {
         // A5: the conversation-scoped assistant poll.
         self.poll_assistant(db);
 
-        let subtitle = format!("{} of {} conversations", self.list.len(), self.total);
+        // Clean-audit item 78: the subtitle reports the visible RANGE once
+        // pagination is in play ("51-100 of 1234"), not a misleading
+        // "50 of 1234".
+        let subtitle = if self.total > INBOX_PAGE_SIZE {
+            let from = self.page * INBOX_PAGE_SIZE + 1;
+            let to = from - 1 + self.list.len() as u32;
+            format!("{from}-{to} of {} conversations", self.total)
+        } else {
+            format!("{} of {} conversations", self.list.len(), self.total)
+        };
         let syncing = engine.is_some_and(|e| e.is_running());
         design::page_header(ui, "Inbox", Some(&subtitle), |ui| {
             if design::button(ui, "reset filters", ButtonVariant::Ghost)
@@ -918,6 +1004,7 @@ impl InboxPage {
                 self.tag_pick = None;
                 self.search_edit.clear();
                 self.number_edit.clear();
+                self.page = 0;
                 self.reload_list(db);
             }
             if design::button_with_icon(
@@ -970,6 +1057,7 @@ impl InboxPage {
                 .clicked()
                 {
                     self.bar.ops = None;
+                    self.page = 0;
                     self.reload_list(db);
                 }
             });
@@ -982,6 +1070,7 @@ impl InboxPage {
                 if design::chip(ui, self.view_pick == view, view.label()).clicked() {
                     self.view_pick = view;
                     self.bar.view = Some(view);
+                    self.page = 0;
                     self.reload_list(db);
                 }
             }
@@ -1038,6 +1127,7 @@ impl InboxPage {
                 self.bar.mailbox = self.mailbox_pick;
                 self.bar.channel = self.channel_pick.clone();
                 self.bar.tag = self.tag_pick.clone();
+                self.page = 0;
                 self.reload_list(db);
             }
         });
@@ -1066,6 +1156,7 @@ impl InboxPage {
                     Some(trimmed.to_string())
                 };
                 self.bar.number = self.number_edit.trim().parse::<i64>().ok();
+                self.page = 0;
                 self.reload_list(db);
             }
         });
@@ -1241,6 +1332,18 @@ impl InboxPage {
             });
         if let Some(id) = clicked {
             self.select(db, id);
+        }
+        // Clean-audit item 78: prev/next under the list — the 50-row cap
+        // was a dead end before (conversation 51+ was unreachable, the
+        // subtitle just said "50 of 1234").
+        let pages = self.total.div_ceil(INBOX_PAGE_SIZE);
+        let delta = design::pager(ui, self.page, pages);
+        if delta != 0
+            && let Some(next) = self.page.checked_add_signed(delta)
+            && next < pages
+        {
+            self.page = next;
+            self.reload_list(db);
         }
     }
 
@@ -2924,14 +3027,15 @@ mod tests {
             number: Some(42),
             ops: None,
         };
-        let filters = db.with_read(|conn| filters_from_bar(&bar, conn));
+        let filters = db.with_read(|conn| filters_from_bar(&bar, 0, conn));
         assert_eq!(filters.status.as_deref(), Some("active"));
         assert_eq!(filters.mailbox_id, Some(2));
         assert_eq!(filters.channel.as_deref(), Some("email"));
         assert_eq!(filters.tag.as_deref(), Some("bug"));
         assert_eq!(filters.query.as_deref(), Some("export"));
         assert_eq!(filters.number, Some(42));
-        assert_eq!(filters.limit, Some(50));
+        assert_eq!(filters.limit, Some(INBOX_PAGE_SIZE));
+        assert_eq!(filters.offset, Some(0));
         assert_eq!(ViewFilter::All.status(), None);
     }
 
@@ -2948,7 +3052,7 @@ mod tests {
         };
         let (items, total) = db
             .with_read(|conn| {
-                let filters = filters_from_bar(&bar, conn);
+                let filters = filters_from_bar(&bar, 0, conn);
                 spp_core::inbox::list_conversations(conn, &filters)
             })
             .expect("ops list");
@@ -2960,7 +3064,7 @@ mod tests {
             ops: Some("' OR 1=1 --".into()),
             ..FilterBar::default()
         };
-        let filters = db.with_read(|conn| filters_from_bar(&bad, conn));
+        let filters = db.with_read(|conn| filters_from_bar(&bad, 0, conn));
         assert!(filters.extra_where.is_none());
     }
 
@@ -3416,6 +3520,131 @@ mod tests {
         assert_eq!(
             parsed["statusAfter"], "open",
             "the legacy phantom status maps onto the real one"
+        );
+    }
+}
+
+/// Clean-audit item 78: the inbox list was hard-capped at 50 rows with
+/// no pagination — conversation 51+ was unreachable. The cap is now a
+/// page size with offset paging (and a clamp when the data shrinks
+/// underneath the current page).
+#[cfg(test)]
+mod batch27_audit78_tests {
+    use super::*;
+    use crate::testsupport::{fixture, seed_conversation};
+
+    fn seed_many(conn: &mut rusqlite::Connection) {
+        // 55 conversations: page 0 holds 50, page 1 holds 5.
+        for i in 1..=55i64 {
+            seed_conversation(conn, i, &format!("conv {i}"), "active", "email", 1, 5, 9);
+        }
+    }
+
+    #[test]
+    fn page_one_reaches_conversations_past_the_cap() {
+        let db = fixture(Vec::new());
+        db.with_write(seed_many);
+
+        let mut page = InboxPage::new();
+        page.reload_list(&db);
+        assert_eq!(page.total, 55, "the total counts every match");
+        assert_eq!(page.list.len(), 50, "page 0 holds the page size");
+        let page_zero_ids: std::collections::HashSet<i64> =
+            page.list.iter().map(|i| i.id).collect();
+        assert_eq!(page_zero_ids.len(), 50, "no duplicates within page 0");
+
+        // The pager advances: page 1 holds the remaining 5 rows.
+        page.page = 1;
+        page.reload_list(&db);
+        assert_eq!(page.list.len(), 5, "page 1 holds the rest");
+        assert_eq!(page.total, 55, "the total is page-independent");
+        // The two pages together cover every conversation exactly once.
+        let mut seen = page_zero_ids;
+        for item in &page.list {
+            assert!(seen.insert(item.id), "no row appears on two pages");
+        }
+        assert_eq!(seen.len(), 55, "every conversation is reachable");
+    }
+
+    #[test]
+    fn offset_compiles_from_the_page_index() {
+        let db = fixture(Vec::new());
+        let bar = FilterBar::default();
+        let filters = db.with_read(|conn| filters_from_bar(&bar, 2, conn));
+        assert_eq!(filters.limit, Some(INBOX_PAGE_SIZE));
+        assert_eq!(filters.offset, Some(2 * INBOX_PAGE_SIZE));
+    }
+
+    #[test]
+    fn a_page_past_the_end_falls_back_to_the_last_page() {
+        let db = fixture(Vec::new());
+        db.with_write(seed_many);
+
+        let mut page = InboxPage::new();
+        page.reload_list(&db);
+        assert_eq!(page.list.len(), 50);
+
+        // The data shrinks to 60 rows... then to 12 while the user sits
+        // on page 1 (offset 50 > 12 rows): the reload clamps to page 0.
+        db.with_write(|conn| {
+            conn.execute("DELETE FROM conversations WHERE id > 12", [])
+                .expect("delete");
+        });
+        page.reload_list(&db);
+        assert_eq!(page.page, 0, "the past-the-end page clamped");
+        assert_eq!(page.list.len(), 12, "the last-page rows render");
+        assert!(!page.list.is_empty());
+    }
+}
+
+/// Clean-audit item 79: clicking another row used to wipe the typed
+/// reply draft silently — the composer state now travels with its
+/// conversation and is restored on reselect.
+#[cfg(test)]
+mod batch27_audit79_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    #[test]
+    fn row_click_stashes_and_restores_the_typed_draft() {
+        let db = fixture(vec![("conv", 1, "First", "active", "email", 1, 5, 9)]);
+        db.with_write(|conn| {
+            crate::testsupport::seed_conversation(conn, 2, "Second", "active", "email", 1, 5, 10);
+        });
+
+        let mut page = InboxPage::new();
+        page.select(&db, 1);
+        page.composer_mode = ComposerMode::Note;
+        page.composer_body = "typed but unsent reply".into();
+        page.composer_cc = "cc@example.com".into();
+
+        // The user peeks at the other row.
+        page.select(&db, 2);
+        assert_eq!(page.composer_body, "", "the incoming row starts clean");
+        assert_eq!(
+            page.composer_mode,
+            ComposerMode::Reply,
+            "the incoming row starts in reply mode"
+        );
+
+        // Coming back: the draft is exactly where they left it.
+        page.select(&db, 1);
+        assert_eq!(page.composer_body, "typed but unsent reply");
+        assert_eq!(page.composer_cc, "cc@example.com");
+        assert_eq!(page.composer_mode, ComposerMode::Note);
+    }
+
+    #[test]
+    fn reselecting_the_same_row_keeps_the_typing_untouched() {
+        let db = fixture(vec![("conv", 1, "First", "active", "email", 1, 5, 9)]);
+        let mut page = InboxPage::new();
+        page.select(&db, 1);
+        page.composer_body = "mid-thought".into();
+
+        page.select(&db, 1);
+        assert_eq!(
+            page.composer_body, "mid-thought",
+            "clicking the open row changes nothing"
         );
     }
 }
