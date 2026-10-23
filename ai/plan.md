@@ -56,7 +56,7 @@ rows as AI rather than human-written, the cluster prompt caps its
 conversation list, copilot runs recorded in the cost ledger with
 usage/endpoint, the tool-budget cutoff no longer strands dangling
 tool_call ids, insert_message surfaces INSERT failures instead of echoing
-a stale rowid) — in progress.
+a stale rowid) — verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
