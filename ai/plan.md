@@ -68,19 +68,12 @@ breached-vs-first-response for replied tickets, the radar trend "new"
 verdict unreachable for ≥3 clusters, backlog_jump comparing against a
 false week-ago baseline) — verified and recorded in `completed.md`.
 
+Batch 25 = items 57-66 (in progress; item 56 stays parked below pending
+the owner's wire-or-remove decision).
+
 ### MEDIUM — wrong behavior on realistic paths
 
-56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove
-57. [med|bug] new_conversation + customer_reply both fire on every customer thread, no once-guard — automation.rs:1733 + workers.rs:1751-1766
-58. [med|bug] Knowledge FTS lane never dedupes per document — search.rs:591-593
-59. [med|bug] Fused RRF scores sorted against FTS-only 1.0 scores — search.rs:993-998
-60. [med|bug] Orphaned vectors never cleaned; stale chunk text keeps matching — search.rs:908-911
-61. [med|bug] Removing a type field bricks property updates of existing objects — custom_objects.rs:417-420,579-588
-62. [med|bug] parse_mentions diverges from scan_for_mentions (ASCII-only, no boundary) — mentions.rs:223-226
-63. [med|bug] rm_tags is a no-op in ammonia 4.x; title/textarea content leaks visible — richtext.rs:131-136
-64. [med|bug] rebuild_indexes double-inserts every thread into fts_threads — search.rs:1286-1297
-65. [med|bug] Notification sweep advances cursor past unprocessed events (>500 skipped forever) — notification_sweep.rs:124,46
-66. [med|bug] textutil: bare `<` swallows the rest of the body; double entity decode — textutil.rs:37-48
+56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of batch 25)
 67. [med|gap] translation_cache never pruned; retention policy omits it — translation.rs:44 + maintenance.rs:113-118
 68. [med|gap] Audit trail never surfaced; dead reader drops non-JSON payloads — audit.rs:153
 69. [med|bug] Toasts expire on wall-clock while hidden (errors silently lost) — toasts.rs:98,115
