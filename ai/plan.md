@@ -57,19 +57,19 @@ conversation list, copilot runs recorded in the cost ledger with
 usage/endpoint, the tool-budget cutoff no longer strands dangling
 tool_call ids, insert_message surfaces INSERT failures instead of echoing
 a stale rowid) — verified and recorded in `completed.md`.
+Batch 24 = items 46-55 (knowledge-chunk batch poisoned by one empty
+vector, customer email patch deleting ALL stored emails with errors
+swallowed, verify_bundle leaking decrypted plaintext temps on error
+paths, workspace reset leaving downloaded attachment files on disk, the
+CSS blocklist bypassable via escapes/comments, blocking DNS resolution
+inside async contexts, the shared_tag display query joining a
+conversation's tags to itself, waiting_stats.at_risk counting
+breached-vs-first-response for replied tickets, the radar trend "new"
+verdict unreachable for ≥3 clusters, backlog_jump comparing against a
+false week-ago baseline) — in progress in `progress.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
-46. [med|bug] Knowledge-chunk batch poisoned by one empty vector — embeddings.rs:895-914
-47. [med|bug] Customer email patch deletes ALL stored emails, errors swallowed — people_store.rs:1245-1256
-48. [med|bug] verify_bundle leaks decrypted plaintext temp on error paths, no sweep — encrypted_sync.rs:481-487
-49. [med|gap] Workspace reset leaves downloaded attachment files on disk — data_reset.rs:110-118
-50. [med|issue] CSS blocklist bypassable via escapes/comments — security.rs:106-110
-51. [med|issue] Blocking DNS resolution inside async contexts — security.rs:482 + connectors.rs:633,641,757
-52. [med|bug] shared_tag display query joins a conversation's tags to itself — quality.rs:1193-1195
-53. [med|bug] waiting_stats.at_risk counts breached-vs-first-response for replied tickets — sla.rs:532
-54. [med|issue] Radar trend precedence: "new" unreachable for ≥3 clusters — analytics.rs:375-380
-55. [med|issue] backlog_jump compares against a false week-ago baseline — digest.rs:265-267
 56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove
 57. [med|bug] new_conversation + customer_reply both fire on every customer thread, no once-guard — automation.rs:1733 + workers.rs:1751-1766
 58. [med|bug] Knowledge FTS lane never dedupes per document — search.rs:591-593
