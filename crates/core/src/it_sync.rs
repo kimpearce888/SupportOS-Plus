@@ -276,6 +276,19 @@ fn count(db: &DbHandle, sql: &str) -> i64 {
         .unwrap_or(-1)
 }
 
+/// Hold the process-global secrets lock for the test's duration and
+/// install the deterministic master key (same value/convention as
+/// `it_loopback`) — the engine helper seeds OAuth tokens through the
+/// encrypted envelope, which needs the key. Filtered runs (a single
+/// test) cannot rely on another module having installed it first.
+fn install_master_key() -> std::sync::MutexGuard<'static, ()> {
+    let guard = crate::settings::SECRETS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    crate::settings::set_master_key_for_tests([7u8; 32]);
+    guard
+}
+
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -608,4 +621,488 @@ fn hard_upstream_failure_is_reported_not_swallowed() {
     // And the state machine degraded to ERROR, not LIVE.
     let state = crate::sync_engine::get_state(&db.write_guard());
     assert_eq!(state, "ERROR");
+}
+
+// ---------------------------------------------------------------------------
+// Clean-audit batch 28 (items 88/89/91)
+// ---------------------------------------------------------------------------
+
+/// A handler over the FULL fixture whose conversations LIST endpoint
+/// reports nothing modified (an empty page, no cursor): a realistic
+/// incremental pass where the overlap window sees no changes. The
+/// conversations pass is a no-op, which isolates whatever else the
+/// engine does in an incremental run (the threads backfill). Single-
+/// conversation fetches still serve the fixture — the backfill needs
+/// them.
+fn quiet_conversations(fix: &Fixture) -> crate::mockserver::Handler {
+    let inner = fixture_handler(fix);
+    Arc::new(move |req: &MockRequest| {
+        if req.method == "GET" && req.path == "/v3/conversations" {
+            return MockResponse::json(
+                200,
+                json!({"_embedded": {"conversations": []}}).to_string(),
+            );
+        }
+        inner(req)
+    })
+}
+
+/// Clean-audit item 88: a cancelled initial sync is not a LIVE mirror.
+/// The pre-fix completion path stamped the state machine LIVE (and the
+/// run row "finished, LIVE") whenever the completed resources had no
+/// errors — a mid-run cancel sailed straight through it.
+#[test]
+fn audit88_cancelled_initial_sync_is_not_live() {
+    use std::sync::mpsc;
+
+    let _secrets = install_master_key();
+    let fix = Fixture::new();
+    let inner = fixture_handler(&fix);
+    // The tags page-0 fetch blocks until the test has armed the
+    // cancellation: the engine finishes the tags resource, then the loop
+    // sees `cancelled` at the next resource and breaks partway — the
+    // deterministic equivalent of a user hitting Stop mid-sync.
+    let (signal_tx, signal_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = std::sync::Mutex::new(release_rx);
+    let outer: crate::mockserver::Handler = Arc::new(move |req: &MockRequest| {
+        if req.method == "GET"
+            && req.path == "/v2/tags"
+            && req.query_param("page").unwrap_or_default() == "0"
+        {
+            let _ = signal_tx.send(());
+            let Ok(rx) = release_rx.lock() else {
+                return inner(req);
+            };
+            let _ = rx.recv_timeout(std::time::Duration::from_secs(30));
+        }
+        inner(req)
+    });
+    let mock = crate::mockserver::MockServer::start(outer).expect("mock server");
+    let db = fixture_db();
+    let engine = Arc::new(engine(&db, &mock));
+
+    let task_engine = Arc::clone(&engine);
+    let results = runtime().block_on(async {
+        let task = tokio::spawn(async move {
+            task_engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        });
+        // Poll for the signal while yielding to the spawned task — a
+        // blocking std recv would starve this single-threaded runtime.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            if signal_rx.try_recv().is_ok() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the sync never reached the tags stage"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        engine.request_cancellation();
+        release_tx.send(()).expect("release the tags response");
+        task.await.expect("sync task joins").expect("cancelled run")
+    });
+    assert!(
+        results.len() < crate::sync_engine::INITIAL_SYNC_ORDER.len(),
+        "the cancel broke the loop partway ({} of {} resources done)",
+        results.len(),
+        crate::sync_engine::INITIAL_SYNC_ORDER.len()
+    );
+    assert!(
+        results.iter().all(|r| r.error.is_none()),
+        "the completed resources themselves are clean — the pre-fix verdict was LIVE"
+    );
+
+    let state = crate::sync_engine::get_state(&db.write_guard());
+    assert_eq!(
+        state, "CATCHING_UP",
+        "a cancelled initial sync must not claim the mirror is LIVE"
+    );
+    let run_state: String = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT state FROM sync_runs ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("run row")
+    });
+    assert_eq!(run_state, "CANCELLED", "the run row records the cancel");
+
+    // And the recovery rule counts a CANCELLED run as "the account has
+    // data" (CATCHING_UP), not "start over".
+    db.with_write(|conn| {
+        crate::sync_engine::set_state(conn, "INITIALIZING");
+    });
+    let recovered = crate::sync_engine::recover_interrupted_state(&db.write_guard());
+    assert!(recovered, "recovery fires on the stranded state");
+    assert_eq!(
+        crate::sync_engine::get_state(&db.write_guard()),
+        "CATCHING_UP",
+        "a CANCELLED run on record means the mirror holds data"
+    );
+}
+
+/// Clean-audit item 88: the threads backfill re-runs on incrementals.
+/// The initial sync lands conversation 102 thread-less (its thread page
+/// came back empty — a rate-limited moment); the pre-fix engine never
+/// re-ran the backfill, so the conversation stayed thread-less forever.
+#[test]
+fn audit88_incremental_runs_the_threads_backfill() {
+    let _secrets = install_master_key();
+    // Phase 1: the initial sync with 102's thread list empty.
+    let mut fix = Fixture::new();
+    fix.threads.remove(&102);
+    let mock = mock_with_fixture(&fix);
+    let db = fixture_db();
+    let engine = engine(&db, &mock);
+
+    runtime()
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("initial sync");
+    let threads_102: i64 = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM conversation_threads
+              WHERE conversation_id = (SELECT id FROM conversations WHERE remote_id = 102)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(-1)
+    });
+    assert_eq!(threads_102, 0, "conv 102 landed thread-less");
+    assert_eq!(
+        crate::sync_engine::get_state(&db.write_guard()),
+        "LIVE",
+        "the initial sync itself succeeded (its threads pass was clean)"
+    );
+
+    // Phase 2: the transient rate limit is gone; nothing else changed.
+    let full = Fixture::new();
+    mock.set_handler(quiet_conversations(&full));
+    runtime()
+        .block_on(async {
+            engine
+                .incremental_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("incremental sync");
+
+    let threads_102: i64 = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM conversation_threads
+              WHERE conversation_id = (SELECT id FROM conversations WHERE remote_id = 102)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(-1)
+    });
+    assert_eq!(
+        threads_102, 1,
+        "the incremental's threads backfill drained the thread-less conversation \
+         (the pre-fix incremental never re-ran it)"
+    );
+}
+
+/// Clean-audit item 89: the threads pass counts unreachable conversations.
+/// The pre-fix pass hardcoded failed: 0 with error: None, so the caller's
+/// record_success stamped the checkpoint 'ok' right over the failure.
+#[test]
+fn audit89_threads_backfill_counts_unreachable_conversations() {
+    let _secrets = install_master_key();
+    let fix = Fixture::new();
+    let mock = mock_with_fixture(&fix);
+    let db = fixture_db();
+    let engine = engine(&db, &mock);
+
+    runtime()
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("initial sync");
+
+    // A crash between the two halves of the initial sync left conv 102's
+    // threads gone from the mirror (they exist platform-side); now the
+    // re-fetch hard-fails with a non-retryable 400.
+    db.with_write(|conn| {
+        conn.execute(
+            "DELETE FROM conversation_threads
+              WHERE conversation_id = (SELECT id FROM conversations WHERE remote_id = 102)",
+            [],
+        )
+        .expect("delete threads");
+    });
+    let quiet = quiet_conversations(&Fixture::new());
+    let blocked: crate::mockserver::Handler = Arc::new(move |req: &MockRequest| {
+        if req.method == "GET" && req.path == "/v3/conversations/102" {
+            return MockResponse::json(400, r#"{"error":"bad request"}"#);
+        }
+        quiet(req)
+    });
+    mock.set_handler(blocked);
+
+    let results = runtime()
+        .block_on(async {
+            engine
+                .incremental_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("incremental sync");
+
+    let threads = results
+        .iter()
+        .find(|r| r.resource == "threads")
+        .expect("the incremental result carries a threads stage");
+    assert!(
+        threads.failed >= 1,
+        "the unreachable conversation is counted, not hardcoded to 0"
+    );
+    assert!(
+        threads.error.is_some(),
+        "the resource carries the summarized failure"
+    );
+
+    // The checkpoint records the failure — record_success no longer
+    // stamps 'ok' over it.
+    let (status, last_error): (String, Option<String>) = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT status, last_error FROM sync_checkpoints WHERE resource = 'threads'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or(("missing".into(), None))
+    });
+    assert_eq!(status, "error", "the threads checkpoint is honestly failed");
+    assert!(
+        last_error
+            .as_deref()
+            .is_some_and(|e| e.contains("could not be re-fetched")),
+        "the failure summary is on the checkpoint: {last_error:?}"
+    );
+}
+
+/// Clean-audit item 91: platform-side deletions propagate to the mirror.
+/// Saved replies, workflows and organizations are full-list resources —
+/// a row absent from the platform's list was deleted up there, and the
+/// pre-fix sync upserted forever without ever noticing.
+#[test]
+fn audit91_platform_deletions_propagate_and_restore() {
+    let _secrets = install_master_key();
+    let fix = Fixture::new();
+    let mock = mock_with_fixture(&fix);
+    let db = fixture_db();
+    let engine = engine(&db, &mock);
+
+    runtime()
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("initial sync");
+    // Baseline: workflows 71+72, saved reply 51, organization 5 — all live.
+    let deleted_count = |table: &str| -> i64 {
+        db.with_read(|conn| {
+            conn.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE deleted_at IS NOT NULL"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(-1)
+        })
+    };
+    assert_eq!(deleted_count("workflows"), 0);
+    assert_eq!(deleted_count("saved_replies"), 0);
+    assert_eq!(deleted_count("organizations"), 0);
+
+    // The platform deletes workflow 72, saved reply 51 and organization 5
+    // (replacements 52 and 6 arrive in the same listings).
+    let quiet = quiet_conversations(&Fixture::new());
+    let thinned: crate::mockserver::Handler = Arc::new(move |req: &MockRequest| {
+        if req.method == "GET" && req.path == "/v2/workflows" {
+            return MockResponse::json(
+                200,
+                json!({"_embedded": {"workflows": [
+                    {"id": 71, "name": "Auto-tag", "type": "manual", "status": "active", "mailboxId": 1}
+                ]}}).to_string(),
+            );
+        }
+        if req.method == "GET" && req.path == "/v2/mailboxes/1/saved-replies" {
+            return MockResponse::json(
+                200,
+                json!({"_embedded": {"savedReplies": [
+                    {"id": 52, "name": "Bye", "preview": "Ciao", "text": "Ciao!"}
+                ]}})
+                .to_string(),
+            );
+        }
+        if req.method == "GET" && req.path == "/v2/organizations" {
+            return MockResponse::json(
+                200,
+                json!({"_embedded": {"organizations": [
+                    {"id": 6, "name": "Babbage and Sons", "domains": ["babbage.example"]}
+                ]}})
+                .to_string(),
+            );
+        }
+        quiet(req)
+    });
+    mock.set_handler(thinned);
+    runtime()
+        .block_on(async {
+            engine
+                .incremental_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("incremental sync");
+
+    assert_eq!(
+        deleted_count("workflows"),
+        1,
+        "workflow 72 is gone platform-side"
+    );
+    assert_eq!(
+        deleted_count("saved_replies"),
+        1,
+        "saved reply 51 is gone platform-side"
+    );
+    assert_eq!(
+        deleted_count("organizations"),
+        1,
+        "organization 5 is gone platform-side"
+    );
+    let live_workflow: i64 = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM workflows WHERE remote_id = 71 AND deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(-1)
+    });
+    assert_eq!(live_workflow, 1, "the surviving workflow stays live");
+
+    // The readers these mirrors feed only serve non-deleted rows.
+    let visible_replies: i64 = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM saved_replies WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(-1)
+    });
+    assert_eq!(visible_replies, 1, "only replacement reply 52 is visible");
+
+    // Restoration: the platform un-deletes (the original fixture returns;
+    // replacements 52/6 disappear and take the deleted slot instead).
+    // A listed row must come back to life.
+    mock.set_handler(quiet_conversations(&Fixture::new()));
+    runtime()
+        .block_on(async {
+            engine
+                .incremental_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("restoration incremental");
+    let alive = |table: &str, remote_id: i64| -> bool {
+        db.with_read(|conn| {
+            conn.query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE remote_id = {remote_id} AND deleted_at IS NULL)"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(false)
+        })
+    };
+    assert_eq!(
+        deleted_count("workflows"),
+        0,
+        "workflow 72 is listed again — the soft delete lifts"
+    );
+    assert!(
+        alive("saved_replies", 51),
+        "saved reply 51 is listed again — the soft delete lifts"
+    );
+    assert_eq!(
+        deleted_count("saved_replies"),
+        1,
+        "replacement 52 vanished from the listing and takes the deleted slot"
+    );
+    assert!(
+        alive("organizations", 5),
+        "organization 5 is listed again — the soft delete lifts"
+    );
+    assert_eq!(
+        deleted_count("organizations"),
+        1,
+        "replacement 6 vanished from the listing and takes the deleted slot"
+    );
+}
+
+/// Clean-audit item 91, guard rail: an empty platform listing is NOT a
+/// wipe signal — a degraded or permission-downgraded answer must not
+/// blank the mirror.
+#[test]
+fn audit91_empty_listing_never_wipes_the_mirror() {
+    let _secrets = install_master_key();
+    let fix = Fixture::new();
+    let mock = mock_with_fixture(&fix);
+    let db = fixture_db();
+    let engine = engine(&db, &mock);
+
+    runtime()
+        .block_on(async {
+            engine
+                .initial_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("initial sync");
+
+    let quiet = quiet_conversations(&Fixture::new());
+    let emptied: crate::mockserver::Handler = Arc::new(move |req: &MockRequest| {
+        if req.method == "GET" && req.path == "/v2/workflows" {
+            return MockResponse::json(200, json!({"_embedded": {"workflows": []}}).to_string());
+        }
+        if req.method == "GET" && req.path == "/v2/organizations" {
+            return MockResponse::json(
+                200,
+                json!({"_embedded": {"organizations": []}}).to_string(),
+            );
+        }
+        quiet(req)
+    });
+    mock.set_handler(emptied);
+    runtime()
+        .block_on(async {
+            engine
+                .incremental_sync(crate::events::SyncTrigger::Manual)
+                .await
+        })
+        .expect("incremental sync");
+
+    let live: i64 = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM workflows WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(-1)
+    });
+    assert_eq!(live, 2, "an empty listing deletes nothing");
+    let live_orgs: i64 = db.with_read(|conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM organizations WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(-1)
+    });
+    assert_eq!(live_orgs, 1, "an empty listing deletes nothing");
 }

@@ -117,6 +117,11 @@ impl Response {
 /// Everything the request handler needs.
 pub struct LoopbackCtx {
     pub db: DbHandle,
+    /// The port THIS listener is bound to — the OAuth callback verifies
+    /// the redeemed state's redirect URI points here (clean-audit item 93:
+    /// the stored redirect_uri was written but never checked, so a state
+    /// issued for one loopback port redeemed fine on any other).
+    pub port: u16,
     /// OAuth completion path; `None` when this session has no live
     /// Help Scout provider (no credentials at boot).
     pub oauth: Option<Arc<dyn OAuthCompletion>>,
@@ -199,6 +204,11 @@ pub fn begin_oauth(
     credentials: &HsCredentials,
     redirect_uri: &str,
 ) -> Result<String> {
+    // Clean-audit item 93: the TTL sweeper was written and never wired —
+    // oauth_states grew forever and unconsumed states stayed redeemable
+    // for the process's lifetime. Every new authorization sweeps the dead
+    // ones (consumed-old and abandoned-old alike) before issuing.
+    let _ = db.with_write(|conn| crate::oauth_state::sweep_states(conn));
     let state = db.with_write(|conn| crate::oauth_state::issue_state(conn, redirect_uri, None))?;
     Ok(credentials.authorize_url(&state))
 }
@@ -433,6 +443,31 @@ fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
         );
     }
 
+    // Clean-audit item 93: the redirect-URI verifier. The state was
+    // issued for one specific redirect (host:port recorded at issue
+    // time); the callback must land on the SAME listener. A state
+    // recorded for a different port — an old port from a previous
+    // session with an OS-assigned listener, or another local program
+    // redeeming a state it captured — is rejected before the code is
+    // exchanged.
+    let redirect_ok =
+        ctx.db.with_read(
+            |conn| match crate::oauth_state::redirect_uri_for(conn, state_param) {
+                Ok(Some(recorded)) => {
+                    let expected = port_from_redirect_uri(&recorded);
+                    expected.is_none_or(|expected| expected == ctx.port)
+                }
+                _ => false,
+            },
+        );
+    if !redirect_ok {
+        return fail_page(
+            "The authorization response arrived on a different listener than the one \
+             the request was issued for (redirect URI mismatch). For safety the code \
+             was not exchanged — restart the connect flow from Settings.",
+        );
+    }
+
     match oauth.complete(code) {
         Ok(identity) => {
             ctx.db.with_write(|conn| {
@@ -523,6 +558,7 @@ impl LoopbackServer {
 
         let ctx = Arc::new(LoopbackCtx {
             db,
+            port: bound_port,
             oauth: Some(Arc::new(RealOAuthCompletion { handle }) as Arc<dyn OAuthCompletion>),
         });
 
@@ -781,6 +817,9 @@ mod tests {
     fn ctx(oauth: Option<FakeOAuth>) -> LoopbackCtx {
         LoopbackCtx {
             db: fixture_db(),
+            // Port 1 matches the "http://127.0.0.1:1/" redirect URIs the
+            // callback tests issue their states with.
+            port: 1,
             oauth: oauth.map(|f| Arc::new(f) as Arc<dyn OAuthCompletion>),
         }
     }
@@ -1124,6 +1163,164 @@ mod tests {
         drop(probe);
         assert!(!listener_answers(closed_port), "a closed port must fail");
     }
+
+    /// Clean-audit batch 28 (item 93): the OAuth state TTL and the
+    /// redirect-URI verifier — the sweeper and the recorded redirect_uri
+    /// existed but nothing ever called either, so states never expired and
+    /// the callback never checked where the flow started.
+    mod batch28_oauth_tests {
+        use super::*;
+
+        fn ctx_on_port(oauth: Option<FakeOAuth>, port: u16) -> LoopbackCtx {
+            LoopbackCtx {
+                db: fixture_db(),
+                port,
+                oauth: oauth.map(|f| Arc::new(f) as Arc<dyn OAuthCompletion>),
+            }
+        }
+
+        fn good_oauth() -> Option<FakeOAuth> {
+            Some(FakeOAuth {
+                result: Some(ConnectedIdentity {
+                    name: "A B".into(),
+                    email: Some("a@b.c".into()),
+                    remote_id: 7,
+                }),
+            })
+        }
+
+        fn backdate_state(db: &DbHandle, state: &str, hours: i64) {
+            db.with_write(|conn| {
+                // Age BOTH clocks: an unconsumed state dies of old
+                // created_at, a consumed one of old consumed_at.
+                conn.execute(
+                    "UPDATE oauth_states
+                    SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2),
+                        consumed_at = CASE WHEN consumed_at IS NULL THEN NULL
+                                           ELSE strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2) END
+                  WHERE state = ?1",
+                    rusqlite::params![state, format!("-{hours} hours")],
+                )
+                .expect("backdate");
+            });
+        }
+
+        /// A state issued for listener port 2 must not redeem on listener
+        /// port 1 — the recorded redirect URI is now actually verified.
+        #[test]
+        fn audit93_callback_rejects_a_state_issued_for_another_port() {
+            let c = ctx_on_port(good_oauth(), 1);
+            let state =
+                c.db.with_write(|conn| {
+                    crate::oauth_state::issue_state(conn, "http://127.0.0.1:2/oauth/callback", None)
+                })
+                .expect("issue state");
+            let target = format!("/oauth/callback?code=1&state={state}");
+            let r = handle_request(&request("GET", &target, &[], b""), &c);
+            let body = body_str(&r);
+            assert!(
+                body.contains("different listener"),
+                "the redirect mismatch is explained: {body}"
+            );
+            assert!(
+                !body.contains("Connected to Help Scout"),
+                "the code must not be exchanged on a mismatch"
+            );
+
+            // The state stays consumed (single-use burned) even on mismatch.
+            let again = handle_request(&request("GET", &target, &[], b""), &c);
+            assert!(
+                body_str(&again).contains("did not match"),
+                "the burned state cannot be replayed on the right port either"
+            );
+        }
+
+        /// A state older than the TTL is dead whether or not it was consumed
+        /// — the "may have expired" message finally tells the truth.
+        #[test]
+        fn audit93_stale_states_expire() {
+            let c = ctx_on_port(good_oauth(), 1);
+            // Unconsumed but issued an hour ago: rejected.
+            let stale =
+                c.db.with_write(|conn| {
+                    crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/oauth/callback", None)
+                })
+                .expect("issue state");
+            backdate_state(&c.db, &stale, 1);
+            let target = format!("/oauth/callback?code=1&state={stale}");
+            let r = handle_request(&request("GET", &target, &[], b""), &c);
+            assert!(
+                body_str(&r).contains("did not match"),
+                "an expired state is rejected like an unknown one"
+            );
+
+            // Fresh state on the right port: still accepted (the TTL does not
+            // break the happy path).
+            let fresh =
+                c.db.with_write(|conn| {
+                    crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/oauth/callback", None)
+                })
+                .expect("issue state");
+            let target = format!("/oauth/callback?code=1&state={fresh}");
+            let r = handle_request(&request("GET", &target, &[], b""), &c);
+            assert!(
+                body_str(&r).contains("Connected to Help Scout"),
+                "a fresh state on the matching port completes the flow"
+            );
+        }
+
+        /// The TTL sweeper runs (wired into begin_oauth) and removes both
+        /// consumed-old and abandoned-old states.
+        #[test]
+        fn audit93_sweep_states_runs_on_every_new_authorization() {
+            let c = ctx_on_port(None, 1);
+            // Seed the graveyard: a consumed-old state, an abandoned-old
+            // state, and (after the sweep) the fresh one.
+            let consumed =
+                c.db.with_write(|conn| {
+                    crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/oauth/callback", None)
+                })
+                .expect("issue");
+            c.db.with_write(|conn| crate::oauth_state::consume_state(conn, &consumed))
+                .expect("consume");
+            let abandoned =
+                c.db.with_write(|conn| {
+                    crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/oauth/callback", None)
+                })
+                .expect("issue");
+            backdate_state(&c.db, &consumed, 2);
+            backdate_state(&c.db, &abandoned, 2);
+
+            let creds = crate::helpscout_real::HsCredentials {
+                client_id: "cid".into(),
+                client_secret: "secret".into(),
+                redirect_uri: "http://127.0.0.1:1/oauth/callback".into(),
+                ..Default::default()
+            };
+            let url = begin_oauth(&c.db, &creds, "http://127.0.0.1:1/oauth/callback")
+                .expect("begin_oauth");
+            let fresh = url.rsplit("state=").next().unwrap_or_default().to_string();
+
+            let remaining: Vec<String> = c.db.with_read(|conn| {
+                let mut stmt = conn
+                    .prepare("SELECT state FROM oauth_states ORDER BY state")
+                    .expect("select");
+                stmt.query_map([], |r| r.get::<_, String>(0))
+                    .expect("rows")
+                    .filter_map(|r| r.ok())
+                    .collect()
+            });
+            assert!(
+                !remaining.contains(&consumed),
+                "the consumed-old state was swept"
+            );
+            assert!(
+                !remaining.contains(&abandoned),
+                "the abandoned-old state was swept"
+            );
+            assert_eq!(remaining, vec![fresh], "only the fresh state remains");
+        }
+    }
 }
 
 /// Clean-audit item 32: the loopback verifies signatures with the same
@@ -1156,6 +1353,7 @@ mod batch22_audit32_tests {
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
         LoopbackCtx {
             db: DbHandle::new(conn),
+            port: 1,
             oauth: None,
         }
     }

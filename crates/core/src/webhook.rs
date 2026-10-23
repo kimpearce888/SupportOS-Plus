@@ -149,8 +149,18 @@ pub fn set_webhook_event_state(
 }
 
 pub fn prune_webhook_events(conn: &Connection, keep: u32) -> Result<()> {
+    // Clean-audit item 94: the pre-fix prune kept the newest `keep` rows
+    // REGARDLESS of state — under a backlog (an offline weekend, a burst
+    // while processing is failing) the OLDEST rows are exactly the
+    // pending ones, so the prune deleted work that was never processed
+    // before the drain ever reached it. Only terminally-done rows are
+    // prunable now (processed, or failed with the retry budget spent);
+    // rows that still need processing survive at any age, and the newest
+    // `keep` of everything stay for diagnostics.
     conn.execute(
-        "DELETE FROM webhook_events WHERE id NOT IN (SELECT id FROM webhook_events ORDER BY id DESC LIMIT ?1)",
+        "DELETE FROM webhook_events
+          WHERE NOT (processing_state IN ('pending','failed') AND attempts < 5)
+            AND id NOT IN (SELECT id FROM webhook_events ORDER BY id DESC LIMIT ?1)",
         params![keep.max(1)],
     )?;
     Ok(())
@@ -319,5 +329,105 @@ mod tests {
         assert!(verify_signature(b"top-secret", b"tampered", &sig).is_err());
         assert!(verify_signature(b"wrong", b"body", &sig).is_err());
         assert!(verify_signature(b"top-secret", b"body", "not-hex").is_err());
+    }
+
+    fn event_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("db");
+        apply_m048_webhook_events(&conn).expect("table");
+        conn
+    }
+
+    fn insert_event(conn: &Connection, id: i64, state: &str, attempts: i64) {
+        conn.execute(
+            "INSERT INTO webhook_events (id, event_id, event_hash, event_type, received_at,
+                                         payload, processing_state, attempts)
+             VALUES (?1, ?2, ?3, 'convo.created', '2026-10-23T00:00:00.000Z', '{}', ?4, ?5)",
+            rusqlite::params![
+                id,
+                format!("evt-{id}"),
+                format!("hash-{id}"),
+                state,
+                attempts
+            ],
+        )
+        .expect("insert event");
+    }
+
+    fn ids(conn: &Connection, state: &str) -> Vec<i64> {
+        let mut stmt = conn
+            .prepare("SELECT id FROM webhook_events WHERE processing_state = ?1 ORDER BY id")
+            .expect("select");
+        stmt.query_map(rusqlite::params![state], |r| r.get::<_, i64>(0))
+            .expect("rows")
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    /// Clean-audit batch 28, item 94: the prune kept the newest N rows
+    /// regardless of state — under a backlog the OLDEST rows are exactly
+    /// the pending ones, so unprocessed events were deleted before the
+    /// drain ever reached them. Only terminally-done rows are prunable
+    /// now.
+    #[test]
+    fn audit94_prune_keeps_unprocessed_events_under_backlog() {
+        let conn = event_db();
+        // A backlog: the oldest three are still pending; three processed
+        // rows sit on top of them.
+        for id in 1..=3 {
+            insert_event(&conn, id, "pending", 0);
+        }
+        for id in 4..=6 {
+            insert_event(&conn, id, "processed", 1);
+        }
+
+        prune_webhook_events(&conn, 2).expect("prune");
+
+        assert_eq!(
+            ids(&conn, "pending"),
+            vec![1, 2, 3],
+            "pending events survive the prune at any age"
+        );
+        assert_eq!(
+            ids(&conn, "processed"),
+            vec![5, 6],
+            "processed history is trimmed to the newest `keep`"
+        );
+    }
+
+    /// Item 94, terminal states: a failed event with its retry budget
+    /// spent is dead work — outside the history window it is prunable;
+    /// a failed event that still owes retries survives regardless of
+    /// the window.
+    #[test]
+    fn audit94_prune_removes_failed_events_past_the_retry_budget() {
+        let conn = event_db();
+        insert_event(&conn, 1, "failed", 5);
+        insert_event(&conn, 2, "failed", 2);
+        insert_event(&conn, 3, "processed", 1);
+
+        // Newest 2 (ids 3, 2) are the history window. Row 1 is terminal
+        // (attempts = 5, nothing left to process) and outside it: gone.
+        // Row 2 is outside it too, but still owes processing: kept.
+        prune_webhook_events(&conn, 2).expect("prune");
+        let remaining: Vec<i64> = {
+            let mut stmt = conn
+                .prepare("SELECT id FROM webhook_events ORDER BY id")
+                .expect("select");
+            stmt.query_map([], |r| r.get::<_, i64>(0))
+                .expect("rows")
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert_eq!(
+            remaining,
+            vec![2, 3],
+            "the terminal attempts=5 row is pruned; the retries-left row \
+             survives outside the window, and the in-window history stays"
+        );
+        assert_eq!(
+            ids(&conn, "failed"),
+            vec![2],
+            "only the retry-budget-spent failure went"
+        );
     }
 }

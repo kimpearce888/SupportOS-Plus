@@ -1746,3 +1746,39 @@ fn retried_saved_reply_create_never_reposts() {
         "the re-read still lands the reply in the mirror"
     );
 }
+
+/// Clean-audit batch 28, item 92: `get_rating`'s 404 mapping. The pre-fix
+/// branch matched the literal "-> 404" substring of the error's Display —
+/// but HsApiError's Display prints the FRIENDLY text, so the mapping
+/// never fired and a genuinely-absent rating surfaced as an Err (with
+/// batch 27's item 85, retried and then failed) instead of the honest
+/// Ok(None) every other 404-tolerant fetch returns.
+#[test]
+fn audit92_get_rating_maps_404_to_none_not_an_error() {
+    let _secrets = secrets_guard();
+    let db = fixture_db();
+    // 404 on the rating id, 400 on everything else (so a wrong-status
+    // answer cannot accidentally pass as "not found").
+    let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+        if req.method == "GET" && req.path == "/v2/ratings/404" {
+            MockResponse::json(404, r#"{"error":"not found"}"#)
+        } else {
+            MockResponse::json(400, r#"{"error":"bad request"}"#)
+        }
+    }))
+    .expect("mock server");
+    let creds = creds(&mock);
+    let provider = provider_with_token(&db, &creds);
+
+    let gone = runtime()
+        .block_on(async { provider.get_rating(404).await })
+        .expect("a 404 rating is Ok(None), not an error");
+    assert!(gone.is_none(), "the absent rating maps to None");
+
+    // And the error path proves the mapping is not "any error is None":
+    // a 400 on the same endpoint stays an Err carrying its status.
+    let err = runtime()
+        .block_on(async { provider.get_rating(400).await })
+        .expect_err("a hard 400 stays an error");
+    assert_eq!(hs_status(&err), Some(400), "the error keeps its status");
+}
