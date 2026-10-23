@@ -3,23 +3,19 @@
 > Exactly ten active items at any time, per `rule.md` (batch size raised from five by the owner, 2026-10-23). Items move here from `plan.md` (Rule 2)
 > and leave for `completed.md` only after verification (Rule 5).
 
-## Active items — none
+## Active items — Batch 24 (clean-audit items 46-55, the first ten MEDIUM-tier findings)
 
-Batch 23 (clean-audit items 36-45, the first ten-item batch after the
-owner raised the batch size from five in `8c66cb8`: the extraction
-window reading the newest 30 live customer messages instead of the
-oldest 30 including soft-deleted threads, extraction runs landing as
-completed ledger-visible 'attributes' rows with self-healing for
-pre-fix stuck-queued rows, the ticket-analysis cache hit serving the
-hash-matched run's own analysis and sources, the draft fallback
-refusing to store the raw JSON envelope, the interaction-strategy
-prompt block rendering real recommendation/heuristic/preference data
-instead of a hard-coded None, get_customer_memory's honest
-provenance note, the cluster prompt capped to the newest 250 with the
-sampling declared, copilot chats recorded in the cost ledger with
-accumulated usage and endpoint, the tool-budget cutoff answering every
-tool_call id, and insert_message reporting failures instead of echoing
-a stale rowid) is complete and verified; the record is in
-`completed.md`. The remaining 120 audit findings are queued in
-`plan.md` (items 46-165) and the next ten start only on the owner's
-"continue".
+46. [med|bug] Knowledge-chunk batch poisoned by one empty vector — embeddings.rs:895-914
+47. [med|bug] Customer email patch deletes ALL stored emails, errors swallowed — people_store.rs:1245-1256
+48. [med|bug] verify_bundle leaks decrypted plaintext temp on error paths, no sweep — encrypted_sync.rs:481-487
+49. [med|gap] Workspace reset leaves downloaded attachment files on disk — data_reset.rs:110-118
+50. [med|issue] CSS blocklist bypassable via escapes/comments — security.rs:106-110
+51. [med|issue] Blocking DNS resolution inside async contexts — security.rs:482 + connectors.rs:633,641,757
+52. [med|bug] shared_tag display query joins a conversation's tags to itself — quality.rs:1193-1195
+53. [med|bug] waiting_stats.at_risk counts breached-vs-first-response for replied tickets — sla.rs:532
+54. [med|issue] Radar trend precedence: "new" unreachable for ≥3 clusters — analytics.rs:375-380
+55. [med|issue] backlog_jump compares against a false week-ago baseline — digest.rs:265-267
+
+Batch 23 (items 36-45) is complete and verified; the record is in
+`completed.md`. The remaining findings are queued in `plan.md` (items
+56-165); the next ten start only on the owner's "continue".
