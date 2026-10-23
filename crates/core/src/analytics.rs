@@ -372,12 +372,18 @@ fn radar_clusters(conn: &rusqlite::Connection) -> Vec<RadarCluster> {
                 f.jd.is_some_and(|d| now_jd - d > 14.0 && now_jd - d <= 28.0)
             })
             .count();
-        let trend = if (recent as f64) > previous as f64 * 1.3 && recent >= 3 {
+        // Clean-audit item 54: "new" must be checked before "rising". The
+        // pre-fix precedence tested the rising band first, and a brand-new
+        // cluster (previous = 0, recent >= 3) always satisfied
+        // `recent > 0 * 1.3` — so every genuinely new cluster with three
+        // or more conversations was reported as "rising" and "new" was
+        // unreachable exactly where it matters most.
+        let trend = if previous == 0 && recent > 0 {
+            "new"
+        } else if (recent as f64) > previous as f64 * 1.3 && recent >= 3 {
             "rising"
         } else if previous > 0 && (recent as f64) < previous as f64 * 0.7 {
             "falling"
-        } else if previous == 0 && recent > 0 {
-            "new"
         } else {
             "stable"
         };
@@ -691,4 +697,132 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
 
 fn truncate_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
+}
+
+#[cfg(test)]
+mod batch24_audit54_tests {
+    use super::*;
+    use rusqlite::Connection;
+    use rusqlite::params;
+
+    /// Four clusters covering every trend band:
+    /// - "brand-new": 4 conversations in the last 14 days, none in the
+    ///   14-28 day window — the shape the pre-fix precedence reported as
+    ///   "rising" (recent > 0 * 1.3 always holds), leaving "new"
+    ///   unreachable for any cluster with recent >= 3.
+    /// - "growing": 5 previous, 8 recent — the rising band.
+    /// - "shrinking": 10 previous, 3 recent — the falling band.
+    /// - "flat": 5 previous, 5 recent — stable.
+    fn db_with_trend_clusters() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        let cases: &[(&str, usize, usize)] = &[
+            ("brand-new", 0, 4),
+            ("growing", 5, 8),
+            ("shrinking", 10, 3),
+            ("flat", 5, 5),
+        ];
+        // Conversation numbers are globally unique — one running counter
+        // across the whole fixture.
+        let mut number = 9000_i64;
+        for (name, previous, recent) in cases {
+            conn.execute(
+                "INSERT INTO issue_clusters (name, conversation_count) VALUES (?1, ?2)",
+                params![name, *previous as i64 + *recent as i64],
+            )
+            .expect("cluster");
+            let cluster = conn.last_insert_rowid();
+            for _ in 0..*previous {
+                number += 1;
+                conn.execute(
+                    "INSERT INTO conversations (remote_id, number, subject, created_at)
+                     VALUES (?1, ?1, 'old', datetime('now', ?2))",
+                    params![number, "-20 days"],
+                )
+                .expect("old conversation");
+                conn.execute(
+                    "INSERT INTO issue_cluster_conversations (cluster_id, conversation_id)
+                     VALUES (?1, ?2)",
+                    params![cluster, conn.last_insert_rowid()],
+                )
+                .expect("member");
+            }
+            for _ in 0..*recent {
+                number += 1;
+                conn.execute(
+                    "INSERT INTO conversations (remote_id, number, subject, created_at)
+                     VALUES (?1, ?1, 'new', datetime('now', ?2))",
+                    params![number, "-2 days"],
+                )
+                .expect("recent conversation");
+                conn.execute(
+                    "INSERT INTO issue_cluster_conversations (cluster_id, conversation_id)
+                     VALUES (?1, ?2)",
+                    params![cluster, conn.last_insert_rowid()],
+                )
+                .expect("member");
+            }
+        }
+        conn
+    }
+
+    fn trend_of(conn: &Connection, name: &str) -> &'static str {
+        let clusters = radar_clusters(conn);
+        clusters
+            .iter()
+            .find(|c| c.title == name)
+            .unwrap_or_else(|| panic!("cluster {name} missing"))
+            .trend
+    }
+
+    /// Clean-audit item 54: a cluster whose conversations all fall inside
+    /// the recent window (previous = 0, recent >= 3) is "new" — not
+    /// "rising", which the pre-fix precedence reported because the rising
+    /// band was tested first and `recent > 0 * 1.3` always holds.
+    #[test]
+    fn audit54_new_cluster_with_three_recent_is_new() {
+        let conn = db_with_trend_clusters();
+        assert_eq!(trend_of(&conn, "brand-new"), "new");
+    }
+
+    /// Clean-audit item 54: the other bands keep their meanings —
+    /// growth on an established cluster is still "rising", decline
+    /// still "falling", and no significant change still "stable".
+    #[test]
+    fn audit54_established_clusters_keep_their_bands() {
+        let conn = db_with_trend_clusters();
+        assert_eq!(trend_of(&conn, "growing"), "rising");
+        assert_eq!(trend_of(&conn, "shrinking"), "falling");
+        assert_eq!(trend_of(&conn, "flat"), "stable");
+    }
+
+    /// Clean-audit item 54: a small new cluster (previous = 0,
+    /// recent < 3) was "new" even pre-fix — pinned so the reorder does
+    /// not disturb it.
+    #[test]
+    fn audit54_small_new_cluster_stays_new() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO issue_clusters (name, conversation_count) VALUES ('small-new', 2)",
+            [],
+        )
+        .expect("cluster");
+        let cluster = conn.last_insert_rowid();
+        for i in 0..2 {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, created_at)
+                 VALUES (?1, ?1, 's', datetime('now', '-2 days'))",
+                params![31_000_i64 + i],
+            )
+            .expect("conversation");
+            conn.execute(
+                "INSERT INTO issue_cluster_conversations (cluster_id, conversation_id)
+                 VALUES (?1, ?2)",
+                params![cluster, conn.last_insert_rowid()],
+            )
+            .expect("member");
+        }
+        assert_eq!(trend_of(&conn, "small-new"), "new");
+    }
 }

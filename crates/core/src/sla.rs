@@ -514,6 +514,15 @@ fn waiting_stats(
         // honest since-point is the newest published customer thread,
         // falling back to the conversation's own creation time when the
         // customer has not spoken yet.
+        //
+        // Clean-audit item 53: the replied flag rides along so at_risk
+        // judges each conversation against the target it can actually
+        // miss — the first-response target only while the first response
+        // is still owed, the resolution target once an agent has
+        // answered (mirroring the alerts lane). The pre-fix count judged
+        // every ticket, replied or not, against the first-response
+        // target, flagging long back-and-forth tickets whose first
+        // response happened days ago.
         "SELECT COALESCE(
              (SELECT MAX(COALESCE(t.remote_created_at, t.created_at))
                 FROM conversation_threads t
@@ -521,33 +530,48 @@ fn waiting_stats(
                  AND t.type = 'customer'
                  AND t.state = 'published'
                  AND t.deleted_at IS NULL),
-             c.created_at) AS since
+             c.created_at) AS since,
+            EXISTS (SELECT 1 FROM conversation_threads rt
+                     WHERE rt.conversation_id = c.id
+                       AND rt.type = 'reply'
+                       AND rt.state = 'published'
+                       AND rt.deleted_at IS NULL) AS replied
          FROM conversations c
          WHERE c.mailbox_local_id = ?1 AND c.status IN ('active','pending') AND c.deleted_at IS NULL",
     )?;
-    let rows = stmt.query_map([mailbox_local_id], |r| r.get::<_, Option<String>>(0))?;
-    let mut sinces: Vec<Option<String>> = Vec::new();
+    let rows = stmt.query_map([mailbox_local_id], |r| {
+        Ok((r.get::<_, Option<String>>(0)?, r.get::<_, bool>(1)?))
+    })?;
+    let mut waiting: Vec<(Option<String>, bool)> = Vec::new();
     for row in rows {
-        sinces.push(row?);
+        waiting.push(row?);
     }
     let now = now_iso_millis();
+    let first_response_target = cfg.and_then(|c| c.targets.first_response_target_min);
+    let resolution_target = cfg.and_then(|c| c.targets.resolution_target_min);
     let mut businesses: Vec<f64> = Vec::new();
-    for since in sinces.iter().flatten() {
+    let mut at_risk = 0_i64;
+    for (since, replied) in waiting.iter() {
+        let Some(since) = since.as_deref() else {
+            continue;
+        };
         let b = match cfg {
             Some(c) => business_minutes_between(since, &now, &c.business_hours),
             None => wall_minutes_between(since, &now),
         };
-        if let Some(b) = b {
-            businesses.push(b);
+        let Some(b) = b else { continue };
+        businesses.push(b);
+        let target = if *replied {
+            resolution_target
+        } else {
+            first_response_target
+        };
+        if target.is_some_and(|t| b > t as f64) {
+            at_risk += 1;
         }
     }
-    let target = cfg.and_then(|c| c.targets.first_response_target_min);
-    let at_risk = match target {
-        Some(t) => businesses.iter().filter(|b| **b > t as f64).count() as i64,
-        None => 0,
-    };
     Ok(SlaWaitingStats {
-        count: sinces.len() as i64,
+        count: waiting.len() as i64,
         oldest_business_min: businesses
             .iter()
             .copied()
@@ -840,5 +864,123 @@ mod batch18_tests {
             "a touched conversation keeps its real wait ({expected} min), not the \
              since-last-touch age ({touched_recently}): got {avg}"
         );
+    }
+}
+
+/// Clean-audit item 53: at_risk must judge each waiting conversation
+/// against the target it can actually miss — first-response while the
+/// first response is still owed, resolution once an agent has answered
+/// (the same rule the alerts lane applies). The pre-fix count judged
+/// replied tickets against the first-response target too, flagging
+/// long-running back-and-forth tickets whose first response happened
+/// long ago.
+#[cfg(test)]
+mod batch24_audit53_tests {
+    use super::*;
+    use rusqlite::params;
+
+    const OLD: &str = "2026-08-01T00:00:00.000Z";
+
+    fn full_week_hours() -> crate::business_hours::BusinessHoursConfig {
+        crate::business_hours::BusinessHoursConfig {
+            timezone: "UTC".to_string(),
+            days: vec![0, 1, 2, 3, 4, 5, 6],
+            start_minute: 0,
+            end_minute: 1440,
+        }
+    }
+
+    /// One mailbox, two waiting conversations: X owes its first response
+    /// (customer thread at OLD, no reply); Y was answered at OLD and the
+    /// customer's last message is still from OLD (a long-running
+    /// back-and-forth ticket).
+    fn db_with_replied_and_unreplied() -> (Connection, i64) {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO mailboxes (remote_id, name) VALUES (601, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        let mailbox = conn.last_insert_rowid();
+        for remote in [701_i64, 702_i64] {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                            mailbox_local_id, created_at, updated_at)
+                 VALUES (?1, ?1, 'waiting', 'p', 'active', ?2, ?3, ?3)",
+                params![remote, mailbox, OLD],
+            )
+            .expect("conversation");
+            let conv = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
+                                                   remote_created_at)
+                 VALUES (?1, 'customer', 'published', 'still waiting', ?2)",
+                params![conv, OLD],
+            )
+            .expect("customer thread");
+            if remote == 702 {
+                // Y has been answered — its first response is long done.
+                conn.execute(
+                    "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
+                                                       remote_created_at)
+                     VALUES (?1, 'reply', 'published', 'we are on it', ?2)",
+                    params![conv, OLD],
+                )
+                .expect("reply thread");
+            }
+        }
+        (conn, mailbox)
+    }
+
+    fn cfg(first_response: Option<i64>, resolution: Option<i64>) -> EffectiveConfig {
+        EffectiveConfig {
+            business_hours: full_week_hours(),
+            targets: crate::business_hours::SlaTargets {
+                first_response_target_min: first_response,
+                resolution_target_min: resolution,
+            },
+        }
+    }
+
+    /// First-response 60 min, resolution effectively unbounded: only the
+    /// unreplied X is at risk. The pre-fix count flagged Y too — its
+    /// months-old wait measured against a 60-minute first-response
+    /// target it already met.
+    #[test]
+    fn audit53_replied_tickets_are_not_judged_against_first_response() {
+        let (conn, mailbox) = db_with_replied_and_unreplied();
+        let config = cfg(Some(60), Some(10_000_000));
+        let stats = waiting_stats(&conn, mailbox, Some(&config)).expect("waiting stats");
+        assert_eq!(stats.count, 2, "both conversations are waiting");
+        assert_eq!(
+            stats.at_risk, 1,
+            "only the unreplied ticket can miss its first-response target"
+        );
+    }
+
+    /// Mirror config — first-response unconfigured, resolution 60 min:
+    /// now only the REPLIED ticket counts (it can still miss its
+    /// resolution target); the unreplied one has no target to miss.
+    #[test]
+    fn audit53_replied_tickets_are_judged_against_resolution() {
+        let (conn, mailbox) = db_with_replied_and_unreplied();
+        let config = cfg(None, Some(60));
+        let stats = waiting_stats(&conn, mailbox, Some(&config)).expect("waiting stats");
+        assert_eq!(
+            stats.at_risk, 1,
+            "the replied ticket is measured against its resolution target"
+        );
+    }
+
+    /// No targets configured: nobody is at risk (unchanged behavior).
+    #[test]
+    fn audit53_no_targets_means_no_risk() {
+        let (conn, mailbox) = db_with_replied_and_unreplied();
+        let config = cfg(None, None);
+        let stats = waiting_stats(&conn, mailbox, Some(&config)).expect("waiting stats");
+        assert_eq!(stats.at_risk, 0);
+        let no_cfg = waiting_stats(&conn, mailbox, None).expect("waiting stats");
+        assert_eq!(no_cfg.at_risk, 0);
     }
 }

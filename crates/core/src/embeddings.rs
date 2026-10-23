@@ -897,25 +897,46 @@ fn embed_pending_chunks(
     };
 
     if table == "knowledge_chunks" {
-        if qdrant_connected && vectors.first().is_some_and(|v| !v.is_empty()) {
-            let dim = vectors[0].len();
-            let points: Vec<crate::vectorstore_sqlitevec::VectorPoint> = pending
-                .iter()
-                .enumerate()
-                .map(|(i, chunk)| {
-                    let empty: Vec<f32> = Vec::new();
-                    let vector = vectors.get(i).unwrap_or(&empty);
-                    vector_point(table, chunk, vector, &model)
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let q = qdrant.expect("checked is_some above");
-            let _ = q.ensure_collection(dim);
-            let ok = q.upsert(&points);
-            let state = if ok { "indexed" } else { "failed" };
-            for chunk in &pending {
-                set_chunk_state(conn, table, chunk.id, state, Some(&model))?;
+        // Clean-audit item 46: the qdrant lane used to gate the whole
+        // batch on the FIRST vector being non-empty, then upserted every
+        // pending chunk — substituting an empty vector for any chunk the
+        // model skipped — and stamped the entire batch 'indexed'. One
+        // empty vector poisoned the batch: a zero-dim point landed in the
+        // store and its chunk was marked done, never retried. The batch
+        // is now partitioned per chunk: only chunks with a real vector
+        // are upserted and marked 'indexed'; chunks the model left
+        // empty are marked 'failed' and stay in the retry pipeline.
+        if qdrant_connected {
+            let mut points: Vec<crate::vectorstore_sqlitevec::VectorPoint> = Vec::new();
+            let mut indexed_ids: Vec<i64> = Vec::new();
+            let mut failed_ids: Vec<i64> = Vec::new();
+            for (i, chunk) in pending.iter().enumerate() {
+                match vectors.get(i) {
+                    Some(v) if !v.is_empty() => {
+                        points.push(vector_point(table, chunk, v, &model)?);
+                        indexed_ids.push(chunk.id);
+                    }
+                    _ => failed_ids.push(chunk.id),
+                }
             }
-            return Ok(if ok { pending.len() } else { 0 });
+            if !points.is_empty() {
+                let q = qdrant.expect("checked is_some above");
+                let _ = q.ensure_collection(points[0].vector.len());
+                let ok = q.upsert(&points);
+                let state = if ok { "indexed" } else { "failed" };
+                for id in &indexed_ids {
+                    set_chunk_state(conn, table, *id, state, Some(&model))?;
+                }
+                let indexed = if ok { indexed_ids.len() } else { 0 };
+                for id in &failed_ids {
+                    set_chunk_state(conn, table, *id, "failed", None)?;
+                }
+                return Ok(indexed);
+            }
+            for id in &failed_ids {
+                set_chunk_state(conn, table, *id, "failed", None)?;
+            }
+            return Ok(0);
         }
         let mut embedded = 0_usize;
         for (i, chunk) in pending.iter().enumerate() {
@@ -1372,5 +1393,169 @@ mod batch13_a4_tests {
             .unwrap_or(0);
         let first = chunk_conversation(&conn, conv).expect("third");
         assert_eq!(first as i64, count, "no duplication across re-chunks");
+    }
+}
+
+#[cfg(test)]
+mod batch24_audit46_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn temp_data_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-embed-audit46-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    /// Two pending knowledge chunks. The embedding endpoint is a mock that
+    /// answers `power-cycle` texts with an empty vector and everything else
+    /// with a healthy 2-dim vector — the batch is answered per input, so
+    /// the test does not depend on row order.
+    fn db_with_two_pending_chunks() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO knowledge_sources (name, kind) VALUES ('src', 'local_file')",
+            [],
+        )
+        .expect("source");
+        let source = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, content)
+             VALUES (?1, 'Runbook', 'restart the widget')",
+            params![source],
+        )
+        .expect("doc");
+        let doc = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO knowledge_chunks (document_id, chunk_index, content, embedding_state)
+             VALUES (?1, 0, 'restart the widget', 'not_indexed')",
+            params![doc],
+        )
+        .expect("chunk 1");
+        conn.execute(
+            "INSERT INTO knowledge_chunks (document_id, chunk_index, content, embedding_state)
+             VALUES (?1, 1, 'then power-cycle it', 'not_indexed')",
+            params![doc],
+        )
+        .expect("chunk 2");
+        conn
+    }
+
+    fn mixed_batch_handler() -> std::sync::Arc<
+        dyn Fn(&crate::mockserver::MockRequest) -> crate::mockserver::MockResponse + Send + Sync,
+    > {
+        std::sync::Arc::new(|req: &crate::mockserver::MockRequest| {
+            let body: serde_json::Value =
+                serde_json::from_str(&req.body).unwrap_or(serde_json::Value::Null);
+            let inputs = body
+                .get("input")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let data: Vec<serde_json::Value> = inputs
+                .iter()
+                .map(|t| {
+                    let text = t.as_str().unwrap_or_default();
+                    let embedding: Vec<f32> = if text.contains("power-cycle") {
+                        Vec::new()
+                    } else {
+                        vec![0.25, 0.5]
+                    };
+                    serde_json::json!({ "embedding": embedding })
+                })
+                .collect();
+            crate::mockserver::MockResponse::json(200, serde_json::json!({ "data": data }))
+        })
+    }
+
+    /// Clean-audit item 46: one empty vector no longer poisons the
+    /// knowledge batch. The chunk the model skipped is marked 'failed'
+    /// (staying in the retry pipeline) instead of riding the batch into
+    /// the store as an empty point stamped 'indexed'; the healthy chunks
+    /// are upserted and marked 'indexed'.
+    #[test]
+    fn audit46_empty_vector_does_not_poison_the_batch() {
+        let conn = db_with_two_pending_chunks();
+        let dir = temp_data_dir("mixed");
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
+        let mock = crate::mockserver::MockServer::start(mixed_batch_handler()).expect("mock");
+        crate::settings::set_string(&conn, "lmstudio_base_url", &mock.url()).expect("base url");
+        crate::settings::set_string(&conn, "lmstudio_embedding_model", "test-embed")
+            .expect("model");
+
+        let indexed = embed_pending_knowledge(&conn, Some(&index)).expect("embed pass");
+        assert_eq!(indexed, 1, "only the healthy chunk counts as indexed");
+
+        let mut stmt = conn
+            .prepare("SELECT content, embedding_state FROM knowledge_chunks ORDER BY id")
+            .expect("states");
+        let states: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("rows")
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+        assert_eq!(
+            states,
+            vec![
+                ("restart the widget".to_string(), "indexed".to_string()),
+                ("then power-cycle it".to_string(), "failed".to_string()),
+            ],
+            "the skipped chunk must be failed, not indexed"
+        );
+        assert_eq!(
+            index.try_point_count().expect("count"),
+            Some(1),
+            "exactly one point in the store — no empty-vector point"
+        );
+    }
+
+    /// Clean-audit item 46, all-empty corner: when the model returns
+    /// nothing usable for any chunk, nothing is upserted and every chunk
+    /// is marked 'failed' for retry.
+    #[test]
+    fn audit46_all_empty_batch_upserts_nothing() {
+        let conn = db_with_two_pending_chunks();
+        let dir = temp_data_dir("allempty");
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
+        let mock = crate::mockserver::MockServer::start(std::sync::Arc::new(
+            |_req: &crate::mockserver::MockRequest| {
+                crate::mockserver::MockResponse::json(
+                    200,
+                    serde_json::json!({ "data": [
+                        { "embedding": [] },
+                        { "embedding": [] }
+                    ]}),
+                )
+            },
+        ))
+        .expect("mock");
+        crate::settings::set_string(&conn, "lmstudio_base_url", &mock.url()).expect("base url");
+        crate::settings::set_string(&conn, "lmstudio_embedding_model", "test-embed")
+            .expect("model");
+
+        let indexed = embed_pending_knowledge(&conn, Some(&index)).expect("embed pass");
+        assert_eq!(indexed, 0, "nothing usable came back");
+        let failed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM knowledge_chunks WHERE embedding_state = 'failed'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("failed count");
+        assert_eq!(failed, 2, "both chunks stay in the retry pipeline");
+        // No point was upserted, so no collection is created either.
+        assert!(
+            matches!(index.try_point_count().expect("count"), None | Some(0)),
+            "the store stays empty"
+        );
     }
 }
