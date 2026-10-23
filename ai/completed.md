@@ -3465,3 +3465,161 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   success, both jobs green (fmt/clippy/test/deny AND the AppImage/deb
   build with the SPP_SMOKE shell smoke); tracking commit `61ff279` —
   CI run `40035306132`: success, both jobs green.
+
+### Batch 30 — 2026-10-24 (code commit `ecc7228`)
+
+**107. redact_string byte-slicing panic** (low|bug)
+— the redaction helper sliced head/tail at raw byte offsets
+(`&s[..2]`), so any secret whose second byte sits inside a
+multi-byte character — a CJK, emoji, or accented-Latin client id —
+panicked with "byte index 2 is not a char boundary" the moment the
+redacted config was rendered. The helper now takes the first and
+last two CHARACTERS and masks short strings by character count, not
+bytes; the panic shape is impossible. core/config.rs.
+
+**108. Digest doc counts: space-format vs ISO-T lexical comparison**
+(low|bug)
+— `change_facts` normalized the gap-candidates comparison through
+`datetime()` but compared the two doc counts as raw strings: a
+stored space-format stamp (`2026-10-20 11:30:00`) sorts before the
+ISO-T `since` bound (`2026-10-20T10:00:00.000Z`) because `' '` < `'T'`,
+so a doc updated later on the same day silently fell out of the
+digest. The articles WHERE and ORDER BY and the knowledge-documents
+count normalize through `datetime()` like the gaps query always did.
+core/digest.rs.
+
+**109. New-conv windows key on local_created_at; deleted-filter
+claim false** (low|bug)
+— the dashboard's "new conversations" window and build_report's
+period windows (plus the day/week/month bucket expressions) keyed on
+`local_created_at`, which is the LOCAL INSERT stamp (schema default
+`datetime('now')`, never written from the platform payload) — every
+backfilled conversation counted as new on the day it was synced and
+the buckets reported sync time, not creation time. All of it keys on
+`COALESCE(remote_created_at, created_at)` — the same creation stamp
+the digest, segments and AI pipeline use. And the Conversations
+metric's limitation text claimed "Does not include deleted
+conversations" while no filter did: every report row and the
+previous-period window now carry `deleted_at IS NULL`.
+core/reports.rs.
+
+**110. %W year-boundary week split** (low|issue)
+— the week dimension paired `%Y` with `%W`, so one natural week at
+the year boundary split into "2025-W53" and "2026-W00" (and W00 is
+not a real week label). The dimension is ISO now — `strftime('%G-W%V')`
+(supported by the bundled SQLite ≥ 3.44) — so Dec 30 and Jan 1 land
+in the same `2026-W01` bucket, pinned by a test. core/reports.rs.
+
+**111. LIMIT caps silently undercount alert claims** (low|issue)
+— the escalation radar sample was capped at `LIMIT 1000` and the
+rating-correlation sample at `LIMIT 2000` (newest by id): 2,500
+escalated tickets were claimed as "1000 escalated tickets in the
+last 30 days", and older not-good ratings silently vanished from the
+cluster overlap counts. Both caps are gone — the claims match the
+real sample, and the queries stay bounded by the 30-day window.
+core/analytics.rs.
+
+**112. Concentration denominator counts NULL-key conversations**
+(low|issue)
+— `customer_concentration` divided distinct customers by ALL cluster
+conversations while the numerator set only carried attributed ones
+(unattributed imports fired the alert on imaginary concentration),
+and `inbox_concentration` divided by ALL conversations while only
+mailbox-bearing rows could land in a bucket (NULL-mailbox rows
+diluted the ratio and suppressed real single-inbox concentration).
+Both checks now run over the attributed subset and the claim texts
+report the attributed totals ("4 of 4", not "4 of 7").
+core/analytics.rs.
+
+**113. open_closed_distribution drops pending** (low|issue)
+— the incident/known-issue impact distribution counted open as
+`status = 'active'` and closed as `'closed'`, so a conversation in
+the platform's `pending` state vanished between the buckets and
+open + closed undercounted affected_conversations. Open counts
+`status IN ('active','pending')` — the same convention workload,
+operations and the digest already use. core/issue_impact.rs.
+
+**114. email_domain filter unanchored, op ignored** (low|issue)
+— every operator ran the same `LIKE %@{domain}%`: the trailing `%`
+let `user@example.com.au` match an `example.com` filter,
+`not_equals` returned the equals set, and `is_empty`/`is_not_empty`
+were unreachable. The filter now extracts each stored address's
+domain part (`LOWER(SUBSTR(ce.value, INSTR(ce.value, '@') + 1))`)
+and dispatches the standard operator set onto it — equals (exact
+domain), not_equals (negation over all customers), contains,
+starts_with, ends_with — with is_empty/is_not_empty answering on
+email presence without requiring a value. core/segment.rs.
+
+**115. campaign_reconcile references nonexistent updated_at column**
+(low|bug)
+— the reconcile sweep's state-transition UPDATEs stamp
+`outreach_recipients.updated_at`, but the column is missing on
+databases created before the item-17 batch and the ensure ran only
+in `send_batch` — so `campaign_reconcile`'s own path failed every
+UPDATE with "no such column", swallowed the error (`let _ =`), left
+the row in 'unknown' forever (re-logged by every reconcile pass) and
+still counted it in the returned totals. The idempotent
+`ensure_recipient_updated_at` self-heal now runs at the top of
+`reconcile_recipient_states`, covering both entry paths, pinned by a
+legacy-schema test (column dropped → reconcile still transitions the
+exhausted row to 'failed' and re-adds the column).
+core/outreach.rs.
+
+**116. ORDER BY remote_created_at never populated by sync (2 sites)**
+(low|bug)
+— the sync writer (`sync_engine::upsert_thread`) never populates
+`conversation_threads.remote_created_at`, so `customer_messages`
+(interaction_current) and `compute_outcome` (interaction_engine)
+sorted on a constant NULL and the customer-message sequence was
+whatever the scan returned — miscounting follow-ups and first-reply
+resolution. Both lanes order on
+`COALESCE(remote_created_at, created_at)`, the fallback
+ai_pipeline, ai_evidence, ai_local and translation already use, with
+an insert-order test proving chronology is restored.
+core/interaction_current.rs, core/interaction_engine.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `python3 scripts/gate_no_simulation.py`: clean.
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- Tests: core 453 passed / 0 failed / 4 ignored (13 new batch-30
+  regressions: redact_string rendering a 6-emoji client id where the
+  old byte slice panicked; the space-format doc update after an
+  ISO-T same-day bound counting in the digest facts; the backfilled
+  conversation counting as new while the 60-day-old backfill and the
+  deleted one do not; the 2025-12-30/2026-01-01 pair landing in one
+  `2026-W01` bucket with the deleted boundary row excluded; the
+  deleted conversation excluded from the 'all' report row; the
+  inbox-concentration alert firing at 4 of 4 attributed conversations
+  where the old 4-of-7 denominator suppressed it; the 2-attributed/4-
+  unattributed mixture no longer firing customer concentration; the
+  1001-escalated-ticket claim reporting 1001; pending counting as
+  open in the impact distribution; the email_domain operator set
+  (equals exact, .au and subdomain anchored out, ends_with including
+  the subdomain, contains including the .au, not_equals and the
+  email-presence ops); campaign_reconcile on a dropped-column legacy
+  schema still transitioning the exhausted row to 'failed' with the
+  column re-added; customer_messages restoring oldest-first order on
+  reverse-inserted NULL-remote rows; and compute_outcome counting
+  one follow-up where the constant-NULL order miscounted);
+  sandbox-feature suite 458 passed / 0 failed / 4 ignored; app-shell
+  209 passed / 0 failed; xtask 6; catalog 0.
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4043 shapes painted (identical to the batch-29 baseline).
+- Fresh harness `scripts/verify_batch30.py` (committed): all 36
+  checks pass; the batch-18, batch-19, batch-21, batch-23, batch-24,
+  batch-25, batch-26, batch-27, batch-28 and batch-29 harnesses still
+  pass. Pre-existing stale needles in batch-20 (item-21 upsert-site
+  needle restructured by batch-24's per-chunk partitioning) and
+  batch-22 (the one-line fence literal rustfmt has since wrapped, and
+  the volume-spike flake check) were proven pre-batch by a stash-run
+  at the pre-batch commit — identical failures, unrelated to this
+  batch; batch-17's script remains environment-bound as documented.
+- `cargo deny check advisories licenses`: ok (the CDLA-Permissive-2.0
+  note is the pre-existing unmatched-allowance warning, not a failure).
+- Security: staged diff token-scanned clean before each push; remote
+  fetched before each push (batch-29's runner-verification commit
+  `b3d8904` landed mid-batch and was rebased onto, not overwritten).
+- Runner verification: follows once CI on code commit `ecc7228`
+  completes (recorded below when the runs finish).
