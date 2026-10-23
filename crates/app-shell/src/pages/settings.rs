@@ -646,6 +646,12 @@ impl SettingsPage {
         let interval_before = db.with_read(|conn| {
             spp_core::settings::get_i64(conn, "sync_interval_minutes", 1).unwrap_or(1)
         });
+        // Audit item 31: `api_concurrency` was parsed and saved but never
+        // applied — capture the pre-save value so a change reaches the
+        // live provider's queues in-session instead of waiting for a
+        // restart that never mattered.
+        let concurrency_before = db
+            .with_read(|conn| spp_core::settings::get_i64(conn, "api_concurrency", 2).unwrap_or(2));
         let result = db.with_write(|conn| general.save(conn));
         match result {
             Ok(()) => {
@@ -658,6 +664,18 @@ impl SettingsPage {
                         "sync interval changed: restarting background workers"
                     );
                     workers.restart();
+                }
+                if concurrency_before != general.api_concurrency
+                    && let Some(handle) = self.provider.clone()
+                    && let Some(real) = handle.real()
+                {
+                    real.set_api_concurrency(general.api_concurrency.max(1) as usize);
+                    tracing::info!(
+                        before = concurrency_before,
+                        after = general.api_concurrency,
+                        current = real.api_concurrency(),
+                        "api concurrency changed: applied to the live provider queues"
+                    );
                 }
                 self.message = Some("settings saved".into())
             }
@@ -721,8 +739,23 @@ impl SettingsPage {
         });
         match result {
             Ok(()) => {
-                self.message =
-                    Some("credentials stored (encrypted) — activating the connection now…".into());
+                // Audit item 32: the platform caps webhook secrets at 40
+                // characters — registration and signature verification both
+                // use the truncation, so say it out loud when the form
+                // stored more than the platform will keep.
+                let secret_note = if ws.chars().count() > spp_core::webhook::SECRET_CAP {
+                    format!(
+                        " (note: the platform caps webhook secrets at {} characters — \
+                         only the first {} of yours are used)",
+                        spp_core::webhook::SECRET_CAP,
+                        spp_core::webhook::SECRET_CAP
+                    )
+                } else {
+                    String::new()
+                };
+                self.message = Some(format!(
+                    "credentials stored (encrypted) — activating the connection now…{secret_note}"
+                ));
                 // The three secret fields do not linger on screen after a
                 // successful save; the client id stays for reference.
                 self.hs_client_secret.clear();
@@ -2652,5 +2685,57 @@ mod tests {
         assert!(still_live, "the live database survived the refusal");
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+/// Clean-audit item 31: saving a changed `api_concurrency` reaches the
+/// LIVE provider's queues in-session — the setting used to be parsed and
+/// persisted while every queue ran the hard-coded default until restart
+/// (and the restart didn't matter either: nothing ever applied it).
+#[cfg(test)]
+mod batch22_audit31_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    #[test]
+    fn api_concurrency_save_reaches_the_live_provider() {
+        let db = fixture(Vec::new());
+        // The boot-time provider (build_boot_services shape): default 2.
+        let real = std::sync::Arc::new(spp_core::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
+            spp_core::helpscout_real::HsCredentials::default(),
+        ));
+        assert_eq!(real.api_concurrency(), 2, "unset: the default");
+
+        let mut page = SettingsPage::new();
+        page.set_provider_handle(std::sync::Arc::new(
+            spp_core::provider_handle::ProviderHandle::new_real(std::sync::Arc::clone(&real)),
+        ));
+
+        // Load the form, change the concurrency, save.
+        page.reload(&db);
+        page.general.as_mut().expect("loaded").api_concurrency = 6;
+        page.save_general(&db);
+
+        assert!(
+            page.error.is_none(),
+            "the save must succeed: {:?}",
+            page.error
+        );
+        assert_eq!(
+            real.api_concurrency(),
+            6,
+            "the live provider's queues resized in-session"
+        );
+        // And the write persisted: a fresh provider starts at the new width.
+        let rebuilt = spp_core::helpscout_real::RealHelpScoutProvider::new(
+            db.clone(),
+            spp_core::helpscout_real::HsCredentials::default(),
+        );
+        assert_eq!(
+            rebuilt.api_concurrency(),
+            6,
+            "construction applies the stored setting"
+        );
     }
 }

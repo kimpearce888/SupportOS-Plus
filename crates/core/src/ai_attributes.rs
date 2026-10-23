@@ -766,6 +766,7 @@ pub fn prepare_computation(
 }
 
 pub async fn run_extraction(
+    conn: &Connection,
     provider: &dyn LocalAiProvider,
     model: &str,
     prompt: &str,
@@ -773,8 +774,23 @@ pub async fn run_extraction(
     if !provider.is_available().await {
         return None;
     }
+    // Clean-audit item 35: the extraction prompt carries raw customer
+    // messages — it crosses the same prompt-redaction boundary the
+    // pipeline's chat_json uses (`redaction_enabled` setting, default
+    // on) instead of bypassing it. Emails, card numbers, phone numbers
+    // and secrets never reach the model from this path.
+    let redaction_enabled =
+        crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
+    let (safe_prompt, findings) = crate::security::redact_text(prompt, redaction_enabled);
+    if !findings.is_empty() {
+        tracing::info!(
+            operation = "attribute_extraction",
+            patterns = ?findings.iter().filter_map(|f| f.get("pattern")).collect::<Vec<_>>(),
+            "redaction boundary applied to the extraction prompt"
+        );
+    }
     match provider
-        .chat(
+        .chat_structured(
             model,
             &[
                 ChatMessage {
@@ -783,7 +799,7 @@ pub async fn run_extraction(
                 },
                 ChatMessage {
                     role: "user".into(),
-                    content: prompt.to_string(),
+                    content: safe_prompt,
                 },
             ],
         )
@@ -815,7 +831,12 @@ pub fn finish_computation(
         extracted = Some(cached_value);
         ai_run_id = Some(run_id);
     } else if let (Some(_), Some(raw)) = (&prompt, fresh_output)
-        && let Ok(parsed) = serde_json::from_str::<Value>(&raw)
+        // Clean-audit item 34: local models happily wrap their JSON in
+        // markdown fences or surround it with prose — a strict
+        // from_str on the raw answer lost every such extraction. Parse
+        // through the pipeline's canonical fence-stripping extractor
+        // (the same one chat_json uses) before the shape validation.
+        && let Some(parsed) = crate::ai_pipeline::extract_json(&raw)
         && parsed
             .get("attributes")
             .is_some_and(|a| a.as_array().is_some())
@@ -893,7 +914,9 @@ pub async fn compute(
         return Ok(None);
     };
     let fresh = match &prepared.prompt {
-        Some(prompt) if prepared.cached.is_none() => run_extraction(provider, model, prompt).await,
+        Some(prompt) if prepared.cached.is_none() => {
+            run_extraction(conn, provider, model, prompt).await
+        }
         _ => None,
     };
     finish_computation(conn, prepared, fresh, model)
@@ -1594,5 +1617,242 @@ mod a2_wiring_tests {
         assert_eq!(intents.len(), 1, "the old row must be superseded");
         assert_eq!(intents[0].value, "question");
         assert_eq!(intents[0].source, "human");
+    }
+}
+
+/// Clean-audit batch 22 (items 34-35): the attribute extraction parses
+/// raw model output without the pipeline's fence-stripping extractor, and
+/// its prompt — raw customer messages — bypassed the prompt-redaction
+/// boundary every other AI path crosses.
+#[cfg(test)]
+mod batch22_audit_tests {
+    use super::*;
+    use crate::ai_provider::{ChatResponse, LocalAiProvider, ModelInfo};
+
+    fn db_with_conversation() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9301, 93, 'Export failing again', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, created_at)
+             VALUES (?1, 'customer', ?2, datetime('now'))",
+            rusqlite::params![
+                conv,
+                "This is urgent — the export throws an error every time \
+                 and we cannot work. How do I fix the export timeout?"
+            ],
+        )
+        .expect("thread");
+        conn
+    }
+
+    fn conv_id(conn: &Connection) -> i64 {
+        conn.query_row("SELECT id FROM conversations", [], |r| r.get(0))
+            .expect("conv id")
+    }
+
+    /// Item 34: a fenced answer and a prose-wrapped answer both parse —
+    /// the strict `serde_json::from_str` on the raw string used to drop
+    /// every such extraction (and never even stored the run).
+    #[test]
+    fn fenced_and_prose_wrapped_extraction_outputs_are_parsed() {
+        for (label, raw) in [
+            (
+                "fenced",
+                "```json\n{\"attributes\":[{\"attribute\":\"intent\",\"value\":\"bug_report\",\"confidence\":\"high\",\"evidence_excerpt\":\"export throws an error\"}]}\n```",
+            ),
+            (
+                "prose-wrapped",
+                "Sure! Here is the JSON you asked for:\n{\"attributes\":[{\"attribute\":\"intent\",\"value\":\"bug_report\",\"confidence\":\"high\",\"evidence_excerpt\":\"export throws an error\"}]}\nHope that helps.",
+            ),
+        ] {
+            let mut conn = db_with_conversation();
+            let conv = conv_id(&conn);
+            let prepared = prepare_computation(&conn, conv, "test-model", true)
+                .expect("prepared")
+                .expect("a prepared computation exists");
+            assert!(prepared.cached.is_none(), "{label}: no cache under force");
+            assert!(prepared.prompt.is_some(), "{label}: prompt built");
+
+            let snapshot =
+                finish_computation(&mut conn, prepared, Some(raw.to_string()), "test-model")
+                    .expect("finish")
+                    .expect("snapshot");
+
+            let intent = snapshot
+                .attributes
+                .iter()
+                .find(|a| a.get("attribute").and_then(Value::as_str) == Some("intent"));
+            let Some(intent) = intent else {
+                panic!(
+                    "{label}: the AI intent attribute must land, got {:?}",
+                    snapshot.attributes
+                );
+            };
+            assert_eq!(
+                intent.get("value").and_then(Value::as_str),
+                Some("bug_report"),
+                "{label}: value survives the fenced parse"
+            );
+            assert_eq!(
+                intent.get("source").and_then(Value::as_str),
+                Some("ai"),
+                "{label}: the row is the machine's, not deterministic"
+            );
+            assert!(
+                intent.get("run_id").and_then(Value::as_i64).is_some(),
+                "{label}: the run is stored even for a wrapped answer"
+            );
+        }
+    }
+
+    /// A recording provider for the redaction-boundary test: counts which
+    /// chat lane was used and captures exactly what the model received.
+    struct RecordingProvider {
+        seen: std::sync::Mutex<Vec<crate::ai_provider::ChatMessage>>,
+        structured_calls: std::sync::atomic::AtomicUsize,
+        plain_calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl RecordingProvider {
+        fn new() -> Self {
+            Self {
+                seen: std::sync::Mutex::new(Vec::new()),
+                structured_calls: std::sync::atomic::AtomicUsize::new(0),
+                plain_calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn captured_user_content(&self) -> String {
+            self.seen
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .iter()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.clone())
+                .expect("the model must receive a user message")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LocalAiProvider for RecordingProvider {
+        async fn list_models(&self) -> crate::error::Result<Vec<ModelInfo>> {
+            Ok(Vec::new())
+        }
+
+        async fn chat(
+            &self,
+            _model: &str,
+            _messages: &[crate::ai_provider::ChatMessage],
+        ) -> crate::error::Result<ChatResponse> {
+            self.plain_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err(crate::error::Error::Config(
+                "plain chat must not be used".into(),
+            ))
+        }
+
+        async fn chat_structured(
+            &self,
+            _model: &str,
+            messages: &[crate::ai_provider::ChatMessage],
+        ) -> crate::error::Result<ChatResponse> {
+            self.structured_calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            *self.seen.lock().unwrap_or_else(|p| p.into_inner()) = messages.to_vec();
+            Ok(ChatResponse {
+                content: "{\"attributes\":[]}".into(),
+                model: "recording".into(),
+                usage: None,
+                finish_reason: None,
+            })
+        }
+
+        async fn embed(
+            &self,
+            _model: &str,
+            _text: &str,
+        ) -> crate::error::Result<crate::ai_provider::EmbedResponse> {
+            Err(crate::error::Error::Config("not needed".into()))
+        }
+
+        async fn is_available(&self) -> bool {
+            true
+        }
+    }
+
+    /// Item 35: the extraction prompt carries raw customer messages —
+    /// boundary-covered PII (card numbers, credentials) must never reach
+    /// the model, and the boundary honors the `redaction_enabled`
+    /// setting like every other AI path.
+    #[test]
+    fn run_extraction_crosses_the_redaction_boundary() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let prompt = "Customer wrote: my card 4111 1111 1111 1111 was charged twice \
+                      and my password: hunter2secret, the export is broken.";
+
+        // Default: redaction on — the model sees placeholders, not PII.
+        {
+            let conn = db_with_conversation();
+            let provider = RecordingProvider::new();
+            let out = rt
+                .block_on(run_extraction(&conn, &provider, "test-model", prompt))
+                .expect("an answer");
+            assert_eq!(out, "{\"attributes\":[]}");
+            let captured = provider.captured_user_content();
+            assert!(
+                !captured.contains("4111 1111 1111 1111"),
+                "the card number must be redacted before the model: {captured}"
+            );
+            assert!(
+                !captured.contains("hunter2secret"),
+                "the credential must be redacted before the model: {captured}"
+            );
+            assert!(
+                captured.contains("[REDACTED-CARD]"),
+                "the boundary's placeholder is what the model sees: {captured}"
+            );
+            assert!(
+                captured.contains("the export is broken"),
+                "the non-PII text survives: {captured}"
+            );
+            assert_eq!(
+                provider
+                    .structured_calls
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                1,
+                "item 34: the structured (json_mode) lane is the one used"
+            );
+            assert_eq!(
+                provider
+                    .plain_calls
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                0,
+                "item 34: the plain chat lane must not be used"
+            );
+        }
+
+        // The setting is the switch: redaction off passes the text through.
+        {
+            let conn = db_with_conversation();
+            crate::settings::set_bool(&conn, "redaction_enabled", false).expect("setting");
+            let provider = RecordingProvider::new();
+            rt.block_on(run_extraction(&conn, &provider, "test-model", prompt))
+                .expect("an answer");
+            let captured = provider.captured_user_content();
+            assert_eq!(
+                captured, prompt,
+                "redaction_enabled=false is honored verbatim"
+            );
+        }
     }
 }

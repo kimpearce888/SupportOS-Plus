@@ -2007,10 +2007,20 @@ impl InboxPage {
                 design::field_label(ui, "assign:");
                 egui::ComboBox::from_id_salt("inbox-assign")
                     .width(200.0)
+                    // Clean-audit item 33: a team assignment is its own
+                    // state — "team: Billing" — never "unassigned", and
+                    // never a user name that happens to share the team's
+                    // platform id.
                     .selected_text(
                         detail
                             .assignee_name
                             .clone()
+                            .or_else(|| {
+                                detail
+                                    .assigned_team_name
+                                    .as_deref()
+                                    .map(|t| format!("team: {t}"))
+                            })
                             .unwrap_or_else(|| "unassigned".into()),
                     )
                     .show_ui(ui, |ui| {

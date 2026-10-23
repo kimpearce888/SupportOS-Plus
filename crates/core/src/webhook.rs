@@ -9,6 +9,26 @@ pub const HELPSCOUT_SIGNATURE_HEADER: &str = "X-Helpscout-Signature";
 
 type HmacSha1 = Hmac<Sha1>;
 
+/// The platform's cap on webhook secrets (registration answers 400 for
+/// anything longer — Help Scout's own rule).
+pub const SECRET_CAP: usize = 40;
+
+/// The secret Help Scout actually holds: the first 40 characters of the
+/// configured one (the platform rejects longer values at registration).
+///
+/// Audit item 32: registration capped the secret at 40 characters while
+/// signature verification used the full stored value — any configured
+/// secret longer than the cap meant the platform signed with the
+/// truncation while the app verified with the whole string, so every
+/// delivery failed the check, ten discards deactivated the hook, and the
+/// health check re-registered it into the same trap. Both sides now
+/// resolve through this one function: registration and verification
+/// always agree.
+#[must_use]
+pub fn effective_secret(secret: &str) -> String {
+    secret.chars().take(SECRET_CAP).collect()
+}
+
 #[must_use]
 pub fn compute_signature(secret: &[u8], body: &[u8]) -> String {
     let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
@@ -231,6 +251,39 @@ mod tests {
         // over the lazy dog") = de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9
         let sig = compute_signature(b"key", b"The quick brown fox jumps over the lazy dog");
         assert_eq!(sig, "3nybhbi3iqa8ino29wqQcBydtNk=");
+    }
+
+    /// Clean-audit item 32: registration and verification must agree on
+    /// the effective secret — the platform's 40-character cap applied to
+    /// whatever the user stored.
+    #[test]
+    fn effective_secret_applies_the_platform_cap() {
+        assert_eq!(
+            effective_secret("short-secret"),
+            "short-secret",
+            "under the cap: unchanged"
+        );
+        let exactly_40: String = "x".repeat(40);
+        assert_eq!(
+            effective_secret(&exactly_40),
+            exactly_40,
+            "exactly at the cap: unchanged"
+        );
+        let longer: String = "y".repeat(60);
+        assert_eq!(
+            effective_secret(&longer),
+            "y".repeat(40),
+            "over the cap: the first 40 characters are what the platform holds"
+        );
+        // The truncation and the registration path sign identically: the
+        // signature computed over the capped secret verifies with the
+        // capped secret, and NOT with the full one — which is exactly the
+        // trap the pre-fix loopback fell into (register truncated,
+        // verify full).
+        let body = br#"{"objectID":1}"#;
+        let sig = compute_signature(effective_secret(&longer).as_bytes(), body);
+        assert!(verify_signature(effective_secret(&longer).as_bytes(), body, &sig).is_ok());
+        assert!(verify_signature(longer.as_bytes(), body, &sig).is_err());
     }
 
     #[test]

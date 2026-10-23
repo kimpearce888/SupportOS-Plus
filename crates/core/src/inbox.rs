@@ -67,6 +67,10 @@ pub struct ConversationListItem {
     pub mailbox_name: Option<String>,
     pub assignee_id: Option<i64>,
     pub assignee_name: Option<String>,
+    /// Clean-audit item 33: team assignments — the team the platform
+    /// holds when no individual user is assigned.
+    pub assigned_team_id: Option<i64>,
+    pub assigned_team_name: Option<String>,
     pub customer_id: Option<i64>,
     pub customer_name: Option<String>,
     pub priority: Option<String>,
@@ -119,6 +123,10 @@ pub struct ConversationDetail {
     pub mailbox_name: Option<String>,
     pub assignee_id: Option<i64>,
     pub assignee_name: Option<String>,
+    /// Clean-audit item 33: team assignments — the team the platform
+    /// holds when no individual user is assigned.
+    pub assigned_team_id: Option<i64>,
+    pub assigned_team_name: Option<String>,
     pub customer_id: Option<i64>,
     pub customer_name: Option<String>,
     pub customer_email: Option<String>,
@@ -209,12 +217,14 @@ pub fn list_conversations(
         "SELECT c.id, c.remote_id, c.number, c.subject, c.preview, c.status,
                 c.mailbox_local_id, m.name,
                 c.assignee_local_id, u.first_name || ' ' || u.last_name,
+                c.assigned_team_local_id, tm.name,
                 c.customer_local_id, cu.first_name || ' ' || cu.last_name,
                 c.priority, c.created_at, c.updated_at, c.closed_at,
                 c.response_state
          FROM conversations c
          LEFT JOIN mailboxes m ON m.id = c.mailbox_local_id
          LEFT JOIN users u ON u.id = c.assignee_local_id
+         LEFT JOIN teams tm ON tm.id = c.assigned_team_local_id
          LEFT JOIN customers cu ON cu.id = c.customer_local_id
          {where_clause}
          ORDER BY COALESCE(c.updated_at, c.local_created_at) DESC
@@ -239,13 +249,15 @@ pub fn list_conversations(
                 mailbox_name: row.get(7)?,
                 assignee_id: row.get(8)?,
                 assignee_name: row.get(9)?,
-                customer_id: row.get(10)?,
-                customer_name: row.get(11)?,
-                priority: row.get(12)?,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
-                closed_at: row.get(15)?,
-                response_state: row.get::<_, Option<String>>(16).ok().flatten(),
+                assigned_team_id: row.get(10)?,
+                assigned_team_name: row.get(11)?,
+                customer_id: row.get(12)?,
+                customer_name: row.get(13)?,
+                priority: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
+                closed_at: row.get(17)?,
+                response_state: row.get::<_, Option<String>>(18).ok().flatten(),
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -263,12 +275,14 @@ pub fn get_conversation(
         "SELECT c.id, c.remote_id, c.number, c.subject, c.preview, c.status,
                     c.mailbox_local_id, m.name,
                     c.assignee_local_id, u.first_name || ' ' || u.last_name,
+                    c.assigned_team_local_id, tm.name,
                     c.customer_local_id, cu.first_name || ' ' || cu.last_name, cu.email,
                     c.priority, c.response_state,
                     c.created_at, c.updated_at, c.closed_at
              FROM conversations c
              LEFT JOIN mailboxes m ON m.id = c.mailbox_local_id
              LEFT JOIN users u ON u.id = c.assignee_local_id
+             LEFT JOIN teams tm ON tm.id = c.assigned_team_local_id
              LEFT JOIN customers cu ON cu.id = c.customer_local_id
              WHERE c.id = ?",
         params![conversation_id],
@@ -284,14 +298,16 @@ pub fn get_conversation(
                 mailbox_name: row.get(7)?,
                 assignee_id: row.get(8)?,
                 assignee_name: row.get(9)?,
-                customer_id: row.get(10)?,
-                customer_name: row.get(11)?,
-                customer_email: row.get(12)?,
-                priority: row.get(13)?,
-                response_state: row.get::<_, Option<String>>(14).ok().flatten(),
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
-                closed_at: row.get(17)?,
+                assigned_team_id: row.get(10)?,
+                assigned_team_name: row.get(11)?,
+                customer_id: row.get(12)?,
+                customer_name: row.get(13)?,
+                customer_email: row.get(14)?,
+                priority: row.get(15)?,
+                response_state: row.get::<_, Option<String>>(16).ok().flatten(),
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
+                closed_at: row.get(19)?,
                 thread: Vec::new(),
                 tags: Vec::new(),
             })
