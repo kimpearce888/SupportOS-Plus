@@ -95,8 +95,8 @@ acting user, the known-issue links that reject dangling ids, the
 Customers fetch past page 1, the LIKE escaping shared by its three
 call sites, the jobs::fail calls carrying the real job id, the rating
 fetch errors surfaced with re-enqueue, and the copilot panic containment
-that no longer re-persists the user message) — opened, in
-`progress.md`.
+that no longer re-persists the user message) — verified and recorded in
+`completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
