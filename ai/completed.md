@@ -2973,3 +2973,13 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   regression test specifies (an unchanged map is a no-op).
 - Security: staged diff token-scanned clean before each push; remote
   unmoved at push time (fetch-first).
+- Runner verification (added after the runs): code commit `ea5f84e` —
+  CI run `39967607725`: the AppImage/deb job (which runs the item-71
+  shell smoke) green; the fmt/clippy/test/deny job red on
+  `cargo deny advisories` ONLY — RUSTSEC-2026-0385 (ctutils < 0.4.4,
+  non-constant-time mask generation), a transitive crypto dependency
+  advisory published after the last green run, unrelated to the batch's
+  code. Fix commit `4ca77e1` (ctutils 0.4.3 → 0.4.5 via
+  `cargo update -p ctutils`, no code change; workspace tests re-run
+  green on 0.4.5) — CI run `39971217122`: success, both jobs green
+  (fmt/clippy/test/deny AND AppImage/deb build with the shell smoke).
