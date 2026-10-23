@@ -119,7 +119,16 @@ resolution subqueries missing deleted_at, the org-name linking that
 ignores NOCASE, and the CSV export without a formula-injection guard) —
 verified and recorded in `completed.md`.
 
-Batch 30 = items 107-116 — in progress (moved to `progress.md`).
+Batch 30 = items 107-116 (the redact_string byte-slicing panic, the digest
+doc counts' space-format vs ISO-T lexical comparison, the new-conv windows
+keyed on the local insert stamp with the false deleted-filter claim, the
+%W year-boundary week split, the radar alert claims undercounted by silent
+LIMIT caps, the concentration denominators counting NULL-key conversations,
+open_closed_distribution dropping pending, the email_domain filter ignoring
+its operator and matching unanchored, campaign_reconcile referencing the
+nonexistent updated_at column without the self-heal, and the two bare
+ORDER BY remote_created_at thread lanes) — verified and recorded in
+`completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
