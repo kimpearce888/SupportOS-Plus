@@ -37,6 +37,64 @@ pub mod sync_health;
 
 use spp_core::events::ServerEvent;
 
+/// A destructive action that must run only after the user confirms it
+/// in the shell's dialog (clean-audit item 70: the `ConfirmDialog`
+/// machinery existed and rendered, but nothing ever armed it — every
+/// destructive action ran unconfirmed). Pages raise a
+/// [`NavRequest::Confirm`] carrying one of these; the shell shows the
+/// dialog and executes the action only on `DialogOutcome::Confirmed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DestructiveAction {
+    /// Delete an automation rule by row id (the item-70 sample wiring;
+    /// the remaining destructive surfaces route through this mechanism
+    /// in their own audit items).
+    DeleteAutomationRule { id: i64 },
+}
+
+/// A request to arm the shell-level confirmation dialog for a
+/// [`DestructiveAction`] (clean-audit item 70).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmRequest {
+    /// Dialog title (e.g. "Delete automation rule?").
+    pub title: String,
+    /// What the action does, phrased for confirmation.
+    pub message: String,
+    /// Confirm-button label (e.g. "Delete").
+    pub confirm_label: String,
+    /// Destructive styling for the confirm button.
+    pub danger: bool,
+    /// The action that runs when the user confirms.
+    pub action: DestructiveAction,
+}
+
+impl ConfirmRequest {
+    /// Confirmation for deleting an automation rule.
+    #[must_use]
+    pub fn delete_automation_rule(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete automation rule?".into(),
+            message: format!(
+                "The rule \"{name}\" stops firing immediately. This cannot be undone."
+            ),
+            confirm_label: "Delete rule".into(),
+            danger: true,
+            action: DestructiveAction::DeleteAutomationRule { id },
+        }
+    }
+
+    /// The dialog the shell shows for this request.
+    #[must_use]
+    pub fn dialog(&self) -> crate::overlays::ConfirmDialog {
+        let mut dialog =
+            crate::overlays::ConfirmDialog::new(self.title.clone(), self.message.clone())
+                .confirm_label(self.confirm_label.clone());
+        if self.danger {
+            dialog = dialog.danger();
+        }
+        dialog
+    }
+}
+
 /// A cross-page navigation request raised by a page view (port of the
 /// web router links that jumped between pages, e.g. an operations tile
 /// linking `/inbox?view={tile}`).
@@ -46,6 +104,9 @@ pub enum NavRequest {
     InboxTile(String),
     /// Open a specific page.
     Page(PageKey),
+    /// Arm the shell's confirm dialog for a destructive action
+    /// (clean-audit item 70) — the action runs only on confirmation.
+    Confirm(ConfirmRequest),
 }
 
 /// A navigable page of the shell.
@@ -338,5 +399,34 @@ mod tests {
         assert_eq!(opt_str_field(&v, "null"), None);
         assert_eq!(opt_str_field(&v, "missing"), None);
         assert_eq!(opt_str_field(&v, "name").as_deref(), Some("Kim"));
+    }
+
+    /// Clean-audit item 70: pages can ask the shell to confirm a
+    /// destructive action, and the request carries everything the
+    /// dialog needs (title, message, danger, and the action itself).
+    #[test]
+    fn confirm_requests_carry_the_dialog_spec_and_action() {
+        let request = ConfirmRequest::delete_automation_rule(7, "Escalate VIP");
+        assert_eq!(request.title, "Delete automation rule?");
+        assert_eq!(request.confirm_label, "Delete rule");
+        assert!(request.danger, "deleting a rule is a destructive action");
+        assert!(request.message.contains("Escalate VIP"));
+        assert_eq!(
+            request.action,
+            DestructiveAction::DeleteAutomationRule { id: 7 }
+        );
+        let dialog = request.dialog();
+        assert!(dialog.danger);
+        assert_eq!(dialog.title, request.title);
+        assert_eq!(dialog.confirm_label, "Delete rule");
+        // The request rides NavRequest so pages can return it from ui().
+        let nav = NavRequest::Confirm(request);
+        let NavRequest::Confirm(inner) = &nav else {
+            panic!("the Confirm variant must pattern-match");
+        };
+        assert_eq!(
+            inner.action,
+            DestructiveAction::DeleteAutomationRule { id: 7 }
+        );
     }
 }

@@ -3,7 +3,13 @@
 //! `push(kind, message, detail)` stacks a toast; the shell renders the
 //! stack as a bottom-right window and auto-dismisses entries after the
 //! per-kind timeout (web: `auto_dismiss_ms`). Advancement uses the UI
-//! clock so hidden frames do not burn toast lifetime.
+//! clock so hidden frames do not burn toast lifetime — eframe 0.37 runs
+//! no ui pass at all while the window is hidden (only `logic`), so a
+//! wall-clock deadline would expire toasts the user never saw: an
+//! error raised while the window was hidden vanished silently the
+//! moment it was shown again (clean-audit item 69). Lifetime therefore
+//! starts at the first RENDERED pass and burns only across rendered
+//! passes, with each pass's burn capped at one repaint heartbeat.
 
 use std::time::{Duration, Instant};
 
@@ -11,6 +17,13 @@ use eframe::egui;
 
 use crate::design;
 use crate::icons::Icon;
+
+/// The largest lifetime burn a single rendered pass may apply. Normal
+/// visible gaps sit at or below the shell's 1.5 s repaint heartbeat, so
+/// steady-state expiry keeps its wall-clock pace; a hidden window
+/// (arbitrarily long gap between rendered passes) burns at most this
+/// much on return and the toast still shows for (nearly) its lifetime.
+const MAX_PASS_GAP: Duration = Duration::from_millis(1600);
 
 /// Toast severity (web: `ToastKind`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,8 +74,13 @@ pub struct Toast {
     pub kind: ToastKind,
     pub message: String,
     pub detail: Option<String>,
-    /// Deadline compared against the render clock.
-    pub expires_at: Instant,
+    /// Lifetime left. Burns only on rendered passes (audit item 69), so
+    /// a toast pushed while the window is hidden waits — visible for
+    /// its full duration once the window returns.
+    pub remaining: Duration,
+    /// Wall-clock stamp of the last rendered pass that showed this
+    /// toast (`None` until the first render — lifetime starts there).
+    pub last_paint: Option<Instant>,
 }
 
 /// The shell-level toast stack.
@@ -95,7 +113,8 @@ impl Toasts {
             kind,
             message: message.into(),
             detail,
-            expires_at: Instant::now() + kind.auto_dismiss(),
+            remaining: kind.auto_dismiss(),
+            last_paint: None,
         });
     }
 
@@ -111,8 +130,21 @@ impl Toasts {
 
     /// Drop expired entries and render the stack.
     pub fn ui(&mut self, ctx: &egui::Context) {
+        // Clean-audit item 69: burn lifetime only across RENDERED passes.
+        // A toast that has never rendered keeps its full lifetime (it
+        // starts when the user can actually see it); a previously
+        // rendered toast burns the gap since its last painted pass,
+        // capped at one heartbeat so a hidden window cannot consume the
+        // remaining lifetime in one go.
         let now = Instant::now();
-        self.stack.retain(|t| t.expires_at > now);
+        for toast in &mut self.stack {
+            if let Some(last) = toast.last_paint {
+                let gap = now.saturating_duration_since(last).min(MAX_PASS_GAP);
+                toast.remaining = toast.remaining.saturating_sub(gap);
+            }
+            toast.last_paint = Some(now);
+        }
+        self.stack.retain(|t| t.remaining > Duration::ZERO);
         if self.stack.is_empty() {
             return;
         }
@@ -190,13 +222,16 @@ mod tests {
         assert_eq!(toasts.stack[0].message, "saved");
         assert_eq!(toasts.stack[1].kind, ToastKind::Error);
         assert_eq!(toasts.stack[2].detail.as_deref(), Some("detail"));
+        // Full lifetime on push; the countdown starts at the first
+        // rendered pass, not at push time (audit item 69).
+        assert_eq!(toasts.stack[0].remaining, ToastKind::Success.auto_dismiss());
+        assert!(toasts.stack[0].last_paint.is_none());
 
-        // Force expiry: every toast's deadline is in the past.
+        // Force expiry: every toast's remaining lifetime is exhausted.
         for toast in &mut toasts.stack {
-            toast.expires_at = Instant::now() - Duration::from_millis(1);
+            toast.remaining = Duration::ZERO;
         }
-        let now = Instant::now();
-        toasts.stack.retain(|t| t.expires_at > now);
+        toasts.stack.retain(|t| t.remaining > Duration::ZERO);
         assert!(toasts.is_empty());
     }
 
@@ -216,5 +251,79 @@ mod tests {
         assert_eq!(ToastKind::Error.as_str(), "error");
         assert_eq!(ToastKind::Warning.as_str(), "warning");
         assert_eq!(ToastKind::Info.as_str(), "info");
+    }
+
+    /// Audit item 69: a toast pushed while the window is hidden (no ui
+    /// pass runs — eframe only calls `logic`) never burned any lifetime,
+    /// so it still has its FULL duration left when the window returns
+    /// and the first rendered pass happens arbitrarily late.
+    #[test]
+    fn a_hidden_window_never_burns_unrendered_toast_lifetime() {
+        let mut toasts = Toasts::new();
+        toasts.error("sync failed while hidden");
+        // The window was hidden for an hour before this first render.
+        let ctx = egui::Context::default();
+        ctx.run_pass(egui::RawInput::default(), |ctx| toasts.ui(ctx))
+            .drop_without_applying_deltas();
+        assert_eq!(toasts.len(), 1, "the error toast survives the hidden hour");
+        let remaining = toasts.stack[0].remaining;
+        assert_eq!(
+            remaining,
+            ToastKind::Error.auto_dismiss(),
+            "lifetime starts at the first rendered pass — the hidden gap burned nothing"
+        );
+    }
+
+    /// Audit item 69: a toast RENDERED before the window was hidden keeps
+    /// (nearly) its remaining lifetime — the hidden gap burns at most one
+    /// repaint heartbeat (MAX_PASS_GAP), never the whole gap.
+    #[test]
+    fn a_hidden_gap_burns_at_most_one_heartbeat() {
+        let mut toasts = Toasts::new();
+        toasts.error("boom");
+        let ctx = egui::Context::default();
+        // First render: lifetime starts.
+        ctx.run_pass(egui::RawInput::default(), |ctx| toasts.ui(ctx))
+            .drop_without_applying_deltas();
+        // The window is hidden for an hour: no ui pass runs at all.
+        for toast in &mut toasts.stack {
+            toast.last_paint = Some(Instant::now() - Duration::from_secs(3600));
+        }
+        // The window returns: the next rendered pass must not expire the
+        // toast — the burn is capped.
+        ctx.run_pass(egui::RawInput::default(), |ctx| toasts.ui(ctx))
+            .drop_without_applying_deltas();
+        assert_eq!(toasts.len(), 1, "the toast survives the return from hidden");
+        assert!(
+            toasts.stack[0].remaining + MAX_PASS_GAP >= ToastKind::Error.auto_dismiss(),
+            "at most one heartbeat burned: {} left of {}",
+            toasts.stack[0].remaining.as_secs(),
+            ToastKind::Error.auto_dismiss().as_secs()
+        );
+    }
+
+    /// Visible steady state: consecutive rendered passes at normal frame
+    /// gaps burn real time, so a toast still expires on schedule.
+    #[test]
+    fn consecutive_rendered_passes_burn_real_lifetime() {
+        let mut toasts = Toasts::new();
+        toasts.success("saved");
+        let ctx = egui::Context::default();
+        ctx.run_pass(egui::RawInput::default(), |ctx| toasts.ui(ctx))
+            .drop_without_applying_deltas();
+        // Simulate elapsed visible time by back-dating each pass's paint
+        // stamp to 2 s ago: three passes burn 3 × 1.6 s (the cap) = 4.8 s,
+        // past the 4 s success lifetime.
+        for _ in 0..3 {
+            for toast in &mut toasts.stack {
+                toast.last_paint = Some(Instant::now() - Duration::from_secs(2));
+            }
+            ctx.run_pass(egui::RawInput::default(), |ctx| toasts.ui(ctx))
+                .drop_without_applying_deltas();
+        }
+        assert!(
+            toasts.is_empty(),
+            "6 s of visible passes expire a 4 s toast"
+        );
     }
 }

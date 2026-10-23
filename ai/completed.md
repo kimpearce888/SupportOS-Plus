@@ -2789,3 +2789,187 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   AppImage/deb build with both boot-chain smoke tests).
 - Security: staged diff token-scanned clean before each push; remote
   unmoved at push time (fetch-first).
+
+## Batch 26 — clean-audit items 67-76 (MEDIUM tier: the translation cache that never pruned, the audit trail nothing ever showed, the toasts that expired behind a hidden window, the confirm dialog that was never armed, the smoke that returned before the renderer existed, the palette Enter that stranded the query field, the transform that clobbered in-flight typing, the role-model edit that saved per keystroke, the copilot that submitted on any Enter, and the sync invalidation that destroyed the open Library form)
+
+**67. translation_cache never pruned; retention policy omits it**
+(med|gap)
+— `enforce_retention` swept `webhook_events`, `application_errors`,
+`audit_log` and `ai_runs` — but not `translation_cache`: every cached
+translation lived forever (the cache is written on every non-cached
+translate; nothing else ever removed rows) while every other
+retention-covered table was pruned. The cache is now the fifth row of
+the retention table list (`("translation_cache", "created_at")` — the
+column the schema already stamped), so the same `retention_days`
+policy that governs the rest governs the cache, and a disabled policy
+(`retention_days <= 0`) still prunes nothing. maintenance.rs.
+
+**68. Audit trail never surfaced; dead reader drops non-JSON
+payloads** (med|gap)
+— `audit_log` was written all along (the outbound lane, the people
+store, the copilot, the side-thread writers) but nothing in the shell
+ever read it, and the only reader — `list_audit` — silently decoded a
+non-JSON stored payload to `null`, dropping the recorded state. The
+reader now surfaces a non-JSON `before_state`/`after_state`/
+`remote_result` verbatim as a JSON string instead of decoding it to
+null, and the Diagnostics page gains an "Audit trail" card: the newest
+50 audited changes (who, what, when, which conversation, AI
+involvement) plus the recorded before/after states and remote
+outcomes, reloading with the page like the event log and sync reports
+beside it. audit.rs, pages/diagnostics.rs.
+
+**69. Toasts expire on wall-clock while hidden (errors silently
+lost)** (med|bug)
+— eframe 0.37 runs no ui pass at all while the window is hidden (only
+`logic`), so a toast's wall-clock `expires_at` deadline kept running:
+an error raised while the window was hidden expired unseen and
+vanished silently the moment the window returned — the single most
+important toast ("it did not go through") included. A toast's lifetime
+is now a `remaining` budget that starts at the FIRST rendered pass
+(`last_paint` is `None` until then — a toast pushed while hidden waits
+with its full duration) and burns only across rendered passes, each
+pass's burn capped at one repaint heartbeat (`MAX_PASS_GAP`, 1.6 s):
+steady-state expiry keeps its wall-clock pace, a hidden window cannot
+consume a lifetime, and a toast rendered before hiding burns at most
+one heartbeat on return. The old deadline field is gone.
+toasts.rs.
+
+**70. Confirm-dialog system never armed; destructive actions
+unconfirmed** (med|gap)
+— the `ConfirmDialog` machinery existed and rendered, but nothing ever
+armed it: every destructive action in the shell ran unconfirmed — the
+automation page's delete button deleted the rule on the first click.
+Pages can now raise `NavRequest::Confirm(ConfirmRequest)` carrying a
+modeled `DestructiveAction` plus the dialog spec (title, message,
+confirm label, danger); the automation delete button raises the
+request instead of deleting, the shell arms the dialog and remembers
+the action (`pending_confirm`), and ONLY a `DialogOutcome::Confirmed`
+executes it — the confirmed execution routes the automation delete
+through core, invalidates the owning page and toasts the outcome; a
+cancelled dialog leaves the world untouched, and a dialog armed
+outside the mechanism (no action) still reports its decision as
+before. The remaining destructive surfaces (knowledge docs, rules,
+types, objects, connectors, segments, clear-log — audit item 140) will
+route through this mechanism in their own items.
+pages/mod.rs, app.rs, pages/automation.rs.
+
+**71. SPP_SMOKE returns before shell/renderer boot — renderer
+regressions pass CI** (med|gap)
+— the CI smoke hook returned after the boot chain (migrations, boot
+services, workers, loopback) and BEFORE the shell/renderer existed: a
+renderer regression could not fail CI because the binary under test
+never rendered a frame. `run_shell_smoke` now constructs the REAL
+`ShellApp` headlessly — the new `new_with_context` constructor takes
+just an `egui::Context` (everything the shell builds at startup needs
+no eframe window; the eframe `new` delegates to it), and the `logic`/
+`ui` trait bodies live in `logic_pass`/`ui_pass` so the harness drives
+the exact code eframe drives — then renders one full pass per page
+key (plus the default Dashboard boot pass) with a non-empty-paint
+assertion per pass: a panic or a blank frame fails the smoke, the
+smoke exits non-zero, CI goes red. Verified end-to-end:
+`SPP_SMOKE=1` binary exit 0, 24 pages rendered, 4043 shapes painted.
+smoke.rs, main.rs, app.rs, lib.rs.
+
+**72. Palette Enter on zero hits defocuses the input; keystrokes
+swallowed** (med|bug)
+— egui 0.37 single-line TextEdits surrender focus on Enter, and with
+zero hits nothing consumed the key: the query field sat defocused and
+every keystroke after a fruitless Enter was swallowed until the user
+clicked back in. A dry Enter (take with an empty hit list) now
+immediately re-grabs focus for the query field — typing continues
+without a click; the hit-bearing Enter path (confirm-and-close) is
+untouched. palette.rs.
+
+**73. Transform completion overwrites typing made in flight**
+(med|issue)
+— a finishing rewrite/translate job replaced the composer wholesale,
+clobbering whatever the user typed while the job ran (the very text
+they were re-working). `PendingComposerAi` now snapshots the composer
+text at enqueue (`origin_body`); on completion the result only
+replaces the composer when the text still equals that origin — an
+in-flight edit keeps the user's text and says so out loud ("you edited
+the draft while it ran — your text was kept", a status message, not an
+error), while the job still resolves and the untouched path still
+lands the result. pages/inbox.rs.
+
+**74. Role-model field persists + enqueues golden_eval per
+keystroke** (med|bug)
+— every keystroke in the model text field ran `save_roles` plus a
+`golden_eval` enqueue: typing "qwen2.5-7b" was eleven saves and eleven
+eval jobs. `RoleAssignment`/`RoleMap` now derive `PartialEq`/`Eq`; the
+page tracks `hub_roles_saved` (the last PERSISTED map); keystrokes
+only sync the live map in memory (the field's egui state and the page
+agree — no revert, no focus loss); the persist + eval ride a blur
+commit (`model_response.lost_focus() && roles != saved`) and the
+endpoint combo's discrete selection; and `commit_role_map` — the one
+shared commit method — is itself idempotent: an unchanged map is a
+no-op (no second save, no second eval), so the eval count tracks real
+edits no matter the caller. ai_hub.rs, pages/ai_center.rs.
+
+**75. Copilot submits on a global Enter with no focus check**
+(med|bug)
+— the copilot submit listened for ANY Enter on the AI Center page: a
+stray Enter with no field focused (or mid-typing in another field)
+fired the chat job. The submit now rides the copilot input's OWN focus
+loss (`response.lost_focus() && Enter && !input.is_empty()` — the
+single-line TextEdit surrenders focus on Enter, so an Enter in the
+field is a lost_focus event) while the button-click path is untouched.
+pages/ai_center.rs.
+
+**76. Sync invalidation destroys the open Library edit form**
+(med|issue)
+— `OperationsPage::invalidate` set `self.library = None`: a sync event
+landing while the user had the saved-reply edit form open wiped their
+typed name and text, the picked mailbox chip, and the typed workflow
+number — the form was gone on the next render. The Library model now
+carries a `stale` flag: invalidation marks the mirror data stale
+instead of dropping the model, and a stale model re-reads its rows on
+the next render while carrying the user's in-progress state forward —
+the open edit form, the typed workflow number, and the picked mailbox
+(clamped to the new mailbox list); only the mirror rows refresh.
+pages/operations.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 398 passed / 0 failed / 4 ignored (3 new batch-26
+  regressions: the 400-day-old translation-cache row pruned while the
+  1-day-old row survives and a disabled policy pruning nothing; the
+  plain-text audit payloads surfacing verbatim instead of null with the
+  JSON row intact and the conversation filter narrowing); sandbox
+  suite 403 passed / 0 failed / 4 ignored; app-shell 194 passed /
+  0 failed (14 new batch-26 regressions: the audit-trail card listing
+  recorded changes; the hidden window never burning an unrendered
+  toast's lifetime, the hidden gap burning at most one heartbeat, and
+  consecutive rendered passes burning real time; the Confirm request
+  carrying the dialog spec and action, the page half where cancel
+  keeps the rule and only the confirmed execution deletes, and the
+  shell half where arming deletes nothing, cancel keeps the rule, and
+  confirm executes with a toast; the shell rendering every page
+  headlessly with non-empty frames; the palette dry Enter keeping the
+  query focused with the next keystroke landing; the transform
+  keeping in-flight typing with the decision said out loud while the
+  untouched composer still receives the result; ten rendered frames
+  of a divergent live map persisting nothing and enqueueing no eval,
+  and a committed edit persisting once with exactly one eval while an
+  identical re-commit is a no-op; the global Enter with nothing
+  focused enqueuing no copilot job and keeping the input's text; and
+  the Library invalidation keeping the typed name/text/workflow
+  number while the mirror rows re-read underneath); xtask 6; catalog 0.
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4043 shapes painted (item 71's deliverable exercised as CI runs it).
+- Fresh harness `scripts/verify_batch26.py` (committed; also archived
+  at /home/z/my-project/scripts/): all 59 checks pass; the batch-25
+  harness still passes.
+- Session note: this batch landed across two sessions — the previous
+  session's tree did not yet compile (egui-0.37 panel/Context API
+  misuse in three new tests, a moved-value error in the Library
+  reload, a double-unwrap in the confirm test) and two test helpers
+  queried a nonexistent `jobs.kind` column that `.unwrap_or(0)` masked
+  as a pass; all were corrected this session before the verification
+  above ran, and `commit_role_map` gained the idempotence its
+  regression test specifies (an unchanged map is a no-op).
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).
