@@ -1375,7 +1375,13 @@ pub fn execute(
                 "customer": format!("{} {}", first, last).trim(),
                 "sections": sections,
                 "quarantined": quarantined,
-                "note": "Composed live from the local mirror - human-written entries are the only persisted rows. Psychological/personality judgments are never included."
+                // Clean-audit item 41: the note used to claim "human-written
+                // entries are the only persisted rows" while the memory
+                // extraction writes source='ai' rows into the same table —
+                // the model relayed machine-extracted facts as human
+                // statements. Each entry now carries its own source and the
+                // note says exactly what that means.
+                "note": "Composed live from the local mirror - each entry carries its own source: 'human' rows were written by support staff; 'ai' rows are machine-extracted facts (confidence-tagged, not human-verified). Treat 'ai' rows as leads to verify, not as customer statements. Psychological/personality judgments are never included."
             })
         }
         _ => {
@@ -1409,4 +1415,94 @@ fn collect_rows(
     rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<Value>>,
 ) -> Vec<Value> {
     rows.filter_map(|r| r.ok()).collect()
+}
+
+#[cfg(test)]
+mod batch23_audit_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db_with_memory_rows() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (80, 'Grace', 'Hopper')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, customer_local_id)
+             VALUES (9501, 95, 'Export failing', 'preview', 'active', ?1)",
+            rusqlite::params![customer],
+        )
+        .expect("conversation");
+        // One human-written note and one machine-extracted fact — the
+        // same table, different provenance.
+        conn.execute(
+            "INSERT INTO customer_memory (customer_id, memory_key, memory_value, evidence_excerpt,
+                     source_conversation_id, confidence, provenance, source, last_seen_at)
+             VALUES (?1, 'vip tier', 'gold — hand-written by support', '',
+                     NULL, 'high', 'human_local', 'human', datetime('now'))",
+            rusqlite::params![customer],
+        )
+        .expect("human memory");
+        conn.execute(
+            "INSERT INTO customer_memory (customer_id, memory_key, memory_value, evidence_excerpt,
+                     source_conversation_id, confidence, provenance, source, last_seen_at)
+             VALUES (?1, 'environment', 'staging cluster (extracted from a thread)', 'from threads',
+                     NULL, 'medium', 'ai_generated', 'ai', datetime('now', '-1 minute'))",
+            rusqlite::params![customer],
+        )
+        .expect("ai memory");
+        conn
+    }
+
+    /// Item 41: get_customer_memory used to relay AI-extracted rows under
+    /// a note claiming "human-written entries are the only persisted
+    /// rows" — the model treated machine-extracted facts as human
+    /// statements. Every entry now carries its own source and the note
+    /// says what each source means.
+    #[test]
+    fn customer_memory_note_no_longer_claims_human_only() {
+        let conn = db_with_memory_rows();
+        let out = execute(&conn, None, "get_customer_memory", r#"{"number": 95}"#);
+
+        let note = out.get("note").and_then(Value::as_str).unwrap_or_default();
+        assert!(
+            !note.contains("the only persisted rows"),
+            "the false human-only claim is gone: {note}"
+        );
+        assert!(
+            note.contains("'ai' rows are machine-extracted"),
+            "the note explains the ai provenance: {note}"
+        );
+        assert!(
+            note.contains("not human-verified"),
+            "the note says ai rows are unverified: {note}"
+        );
+
+        let entries = out
+            .get("sections")
+            .and_then(|s| s.as_array())
+            .expect("sections")
+            .iter()
+            .find(|s| s.get("section").and_then(Value::as_str) == Some("notes"))
+            .and_then(|s| s.get("entries"))
+            .and_then(|e| e.as_array())
+            .expect("the notes section")
+            .clone();
+        assert_eq!(entries.len(), 2, "both memory rows are relayed");
+        let human = entries
+            .iter()
+            .find(|e| e.get("source").and_then(Value::as_str) == Some("human"))
+            .expect("the human row is present with its source");
+        assert_eq!(human.get("title").and_then(Value::as_str), Some("vip tier"));
+        let ai = entries
+            .iter()
+            .find(|e| e.get("source").and_then(Value::as_str) == Some("ai"))
+            .expect("the ai row is present, honestly labeled");
+        assert_eq!(ai.get("title").and_then(Value::as_str), Some("environment"));
+    }
 }

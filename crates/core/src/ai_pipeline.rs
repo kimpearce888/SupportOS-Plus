@@ -594,6 +594,29 @@ pub fn save_analysis(
     Ok(())
 }
 
+/// The `ai_sources` rows a completed run stored (clean-audit item 38:
+/// a cache hit must serve the hash-matched run's OWN sources, not the
+/// newest conversation's).
+fn sources_for_run(conn: &Connection, run_id: i64) -> Result<Vec<AiSourceRef>> {
+    let mut stmt = conn.prepare(
+        "SELECT source_type, source_id, title, relevance, visibility, timestamp
+           FROM ai_sources WHERE run_id = ?1",
+    )?;
+    let sources = stmt
+        .query_map(params![run_id], |r| {
+            Ok(AiSourceRef {
+                source_type: r.get(0)?,
+                source_id: r.get(1)?,
+                title: r.get(2)?,
+                relevance: r.get(3)?,
+                visibility: r.get(4)?,
+                timestamp: r.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(sources)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiDraftRecord {
     pub id: i64,
@@ -878,11 +901,22 @@ pub async fn analyze_ticket(
             &hash,
             PROMPT_VERSIONS_TICKET_ANALYSIS,
         )
-        && let Ok(Some(existing)) = get_latest_analysis(conn, conversation_local_id)
+        // Clean-audit item 38: the cache-hit path used to pair the
+        // hash-matched run's id with `get_latest_analysis`'s NEWEST
+        // analysis for the conversation — once the conversation had
+        // evolved and its content reverted (or a force re-run had stored
+        // a newer run), the served analysis came from a different, newer
+        // run while its provenance pointed at the older hash-matched
+        // one. The cache now serves exactly the hash-matched run's own
+        // output and sources; an unparseable cached row degrades to a
+        // fresh computation instead of serving mismatched data.
+        && let Some(cached_json) = serde_json::from_str::<serde_json::Value>(&cached.output).ok()
+        && let Some(analysis) = parse_ticket_analysis(Some(&cached_json))
     {
+        let sources = sources_for_run(conn, cached.id).unwrap_or_default();
         return Ok(AnalyzeOutcome {
-            analysis: existing.analysis,
-            sources: existing.sources,
+            analysis,
+            sources,
             cached: true,
             run_id: cached.id,
         });
@@ -1076,15 +1110,41 @@ pub async fn generate_draft(
     let json_draft = res
         .json
         .as_ref()
-        .and_then(|j| j.get("draft"))
-        .and_then(|d| d.as_str())
+        .and_then(|j| {
+            j.get("draft")
+                .and_then(|d| d.as_str())
+                // A bare JSON string IS the draft (a model that answered
+                // with one quoted string).
+                .or_else(|| j.as_str())
+        })
         .map(|s| s.to_string());
-    let draft_text = match json_draft.or_else(|| res.raw.as_deref().map(|r| r.trim().to_string())) {
-        Some(t) if !t.is_empty() => t,
+    // Clean-audit item 39: the fallback used to store `res.raw`
+    // whenever the "draft" key was missing — if the model answered with
+    // a JSON envelope under a different key (or wrong value type), the
+    // customer-facing draft BECAME the raw envelope itself. The raw
+    // text is now only accepted when NO parseable JSON exists at all
+    // (a plain-prose answer); a parsed envelope without a usable draft
+    // fails loudly instead of silently storing the envelope.
+    let draft_text = match json_draft {
+        Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+        _ if res.json.is_none() => match res.raw.as_deref().map(str::trim) {
+            Some(t) if !t.is_empty() => t.to_string(),
+            _ => {
+                let _ = fail_run(conn, run_id, "AI draft generation returned empty content");
+                return Err(LmStudioError::new(
+                    "The local model returned an empty draft. Retry or use a different model.",
+                    false,
+                ));
+            }
+        },
         _ => {
-            let _ = fail_run(conn, run_id, "AI draft generation returned empty content");
+            let _ = fail_run(
+                conn,
+                run_id,
+                "AI draft JSON had no draft text (envelope without a usable draft field)",
+            );
             return Err(LmStudioError::new(
-                "The local model returned an empty draft. Retry or use a different model.",
+                "The local model returned JSON without a draft field. Retry or use a different model.",
                 false,
             ));
         }
@@ -1515,6 +1575,14 @@ pub struct ClusterOut {
     pub conversation_ids: Vec<i64>,
 }
 
+/// Clean-audit item 42: the clustering prompt used to include EVERY
+/// conversation in the window — at volume (a busy week of thousands of
+/// tickets) the list blew the model's context window and the whole run
+/// failed. The list is capped to the NEWEST conversations of the window
+/// and the prompt says the cap out loud so the model does not treat the
+/// sample as the population.
+const CLUSTER_PROMPT_CONVERSATION_CAP: usize = 250;
+
 pub async fn cluster_issues(
     conn: &Connection,
     backend: &AiBackend,
@@ -1528,11 +1596,12 @@ pub async fn cluster_issues(
                FROM conversations c
               WHERE c.deleted_at IS NULL
                 AND julianday(COALESCE(c.remote_created_at, c.created_at)) >= julianday('now', '-' || ?1 || ' days')
-              ORDER BY c.number",
+              ORDER BY COALESCE(c.remote_created_at, c.created_at) DESC, c.id DESC
+              LIMIT ?2",
         )
         .map_err(|e| LmStudioError::new(e.to_string(), true))?;
-    let conversations: Vec<(i64, ClusterConversation)> = stmt
-        .query_map(params![days], |r| {
+    let mut conversations: Vec<(i64, ClusterConversation)> = stmt
+        .query_map(params![days, CLUSTER_PROMPT_CONVERSATION_CAP as i64], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 ClusterConversation {
@@ -1557,9 +1626,22 @@ pub async fn cluster_issues(
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
         .filter_map(|r| r.ok())
         .collect();
+    // The prompt presents the sample in stable number order (the SQL
+    // above picked the newest first).
+    conversations.sort_by_key(|(_, c)| c.number);
     if conversations.len() < 3 {
         return Ok(Vec::new());
     }
+    let total_in_window: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM conversations c
+              WHERE c.deleted_at IS NULL
+                AND julianday(COALESCE(c.remote_created_at, c.created_at))
+                    >= julianday('now', '-' || ?1 || ' days')",
+            params![days],
+            |r| r.get(0),
+        )
+        .unwrap_or(conversations.len() as i64);
     let run_id = start_run(
         conn,
         "issue_cluster",
@@ -1579,6 +1661,7 @@ pub async fn cluster_issues(
                     .iter()
                     .map(|(_, c)| c.clone())
                     .collect::<Vec<_>>(),
+                total_in_window,
             ),
             true,
             Some(3000),
@@ -1905,10 +1988,87 @@ pub fn build_ai_note(
 
 pub fn build_interaction_strategy_block(
     conn: &Connection,
-    _conversation_local_id: i64,
+    conversation_local_id: i64,
 ) -> Option<String> {
-    let _ = conn;
-    None
+    // Clean-audit item 40: this used to return a hard-coded None, so the
+    // draft prompt's "COMMUNICATION APPROACH" section was unreachable —
+    // the interaction machinery computed recommendations that no prompt
+    // ever saw. The block now renders the conversation's stored
+    // interaction recommendation (AI-saved), falling back to the
+    // deterministic heuristic approach from its stored signals, plus
+    // the customer's durable communication preferences and the facts
+    // they already provided (so the draft never asks for them again).
+    use crate::interaction_engine as engine;
+
+    let stored = engine::get_latest_current_interaction(conn, conversation_local_id)
+        .ok()
+        .flatten()?;
+    let customer = engine::conversation_customer(conn, conversation_local_id);
+
+    let approach = match stored.recommendation.as_ref() {
+        Some(r) => r.recommendation.clone(),
+        None => {
+            let current = crate::interaction_current::CurrentInteraction {
+                conversation_local_id,
+                customer_local_id: customer,
+                is_returning_client: false,
+                signals: stored.signals.clone(),
+                customer_goal: stored.customer_goal.clone(),
+                message_stats: stored.message_stats.unwrap_or_default(),
+                sources: stored.sources.clone(),
+                generated_at: Some(stored.generated_at.clone()),
+            };
+            let baseline = customer
+                .and_then(|cid| engine::comparison_baseline(conn, cid, conversation_local_id).ok())
+                .flatten();
+            let changes = engine::compute_changes(&current, baseline.as_ref());
+            let overrides = customer
+                .map(|cid| engine::get_active_overrides(conn, cid).unwrap_or_default())
+                .unwrap_or_default();
+            engine::heuristic_recommendation(&current, &changes, baseline.as_ref(), &overrides)?
+        }
+    };
+
+    let preferences: Vec<String> = customer
+        .and_then(|cid| engine::get_preferences(conn, cid).ok())
+        .map(|prefs| prefs.into_iter().map(|p| p.preference).collect())
+        .unwrap_or_default();
+
+    // What the customer already told us in this conversation's newest
+    // messages — the draft must not ask for these again.
+    let already_provided: Vec<String> = conn
+        .prepare(
+            "SELECT COALESCE(body_text, '') FROM conversation_threads
+              WHERE conversation_id = ?1 AND type = 'customer' AND deleted_at IS NULL
+              ORDER BY created_at DESC, id DESC LIMIT 10",
+        )
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map(params![conversation_local_id], |r| r.get::<_, String>(0))
+                .map(|rows| rows.flatten().collect::<Vec<_>>())
+                .ok()
+        })
+        .map(|texts| {
+            let mut facts: Vec<String> = Vec::new();
+            for t in &texts {
+                for f in extract_provided_facts(t) {
+                    if !facts.contains(&f) {
+                        facts.push(f);
+                    }
+                }
+            }
+            facts
+        })
+        .unwrap_or_default();
+
+    Some(crate::ai_prompts::interaction_strategy_block(
+        approach.tone.as_deref(),
+        approach.length.as_deref(),
+        &approach.response_strategy,
+        &approach.avoid,
+        &preferences,
+        &already_provided,
+    ))
 }
 
 pub fn extract_provided_facts(text: &str) -> Vec<String> {
@@ -3029,6 +3189,424 @@ mod batch14_k2_k4_tests {
         assert_eq!(
             crate::digest::list_digests(&conn, Some("deterministic digest facts"), 5).len(),
             1
+        );
+    }
+}
+
+#[cfg(test)]
+mod batch23_audit_tests {
+    use super::*;
+    use crate::ai_prompts::{ClusterConversation, TicketAnalysis};
+    use rusqlite::Connection;
+    use serde_json::json;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_conversation(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9401, 94, 'Invite emails bouncing', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, created_at)
+             VALUES (?1, 'customer', 'Our invite emails bounce with a 550.', '2026-10-20T10:00:00Z')",
+            params![conv],
+        )
+        .expect("thread");
+        conv
+    }
+
+    fn analysis_json(intent: &str, summary: &str) -> String {
+        let a = TicketAnalysis {
+            intent: Some(intent.into()),
+            summary: Some(summary.into()),
+            ..Default::default()
+        };
+        serde_json::to_string(&a).expect("analysis json")
+    }
+
+    fn seed_run(
+        conn: &Connection,
+        conv: i64,
+        input_hash: &str,
+        intent: &str,
+        summary: &str,
+        source_title: Option<&str>,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO ai_runs (type, conversation_id, status, model, prompt_version,
+                                  input_hash, response_json, started_at, created_at)
+             VALUES ('ticket_analysis', ?1, 'completed', 'test-model', ?2, ?3, ?4,
+                     datetime('now'), datetime('now'))",
+            params![
+                conv,
+                PROMPT_VERSIONS_TICKET_ANALYSIS,
+                input_hash,
+                analysis_json(intent, summary)
+            ],
+        )
+        .expect("run");
+        let run_id = conn.last_insert_rowid();
+        if let Some(title) = source_title {
+            conn.execute(
+                "INSERT INTO ai_sources (run_id, source_type, source_id, title, relevance, visibility, timestamp)
+                 VALUES (?1, 'conversation', 94, ?2, 0.9, 'internal', '2026-10-20T10:00:00Z')",
+                params![run_id, title],
+            )
+            .expect("source");
+        }
+        run_id
+    }
+
+    /// Item 38: a cache hit serves the hash-matched run's OWN analysis
+    /// and sources — not the newest conversation analysis under the
+    /// hash-matched run's id.
+    #[test]
+    fn cache_hit_serves_the_hash_matched_runs_own_analysis() {
+        let conn = db();
+        let conv = seed_conversation(&conn);
+        let hash = input_hash(conv, &get_analysis_signature(&conn, conv));
+
+        // Run A: the hash-matched (older) run, its own analysis + source.
+        let run_a = seed_run(
+            &conn,
+            conv,
+            &hash,
+            "question",
+            "A: the invite bounces",
+            Some("A-source"),
+        );
+        // Run B: a newer run under a stale hash, a DIFFERENT analysis, its own source.
+        let _run_b = seed_run(
+            &conn,
+            conv,
+            "stale-hash",
+            "bug_report",
+            "B: newer analysis",
+            Some("B-source"),
+        );
+
+        let outcome = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(analyze_ticket(
+                &conn,
+                &AiBackend::Disabled,
+                None,
+                conv,
+                false,
+            ))
+            .expect("the cache hit needs no backend");
+
+        assert!(outcome.cached);
+        assert_eq!(
+            outcome.run_id, run_a,
+            "provenance points at the hash-matched run"
+        );
+        assert_eq!(
+            outcome.analysis.intent.as_deref(),
+            Some("question"),
+            "the analysis is the hash-matched run's, not the newest run's"
+        );
+        assert_eq!(
+            outcome.analysis.summary.as_deref(),
+            Some("A: the invite bounces")
+        );
+        assert_eq!(
+            outcome.sources.len(),
+            1,
+            "the sources are the hash-matched run's"
+        );
+        assert_eq!(outcome.sources[0].title, "A-source");
+    }
+
+    /// Item 39: the draft fallback no longer stores the raw JSON envelope
+    /// as the draft — an envelope without a usable draft field fails
+    /// loudly, and a plain-prose answer still becomes the draft.
+    #[test]
+    fn draft_fallback_no_longer_stores_the_raw_json_envelope() {
+        fn chat_body(content: &str) -> crate::mockserver::MockResponse {
+            crate::mockserver::MockResponse::json(
+                200,
+                json!({
+                    "model": "test-model",
+                    "choices": [{
+                        "message": {"role": "assistant", "content": content}
+                    }],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+                })
+                .to_string(),
+            )
+        }
+
+        // Case 1: the model answers with a JSON envelope under a wrong
+        // key — the pre-fix code stored the whole envelope as the draft.
+        {
+            let conn = db();
+            let conv = seed_conversation(&conn);
+            let mock =
+                crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![chat_body(
+                    "{\"reply\": \"Dear customer, the fix is on the way.\"}",
+                )]))
+                .expect("mock");
+            let backend = AiBackend::LmStudio {
+                client: crate::ai_lm_studio::OpenAiCompatibleClient::new_with_timeout(
+                    mock.url(),
+                    5_000,
+                ),
+                model: Some("test-model".into()),
+                endpoint_id: None,
+            };
+            let analysis = TicketAnalysis::default();
+            let err = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime")
+                .block_on(generate_draft(
+                    &conn,
+                    &backend,
+                    None,
+                    conv,
+                    "reply",
+                    false,
+                    Some(&analysis),
+                ))
+                .expect_err("an envelope without a draft field must fail loudly");
+            assert!(
+                err.message.contains("without a draft field"),
+                "the failure names the real problem: {}",
+                err.message
+            );
+            let status: String = conn
+                .query_row(
+                    "SELECT status FROM ai_runs WHERE type = 'customer_draft' ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("the run row exists");
+            let drafts: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_drafts WHERE conversation_id = ?1",
+                    params![conv],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            assert_eq!(status, "failed", "the run is failed, not completed");
+            assert_eq!(drafts, 0, "no draft row stores the envelope");
+        }
+
+        // Case 2: a plain-prose answer (no JSON anywhere) still becomes
+        // the draft — that is the legitimate raw fallback.
+        {
+            let conn = db();
+            let conv = seed_conversation(&conn);
+            let mock = crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![
+                chat_body("Dear customer, we cleared the invite queue and retried the batch."),
+                crate::mockserver::MockResponse::json(
+                    200,
+                    json!({
+                        "model": "test-model",
+                        "choices": [{
+                            "message": {"role": "assistant",
+                                        "content": "{\"verified\": true, \"warnings\": []}"}
+                        }],
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}
+                    })
+                    .to_string(),
+                ),
+            ]))
+            .expect("mock");
+            let backend = AiBackend::LmStudio {
+                client: crate::ai_lm_studio::OpenAiCompatibleClient::new_with_timeout(
+                    mock.url(),
+                    5_000,
+                ),
+                model: Some("test-model".into()),
+                endpoint_id: None,
+            };
+            let analysis = TicketAnalysis::default();
+            let (draft, _) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime")
+                .block_on(generate_draft(
+                    &conn,
+                    &backend,
+                    None,
+                    conv,
+                    "reply",
+                    false,
+                    Some(&analysis),
+                ))
+                .expect("the prose draft is accepted");
+            assert_eq!(
+                draft.content, "Dear customer, we cleared the invite queue and retried the batch.",
+                "the prose answer is the draft, verbatim"
+            );
+        }
+    }
+
+    /// Item 40: the interaction-strategy prompt block renders real
+    /// strategy data — the stored recommendation (or the deterministic
+    /// heuristic), the customer's preferences, and what they already
+    /// provided — instead of a hard-coded None that left the whole
+    /// section unreachable.
+    #[test]
+    fn interaction_strategy_block_renders_real_strategy_data() {
+        let conn = db();
+        // A conversation with no stored interaction data: no block.
+        let bare = seed_conversation(&conn);
+        assert!(
+            build_interaction_strategy_block(&conn, bare).is_none(),
+            "no stored signals - no block, honestly"
+        );
+
+        // A customer + a conversation with stored interaction signals.
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name) VALUES (81, 'Ada', 'Lovelace')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        conn.execute(
+            "UPDATE conversations SET customer_local_id = ?1 WHERE id = ?2",
+            params![customer, bare],
+        )
+        .expect("link customer");
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, created_at)
+             VALUES (?1, 'customer', 'I attached a screenshot of the bounce; already tried a resend.', '2026-10-21T10:00:00Z')",
+            params![bare],
+        )
+        .expect("thread");
+
+        let signals = vec![
+            crate::interaction_current::InteractionSignal {
+                dimension: "frustration".into(),
+                value: "moderate".into(),
+                confidence: "high".into(),
+                evidence: None,
+                source: "heuristic".into(),
+            },
+            crate::interaction_current::InteractionSignal {
+                dimension: "detail".into(),
+                value: "high".into(),
+                confidence: "medium".into(),
+                evidence: None,
+                source: "heuristic".into(),
+            },
+        ];
+        let stats = crate::interaction_current::MessageStats {
+            customer_messages: 2,
+            avg_message_length: 40,
+            question_count: 1,
+            exclamation_ratio: 0.0,
+            caps_ratio: 0.0,
+        };
+        crate::interaction_engine::save_current_interaction(
+            &conn,
+            bare,
+            Some(customer),
+            &signals,
+            &stats,
+            Some("get the invites delivered"),
+            "heuristic",
+            None,
+        )
+        .expect("current interaction");
+        // No AI recommendation stored: the deterministic heuristic must
+        // carry the block.
+        let block =
+            build_interaction_strategy_block(&conn, bare).expect("the heuristic carries the block");
+        assert!(
+            block.contains("COMMUNICATION APPROACH"),
+            "the section renders: {block}"
+        );
+        assert!(
+            block.contains("ALREADY PROVIDED BY THE CUSTOMER"),
+            "the already-provided facts render: {block}"
+        );
+        assert!(
+            block.contains("screenshots/attachments"),
+            "the screenshot fact from the customer's message is listed: {block}"
+        );
+        assert!(
+            block.contains("do NOT ask again"),
+            "the instruction not to re-ask is present: {block}"
+        );
+
+        // With a stored AI recommendation, its tone and strategy render.
+        crate::interaction_engine::save_recommendation(
+            &conn,
+            bare,
+            &crate::interaction_engine::SupportApproach {
+                tone: Some("warm".into()),
+                length: Some("concise".into()),
+                start_with: None,
+                then: None,
+                avoid: vec!["long background explanations".into()],
+                response_strategy: vec![
+                    "Acknowledge the bounce".into(),
+                    "State the retry plan".into(),
+                ],
+                de_escalation: false,
+                escalation_recommendation: None,
+                why: vec![],
+                source: "ai".into(),
+                confidence: "medium".into(),
+            },
+            None,
+            None,
+        )
+        .expect("recommendation");
+        let block = build_interaction_strategy_block(&conn, bare).expect("the block renders");
+        assert!(block.contains("Tone: warm"), "{block}");
+        assert!(
+            block.contains("Acknowledge the bounce -> State the retry plan"),
+            "{block}"
+        );
+        assert!(
+            block.contains("Avoid: long background explanations"),
+            "{block}"
+        );
+    }
+
+    /// Item 42: the cluster prompt declares the sample cap when the
+    /// window holds more conversations than the prompt can carry.
+    #[test]
+    fn issue_cluster_prompt_declares_the_sample_cap() {
+        let sample = vec![
+            ClusterConversation {
+                number: 9,
+                subject: "Invite emails bouncing".into(),
+                preview: "550 error".into(),
+                tags: vec!["email".into()],
+            },
+            ClusterConversation {
+                number: 10,
+                subject: "More invites bouncing".into(),
+                preview: "550 again".into(),
+                tags: vec![],
+            },
+        ];
+        let capped = build_issue_cluster_user(&sample, 500);
+        assert!(
+            capped.contains("the window holds 500 conversations; only the newest 2 are listed"),
+            "the cap is said out loud: {capped}"
+        );
+        assert!(capped.contains("Cluster only the listed ones."), "{capped}");
+        let uncapped = build_issue_cluster_user(&sample, 2);
+        assert!(
+            !uncapped.contains("NOTE: the window holds"),
+            "no sampling note when everything is listed: {uncapped}"
         );
     }
 }

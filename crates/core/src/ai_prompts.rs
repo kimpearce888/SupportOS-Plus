@@ -330,7 +330,10 @@ Rules:
 - Titles: short, specific, lowercase topic style (e.g. \"timezone after DST change\", \"invite emails bouncing\").
 - Respond ONLY with JSON: {\"clusters\": [{\"title\": \"...\", \"summary\": \"one sentence\", \"category\": \"...\", \"product\": \"...\"|null, \"feature\": \"...\"|null, \"conversation_numbers\": [..]}]}";
 
-pub fn build_issue_cluster_user(conversations: &[ClusterConversation]) -> String {
+pub fn build_issue_cluster_user(
+    conversations: &[ClusterConversation],
+    total_in_window: i64,
+) -> String {
     let lines: Vec<String> = conversations
         .iter()
         .map(|c| {
@@ -342,8 +345,20 @@ pub fn build_issue_cluster_user(conversations: &[ClusterConversation]) -> String
             format!("#{} [{}] {}: {}", c.number, tags, c.subject, c.preview)
         })
         .collect();
+    // Clean-audit item 42: when the window is capped, the model is told
+    // it is seeing a newest-first sample of a larger population so it
+    // does not treat the list as exhaustive.
+    let sampling_note = if (conversations.len() as i64) < total_in_window {
+        format!(
+            "\n\nNOTE: the window holds {} conversations; only the newest {} are listed (context cap). Cluster only the listed ones.",
+            total_in_window,
+            conversations.len()
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "Group these conversations into issue clusters. Only output clusters with 2+ members.\n\n{}",
+        "Group these conversations into issue clusters. Only output clusters with 2+ members.{sampling_note}\n\n{}",
         lines.join("\n")
     )
 }
