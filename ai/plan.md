@@ -88,22 +88,22 @@ recorded in `completed.md`.
 Item 56 (report-builder wire-or-remove) stays parked below pending
 the owner's wire-or-remove decision, as do 150/151 (dead-feature calls).
 
+Batch 27 = items 77-86 (the sync invalidation that keeps unsaved
+Settings edits, the Inbox pagination past the 50-row cap, the row-click
+that keeps the typed reply draft, the approvals attributed to the real
+acting user, the known-issue links that reject dangling ids, the
+Customers fetch past page 1, the LIKE escaping shared by its three
+call sites, the jobs::fail calls carrying the real job id, the rating
+fetch errors surfaced with re-enqueue, and the copilot panic containment
+that no longer re-persists the user message) — opened, in
+`progress.md`.
+
 ### MEDIUM — wrong behavior on realistic paths
 
 56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of any batch until then)
-77. [med|issue] Sync invalidation silently reverts unsaved Settings edits — pages/settings.rs:550-552
-78. [med|gap] Inbox hard-capped at 50, no pagination — pages/inbox.rs:109-110
-79. [med|issue] Row click silently wipes the typed reply draft — pages/inbox.rs:742-747
-80. [med|bug] Approvals attributed to hardcoded user 5 — pages/automation.rs:323-330
-81. [med|bug] Known-issue links accept dangling ids and count them — pages/issue_radar.rs:147-149
-82. [med|gap] Customers page fetches page 1 only (50 cap) — pages/customers.rs:217-222
 
 ### LOW — edge cases, provable minor defects
 
-83. [low|bug] LIKE input not escaped despite ESCAPE clause (customers.rs:162, inbox.rs:185, mirror_readouts.rs:207; trailing `\` errors)
-84. [low|bug] jobs::fail called with literal job id 0 (2 sites) — workers.rs:2748,3067
-85. [low|bug] Rating fetch errors swallowed; ratings permanently lost — workers.rs:1245-1246
-86. [low|bug] Panic containment marks copilot jobs retryable (re-persists user message) — workers.rs:369-374
 87. [low|bug] Ratings upsert never re-links conversation/customer on conflict — workers.rs:3771-3774
 88. [low|bug] Cancelled initial sync recorded LIVE; threads backfill never re-runs — sync_engine.rs:1309-1316
 89. [low|bug] Threads pass hardcodes failed:0 then gets stamped ok — sync_engine.rs:1167-1172,1246-1249
