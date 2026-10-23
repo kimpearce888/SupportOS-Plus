@@ -2410,3 +2410,177 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   on the runner).
 - Security: staged diff token-scanned clean before each push; remote
   unmoved at push time (fetch-first).
+
+## Batch 24 — clean-audit items 46-55 (MEDIUM tier: the batch poisoned by one empty vector, the email patch that deleted every stored address, the plaintext temp that leaked on error paths, the reset that left customer documents on disk, the blocklist that CSS comments walked through, the DNS lookup that blocked the executor, the shared tag that was never shared, the at-risk count that judged replied tickets by the wrong target, the trend verdict that could never say "new", the backlog jump measured against a baseline that forgot the work that was done)
+
+**46. Knowledge-chunk batch poisoned by one empty vector** (med|bug)
+— the knowledge_chunks qdrant lane gated the whole batch on the FIRST
+vector being non-empty, then upserted EVERY pending chunk —
+substituting an empty vector for any chunk the model skipped — and
+stamped the entire batch 'indexed'. One empty vector poisoned the
+batch: a zero-dim point landed in the store and its chunk was marked
+done, never retried. The lane now partitions the batch per chunk:
+only chunks with a real vector are upserted and marked 'indexed';
+chunks the model left empty are marked 'failed' and stay in the
+retry pipeline; the all-empty corner upserts nothing. (The docs and
+conversation lanes already filtered correctly; the local fallback
+path was already per-chunk.)
+embeddings.rs.
+
+**47. Customer email patch deletes ALL stored emails, errors swallowed**
+(med|bug)
+— `update_customer`'s email handling did `DELETE FROM customer_emails
+WHERE customer_id = ?1` then inserted the patched address, both with
+`let _ =` — one patch of the PRIMARY email destroyed every secondary
+address the platform sync had recorded (personal/other), and a failed
+INSERT silently left the customer with none. The patch's email field
+is the PRIMARY address: the old primary is captured before the UPDATE
+and only that one VALUE is replaced in the set (case-insensitive
+compare, every other row survives), clearing the primary leaves the
+set untouched, and both statements' failures now propagate.
+people_store.rs.
+
+**48. verify_bundle leaks decrypted plaintext temp on error paths, no
+sweep** (med|bug)
+— the decrypted `.import-*.tmp` database was removed only on
+verify_bundle's success path; a failed snapshot_info, schema-version
+read, or schema check `?`-bailed past the cleanup and the fully
+decrypted database stayed in the bundles dir forever, and nothing
+ever swept leftovers from crashed runs. The temp is now removed on
+EVERY path (after the closure, with the snapshot connection dropped
+first for Windows open-handle safety), and every decrypt entry point
+(verify + import share `decrypt_to_temp`) sweeps stale leftovers:
+`.import-{millis}.tmp` embeds the creation time, and anything at
+least an hour old (a verify/import finishes in seconds) is deleted —
+fresh temps are never touched, so a concurrent operation is safe.
+encrypted_sync.rs.
+
+**49. Workspace reset leaves downloaded attachment files on disk**
+(med|gap)
+— the reset purged the `attachments` table and the vector store but
+left `data_dir/attachments` untouched: customer documents kept
+sitting in the data directory after the user wiped the workspace. The
+reset now empties the directory with the same best-effort posture as
+the vector purge (regular files removed, an undeletable entry warns
+and never fails the reset, subdirectories left to their owner), and
+the report counts what was removed
+(`ResetReport.attachment_files_deleted`).
+data_reset.rs.
+
+**50. CSS blocklist bypassable via escapes/comments** (med|issue)
+— the dangerous-CSS regex ran on the RAW style attribute value. CSS
+comments may appear between any two tokens (`ur/*x*/l(` still means
+`url(`) and backslash escapes spell any character (`\75 rl(` is
+`url(`, `behavior\3a` is `behavior:`), so both families sailed past
+the blocklist while the CSS engine still read the payload. The value
+is now normalized first — comments stripped, escapes decoded to a
+fixpoint (hex up to 6 digits + consumed whitespace, or literal
+`\<char>`) — and the blocklist runs on the decoded form of everything
+that can survive the 2000-char clip; the original clipped value is
+kept only when the decoded form is clean. Layered-escape evasion
+(`\5c` decodes to a backslash, building the next layer) still
+carrying escapes after 64 productive decode rounds is rejected
+outright — each productive round strictly shortens the value, so a
+legitimate stylesheet never reaches the bound.
+security.rs.
+
+**51. Blocking DNS resolution inside async contexts** (med|issue)
+— `validate_ssrf_full` blocks the thread on getaddrinfo, and the two
+async connector lanes called it directly on the executor:
+`validate_config` (the settings-page URL check) and `fetch_rows` (the
+http branch of the async refresh pipeline) — a slow resolver stalled
+every task on that worker. Both now call the new
+`validate_ssrf_full_async`, whose literal checks stay inline (pure
+CPU) and whose DNS resolution rides the blocking pool via the
+existing `check_url_resolved` (spawn_blocking). The sync guard stays
+for genuinely sync callers (data_tools, sync-side checks).
+security.rs, connectors.rs.
+
+**52. shared_tag display query joins a conversation's tags to itself**
+(med|bug)
+— the repeated_unresolved_interactions finding named a "shared" tag
+via a query that constrained BOTH ct1 and ct2 to the current
+conversation: the self-join returned an arbitrary tag of the current
+conversation (alphabetically first), which none of the related
+conversations might carry. The query now returns a tag that exists on
+the current conversation AND on at least one related conversation of
+the same customer (same 90-day window, liveness and deleted rules as
+the related list), so the named tag is genuinely shared.
+quality.rs.
+
+**53. waiting_stats.at_risk counts breached-vs-first-response for
+replied tickets** (med|bug)
+— the SLA report's waiting panel judged every open ticket, replied or
+not, against the first-response target: a long back-and-forth ticket
+whose first response happened days ago was flagged "at risk" for
+missing a target it had already met. The replied flag now rides along
+in the waiting query and each conversation is judged against the
+target it can actually miss — first-response while the first response
+is still owed, resolution once an agent has answered (the same rule
+the alerts lane applies); with no target configured the count stays
+0, and the avg/oldest aggregates are unchanged.
+sla.rs.
+
+**54. Radar trend precedence: "new" unreachable for ≥3 clusters**
+(med|issue)
+— the trend classification tested the rising band before "new", and a
+brand-new cluster (previous = 0, recent ≥ 3) always satisfied
+`recent > 0 * 1.3`, so every genuinely new cluster with three or more
+conversations was reported "rising" and "new" was unreachable exactly
+where it matters most. "new" (previous = 0, recent > 0) is now
+checked first; the rising (≥3 recent, >1.3× previous), falling
+(<0.7× previous with a prior window) and stable bands keep their
+meanings.
+analytics.rs.
+
+**55. backlog_jump compares against a false week-ago baseline**
+(med|issue)
+— the digest's backlog-jump baseline counted only CURRENTLY-open
+tickets created before the period start, so every ticket that was
+open a week ago and got closed during the period vanished from the
+baseline — a team that worked down old tickets with flat volume was
+told its backlog "jumped" >50%. The honest baseline counts what was
+open AT the period start: existed before the start, not deleted, and
+either still open now or closed at/after the start (tickets closed
+before the period stay honestly excluded).
+digest.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 364 passed / 0 failed / 4 ignored (28 new batch-24
+  regressions: the mixed-batch embedding pass against a mock
+  embedding server — the skipped chunk fails while the healthy one
+  indexes, with exactly one point in the store — plus the all-empty
+  corner; the email patch preserving the platform-synced secondary
+  address, clearing the primary keeping the set, and a dropped
+  customer_emails table failing the patch loudly; the crafted-garbage
+  bundle leaving no plaintext temp behind, the successful verify
+  leaving none either, and the sweep taking only the two-hour-old
+  temp; the reset removing both downloaded attachment files while an
+  unrelated data-dir subdirectory survives; comment-, escape-, and
+  layered-escape style bypasses blocked, benign styles (including
+  `content: "\2014"`) surviving, and the decoder's engine-view
+  assertions; the async guard's deterministic offline verdicts (loop
+  back/private/IPv6/file refused, public literal accepted) exercised
+  end-to-end through connectors::validate_config; the shared tag
+  being genuinely shared — the current-only tag never named — and no
+  finding firing once nothing is shared; the replied ticket judged by
+  resolution and the unreplied by first-response under mirror
+  configs, with no targets still zero; brand-new clusters with 3+
+  recent conversations saying "new" while established clusters keep
+  rising/falling/stable; and the worked-down flat backlog not being
+  a jump, the genuine 10→16 jump still firing, and pre-period
+  closures staying excluded from the baseline); sandbox-feature suite
+  369 passed / 0 failed / 4 ignored; app-shell 180 passed / 0
+  failed; xtask 6; catalog 0.
+- Fresh harness `scripts/verify_batch24.py` (committed; also archived
+  at /home/z/my-project/scripts/): all 44 checks pass; the batch-23
+  harness still passes.
+- Runner verification: rule-2 commit `d3f51d9` — CI run `39894038354`:
+  success; code commit `8dbd43c` — CI run `39900557760`: success, both
+  jobs green (fmt/clippy/test workspace + sandbox + deny, and the
+  AppImage/deb build with both boot-chain smoke tests).
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).

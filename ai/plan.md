@@ -66,7 +66,7 @@ inside async contexts, the shared_tag display query joining a
 conversation's tags to itself, waiting_stats.at_risk counting
 breached-vs-first-response for replied tickets, the radar trend "new"
 verdict unreachable for ≥3 clusters, backlog_jump comparing against a
-false week-ago baseline) — in progress in `progress.md`.
+false week-ago baseline) — verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
