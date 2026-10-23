@@ -96,14 +96,17 @@ impl EndpointConfig {
 }
 
 /// One role assignment: which endpoint serves the role and which model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// `PartialEq` powers the AI Center's persisted-vs-live comparison
+/// (clean-audit item 74: commit a model edit only when it differs from
+/// what was last saved).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleAssignment {
     pub endpoint: String,
     #[serde(default)]
     pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleMap {
     #[serde(default)]
     pub embed: Option<RoleAssignment>,

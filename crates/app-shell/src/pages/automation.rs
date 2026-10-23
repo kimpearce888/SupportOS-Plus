@@ -18,6 +18,7 @@ use spp_core::db::DbHandle;
 
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
+use crate::pages::{ConfirmRequest, NavRequest};
 
 /// Trigger kinds offered by the new-rule form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,14 +214,6 @@ impl AutomationPage {
         self.reload(db);
     }
 
-    fn delete_rule(&mut self, db: &DbHandle, id: i64) {
-        let result = db.with_write(|conn| spp_core::automation::delete_rule(conn, id));
-        if let Err(e) = result {
-            self.error = Some(e.to_string());
-        }
-        self.reload(db);
-    }
-
     /// Build the trigger from the form state.
     fn form_trigger(&self) -> Result<Trigger, String> {
         match self.trigger_kind {
@@ -335,8 +328,11 @@ impl AutomationPage {
         self.reload(db);
     }
 
-    /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// Render the page. Returns a [`NavRequest::Confirm`]
+    /// (clean-audit item 70) when the user asked to delete a rule — the
+    /// shell arms its confirm dialog and the deletion runs only when
+    /// the user confirms; the button no longer deletes unconfirmed.
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         design::page_header(
@@ -366,7 +362,9 @@ impl AutomationPage {
 
         let rules = self.rules.clone();
         let mut toggled: Option<(i64, bool)> = None;
-        let mut deleted: Option<i64> = None;
+        // Clean-audit item 70: the delete button arms the shell's confirm
+        // dialog instead of deleting immediately.
+        let mut delete_requested: Option<(i64, String)> = None;
         design::card_titled(
             ui,
             "Rules",
@@ -426,9 +424,10 @@ impl AutomationPage {
                                             toggled = Some((id, !rule.enabled));
                                         }
                                         if design::button(ui, "delete", ButtonVariant::Destructive)
+                                            .on_hover_text("asks for confirmation before deleting")
                                             .clicked()
                                         {
-                                            deleted = Some(id);
+                                            delete_requested = Some((id, rule.name.clone()));
                                         }
                                     });
                                     ui.end_row();
@@ -441,8 +440,11 @@ impl AutomationPage {
         if let Some((id, enabled)) = toggled {
             self.toggle_rule(db, id, enabled);
         }
-        if let Some(id) = deleted {
-            self.delete_rule(db, id);
+        let mut nav = None;
+        if let Some((id, name)) = delete_requested {
+            nav = Some(NavRequest::Confirm(ConfirmRequest::delete_automation_rule(
+                id, &name,
+            )));
         }
         ui.add_space(10.0);
 
@@ -499,6 +501,19 @@ impl AutomationPage {
         if let Some((id, approve)) = decided {
             self.decide(db, id, approve);
         }
+        nav
+    }
+
+    /// Clean-audit item 70: the execution half of a CONFIRMED delete
+    /// request. The shell calls this after the user confirmed the
+    /// dialog; errors land on the page's error banner like every other
+    /// write, and the rules table reloads.
+    pub fn delete_rule_confirmed(&mut self, db: &DbHandle, id: i64) {
+        let result = db.with_write(|conn| spp_core::automation::delete_rule(conn, id));
+        if let Err(e) = result {
+            self.error = Some(e.to_string());
+        }
+        self.reload(db);
     }
 
     fn new_rule_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -688,8 +703,44 @@ mod tests {
         let id = rule.id.unwrap_or(0);
         page.toggle_rule(&db, id, false);
         assert!(!page.rules[0].enabled);
-        page.delete_rule(&db, id);
+        // Clean-audit item 70: deletion runs through the CONFIRMED
+        // execution path (the button itself only raises the request).
+        page.delete_rule_confirmed(&db, id);
         assert!(page.rules.is_empty());
+    }
+
+    /// Clean-audit item 70: the delete button no longer deletes — it
+    /// asks the shell for a confirmation, and only the confirmed
+    /// execution removes the rule. Cancelling leaves the rule in place.
+    #[test]
+    fn audit70_delete_needs_confirmation_and_cancel_keeps_the_rule() {
+        let db = fixture(Vec::new());
+        let mut page = page();
+        page.new_name = "Escalate urgent".into();
+        page.trigger_kind = TriggerKind::TagAdded;
+        page.trigger_tag = "urgent".into();
+        page.action_kind = ActionKind::ChangeStatus;
+        page.action_status = "pending".into();
+        page.create_rule(&db);
+        let id = page.rules[0].id.unwrap_or(0);
+        assert_eq!(page.rules.len(), 1);
+
+        // What the button raises: a Confirm request carrying the action.
+        let request = ConfirmRequest::delete_automation_rule(id, "Escalate urgent");
+        assert_eq!(
+            request.action,
+            crate::pages::DestructiveAction::DeleteAutomationRule { id }
+        );
+        // The un-confirmed path (dialog cancelled): nothing is deleted.
+        let rules: usize = db
+            .with_read(spp_core::automation::list_rules)
+            .map(|rules| rules.len())
+            .unwrap_or_default();
+        assert_eq!(rules, 1, "cancel keeps the rule");
+        // The confirmed path (dialog confirmed): the rule is gone and
+        // the page model reloads empty.
+        page.delete_rule_confirmed(&db, id);
+        assert!(page.rules.is_empty(), "confirm deletes the rule");
     }
 
     #[test]

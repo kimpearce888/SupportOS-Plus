@@ -115,6 +115,10 @@ pub fn enforce_retention(conn: &Connection, retention_days: i64) -> Result<usize
         ("application_errors", "timestamp"),
         ("audit_log", "timestamp"),
         ("ai_runs", "created_at"),
+        // Clean-audit item 67: the translation cache grows without bound
+        // otherwise — every cached translation lives forever while every
+        // other retention-covered table is pruned.
+        ("translation_cache", "created_at"),
     ] {
         let sql = format!(
             "DELETE FROM {table} WHERE julianday({column}) < julianday('now', '-{retention_days} days')"
@@ -132,4 +136,79 @@ pub fn enforce_retention(conn: &Connection, retention_days: i64) -> Result<usize
         removed += n;
     }
     Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn migrated() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// Clean-audit item 67: `enforce_retention` prunes the translation
+    /// cache like every other retention-covered table. Before, a cached
+    /// translation lived forever (the cache is written on every
+    /// non-cached translate; nothing else ever removed rows).
+    #[test]
+    fn retention_prunes_stale_translation_cache_rows() {
+        let conn = migrated();
+        crate::translation::ensure_translation_schema(&conn).expect("translation schema");
+        // One row inside the window, one row past it, one row written now.
+        conn.execute(
+            "INSERT INTO translation_cache
+                 (cache_key, source_lang, target_lang, purpose, source_text,
+                  translated_text, model, created_at)
+             VALUES ('fresh', 'en', 'de', 'general', 'hello', 'hallo', 'm',
+                      datetime('now', '-1 day')),
+                    ('stale', 'en', 'de', 'general', 'bye', 'tschüss', 'm',
+                      datetime('now', '-400 day'))",
+            [],
+        )
+        .expect("seed cache");
+
+        let removed = enforce_retention(&conn, 365).expect("retention");
+        assert!(removed >= 1, "the stale row is removed");
+        let remaining: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM translation_cache WHERE cache_key = 'stale'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(remaining, 0, "the 400-day-old cache row is gone");
+        let fresh: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM translation_cache WHERE cache_key = 'fresh'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(fresh, 1, "the 1-day-old cache row survives");
+    }
+
+    /// A disabled retention policy (`retention_days <= 0`) still prunes
+    /// nothing — the translation cache included.
+    #[test]
+    fn retention_disabled_prunes_nothing() {
+        let conn = migrated();
+        crate::translation::ensure_translation_schema(&conn).expect("translation schema");
+        conn.execute(
+            "INSERT INTO translation_cache
+                 (cache_key, source_lang, target_lang, purpose, source_text,
+                  translated_text, model, created_at)
+             VALUES ('old', 'en', 'de', 'general', 'x', 'y', 'm',
+                      datetime('now', '-400 day'))",
+            [],
+        )
+        .expect("seed cache");
+        let removed = enforce_retention(&conn, 0).expect("retention");
+        assert_eq!(removed, 0);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM translation_cache", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(n, 1, "retention off keeps every cached row");
+    }
 }

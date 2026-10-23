@@ -236,11 +236,16 @@ impl OperationsPage {
     }
 
     /// Live-update invalidation (web: `sse_refresh` version bump).
+    /// Clean-audit item 76: the Library's mirror data goes stale but the
+    /// model (and the open edit form inside it) is NOT dropped — the
+    /// reload carries the user's in-progress state forward.
     pub fn invalidate(&mut self) {
         self.snapshot = None;
         self.workload = None;
         self.suggestions.clear();
-        self.library = None;
+        if let Some(library) = &mut self.library {
+            library.stale = true;
+        }
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -541,6 +546,9 @@ struct ReplyEdit {
 }
 
 /// The P3 Library tab state: saved replies CRUD + workflows surfaced.
+/// `stale` marks mirror data that must re-read on the next render
+/// WITHOUT discarding the user's in-progress edit form (clean-audit
+/// item 76: a sync invalidation used to wipe `reply_edit` wholesale).
 struct LibraryModel {
     mailboxes: Vec<LibraryMailbox>,
     selected_mailbox: usize,
@@ -549,6 +557,9 @@ struct LibraryModel {
     workflows: Vec<WorkflowRow>,
     workflow_number: String,
     notice: Option<String>,
+    /// Mirror data is stale (an invalidation landed); re-read on the
+    /// next render, keeping the edit form and pickers.
+    stale: bool,
 }
 
 /// Build the `saved_reply_write` job payload. The platform's required
@@ -593,9 +604,14 @@ enum LibraryAction {
 impl OperationsPage {
     /// Load the Library tab's mirror data (mailboxes, saved replies,
     /// workflows) — presentation only; every write goes through jobs.
+    ///
+    /// Clean-audit item 76: when a previous model exists, the user's
+    /// in-progress state (the open edit form, the picked mailbox, the
+    /// typed workflow number) survives the re-read — a sync invalidation
+    /// refreshes the rows, it does not destroy the form.
     fn reload_library(&mut self, db: &DbHandle) {
         let (mailboxes, replies, workflows) = db.with_read(|conn| {
-            let mailboxes = conn
+            let mailboxes: Vec<LibraryMailbox> = conn
                 .prepare("SELECT id, remote_id, name FROM mailboxes ORDER BY name")
                 .and_then(|mut s| {
                     s.query_map([], |r| {
@@ -645,14 +661,26 @@ impl OperationsPage {
                 .unwrap_or_default();
             (mailboxes, replies, workflows)
         });
+        // Clean-audit item 76: carry the user's in-progress state across
+        // the re-read — the open edit form (their typing), the picked
+        // mailbox chip, and the typed workflow number. Only the mirror
+        // rows refresh.
+        let previous = self.library.take();
+        let selected_mailbox = previous
+            .as_ref()
+            .map(|l| l.selected_mailbox.min(mailboxes.len().saturating_sub(1)))
+            .unwrap_or(0);
+        let reply_edit = previous.as_ref().and_then(|l| l.reply_edit.clone());
+        let workflow_number = previous.map_or_else(String::new, |l| l.workflow_number);
         self.library = Some(LibraryModel {
             mailboxes,
-            selected_mailbox: 0,
+            selected_mailbox,
             replies,
-            reply_edit: None,
+            reply_edit,
             workflows,
-            workflow_number: String::new(),
+            workflow_number,
             notice: None,
+            stale: false,
         });
     }
 
@@ -664,7 +692,10 @@ impl OperationsPage {
     /// with their type/status and a run action that resolves the
     /// conversation number from the local mirror.
     fn library_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        if self.library.is_none() {
+        // Clean-audit item 76: reload when missing OR stale — a stale
+        // model re-reads its mirror rows while the edit form survives
+        // (see reload_library).
+        if self.library.as_ref().is_none_or(|l| l.stale) {
             self.reload_library(db);
         }
         let Some(library) = &mut self.library else {
@@ -1129,8 +1160,82 @@ mod tests {
         assert_eq!(v["replyRemoteId"], 11);
         assert_eq!(v["name"], "Refund path v2");
 
-        // Invalidation clears the cached library like every other model.
+        // Invalidation marks the mirror data stale (clean-audit item 76:
+        // the model — and any open edit form — is no longer dropped).
         page.invalidate();
-        assert!(page.library.is_none());
+        assert!(
+            page.library.as_ref().is_some_and(|l| l.stale),
+            "invalidation flags the mirror rows for a re-read"
+        );
+
+        // A stale model reloads on the next render.
+        page.reload_library(&db);
+        assert!(page.library.as_ref().is_some_and(|l| !l.stale));
+        assert_eq!(
+            page.library.as_ref().expect("library").replies.len(),
+            1,
+            "the re-read still mirrors the platform rows"
+        );
+    }
+
+    /// Clean-audit item 76: a sync invalidation (or any reload) must not
+    /// destroy the open Library edit form — the user's typing survives;
+    /// the mirror rows refresh underneath it.
+    #[test]
+    fn audit76_invalidation_keeps_the_open_library_edit_form() {
+        let db = fixture(vec![]);
+        db.with_write(|conn| {
+            spp_core::sync_engine::upsert_saved_reply(
+                conn,
+                None,
+                &spp_core::helpscout::HsSavedReply {
+                    remote_id: 11,
+                    name: "Refund path".into(),
+                    preview: Some("…here is how…".into()),
+                    text: Some("<p>…here is how…</p>".into()),
+                },
+            )
+            .expect("seed reply");
+        });
+
+        let mut page = OperationsPage::new();
+        page.reload_library(&db);
+
+        // The user opens the edit form and types.
+        let library = page.library.as_mut().expect("library");
+        library.selected_mailbox = 0;
+        library.reply_edit = Some(ReplyEdit {
+            remote_id: Some(11),
+            name: "Refund path v2".into(),
+            text: "<p>edited while a sync landed</p>".into(),
+        });
+        library.workflow_number = "778".into();
+
+        // A sync event lands: invalidate + the next library render
+        // re-reads the mirror (what library_ui does for a stale model).
+        page.invalidate();
+        assert!(page.library.as_ref().is_some_and(|l| l.stale));
+        page.reload_library(&db);
+
+        let library = page.library.as_ref().expect("library reloaded");
+        assert_eq!(
+            library.replies.len(),
+            1,
+            "the mirror rows re-read underneath the form"
+        );
+        let edit = library
+            .reply_edit
+            .as_ref()
+            .expect("the open edit form survived the invalidation");
+        assert_eq!(edit.name, "Refund path v2", "the typed name is kept");
+        assert_eq!(
+            edit.text, "<p>edited while a sync landed</p>",
+            "the typed text is kept"
+        );
+        assert_eq!(
+            library.workflow_number, "778",
+            "the typed workflow number is kept"
+        );
+        assert!(!library.stale, "the reload cleared the stale flag");
     }
 }

@@ -344,11 +344,17 @@ pub struct InboxPage {
 /// their results in durable rows (`ai_runs` response JSON or
 /// `coaching_reviews` / `post_resolution_qa`), so the poll only needs the
 /// job row's terminal state — never a fabricated interim value.
+///
+/// `origin_body` is the composer text at enqueue time (clean-audit item
+/// 73): a rewrite/translate result may only replace the composer when
+/// the user typed nothing while the job ran — in-flight edits are never
+/// clobbered by a finishing transform.
 #[derive(Debug, Clone)]
 struct PendingComposerAi {
     job_id: i64,
     kind: &'static str,
     conversation_id: i64,
+    origin_body: String,
 }
 
 /// One editable triage chip (A2). Attribute-backed chips open a vocab
@@ -1691,6 +1697,10 @@ impl InboxPage {
                     job_id,
                     kind,
                     conversation_id,
+                    // Clean-audit item 73: what the composer held when the
+                    // transform was queued — the result may only land if
+                    // the user typed nothing since.
+                    origin_body: self.composer_body.clone(),
                 });
                 self.status_message = Some(format!(
                     "{kind} queued — the result lands here when it finishes."
@@ -1735,7 +1745,20 @@ impl InboxPage {
                 match p.kind {
                     "rewrite_composer" | "translate_composer" => {
                         // This job's own output — never a neighbouring or
-                        // historical run's (audit item 24).
+                        // historical run's (audit item 24)...
+                        // and never over typing made in flight (audit item
+                        // 73): the result only replaces the composer when
+                        // the text still equals what the transform was
+                        // queued from.
+                        if self.composer_body != p.origin_body {
+                            self.status_message = Some(
+                                "Transform finished, but you edited the draft while it ran — \
+                                 your text was kept."
+                                    .into(),
+                            );
+                            self.status_is_error = false;
+                            return;
+                        }
                         match result {
                             Some(text) if !text.trim().is_empty() => {
                                 self.composer_body = text;
@@ -3244,6 +3267,7 @@ mod tests {
                 job_id,
                 kind: "rewrite_composer",
                 conversation_id: 1,
+                origin_body: String::new(),
             }),
             ..Default::default()
         };
@@ -3270,6 +3294,7 @@ mod tests {
             job_id: job_id2,
             kind: "translate_composer",
             conversation_id: 1,
+            origin_body: String::new(),
         });
         page.poll_pending_ai(&db);
         assert!(
@@ -3277,6 +3302,77 @@ mod tests {
             "no foreign text may leak into the composer"
         );
         assert!(page.status_is_error, "the honest no-result message shows");
+    }
+
+    /// Clean-audit item 73: a finishing rewrite/translate must not
+    /// clobber typing made while the job ran. The result lands only when
+    /// the composer still holds the text the transform was queued from;
+    /// an in-flight edit keeps the user's text and says so.
+    #[test]
+    fn audit73_transform_completion_never_overwrites_in_flight_typing() {
+        let db = fixture(vec![seeded().0]);
+        let job_id = db.with_write(|conn| {
+            spp_core::jobs::enqueue_on(conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue")
+        });
+        db.with_write(|conn| {
+            conn.execute(
+                "UPDATE jobs SET status = 'completed', completed_at = datetime('now'),
+                                 result = 'REWRITTEN RESULT' WHERE id = ?1",
+                rusqlite::params![job_id],
+            )
+            .expect("complete with result")
+        });
+
+        // The user typed while the transform was running.
+        let mut page = InboxPage {
+            pending_ai: Some(PendingComposerAi {
+                job_id,
+                kind: "rewrite_composer",
+                conversation_id: 1,
+                origin_body: "original draft".into(),
+            }),
+            composer_body: "the user typed this in the meantime".into(),
+            ..Default::default()
+        };
+        page.poll_pending_ai(&db);
+        assert_eq!(
+            page.composer_body, "the user typed this in the meantime",
+            "in-flight typing wins over the finishing transform"
+        );
+        assert!(page.pending_ai.is_none(), "the poll still resolves the job");
+        assert!(
+            page.status_message
+                .as_deref()
+                .is_some_and(|m| m.contains("your text was kept")),
+            "the kept-edit decision is said out loud: {:?}",
+            page.status_message
+        );
+        assert!(!page.status_is_error, "keeping the edit is not an error");
+
+        // The untouched path still lands the result (audit item 24 intact).
+        let job_id2 = db.with_write(|conn| {
+            spp_core::jobs::enqueue_on(conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue")
+        });
+        db.with_write(|conn| {
+            conn.execute(
+                "UPDATE jobs SET status = 'completed', completed_at = datetime('now'),
+                                 result = 'REWRITTEN RESULT' WHERE id = ?1",
+                rusqlite::params![job_id2],
+            )
+            .expect("complete with result")
+        });
+        page.pending_ai = Some(PendingComposerAi {
+            job_id: job_id2,
+            kind: "rewrite_composer",
+            conversation_id: 1,
+            origin_body: "original draft".into(),
+        });
+        page.composer_body = "original draft".into();
+        page.poll_pending_ai(&db);
+        assert_eq!(
+            page.composer_body, "REWRITTEN RESULT",
+            "an unedited composer still receives the transform"
+        );
     }
 
     /// Clean-audit item 25: `open` is the platform's own await-agent status

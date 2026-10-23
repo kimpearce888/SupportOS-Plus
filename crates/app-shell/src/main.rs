@@ -133,13 +133,22 @@ fn main() {
         vector_index: Some(vector_index),
     };
 
-    // CI smoke hook (AppImage job): verifies the full boot chain —
+    // CI smoke hook (AppImage/deb jobs): verifies the full boot chain —
     // migrations, boot services, background workers, loopback listener —
-    // without opening a window, then exits 0. Never active in normal runs.
+    // and, since clean-audit item 71, the SHELL itself: the real
+    // ShellApp is constructed headlessly and renders one frame per page
+    // (the same tessellation path eframe drives), so renderer
+    // regressions fail the smoke instead of passing CI unexercised.
+    // Never active in normal runs.
     if std::env::var("SPP_SMOKE").as_deref() == Ok("1") {
+        if let Err(e) = spp_shell::smoke::run_shell_smoke(options) {
+            tracing::error!(error = %e, "SPP_SMOKE: shell smoke failed");
+            spp_shell::fatal::fatal(&app_config.data_dir, "smoke failed", e);
+            std::process::exit(1);
+        }
         tracing::info!(
             operation = "smoke",
-            "SPP_SMOKE=1: boot chain verified, exiting"
+            "SPP_SMOKE=1: boot chain + shell/renderer verified, exiting"
         );
         return;
     }

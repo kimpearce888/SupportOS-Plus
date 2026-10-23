@@ -258,6 +258,16 @@ impl CommandPalette {
                     let take =
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     self.palette_take = take;
+                    // Clean-audit item 72: egui 0.37 single-line TextEdits
+                    // surrender focus on Enter — with nothing to confirm
+                    // (zero hits) the field used to sit defocused and every
+                    // following keystroke was swallowed until the user
+                    // clicked back in. Grab the focus right back so typing
+                    // continues (a hit-bearing Enter keeps the old
+                    // confirm-and-close path).
+                    if take && take_hits(&self.hits).is_empty() {
+                        response.request_focus();
+                    }
                 });
                 let take = self.palette_take;
                 ui.add_space(6.0);
@@ -615,5 +625,65 @@ mod tests {
             "DEFECT-02: Enter must confirm the selected palette hit"
         );
         assert!(!palette.is_open());
+    }
+
+    /// Clean-audit item 72: Enter with ZERO hits must not strand the
+    /// query field defocused — egui single-line TextEdits surrender
+    /// focus on Enter, and the pre-fix palette left it surrendered, so
+    /// every keystroke after a fruitless Enter was swallowed until the
+    /// user clicked back in. The field re-grabs focus; typing continues.
+    #[test]
+    fn audit72_enter_on_zero_hits_keeps_the_query_focused() {
+        let (ctx, mut palette, db) = seeded_palette_ctx();
+
+        // Pass 1: open + focus.
+        ctx.run_pass(egui::RawInput::default(), |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+
+        // Type a query that matches nothing.
+        let mut typing = egui::RawInput::default();
+        typing.events.push(egui::Event::Text("zzzznomatch".into()));
+        ctx.run_pass(typing, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(
+            palette.hits.is_empty(),
+            "the fixture has no hit for this query"
+        );
+
+        // Pass 3: Enter — nothing to confirm, so the palette stays open
+        // AND the query field must still hold keyboard focus afterwards.
+        let mut enter = egui::RawInput::default();
+        enter.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let mut nav = None;
+        ctx.run_pass(enter, |ctx| {
+            nav = palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(nav.is_none(), "nothing to confirm — no navigation");
+        assert!(palette.is_open(), "the palette stays open on a dry Enter");
+
+        // Pass 4: the proof — the next keystroke still lands in the query
+        // field without any click. Pre-fix, the field sat defocused and
+        // this character vanished.
+        let mut more = egui::RawInput::default();
+        more.events.push(egui::Event::Text("x".into()));
+        ctx.run_pass(more, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(
+            palette.query, "zzzznomatchx",
+            "keystrokes after a dry Enter keep reaching the query field"
+        );
     }
 }

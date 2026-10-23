@@ -179,8 +179,11 @@ fn audit_row_to_json(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let before: Option<String> = r.get(5)?;
     let after: Option<String> = r.get(6)?;
     let remote_result: Option<String> = r.get(8)?;
+    // Clean-audit item 68: a stored payload that is not valid JSON used to
+    // decode to `null` — the reader silently dropped the recorded state.
+    // Non-JSON payloads now surface verbatim as JSON strings.
     let parse_json = |s: Option<&str>| -> Option<Value> {
-        s.and_then(|v| serde_json::from_str::<Value>(v).ok())
+        s.map(|v| serde_json::from_str::<Value>(v).unwrap_or_else(|_| Value::String(v.to_string())))
     };
     Ok(json!({
         "id": r.get::<_, i64>(0)?,
@@ -428,5 +431,59 @@ mod tests {
         assert_eq!(remaining.len(), 500, "the cap keeps the newest 500 events");
         assert_eq!(remaining[0].message, "event 599");
         assert_eq!(remaining[499].message, "event 100");
+    }
+
+    /// Clean-audit item 68: the audit reader never dropped a stored
+    /// payload again — non-JSON `before_state`/`after_state`/
+    /// `remote_result` values surface verbatim as strings instead of
+    /// decoding to `null`.
+    #[test]
+    fn list_audit_surfaces_non_json_payloads_verbatim() {
+        let conn = migrated();
+        // A writer that stored plain text (not JSON) in the state columns:
+        // the audit table has no CHECK constraint on these payloads.
+        conn.execute(
+            "INSERT INTO audit_log (timestamp, actor, action, conversation_id,
+                                     before_state, after_state, remote_operation,
+                                     remote_result, ai_involvement, job_id, correlation_id)
+             VALUES (datetime('now'), 'user', 'update_status', 7,
+                     'status was open', 'status: closed', 'conversations.update',
+                     'HTTP 200 (not json)', 0, NULL, NULL)",
+            [],
+        )
+        .expect("seed non-json audit row");
+        // A regular JSON row for contrast.
+        audit(
+            &conn,
+            &AuditEntry::user("tag_added")
+                .with_conversation_id(8)
+                .with_after_state(json!({"tag": "vip"})),
+        )
+        .expect("json audit row");
+
+        let rows = list_audit(&conn, None, 10).expect("list");
+        assert_eq!(rows.len(), 2, "newest first: the JSON row leads");
+        let json_row = &rows[0];
+        assert_eq!(json_row["after_state"], json!({"tag": "vip"}));
+        let plain = &rows[1];
+        assert_eq!(
+            plain["before_state"],
+            json!("status was open"),
+            "plain-text before_state surfaces verbatim, not null"
+        );
+        assert_eq!(
+            plain["after_state"],
+            json!("status: closed"),
+            "plain-text after_state surfaces verbatim, not null"
+        );
+        assert_eq!(
+            plain["remote_result"],
+            json!("HTTP 200 (not json)"),
+            "plain-text remote_result surfaces verbatim, not null"
+        );
+        // The conversation filter still narrows.
+        let one = list_audit(&conn, Some(7), 10).expect("list one");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0]["conversation_id"], json!(7));
     }
 }

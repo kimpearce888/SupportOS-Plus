@@ -246,6 +246,12 @@ pub struct AiCenterPage {
     // ---- A1 provider hub state ----
     hub_endpoints: Vec<spp_core::ai_hub::EndpointConfig>,
     hub_roles: spp_core::ai_hub::RoleMap,
+    /// Clean-audit item 74: the last PERSISTED role map. The model text
+    /// field commits on blur (and only when the live map differs from
+    /// this snapshot) — keystrokes update the live map in memory only,
+    /// so typing no longer persists and enqueues a golden_eval per
+    /// character.
+    hub_roles_saved: spp_core::ai_hub::RoleMap,
     hub_loaded: bool,
     /// Probe outcomes per endpoint id, filled by the probe thread.
     probe_results: std::collections::BTreeMap<String, String>,
@@ -303,6 +309,7 @@ impl AiCenterPage {
             connection_status: Arc::new(Mutex::new(None)),
             hub_endpoints: Vec::new(),
             hub_roles: spp_core::ai_hub::RoleMap::default(),
+            hub_roles_saved: spp_core::ai_hub::RoleMap::default(),
             hub_loaded: false,
             probe_results: std::collections::BTreeMap::new(),
             probe_slot: Arc::new(Mutex::new(None)),
@@ -364,6 +371,26 @@ impl AiCenterPage {
         self.reload_hub(db);
     }
 
+    /// Clean-audit item 74: persist a role-map edit and re-run the
+    /// golden set — ONCE per committed edit. Called when the model text
+    /// field gives up focus (a finished edit) and when the endpoint
+    /// combo picks a new endpoint (a discrete selection). Keystrokes
+    /// alone never reach this method: they only sync the live map.
+    /// An unchanged map is a no-op — no second save, no second eval
+    /// (the blur guard at the call site and this check agree).
+    fn commit_role_map(&mut self, db: &DbHandle, roles: &spp_core::ai_hub::RoleMap) {
+        self.hub_roles = roles.clone();
+        if *roles == self.hub_roles_saved {
+            return;
+        }
+        let _ = db.with_write(|conn| spp_core::ai_hub::save_roles(conn, roles));
+        self.hub_roles_saved = roles.clone();
+        // A6: model-role reassignment re-runs the golden set — the eval
+        // scores on the Usage tab must describe the routing that is live.
+        let _ =
+            db.with_write(|conn| spp_core::jobs::enqueue_on(conn, "ai", "golden_eval", "{}", 3, 2));
+    }
+
     /// Load the A1 provider hub state (endpoints, roles, ledger, toggles).
     fn reload_hub(&mut self, db: &DbHandle) {
         let (endpoints, roles, ledger, features) = db.with_read(|conn| {
@@ -378,7 +405,8 @@ impl AiCenterPage {
             )
         });
         self.hub_endpoints = endpoints;
-        self.hub_roles = roles;
+        self.hub_roles = roles.clone();
+        self.hub_roles_saved = roles;
         self.ledger = ledger;
         self.feature_states = features;
         self.hub_loaded = true;
@@ -654,8 +682,14 @@ impl AiCenterPage {
             if response.changed() {
                 self.copilot_input = question;
             }
-            let submit =
-                ui.input(|i| i.key_pressed(egui::Key::Enter)) && !self.copilot_input.is_empty();
+            // Clean-audit item 75: Enter submits only when the copilot
+            // input itself surrendered focus on that keypress (egui
+            // single-line TextEdits give up focus on Enter) — a global
+            // Enter used to submit from anywhere on the AI Center page,
+            // firing mid-typing in other fields and on stray keypresses.
+            let submit = response.lost_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && !self.copilot_input.is_empty();
             if (design::button_with_icon(
                 ui,
                 Icon::Send,
@@ -1203,10 +1237,16 @@ impl AiCenterPage {
                                 .and_then(|c| c.model.clone())
                                 .unwrap_or_default();
                             let mut model_edit = model_text.clone();
-                            ui.add_sized(
+                            let model_response = ui.add_sized(
                                 [180.0, 26.0],
                                 egui::TextEdit::singleline(&mut model_edit),
                             );
+                            // Clean-audit item 74: keystrokes only sync the
+                            // live map (so the field's egui state and the
+                            // page agree — no focus loss, no revert); the
+                            // persist + golden_eval happen once, on blur,
+                            // and only when the map actually differs from
+                            // what was last saved.
                             if model_edit != model_text {
                                 roles.set(
                                     role,
@@ -1216,7 +1256,10 @@ impl AiCenterPage {
                                             .then(|| model_edit.trim().to_string()),
                                     }),
                                 );
-                                changed = true;
+                                self.hub_roles = roles.clone();
+                            }
+                            if model_response.lost_focus() && roles != self.hub_roles_saved {
+                                self.commit_role_map(db, &roles);
                             }
                             ui.label(
                                 egui::RichText::new(role.note())
@@ -1224,22 +1267,7 @@ impl AiCenterPage {
                                     .color(t.muted_foreground),
                             );
                             if changed {
-                                self.hub_roles = roles.clone();
-                                let _ = db
-                                    .with_write(|conn| spp_core::ai_hub::save_roles(conn, &roles));
-                                // A6: model-role reassignment re-runs the
-                                // golden set — the eval scores on the Usage
-                                // tab must describe the routing that is live.
-                                let _ = db.with_write(|conn| {
-                                    spp_core::jobs::enqueue_on(
-                                        conn,
-                                        "ai",
-                                        "golden_eval",
-                                        "{}",
-                                        3,
-                                        2,
-                                    )
-                                });
+                                self.commit_role_map(db, &roles);
                             }
                             ui.end_row();
                         }
@@ -1774,5 +1802,165 @@ mod tests {
             .unwrap_or_default();
         // Fresh DB: attributes exist in the schema but no snapshots yet.
         assert!(distributions.iter().all(|d| d.total_conversations >= 0));
+    }
+
+    /// Count queued golden_eval jobs (the item-74 signal).
+    fn golden_eval_jobs(db: &DbHandle) -> i64 {
+        db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM jobs WHERE queue = 'ai' AND type = 'golden_eval'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .expect("count golden_eval jobs")
+    }
+
+    /// Clean-audit item 74: a COMMITTED role-map edit persists exactly
+    /// once and enqueues exactly one golden_eval; re-committing the same
+    /// map is a no-op because the saved snapshot catches up.
+    #[test]
+    fn audit74_commit_persists_once_and_enqueues_one_eval() {
+        let db = fixture(Vec::new());
+        let mut page = AiCenterPage::new();
+        page.reload(&db);
+        assert_eq!(golden_eval_jobs(&db), 0);
+
+        // A committed model edit (what the blur path delivers).
+        let mut roles = page.hub_roles.clone();
+        roles.draft = Some(spp_core::ai_hub::RoleAssignment {
+            endpoint: "lmstudio".into(),
+            model: Some("qwen2.5-7b".into()),
+        });
+        page.commit_role_map(&db, &roles);
+        assert_eq!(golden_eval_jobs(&db), 1, "one eval per committed edit");
+        assert_eq!(page.hub_roles_saved, roles, "the snapshot catches up");
+
+        // The persisted state round-trips.
+        let stored = db.with_read(spp_core::ai_hub::load_roles).expect("roles");
+        assert_eq!(
+            stored.draft.and_then(|d| d.model),
+            Some("qwen2.5-7b".into())
+        );
+
+        // Re-committing the identical map: the UI blur path is guarded by
+        // the snapshot comparison (roles == saved reaches nothing), and a
+        // direct re-commit must not re-run the eval either.
+        page.commit_role_map(&db, &roles);
+        assert_eq!(
+            golden_eval_jobs(&db),
+            1,
+            "no second eval for an unchanged map through the UI path (blur guard)"
+        );
+    }
+
+    /// Clean-audit item 74, the regression itself: typing (a live map that
+    /// diverged from the persisted one) persists NOTHING and enqueues NO
+    /// eval across any number of rendered frames — only a blur commits.
+    /// Pre-fix, every keystroke was a save_roles + golden_eval.
+    #[test]
+    fn audit74_typing_divergence_never_persists_or_enqueues() {
+        let db = fixture(Vec::new());
+        let ctx = egui::Context::default();
+        let mut page = AiCenterPage::new();
+        // Load once (what the first rendered frame does), then simulate
+        // the in-memory state after a few keystrokes in the model field:
+        // the live map diverges, the saved snapshot does not.
+        page.reload(&db);
+        page.hub_roles.draft = Some(spp_core::ai_hub::RoleAssignment {
+            endpoint: "lmstudio".into(),
+            model: Some("q".into()),
+        });
+        let saved_before = page.hub_roles_saved.clone();
+        assert_ne!(
+            page.hub_roles, page.hub_roles_saved,
+            "the divergence is set up"
+        );
+
+        // Ten rendered frames of the Health tab (where the routing table
+        // lives) — the keystroke-synced live map stays memory-only.
+        for _ in 0..10 {
+            ctx.run_pass(egui::RawInput::default(), |ctx| {
+                ctx.root_ui(|ui| {
+                    egui::CentralPanel::default().show(ui, |ui| page.ui(ui, &db));
+                });
+            })
+            .drop_without_applying_deltas();
+        }
+        assert_eq!(
+            golden_eval_jobs(&db),
+            0,
+            "no golden_eval may be enqueued without a committed (blurred) edit"
+        );
+        let stored = db.with_read(spp_core::ai_hub::load_roles).expect("roles");
+        assert_eq!(
+            stored.draft.and_then(|d| d.model),
+            None,
+            "the divergent live map must not be persisted"
+        );
+        assert_eq!(
+            page.hub_roles_saved, saved_before,
+            "the snapshot is untouched"
+        );
+        // The live map is still rendered from (no revert, no loss).
+        assert_eq!(page.hub_roles.draft.and_then(|d| d.model), Some("q".into()));
+    }
+
+    /// Clean-audit item 75: a global Enter must NOT submit the copilot
+    /// chat. Pre-fix, any Enter on the AI Center page fired the job —
+    /// including one pressed with no field focused at all. Post-fix the
+    /// submit rides the copilot input's own focus loss (Enter in a
+    /// single-line TextEdit), so a stray Enter enqueues nothing.
+    #[test]
+    fn audit75_global_enter_never_submits_the_copilot() {
+        let db = fixture(Vec::new());
+        let ctx = egui::Context::default();
+        let mut page = AiCenterPage::new();
+        page.tab = Tab::Copilot;
+        // A question is sitting in the input (typed earlier): the pre-fix
+        // global Enter would fire the job on this state alone.
+        page.copilot_input = "what is the refund policy?".into();
+
+        // Render, then press Enter with nothing focused.
+        ctx.run_pass(egui::RawInput::default(), |ctx| {
+            ctx.root_ui(|ui| {
+                egui::CentralPanel::default().show(ui, |ui| page.ui(ui, &db));
+            });
+        })
+        .drop_without_applying_deltas();
+        let mut enter = egui::RawInput::default();
+        enter.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        ctx.run_pass(enter, |ctx| {
+            ctx.root_ui(|ui| {
+                egui::CentralPanel::default().show(ui, |ui| page.ui(ui, &db));
+            });
+        })
+        .drop_without_applying_deltas();
+
+        let jobs: i64 = db
+            .with_read(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM jobs WHERE queue = 'ai' AND type = 'copilot_chat'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("count copilot jobs");
+        assert_eq!(
+            jobs, 0,
+            "a global Enter may not submit the copilot chat anymore"
+        );
+        assert!(
+            page.copilot_pending.is_none(),
+            "no in-flight job was started either"
+        );
+        // The typed question is still sitting in the input, un-submitted.
+        assert_eq!(page.copilot_input, "what is the refund policy?");
     }
 }

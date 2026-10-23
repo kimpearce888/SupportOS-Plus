@@ -23,6 +23,7 @@ use crate::bridge::TaskBridge;
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 use crate::overlays::{ConfirmDialog, DialogOutcome};
+use crate::pages::DestructiveAction;
 use crate::pages::NavRequest;
 use crate::pages::PageKey;
 use crate::pages::ai_center::AiCenterPage;
@@ -93,6 +94,10 @@ pub struct ShellApp {
     palette: CommandPalette,
     toasts: Toasts,
     dialog: Option<ConfirmDialog>,
+    /// Clean-audit item 70: the destructive action awaiting the user's
+    /// confirmation. Armed when a page raises `NavRequest::Confirm`;
+    /// executed only when the dialog resolves `Confirmed`.
+    pending_confirm: Option<DestructiveAction>,
 }
 
 impl ShellApp {
@@ -100,10 +105,21 @@ impl ShellApp {
     /// degrade to defaults instead of refusing to start.
     #[must_use]
     pub fn new(cc: &eframe::CreationContext<'_>, options: ShellOptions) -> Self {
-        design::install(&cc.egui_ctx);
+        Self::new_with_context(&cc.egui_ctx, options)
+    }
+
+    /// The headless constructor behind [`Self::new`] (clean-audit item
+    /// 71): everything the shell builds at startup needs only an
+    /// [`egui::Context`], never the eframe window — so the SPP_SMOKE
+    /// boot check can construct the REAL shell and render real frames
+    /// without a display, and renderer regressions fail CI instead of
+    /// sailing through a smoke that returned before the shell existed.
+    #[must_use]
+    pub fn new_with_context(ctx: &egui::Context, options: ShellOptions) -> Self {
+        design::install(ctx);
         let theme = Theme::load(&options.db);
-        theme.apply(&cc.egui_ctx);
-        let bridge = TaskBridge::spawn(&options.bus, &cc.egui_ctx);
+        theme.apply(ctx);
+        let bridge = TaskBridge::spawn(&options.bus, ctx);
         let (db_path, schema_version) = options.db.with_read(|conn| {
             (
                 spp_core::db::db_file_path(conn),
@@ -185,10 +201,18 @@ impl ShellApp {
             palette: CommandPalette::new(),
             toasts: Toasts::new(),
             dialog: None,
+            pending_confirm: None,
         };
         #[cfg(feature = "ui-screenshot")]
-        app.apply_screenshot_env(&cc.egui_ctx);
+        app.apply_screenshot_env(ctx);
         app
+    }
+
+    /// Select the active page (normally driven by the sidebar, the
+    /// palette and page navigation requests; the headless smoke harness
+    /// and the screenshot harness use it directly).
+    pub fn select_page(&mut self, page: PageKey) {
+        self.page = page;
     }
 
     /// Apply an invalidation batch to the ported pages.
@@ -232,6 +256,37 @@ impl ShellApp {
             }
             NavRequest::Page(page) => {
                 self.page = page;
+            }
+            // Clean-audit item 70: arm the confirm dialog with the
+            // request's spec and remember the action to run on confirm.
+            NavRequest::Confirm(request) => {
+                let dialog = request.dialog();
+                self.pending_confirm = Some(request.action);
+                self.dialog = Some(dialog);
+            }
+        }
+    }
+
+    /// Clean-audit item 70: execute a CONFIRMED destructive action. The
+    /// toast records the outcome; the owning page invalidates so the
+    /// next frame re-reads the mirror.
+    fn execute_confirmed(&mut self, action: DestructiveAction) {
+        match action {
+            DestructiveAction::DeleteAutomationRule { id } => {
+                let result = self
+                    .db
+                    .with_write(|conn| spp_core::automation::delete_rule(conn, id));
+                match result {
+                    Ok(_) => {
+                        self.automation.invalidate();
+                        self.toasts.success(format!("Automation rule {id} deleted"));
+                    }
+                    Err(e) => {
+                        self.automation.invalidate();
+                        self.toasts
+                            .error(format!("Could not delete rule {id}: {e}"));
+                    }
+                }
             }
         }
     }
@@ -463,6 +518,18 @@ impl eframe::App for ShellApp {
     /// Runs before every frame — and while the window is hidden, whenever
     /// the bridge requested a repaint. No painting is allowed here.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.logic_pass(ctx);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.ui_pass(ui);
+    }
+}
+
+impl ShellApp {
+    /// The body of [`eframe::App::logic`] (shared with the headless
+    /// smoke harness, clean-audit item 71).
+    pub(crate) fn logic_pass(&mut self, ctx: &egui::Context) {
         // 1.3.0: a periodic repaint heartbeat. Everything the user does
         // now crosses an async boundary (outbound dispatch ~2s ticks,
         // sync progress, the 1-minute poll) — with repaints only on
@@ -540,7 +607,9 @@ impl eframe::App for ShellApp {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    /// The body of [`eframe::App::ui`] (shared with the headless smoke
+    /// harness, clean-audit item 71).
+    pub(crate) fn ui_pass(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
         // Full-height sidebar with the theme's elevated sidebar surface.
         egui::Panel::left("spp-nav")
@@ -578,10 +647,15 @@ impl eframe::App for ShellApp {
             let outcome = dialog.ui(ui.ctx());
             if outcome.is_done() {
                 let dialog = self.dialog.take();
+                // Clean-audit item 70: the confirmed decision executes the
+                // armed action; a cancel leaves the world untouched.
+                let action = self.pending_confirm.take();
                 if outcome == DialogOutcome::Confirmed {
-                    // The confirm action ran when the requester armed the
-                    // dialog; the toast records the decision.
-                    if let Some(dialog) = dialog {
+                    if let Some(action) = action {
+                        self.execute_confirmed(action);
+                    } else if let Some(dialog) = dialog {
+                        // A dialog armed outside the item-70 mechanism (no
+                        // action) still reports its decision.
                         self.toasts
                             .push(crate::toasts::ToastKind::Info, dialog.title, None);
                     }
@@ -636,7 +710,9 @@ impl eframe::App for ShellApp {
                                         nav = self.operations.ui(ui, &self.db);
                                     }
                                     PageKey::AiCenter => self.ai_center.ui(ui, &self.db),
-                                    PageKey::Automation => self.automation.ui(ui, &self.db),
+                                    PageKey::Automation => {
+                                        nav = self.automation.ui(ui, &self.db);
+                                    }
                                     PageKey::Connectors => self.connectors.ui(ui, &self.db),
                                     PageKey::CustomObjects => {
                                         self.custom_objects.ui(ui, &self.db);
@@ -1225,6 +1301,128 @@ fn seed_fixture_for_screenshots(conn: &mut rusqlite::Connection) -> spp_core::er
     );
     let _ = spp_core::search::rebuild_indexes(conn);
     Ok(())
+}
+
+#[cfg(test)]
+mod headless_tests {
+    use super::*;
+    use crate::ShellOptions;
+    use crate::pages::ConfirmRequest;
+
+    /// A shell built exactly like `main` builds it, minus the window:
+    /// the same database, bus and boot services the real run gets.
+    fn headless_shell(
+        convs: Vec<crate::testsupport::ConvSeed>,
+    ) -> (ShellApp, spp_core::db::DbHandle) {
+        let db = crate::testsupport::fixture(convs);
+        let bus = spp_core::eventing::EventBus::default();
+        let sync = crate::build_sync_engine(&db, &bus);
+        let options = ShellOptions {
+            db: db.clone(),
+            bus,
+            data_dir: std::env::temp_dir(),
+            sync: Some(sync),
+            handle: None,
+            workers: None,
+            vector_index: None,
+        };
+        let ctx = egui::Context::default();
+        (ShellApp::new_with_context(&ctx, options), db)
+    }
+
+    /// Clean-audit item 71: the shell constructs and renders headlessly
+    /// — the same path SPP_SMOKE drives — and every page paints a
+    /// non-empty frame.
+    #[test]
+    fn audit71_the_shell_renders_every_page_headlessly() {
+        let (mut app, _db) = headless_shell(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let ctx = egui::Context::default();
+        for key in PageKey::all() {
+            app.select_page(key);
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.logic_pass(ui.ctx());
+                app.ui_pass(ui);
+            });
+            let shapes = output.shapes.len();
+            output.drop_without_applying_deltas();
+            assert!(
+                shapes > 0,
+                "page {} must paint a non-empty frame",
+                key.label()
+            );
+        }
+    }
+
+    /// Clean-audit item 70, shell half: a page's Confirm request arms
+    /// the dialog WITHOUT running the action; the confirmed outcome
+    /// executes it; nothing else does.
+    #[test]
+    fn audit70_confirm_requests_arm_execute_and_cancel_correctly() {
+        let (mut app, db) = headless_shell(Vec::new());
+        let rule_id = db
+            .with_write(|conn| {
+                spp_core::automation::create_rule(
+                    conn,
+                    &spp_core::automation::AutomationRule {
+                        id: None,
+                        name: "Escalate VIP".into(),
+                        trigger: spp_core::automation::Trigger::SlaRisk,
+                        action: spp_core::automation::Action::ChangeStatus {
+                            new_status: "pending".into(),
+                        },
+                        enabled: true,
+                        created_at: None,
+                    },
+                )
+            })
+            .expect("create rule");
+        let rules_now = |db: &spp_core::db::DbHandle| -> usize {
+            db.with_read(spp_core::automation::list_rules)
+                .map(|r| r.len())
+                .unwrap_or_default()
+        };
+        assert_eq!(rules_now(&db), 1);
+
+        // 1. The page raises the request; the shell arms the dialog.
+        app.apply_nav(NavRequest::Confirm(ConfirmRequest::delete_automation_rule(
+            rule_id,
+            "Escalate VIP",
+        )));
+        assert!(app.dialog.is_some(), "the confirm dialog is armed");
+        assert_eq!(
+            app.pending_confirm,
+            Some(DestructiveAction::DeleteAutomationRule { id: rule_id })
+        );
+        assert_eq!(rules_now(&db), 1, "arming the dialog deletes nothing");
+
+        // 2. A cancelled dialog leaves the rule untouched.
+        let cancelled = app.pending_confirm.take();
+        assert!(cancelled.is_some());
+        assert_eq!(rules_now(&db), 1, "a cancelled confirmation keeps the rule");
+
+        // 3. The confirmed outcome executes the deletion.
+        app.apply_nav(NavRequest::Confirm(ConfirmRequest::delete_automation_rule(
+            rule_id,
+            "Escalate VIP",
+        )));
+        let action = app
+            .pending_confirm
+            .take()
+            .expect("the action is armed again");
+        app.execute_confirmed(action);
+        assert_eq!(rules_now(&db), 0, "confirming deletes the rule");
+        // The outcome toast records the decision.
+        assert!(!app.toasts.is_empty(), "the deletion outcome is toasted");
+    }
 }
 
 #[cfg(test)]

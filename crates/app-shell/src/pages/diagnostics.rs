@@ -11,6 +11,11 @@
 //!   workers, the loopback listener and the settings page. Filter chips
 //!   (all / errors / warnings / info), expandable per-row details, and
 //!   a clear button.
+//! * **Audit trail** — `audit_log` via [`spp_core::audit::list_audit`]
+//!   (clean-audit item 68): who changed what, when, with what before/
+//!   after state and remote outcome — the record the outbound lane,
+//!   the people store, the copilot and the side-thread writers keep,
+//!   previously written but never surfaced anywhere.
 //! * **Sync reports** — the recent `sync_runs` rows (kind, state,
 //!   duration, records, errors) so a run's outcome is visible without
 //!   reading logs.
@@ -61,10 +66,71 @@ struct SyncRunRow {
     errors: i64,
 }
 
+/// One audit-trail row as the Diagnostics page shows it (clean-audit
+/// item 68 — the `audit_log` record, previously never surfaced).
+#[derive(Debug, Clone)]
+struct AuditRow {
+    id: i64,
+    timestamp: String,
+    actor: String,
+    action: String,
+    conversation_id: Option<i64>,
+    before_state: Option<String>,
+    after_state: Option<String>,
+    remote_operation: Option<String>,
+    remote_result: Option<String>,
+    ai_involvement: bool,
+}
+
+impl AuditRow {
+    /// Shape a `list_audit` JSON row for display (payloads render
+    /// compactly; non-JSON payloads arrive as JSON strings and show
+    /// verbatim).
+    fn from_json(v: &serde_json::Value) -> Self {
+        let compact = |key: &str| -> Option<String> {
+            v.get(key).and_then(|p| match p {
+                serde_json::Value::Null => None,
+                other => Some(other.to_string()),
+            })
+        };
+        Self {
+            id: v.get("id").and_then(serde_json::Value::as_i64).unwrap_or(0),
+            timestamp: v
+                .get("timestamp")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            actor: v
+                .get("actor")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            action: v
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            conversation_id: v.get("conversation_id").and_then(serde_json::Value::as_i64),
+            before_state: compact("before_state"),
+            after_state: compact("after_state"),
+            remote_operation: v
+                .get("remote_operation")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            remote_result: compact("remote_result"),
+            ai_involvement: v
+                .get("ai_involvement")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+        }
+    }
+}
+
 /// The interactive Diagnostics page state.
 pub struct DiagnosticsPage {
     events: Option<Vec<spp_core::audit::DiagEvent>>,
     runs: Option<Vec<SyncRunRow>>,
+    audit: Option<Vec<AuditRow>>,
     filter: LevelFilter,
     message: Option<String>,
 }
@@ -75,6 +141,7 @@ impl DiagnosticsPage {
         Self {
             events: None,
             runs: None,
+            audit: None,
             filter: LevelFilter::All,
             message: None,
         }
@@ -84,6 +151,7 @@ impl DiagnosticsPage {
     pub fn invalidate(&mut self) {
         self.events = None;
         self.runs = None;
+        self.audit = None;
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -92,8 +160,20 @@ impl DiagnosticsPage {
             spp_core::audit::list_recent_events(conn, 200, filter.level()).unwrap_or_default()
         });
         let runs = db.with_read(load_sync_runs);
+        // Clean-audit item 68: the audit trail (`audit_log`) surfaces
+        // here — written all along by the outbound lane, the people
+        // store, the copilot and the side-thread writers, but never
+        // readable anywhere before.
+        let audit = db.with_read(|conn| {
+            spp_core::audit::list_audit(conn, None, 50)
+                .unwrap_or_default()
+                .iter()
+                .map(AuditRow::from_json)
+                .collect::<Vec<_>>()
+        });
         self.events = Some(events);
         self.runs = Some(runs);
+        self.audit = Some(audit);
     }
 
     /// Delete every stored diagnostics event.
@@ -105,7 +185,7 @@ impl DiagnosticsPage {
 
     /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        if self.events.is_none() || self.runs.is_none() {
+        if self.events.is_none() || self.runs.is_none() || self.audit.is_none() {
             self.reload(db);
         }
 
@@ -127,6 +207,7 @@ impl DiagnosticsPage {
 
         let events = self.events.clone().unwrap_or_default();
         let runs = self.runs.clone().unwrap_or_default();
+        let audit = self.audit.clone().unwrap_or_default();
 
         // --- Event log -------------------------------------------------
         let error_count = events.iter().filter(|e| e.level == "error").count();
@@ -204,6 +285,96 @@ impl DiagnosticsPage {
                             });
                         }
                         ui.add_space(2.0);
+                    }
+                });
+        });
+        ui.add_space(10.0);
+
+        // --- Audit trail ------------------------------------------------
+        // Clean-audit item 68: the `audit_log` record surfaces — actor,
+        // action, conversation, AI involvement, and the before/after
+        // states plus remote outcome when the row carries them.
+        let audit_subtitle = format!("{} audited change(s) shown — newest first", audit.len());
+        design::card_titled(ui, "Audit trail", Some(&audit_subtitle), |ui| {
+            if audit.is_empty() {
+                design::hint_text(
+                    ui,
+                    "No audited changes yet. Outbound writes, people edits, \
+                         copilot runs and side-thread actions record here.",
+                );
+                return;
+            }
+            design::table(
+                ui,
+                "diagnostics-audit",
+                &["when", "actor", "action", "conversation", "ai"],
+                24.0,
+                |ui| {
+                    for row in &audit {
+                        ui.monospace(
+                            egui::RichText::new(row.timestamp.as_str())
+                                .size(12.0)
+                                .weak(),
+                        );
+                        design::badge(ui, &row.actor, BadgeTone::Neutral);
+                        ui.label(
+                            egui::RichText::new(row.action.as_str())
+                                .size(12.5)
+                                .color(design::tokens(ui).foreground),
+                        );
+                        ui.monospace(
+                            egui::RichText::new(
+                                row.conversation_id
+                                    .map_or_else(|| "—".to_string(), |cid| cid.to_string()),
+                            )
+                            .size(12.5),
+                        );
+                        let (tone, label) = if row.ai_involvement {
+                            (BadgeTone::Info, "ai")
+                        } else {
+                            (BadgeTone::Neutral, "—")
+                        };
+                        design::badge(ui, label, tone);
+                        ui.end_row();
+                    }
+                },
+            );
+            // The recorded states and remote outcomes (compact, muted).
+            egui::ScrollArea::vertical()
+                .max_height(140.0)
+                .auto_shrink([false, false])
+                .show_rows(ui, 20.0, audit.len(), |ui, range| {
+                    for row in &audit[range] {
+                        let has_detail = row.before_state.is_some()
+                            || row.after_state.is_some()
+                            || row.remote_operation.is_some()
+                            || row.remote_result.is_some();
+                        if !has_detail {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            ui.monospace(
+                                egui::RichText::new(format!("#{}", row.id))
+                                    .size(11.0)
+                                    .weak(),
+                            );
+                            if let Some(op) = &row.remote_operation {
+                                design::badge(ui, op, BadgeTone::Neutral);
+                            }
+                            for (label, value) in [
+                                ("before", &row.before_state),
+                                ("after", &row.after_state),
+                                ("remote", &row.remote_result),
+                            ] {
+                                if let Some(value) = value {
+                                    ui.monospace(
+                                        egui::RichText::new(format!("{label}: {value}"))
+                                            .size(11.0)
+                                            .weak(),
+                                    );
+                                }
+                            }
+                        });
                     }
                 });
         });
@@ -399,5 +570,51 @@ mod tests {
         let events = page.events.clone().expect("events");
         assert!(events.is_empty());
         assert!(page.message.is_some());
+    }
+
+    /// Clean-audit item 68: the audit trail (`audit_log`) surfaces on the
+    /// Diagnostics page — the record was written all along but never had
+    /// a reader in the shell.
+    #[test]
+    fn audit_trail_card_lists_recorded_changes() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            spp_core::audit::audit(
+                conn,
+                &spp_core::audit::AuditEntry::user("update_status")
+                    .with_conversation_id(1)
+                    .with_before_state(serde_json::json!({"status": "open"}))
+                    .with_after_state(serde_json::json!({"status": "closed"})),
+            )
+            .expect("audit row");
+            // A row with a plain-text (non-JSON) payload — must surface
+            // verbatim, not as null (the dead-reader drop).
+            conn.execute(
+                "INSERT INTO audit_log (timestamp, actor, action, conversation_id,
+                                         before_state, after_state, ai_involvement)
+                 VALUES (datetime('now'), 'ai', 'draft_inserted', 2,
+                         NULL, 'plain text payload', 1)",
+                [],
+            )
+            .expect("plain row");
+        });
+        let mut page = DiagnosticsPage::new();
+        page.reload(&db);
+        let audit = page.audit.clone().expect("audit rows");
+        assert_eq!(audit.len(), 2, "both audit rows are listed");
+        // Newest first: the plain-text row was inserted last.
+        assert_eq!(audit[0].actor, "ai");
+        assert!(audit[0].ai_involvement, "the ai flag rides the row");
+        assert_eq!(
+            audit[0].after_state.as_deref(),
+            Some("\"plain text payload\""),
+            "non-JSON payloads surface verbatim"
+        );
+        assert_eq!(audit[1].action, "update_status");
+        assert_eq!(audit[1].conversation_id, Some(1));
+        assert_eq!(
+            audit[1].before_state.as_deref(),
+            Some("{\"status\":\"open\"}")
+        );
     }
 }

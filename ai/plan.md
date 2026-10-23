@@ -77,12 +77,20 @@ and double-decode fixes) — verified and recorded in `completed.md`.
 Item 56 (report-builder wire-or-remove) stays parked below pending the
 owner's decision, as do 150/151 (dead-feature calls).
 
-Batch 26 = items 67-76 (in progress; item 56 stays parked below pending
-the owner's wire-or-remove decision).
+Batch 26 = items 67-76 (the translation-cache retention row, the audit
+trail surfaced with its non-JSON-payload reader fixed, the toast lifetime
+that burns only on rendered passes, the armed confirm-dialog system, the
+SPP_SMOKE that renders the real shell per page, the palette dry-Enter
+focus grab, the transform that keeps in-flight typing, the role-map
+commit on blur, the copilot submit on its own field's focus loss, and
+the Library invalidation that keeps the open edit form) — verified and
+recorded in `completed.md`.
+Item 56 (report-builder wire-or-remove) stays parked below pending
+the owner's wire-or-remove decision, as do 150/151 (dead-feature calls).
 
 ### MEDIUM — wrong behavior on realistic paths
 
-56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of batch 26)
+56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of any batch until then)
 77. [med|issue] Sync invalidation silently reverts unsaved Settings edits — pages/settings.rs:550-552
 78. [med|gap] Inbox hard-capped at 50, no pagination — pages/inbox.rs:109-110
 79. [med|issue] Row click silently wipes the typed reply draft — pages/inbox.rs:742-747

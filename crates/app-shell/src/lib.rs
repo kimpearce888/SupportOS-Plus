@@ -23,6 +23,7 @@ pub mod mention;
 pub mod overlays;
 pub mod pages;
 pub mod palette;
+pub mod smoke;
 pub mod workers_host;
 // The only unsafe code in this crate: two libc::flock FFI calls that hold
 // and release the single-instance advisory lock.
