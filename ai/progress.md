@@ -3,18 +3,19 @@
 > Exactly ten active items at any time, per `rule.md` (batch size raised from five by the owner, 2026-10-23). Items move here from `plan.md` (Rule 2)
 > and leave for `completed.md` only after verification (Rule 5).
 
-## Active items — batch 25 (clean-audit items 57-66, MEDIUM tier)
+## Active items — none
 
-Item 56 (report-builder wire-or-remove) stays parked in `plan.md` awaiting the
-owner decision noted there; this batch is the next ten eligible items.
-
-57. [med|bug] new_conversation + customer_reply both fire on every customer thread, no once-guard — automation.rs:1733 + workers.rs:1751-1766
-58. [med|bug] Knowledge FTS lane never dedupes per document — search.rs:591-593
-59. [med|bug] Fused RRF scores sorted against FTS-only 1.0 scores — search.rs:993-998
-60. [med|bug] Orphaned vectors never cleaned; stale chunk text keeps matching — search.rs:908-911
-61. [med|bug] Removing a type field bricks property updates of existing objects — custom_objects.rs:417-420,579-588
-62. [med|bug] parse_mentions diverges from scan_for_mentions (ASCII-only, no boundary) — mentions.rs:223-226
-63. [med|bug] rm_tags is a no-op in ammonia 4.x; title/textarea content leaks visible — richtext.rs:131-136
-64. [med|bug] rebuild_indexes double-inserts every thread into fts_threads — search.rs:1286-1297
-65. [med|bug] Notification sweep advances cursor past unprocessed events (>500 skipped forever) — notification_sweep.rs:124,46
-66. [med|bug] textutil: bare `<` swallows the rest of the body; double entity decode — textutil.rs:37-48
+Batch 25 (clean-audit items 57-66, the second ten MEDIUM-tier findings:
+the automation trigger pair firing both on every customer thread, the
+knowledge FTS lane a single multi-chunk document could flood, the fused
+ranking that buried its own semantic hits under FTS-only 1.0 scores, the
+orphaned vectors outliving their chunks with stale text, the type-field
+removal bricking its objects' patches, the mention parser disagreeing
+with its scanner, the sanitizer leaking the text of the tags it claimed
+to drop, the rebuild writing every thread into fts_threads twice, the
+sweep cursor sailing past its >500 backlog, and the text extractor
+swallowing bodies at a bare '<' while double-decoding entities) is
+complete and verified; the record is in `completed.md`. Item 56 remains
+parked pending the owner's wire-or-remove decision. The remaining 99
+audit findings are queued in `plan.md` (items 67-165) and the next ten
+start only on the owner's "continue".

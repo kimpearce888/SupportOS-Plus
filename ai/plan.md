@@ -68,8 +68,14 @@ breached-vs-first-response for replied tickets, the radar trend "new"
 verdict unreachable for ≥3 clusters, backlog_jump comparing against a
 false week-ago baseline) — verified and recorded in `completed.md`.
 
-Batch 25 = items 57-66 (in progress; item 56 stays parked below pending
-the owner's wire-or-remove decision).
+Batch 25 = items 57-66 (the trigger pair's once-guard, the knowledge FTS
+per-document dedupe, the fused-vs-FTS-only score scale, the orphaned
+vector sweep, the type-field removal that bricked patches, the mention
+parser aligned with its scanner, the ammonia rm_tags no-op, the
+fts_threads double-insert, the sweep cursor cap, and the textutil bare-'<'
+and double-decode fixes) — verified and recorded in `completed.md`.
+Item 56 (report-builder wire-or-remove) stays parked below pending the
+owner's decision, as do 150/151 (dead-feature calls).
 
 ### MEDIUM — wrong behavior on realistic paths
 
