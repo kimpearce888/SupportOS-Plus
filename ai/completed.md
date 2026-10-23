@@ -2983,3 +2983,152 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   `cargo update -p ctutils`, no code change; workspace tests re-run
   green on 0.4.5) — CI run `39971217122`: success, both jobs green
   (fmt/clippy/test/deny AND AppImage/deb build with the shell smoke).
+
+### Batch 27 — 2026-10-23 (code commit `b4aab92`)
+
+**77. Sync invalidation silently reverts unsaved Settings edits**
+(med|issue)
+— the pre-fix `invalidate` dropped the General form wholesale
+(`general = None`), so the next render's reload re-read the persisted
+values over whatever the user was typing — a sync landing mid-edit lost
+their changes. The form is user state now, with the same
+dirty-guard shape batch 26 gave the Library: the page tracks the last
+PERSISTED snapshot (`general_persisted`); invalidation only marks the
+page `stale` (connection status, business hours and backups re-read on
+the next render); and `reload` keeps a DIRTY form — one that differs
+from its snapshot — instead of overwriting it, while a clean or absent
+form still takes the fresh read. A successful save refreshes the
+snapshot, so later invalidations take fresh reads again. The tab-switch
+reload, the connect/disconnect completions and the workspace reset all
+flow through the same guard — no path clobbers unsaved edits.
+pages/settings.rs.
+
+**78. Inbox hard-capped at 50, no pagination** (med|gap)
+— `filters_from_bar` hardcoded `limit: Some(50), offset: Some(0)`, so
+conversation 51+ was unreachable while the subtitle said "50 of 1234".
+The cap is now a page size: `INBOX_PAGE_SIZE` with offset paging
+compiled from a `page` field, a shared `design::pager` widget under the
+list (prev/next with inert boundary glyphs), a range-reporting subtitle
+("51-100 of 1234"), page resets on every filter change (view chips,
+apply, search, ops clear, reset filters), and a clamp when the data
+shrinks underneath the current page (a past-the-end page falls back to
+the last page that still holds rows — one recursive step, never a dead
+end). pages/inbox.rs, design.rs.
+
+**79. Row click silently wipes the typed reply draft** (med|issue)
+— clicking another conversation row cleared the composer wholesale:
+a typed reply, cc/bcc, the note/reply mode — gone with no way back.
+The composer state now travels with its conversation: `select` stashes
+the outgoing conversation's draft (body/cc/bcc/mode + the AI-draft
+provenance, so accept/edit-distance feedback still records against the
+real row) and restores the incoming conversation's stash on reselect; a
+successful submit spends the stash (reselecting a sent conversation
+starts clean); and clicking the row that is ALREADY open touches the
+composer not at all — typing continues. pages/inbox.rs.
+
+**80. Approvals attributed to hardcoded user 5** (med|bug)
+— `decide` wrote literal user 5 as `decided_by_user_id` on every
+approval and rejection, so every decision by anyone was recorded as
+Ada's in the approvals table. The decision now carries the REAL acting
+user — `me_remote_id` (captured at the OAuth callback) resolved through
+the same `me_user_local_id` helper the notifications page uses — with
+Ada kept only as the no-identity stand-in (client-credentials/demo
+sessions, where no user identity exists to attribute).
+pages/automation.rs.
+
+**81. Known-issue links accept dangling ids and count them**
+(med|bug)
+— `create_known_issue` inserted a `known_issue_links` row for every
+id in the free-text field, existent or not (the table has no FK on
+conversation_id), and `refresh_known_issue_counts` counted them all —
+a typo'd id inflated the issue's conversation count forever. The link
+INSERT now SELECTs from conversations itself (a dangling id inserts
+zero rows), the count joins the conversations table (so pre-fix
+dangling rows stop counting at the next refresh), and the create form
+parses + dedupes + validates the ids against the table, reporting
+skipped unknown ids out loud instead of dropping them silently.
+pages/issue_radar.rs, core/intelligence_features.rs.
+
+**82. Customers page fetches page 1 only (50 cap)** (med|gap)
+— `reload_search` called `list_customers_summary(conn, query, 1, 50)`
+— customer 51+ was unreachable behind the hard-coded page 1. The fetch
+now takes the pager's page: `CUSTOMERS_PAGE_SIZE` with a `page` field,
+the shared `design::pager` under the table, a range-reporting card
+title, page resets on a new search and on back-from-profile, and the
+same past-the-end clamp as the inbox. pages/customers.rs.
+
+**83. LIKE input not escaped despite ESCAPE clause** (low|bug)
+— three call sites interpolated raw user text into LIKE patterns: the
+inbox query filter and `search_customers` (both with a declared but
+dead `ESCAPE '\'` clause — a `%`/`_` the user typed acted as a
+wildcard, and a trailing `\` escaped the wrapping percent so
+backslash-containing searches matched nothing) and the saved-replies
+mirror search (no ESCAPE clause at all — pure wildcard injection).
+One shared `pub fn escape_like` in core/search.rs now feeds all three;
+the mirror query also gains its ESCAPE clause. Literal means literal:
+"50%" finds only rows containing 50%, "a_b" is not a single-char
+wildcard, "path C:\temp" finds the backslash row.
+core/inbox.rs, core/customers.rs, core/mirror_readouts.rs,
+core/search.rs.
+
+**84. jobs::fail called with literal job id 0 (2 sites)** (low|bug)
+— the `draft_article` (missing candidateId) and `fetch_hs_report`
+(unknown report key) validation paths called `jobs::fail(&conn, 0, …)`:
+the failure updated nothing (job 0 does not exist) and the real job row
+sat in 'running' forever with its honest error written nowhere. Both
+functions now receive the real `job_id` from the dispatch, and the
+failure lands on the job row: status 'failed', the message on the row
+where the Knowledge page and the reports UI surface it.
+core/workers.rs.
+
+**85. Rating fetch errors swallowed; ratings permanently lost**
+(low|bug)
+— the satisfaction-webhook job fetched the rating with
+`let Ok(Some(r)) = …`, so an Err (a 5xx, a timeout — anything
+transient) matched nothing: the webhook fires once, the one fetch
+failed once, and the rating was lost forever while the job reported
+success. The fetch outcome is now matched explicitly: Ok(Some) stores
+and notifies as before, Ok(None) is an honest logged no-op (the rating
+genuinely does not exist platform-side), and Err fails the job — the
+queue's retry machinery re-fetches it with exponential backoff up to
+max_attempts, and the error is recorded on the job row.
+core/workers.rs.
+
+**86. Panic containment marks copilot jobs retryable (re-persists
+user message)** (low|bug)
+— the worker-boundary panic containment called
+`jobs::fail(…, retryable: true)`: a deterministic panic re-ran once
+per attempt, and each re-run re-executed the job's early side effects
+— a panicking copilot chat re-persisted the user's message every
+retry. A panic is a code defect, not a transient fault: the contained
+job now fails terminally (status 'failed', the honest panic error on
+the row, the UI notification unchanged), and no side effect runs twice.
+core/workers.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 409 passed / 0 failed / 4 ignored (11 new batch-27
+  regressions: the literal-`%`/`_`/trailing-backslash LIKE semantics on
+  all three call sites; the draft_article and fetch_hs_report failures
+  landing on the real job row; the rating fetch failure requeueing
+  with nothing stored; and the panicking job failing terminally with
+  no second execution); app-shell 209 passed / 0 failed (15 new
+  batch-27 regressions: the invalidation keeping unsaved General edits
+  while a clean form still takes fresh reads and a save clears the
+  guard; page one reaching conversations 51-55 with no overlap and
+  full coverage, the offset compiling from the page index, and the
+  past-the-end clamp; the row-click stash/restore with mode, the
+  same-row click touching nothing; the approval attributed to the
+  acting user with the no-identity stand-in; the dangling ids gaining
+  no links, the pre-fix dangling rows not counting, and the page
+  reporting skipped ids after dedupe; and the customers page two
+  reaching customers 51-55 with its own clamp); xtask 6; catalog 0.
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4043 shapes painted.
+- Fresh harness `scripts/verify_batch27.py` (committed): all 52
+  checks pass; the batch-26 harness still passes.
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).
