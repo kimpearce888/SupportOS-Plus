@@ -1,6 +1,6 @@
 # SupportOs-Plus — TODO
 
-> Remaining work items, executed five at a time under `rule.md`.
+> Remaining work items, executed ten at a time under `rule.md` (batch size raised from five by the owner, 2026-10-23).
 > Status flow: `plan.md` → `progress.md` → implementation → verification → `completed.md`.
 > Planning context and decision ledger: `decisions.md`.
 
@@ -46,19 +46,20 @@ verification, team ids kept out of the user-assignee slot with
 assigned_team_id consumed, fenced/prose extraction parsing on the
 json_mode lane, the extraction prompt crossing the redaction boundary)
 — verified and recorded in `completed.md`.
+Batch 23 = items 36-45 (customer_messages excludes soft-deleted threads
+and takes the NEWEST 30, extraction runs leave `queued` and reach the
+cost ledger, the cache-hit path pairs the hash-matched run's id with its
+own analysis, the draft fallback stores the model's text rather than the
+raw JSON envelope, the interaction-strategy prompt block feeds real
+strategy data instead of a hard-coded None, get_customer_memory labels AI
+rows as AI rather than human-written, the cluster prompt caps its
+conversation list, copilot runs recorded in the cost ledger with
+usage/endpoint, the tool-budget cutoff no longer strands dangling
+tool_call ids, insert_message surfaces INSERT failures instead of echoing
+a stale rowid) — in progress.
 
 ### MEDIUM — wrong behavior on realistic paths
 
-36. [med|bug] customer_messages includes soft-deleted threads, takes OLDEST 30 — ai_attributes.rs:690-692
-37. [med|issue] Extraction runs stuck `queued`, invisible to the cost ledger — ai_attributes.rs:966-968
-38. [med|bug] Cache-hit path mixes hash-matched run id with newest run's analysis — ai_pipeline.rs:872-877
-39. [med|bug] Draft fallback stores the raw JSON envelope as the draft — ai_pipeline.rs:1071
-40. [med|gap] Interaction-strategy prompt block hard-coded None; section unreachable — ai_pipeline.rs:1898-1900
-41. [med|issue] get_customer_memory relays AI rows as "human-written" — ai_tools.rs:1378
-42. [med|issue] Cluster prompt has no conversation cap → context blowup at volume — ai_pipeline.rs:1518-1520
-43. [med|bug] Copilot runs invisible to the cost ledger (no usage/endpoint) — copilot.rs:216-219,354-375
-44. [med|bug] Tool-budget cutoff leaves dangling tool_call ids (400 on strict servers) — copilot.rs:254-292
-45. [med|bug] insert_message swallows INSERT failure, echoes stale rowid — copilot.rs:618-635
 46. [med|bug] Knowledge-chunk batch poisoned by one empty vector — embeddings.rs:895-914
 47. [med|bug] Customer email patch deletes ALL stored emails, errors swallowed — people_store.rs:1245-1256
 48. [med|bug] verify_bundle leaks decrypted plaintext temp on error paths, no sweep — encrypted_sync.rs:481-487
