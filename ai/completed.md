@@ -2099,3 +2099,133 @@ Verification (Rule 5):
   smoke, all green on the runner).
 - Security: staged diff token-scanned clean before the push; remote
   unmoved at push time (fetch-first).
+
+## Batch 22 — clean-audit items 31-35 (MEDIUM tier: the api_concurrency setting that never applied, the webhook secret cap disagreement, the team id in the user-assignee slot, the extraction parse that lost fenced answers, the extraction prompt that bypassed redaction)
+
+**31. `api_concurrency` setting parsed/saved but never applied** (med|gap)
+— the Settings form loaded and saved `api_concurrency` (DragValue,
+range 1..=8) and the config layer read `SYNC_API_CONCURRENCY`, but
+nothing ever called `RealHelpScoutProvider::set_api_concurrency`: every
+provider — boot-built, mid-session activation, worker-built — ran both
+API queues at the hard-coded default of 2 forever, and even a live call
+would have resized only the conversations queue, never the docs queue.
+The provider constructor now resolves the setting (stored value over
+the env default; stored 0/negative clamps to 1; unparsable falls back
+to the env default) so every construction path starts at the
+configured width, `set_api_concurrency` resizes BOTH queues, the queue
+exposes its current limit (`ApiQueue::concurrency`), and
+`save_general` captures the pre-save value and pushes a change to the
+live provider through the shared handle in-session. The form's save
+message stays honest about what a restart would not have fixed.
+api_queue.rs, helpscout_real.rs, pages/settings.rs.
+
+**32. Webhook secret capped to 40 chars at registration but verified
+with the full secret** (med|bug)
+— the health check re-registered hooks with `capped_secret` (first 40
+characters, the platform's rule), while the loopback's webhook ingress
+verified delivery signatures with the FULL stored/env secret: any
+configured secret over the cap meant the platform signed with the
+truncation while the app verified with the whole string — every
+delivery failed the check, ten discards silently deactivated the hook,
+and the health check re-registered it into the same trap. One
+canonical `webhook::effective_secret` (SECRET_CAP = 40) now lives at
+the signature boundary; registration delegates to it and the loopback
+resolves the stored/env secret through it before verification, so both
+sides always agree. The credential form says the truncation out loud
+when it stores more than the platform will keep.
+webhook.rs, webhook_health.rs, loopback.rs, pages/settings.rs.
+
+**33. Team id written into the user-assignee slot;
+`assigned_team_id` unconsumed** (med|bug)
+— `map_conversation` copied `assignee.id` into `assignee_id`
+regardless of the assignee's type: a team-assigned conversation put
+the TEAM id where only user ids belong, so the sync's users lookup
+either found no match (team-assigned tickets showed "unassigned") or —
+when a team and a user share a platform id — resolved to the WRONG
+user. `assigned_team_id` was parsed (assignedTeam, or a team-typed
+assignee) and then dropped: nothing consumed it, and the mirror's
+`conversations.assigned_team_local_id` column (present since m040)
+stayed forever NULL. The mapper now leaves the user slot empty for
+team-typed assignees and carries the team in its own field; the sync
+resolves and persists the team's local id; the inbox list, detail view
+and assign combo surface the team by name ("team: Billing" instead of
+a phantom "unassigned" or the wrong user), and an unmirrored team id
+degrades to no-team rather than poisoning either slot.
+helpscout_real.rs, sync.rs, inbox.rs, pages/inbox.rs.
+
+**34. Attribute extraction parses raw output without
+fence-stripping/json_mode** (med|bug)
+— `finish_computation` ran `serde_json::from_str` on the model's raw
+answer: a local model that wraps its JSON in markdown fences or
+surrounds it with prose (the normal behavior of LM Studio/llama.cpp
+served models) failed the strict parse, and the whole extraction
+silently fell away — no attributes, no stored run, no error.
+Fresh output now parses through the pipeline's canonical
+`extract_json` fence-stripper (the same one `chat_json` uses), and the
+request rides a new structured chat lane: `LocalAiProvider` gained a
+defaulted `chat_structured` (json_mode + deterministic temperature,
+matching the pipeline's lane) which `LmStudioProvider` maps onto
+`chat_with_opts(response_format: json_object)`, so endpoints that
+support structured output deliver clean JSON while those that don't
+still work through the default with defensive parsing.
+ai_attributes.rs, ai_provider.rs, ai_lm_studio.rs.
+
+**35. Attribute extraction bypasses the prompt-redaction boundary**
+(med|issue)
+— `run_extraction` sent the prompt — raw customer messages, subject,
+and thread text — straight to `provider.chat`, while every other AI
+path (the pipeline's `chat_json`) crosses the prompt-redaction
+boundary: `redaction_enabled` (default on) applies
+`security::redact_text`, so card numbers, CVVs, credentials, bearer
+tokens, AWS keys and private key blocks never reach the model. The
+extraction now crosses the same boundary before the send (the
+redacted prompt is what the model receives; redaction findings are
+logged; `redaction_enabled=false` passes the text through verbatim,
+honoring the setting like every other path).
+ai_attributes.rs.
+
+Out-of-band verification fix (not a plan item): the digest
+`facts_collect_volume_anomaly_and_happiness` test seeded its "loud
+day" at a fixed 09:00 UTC wall-clock — before 09:00 UTC that timestamp
+lies in the future, outside `collect_facts`' now-ended collection
+window, and the test failed (observed 2026-10-23 00:18 UTC, count 16 →
+6). The loud day now seeds at *now* (same calendar day, always inside
+the window); the six quiet days keep their fixed 09:00 stamps. No
+production code touched. digest.rs (tests only).
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `cargo fmt --all --check`: clean (the digest test fix initially
+  missed the fmt pass and failed CI's format gate on commit `c4abd83`
+  — run 39878955781, job `fmt, clippy, test, deny` failed at the
+  Format check step only; the formatting followup `54185ff` is clean).
+- `cargo clippy --workspace --all-targets -D warnings`: clean;
+  `--features sandbox`: clean.
+- Tests: core 325 passed / 0 failed / 4 ignored (10 new batch-22
+  regressions: fenced and prose-wrapped extraction outputs parse with
+  the run stored; the extraction prompt crosses the redaction boundary
+  with the placeholder reaching the model, non-PII surviving, the
+  structured lane used and the plain lane never, and
+  redaction_enabled=false honored verbatim; the canonical cap asserted
+  at the signature boundary including the truncation-verifies/full-
+  fails pair; the over-the-cap loopback delivery verifies against the
+  truncation while the full-secret signature still 401s; the stored
+  setting reaches both provider queues with the live resize covering
+  the docs queue, stored 0 clamping to 1 and garbage falling back to
+  the default; the mapper keeps team ids out of the user slot across
+  team/user/both/assignedTeam-only payload shapes; the end-to-end
+  team-column regression with the id collision (user 42 ≠ team 42),
+  inbox list + detail showing the team by name, the honest flip to a
+  user assignment, and the unmirrored-team degradation); the digest
+  volume-spike flake fix; sandbox-feature suite 330 passed / 0 failed /
+  4 ignored; app-shell 180 passed / 0 failed (1 new: a changed
+  api_concurrency reaches the live provider's queues in-session and a
+  fresh provider construction applies the stored setting); xtask 6;
+  catalog 0.
+- Fresh harness `scripts/verify_batch22.py` (committed; also archived
+  at /home/z/my-project/scripts/): all 30 checks pass.
+- Runner verification: code commits `c4abd83` + fmt followup `54185ff`
+  — CI run `39879565057` on `54185ff`: success, both jobs
+  (fmt/clippy/test/deny + AppImage/deb build and smoke, all green on
+  the runner).
+- Security: staged diff token-scanned clean before each push; remote
+  unmoved at push time (fetch-first).
