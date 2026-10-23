@@ -3132,3 +3132,8 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   checks pass; the batch-26 harness still passes.
 - Security: staged diff token-scanned clean before each push; remote
   unmoved at push time (fetch-first).
+- Runner verification (added after the run): code commit `b4aab92` —
+  CI run `39994546286`: success, both jobs green (fmt/clippy/test/deny
+  AND the AppImage/deb build with the SPP_SMOKE shell smoke). The
+  batch-opening commit `f3da4c9` and the tracking commit `a24ce00`
+  also ran green (runs `39987498920` and `39994712702`: success).
