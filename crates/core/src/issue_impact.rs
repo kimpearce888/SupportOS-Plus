@@ -82,7 +82,7 @@ fn compute(
                         AND cu.organization IS NOT NULL AND TRIM(cu.organization) != '') AS organizations,
                    MIN(c.created_at) AS first_seen,
                    MAX(c.created_at) AS last_seen,
-                   SUM(CASE WHEN c.status = 'active' THEN 1 ELSE 0 END) AS open_count,
+                   SUM(CASE WHEN c.status IN ('active','pending') THEN 1 ELSE 0 END) AS open_count,
                    SUM(CASE WHEN c.status = 'closed' THEN 1 ELSE 0 END) AS closed_count,
                    SUM(CASE WHEN c.customer_waiting_since IS NOT NULL AND c.status = 'active' THEN 1 ELSE 0 END) AS waiting_count
                  {base}"
@@ -252,6 +252,11 @@ fn compute(
         "affected_inboxes": inboxes,
         "top_tags": tags,
         "products": products,
+        // Audit item 113: 'pending' is an unresolved conversation — the
+        // workload, operations and digest surfaces all count open as
+        // status IN ('active','pending') — but this distribution dropped
+        // it, so open + closed silently undercounted affected_conversations
+        // whenever a linked conversation sat in the platform's pending state.
         "open_closed_distribution": { "open": open_count, "closed": closed_count },
         "customer_waiting_count": waiting_count,
         "release_correlation_candidates": release_candidates,
@@ -303,4 +308,44 @@ fn collect_pairs(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// Audit item 113: 'pending' is an unresolved conversation — every
+    /// other surface counts open as status IN ('active','pending') — but
+    /// the open/closed distribution dropped it, so open + closed silently
+    /// undercounted affected_conversations.
+    #[test]
+    fn open_closed_distribution_counts_pending_as_open() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute("INSERT INTO incidents (description) VALUES ('outage')", [])
+            .expect("incident");
+        let incident: i64 = conn.last_insert_rowid();
+        for (remote, status) in [(70_i64, "active"), (71, "pending"), (72, "closed")] {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at)
+                 VALUES (?1, ?1, 'incident conv', 'p', ?2, datetime('now'))",
+                rusqlite::params![remote, status],
+            )
+            .expect("conversation");
+            conn.execute(
+                "INSERT INTO incident_conversations (incident_id, conversation_id) VALUES (?1, ?2)",
+                rusqlite::params![incident, conn.last_insert_rowid()],
+            )
+            .expect("link");
+        }
+
+        let v = for_incident(&conn, incident).expect("impact");
+        assert_eq!(v["affected_conversations"], 3);
+        assert_eq!(
+            v["open_closed_distribution"]["open"], 2,
+            "active + pending are both open"
+        );
+        assert_eq!(v["open_closed_distribution"]["closed"], 1);
+    }
 }

@@ -957,6 +957,24 @@ pub fn campaign_retry_failed(conn: &Connection, campaign_id: i64) -> serde_json:
 /// Returns (resolved_sent, returned_to_queue, still_unknown). Pure state
 /// repair: no continuation job is enqueued here.
 fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64, i64) {
+    // Audit item 115: the reconcile UPDATEs stamp `updated_at`, but on
+    // databases created before the item-17 batch the column does not
+    // exist, and this path ran without the schema self-heal — every
+    // state-transition UPDATE failed with "no such column", the error was
+    // swallowed by `let _`, the row stayed in 'unknown' forever (re-logged
+    // by every reconcile pass) and the counters still reported it as
+    // processed. The ensure runs here so BOTH entry paths
+    // (`campaign_reconcile` and the `send_batch` sweep) repair the schema
+    // before touching the clock; it is idempotent and cheap.
+    if let Err(e) = ensure_recipient_updated_at(conn) {
+        log_event(
+            conn,
+            campaign_id,
+            None,
+            "recipient_schema_ensure_failed",
+            Some(&e.to_string()),
+        );
+    }
     type UnknownRow = (i64, Option<i64>, Option<String>, Option<String>);
     let unknowns: Vec<UnknownRow> = conn
         .prepare(
@@ -2925,5 +2943,76 @@ mod batch19_tests {
             })
             .expect("pragma");
         assert!(has_column, "the claim/staleness clock column exists");
+    }
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// Audit item 115: campaign_reconcile → reconcile_recipient_states
+    /// stamps `updated_at`, but on databases created before the item-17
+    /// batch the column does not exist and this path ran without the
+    /// schema self-heal — every transition UPDATE failed with "no such
+    /// column", the error was swallowed, the row stayed 'unknown' forever
+    /// and the counters still counted it. The reconcile path repairs the
+    /// schema itself now.
+    #[test]
+    fn campaign_reconcile_self_heals_missing_updated_at_column() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        // Simulate a pre-item-17 database: no claim/staleness clock column.
+        conn.execute_batch("ALTER TABLE outreach_recipients DROP COLUMN updated_at;")
+            .expect("legacy schema");
+
+        conn.execute(
+            "INSERT INTO outreach_campaigns (name, subject, body, status)
+             VALUES ('legacy', 'Hi', 'Body', 'sending')",
+            [],
+        )
+        .expect("campaign");
+        let campaign: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (555, 'C')",
+            [],
+        )
+        .expect("customer");
+        conn.execute(
+            "INSERT INTO outreach_recipients
+                 (campaign_id, customer_local_id, customer_remote_id, email, state, attempts, sent_at)
+             VALUES (?1, 1, 555, 'c@example.com', 'unknown', ?2, datetime('now', '-1 hour'))",
+            rusqlite::params![campaign, MAX_ATTEMPTS],
+        )
+        .expect("recipient");
+
+        let out = campaign_reconcile(&conn, campaign);
+        assert_eq!(out["stillUnknown"], 1);
+
+        // The self-heal re-added the column and the exhausted-attempts
+        // transition actually landed instead of silently no-opping.
+        let state: String = conn
+            .query_row(
+                "SELECT state FROM outreach_recipients WHERE campaign_id = ?1",
+                [campaign],
+                |r| r.get(0),
+            )
+            .expect("recipient state");
+        assert_eq!(
+            state, "failed",
+            "attempts exhausted + no mirror match = failed, not stuck 'unknown'"
+        );
+        let has_column: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('outreach_recipients')
+                  WHERE name = 'updated_at'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("pragma");
+        assert!(
+            has_column,
+            "the reconcile path must self-heal the clock column"
+        );
     }
 }

@@ -442,8 +442,12 @@ fn happiness_facts(conn: &Connection, start: &str, end: &str) -> Value {
 
 /// "What changed": new gap candidates and new/updated knowledge since the
 /// previous archived digest (or the whole period for the first digest).
-/// `datetime()` normalizes both the ISO-T and space-separated formats the
-/// schema mixes.
+/// Every comparison goes through `datetime()` — it normalizes both the
+/// ISO-T and space-separated formats the schema mixes. Audit item 108:
+/// the two doc queries compared raw strings, so a stored space-format
+/// stamp (`2026-10-20 11:30:00`) sorted before the ISO-T `since` bound
+/// on the same day (`2026-10-20T10:00:00.000Z`, because ` ` < `T`) and
+/// a same-day-later update silently fell out of the digest counts.
 fn change_facts(conn: &Connection, start: &str) -> Value {
     let since = latest_digest_created_at(conn).unwrap_or_else(|| start.to_string());
     let new_gaps: Vec<Value> = conn
@@ -465,7 +469,8 @@ fn change_facts(conn: &Connection, start: &str) -> Value {
     let new_articles: Vec<Value> = conn
         .prepare(
             "SELECT name, status, remote_updated_at FROM docs_articles
-              WHERE remote_updated_at >= ?1 ORDER BY remote_updated_at DESC LIMIT 12",
+              WHERE datetime(remote_updated_at) >= datetime(?1)
+              ORDER BY datetime(remote_updated_at) DESC LIMIT 12",
         )
         .and_then(|mut stmt| {
             stmt.query_map(params![since], |r| {
@@ -480,7 +485,7 @@ fn change_facts(conn: &Connection, start: &str) -> Value {
         .unwrap_or_default();
     let new_documents: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM knowledge_documents WHERE updated_at >= ?1",
+            "SELECT COUNT(*) FROM knowledge_documents WHERE datetime(updated_at) >= datetime(?1)",
             params![since],
             |r| r.get(0),
         )
@@ -782,5 +787,62 @@ mod batch24_audit55_tests {
             .find(|a| a["kind"] == json!("backlog_jump"))
             .expect("16 > 10 + 5 fires the jump");
         assert_eq!(jump["from"], json!(10), "only the 10 open-at-start count");
+    }
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+
+    /// Audit item 108: the two doc queries compared raw strings against
+    /// the ISO-T `since` bound, so a stored space-format stamp later on
+    /// the same day sorted BEFORE the bound (`' ' < 'T'`) and silently
+    /// fell out of the digest's change facts. All three comparisons
+    /// normalize through datetime() now.
+    #[test]
+    fn change_facts_counts_space_format_docs_after_iso_t_since() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+
+        conn.execute("INSERT INTO knowledge_sources (name) VALUES ('src')", [])
+            .expect("source");
+        // Same-day updates in the space format the local writers emit:
+        // 11:30 is AFTER the 10:00 ISO-T bound, 09:00 is before it.
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, updated_at)
+             VALUES (1, 'doc updated later same day', '2026-10-20 11:30:00')",
+            [],
+        )
+        .expect("doc later");
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, updated_at)
+             VALUES (1, 'doc updated earlier same day', '2026-10-20 09:00:00')",
+            [],
+        )
+        .expect("doc earlier");
+
+        conn.execute(
+            "INSERT INTO docs_articles (remote_id, name, status, remote_updated_at)
+             VALUES (11, 'Article later same day (space)', 'published', '2026-10-20 11:30:00')",
+            [],
+        )
+        .expect("article later");
+        conn.execute(
+            "INSERT INTO docs_articles (remote_id, name, status, remote_updated_at)
+             VALUES (12, 'Article before since (ISO-T)', 'published', '2026-10-19T09:00:00.000Z')",
+            [],
+        )
+        .expect("article before");
+
+        let facts = change_facts(&conn, "2026-10-20T10:00:00.000Z");
+        assert_eq!(
+            facts["new_local_documents"], 1,
+            "the 11:30 space-format update is after the 10:00 ISO-T bound"
+        );
+        let articles = facts["changed_help_center_articles"]
+            .as_array()
+            .expect("articles");
+        assert_eq!(articles.len(), 1, "only the later same-day article counts");
+        assert_eq!(articles[0]["name"], "Article later same day (space)");
     }
 }

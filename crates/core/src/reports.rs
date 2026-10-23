@@ -129,8 +129,16 @@ pub fn get_dashboard_metrics(
 
     let new_conv: i64 = conn.query_row(
         &format!(
+            // Audit item 109: the "new conversations" window keyed on
+            // `local_created_at` — the LOCAL INSERT stamp (schema default
+            // datetime('now')), never the platform payload — so every
+            // backfilled/historical conversation counted as new on the
+            // day it was synced. It also counted soft-deleted rows. The
+            // window now keys on the real creation stamp and excludes
+            // deleted conversations.
             "SELECT COUNT(*) FROM conversations
-             WHERE julianday(local_created_at) >= julianday('now', '-{days_back} days')
+             WHERE julianday(COALESCE(remote_created_at, created_at)) >= julianday('now', '-{days_back} days')
+               AND deleted_at IS NULL
              {mailbox_clause}"
         ),
         [],
@@ -226,18 +234,29 @@ pub fn build_report(
 ) -> Result<ReportResult> {
     let days_back = days_back.max(1) as i64;
 
+    // The conversation's real creation stamp — the platform payload's
+    // createdAt, with the remote alias first — the same key the rest of
+    // the reporting surface (digest, segments, AI pipeline) uses.
+    // Audit items 109 + 110: the windows and the time dimensions keyed on
+    // `local_created_at` (the local insert stamp) and the week dimension
+    // paired `%Y` with `%W` — `2025-W53`/`2026-W00` split one natural
+    // week at the year boundary. Buckets and windows now share the
+    // creation stamp, and weeks are ISO (`%G`-`%V`, SQLite >= 3.44), so
+    // Dec 29 and Jan 1 land in the same week bucket.
+    let created_stamp = "COALESCE(remote_created_at, created_at)";
+
     let (dim_expr, dim_label) = match dimension {
         ReportDimensionKey::None => ("'all'".to_string(), "all".to_string()),
         ReportDimensionKey::Day => (
-            "strftime('%Y-%m-%d', local_created_at)".to_string(),
+            format!("strftime('%Y-%m-%d', {created_stamp})"),
             "day".to_string(),
         ),
         ReportDimensionKey::Week => (
-            "strftime('%Y-W%W', local_created_at)".to_string(),
+            format!("strftime('%G-W%V', {created_stamp})"),
             "week".to_string(),
         ),
         ReportDimensionKey::Month => (
-            "strftime('%Y-%m', local_created_at)".to_string(),
+            format!("strftime('%Y-%m', {created_stamp})"),
             "month".to_string(),
         ),
         ReportDimensionKey::Mailbox => ("mailbox_local_id".to_string(), "mailbox".to_string()),
@@ -249,9 +268,14 @@ pub fn build_report(
     let (metric_expr, definition, limitations) = metric_info(metric);
 
     let sql = format!(
+        // Audit item 109: the metric limitation for Conversations claims
+        // "Does not include deleted conversations" — no filter did. Every
+        // report row now excludes soft-deleted conversations and keys the
+        // period window on the creation stamp instead of the local insert stamp.
         "SELECT {dim_expr} as dim, {metric_expr} as val
          FROM conversations
-         WHERE julianday(local_created_at) >= julianday('now', '-{days_back} days')
+         WHERE julianday({created_stamp}) >= julianday('now', '-{days_back} days')
+           AND deleted_at IS NULL
          GROUP BY {dim_expr}
          ORDER BY {dim_expr}"
     );
@@ -270,8 +294,9 @@ pub fn build_report(
     let prev_sql = format!(
         "SELECT {dim_expr} as dim, {metric_expr} as val
          FROM conversations
-         WHERE julianday(local_created_at) >= julianday('now', '-{prev_days_start} days')
-           AND julianday(local_created_at) < julianday('now', '-{days_back} days')
+         WHERE julianday({created_stamp}) >= julianday('now', '-{prev_days_start} days')
+           AND julianday({created_stamp}) < julianday('now', '-{days_back} days')
+           AND deleted_at IS NULL
          GROUP BY {dim_expr}
          ORDER BY {dim_expr}"
     );
@@ -2267,5 +2292,126 @@ mod p1_tests {
         )
         .expect("old rating");
         assert_eq!(happiness_overview(&conn, 30)["total"], 0);
+    }
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// Audit item 109: the "new conversations" window keyed on
+    /// local_created_at — the local INSERT stamp — so a backfilled
+    /// conversation created 5 days ago but synced today counted as new,
+    /// while a genuinely new conversation synced late still counted. The
+    /// window keys on the platform creation stamp now and skips deleted
+    /// rows.
+    #[test]
+    fn dashboard_new_conversations_key_on_creation_not_local_insert() {
+        let conn = db();
+        // Created 5 days ago on the platform, synced today
+        // (local_created_at takes its datetime('now') default).
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at)
+             VALUES (10, 10, 'backfilled', 'p', 'active', datetime('now', '-5 days'))",
+            [],
+        )
+        .expect("backfilled conversation");
+        // Created 60 days ago on the platform, also synced today — not new.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at)
+             VALUES (11, 11, 'old backfill', 'p', 'active', datetime('now', '-60 days'))",
+            [],
+        )
+        .expect("old conversation");
+        // Created now but soft-deleted — never counts.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at, deleted_at)
+             VALUES (12, 12, 'deleted', 'p', 'active', datetime('now'), datetime('now'))",
+            [],
+        )
+        .expect("deleted conversation");
+
+        let m = get_dashboard_metrics(&conn, None, 30).expect("metrics");
+        assert_eq!(m.new_conversations, 1, "only the 5-day-old creation counts");
+    }
+
+    /// Audit item 110: %Y+%W split one natural week at the year boundary
+    /// (2025-12-30 reported as "2025-W53"-style, 2026-01-01 as "2026-W00").
+    /// ISO %G-%V keeps both in 2026-W01. Buckets also key on the creation
+    /// stamp and exclude deleted rows (item 109).
+    #[test]
+    fn week_dimension_is_iso_and_keeps_year_boundary_together() {
+        let conn = db();
+        for (remote, day) in [
+            (20_i64, "2025-12-30T12:00:00.000Z"),
+            (21, "2026-01-01T09:00:00.000Z"),
+        ] {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at)
+                 VALUES (?1, ?1, 'year boundary', 'p', 'active', ?2)",
+                params![remote, day],
+            )
+            .expect("boundary conversation");
+        }
+        // Same week window, but deleted — must not join the bucket.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at, deleted_at)
+             VALUES (22, 22, 'deleted boundary', 'p', 'active',
+                     '2026-01-02T09:00:00.000Z', datetime('now'))",
+            [],
+        )
+        .expect("deleted boundary conversation");
+
+        let report = build_report(
+            &conn,
+            ReportMetricKey::Conversations,
+            ReportDimensionKey::Week,
+            400,
+        )
+        .expect("report");
+        assert_eq!(
+            report.rows.len(),
+            1,
+            "both boundary days share one ISO week"
+        );
+        assert_eq!(report.rows[0].dimension_value, "2026-W01");
+        assert_eq!(report.rows[0].metric_value, 2.0);
+    }
+
+    /// Audit item 109: the Conversations metric's limitation claims
+    /// "Does not include deleted conversations" — nothing filtered them.
+    #[test]
+    fn build_report_excludes_soft_deleted_conversations() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at)
+             VALUES (30, 30, 'live', 'p', 'active', datetime('now', '-1 days'))",
+            [],
+        )
+        .expect("live conversation");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at, deleted_at)
+             VALUES (31, 31, 'deleted', 'p', 'active', datetime('now', '-1 days'), datetime('now'))",
+            [],
+        )
+        .expect("deleted conversation");
+
+        let report = build_report(
+            &conn,
+            ReportMetricKey::Conversations,
+            ReportDimensionKey::None,
+            30,
+        )
+        .expect("report");
+        assert!(report.metric_limitations.contains("deleted"));
+        assert_eq!(report.rows.len(), 1);
+        assert_eq!(report.rows[0].metric_value, 1.0);
     }
 }

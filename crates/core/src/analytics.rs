@@ -209,14 +209,19 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
         }
     }
 
+    // Audit item 111: the LIMIT 1000 silently truncated the sample the
+    // alert's claim is built on — 2,500 escalated tickets reported as
+    // "1000 escalated tickets", and older not-good ratings dropped out
+    // of the rating overlap. Both caps are gone so the counts match the
+    // claims; the tables are local and the queries are bounded by the
+    // 30-day window.
     let escalated: Vec<i64> = conn
         .prepare(
             "SELECT c.id FROM conversations c
                JOIN conversation_tags ct ON ct.conversation_id = c.id
                JOIN tags t ON t.id = ct.tag_id
               WHERE t.name = 'escalated'
-                AND julianday(c.created_at) >= julianday('now', '-30 days')
-              LIMIT 1000",
+                AND julianday(c.created_at) >= julianday('now', '-30 days')",
         )
         .map(|mut stmt| {
             stmt.query_map([], |r| r.get::<_, i64>(0))
@@ -238,11 +243,12 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
         ));
     }
 
+    // Audit item 111: no silent LIMIT 2000 — the rating_correlated
+    // overlap must see every not-good rating, not just the newest 2000.
     let bad_ids: std::collections::HashSet<i64> = conn
         .prepare(
             "SELECT r.conversation_id FROM ratings r
-              WHERE r.rating = 'not-good' AND r.conversation_id IS NOT NULL
-              ORDER BY r.id DESC LIMIT 2000",
+              WHERE r.rating = 'not-good' AND r.conversation_id IS NOT NULL",
         )
         .map(|mut stmt| {
             stmt.query_map([], |r| r.get::<_, i64>(0))
@@ -486,13 +492,27 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
 
         let customers: std::collections::HashSet<i64> =
             convs.iter().filter_map(|f| f.customer_id).collect();
-        if convs.len() >= 4 && !customers.is_empty() && customers.len() <= convs.len() / 2 {
+        // Audit item 112: conversations whose grouping key is NULL can
+        // never concentrate, but they were counted in the denominator —
+        // inflating the customer ratio (unattributed imports made the
+        // alert fire on imaginary concentration) and diluting the inbox
+        // ratio (silently suppressing real single-inbox concentration).
+        // Both checks now run over the attributed subset only, and the
+        // claim texts report the attributed totals.
+        let attributed: Vec<&ConvFacts> = convs
+            .iter()
+            .copied()
+            .filter(|f| f.customer_id.is_some())
+            .collect();
+        let attributed_total = attributed.len();
+        if attributed_total >= 4 && !customers.is_empty() && customers.len() <= attributed_total / 2
+        {
             alerts.push(radar_alert(
                 "customer_concentration",
                 format!("Customer concentration: {}", c.title),
                 format!(
                     "{} conversations from only {} distinct customers - a small group hitting the same problem repeatedly (an association, not a causal claim). {}",
-                    convs.len(),
+                    attributed_total,
                     customers.len(),
                     c.summary
                 ),
@@ -502,9 +522,15 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
             ));
         }
 
+        let with_mailbox: Vec<&ConvFacts> = convs
+            .iter()
+            .copied()
+            .filter(|f| f.mailbox_id.is_some())
+            .collect();
+        let mailbox_total = with_mailbox.len();
         let mut mailbox_counts: std::collections::HashMap<i64, usize> =
             std::collections::HashMap::new();
-        for f in &convs {
+        for f in &with_mailbox {
             if let Some(m) = f.mailbox_id {
                 *mailbox_counts.entry(m).or_insert(0) += 1;
             }
@@ -514,8 +540,8 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
             .max_by_key(|(_, n)| **n)
             .map(|(m, n)| (*m, *n));
         if let Some((mailbox_id, n)) = dominant
-            && convs.len() >= 4
-            && n as f64 / convs.len() as f64 >= 0.7
+            && mailbox_total >= 4
+            && n as f64 / mailbox_total as f64 >= 0.7
         {
             let mailbox_name: String = conn
                 .query_row(
@@ -530,7 +556,7 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
                 format!(
                     "{} of {} conversations arrived in \"{}\" - the issue is concentrated in one channel. {}",
                     n,
-                    convs.len(),
+                    mailbox_total,
                     mailbox_name,
                     c.summary
                 ),
@@ -824,5 +850,170 @@ mod batch24_audit54_tests {
             .expect("member");
         }
         assert_eq!(trend_of(&conn, "small-new"), "new");
+    }
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+    use rusqlite::{Connection, params};
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_cluster_conv(
+        conn: &Connection,
+        cluster: i64,
+        number: i64,
+        customer_local_id: Option<i64>,
+        mailbox_local_id: Option<i64>,
+        created_offset: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, customer_local_id, mailbox_local_id, created_at)
+             VALUES (?1, ?1, 'concentration seed', ?2, ?3, datetime('now', ?4))",
+            params![number, customer_local_id, mailbox_local_id, created_offset],
+        )
+        .expect("conversation");
+        conn.execute(
+            "INSERT INTO issue_cluster_conversations (cluster_id, conversation_id) VALUES (?1, ?2)",
+            params![cluster, conn.last_insert_rowid()],
+        )
+        .expect("member");
+    }
+
+    /// Audit item 112: NULL-mailbox conversations diluted the inbox
+    /// concentration denominator — 4 of 7 (0.57) suppressed an alert that
+    /// is really 4 of 4 attributed conversations in one inbox (1.0).
+    #[test]
+    fn inbox_concentration_ignores_unattributed_conversations() {
+        let conn = db();
+        // Real parent rows: customer_local_id / mailbox_local_id are FKs.
+        conn.execute(
+            "INSERT INTO mailboxes (remote_id, name) VALUES (1, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        let mailbox: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (101, 'Casey')",
+            [],
+        )
+        .expect("customer");
+        let customer: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO issue_clusters (name, conversation_count) VALUES ('inbox-spike', 7)",
+            [],
+        )
+        .expect("cluster");
+        let cluster = conn.last_insert_rowid();
+        for number in 9001..=9004 {
+            seed_cluster_conv(
+                &conn,
+                cluster,
+                number,
+                Some(customer),
+                Some(mailbox),
+                "-2 days",
+            );
+        }
+        for number in 9005..=9007 {
+            seed_cluster_conv(&conn, cluster, number, None, None, "-2 days");
+        }
+
+        let clusters = radar_clusters(&conn);
+        let alerts = radar_extensions(&conn, &clusters);
+        let inbox = alerts
+            .iter()
+            .find(|a| a["kind"] == "inbox_concentration")
+            .unwrap_or_else(|| panic!("inbox_concentration alert missing: {alerts:?}"));
+        assert!(
+            inbox["detail"]
+                .as_str()
+                .unwrap()
+                .starts_with("4 of 4 conversations"),
+            "denominator must be the attributed subset: {inbox}"
+        );
+    }
+
+    /// Audit item 112, the other direction: unattributed conversations
+    /// inflated the customer concentration denominator — 2 attributed
+    /// conversations (2 customers) plus 4 unattributed fired a false
+    /// "6 conversations from 2 customers" alert pre-fix.
+    #[test]
+    fn customer_concentration_ignores_unattributed_conversations() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (7, 'Ada')",
+            [],
+        )
+        .expect("customer 7");
+        let customer7: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (8, 'Ben')",
+            [],
+        )
+        .expect("customer 8");
+        let customer8: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO issue_clusters (name, conversation_count) VALUES ('mixed-attribution', 6)",
+            [],
+        )
+        .expect("cluster");
+        let cluster = conn.last_insert_rowid();
+        seed_cluster_conv(&conn, cluster, 9101, Some(customer7), None, "-2 days");
+        seed_cluster_conv(&conn, cluster, 9102, Some(customer8), None, "-2 days");
+        for number in 9103..=9106 {
+            seed_cluster_conv(&conn, cluster, number, None, None, "-2 days");
+        }
+
+        let clusters = radar_clusters(&conn);
+        let alerts = radar_extensions(&conn, &clusters);
+        assert!(
+            !alerts.iter().any(|a| a["kind"] == "customer_concentration"),
+            "two attributed conversations cannot concentrate: {alerts:?}"
+        );
+    }
+
+    /// Audit item 111: the escalation alert's claim counted a silently
+    /// LIMIT-capped sample — 1001 escalated tickets reported as "1000".
+    #[test]
+    fn escalation_alert_claims_the_real_count() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO tags (remote_id, name) VALUES (1, 'escalated')",
+            [],
+        )
+        .expect("tag");
+        let tag: i64 = conn.last_insert_rowid();
+        for i in 1..=1001_i64 {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, created_at)
+                 VALUES (?1, ?1, 'escalated', datetime('now', '-1 days'))",
+                params![i],
+            )
+            .expect("conversation");
+            conn.execute(
+                "INSERT INTO conversation_tags (conversation_id, tag_id) VALUES (?1, ?2)",
+                params![conn.last_insert_rowid(), tag],
+            )
+            .expect("tag link");
+        }
+
+        let alerts = issue_radar_impl(&conn);
+        let escalation = alerts
+            .iter()
+            .find(|a| a["kind"] == "escalation_heavy")
+            .expect("escalation alert");
+        assert!(
+            escalation["title"]
+                .as_str()
+                .unwrap()
+                .contains("1001 escalated tickets"),
+            "the claim must match the real sample: {escalation}"
+        );
     }
 }
