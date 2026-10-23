@@ -109,22 +109,22 @@ events under backlog, the weekly_digest ledger row completed despite a
 failed narrative, and the empty `{}` analysis accepted and cached
 against its eval gate) — verified and recorded in `completed.md`.
 
+Batch 29 = items 97-106 (the rewrite paths that bypass redaction, the
+tool args as_i64 rejecting schema-valid floats, get_issue_clusters
+returning 3x the documented limit, the knowledge-chunk embedding retry
+with no attempts cap, the malformed LM Studio 200 landing as literal
+"Unknown" content, the draft signature picking an arbitrary agent's
+name, the org member_count capped by LIMIT 100, the last-activity and
+resolution subqueries missing deleted_at, the org-name linking that
+ignores NOCASE, and the CSV export without a formula-injection guard) —
+opened, in `progress.md`.
+
 ### MEDIUM — wrong behavior on realistic paths
 
 56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of any batch until then)
 
 ### LOW — edge cases, provable minor defects
 
-97. [low|issue] Rewrite paths bypass redaction — ai_pipeline.rs:1280-1285,1350-1358
-98. [low|issue] Tool args: as_i64 rejects schema-valid floats — ai_tools.rs:418 (+7 sites)
-99. [low|issue] get_issue_clusters returns 3× the documented limit with a query — ai_tools.rs:695
-100. [low|issue] Knowledge chunks: no attempts cap → infinite retry — embeddings.rs:792,841-856
-101. [low|issue] Malformed 200 → literal "Unknown" content — ai_lm_studio.rs:511-516
-102. [low|issue] Draft signature picks an arbitrary agent's name — ai_local.rs:531-533
-103. [low|bug] Org member_count capped by LIMIT 100 — people_store.rs:110
-104. [low|bug] last-activity/resolution subqueries miss deleted_at — people_store.rs:753-754,985-989
-105. [low|bug] Org name linking case-sensitive vs NOCASE elsewhere — people_store.rs:1145-1146
-106. [low|issue] CSV export lacks formula-injection guard — backup_service.rs:351-353
 107. [low|bug] redact_string byte-slicing panic (dead caller) — config.rs:304-306
 108. [low|bug] Digest doc counts: space-format vs ISO-T lexical comparison — digest.rs:471
 109. [low|bug] New-conv windows key on local_created_at; deleted-filter claim false — reports.rs:133,251-256
