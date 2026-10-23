@@ -212,10 +212,21 @@ pub async fn chat(
     let mut rounds: u32 = 0;
     let mut answer: Option<String> = None;
     let mut model = String::from("unknown");
+    // Clean-audit item 43: the copilot run used to be completed without
+    // token usage or endpoint — every copilot chat was invisible to the
+    // cost ledger (`usage_ledger` prices `ai_runs.token_usage` by
+    // `ai_runs.endpoint_id`). Usage is accumulated across every chat
+    // round (tool rounds + the final answer) and the run row now
+    // carries both.
+    let mut usage_total: Option<crate::ai_provider::TokenUsage> = None;
 
-    let (client, backend_model) = match backend {
-        AiBackend::LmStudio { client, model, .. } => (Some(client), model.clone()),
-        AiBackend::Disabled => (None, None),
+    let (client, backend_model, endpoint_id) = match backend {
+        AiBackend::LmStudio {
+            client,
+            model,
+            endpoint_id,
+        } => (Some(client), model.clone(), endpoint_id.as_deref()),
+        AiBackend::Disabled => (None, None, None),
     };
     let Some(client) = client else {
         return Err(LmStudioError::new(
@@ -231,6 +242,16 @@ pub async fn chat(
             .await
             .map_err(|e| LmStudioError::new(e.to_string(), true))?;
         model = res.model;
+        if let Some(u) = res.usage {
+            match usage_total.as_mut() {
+                Some(t) => {
+                    t.prompt_tokens += u.prompt_tokens;
+                    t.completion_tokens += u.completion_tokens;
+                    t.total_tokens += u.total_tokens;
+                }
+                None => usage_total = Some(u),
+            }
+        }
         if !res.tool_calls.is_empty() {
             messages.push(CopilotWireMessage {
                 role: "assistant".into(),
@@ -253,7 +274,20 @@ pub async fn chat(
             });
             for tc in res.tool_calls.iter() {
                 if executed.len() >= MAX_TOOL_CALLS as usize {
-                    break;
+                    // Clean-audit item 44: every assistant tool_call must
+                    // carry a matching tool response — strict
+                    // OpenAI-compatible servers reject the follow-up
+                    // request with a 400 when a tool_call id dangles.
+                    // The un-executed calls now get an explicit
+                    // budget-refusal result instead of silence.
+                    messages.push(CopilotWireMessage {
+                        role: "tool".into(),
+                        content: "Tool budget reached - this call was not executed. Answer from the evidence you already have.".into(),
+                        tool_calls: None,
+                        tool_call_id: Some(tc.id.clone()),
+                        name: Some(tc.name.clone()),
+                    });
+                    continue;
                 }
                 let result = ai_tools::execute(conn, index, &tc.name, &tc.arguments);
                 executed.push(ExecutedToolCall {
@@ -288,6 +322,16 @@ pub async fn chat(
                     .await
                     .map_err(|e| LmStudioError::new(e.to_string(), true))?;
                 model = final_res.model;
+                if let Some(u) = final_res.usage {
+                    match usage_total.as_mut() {
+                        Some(t) => {
+                            t.prompt_tokens += u.prompt_tokens;
+                            t.completion_tokens += u.completion_tokens;
+                            t.total_tokens += u.total_tokens;
+                        }
+                        None => usage_total = Some(u),
+                    }
+                }
                 answer = Some(final_res.content.unwrap_or_default().trim().to_string());
                 break;
             }
@@ -361,7 +405,7 @@ pub async fn chat(
         &serde_json::json!([question.chars().take(500).collect::<String>()]),
     );
     if let Ok(run_id) = run_id {
-        let _ = ai_pipeline::complete_run(
+        let _ = ai_pipeline::complete_run_with_usage(
             conn,
             run_id,
             &json!({
@@ -371,6 +415,8 @@ pub async fn chat(
                 "model": model,
             }),
             latency_ms as u64,
+            usage_total.as_ref(),
+            endpoint_id,
         );
     }
     let _ = crate::audit::audit(
@@ -615,13 +661,35 @@ fn insert_message(
     tool_calls: i64,
     latency_ms: Option<i64>,
 ) -> Value {
-    let _ = conn.execute(
+    // Clean-audit item 45: the INSERT failure used to be swallowed and
+    // `last_insert_rowid()` echoed the id of whatever row was last
+    // inserted on this connection — the response presented a stale id
+    // pointing at a different message. A failed insert now reports a
+    // null id and the error text instead of a fabricated one.
+    let inserted = conn.execute(
         "INSERT INTO copilot_messages (session_id, role, content, citations, tool_name, tool_calls, latency_ms)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![session_id, role, content, citations, tool_name, tool_calls, latency_ms],
     );
+    let (id, persist_error) = match inserted {
+        Ok(1) => (json!(conn.last_insert_rowid()), Value::Null),
+        Ok(_) => (
+            Value::Null,
+            json!("insert affected an unexpected number of rows"),
+        ),
+        Err(e) => {
+            tracing::warn!(
+                operation = "copilot_insert_message",
+                role,
+                session_id,
+                error = %e,
+                "copilot message insert failed - reporting a null id"
+            );
+            (Value::Null, json!(e.to_string()))
+        }
+    };
     json!({
-        "id": conn.last_insert_rowid(),
+        "id": id,
         "session_id": session_id,
         "role": role,
         "content": content,
@@ -631,6 +699,7 @@ fn insert_message(
         "tool_name": tool_name,
         "tool_calls": tool_calls,
         "latency_ms": latency_ms,
+        "persist_error": persist_error,
         "created_at": crate::activity::now_iso(),
     })
 }
@@ -708,4 +777,248 @@ pub fn starter_questions(conn: &Connection, conversation_id: i64) -> Vec<(String
         "Citations from real tool results".into(),
     ));
     out
+}
+
+#[cfg(test)]
+mod batch23_audit_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn backend_for(mock: &crate::mockserver::MockServer) -> AiBackend {
+        AiBackend::LmStudio {
+            client: crate::ai_lm_studio::OpenAiCompatibleClient::new_with_timeout(
+                mock.url(),
+                5_000,
+            ),
+            model: Some("test-model".into()),
+            endpoint_id: Some("lm-hub-1".into()),
+        }
+    }
+
+    fn chat_body(
+        content: Option<&str>,
+        tool_calls: serde_json::Value,
+        usage: (u64, u64, u64),
+    ) -> crate::mockserver::MockResponse {
+        crate::mockserver::MockResponse::json(
+            200,
+            json!({
+                "model": "test-model",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": content,
+                        "tool_calls": tool_calls
+                    },
+                    "finish_reason": if tool_calls.is_null() { "stop" } else { "tool_calls" }
+                }],
+                "usage": {"prompt_tokens": usage.0, "completion_tokens": usage.1, "total_tokens": usage.2}
+            })
+            .to_string(),
+        )
+    }
+
+    fn tool_call(id: &str, name: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "type": "function",
+            "function": {"name": name, "arguments": "{}"}
+        })
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
+
+    /// Item 45: a failed INSERT reports a null id and the error — the
+    /// pre-fix code echoed `last_insert_rowid()`, presenting the id of
+    /// whatever row was last inserted as the new message.
+    #[test]
+    fn insert_message_reports_null_id_on_failure() {
+        let conn = db();
+        ensure_copilot_schema(&conn).expect("schema");
+        conn.execute(
+            "INSERT INTO copilot_sessions (title, conversation_id) VALUES ('t', NULL)",
+            [],
+        )
+        .expect("session");
+        let sid = conn.last_insert_rowid();
+
+        // Happy path: the id is the row just inserted.
+        let ok = insert_message(&conn, sid, "user", "hello", "[]", None, 0, None);
+        assert_eq!(ok["id"].as_i64(), Some(conn.last_insert_rowid()));
+        assert!(ok["persist_error"].is_null(), "{ok}");
+
+        // Failure path: the table is gone, the INSERT fails — the id must
+        // be null, never a stale rowid.
+        conn.execute("DROP TABLE copilot_messages", [])
+            .expect("drop");
+        let failed = insert_message(&conn, sid, "user", "hello", "[]", None, 0, None);
+        assert!(
+            failed["id"].is_null(),
+            "no fabricated id on failure: {failed}"
+        );
+        assert!(
+            failed["persist_error"]
+                .as_str()
+                .is_some_and(|e| !e.is_empty()),
+            "the failure is reported: {failed}"
+        );
+    }
+
+    /// Item 43: the copilot run lands in the cost ledger with its token
+    /// usage and endpoint — usage accumulated across the tool round AND
+    /// the final answer round.
+    #[test]
+    fn copilot_chat_records_usage_and_endpoint_in_the_ledger() {
+        let conn = db();
+        // Round 1: one tool call (usage 10/5/15). Round 2: the answer
+        // (usage 7/3/10) — the run must total 17/8/25.
+        let mock = crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![
+            chat_body(
+                None,
+                json!([tool_call("call_1", "search_conversations")]),
+                (10, 5, 15),
+            ),
+            chat_body(
+                Some("The invite queue was cleared."),
+                serde_json::Value::Null,
+                (7, 3, 10),
+            ),
+        ]))
+        .expect("mock");
+        let backend = backend_for(&mock);
+
+        let out = runtime()
+            .block_on(chat(
+                &conn,
+                &backend,
+                None,
+                "why did invites bounce?",
+                None,
+                None,
+            ))
+            .expect("chat");
+
+        assert_eq!(out["model"], "test-model");
+
+        let (status, usage, endpoint, run_type): (String, Option<String>, Option<String>, String) =
+            conn.query_row(
+                "SELECT status, token_usage, endpoint_id, type FROM ai_runs
+                  WHERE type = 'copilot_chat' ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .expect("the copilot run row exists");
+        assert_eq!(run_type, "copilot_chat");
+        assert_eq!(status, "completed");
+        assert_eq!(endpoint.as_deref(), Some("lm-hub-1"), "endpoint attributed");
+        let usage = usage.expect("usage recorded");
+        assert!(
+            usage.contains("\"prompt_tokens\":17")
+                && usage.contains("\"completion_tokens\":8")
+                && usage.contains("\"total_tokens\":25"),
+            "usage accumulated across both rounds: {usage}"
+        );
+
+        // The ledger sees the row with its tokens.
+        let ledger = crate::ai_hub::usage_ledger(&conn, 7).expect("ledger");
+        let row = ledger
+            .iter()
+            .find(|r| r.feature == "copilot_chat")
+            .expect("copilot chats are ledger-visible now");
+        assert_eq!(row.prompt_tokens, 17);
+        assert_eq!(row.completion_tokens, 8);
+        assert_eq!(row.runs, 1);
+    }
+
+    /// Item 44: when the tool budget cuts a round short, every assistant
+    /// tool_call id still carries a matching tool response — strict
+    /// OpenAI-compatible servers 400 the follow-up request otherwise.
+    #[test]
+    fn tool_budget_refusal_answers_every_dangling_tool_call_id() {
+        let conn = db();
+        // Round 1 asks for 10 tool calls at once; the budget is
+        // MAX_TOOL_CALLS (8), so 8 run and 2 must be refused explicitly.
+        let calls: Vec<serde_json::Value> = (1..=10)
+            .map(|i| tool_call(&format!("call_{i}"), "search_conversations"))
+            .collect();
+        let mock = crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![
+            chat_body(None, serde_json::Value::Array(calls), (10, 5, 15)),
+            chat_body(
+                Some("Answer from the evidence gathered."),
+                serde_json::Value::Null,
+                (4, 2, 6),
+            ),
+        ]))
+        .expect("mock");
+        let backend = backend_for(&mock);
+
+        let out = runtime()
+            .block_on(chat(
+                &conn,
+                &backend,
+                None,
+                "look up everything",
+                None,
+                None,
+            ))
+            .expect("chat");
+        assert_eq!(
+            out["assistant_message"]["tool_calls"].as_i64(),
+            Some(8),
+            "the budget held at 8 executed calls"
+        );
+
+        // The follow-up request (mock hit #2) must pair every assistant
+        // tool_call id with a tool-role response.
+        let body: serde_json::Value =
+            serde_json::from_str(&mock.hits()[1].body).expect("follow-up request json");
+        let messages = body["messages"].as_array().expect("messages");
+        let assistant_ids: Vec<String> = messages
+            .iter()
+            .filter(|m| m["role"] == "assistant" && !m["tool_calls"].is_null())
+            .flat_map(|m| {
+                m["tool_calls"]
+                    .as_array()
+                    .expect("tool_calls array")
+                    .iter()
+                    .filter_map(|tc| tc["id"].as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        assert_eq!(assistant_ids.len(), 10, "the assistant asked for 10 calls");
+        let answered_ids: Vec<String> = messages
+            .iter()
+            .filter(|m| m["role"] == "tool")
+            .filter_map(|m| m["tool_call_id"].as_str().map(String::from))
+            .collect();
+        for id in &assistant_ids {
+            assert!(
+                answered_ids.contains(id),
+                "tool_call {id} must carry a tool response (no dangling ids)"
+            );
+        }
+        // The two refused calls say so in plain words.
+        let refusals: Vec<&str> = messages
+            .iter()
+            .filter(|m| m["role"] == "tool")
+            .filter_map(|m| m["content"].as_str())
+            .filter(|c| c.contains("Tool budget reached"))
+            .collect();
+        assert_eq!(
+            refusals.len(),
+            2,
+            "the 2 over-budget calls are refused explicitly"
+        );
+    }
 }

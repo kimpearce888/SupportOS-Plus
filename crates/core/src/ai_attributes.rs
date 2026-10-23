@@ -686,12 +686,20 @@ pub struct CustomerMessage {
 }
 
 pub fn customer_messages(conn: &Connection, conversation_id: i64) -> Result<Vec<CustomerMessage>> {
+    // Clean-audit item 36: this window used to be the OLDEST 30 customer
+    // messages INCLUDING soft-deleted threads — a long ticket's recent
+    // context (the half that says what the customer wants now) was cut
+    // off, and deleted threads kept feeding the prompt. The window is
+    // now the NEWEST 30 live threads, presented oldest-first (the
+    // prompt's declared order).
     let mut stmt = conn.prepare(
         "SELECT id, COALESCE(body_text, '') FROM conversation_threads
          WHERE conversation_id = ?1 AND type = 'customer'
-         ORDER BY created_at ASC, id ASC LIMIT 30",
+           AND deleted_at IS NULL
+           AND TRIM(COALESCE(body_text, ''), char(32) || char(9) || char(10) || char(13)) <> ''
+         ORDER BY created_at DESC, id DESC LIMIT 30",
     )?;
-    let rows: Vec<CustomerMessage> = stmt
+    let mut rows: Vec<CustomerMessage> = stmt
         .query_map(params![conversation_id], |r| {
             Ok(CustomerMessage {
                 thread_local_id: r.get(0)?,
@@ -708,6 +716,9 @@ pub fn customer_messages(conn: &Connection, conversation_id: i64) -> Result<Vec<
         })
         .filter(|m| !m.text.trim().is_empty())
         .collect();
+    // Newest-first from SQL; the prompt (and the deterministic layer's
+    // `messages.first()` customer_goal) expect chronological order.
+    rows.reverse();
     Ok(rows)
 }
 
@@ -765,12 +776,22 @@ pub fn prepare_computation(
     }))
 }
 
+/// What one extraction chat call produced — the run row's raw material
+/// for the cost ledger (clean-audit item 37: content + latency + the
+/// endpoint's token usage).
+#[derive(Debug, Clone)]
+pub struct ExtractionOutput {
+    pub content: String,
+    pub latency_ms: u64,
+    pub usage: Option<crate::ai_provider::TokenUsage>,
+}
+
 pub async fn run_extraction(
     conn: &Connection,
     provider: &dyn LocalAiProvider,
     model: &str,
     prompt: &str,
-) -> Option<String> {
+) -> Option<ExtractionOutput> {
     if !provider.is_available().await {
         return None;
     }
@@ -789,6 +810,7 @@ pub async fn run_extraction(
             "redaction boundary applied to the extraction prompt"
         );
     }
+    let started = std::time::Instant::now();
     match provider
         .chat_structured(
             model,
@@ -805,7 +827,11 @@ pub async fn run_extraction(
         )
         .await
     {
-        Ok(response) => Some(response.content),
+        Ok(response) => Some(ExtractionOutput {
+            latency_ms: started.elapsed().as_millis() as u64,
+            usage: response.usage,
+            content: response.content,
+        }),
         Err(_) => None,
     }
 }
@@ -813,8 +839,9 @@ pub async fn run_extraction(
 pub fn finish_computation(
     conn: &mut Connection,
     prepared: PreparedComputation,
-    fresh_output: Option<String>,
+    fresh_output: Option<ExtractionOutput>,
     model: &str,
+    endpoint_id: Option<&str>,
 ) -> Result<Option<AttributeSnapshot>> {
     let PreparedComputation {
         conversation_id,
@@ -830,18 +857,34 @@ pub fn finish_computation(
     if let Some((run_id, cached_value)) = cached {
         extracted = Some(cached_value);
         ai_run_id = Some(run_id);
-    } else if let (Some(_), Some(raw)) = (&prompt, fresh_output)
+    } else if let (Some(_), Some(fresh)) = (&prompt, fresh_output)
         // Clean-audit item 34: local models happily wrap their JSON in
         // markdown fences or surround it with prose — a strict
         // from_str on the raw answer lost every such extraction. Parse
         // through the pipeline's canonical fence-stripping extractor
         // (the same one chat_json uses) before the shape validation.
-        && let Some(parsed) = crate::ai_pipeline::extract_json(&raw)
+        && let Some(parsed) = crate::ai_pipeline::extract_json(&fresh.content)
         && parsed
             .get("attributes")
             .is_some_and(|a| a.as_array().is_some())
     {
-        let run_id = store_extraction_run(conn, &input_hash, model, &raw)?;
+        // Clean-audit item 37: the run row now lands as a completed
+        // 'attributes' run carrying the cost ledger's raw material
+        // (latency, token usage, endpoint) instead of a bare row stuck
+        // at the status column's 'queued' default, invisible to
+        // `usage_ledger`'s `WHERE status='completed'`.
+        let run_id = store_extraction_run(
+            conn,
+            ExtractionRunRow {
+                conversation_id,
+                input_hash: &input_hash,
+                model,
+                output: &fresh.content,
+                latency_ms: fresh.latency_ms,
+                usage: fresh.usage.as_ref(),
+                endpoint_id,
+            },
+        )?;
         extracted = Some(parsed);
         ai_run_id = Some(run_id);
     }
@@ -907,6 +950,7 @@ pub async fn compute(
     conn: &mut Connection,
     provider: &dyn LocalAiProvider,
     model: &str,
+    endpoint_id: Option<&str>,
     conversation_id: i64,
     force: bool,
 ) -> Result<Option<AttributeSnapshot>> {
@@ -919,7 +963,7 @@ pub async fn compute(
         }
         _ => None,
     };
-    finish_computation(conn, prepared, fresh, model)
+    finish_computation(conn, prepared, fresh, model, endpoint_id)
 }
 
 fn is_ai_slot(key: AiAttributeKey) -> bool {
@@ -980,20 +1024,39 @@ fn build_extraction_user(
     parts.join("\n")
 }
 
-fn store_extraction_run(
-    conn: &Connection,
-    input_hash: &str,
-    model: &str,
-    output: &str,
-) -> Result<i64> {
+/// What one completed extraction run must persist (clean-audit item 37's
+/// ledger row: the hash-keyed cache columns plus the cost ledger's raw
+/// material).
+struct ExtractionRunRow<'a> {
+    conversation_id: i64,
+    input_hash: &'a str,
+    model: &'a str,
+    output: &'a str,
+    latency_ms: u64,
+    usage: Option<&'a crate::ai_provider::TokenUsage>,
+    endpoint_id: Option<&'a str>,
+}
+
+fn store_extraction_run(conn: &Connection, row: ExtractionRunRow<'_>) -> Result<i64> {
+    let usage_json = match row.usage {
+        Some(u) => serde_json::to_string(u)?,
+        None => "null".to_string(),
+    };
     conn.execute(
-        "INSERT INTO ai_runs (input_hash, prompt_version, model, response_json)
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO ai_runs (input_hash, prompt_version, model, response_json,
+                              type, conversation_id, status, latency_ms,
+                              started_at, completed_at, token_usage, endpoint_id)
+         VALUES (?1, ?2, ?3, ?4, 'attributes', ?5, 'completed', ?6,
+                 datetime('now'), datetime('now'), ?7, ?8)",
         params![
-            input_hash,
+            row.input_hash,
             ATTRIBUTE_EXTRACTION_PROMPT_VERSION,
-            model,
-            output
+            row.model,
+            row.output,
+            row.conversation_id,
+            row.latency_ms as i64,
+            usage_json,
+            row.endpoint_id
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1004,10 +1067,15 @@ fn lookup_cached_extraction(
     input_hash: &str,
     model: &str,
 ) -> Result<Option<(i64, Value)>> {
+    // Clean-audit item 37: only completed runs are cache hits — a
+    // pre-fix row stuck at the 'queued' default is treated as a miss so
+    // the next computation re-runs and stores a proper completed row
+    // (self-healing, newest-first below finds it thereafter).
     let row: Option<(i64, String)> = conn
         .query_row(
             "SELECT id, response_json FROM ai_runs
              WHERE input_hash = ?1 AND prompt_version = ?2 AND model = ?3
+               AND status = 'completed'
              ORDER BY created_at DESC, id DESC LIMIT 1",
             params![input_hash, ATTRIBUTE_EXTRACTION_PROMPT_VERSION, model],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -1498,12 +1566,17 @@ pub async fn compute_with_backend(
     force: bool,
 ) -> Result<Option<AttributeSnapshot>> {
     match backend {
-        crate::ai_pipeline::AiBackend::LmStudio { client, model, .. } => {
+        crate::ai_pipeline::AiBackend::LmStudio {
+            client,
+            model,
+            endpoint_id,
+        } => {
             let provider = crate::ai_lm_studio::LmStudioProvider::with_client(client.clone());
             compute(
                 conn,
                 &provider,
                 model.as_deref().unwrap_or(""),
+                endpoint_id.as_deref(),
                 conversation_id,
                 force,
             )
@@ -1512,7 +1585,7 @@ pub async fn compute_with_backend(
         crate::ai_pipeline::AiBackend::Disabled => {
             // No model configured: deterministic-only, still a real snapshot.
             if let Some(prepared) = prepare_computation(conn, conversation_id, "", force)? {
-                finish_computation(conn, prepared, None, "")
+                finish_computation(conn, prepared, None, "", None)
             } else {
                 Ok(None)
             }
@@ -1680,10 +1753,23 @@ mod batch22_audit_tests {
             assert!(prepared.cached.is_none(), "{label}: no cache under force");
             assert!(prepared.prompt.is_some(), "{label}: prompt built");
 
-            let snapshot =
-                finish_computation(&mut conn, prepared, Some(raw.to_string()), "test-model")
-                    .expect("finish")
-                    .expect("snapshot");
+            let snapshot = finish_computation(
+                &mut conn,
+                prepared,
+                Some(ExtractionOutput {
+                    content: raw.to_string(),
+                    latency_ms: 42,
+                    usage: Some(crate::ai_provider::TokenUsage {
+                        prompt_tokens: 11,
+                        completion_tokens: 7,
+                        total_tokens: 18,
+                    }),
+                }),
+                "test-model",
+                Some("lmstudio-local"),
+            )
+            .expect("finish")
+            .expect("snapshot");
 
             let intent = snapshot
                 .attributes
@@ -1807,7 +1893,7 @@ mod batch22_audit_tests {
             let out = rt
                 .block_on(run_extraction(&conn, &provider, "test-model", prompt))
                 .expect("an answer");
-            assert_eq!(out, "{\"attributes\":[]}");
+            assert_eq!(out.content, "{\"attributes\":[]}");
             let captured = provider.captured_user_content();
             assert!(
                 !captured.contains("4111 1111 1111 1111"),
@@ -1854,5 +1940,261 @@ mod batch22_audit_tests {
                 "redaction_enabled=false is honored verbatim"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod batch23_audit_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_conversation(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9301, 93, 'Export failing', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        conn.last_insert_rowid()
+    }
+
+    fn add_customer_message(conn: &Connection, conv: i64, text: &str, stamp: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, body_text, created_at)
+             VALUES (?1, 'customer', ?2, ?3)",
+            rusqlite::params![conv, text, stamp],
+        )
+        .expect("thread");
+        conn.last_insert_rowid()
+    }
+
+    /// Item 36: the extraction window is the NEWEST 30 live customer
+    /// messages, oldest-first — soft-deleted threads and whitespace-only
+    /// bodies are excluded, and the recent context is no longer cut off
+    /// in favor of the OLDEST 30.
+    #[test]
+    fn customer_messages_takes_newest_30_and_skips_soft_deleted() {
+        let conn = db();
+        let conv = seed_conversation(&conn);
+        // 32 live messages, numbered by timestamp.
+        let mut oldest_id = 0;
+        for i in 1..=32 {
+            let id = add_customer_message(
+                &conn,
+                conv,
+                &format!("live message {i}"),
+                &format!("2026-10-{:02}T10:00:00Z", i),
+            );
+            if i == 1 {
+                oldest_id = id;
+            }
+        }
+        // A soft-deleted thread newer than everything.
+        let deleted = add_customer_message(
+            &conn,
+            conv,
+            "DELETED-TEXT must never reach the prompt",
+            "2026-10-40T10:00:00Z",
+        );
+        conn.execute(
+            "UPDATE conversation_threads SET deleted_at = datetime('now') WHERE id = ?1",
+            rusqlite::params![deleted],
+        )
+        .expect("soft delete");
+        // A whitespace-only body, also newest.
+        add_customer_message(&conn, conv, "   \n\t ", "2026-10-41T10:00:00Z");
+
+        let messages = customer_messages(&conn, conv).expect("messages");
+        assert_eq!(messages.len(), 30, "exactly the newest 30 live messages");
+        // Chronological order (the prompt's declared order).
+        let ids: Vec<i64> = messages.iter().map(|m| m.thread_local_id).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted, "presented oldest-first");
+        // The window is messages 3..=32 (newest 30), not 1..=30.
+        assert!(
+            messages.iter().any(|m| m.text.contains("live message 32")),
+            "the newest message is included: {:?}",
+            messages.last().map(|m| m.text.clone())
+        );
+        assert!(
+            !messages.iter().any(|m| m.thread_local_id == oldest_id),
+            "the OLDEST message must fall out of the window"
+        );
+        assert!(
+            !messages.iter().any(|m| m.text.contains("DELETED-TEXT")),
+            "soft-deleted threads never reach the prompt"
+        );
+        assert!(
+            messages
+                .last()
+                .is_some_and(|m| m.text.contains("live message 32")),
+            "newest live message is the last (chronological) entry"
+        );
+    }
+
+    /// Item 37: a fresh extraction lands as a COMPLETED 'attributes' run
+    /// carrying the cost ledger's raw material (latency, token usage,
+    /// endpoint) — `usage_ledger`'s `WHERE status='completed'` sees it.
+    #[test]
+    fn extraction_run_lands_completed_in_the_cost_ledger() {
+        let mut conn = db();
+        let conv = seed_conversation(&conn);
+        add_customer_message(
+            &conn,
+            conv,
+            "The export throws an error every time.",
+            "2026-10-01T10:00:00Z",
+        );
+
+        let prepared = prepare_computation(&conn, conv, "test-model", true)
+            .expect("prepared")
+            .expect("exists");
+        let snapshot = finish_computation(
+            &mut conn,
+            prepared,
+            Some(ExtractionOutput {
+                content: "{\"attributes\":[{\"attribute\":\"intent\",\"value\":\"bug_report\",\"confidence\":\"high\",\"evidence_excerpt\":\"export throws an error\"}]}".into(),
+                latency_ms: 42,
+                usage: Some(crate::ai_provider::TokenUsage {
+                    prompt_tokens: 11,
+                    completion_tokens: 7,
+                    total_tokens: 18,
+                }),
+            }),
+            "test-model",
+            Some("lmstudio-local"),
+        )
+        .expect("finish")
+        .expect("snapshot");
+
+        let run_id = snapshot
+            .attributes
+            .iter()
+            .find_map(|a| a.get("run_id").and_then(Value::as_i64))
+            .expect("the AI attribute carries its run id");
+
+        let row = conn
+            .query_row(
+                "SELECT type, status, latency_ms, token_usage, endpoint_id, conversation_id
+                   FROM ai_runs WHERE id = ?1",
+                rusqlite::params![run_id],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, Option<i64>>(5)?,
+                    ))
+                },
+            )
+            .expect("the run row exists");
+        assert_eq!(
+            row.0, "attributes",
+            "the run is typed for the ledger's per-feature rows"
+        );
+        assert_eq!(row.1, "completed", "not stuck at the 'queued' default");
+        assert_eq!(row.2, 42, "latency recorded");
+        assert!(
+            row.3.contains("\"prompt_tokens\":11") && row.3.contains("\"completion_tokens\":7"),
+            "token usage recorded: {}",
+            row.3
+        );
+        assert_eq!(
+            row.4.as_deref(),
+            Some("lmstudio-local"),
+            "endpoint recorded"
+        );
+        assert_eq!(row.5, Some(conv), "the run is pinned to its conversation");
+
+        // The ledger itself sees the run (tokens attributed, feature row).
+        let ledger = crate::ai_hub::usage_ledger(&conn, 7).expect("ledger");
+        let row = ledger
+            .iter()
+            .find(|r| r.feature == "attributes")
+            .expect("the extraction run appears in the cost ledger");
+        assert_eq!(row.prompt_tokens, 11);
+        assert_eq!(row.completion_tokens, 7);
+        assert_eq!(row.runs, 1);
+    }
+
+    /// Item 37 (self-heal): a pre-fix row stuck at the 'queued' default
+    /// with the same hash is NOT a cache hit — the next computation
+    /// re-runs and stores a proper completed row.
+    #[test]
+    fn stuck_queued_extraction_rows_self_heal() {
+        let mut conn = db();
+        let conv = seed_conversation(&conn);
+        add_customer_message(
+            &conn,
+            conv,
+            "The export throws an error every time.",
+            "2026-10-01T10:00:00Z",
+        );
+
+        // Discover the hash the old writer would have used.
+        let prepared = prepare_computation(&conn, conv, "test-model", true)
+            .expect("prepared")
+            .expect("exists");
+        let hash = prepared.input_hash.clone();
+
+        // The pre-fix row: bare columns, status defaults to 'queued'.
+        conn.execute(
+            "INSERT INTO ai_runs (input_hash, prompt_version, model, response_json)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                hash,
+                ATTRIBUTE_EXTRACTION_PROMPT_VERSION,
+                "test-model",
+                "{\"attributes\":[]}"
+            ],
+        )
+        .expect("stuck row");
+
+        // force=false: the queued row must not serve as a cache hit.
+        let next = prepare_computation(&conn, conv, "test-model", false)
+            .expect("prepared")
+            .expect("exists");
+        assert!(
+            next.cached.is_none(),
+            "a stuck 'queued' row is a cache miss, not a hit"
+        );
+
+        // Completing the recomputation stores a proper completed row...
+        finish_computation(
+            &mut conn,
+            next,
+            Some(ExtractionOutput {
+                content: "{\"attributes\":[]}".into(),
+                latency_ms: 5,
+                usage: None,
+            }),
+            "test-model",
+            None,
+        )
+        .expect("finish")
+        .expect("snapshot");
+
+        // ...and only the completed row is a hit from now on.
+        let after = prepare_computation(&conn, conv, "test-model", false)
+            .expect("prepared")
+            .expect("exists");
+        let (cached_id, _) = after.cached.expect("the completed row is the cache hit");
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM ai_runs WHERE id = ?1",
+                rusqlite::params![cached_id],
+                |r| r.get(0),
+            )
+            .expect("status");
+        assert_eq!(status, "completed");
     }
 }
