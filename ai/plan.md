@@ -117,7 +117,7 @@ with no attempts cap, the malformed LM Studio 200 landing as literal
 name, the org member_count capped by LIMIT 100, the last-activity and
 resolution subqueries missing deleted_at, the org-name linking that
 ignores NOCASE, and the CSV export without a formula-injection guard) —
-opened, in `progress.md`.
+verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
