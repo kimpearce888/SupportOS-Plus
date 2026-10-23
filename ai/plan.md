@@ -98,22 +98,23 @@ fetch errors surfaced with re-enqueue, and the copilot panic containment
 that no longer re-persists the user message) — verified and recorded in
 `completed.md`.
 
+Batch 28 = items 87-96 (the ratings upsert that never re-links its
+conversation/customer on conflict, the cancelled initial sync recorded
+LIVE with its never-re-run threads backfill, the threads pass hardcoding
+failed:0 before its ok stamp, the post-initial-sync AI backfill capped
+at 50 conversations, the platform-side deletions that never propagate,
+the dead 404 mapping in get_rating, the dead OAuth TTL sweeper with its
+never-expiring states, the webhook prune deleting unprocessed pending
+events under backlog, the weekly_digest ledger row completed despite a
+failed narrative, and the empty `{}` analysis accepted and cached
+against its eval gate) — opened, in `progress.md`.
+
 ### MEDIUM — wrong behavior on realistic paths
 
 56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of any batch until then)
 
 ### LOW — edge cases, provable minor defects
 
-87. [low|bug] Ratings upsert never re-links conversation/customer on conflict — workers.rs:3771-3774
-88. [low|bug] Cancelled initial sync recorded LIVE; threads backfill never re-runs — sync_engine.rs:1309-1316
-89. [low|bug] Threads pass hardcodes failed:0 then gets stamped ok — sync_engine.rs:1167-1172,1246-1249
-90. [low|gap] Post-initial-sync AI backfill covers only first 50 conversations — workers.rs:1638
-91. [low|gap] Platform-side deletions never propagate (saved replies/orgs/workflows) — sync_engine.rs:1962-2015
-92. [low|bug] Dead "-> 404" mapping in get_rating (use is_not_found) — helpscout_real.rs:1737
-93. [low|gap] OAuth TTL sweeper + redirect-URI verifier dead; states never expire — oauth_state.rs:49-66
-94. [low|bug] Webhook prune deletes unprocessed pending events under backlog — webhook.rs:131-135
-95. [low|bug] weekly_digest completes the ledger row despite failed narrative — ai_pipeline.rs:2858-2868
-96. [low|bug] Empty `{}` analysis accepted+cached; eval gate disagrees — ai_pipeline.rs:954-955
 97. [low|issue] Rewrite paths bypass redaction — ai_pipeline.rs:1280-1285,1350-1358
 98. [low|issue] Tool args: as_i64 rejects schema-valid floats — ai_tools.rs:418 (+7 sites)
 99. [low|issue] get_issue_clusters returns 3× the documented limit with a query — ai_tools.rs:695
