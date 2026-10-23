@@ -3,14 +3,10 @@
 > Exactly five active items at any time, per `rule.md`. Items move here from `plan.md` (Rule 2)
 > and leave for `completed.md` only after verification (Rule 5).
 
-## Active items — none
+## Active items — Batch 22 (clean-audit items 31-35)
 
-Batch 21 (clean-audit items 26-30: the custom-objects form's
-type-aware value coercion, the type builder's canonical field-type
-vocabulary with legacy checkbox/url aliases, the paginated threads read
-that stops the stale-thread sweep from mass-deleting threads past page
-1, the tags_changed diff carrying the mirror's real pre-write tag set,
-and the saved-reply create made idempotent by its natural key) is
-complete and verified; the record is in `completed.md`. The remaining
-135 audit findings are queued in `plan.md` (items 31-165) and the next
-five start only on the owner's "continue".
+31. [med|gap] `api_concurrency` setting parsed/saved but never applied — api_queue.rs:94-97
+32. [med|bug] Webhook secret capped to 40 chars at registration but verified with the full secret — webhook_health.rs:255,168
+33. [med|bug] Team id written into the user-assignee slot; `assigned_team_id` unconsumed — helpscout_real.rs:1392-1394
+34. [med|bug] Attribute extraction parses raw output without fence-stripping/json_mode — ai_attributes.rs:817-818
+35. [med|issue] Attribute extraction bypasses the prompt-redaction boundary — ai_attributes.rs:776-787
