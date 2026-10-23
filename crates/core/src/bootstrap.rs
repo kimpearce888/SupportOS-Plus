@@ -308,6 +308,15 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m060_automation_once_guard",
         apply: crate::automation::apply_m060_automation_once_guard,
     },
+    // Clean-audit item 100: knowledge_chunks gains the embedding_attempts
+    // counter its sibling chunk tables already carry, so the family's
+    // failure lane observes the same five-attempt cap instead of retrying
+    // a doomed chunk on every embed pass forever.
+    BootStep {
+        version: 52,
+        label: "m061_knowledge_chunk_attempts",
+        apply: crate::embeddings::apply_m061_knowledge_chunk_attempts,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

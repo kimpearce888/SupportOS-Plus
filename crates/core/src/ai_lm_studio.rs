@@ -206,7 +206,7 @@ impl OpenAiCompatibleClient {
         }
         let body: ChatCompletionResponse = serde_json::from_str(&text)
             .map_err(|e| Error::Config(format!("LM Studio chat parse failed: {e}")))?;
-        Ok(parse_chat_response(body))
+        parse_chat_response(body)
     }
 
     pub async fn chat_with_opts(
@@ -537,25 +537,35 @@ pub struct OpenAiUsage {
     pub total_tokens: u64,
 }
 
-#[must_use]
-pub fn parse_chat_response(resp: ChatCompletionResponse) -> ChatResponse {
-    let content = resp
-        .choices
-        .first()
-        .and_then(|c| c.message.content.clone())
-        .unwrap_or_else(|| "Unknown".into());
-    let finish_reason = resp.choices.first().and_then(|c| c.finish_reason.clone());
+/// Clean-audit item 101: a well-formed JSON 200 whose choices are empty
+/// (or whose single choice carries `content: null`) used to surface as a
+/// SUCCESSFUL completion whose content was the literal string "Unknown" —
+/// which downstream lanes then persisted as if the model had written it.
+/// The parse now refuses such a body: a response with no readable content
+/// is a labeled error, never fabricated text.
+pub fn parse_chat_response(resp: ChatCompletionResponse) -> Result<ChatResponse> {
+    let Some(first) = resp.choices.first() else {
+        return Err(Error::Config(
+            "LM Studio chat returned no choices (malformed 200 body)".into(),
+        ));
+    };
+    let Some(content) = first.message.content.clone() else {
+        return Err(Error::Config(
+            "LM Studio chat returned no message content (malformed 200 body)".into(),
+        ));
+    };
+    let finish_reason = first.finish_reason.clone();
     let usage = resp.usage.map(|u| TokenUsage {
         prompt_tokens: u.prompt_tokens,
         completion_tokens: u.completion_tokens,
         total_tokens: u.total_tokens,
     });
-    ChatResponse {
+    Ok(ChatResponse {
         content,
         model: resp.model,
         usage,
         finish_reason,
-    }
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -602,5 +612,53 @@ pub fn parse_embed_response(resp: EmbeddingResponse) -> EmbedResponse {
         dim,
         model: resp.model,
         usage,
+    }
+}
+
+#[cfg(test)]
+mod batch29_audit101_tests {
+    use super::*;
+
+    fn body_with(choice_content: Option<&str>) -> ChatCompletionResponse {
+        ChatCompletionResponse {
+            model: "m".into(),
+            choices: vec![ChatChoice {
+                message: ChatChoiceMessage {
+                    content: choice_content.map(str::to_string),
+                    tool_calls: None,
+                },
+                finish_reason: Some("stop".into()),
+            }],
+            usage: None,
+        }
+    }
+
+    /// Clean-audit item 101: a well-formed JSON 200 with no choices must
+    /// surface as a labeled parse error — the pre-fix lane returned a
+    /// SUCCESSFUL completion whose content was the literal string
+    /// "Unknown", which downstream persisted as model output.
+    #[test]
+    fn audit101_empty_choices_are_rejected_not_fabricated() {
+        let empty = ChatCompletionResponse {
+            model: "m".into(),
+            choices: Vec::new(),
+            usage: None,
+        };
+        let err = parse_chat_response(empty).expect_err("no choices must fail");
+        assert!(
+            err.to_string().contains("no choices"),
+            "the error must name the malformation: {err}"
+        );
+
+        let err = parse_chat_response(body_with(None)).expect_err("null content must fail");
+        assert!(
+            err.to_string().contains("no message content"),
+            "the error must name the malformation: {err}"
+        );
+
+        let ok =
+            parse_chat_response(body_with(Some("real answer"))).expect("a readable body parses");
+        assert_eq!(ok.content, "real answer");
+        assert_eq!(ok.finish_reason.as_deref(), Some("stop"));
     }
 }

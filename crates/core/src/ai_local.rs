@@ -526,11 +526,16 @@ pub fn copilot_report(
     conversation_local_id: i64,
 ) -> Result<CopilotReport> {
     let analysis = analyze(conn, conversation_local_id)?;
+    // Clean-audit item 102: the signature must be the conversation's
+    // actual assignee — the pre-fix subquery grabbed `users ORDER BY id
+    // LIMIT 1`, i.e. whichever teammate happens to have the lowest row
+    // id, and signed the draft with that arbitrary agent's name. An
+    // unassigned conversation falls back to the honest "Support".
     let (subject, customer_first, me_name): (Option<String>, Option<String>, Option<String>) = conn
         .query_row(
             "SELECT c.subject,
                     (SELECT cu.first_name FROM customers cu WHERE cu.id = c.customer_local_id),
-                    (SELECT u.first_name FROM users u ORDER BY u.id LIMIT 1)
+                    (SELECT u.first_name FROM users u WHERE u.id = c.assignee_local_id)
                FROM conversations c WHERE c.id = ?1",
             params![conversation_local_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -687,6 +692,79 @@ mod tests {
         assert!(
             report.suggested_reply.contains("reset my password"),
             "draft must carry the customer's clarifying question"
+        );
+    }
+}
+
+#[cfg(test)]
+mod batch29_audit102_tests {
+    use super::*;
+
+    /// Clean-audit item 102: the draft signature must be the
+    /// conversation's actual assignee. The pre-fix subquery grabbed
+    /// `users ORDER BY id LIMIT 1` — whichever teammate happened to hold
+    /// the lowest row id signed every copilot draft; an unassigned
+    /// conversation falls back to the honest "Support".
+    #[test]
+    fn audit102_signature_is_the_assignee_not_an_arbitrary_user() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        // The arbitrary user the pre-fix query would have picked: lowest id.
+        conn.execute(
+            "INSERT INTO users (remote_id, first_name, last_name, email)
+             VALUES (11, 'Adam', 'Arbitrary', 'adam@example.com')",
+            [],
+        )
+        .expect("lowest-id user");
+        conn.execute(
+            "INSERT INTO users (remote_id, first_name, last_name, email)
+             VALUES (12, 'Grace', 'Assignee', 'grace@example.com')",
+            [],
+        )
+        .expect("assignee user");
+        let assignee = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (80, 'Sam', 'Customer')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+
+        // The assigned conversation: the draft signs as Grace.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                        customer_local_id, assignee_local_id)
+             VALUES (9501, 95, 'Login broken', 'preview', 'active', ?1, ?2)",
+            params![customer, assignee],
+        )
+        .expect("conversation");
+        let assigned = conn.last_insert_rowid();
+        let report = copilot_report(&conn, None, assigned).expect("report");
+        assert!(
+            report.suggested_reply.contains("Best,\nGrace"),
+            "the draft must be signed by the assignee, not an arbitrary user: {}",
+            report.suggested_reply
+        );
+        assert!(
+            !report.suggested_reply.contains("Adam"),
+            "the lowest-id user must not sign another agent's draft"
+        );
+
+        // The unassigned conversation: the honest fallback.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status,
+                                        customer_local_id)
+             VALUES (9502, 96, 'Export failing', 'preview', 'active', ?1)",
+            params![customer],
+        )
+        .expect("unassigned conversation");
+        let unassigned = conn.last_insert_rowid();
+        let report = copilot_report(&conn, None, unassigned).expect("report");
+        assert!(
+            report.suggested_reply.contains("Best,\nSupport"),
+            "an unassigned conversation falls back to the Support signature: {}",
+            report.suggested_reply
         );
     }
 }

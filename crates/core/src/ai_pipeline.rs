@@ -1356,6 +1356,25 @@ pub fn rewrite_instruction(instruction: &str) -> &'static str {
     }
 }
 
+/// Clean-audit item 97: the rewrite lanes carry agent-typed draft text —
+/// quotes of customer-supplied card numbers, secrets and keys included —
+/// across the model boundary. They now cross the same prompt-redaction
+/// boundary as every other lane (`redaction_enabled`, default on)
+/// instead of bypassing it: the model sees placeholders, and any
+/// findings are logged for the operator.
+fn redact_for_model(conn: &Connection, text: &str) -> String {
+    let enabled = crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
+    let (safe, findings) = crate::security::redact_text(text, enabled);
+    if !findings.is_empty() {
+        tracing::info!(
+            operation = "draft_rewrite",
+            patterns = ?findings.iter().filter_map(|f| f.get("pattern")).collect::<Vec<_>>(),
+            "redaction boundary applied to the rewrite prompt"
+        );
+    }
+    safe
+}
+
 /// A3 composer rewrite: the raw composer text variant of [`rewrite_draft`].
 ///
 /// Works on whatever the composer holds (not just stored ai_drafts rows) so
@@ -1380,6 +1399,9 @@ pub async fn rewrite_composer_text(
         AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
         AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
     };
+    // Clean-audit item 97: the raw composer text (often quoting customer
+    // PII) crosses the redaction boundary before it reaches the model.
+    let safe_text = redact_for_model(conn, text);
     let messages = vec![
         ChatMessage {
             role: "system".into(),
@@ -1390,7 +1412,7 @@ pub async fn rewrite_composer_text(
             content: format!(
                 "{}\n\nReply to rewrite:\n\"\"\"\n{}\n\"\"\"",
                 rewrite_instruction(instruction),
-                text
+                safe_text
             ),
         },
     ];
@@ -1457,6 +1479,10 @@ pub async fn rewrite_draft(
         AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
         AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
     };
+    // Clean-audit item 97: the stored draft crosses the same redaction
+    // boundary as the composer variant — a draft quoting a customer's
+    // card number or API key must not reach the model verbatim.
+    let safe_content = redact_for_model(conn, &draft.content);
     let messages = vec![
         ChatMessage {
             role: "system".into(),
@@ -1464,7 +1490,7 @@ pub async fn rewrite_draft(
         },
         ChatMessage {
             role: "user".into(),
-            content: format!("{instructions}\n\nReply to rewrite:\n\"\"\"\n{}\n\"\"\"", draft.content),
+            content: format!("{instructions}\n\nReply to rewrite:\n\"\"\"\n{}\n\"\"\"", safe_content),
         },
     ];
     let res = client
@@ -3887,5 +3913,48 @@ mod batch28_ai_tests {
                 "the run row completes with the narrative"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod batch29_audit97_tests {
+    use super::*;
+
+    /// Clean-audit item 97: both rewrite paths (the composer variant and
+    /// the stored-draft variant) must cross the same redaction boundary
+    /// every other lane uses — a draft quoting a customer's card number
+    /// reaches the model as a placeholder, never as raw digits. The
+    /// `redaction_enabled` setting stays the switch.
+    #[test]
+    fn audit97_rewrite_prompt_is_redacted() {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        let draft = "Please charge my card 4111 1111 1111 1111, cvv: 1234 soon.";
+        let safe = redact_for_model(&conn, draft);
+        assert!(
+            safe.contains("[REDACTED-CARD]"),
+            "the card number must not reach the model verbatim: {safe}"
+        );
+        assert!(
+            safe.contains("[REDACTED-CVV]"),
+            "the cvv must not reach the model verbatim: {safe}"
+        );
+        assert!(
+            !safe.contains("4111 1111 1111 1111"),
+            "raw card digits are forbidden in the rewrite prompt: {safe}"
+        );
+        // The rewrite instruction map and the redacted text compose the
+        // user message on both paths.
+        let user = format!(
+            "{}\n\nReply to rewrite:\n\"\"\"\n{}\n\"\"\"",
+            rewrite_instruction("warmer"),
+            safe
+        );
+        assert!(user.contains("[REDACTED-CARD]"));
+        assert!(user.starts_with("Rewrite the reply with a warmer"));
+
+        // The setting is the switch: redaction off passes the text through.
+        crate::settings::set_bool(&conn, "redaction_enabled", false).expect("setting");
+        assert_eq!(redact_for_model(&conn, draft), draft);
     }
 }

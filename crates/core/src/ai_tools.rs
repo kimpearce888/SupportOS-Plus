@@ -285,8 +285,28 @@ pub fn definitions() -> Vec<ChatTool> {
 }
 
 fn clamp_limit(args: &serde_json::Map<String, Value>) -> i64 {
-    let n = args.get("limit").and_then(Value::as_i64).unwrap_or(5);
+    let n = arg_i64(args, "limit").unwrap_or(5);
     n.clamp(1, 10)
+}
+
+/// Clean-audit item 98: the tool schemas declare `"type": "number"`, and
+/// JSON lets a model emit whole values as floats (`12345.0`) — which
+/// `Value::as_i64` rejects, so a schema-valid argument came back
+/// "Invalid number". Read any integral encoding as the integer it is;
+/// non-integral values stay `None` (never silently truncated).
+fn arg_i64(args: &serde_json::Map<String, Value>, key: &str) -> Option<i64> {
+    let n = args.get(key)?.as_number()?;
+    if let Some(i) = n.as_i64() {
+        return Some(i);
+    }
+    let f = n.as_f64()?;
+    // Exactly representable integers only: no fraction, inside i64's
+    // range (the strict upper bound keeps 2^63 — unrepresentable as i64 —
+    // out).
+    if f.fract() == 0.0 && f >= -(2f64.powi(63)) && f < 2f64.powi(63) {
+        return Some(f as i64);
+    }
+    None
 }
 
 fn red(conn: &Connection, text: &str) -> String {
@@ -415,7 +435,7 @@ pub fn execute(
             )
         }
         "get_conversation" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let row = conn
@@ -461,11 +481,7 @@ pub fn execute(
             row
         }
         "get_support_metrics" => {
-            let days = args
-                .get("days")
-                .and_then(Value::as_i64)
-                .unwrap_or(30)
-                .clamp(1, 365);
+            let days = arg_i64(&args, "days").unwrap_or(30).clamp(1, 365);
             let (conversations, active, closed) = conn
                 .query_row(
                     "SELECT COUNT(*),
@@ -492,7 +508,7 @@ pub fn execute(
             })
         }
         "get_conversation_context" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let conv = conn
@@ -579,7 +595,7 @@ pub fn execute(
             out
         }
         "get_customer_history" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let Some(customer) = conn
@@ -637,7 +653,7 @@ pub fn execute(
             })
         }
         "get_similar_conversations" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let Some((id, _)) = conv_by_number(conn, num) else {
@@ -692,7 +708,11 @@ pub fn execute(
                 } else {
                     "WHERE ic.title LIKE ?1 ESCAPE '\\' OR ic.summary LIKE ?1 ESCAPE '\\' OR ic.category LIKE ?1 ESCAPE '\\'".to_string()
                 },
-                limit * if q.is_empty() { 1 } else { 3 },
+                // Clean-audit item 99: the schema documents limit as
+                // "Max clusters (default 5, max 10)" — the old `* 3`
+                // multiplier with a query returned up to three times the
+                // documented cap.
+                limit,
             );
             let rows: Vec<Value> = if q.is_empty() {
                 conn.prepare(&sql)
@@ -712,7 +732,7 @@ pub fn execute(
             json!(rows)
         }
         "get_ai_analysis" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let Some((id, _)) = conv_by_number(conn, num) else {
@@ -773,7 +793,7 @@ pub fn execute(
             })
         }
         "get_supportos_metadata" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let row = conn
@@ -816,7 +836,7 @@ pub fn execute(
             row
         }
         "get_ai_attributes" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let Some((id, _)) = conv_by_number(conn, num) else {
@@ -1000,7 +1020,7 @@ pub fn execute(
                 .collect::<Vec<_>>())
         }
         "get_customer_timeline" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let Some(customer) = conn
@@ -1168,11 +1188,7 @@ pub fn execute(
                 .collect::<Vec<_>>())
         }
         "get_friction_report" => {
-            let days = args
-                .get("days")
-                .and_then(Value::as_i64)
-                .unwrap_or(30)
-                .clamp(1, 365);
+            let days = arg_i64(&args, "days").unwrap_or(30).clamp(1, 365);
             let rows: Vec<Value> = conn
                 .prepare(
                     "SELECT f.kind, COUNT(*), SUM(CASE WHEN f.severity = 'high' THEN 1 ELSE 0 END)
@@ -1203,11 +1219,7 @@ pub fn execute(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
-            let Some(local_id) = args
-                .get("local_id")
-                .and_then(Value::as_i64)
-                .filter(|v| *v > 0)
-            else {
+            let Some(local_id) = arg_i64(&args, "local_id").filter(|v| *v > 0) else {
                 return json!({ "error": "Invalid local_id" });
             };
             let Some(kind_enum) = GraphNodeKind::ALL.into_iter().find(|k| k.as_str() == kind)
@@ -1280,7 +1292,7 @@ pub fn execute(
             })
         }
         "get_customer_memory" => {
-            let Some(num) = args.get("number").and_then(Value::as_i64) else {
+            let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
             let Some(customer) = conn
@@ -1504,5 +1516,109 @@ mod batch23_audit_tests {
             .find(|e| e.get("source").and_then(Value::as_str) == Some("ai"))
             .expect("the ai row is present, honestly labeled");
         assert_eq!(ai.get("title").and_then(Value::as_str), Some("environment"));
+    }
+}
+
+#[cfg(test)]
+mod batch29_audit98_99_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db_with_conversation() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name)
+             VALUES (80, 'Grace', 'Hopper')",
+            [],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, customer_local_id)
+             VALUES (9501, 95, 'Export failing', 'preview', 'active', ?1)",
+            rusqlite::params![customer],
+        )
+        .expect("conversation");
+        conn
+    }
+
+    /// Clean-audit item 98: `arg_i64` must decode every integral encoding a
+    /// model may legally emit under a `"type": "number"` schema — a whole
+    /// float like `12345.0` is the integer it carries, while genuinely
+    /// non-integral or non-numeric values stay rejected.
+    #[test]
+    fn audit98_arg_i64_accepts_integral_floats_only() {
+        let mut map = serde_json::Map::new();
+        map.insert("v".into(), serde_json::json!(12345.0));
+        map.insert("neg".into(), serde_json::json!(-7.0));
+        map.insert("frac".into(), serde_json::json!(12.5));
+        map.insert("text".into(), serde_json::json!("42"));
+        map.insert("big".into(), serde_json::json!(9.3e18));
+        assert_eq!(arg_i64(&map, "v"), Some(12345));
+        assert_eq!(arg_i64(&map, "neg"), Some(-7));
+        assert_eq!(arg_i64(&map, "frac"), None, "fractions are not truncated");
+        assert_eq!(arg_i64(&map, "text"), None, "strings stay rejected");
+        assert_eq!(
+            arg_i64(&map, "big"),
+            None,
+            "beyond-i64 floats stay rejected"
+        );
+        assert_eq!(arg_i64(&map, "missing"), None);
+    }
+
+    /// Clean-audit item 98, end to end: a tool call whose `number` argument
+    /// arrives as the schema-valid float `95.0` used to fail with
+    /// "Invalid number"; the tool now resolves the conversation.
+    #[test]
+    fn audit98_float_number_argument_resolves() {
+        let conn = db_with_conversation();
+        let out = execute(&conn, None, "get_conversation", r#"{"number": 95.0}"#);
+        assert_eq!(
+            out.get("number").and_then(Value::as_i64),
+            Some(95),
+            "the float-encoded argument must resolve the conversation: {out}"
+        );
+        assert!(
+            out.get("error").is_none(),
+            "no Invalid number rejection may remain: {out}"
+        );
+        // A genuinely non-integral value still rejects honestly.
+        let out = execute(&conn, None, "get_conversation", r#"{"number": 9.5}"#);
+        assert_eq!(
+            out.get("error").and_then(Value::as_str),
+            Some("Invalid number")
+        );
+    }
+
+    /// Clean-audit item 99: the get_issue_clusters schema documents limit as
+    /// "Max clusters (default 5, max 10)"; the pre-fix `* 3` multiplier on
+    /// the query path returned up to three times that documented cap.
+    #[test]
+    fn audit99_cluster_limit_is_never_inflated_by_a_query() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        for i in 0..7 {
+            conn.execute(
+                "INSERT INTO issue_clusters (name, title, summary, category)
+                 VALUES (?1, ?1, ?1 || ' recurring billing failure', 'billing')",
+                rusqlite::params![format!("billing outage {i}")],
+            )
+            .expect("cluster");
+        }
+        for (args, expected) in [
+            (r#"{"limit": 2}"#, 2usize),
+            (r#"{"query": "billing", "limit": 2}"#, 2usize),
+            (r#"{"query": "billing"}"#, 5usize),
+            (r#"{"query": "billing", "limit": 10}"#, 7usize),
+        ] {
+            let out = execute(&conn, None, "get_issue_clusters", args);
+            let rows = out.as_array().cloned().unwrap_or_default();
+            assert_eq!(
+                rows.len(),
+                expected,
+                "args {args} must return exactly {expected} clusters, got {rows:?}"
+            );
+        }
     }
 }

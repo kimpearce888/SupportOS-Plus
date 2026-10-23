@@ -426,6 +426,34 @@ pub fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Migration m061 (boot step 52, clean-audit item 100): `knowledge_chunks`
+/// gains the `embedding_attempts` counter its two sibling tables already
+/// carry. Without it the family's failure lane could never observe an
+/// attempts cap — a chunk the embedding backend kept rejecting was
+/// re-selected and re-attempted on every embed pass, forever.
+pub fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<()> {
+    if !crate::sync_schema::table_exists(conn, "knowledge_chunks")? {
+        return Ok(());
+    }
+    let has: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('knowledge_chunks')
+             WHERE name = 'embedding_attempts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    if !has {
+        conn.execute(
+            "ALTER TABLE knowledge_chunks
+             ADD COLUMN embedding_attempts INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ConversationChunkStats {
     pub chunks: usize,
@@ -792,7 +820,8 @@ fn list_pending_chunks(conn: &Connection, table: &str) -> Result<Vec<PendingChun
         "knowledge_chunks" => format!(
             "SELECT c.id, c.document_id, c.content, d.title, d.visibility
              FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id
-             WHERE c.embedding_state = 'not_indexed' OR c.embedding_state = 'failed'
+             WHERE (c.embedding_state = 'not_indexed' OR c.embedding_state = 'failed')
+               AND c.embedding_attempts < 5
              LIMIT {EMBED_PASS_LIMIT}"
         ),
         "docs_chunks" => format!(
@@ -839,20 +868,16 @@ fn list_pending_chunks(conn: &Connection, table: &str) -> Result<Vec<PendingChun
 }
 
 fn mark_chunk_failed(conn: &Connection, table: &str, chunk_id: i64) -> Result<()> {
-    if table == "docs_chunks" || table == "conversation_chunks" {
-        conn.execute(
-            &format!(
-                "UPDATE {table} SET embedding_state = 'failed',
-                 embedding_attempts = embedding_attempts + 1 WHERE id = ?1"
-            ),
-            params![chunk_id],
-        )?;
-    } else {
-        conn.execute(
-            &format!("UPDATE {table} SET embedding_state = 'failed' WHERE id = ?1"),
-            params![chunk_id],
-        )?;
-    }
+    // Clean-audit item 100: every family counts its attempts — the
+    // knowledge_chunks lane used to reset only its state, so a failing
+    // chunk was retried on every pass without ever approaching a cap.
+    conn.execute(
+        &format!(
+            "UPDATE {table} SET embedding_state = 'failed',
+             embedding_attempts = embedding_attempts + 1 WHERE id = ?1"
+        ),
+        params![chunk_id],
+    )?;
     Ok(())
 }
 
@@ -1058,7 +1083,7 @@ fn ensure_vector_id_schema_v2(
         return Ok(());
     }
     conn.execute(
-        "UPDATE knowledge_chunks SET embedding_state = 'not_indexed'",
+        "UPDATE knowledge_chunks SET embedding_state = 'not_indexed', embedding_attempts = 0",
         [],
     )?;
     conn.execute(
@@ -1260,7 +1285,7 @@ mod batch20_audit21_tests {
             "the pre-v2 collection must be gone"
         );
         for (table, has_attempts) in [
-            ("knowledge_chunks", false),
+            ("knowledge_chunks", true),
             ("docs_chunks", true),
             ("conversation_chunks", true),
         ] {
@@ -1609,5 +1634,116 @@ mod batch24_audit46_tests {
             matches!(index.try_point_count().expect("count"), None | Some(0)),
             "the store stays empty"
         );
+    }
+}
+
+#[cfg(test)]
+mod batch29_audit100_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db_with_knowledge_chunks() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO knowledge_sources (name, kind) VALUES ('src', 'local_file')",
+            [],
+        )
+        .expect("source");
+        let source = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, content)
+             VALUES (?1, 'Runbook', 'restart the widget')",
+            params![source],
+        )
+        .expect("doc");
+        let doc = conn.last_insert_rowid();
+        for idx in 0..2 {
+            conn.execute(
+                "INSERT INTO knowledge_chunks (document_id, chunk_index, content, embedding_state)
+                 VALUES (?1, ?2, 'chunk body', 'failed')",
+                params![doc, idx],
+            )
+            .expect("chunk");
+        }
+        conn
+    }
+
+    /// Clean-audit item 100: boot step m061 gives knowledge_chunks the
+    /// embedding_attempts column its sibling tables already had.
+    #[test]
+    fn audit100_knowledge_chunks_gain_the_attempts_column() {
+        let conn = db_with_knowledge_chunks();
+        let has: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('knowledge_chunks')
+                 WHERE name = 'embedding_attempts'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .expect("pragma")
+            > 0;
+        assert!(has, "m061 must add the attempts column at boot");
+        // Idempotent: a second apply is a no-op.
+        apply_m061_knowledge_chunk_attempts(&conn).expect("re-apply");
+    }
+
+    /// Clean-audit item 100: a chunk at the five-attempt cap is no longer
+    /// selected for embedding — the pre-fix lane re-selected it forever.
+    #[test]
+    fn audit100_capped_chunks_leave_the_pending_queue() {
+        let conn = db_with_knowledge_chunks();
+        // Both chunks start at attempts 0 and ARE pending.
+        assert_eq!(
+            list_pending_chunks(&conn, "knowledge_chunks")
+                .expect("pending")
+                .len(),
+            2
+        );
+        // Exhaust one chunk's budget: it must drop out of the queue.
+        let capped_id: i64 = conn
+            .query_row(
+                "SELECT id FROM knowledge_chunks WHERE chunk_index = 0",
+                [],
+                |r| r.get(0),
+            )
+            .expect("chunk");
+        conn.execute(
+            "UPDATE knowledge_chunks SET embedding_attempts = 5 WHERE id = ?1",
+            params![capped_id],
+        )
+        .expect("cap");
+        let pending = list_pending_chunks(&conn, "knowledge_chunks").expect("pending");
+        assert_eq!(pending.len(), 1, "only the unexhausted chunk stays queued");
+        assert_ne!(
+            pending[0].id, capped_id,
+            "the capped chunk must not be re-selected"
+        );
+    }
+
+    /// Clean-audit item 100: failing a knowledge chunk now counts the
+    /// attempt (the pre-fix branch reset only its state, so the counter
+    /// never moved and no cap was ever reachable).
+    #[test]
+    fn audit100_failures_count_attempts() {
+        let conn = db_with_knowledge_chunks();
+        let (id, attempts_before): (i64, i64) = conn
+            .query_row(
+                "SELECT id, embedding_attempts FROM knowledge_chunks WHERE chunk_index = 0",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("chunk");
+        assert_eq!(attempts_before, 0);
+        mark_chunk_failed(&conn, "knowledge_chunks", id).expect("mark failed");
+        let (state, attempts): (String, i64) = conn
+            .query_row(
+                "SELECT embedding_state, embedding_attempts FROM knowledge_chunks WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("chunk after");
+        assert_eq!(state, "failed");
+        assert_eq!(attempts, 1, "the attempt must be counted");
     }
 }
