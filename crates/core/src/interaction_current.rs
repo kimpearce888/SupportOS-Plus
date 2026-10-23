@@ -799,13 +799,18 @@ pub(crate) fn customer_messages(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Vec<MessageForAnalysis>> {
+    // Audit item 116: the sync writer (sync_engine::upsert_thread) never
+    // populates remote_created_at — every synced thread row carries NULL,
+    // so `ORDER BY remote_created_at` sorted on a constant and message
+    // order was whatever the scan produced. The COALESCE fallback is the
+    // codebase-wide convention (ai_pipeline, ai_evidence, ai_local).
     let mut stmt = conn.prepare(
         "SELECT id, body_html, body_text, remote_created_at, created_at
            FROM conversation_threads
           WHERE conversation_id = ?1
             AND type = 'customer'
             AND state = 'published'
-          ORDER BY remote_created_at ASC",
+          ORDER BY COALESCE(remote_created_at, created_at) ASC",
     )?;
     let rows: Vec<CustomerThreadRow> = stmt
         .query_map(params![conversation_id], |row| {
@@ -1183,4 +1188,55 @@ pub fn backfill_all(conn: &Connection) -> Result<usize> {
         }
     }
     Ok(written)
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+    use rusqlite::{Connection, params};
+
+    /// Audit item 116: the sync writer never populates
+    /// conversation_threads.remote_created_at, so `ORDER BY
+    /// remote_created_at` sorted on a constant NULL and the customer
+    /// message sequence was whatever the scan returned. The COALESCE
+    /// fallback restores chronology from the local stamps.
+    #[test]
+    fn customer_messages_order_chronologically_without_remote_stamps() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (900, 900, 'sequence', 'p', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv: i64 = conn.last_insert_rowid();
+        // Insert newest first: with the constant-NULL ORDER BY the scan
+        // order won (newest first); the COALESCE order must restore
+        // oldest → newest.
+        for (offset, body) in [
+            ("-1 minutes", "newest"),
+            ("-2 hours", "middle"),
+            ("-2 days", "oldest"),
+        ] {
+            conn.execute(
+                "INSERT INTO conversation_threads (conversation_id, type, state, body_text, created_at)
+                 VALUES (?1, 'customer', 'published', ?2, datetime('now', ?3))",
+                params![conv, body, offset],
+            )
+            .expect("thread");
+        }
+
+        let msgs = customer_messages(&conn, conv).expect("messages");
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].text, "oldest");
+        assert_eq!(msgs[1].text, "middle");
+        assert_eq!(msgs[2].text, "newest");
+        for m in &msgs {
+            assert!(
+                m.created_at.is_some(),
+                "the local stamp backs the created_at field when remote is absent"
+            );
+        }
+    }
 }

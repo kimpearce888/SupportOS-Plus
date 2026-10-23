@@ -1564,16 +1564,79 @@ impl<'a> SegmentEngine<'a> {
                 }
             }
             "email_domain" => {
+                // is_empty / is_not_empty are about email presence, not any
+                // particular domain — they must answer without a value.
+                match op.as_str() {
+                    "is_empty" => {
+                        return self.ids(
+                            "SELECT c.id AS cid FROM customers c WHERE c.deleted_at IS NULL AND c.id NOT IN
+                               (SELECT ce.customer_id FROM customer_emails ce)",
+                            &[],
+                        );
+                    }
+                    "is_not_empty" => {
+                        return self.ids(
+                            "SELECT DISTINCT ce.customer_id AS cid FROM customer_emails ce
+                               JOIN customers c ON c.id = ce.customer_id
+                              WHERE c.deleted_at IS NULL",
+                            &[],
+                        );
+                    }
+                    _ => {}
+                }
                 let domain = val.trim_start_matches('@').to_lowercase();
                 if domain.is_empty() {
                     return Vec::new();
                 }
-                self.ids(
-                    "SELECT DISTINCT ce.customer_id AS cid FROM customer_emails ce
-                       JOIN customers c ON c.id = ce.customer_id
-                      WHERE c.deleted_at IS NULL AND LOWER(ce.value) LIKE ?1 ESCAPE '\\'",
-                    &[text(&format!("%@{}%", escape_like(&domain)))],
-                )
+                // Audit item 114: the operator was ignored and the match
+                // was unanchored at the tail — every op ran the same
+                // `LIKE %@{domain}%`, so `user@example.com.au` matched an
+                // `example.com` filter, and `not_equals`/`ends_with`
+                // returned the same rows as `equals`. The domain part of
+                // each stored address is now extracted and the standard
+                // operator set applies to it.
+                const DOMAIN_EXPR: &str = "LOWER(SUBSTR(ce.value, INSTR(ce.value, '@') + 1))";
+                match op.as_str() {
+                    "equals" => self.ids(
+                        &format!(
+                            "SELECT DISTINCT ce.customer_id AS cid FROM customer_emails ce
+                               JOIN customers c ON c.id = ce.customer_id
+                              WHERE c.deleted_at IS NULL AND {DOMAIN_EXPR} = ?1"
+                        ),
+                        &[text(&domain)],
+                    ),
+                    "not_equals" => self.ids(
+                        "SELECT c.id AS cid FROM customers c WHERE c.deleted_at IS NULL AND c.id NOT IN
+                           (SELECT ce.customer_id FROM customer_emails ce
+                             WHERE LOWER(SUBSTR(ce.value, INSTR(ce.value, '@') + 1)) = ?1)",
+                        &[text(&domain)],
+                    ),
+                    "contains" => self.ids(
+                        &format!(
+                            "SELECT DISTINCT ce.customer_id AS cid FROM customer_emails ce
+                               JOIN customers c ON c.id = ce.customer_id
+                              WHERE c.deleted_at IS NULL AND {DOMAIN_EXPR} LIKE '%' || ?1 || '%' ESCAPE '\\'"
+                        ),
+                        &[text(&escape_like(&domain))],
+                    ),
+                    "starts_with" => self.ids(
+                        &format!(
+                            "SELECT DISTINCT ce.customer_id AS cid FROM customer_emails ce
+                               JOIN customers c ON c.id = ce.customer_id
+                              WHERE c.deleted_at IS NULL AND {DOMAIN_EXPR} LIKE ?1 || '%' ESCAPE '\\'"
+                        ),
+                        &[text(&escape_like(&domain))],
+                    ),
+                    "ends_with" => self.ids(
+                        &format!(
+                            "SELECT DISTINCT ce.customer_id AS cid FROM customer_emails ce
+                               JOIN customers c ON c.id = ce.customer_id
+                              WHERE c.deleted_at IS NULL AND {DOMAIN_EXPR} LIKE '%' || ?1 ESCAPE '\\'"
+                        ),
+                        &[text(&escape_like(&domain))],
+                    ),
+                    _ => Vec::new(),
+                }
             }
             _ => {
                 let expr = match field.as_str() {
@@ -2972,4 +3035,137 @@ pub fn suggest_system_prompt() -> String {
         "Rules: use ONLY ids/names from the catalog below; when unsure of an id, prefer tag/contact/text conditions instead of guessing ids; put exclusions in exclude[]; never invent fields.",
     ]
     .join("\n")
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_customer_with_email(conn: &Connection, remote: i64, email: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (?1, 'C')",
+            [remote],
+        )
+        .expect("customer");
+        let id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customer_emails (customer_id, value) VALUES (?1, ?2)",
+            rusqlite::params![id, email],
+        )
+        .expect("email");
+        id
+    }
+
+    fn contact_ids(conn: &Connection, field: &str, op: &str, value: &str) -> Vec<i64> {
+        let engine = SegmentEngine::new(conn);
+        let mut notes = Vec::new();
+        engine.evaluate_nodes(
+            &[SegmentNode::Contact {
+                field: field.to_string(),
+                op: op.to_string(),
+                value: Some(value.to_string()),
+            }],
+            true,
+            &mut notes,
+            0,
+        )
+    }
+
+    /// Audit item 114: every operator ran the same unanchored
+    /// `LIKE %@{domain}%` — `example.com.au` matched an `example.com`
+    /// filter and `not_equals` returned the equals set. The domain part
+    /// is now extracted and each operator applies to it.
+    #[test]
+    fn email_domain_filter_honors_the_operator_and_anchors_the_tail() {
+        let conn = db();
+        let exact = seed_customer_with_email(&conn, 1, "user@example.com");
+        let tld = seed_customer_with_email(&conn, 2, "admin@example.com.au");
+        let sub = seed_customer_with_email(&conn, 3, "boss@mail.example.com");
+        let other = seed_customer_with_email(&conn, 4, "plain@other.org");
+        let no_email = {
+            conn.execute(
+                "INSERT INTO customers (remote_id, first_name) VALUES (5, 'C')",
+                [],
+            )
+            .expect("customer");
+            conn.last_insert_rowid()
+        };
+
+        let sorted = |mut v: Vec<i64>| {
+            v.sort_unstable();
+            v
+        };
+
+        // equals: the domain part must equal the value exactly — the .au
+        // address no longer matches, and neither does the subdomain.
+        assert_eq!(
+            sorted(contact_ids(&conn, "email_domain", "equals", "example.com")),
+            vec![exact],
+            "exact domain match: user@example.com only"
+        );
+        // The unanchored pre-fix bug: admin@example.com.au must NOT match.
+        assert!(!contact_ids(&conn, "email_domain", "equals", "example.com").contains(&tld));
+
+        // ends_with: subdomains included (their domain ends with the value).
+        assert_eq!(
+            sorted(contact_ids(
+                &conn,
+                "email_domain",
+                "ends_with",
+                "example.com"
+            )),
+            sorted(vec![exact, sub]),
+        );
+
+        // contains: substring semantics on the domain part — the .au
+        // domain contains "example.com".
+        assert_eq!(
+            sorted(contact_ids(
+                &conn,
+                "email_domain",
+                "contains",
+                "example.com"
+            )),
+            sorted(vec![exact, sub, tld]),
+        );
+
+        // starts_with: "ex" prefixes "example.com" and "example.com.au",
+        // but not the subdomain "mail.example.com".
+        assert_eq!(
+            sorted(contact_ids(&conn, "email_domain", "starts_with", "ex")),
+            sorted(vec![exact, tld]),
+        );
+
+        // not_equals: everyone whose domain is not exactly example.com —
+        // the .au address, the subdomain, the other org, and the customer
+        // with no email at all.
+        assert_eq!(
+            sorted(contact_ids(
+                &conn,
+                "email_domain",
+                "not_equals",
+                "example.com"
+            )),
+            sorted(vec![tld, sub, other, no_email]),
+            "customers without the exact domain match, including the one with no email"
+        );
+
+        // is_empty / is_not_empty: previously unreachable — the op was
+        // ignored and the LIKE ran instead.
+        assert_eq!(
+            contact_ids(&conn, "email_domain", "is_empty", ""),
+            vec![no_email]
+        );
+        assert_eq!(
+            sorted(contact_ids(&conn, "email_domain", "is_not_empty", "")),
+            sorted(vec![exact, tld, sub, other]),
+        );
+    }
 }

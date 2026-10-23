@@ -1441,11 +1441,14 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
     let Some(customer_id) = conv.customer_local_id else {
         return Ok(None);
     };
+    // Audit item 116: remote_created_at is never populated by the sync
+    // writer, so the bare ORDER BY sorted on a constant NULL — the same
+    // defect and the same COALESCE convention as interaction_current.rs.
     let mut stmt = conn.prepare(
         "SELECT type, body_html, body_text, created_at
            FROM conversation_threads
           WHERE conversation_id = ?1 AND deleted_at IS NULL AND state = 'published'
-          ORDER BY remote_created_at ASC",
+          ORDER BY COALESCE(remote_created_at, created_at) ASC",
     )?;
     let rows: Vec<(String, Option<String>, Option<String>)> = stmt
         .query_map(params![conversation_id], |r| {
@@ -2252,4 +2255,72 @@ fn build_playbook(
         }),
         avoid,
     })
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+    use rusqlite::{Connection, params};
+
+    /// Audit item 116: the outcome computation read the thread sequence
+    /// with a bare `ORDER BY remote_created_at` — a column the sync
+    /// writer never fills, so the order was scan-order luck. The
+    /// COALESCE fallback keeps the lane working on synced data (where
+    /// remote_created_at is NULL for every row) and prefers the remote
+    /// stamp when a writer does provide one.
+    #[test]
+    fn compute_outcome_survives_synced_threads_with_null_remote_stamps() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (42, 'Casey')",
+            [],
+        )
+        .expect("customer");
+        let customer: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, customer_local_id)
+             VALUES (77, 77, 'outcome', 'p', 'closed', ?1)",
+            params![customer],
+        )
+        .expect("conversation");
+        let conv: i64 = conn.last_insert_rowid();
+        // Synced rows: only created_at is populated, remote_created_at NULL.
+        // The rows are INSERTED reply-first — with the old constant-NULL
+        // ORDER BY the scan order won and the follow-up customer message
+        // was miscounted; the COALESCE order reads customer → reply →
+        // follow-up.
+        for (offset, kind, body) in [
+            (
+                "-3 days",
+                "reply",
+                "We found a bug in the exporter; a fix is out.",
+            ),
+            ("-4 days", "customer", "The export fails every time we try."),
+            (
+                "-2 days",
+                "customer",
+                "Now the attachments fail to upload after the export.",
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO conversation_threads (conversation_id, type, state, body_text, created_at)
+                 VALUES (?1, ?2, 'published', ?3, datetime('now', ?4))",
+                params![conv, kind, body, offset],
+            )
+            .expect("thread");
+        }
+
+        let outcome = compute_outcome(&conn, conv)
+            .expect("compute")
+            .expect("an outcome for a closed, replied conversation");
+        // Chronological order: one customer message after the reply, and
+        // it is a complaint, not a closing acknowledgment.
+        assert_eq!(outcome.follow_up_count, 1, "one follow-up customer message");
+        assert_eq!(
+            outcome.resolved_after_first_response,
+            Some(false),
+            "a follow-up after the first reply means not resolved on first response: {outcome:?}"
+        );
+    }
 }

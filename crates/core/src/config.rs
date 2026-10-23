@@ -295,15 +295,22 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
 }
 
 fn redact_string(s: &str) -> String {
+    // Audit item 107: head/tail were raw BYTE offsets (`&s[..2]`), so any
+    // secret whose second byte sits inside a multi-byte character — a CJK,
+    // emoji, or accented-Latin client id — panicked with "byte index 2 is
+    // not a char boundary" the moment the redacted config was rendered.
+    // Redaction is a display helper: take the first and last two
+    // CHARACTERS and mask short strings by character count, never bytes.
     if s.is_empty() {
         return String::new();
     }
-    if s.len() <= 4 {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= 4 {
         return "••••".into();
     }
-    let head: usize = 2.min(s.len() / 4);
-    let tail: usize = 2.min(s.len() / 4);
-    format!("{}••••{}", &s[..head], &s[s.len() - tail..])
+    let head: String = chars[..2].iter().collect();
+    let tail: String = chars[chars.len() - 2..].iter().collect();
+    format!("{head}••••{tail}")
 }
 
 #[cfg(test)]
@@ -413,5 +420,30 @@ mod migrate_tests {
         root.join(LEGACY_DATA_DIR_NAME)
             .join(LEGACY_DB_FILE_NAME)
             .is_file()
+    }
+}
+
+#[cfg(test)]
+mod batch30_tests {
+    use super::*;
+
+    /// Audit item 107: the head/tail offsets were raw byte indices, so a
+    /// secret whose second byte sits inside a multi-byte character panicked
+    /// with "byte index 2 is not a char boundary". Every shape renders now.
+    #[test]
+    fn redact_string_survives_multibyte_secrets() {
+        assert_eq!(redact_string(""), "");
+        assert_eq!(redact_string("ab"), "••••");
+        assert_eq!(redact_string("abcd"), "••••");
+        // Six 4-byte emoji: 24 bytes, 6 chars — the old code sliced at
+        // byte 2 and panicked.
+        assert_eq!(redact_string("🔒🔒🔒🔒🔒🔒"), "🔒🔒••••🔒🔒");
+        // CJK (3 bytes per char).
+        let cjk = redact_string("秘密のキーです");
+        assert!(cjk.starts_with("秘"), "{cjk}");
+        assert!(cjk.ends_with("す"), "{cjk}");
+        assert!(cjk.contains("••••"));
+        // Long ASCII keeps the original head/tail shape.
+        assert_eq!(redact_string("sk-live-abcdef123456"), "sk••••56");
     }
 }
