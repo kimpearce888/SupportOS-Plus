@@ -412,3 +412,24 @@
 {"t": 1792876719.724, "kind": "app-started", "pid": 32528, "ready": true, "lock_error": false}
 {"t": 1792876726.678, "kind": "home", "pill_y": 180}
 {"t": 1792876751.256, "kind": "step", "id": "SE2b", "action": "click", "label": "LM Studio tab (tight crop)", "at": [948, 91], "diff": 3.02, "changed": true, "result": "ok"}
+{"t": 1792877187.097, "kind": "app-started", "pid": 757, "ready": true, "lock_error": false}
+{"t": 1792877194.058, "kind": "home", "pill_y": 180}
+{"t": 1792877237.854, "kind": "app-started", "pid": 910, "ready": true, "lock_error": false}
+{"t": 1792877244.786, "kind": "home", "pill_y": 180}
+{"t": 1792877248.662, "kind": "step", "id": "W08-open", "action": "header 'Search \u2318K' click opens palette", "at": [1059, 26], "method": "ocr", "diff": 1.69, "empty_state_ocr": false, "result": "check"}
+{"t": 1792877250.616, "kind": "step", "id": "W08-ctrlk", "action": "Ctrl+K chord while palette open", "diff": 0.0, "note": "keyboard-injection limitation claim tested directly", "result": "no-op"}
+{"t": 1792877254.139, "kind": "step", "id": "W08-close-backdrop", "action": "backdrop click closes palette", "diff": 0.0, "palette_gone_ocr": true, "result": "check"}
+{"t": 1792877256.555, "kind": "step", "id": "W08-reopen", "action": "header 'Search \u2318K' reopens palette", "at": [1059, 26], "method": "ocr", "diff": 0.0, "result": "no-change"}
+{"t": 1792877335.626, "kind": "app-started", "pid": 1242, "ready": true, "lock_error": false}
+{"t": 1792877342.554, "kind": "home", "pill_y": 180}
+{"t": 1792877344.424, "kind": "step", "id": "W08b-open", "action": "header 'Search \u2318K' click opens palette", "at": [1059, 26], "diff": 1.69, "result": "ok"}
+{"t": 1792877346.358, "kind": "step", "id": "W08b-close-backdrop", "action": "inside-window backdrop click closes palette", "at": [1000, 620], "diff": 0.0, "result": "no-change"}
+{"t": 1792877348.231, "kind": "step", "id": "W08b-reopen", "action": "header button reopens palette (repeat)", "diff": 0.0, "result": "no-change"}
+{"t": 1792877350.103, "kind": "step", "id": "W08b-close2", "action": "backdrop closes again (repeat)", "diff": 0.0, "result": "no-change"}
+{"t": 1792877447.568, "kind": "app-started", "pid": 1484, "ready": true, "lock_error": false}
+{"t": 1792877454.508, "kind": "home", "pill_y": 180}
+{"t": 1792877464.71, "kind": "step", "id": "W08c-backdrop", "at": [950, 120], "diff": 0.0, "palette_still_visible": true, "result": "still-open"}
+{"t": 1792877469.652, "kind": "step", "id": "W08c-backdrop", "at": [600, 500], "diff": 0.0, "palette_still_visible": true, "result": "still-open"}
+{"t": 1792877474.498, "kind": "step", "id": "W08c-backdrop", "at": [450, 620], "diff": 0.081, "palette_still_visible": true, "result": "still-open"}
+{"t": 1792877479.258, "kind": "step", "id": "W08c-backdrop", "at": [1100, 90], "diff": 0.449, "palette_still_visible": true, "result": "still-open"}
+{"t": 1792877483.843, "kind": "step", "id": "W08c-backdrop", "at": [300, 300], "diff": 1.69, "palette_still_visible": false, "result": "closed"}

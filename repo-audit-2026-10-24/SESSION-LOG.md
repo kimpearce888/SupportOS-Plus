@@ -125,3 +125,22 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
   8-frame sweep and chip/checkbox pixel checks).
 - Status changes: FEAT-002/003 -> SATISFIED; FEAT-004 IN PROGRESS (columns
   complete for F- and C- ledgers; workflows pending).
+
+
+## 2026-10-24 ~22:05 UTC — W-008 command-palette runtime check (partial; FIND-011 opened)
+
+- Palette OPENS via the header "Search ⌘K" button (real click at 1059,26;
+  OCR-located; diff 1.69; repeatable) — empty state "Type to search" +
+  explainer verified visually and by OCR (E-081).
+- Ctrl+K chord injected while open: no-op (diff 0.0) — the XTEST keyboard
+  limitation now verified for chords, not just text.
+- Backdrop close matrix: 5 of 6 outside clicks failed to close the palette
+  and two interacted with the UI UNDERNEATH (contradicting the palette.rs
+  item-133 catcher comment); one click at (300,300) did close it.
+  Recorded as FIND-011 (Low, runtime-confirmed, root cause TBD).
+- Header button + sidebar trigger are open()-only (not toggles) — with the
+  palette open, mouse-only dismissal is unreliable (FIND-011).
+- Query typing / hit-row navigation / Escape close blocked by the keyboard
+  limitation (recorded, not an app defect); sidebar trigger row not clicked
+  (FIND-004 overlap zone; same open() call source-verified).
+- WORKFLOW-COVERAGE W-008 -> PARTIAL; manifest E-081..E-086.

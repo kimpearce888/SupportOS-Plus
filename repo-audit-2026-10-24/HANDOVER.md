@@ -26,10 +26,12 @@ targeting + dark-rect/bbox detectors; E-032..E-080). The NEXT-ACTIONS targeted
 controls were all exercised, including the executed Diagnostics clear-log
 confirmation flow (log now empty — the button is absent with 0 events). Two
 recorded notes: XTEST keyboard injection does not reach egui TextEdits in this
-sandbox (Customers/Support Graph text entry source-verified only) and the
+sandbox (now also verified for chords — Ctrl+K is a no-op) and the
 Onboarding/Shell sync-controls are deliberately deferred to W-002/W-007 to
-preserve the never-synced precondition. Findings now FIND-001 (Medium) +
-FIND-002..FIND-010 (Low; five added in pass 2).
+preserve the never-synced precondition. **W-008 executed PARTIAL** (E-081..
+E-086): palette opens via the header button with the correct empty state;
+the click-outside backdrop is unreliable → FIND-011. Findings now FIND-001
+(Medium) + FIND-002..FIND-011 (Low). Next workflow: W-007.
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -44,7 +46,7 @@ FIND-002..FIND-010 (Low; five added in pass 2).
   evidence/artifacts/control-verify.py + control-verify-events.jsonl (incl.
   retained v1/v2 tool-calibration rows); evidence/logs/CONTROL-app.log
 - Findings: FINDINGS.md (FIND-001..FIND-010)
-- Workflows: WORKFLOW-COVERAGE.md (W-001..W-010 queued, entry points confirmed)
+- Workflows: WORKFLOW-COVERAGE.md (W-008 PARTIAL with evidence; W-001..W-010 otherwise queued)
 - Report: REPORT.md (skeleton, IN PROGRESS)
 
 ## Tooling facts a new session must know
@@ -75,17 +77,17 @@ FIND-002..FIND-010 (Low; five added in pass 2).
 - Formal control testing (QA-001..007 ledger): NOT STARTED (pass-2 exercises
   are inventory verification, not the formal ledger)
 - Workflows identified / completed: 10 queued / 0
-- Evidence: E-001..E-080, all validated
+- Evidence: E-001..E-086, all validated
 - Accepted exceptions: none · Unresolved gaps: none new (W-001/W-003 external
   data blockers unchanged)
-- Findings: FIND-001 Medium; FIND-002..FIND-010 Low
+- Findings: FIND-001 Medium; FIND-002..FIND-011 Low
+- Coverage snapshot time: 2026-10-24 ~22:05 UTC
 
 ## Outstanding tasks (ordered)
-1. Command palette runtime check (W-008) — Ctrl+K via XTEST key injection
-   MAY NOT WORK (see tooling facts); palette opens via the sidebar "Search…"
-   row / header "Search ⌘K" BUTTON (real click) as fallback entry.
-2. Workflow execution order per NEXT-ACTIONS.md #3 (W-007 → W-010 → W-006 →
-   W-005 → W-002 [consumes never-synced state] → W-003/W-004 → W-008 → W-009).
+1. Workflow execution order per NEXT-ACTIONS.md #3 (W-007 → W-010 → W-006 →
+   W-005 → W-002 [consumes never-synced state] → W-003/W-004 → W-009;
+   W-008 PARTIAL done — remaining W-008 steps are keyboard-blocked, record
+   as tooling-limited, not exceptions).
 3. FIND-001 UI-signal + webhook-drain checks.
 4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
    second-instance UI check (FIND-002 reclassification decision).
@@ -98,9 +100,10 @@ FIND-002..FIND-010 (Low; five added in pass 2).
 ## Blockers and known problems
 - W-001 OAuth round-trip needs external Help Scout credentials (likely
   exception registration); W-003 deep steps need data.
-- XTEST keyboard limitation (see tooling facts) may force palette/scope
-  entry via clickable fallbacks — register a tooling note, not an E1–E6
-  exception, if the Ctrl+K chord cannot be injected.
+- XTEST keyboard limitation (see tooling facts) — verified for text AND
+  chords; remaining palette steps (query typing, Escape) are tooling-limited.
+- FIND-011: palette dismissal unreliable — if a workflow needs the palette
+  closed by mouse, use the (300,300)-region click or restart the app run.
 - None environmental: Xvfb/XTEST mouse tooling proven end-to-end.
 
 ## Decisions and constraints to preserve
@@ -123,7 +126,7 @@ FIND-002..FIND-010 (Low; five added in pass 2).
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-24 ~21:35 UTC
+- Timestamp/timezone: 2026-10-24 ~22:05 UTC
 - Validator/check: 46/46 pass-2 steps dispositioned (events JSONL final rows);
   key PNGs visually read (8-frame sweep + chip/checkbox pixel checks + dialog
   and post-clear states); DB state read-only verified; manifest E-032..E-080

@@ -2,8 +2,8 @@
 
 - Audited application revision: `main` @ `3affe7e` (full sha in HANDOVER.md)
 - Current audit branch/commit: audit checkpoint commits on top of `3affe7e` (see HANDOVER.md §Repository and Git state)
-- Current phase: Phase 3 — formal QA ledger + workflows; control/option ledger (pass 2) DONE
-- Last update: 2026-10-24 ~21:35 UTC
+- Current phase: Phase 3 — workflows (W-008 partial done, W-007 next); control/option ledger (pass 2) DONE
+- Last update: 2026-10-24 ~22:05 UTC
 - Traceability reconciliation state: 50/50 rows preserved; BOOT-001..003, ENV-001, BUILD-001/002, TEST-001, FEAT-001/002/003 recorded (FEAT-004 IN PROGRESS); ARCH-001 v1 (deep-dive queued); remainder = workflows/QA ledger/report
 
 | Phase | Status | Evidence/output | Blocker / remaining action |
@@ -14,10 +14,10 @@
 | Feature inventory — controls | **PASS (pass 2)** | FEATURE-INVENTORY.md ledger: 535 C-rows (source-first, line refs) + 46 runtime control exercises (control-verify.py v3; E-032..E-080) | 2 recorded notes: XTEST keyboard-injection limitation (CU1/G01, env tooling) and Onboarding/Shell sync-control deferral (W-002/W-007 sequencing) |
 | Build/install/launch | PASS (build 0 warnings; launch verified; FIND-001/FIND-002 runtime-characterized) | BUILD-AND-INSTALL.md; evidence/screenshots/BUILD/; evidence/logs/F-CAND-001*.log | — |
 | Control testing | NOT STARTED | — | QA-001..007 after pass 2 |
-| Workflow testing | NOT STARTED | — | WORKFLOW-COVERAGE.md queue W-001..W-010 |
+| Workflow testing | IN PROGRESS (W-008 PARTIAL) | WORKFLOW-COVERAGE.md; E-081..E-086; FIND-011 | W-007 next; keyboard-limited steps recorded |
 | Edge/failure/recovery testing | NOT STARTED | — | — |
-| Findings and fix recommendations | IN PROGRESS | FINDINGS.md (FIND-001 Medium; FIND-002..FIND-010 Low) | FIND-001 UI-signal + drain runtime checks queued |
-| Evidence reconciliation | IN PROGRESS | evidence/manifest.csv E-001..E-080 validated | keep manifest ↔ files diff-current (EVID-005) |
+| Findings and fix recommendations | IN PROGRESS | FINDINGS.md (FIND-001 Medium; FIND-002..FIND-011 Low) | FIND-001 UI-signal + drain runtime checks queued |
+| Evidence reconciliation | IN PROGRESS | evidence/manifest.csv E-001..E-086 validated | keep manifest ↔ files diff-current (EVID-005) |
 | Final report and publication | NOT STARTED | REPORT.md (skeleton) | after COV-001/002 |
 
 ## Current counts (2026-10-24 ~21:35 UTC)
@@ -32,7 +32,7 @@
 - UI steps requiring screenshots: 29 (pass 1) + 46 (pass 2) — all covered; validated screenshots: 24 FEATURE + 66 CONTROL + 1 BUILD (PIL + visually validated)
 - Accepted exceptions by type: none (the two pass-2 notes are recorded limitations/sequencing decisions in FEATURE-INVENTORY.md + manifest, not E1-E6 evidence exceptions)
 - Unresolved evidence gaps: none new; W-001/W-003 external-data blockers unchanged
-- Findings by severity/status: FIND-001 Medium confirmed; FIND-002..FIND-010 Low confirmed (FIND-005..010 added in pass 2)
+- Findings by severity/status: FIND-001 Medium confirmed; FIND-002..FIND-011 Low confirmed (FIND-005..011 added in pass 2 / W-008)
 
 Counts reconciled? Partial — page/control inventory reconciled (FEATURE-INVENTORY.md + manifest E-001..E-080); workflow/QA counts remain preliminary until those execute.
 
