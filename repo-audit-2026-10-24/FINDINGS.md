@@ -22,10 +22,14 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 
 ## FIND-002 — Second-instance guard works; message only in stderr log (observation, not a defect)
 - **Classification:** observation/informational
-- **Severity:** Low · **Confidence/status:** Confirmed at runtime
+- **Severity:** Low · **Confidence/status:** Confirmed at runtime · **RECLASSIFIED/CLOSED by W-009 (2026-10-25): stays observation/informational — no defect, no upgrade**
 - **Reproduction:** launch second `supportos-plus` while one runs → exit code 1, log `ERROR supportos_plus: cannot acquire the instance lock, error: another SupportOS+ instance is already running` (main.rs:34, flock on instance.lock).
-- **Evidence:** evidence/logs/single-instance-second-run.log
-- **Note:** source comments state no IPC/focus-existing-window behavior in the native shell (single_instance.rs header). Whether a user-visible dialog appears is queued for UI verification; a bare non-zero exit with console-only message may be a UX gap for double-click launches. Will reclassify after UI test.
+- **Evidence:** evidence/logs/single-instance-second-run.log (BUILD phase) · W-009 runtime: evidence/logs/W009-second-instance.log (exit 1, both stderr lines), evidence/screenshots/WORKFLOW/W009-01/02/03.png (pixel-identical frames), E-138..E-142
+- **W-009 verdict (decision recorded):**
+  - Guard correct and complete: refuses BEFORE the DB is even opened (main.rs boot order — W-009 measured DB unchanged, application_errors stays 5) and releases the lock on exit (independent flock probe: held while running, acquirable after exit).
+  - Instance-1 UI affordance: NONE — full-frame screenshots before/during/after the refused attempt are pixel-identical (diffs 0.0 full / 0.0 content / 0.0 toast region). Matches the source design (single_instance.rs header: no IPC channel, so no focus-existing-window behavior).
+  - Second-instance feedback, full inventory: exit 1 + stderr ERROR + 'SupportOS-Plus: cannot start: …' eprintln + a fatal.log record + a BEST-EFFORT desktop alert (zenity modal → notify-send fallback, fatal.rs desktop_alert). In this sandbox no notifier binary exists (which-probe: zenity/notify-send/kdialog/xmessage all absent), so the alert leg dropped silently — exactly as fatal.rs:60 documents for CI/X-less containers. The alert leg is therefore recorded ENVIRONMENT-DEPENDENT (not exercised here, present by design on normal desktops), not absent.
+  - The earlier 'may be a UX gap for double-click launches' concern is thus bounded: on a notifier-equipped desktop the refused launch shows a modal error dialog; in notifier-less environments the feedback is console + `logs/fatal.log` in the data dir. Recorded as a UX observation for the maintainer, not a defect; no reclassification.
 
 ## FIND-003 — Prior audit committed app-local secret-envelope keys as repo artifacts (pre-existing; observation only)
 - **Classification:** repository hygiene / security observation about pre-existing content, NOT a product-code defect and NOT introduced by this audit

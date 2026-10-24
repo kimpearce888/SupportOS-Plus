@@ -343,3 +343,57 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
 - Evidence: WORKFLOW/W002-01..06.png (6 frames, PIL+visual), E-131..E-137;
   WORKFLOW-COVERAGE W-002 → DONE-PARTIAL; FINDINGS FIND-011 updated.
   Next: W-009 (second-instance UX) — W-003/W-004 remain data-blocked.
+
+## 2026-10-25 (cont.) — W-009 second-instance UX executed DONE (E-138..E-142)
+
+Checkpoint 9 first: the uncommitted W-002 work was committed AND pushed
+(`9db4045..01fe55b`) after a read-only DB reconciliation corrected the
+application_errors count 4 → 5 (the derivation had missed run-3's executed
+S004 click; full attribution: 1 pre-existing FIND-011 + run-2 1 + run-3 1 +
+final-run 2; a w002-reconciliation JSONL row supersedes the wrong sums;
+manifest E-136 + SESSION-LOG + HANDOVER corrected; a duplicated task block
+in HANDOVER §Outstanding tasks removed).
+
+W-009 (process-level around one live GUI instance; no input injection):
+- S001 PASS: instance 1 launched, ready; INDEPENDENT flock probe on
+  instance.lock = HELD while running.
+- S002: pre-state frame W009-01 captured (PIL-validated).
+- S003 PASS: second launch attempt → exit code 1 (waitpid), stderr holds
+  BOTH designed lines ('cannot acquire the instance lock' ERROR, main.rs:34;
+  'SupportOS-Plus: cannot start: …' eprintln via fatal()); frame
+  W009-02 captured 0.62 s into the attempt. Capture note (honest): the
+  script's section header/exit-note were Python-buffered and flushed after
+  the child's unbuffered stderr — they appear at the END of
+  W009-second-instance.log; content complete.
+- S004 PASS: post-attempt frame W009-03 pixel-identical to pre-state
+  (diffs 0.0 full / 0.0 content / 0.0 toast region) — instance 1 offers NO
+  UI affordance (single_instance.rs header: no IPC channel by design).
+- S005 PASS: fatal.log +1 designed '[cannot start]' row (QA artifact); DB
+  unchanged (application_errors stays 5; sync tables 0 — the guard refuses
+  before the DB is even opened per main.rs boot order).
+- S006 PASS: instance 1 terminated; flock probe = acquirable (lock
+  release-on-exit proven both directions).
+- Designed desktop-alert path (zenity → notify-send, fatal.rs
+  desktop_alert): NOT exercisable — no notifier binary in the sandbox
+  (which-probe all null); fatal.rs:60 documents the silent drop for CI/
+  X-less containers. Recorded environment-dependent, not absent.
+- FIND-002 RECLASSIFICATION DECISION (the W-009 deliverable): stays
+  observation/informational (Low). Guard correct and complete; feedback
+  inventory on a refused launch = exit 1 + stderr + fatal.log + (on
+  notifier-equipped desktops) a modal dialog; no focus-existing-window
+  behavior by design. FINDINGS.md updated with the full verdict.
+
+fatal.log pre-existing attribution (recorded): 3 environment-bring-up
+panics (libxkbcommon-x11 load failure — launches before run-app.sh had
+LD_LIBRARY_PATH set; audit tooling, not app defects) + 3 cannot-start rows
+(15:50 build-phase single-instance test, documented; 19:51:31 + 19:53:33
+feature-walk relaunch transitions — walk-events app-started 19:52:11
+pid 18098 abort + 19:54:28 pid 18209, consistent with the walk's
+pkill→relaunch cycle racing the dying instance's lock release; the guard
+behaved as designed). Zero orphan rows.
+
+Evidence: WORKFLOW/W009-01/02/03.png (3 frames, PIL), logs/W009-app.log,
+logs/W009-second-instance.log, E-138..E-142; WORKFLOW-COVERAGE W-009 →
+DONE; FINDINGS FIND-002 closed with decision. Next per HANDOVER: FIND-001
+exception registration (W-001 credential blocker) → QA-004/005 edge tests
+→ formal QA ledger.

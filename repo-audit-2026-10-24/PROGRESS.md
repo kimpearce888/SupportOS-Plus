@@ -2,8 +2,8 @@
 
 - Audited application revision: `main` @ `3affe7e` (full sha in HANDOVER.md)
 - Current audit branch/commit: audit checkpoint commits on top of `3affe7e` (see HANDOVER.md §Repository and Git state)
-- Current phase: Phase 3 — workflows (W-002/W-005/W-006/W-010 DONE-PARTIAL, W-007 DONE, W-008 PARTIAL; W-009 next); control/option ledger (pass 2) DONE
-- Last update: 2026-10-25 ~00:10 UTC
+- Current phase: Phase 3 — workflows (W-002/W-005/W-006/W-010 DONE-PARTIAL, W-007 DONE, W-009 DONE, W-008 PARTIAL; all 10 workflows now executed or explicitly blocked); control/option ledger (pass 2) DONE
+- Last update: 2026-10-25 ~00:35 UTC
 - Traceability reconciliation state: 50/50 rows preserved; BOOT-001..003, ENV-001, BUILD-001/002, TEST-001, FEAT-001/002/003 recorded (FEAT-004 IN PROGRESS); ARCH-001 v1 (deep-dive queued); remainder = workflows/QA ledger/report
 
 | Phase | Status | Evidence/output | Blocker / remaining action |
@@ -14,10 +14,10 @@
 | Feature inventory — controls | **PASS (pass 2)** | FEATURE-INVENTORY.md ledger: 535 C-rows (source-first, line refs) + 46 runtime control exercises (control-verify.py v3; E-032..E-080) | 2 recorded notes: XTEST keyboard-injection limitation (CU1/G01, env tooling) and Onboarding/Shell sync-control deferral (W-002/W-007 sequencing) |
 | Build/install/launch | PASS (build 0 warnings; launch verified; FIND-001/FIND-002 runtime-characterized) | BUILD-AND-INSTALL.md; evidence/screenshots/BUILD/; evidence/logs/F-CAND-001*.log | — |
 | Control testing | NOT STARTED | — | QA-001..007 after pass 2 |
-| Workflow testing | IN PROGRESS (W-002/W-005/W-006/W-010 DONE-PARTIAL; W-007 DONE; W-008 PARTIAL) | WORKFLOW-COVERAGE.md; E-081..E-137; FIND-008 | W-009 next; W-003/W-004 data-blocked |
+| Workflow testing | IN PROGRESS (W-007/W-009 DONE; W-002/W-005/W-006/W-010 DONE-PARTIAL; W-008 PARTIAL) | WORKFLOW-COVERAGE.md; E-081..E-142; FIND-008; FIND-002 closed | W-003/W-004 data-blocked; W-001 credential-blocked (exception registration next) |
 | Edge/failure/recovery testing | NOT STARTED | — | — |
-| Findings and fix recommendations | IN PROGRESS | FINDINGS.md (FIND-001 Medium; FIND-002..FIND-011 Low; FIND-008 + FIND-011 consequences runtime-characterized) | FIND-001 listener-health message partial (needs credentials); drain check source-verified only |
-| Evidence reconciliation | IN PROGRESS | evidence/manifest.csv E-001..E-137 validated (zero missing paths; all logs tracked since checkpoint 5) | keep manifest ↔ files diff-current (EVID-005) |
+| Findings and fix recommendations | IN PROGRESS | FINDINGS.md (FIND-001 Medium; FIND-002..FIND-011 Low; FIND-002 RECLASSIFIED/CLOSED by W-009 — observation stands, no defect; FIND-008 + FIND-011 consequences runtime-characterized) | FIND-001 listener-health message partial (needs credentials) → exception registration; drain check source-verified only |
+| Evidence reconciliation | IN PROGRESS | evidence/manifest.csv E-001..E-142 validated (zero missing paths; all logs tracked since checkpoint 5) | keep manifest ↔ files diff-current (EVID-005) |
 | Final report and publication | NOT STARTED | REPORT.md (skeleton) | after COV-001/002 |
 
 ## Current counts (2026-10-25 ~00:10 UTC)
@@ -25,16 +25,16 @@
 - Features discovered: 26 (23 pages F-001..F-023 + 3 shell-level F-024..F-026); all with runtime evidence
 - Controls/options discovered: 535 ledger rows (FEAT-002 complete; FEATURE-INVENTORY.md, source-first with line refs) + shell/platform capabilities (FEAT-003: workers, bridge events, CLI/env, flock, loopback listener, theme persistence)
 - Controls/options with results: 46 runtime control exercises (pass 2; 42 PASS, 2 PARTIAL with recorded environment limitation, 2 documented mis-target/no-op with superseding evidence); destructive controls source-verified only (deliberate)
-- Workflows identified / completed: 10 identified — W-002 DONE-PARTIAL (no-credentials leg: designed refusals verified, never-synced DB state survives), W-005 DONE-PARTIAL, W-006 DONE-PARTIAL, W-007 DONE, W-010 DONE-PARTIAL, W-008 PARTIAL; W-003/W-004 data-blocked, W-001 credential-blocked, W-009 next
+- Workflows identified / completed: 10 identified — W-007 DONE, W-009 DONE (second-instance guard verified incl. independent flock probes + FIND-002 decision), W-002 DONE-PARTIAL (no-credentials leg), W-005 DONE-PARTIAL, W-006 DONE-PARTIAL, W-010 DONE-PARTIAL, W-008 PARTIAL; W-003/W-004 data-blocked, W-001 credential-blocked (exception pending)
 - Navigation steps executed by real input: 29 (pass 1) + 8 nav moves per pass-2 run — all pill-verified
 - Formal QA test steps executed (02-BUILD §3 ledger): 0 (pass-2 control exercises are inventory verification, not the formal ledger)
 - Passed / failed / partial / blocked / inconclusive / not attempted: 0 / 0 / 0 / 0 / 0 / 0 (formal ledger)
-- UI steps requiring screenshots: 29 (pass 1) + 46 (pass 2) + 10 W-007 + 10 W-010 + 12 W-006 + 10 W-005 + 9 W-002 steps — all covered; validated screenshots: 24 FEATURE + 66 CONTROL + 1 BUILD + 42 WORKFLOW (PIL + visually validated)
+- UI steps requiring screenshots: 29 (pass 1) + 46 (pass 2) + 10 W-007 + 10 W-010 + 12 W-006 + 10 W-005 + 9 W-002 + 3 W-009 steps — all covered; validated screenshots: 24 FEATURE + 66 CONTROL + 1 BUILD + 45 WORKFLOW (PIL + visually validated)
 - Accepted exceptions by type: none (the two pass-2 notes are recorded limitations/sequencing decisions in FEATURE-INVENTORY.md + manifest, not E1-E6 evidence exceptions)
 - Unresolved evidence gaps: none new; W-001/W-003 external-data blockers unchanged
-- Findings by severity/status: FIND-001 Medium confirmed (listener-health sub-check partial: message only renders with credentials); FIND-002..FIND-011 Low confirmed (FIND-008 runtime-confirmed; FIND-011 fall-through consequence attributed — a real sync action was triggered)
+- Findings by severity/status: FIND-001 Medium confirmed (listener-health sub-check partial: message only renders with credentials — exception registration next); FIND-002 RECLASSIFIED/CLOSED (W-009: observation/informational stands, no defect); FIND-003..FIND-011 Low confirmed (FIND-008 runtime-confirmed; FIND-011 fall-through consequence attributed — a real sync action was triggered)
 
-Counts reconciled? Partial — page/control inventory reconciled (FEATURE-INVENTORY.md + manifest E-001..E-137); workflow counts current through W-002/W-005/W-006/W-007/W-008/W-010; QA-ledger counts remain preliminary until those execute.
+Counts reconciled? Partial — page/control inventory reconciled (FEATURE-INVENTORY.md + manifest E-001..E-142); workflow counts current through W-002/W-005/W-006/W-007/W-008/W-009/W-010; QA-ledger counts remain preliminary until those execute.
 
 Prior art (NOT this audit, background only): `qa-audit/20261019T050847Z/` — a completed
 2026-10-19 audit of commit `19dfb35` under a different user-supplied specification.

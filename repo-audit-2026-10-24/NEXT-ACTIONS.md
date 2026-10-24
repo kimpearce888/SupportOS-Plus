@@ -1,28 +1,32 @@
 # Next Actions
 
 ## Immediate next action
-1. **Action:** W-002 sync lifecycle (consumes the never-synced precondition
-   — the audit has deliberately preserved it until now): Dashboard
-   "Sync now" and/or Sync Health "Run initial sync" with NO Help Scout
-   credentials — record the designed no-credentials failure behavior
-   (engine state, toasts, sync_runs/sync_cursors tables), the header
-   freshness-chip behavior, and the Sync Health "Cancel running sync" path.
-   Also cover the FIND-001 webhook-drain check if reachable at worker start.
-   - Relevant IDs/files: W-002; sync_health.rs; dashboard.rs sync section;
-     FIND-001 sub-checks
-   - Prerequisites: Xvfb tooling proven; sync tables currently 0
-   - Records: WORKFLOW-COVERAGE.md (W-002), manifest, SESSION-LOG.md,
-     FINDINGS.md (FIND-001 sub-checks)
+1. **Action:** FIND-001 closing decision: register the W-001 OAuth
+   round-trip + listener-health message sub-checks as an evidence
+   exception (type E2 external dependency) in evidence/exceptions.csv,
+   per instruction 05 — the sandbox has no live Help Scout endpoint or
+   credentials, and W-002 already captured the unconfigured-tab state
+   (E-135). Webhook drain stays source-verified (cannot forge a signed
+   event).
+   - Relevant IDs/files: FIND-001; W-001; evidence/exceptions.csv (create);
+     INSTRUCTION-LOADING-RECORD.md §05 reference
+   - Prerequisites: none
+   - Records: exceptions.csv, FINDINGS.md FIND-001, manifest, SESSION-LOG
+   - Then: edge/failure/recovery + cross-feature tests (QA-004/005) — the
+     FIND-002 reclassification is DONE (W-009), carry its result in.
 
 ## Remaining actions (dependency order)
-2. W-003/W-004 as data allows → W-009 (second-instance UX; FIND-002
-   reclassification); deferred (tooling): C-SET-66 "really restore" + W-006
-   rule creation + W-005 ingest text path + W-008 keyboard steps (await a
-   text-capable run or an explicit QA-fixture decision).
-3. FIND-001 queued runtime checks: Settings → Help Scout tab listener-health
-   message; webhook drain at worker start (degraded listener path).
-4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
-   second-instance UI check (FIND-002 reclassification decision).
+2. W-003/W-004 remain data-blocked (register as exceptions if still
+   unexecutable at report time); deferred (tooling): C-SET-66 "really
+   restore" + W-006 rule creation + W-005 ingest text path + W-008
+   keyboard steps (await a text-capable run or an explicit QA-fixture
+   decision).
+3. FIND-001 queued runtime checks — RESOLVED BY #1: listener-health message
+   + OAuth round-trip register as exceptions (E-135 already captures the
+   unconfigured tab); webhook drain stays source-verified (a signed event
+   cannot be forged outside the app).
+4. Edge/failure/recovery + cross-feature tests (QA-004/005) — the
+   second-instance UI check is DONE (W-009, FIND-002 closed).
 5. Formal QA ledger (QA-001..007) with per-step screenshots (EVID-001..006);
    exceptions to evidence/exceptions.csv as they arise.
 6. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001 completion.
