@@ -4226,3 +4226,237 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
 Runner verification (batch 35, code commit — CI on the tracking commit
 that contains it): follows once CI completes (recorded below when the
 runs finish).
+
+### Batch 34 — 2026-10-25 (clean-audit items 147-149, 152-158)
+
+**147. ensure_loaded-on-empty re-query pattern (7 pages)** (low|issue)
+— six pages gated their first fetch on `if list.is_empty() { reload() }`
+(outreach, organizations, connectors, notifications, incidents,
+automation), so a genuinely empty mirror — the steady state of a fresh
+install or an empty table — re-ran the full reload query on EVERY
+rendered frame. Operations' suggestions lane had the same shape
+(`workload.is_some() && suggestions.is_empty()` re-queried the
+suggested-assignees read every frame when the list was legitimately
+empty), and Search's auto-refetch latch re-ran its no-op reload every
+frame for a whitespace-only query (`query.trim()` is never a response).
+Every page now carries a `loaded` latch: `ensure_loaded` fires once,
+`reload` sets the latch, `invalidate` clears it (the invalidation →
+next-frame refetch semantics are unchanged), and the search guard trims
+the query before latching. Pinned by a page-level regression
+(`ensure_loaded_latches_and_invalidate_refetches`: first load, latch
+holds across a re-entrant `ensure_loaded`, invalidation refetches).
+pages/{outreach,organizations,connectors,notifications,incidents,
+automation,operations,search}.rs.
+
+**148. Dead Runner/JobRegistry/bulk_*/EventEmitter machinery**
+(low|gap)
+— `runner.rs` (Runner/JobRegistry/JobHandler/HandlerOutcome,
+`run_until_idle`) had zero references outside its own module and is
+deleted with its `pub mod runner;` wiring. The `EventEmitter` trait
+(events.rs) and its only impl (on EventBus, eventing.rs) are removed —
+every producer calls the inherent `EventBus::emit` directly. The
+workers' `bulk_*` job-kind dispatch arm and its ~180-line
+`execute_bulk_action` are removed: nothing in the workspace enqueues
+jobs whose kind starts with `bulk_` (the UI's bulk actions ride the
+outbound dispatcher), so the arm was unreachable and the handler dead.
+runner.rs deleted; crates/core/src/{events,eventing,workers}.rs, lib.rs.
+
+**149. Dead prompt surfaces** (low|gap)
+— `ai_pipeline::report_narrative` (the standalone narrative runner) had
+no caller — the weekly digest runs its own narrative lane with its own
+run bookkeeping since batch 28 — and is removed with its now-orphaned
+`REPORT_NARRATIVE_SYSTEM`, `PROMPT_VERSIONS_REPORT_NARRATIVE` and
+`build_report_narrative_user`. The ai_prompts copies of the
+attribute-extraction prompt (`ATTRIBUTE_EXTRACTION_SYSTEM` +
+`build_attribute_extraction_user` + `PROMPT_VERSIONS_ATTRIBUTE_EXTRACTION`)
+are removed — the feature owns its prompt and version in ai_attributes.rs
+(the duplicate was the audit's "duplicate attribute prompt"). The dead
+`ai_features` runtime below its migrations is removed: the coaching
+suggestion parser, the customer-memory helper set (the live memory path
+is ai_tools.rs, the copilot tool), the `TRANSLATION_PROMPT_VERSION =
+"translation-v1"` pair — a mismatched duplicate of
+`ai_prompts::PROMPT_VERSIONS_TRANSLATION = "translation_v1"`, the label
+translation.rs actually writes — the post-resolution QA trio (the live QA
+implementation is quality.rs), and the duplicate suggestions parser.
+ai_pipeline.rs, ai_prompts.rs, ai_features.rs (migrations stay wired).
+
+**152. Dead copilot/embedding helper surface** (low|gap)
+— copilot.rs's `truncate_result`, `should_stop`,
+`validate_tool_allowed`, `tool_allowlist` and the three constant
+accessors had zero production callers (the live chat loop reads the same
+constants directly and truncates inline); removed, and the item-121
+byte-safety regression re-pinned against the live chat-loop truncation.
+embeddings.rs's `embed_with_cache` (with its private `lookup_cache` /
+`store_cache` helpers and `MAX_EMBED_RETRIES`) and the
+`count_cache_entries` / `trim_cache_per_model` / `clear_cache` trio had
+zero callers (the live embed pass writes the `ai_runs` ledger rows
+directly); removed with the imports they orphaned — `content_hash`
+stays (sync_engine consumes it). ai_lm_studio.rs's
+`LmStudioProvider::new` / `with_base_url` / `Default` are removed (zero
+callers of any kind); the it_lm_studio tests build the provider through
+`with_client(OpenAiCompatibleClient::new(..))`. `with_client` stays
+(production caller in ai_attributes.rs), as does
+`with_base_url_and_timeout`. copilot.rs, embeddings.rs, ai_lm_studio.rs,
+it_lm_studio.rs.
+
+**153. AppConfig fields constructed, never consumed** (low|gap)
+— of `AppConfig`, only `data_dir` was ever read (main.rs). The
+`helpscout`, `ai`, `sync_interval_minutes` and `loopback_port` fields —
+and the `HelpScoutConfig` / `AiConfig` structs with their `redacted()`
+helper — were constructed and never consumed: credentials come from the
+env (`EnvConfig`), settings live in the database, the sync interval is
+the settings row, and the loopback listener binds an OS-assigned port.
+The dead surface is removed and main.rs calls `default_data_dir()`
+directly. `redact_string` (whose only production caller was the removed
+`HelpScoutConfig::redacted`) moves into the test module so the item-107
+byte-safety proof stays pinned; the batch-30 harness needle is
+re-pointed to the indented test-module copy (documented in the harness).
+config.rs, app-shell/main.rs, scripts/verify_batch30.py.
+
+**154. Dead hybrid_search fusion stack** (low|gap)
+— the module's entire fusion stack (`HybridResult`, `fuse_results(_with_k)`,
+`merge_doc_hits` with its hit types, `cosine_similarity`, and the
+`hybrid_search` entry point) had zero callers: the live search lanes
+implement RRF directly in search.rs. The removed entry point was also
+latent-broken — it fused sqlite-vec point ids (chunk-family namespaced
+since item 21) against conversation remote ids, so a match between the
+two lists was unrepresentable. The module shrinks to the one live
+symbol, `pub const RRF_K: u32 = 60` (consumed by search.rs's three
+fusion lanes), with the pin test kept. hybrid_search.rs.
+
+**155. Legacy FTS tables + chunk_version column retired** (low|gap)
+— `conversations_fts` and `customers_fts` ("legacy pre-parity tables")
+were created, rebuilt and per-row written, and no search lane ever
+queried them (the live lanes read `fts_conversations` /
+`fts_threads` / `customers`). Their writers (`index_conversation`,
+`index_customer`) had no callers and are removed with the CREATE
+statements, the rebuild inserts and the rebuild list entries; the live
+`index_conversation_fts` path is untouched. `chunk_version` was written
+by five insert sites (two of them disagreeing: 1 in conversation_chunks
+vs the schema default 2) and read by none; the column is dropped from
+the four CREATE TABLE definitions and all five inserts (fresh databases
+never create it; existing databases keep the column at its default,
+harmless — nothing reads it). search.rs, mirror_tables.rs,
+sync_engine.rs, knowledge_store.rs, embeddings.rs.
+
+**156. Connector AI-search/auth-edit + data_tools runtime dead**
+(low|gap)
+— `connectors::search_for_ai` (the audit's AI-search anchor) and
+`ai_visible_connector_names` had zero callers — the copilot's tool set
+reads the local archive through ai_tools, not connectors — and the dead
+lane carried a legacy-schema assumption (string rows through
+`list_rows`) that drifted from the live storage shape; removed with the
+private `get_by_name` helper they alone used. `connectors::patch` — the
+connector edit/auth-change route logic — had no caller (the shell's
+connector page creates, deletes and refreshes; it exposes no edit form),
+so no code path could ever change a stored auth payload; removed.
+`data_tools` shrinks to its `M026_TO_M027` migration: the module's
+custom-object CRUD (owned by custom_objects.rs), connector CRUD (owned
+by connectors.rs), db/settings export-import runtime (owned by
+backup_service.rs + data_reset.rs) and `validate_ssrf` copy (superseded
+by security::validate_ssrf_full*) all had zero callers and drifted from
+the live schemas; removed with the bootstrap wiring untouched.
+connectors.rs, data_tools.rs.
+
+**157. AppDir staging never cleaned** (low|gap)
+— `stage_appdir` created its directories and copied into whatever was
+already on disk, so a leftover staging tree from a previous build
+shipped inside the packed AppImage (a renamed artifact, a removed icon
+size, a stale AppRun) — the .deb path already wiped `debroot` the same
+way. `stage_appdir` now removes an existing AppDir before staging.
+Pinned by a regression test that seeds a stale file and asserts the
+re-stage drops it while the fresh layout lands.
+crates/xtask/src/package.rs.
+
+**158. appimagetool: unversioned URL, no checksum, executed in the
+release path** (med|gap)
+— the build downloaded whatever the moving `continuous` tag served that
+day and executed it, unchecked, in the release path — a supply-chain
+hole in the one step that produces the shipped artifact. The URL is
+pinned to the versioned 1.9.1 release
+(`appimagetool-x86_64.AppImage`) and the tool's SHA-256 is pinned
+(ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0,
+computed from the actual release artifact). The cached tool is verified
+before every use; a fresh download is verified before execution; a
+mismatch (tampered download, corrupted cache, upstream re-upload)
+refuses to run with an explicit error instead of executing an unverified
+binary. xtask hashes with sha2 (the same crate major the core already
+pins). crates/xtask/src/package.rs, Cargo.toml, Cargo.lock.
+>>>>>>> c7b976f (ai: batch 34 (audit items 147-149, 152-158) verified and recorded - executed concurrently with the owner's batch 35; the full record with local verification lives in completed.md: gate clean, fmt clean, workspace clippy clean, core 455/0/4 (467 minus the 13 removed dead-fusion tests plus the new RRF pin), sandbox 460/0/4, app-shell 222/0 with the new latch regression, xtask 7/0 with the new staging-clean regression, catalog 0, SPP_SMOKE exit 0 (24 pages, 4040 shapes, all 52 boot migrations applied), deny advisories+licenses ok, fresh verify_batch34.py harness (116 checks) plus harnesses 18-33 green with the two documented needle re-points (batch-30 item-107 to the test-module redact_string, batch-31 item-121 to the live chat-loop truncation); runner verification follows once CI on this code commit completes)
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `python3 scripts/gate_no_simulation.py`: clean.
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+<<<<<<< HEAD
+- `cargo clippy -p supportos-plus-core --all-targets --features sandbox
+  -- -D warnings`: clean.
+- Tests: core 467 passed / 0 failed / 4 ignored; sandbox-feature suite
+  472 passed / 0 failed / 4 ignored; app-shell 221 passed / 0 failed;
+  xtask 8 passed / 0 failed (6 pre-existing + 2 new batch-35
+  regressions: the appimage-arch mapping and the atomic tool-cache
+  landing); catalog 0. (A disk-full episode — rootfs at 100% — produced
+  39 environmental sandbox failures identical in class to batch 33's;
+  after clearing the incremental cache and stale /tmp fixtures the
+  identical suite was rerun cleanly: 472/0/4.)
+- `cargo metadata --locked`: clean; the Cargo.lock stayed byte-identical
+  through the manifest edit (item 162's premise, re-proven).
+- `cargo deny check advisories licenses bans` (cargo-deny 0.20.2):
+  advisories ok, bans ok, licenses ok — the bans verdict is new this
+  batch; the only note is the pre-existing CDLA-Permissive-2.0
+  unmatched-allowance warning recorded since batch 33, and the
+  unmatched-skip warnings from platform-only skips are gone (the skip
+  list carries exactly the checked graph's duplicates).
+- `cargo run --locked -p supportos-plus-xtask -- verify-icons`: "icon set
+  verified: png/ico/icns structures are consistent" (the exact CI step).
+- Both workflow YAMLs re-parse (yaml.safe_load) after the edits.
+- Harnesses: batch-18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 and
+  33 all pass. The batch-20 (item-21 upsert-site needle restructured by
+  batch-24's per-chunk partitioning) and batch-22 (the wrapped fence
+  literal and the volume-spike flake check) failures are the documented
+  pre-existing stale needles, unchanged from the pre-batch state (proven
+  pre-batch during batch 30); batch-17's script remains
+  environment-bound as documented.
+- SPP_SMOKE: not run locally this batch — batch 35 changes no runtime app
+  surface (xtask packaging code, a dead-code removal in catalog,
+  manifests, CI and deny config only); the AppImage boot-chain smoke runs
+  in the CI packages job on the pushed commit and is recorded below as
+  the runner verification.
+- Security: staged diff token-scanned clean before the push; remote
+  fetched (and rebased when needed) before every push per the
+  concurrent-batch discipline.
+
+Runner verification (batch 35, code commit — CI on the tracking commit
+that contains it): follows once CI completes (recorded below when the
+runs finish).
+=======
+- Tests: core 455 passed / 0 failed / 4 ignored (467 − 13 removed
+  hybrid_search dead-fusion tests + 1 new RRF pin test = 455; the
+  copilot truncate test was replaced 1:1 by the live-path regression);
+  sandbox-feature suite 460 passed / 0 failed / 4 ignored; app-shell
+  222 passed / 0 failed (1 new batch-34 regression: the outreach
+  reload-latch behavior); xtask 7 (6 + 1 new batch-34 regression: the
+  stale-staging-tree clean); catalog 0. (A disk-full episode at 100%
+  rootfs — the batch-33 environmental pattern — required clearing the
+  incremental cache mid-suite; every suite then rebuilt and rerun
+  cleanly with CARGO_INCREMENTAL=0.)
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary — exit 0,
+  boot chain + shell/renderer verified, all 52 boot migrations applied
+  (the shrunk data_tools and ai_features migrations intact), 24 pages
+  rendered, 4040 shapes (unchanged from batch 33 — dead-code removal and
+  data-fetch latching are not visible geometry). The sandbox's
+  loopback-port conflict produced the pre-existing environmental
+  warning (the smoke's boot chain and shell verification are unaffected).
+- Fresh harness `scripts/verify_batch34.py` (committed): 116 checks, all
+  pass; the batch-18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 and
+  33 harnesses all pass. Two documented needle re-points per the
+  batch-26 protocol: batch-30's item-107 check now locates the
+  test-module copy of `redact_string` (item 153 moved it with its
+  regression), and batch-31's item-121 check now pins the live
+  chat-loop truncation plus the removal of the dead helper (item 152).
+- Security: staged diff token-scanned clean before the push (the only
+  password/secret-shaped lines in the diff are the REMOVED dead
+  data_tools export/import code); remote fetched before the push.
+- Runner verification: follows once CI on the batch-34 code commit
+  completes (recorded below when the runs finish).
+>>>>>>> c7b976f (ai: batch 34 (audit items 147-149, 152-158) verified and recorded - executed concurrently with the owner's batch 35; the full record with local verification lives in completed.md: gate clean, fmt clean, workspace clippy clean, core 455/0/4 (467 minus the 13 removed dead-fusion tests plus the new RRF pin), sandbox 460/0/4, app-shell 222/0 with the new latch regression, xtask 7/0 with the new staging-clean regression, catalog 0, SPP_SMOKE exit 0 (24 pages, 4040 shapes, all 52 boot migrations applied), deny advisories+licenses ok, fresh verify_batch34.py harness (116 checks) plus harnesses 18-33 green with the two documented needle re-points (batch-30 item-107 to the test-module redact_string, batch-31 item-121 to the live chat-loop truncation); runner verification follows once CI on this code commit completes)
