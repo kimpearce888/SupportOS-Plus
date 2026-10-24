@@ -295,6 +295,23 @@ pub struct AiCenterPage {
     draft_states: (i64, i64, i64),
     /// (feedback rows, edited rows, avg edit distance) from ai_feedback.
     edit_stats: (i64, i64, f64),
+    // ---- item 151: the ai_settings provider record (pre-hub fallback) ----
+    /// The stored ai_settings row (get_ai_status snapshot), loaded with
+    /// the rest of the Health tab.
+    ai_record: Option<spp_core::ai_center::AiStatus>,
+    /// Provider-kind selection index into `ProviderKind::ALL`.
+    ai_kind_pick: usize,
+    ai_chat_model_edit: String,
+    ai_embed_model_edit: String,
+    ai_embed_dim_edit: String,
+    ai_base_url_edit: String,
+    /// False once any form field is edited. A clean form re-seeds its
+    /// fields from the stored record on every reload; a dirty form keeps
+    /// its edits across invalidation (the batch-27 unsaved-edits
+    /// convention) until Save commits them through the core write API.
+    ai_form_clean: bool,
+    /// Last save outcome: (ok, message).
+    ai_record_note: Option<(bool, String)>,
 }
 
 impl AiCenterPage {
@@ -333,6 +350,14 @@ impl AiCenterPage {
             golden_runs: Vec::new(),
             draft_states: (0, 0, 0),
             edit_stats: (0, 0, 0.0),
+            ai_record: None,
+            ai_kind_pick: 0,
+            ai_chat_model_edit: String::new(),
+            ai_embed_model_edit: String::new(),
+            ai_embed_dim_edit: String::new(),
+            ai_base_url_edit: String::new(),
+            ai_form_clean: true,
+            ai_record_note: None,
         }
     }
 
@@ -353,22 +378,47 @@ impl AiCenterPage {
         self.hub_loaded = false;
         self.ledger.clear();
         self.copilot_loaded = false;
+        // Item 151: drop the stored-record snapshot (it reloads) but keep
+        // the edit fields and the dirty flag — unsaved edits survive.
+        self.ai_record = None;
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        let (settings, analytics, distributions, jobs) = db.with_read(|conn| {
+        let (settings, analytics, distributions, jobs, ai_record) = db.with_read(|conn| {
             (
                 Some(load_ai_settings(conn)),
                 Some(load_analytics(conn)),
                 spp_core::ai_attributes::distributions(conn).unwrap_or_default(),
                 load_jobs(conn, 100),
+                // Item 151: the stored provider record drives the panel.
+                spp_core::ai_center::get_ai_status(conn).ok(),
             )
         });
         self.settings = settings;
         self.analytics = analytics;
         self.distributions = distributions;
         self.jobs = jobs;
+        self.seed_ai_record(ai_record);
         self.reload_hub(db);
+    }
+
+    /// Item 151: refresh the stored-record snapshot and, while the form
+    /// is clean, re-seed the edit fields from it. A dirty (typed) form
+    /// keeps its edits until Save commits them.
+    fn seed_ai_record(&mut self, record: Option<spp_core::ai_center::AiStatus>) {
+        self.ai_record = record;
+        if self.ai_form_clean
+            && let Some(rec) = &self.ai_record
+        {
+            self.ai_kind_pick = spp_core::ai_center::ProviderKind::ALL
+                .iter()
+                .position(|k| *k == rec.provider_kind)
+                .unwrap_or(0);
+            self.ai_chat_model_edit = rec.chat_model.clone().unwrap_or_default();
+            self.ai_embed_model_edit = rec.embedding_model.clone().unwrap_or_default();
+            self.ai_embed_dim_edit = rec.embedding_dim.map(|d| d.to_string()).unwrap_or_default();
+            self.ai_base_url_edit = rec.base_url.clone().unwrap_or_default();
+        }
     }
 
     /// Clean-audit item 74: persist a role-map edit and re-run the
@@ -1002,8 +1052,185 @@ impl AiCenterPage {
                 self.test_connection();
             }
         });
+        // Item 151: the ai_settings write API is live here — this panel
+        // edits the pre-hub fallback record that
+        // ai_pipeline::backend_from_settings and
+        // embeddings::lm_studio_embedding_settings consult when the
+        // Settings → LM Studio keys are unset.
+        self.ai_record_ui(ui, db);
         // A1: the provider hub lives directly under the health snapshot.
         self.hub_ui(ui, db);
+    }
+
+    /// Item 151: the ai_settings provider-record editor. Every control
+    /// writes through the core write API (`ai_center::set_*`) on Save —
+    /// the row is the fallback layer the pipeline already consumes, so
+    /// these edits are load-bearing, not decorative.
+    fn ai_record_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let Some(record) = self.ai_record.clone() else {
+            return;
+        };
+        design::card_titled(
+            ui,
+            "AI provider record (ai_settings)",
+            Some(
+                "the pre-hub fallback record the chat pipeline and embedding \nresolution consult when the Settings → LM Studio keys are unset",
+            ),
+            |ui| {
+                let ready = spp_core::ai_center::ai_features_enabled(&record);
+                ui.horizontal(|ui| {
+                    design::field_label(ui, "provider:");
+                    for (i, kind) in spp_core::ai_center::ProviderKind::ALL.iter().enumerate() {
+                        if design::chip(ui, self.ai_kind_pick == i, kind.label()).clicked() {
+                            self.ai_kind_pick = i;
+                            self.ai_form_clean = false;
+                        }
+                    }
+                    if ready {
+                        design::badge(ui, "features ready", BadgeTone::Success);
+                    } else {
+                        design::badge(ui, "not configured", BadgeTone::Neutral);
+                    }
+                });
+                ui.add_space(4.0);
+                design::form_grid(ui, "ai-record", |ui| {
+                    design::field_label(ui, "chat model:");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.ai_chat_model_edit)
+                                .hint_text("(empty — unset)")
+                                .desired_width(260.0),
+                        )
+                        .changed()
+                    {
+                        self.ai_form_clean = false;
+                    }
+                    ui.end_row();
+                    design::field_label(ui, "embedding model:");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.ai_embed_model_edit)
+                                .hint_text("(empty — embedding columns stay unchanged)")
+                                .desired_width(260.0),
+                        )
+                        .changed()
+                    {
+                        self.ai_form_clean = false;
+                    }
+                    ui.end_row();
+                    design::field_label(ui, "embedding dim:");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.ai_embed_dim_edit)
+                                .hint_text("e.g. 768")
+                                .desired_width(260.0),
+                        )
+                        .changed()
+                    {
+                        self.ai_form_clean = false;
+                    }
+                    ui.end_row();
+                    design::field_label(ui, "base url:");
+                    if ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.ai_base_url_edit)
+                                .hint_text("http://127.0.0.1:1234")
+                                .desired_width(260.0),
+                        )
+                        .changed()
+                    {
+                        self.ai_form_clean = false;
+                    }
+                    ui.end_row();
+                });
+                ui.horizontal(|ui| {
+                    if design::button(ui, "Save provider record", ButtonVariant::Primary).clicked()
+                    {
+                        self.save_ai_record(db);
+                    }
+                    if let Some((ok, msg)) = &self.ai_record_note {
+                        if *ok {
+                            design::success_text(ui, msg);
+                        } else {
+                            design::error_text(ui, msg);
+                        }
+                    }
+                });
+                design::hint_text(
+                    ui,
+                    &format!(
+                        "stored record: provider_kind={} chat_model={} embedding_model={} \
+                         dim={} base_url={}",
+                        record.provider_kind.as_str(),
+                        record.chat_model.as_deref().unwrap_or("(unset)"),
+                        record.embedding_model.as_deref().unwrap_or("(unset)"),
+                        record
+                            .embedding_dim
+                            .map(|d| d.to_string())
+                            .as_deref()
+                            .unwrap_or("(unset)"),
+                        record.base_url.as_deref().unwrap_or("(unset)"),
+                    ),
+                );
+            },
+        );
+    }
+
+    /// Item 151: apply the provider-record edits through the core write
+    /// API and re-read the stored row. An empty embedding-model field
+    /// leaves the embedding columns untouched (the write API has no
+    /// NULL-clearing path, and pretending otherwise would invent one).
+    fn save_ai_record(&mut self, db: &DbHandle) {
+        let kind = spp_core::ai_center::ProviderKind::ALL
+            .get(self.ai_kind_pick)
+            .copied()
+            .unwrap_or(spp_core::ai_center::ProviderKind::None);
+        let chat = self.ai_chat_model_edit.trim().to_string();
+        let embed = self.ai_embed_model_edit.trim().to_string();
+        let base = self.ai_base_url_edit.trim().to_string();
+        let dim_parse = if embed.is_empty() {
+            Ok(None)
+        } else if let Ok(dim) = self.ai_embed_dim_edit.trim().parse::<usize>()
+            && dim > 0
+        {
+            Ok(Some(dim))
+        } else {
+            Err("embedding dim must be a positive integer when an embedding model is set")
+        };
+        match dim_parse {
+            Err(msg) => {
+                self.ai_record_note = Some((false, msg.to_string()));
+            }
+            Ok(dim) => {
+                let outcome = db.with_write(|conn| {
+                    spp_core::ai_center::set_provider_kind(conn, kind)?;
+                    spp_core::ai_center::set_chat_model(conn, &chat)?;
+                    if let Some(dim) = dim {
+                        spp_core::ai_center::set_embedding_model(conn, &embed, dim)?;
+                    }
+                    spp_core::ai_center::set_base_url(conn, &base)?;
+                    Ok::<(), spp_core::error::Error>(())
+                });
+                match outcome {
+                    Ok(()) => {
+                        self.ai_form_clean = true;
+                        self.ai_record_note = Some((
+                            true,
+                            if embed.is_empty() {
+                                "saved — embedding columns left unchanged".into()
+                            } else {
+                                "saved".into()
+                            },
+                        ));
+                        let fresh = db.with_read(spp_core::ai_center::get_ai_status).ok();
+                        self.seed_ai_record(fresh);
+                    }
+                    Err(e) => {
+                        self.ai_record_note = Some((false, format!("save failed: {e}")));
+                    }
+                }
+            }
+        }
     }
 
     /// The A1 provider hub: endpoints (health probes, BYOK keys in the
@@ -1962,5 +2189,77 @@ mod tests {
         );
         // The typed question is still sitting in the input, un-submitted.
         assert_eq!(page.copilot_input, "what is the refund policy?");
+    }
+
+    /// Item 151: the provider-record save path writes through the core
+    /// setters and the re-read picks the values up; the ready badge
+    /// flips only with provider + chat model both present.
+    #[test]
+    fn provider_record_save_round_trips() {
+        let db = fixture(Vec::new());
+        let mut page = AiCenterPage::new();
+        page.reload(&db);
+        assert_eq!(
+            page.ai_record
+                .as_ref()
+                .expect("record loaded")
+                .provider_kind,
+            spp_core::ai_center::ProviderKind::None
+        );
+        page.ai_kind_pick = 1; // LM Studio
+        page.ai_chat_model_edit = "test-chat".into();
+        page.ai_base_url_edit = "http://127.0.0.1:9999".into();
+        page.save_ai_record(&db);
+        let record = db
+            .with_read(spp_core::ai_center::get_ai_status)
+            .expect("status");
+        assert_eq!(
+            record.provider_kind,
+            spp_core::ai_center::ProviderKind::LmStudio
+        );
+        assert_eq!(record.chat_model.as_deref(), Some("test-chat"));
+        assert_eq!(record.base_url.as_deref(), Some("http://127.0.0.1:9999"));
+        assert!(spp_core::ai_center::ai_features_enabled(&record));
+        assert!(page.ai_record_note.as_ref().expect("note").0);
+    }
+
+    /// Item 151: an embedding model without a positive dim is rejected
+    /// with a visible error and nothing is written.
+    #[test]
+    fn provider_record_requires_positive_dim_with_embed_model() {
+        let db = fixture(Vec::new());
+        let mut page = AiCenterPage::new();
+        page.reload(&db);
+        page.ai_kind_pick = 1;
+        page.ai_embed_model_edit = "bge-m3".into();
+        page.ai_embed_dim_edit = "0".into();
+        page.save_ai_record(&db);
+        let note = page.ai_record_note.clone().expect("note");
+        assert!(!note.0, "dim=0 with a model must be an error note");
+        let record = db
+            .with_read(spp_core::ai_center::get_ai_status)
+            .expect("status");
+        assert_eq!(
+            record.provider_kind,
+            spp_core::ai_center::ProviderKind::None
+        );
+        assert!(record.embedding_model.is_none(), "nothing was written");
+    }
+
+    /// Item 151: a dirty (typed, unsaved) form survives invalidation +
+    /// reload with its edits intact; a clean form re-seeds instead.
+    #[test]
+    fn provider_record_dirty_form_survives_reload() {
+        let db = fixture(Vec::new());
+        let mut page = AiCenterPage::new();
+        page.reload(&db);
+        page.ai_chat_model_edit = "typed-but-unsaved".into();
+        page.ai_form_clean = false;
+        page.invalidate();
+        page.reload(&db);
+        assert_eq!(
+            page.ai_chat_model_edit, "typed-but-unsaved",
+            "unsaved edits survive invalidation (batch-27 convention)"
+        );
     }
 }

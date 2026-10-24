@@ -29,10 +29,16 @@ pub enum Tab {
     Digest,
     Happiness,
     HelpScout,
+    /// Item 56: the report builder (metric × dimension over the catalog,
+    /// filters, comparison, saved-report CRUD).
+    Builder,
+    /// Item 56: the dashboard/insights surface (health facts,
+    /// effectiveness, friction, graph nodes).
+    Insights,
 }
 
 impl Tab {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 11] = [
         Self::Overview,
         Self::Sla,
         Self::WhyContacting,
@@ -42,6 +48,8 @@ impl Tab {
         Self::Digest,
         Self::Happiness,
         Self::HelpScout,
+        Self::Builder,
+        Self::Insights,
     ];
 
     fn label(self) -> &'static str {
@@ -55,6 +63,8 @@ impl Tab {
             Self::Digest => "Digest",
             Self::Happiness => "Happiness",
             Self::HelpScout => "Help Scout",
+            Self::Builder => "Builder",
+            Self::Insights => "Insights",
         }
     }
 }
@@ -99,6 +109,48 @@ pub struct ReportsPage {
     hs_capability: spp_core::reports_api::ReportsCapability,
     hs_cached: Vec<(&'static str, &'static str, String, serde_json::Value)>,
     hs_pick: usize,
+    // Item 150: the persisted breach tracking (the intelligence sweep's
+    // sla_breaches rows) + the per-mailbox tracking-threshold editor.
+    tracked_breaches: u32,
+    sla_cfg_pick: Option<i64>,
+    sla_cfg_fr: String,
+    sla_cfg_res: String,
+    sla_cfg_note: Option<(bool, String)>,
+    // Item 56: the report builder.
+    b_metric: usize,
+    b_dimension: usize,
+    b_from: String,
+    b_to: String,
+    b_compare: bool,
+    b_sort: usize,
+    b_limit: String,
+    b_f_channel: String,
+    b_f_statuses: String,
+    b_f_tags_any: String,
+    b_f_tags_none: String,
+    b_f_min_priority: String,
+    b_f_attr_key: String,
+    b_f_attr_value: String,
+    b_f_state_key: String,
+    b_f_mailbox_ids: String,
+    b_f_assignee_ids: String,
+    b_outcome: Option<std::result::Result<spp_core::reports::ReportRunOutcome, String>>,
+    b_saved: Vec<spp_core::reports::SavedReport>,
+    b_save_name: String,
+    b_note: Option<(bool, String)>,
+    // Item 56: the insights surface.
+    i_health: Option<spp_core::reports::HealthFacts>,
+    i_effectiveness: Option<spp_core::reports::EffectivenessReport>,
+    i_high_friction: u32,
+    i_friction_top: Vec<(i64, f64, serde_json::Value)>,
+    i_graph_nodes: Vec<spp_core::reports::GraphNode>,
+    i_graph_pick: Option<i64>,
+    i_graph_neighbors: Vec<spp_core::support_graph::GraphNodeRef>,
+    i_g_kind: usize,
+    i_g_label: String,
+    i_g_entity: String,
+    i_g_props: String,
+    i_note: Option<(bool, String)>,
     error: Option<String>,
 }
 
@@ -123,6 +175,50 @@ impl ReportsPage {
             hs_capability: spp_core::reports_api::ReportsCapability::Unknown,
             hs_cached: Vec::new(),
             hs_pick: 0,
+            tracked_breaches: 0,
+            sla_cfg_pick: None,
+            sla_cfg_fr: String::new(),
+            sla_cfg_res: String::new(),
+            sla_cfg_note: None,
+            b_metric: 0,
+            b_dimension: 1,
+            b_from: {
+                let iso = spp_core::business_hours::iso_days_ago(30);
+                iso.get(..10).unwrap_or("1970-01-01").to_string()
+            },
+            b_to: {
+                let iso = spp_core::business_hours::now_iso_millis();
+                iso.get(..10).unwrap_or("2100-01-01").to_string()
+            },
+            b_compare: false,
+            b_sort: 0,
+            b_limit: String::new(),
+            b_f_channel: String::new(),
+            b_f_statuses: String::new(),
+            b_f_tags_any: String::new(),
+            b_f_tags_none: String::new(),
+            b_f_min_priority: String::new(),
+            b_f_attr_key: String::new(),
+            b_f_attr_value: String::new(),
+            b_f_state_key: String::new(),
+            b_f_mailbox_ids: String::new(),
+            b_f_assignee_ids: String::new(),
+            b_outcome: None,
+            b_saved: Vec::new(),
+            b_save_name: String::new(),
+            b_note: None,
+            i_health: None,
+            i_effectiveness: None,
+            i_high_friction: 0,
+            i_friction_top: Vec::new(),
+            i_graph_nodes: Vec::new(),
+            i_graph_pick: None,
+            i_graph_neighbors: Vec::new(),
+            i_g_kind: 0,
+            i_g_label: String::new(),
+            i_g_entity: String::new(),
+            i_g_props: String::new(),
+            i_note: None,
             error: None,
         }
     }
@@ -138,6 +234,19 @@ impl ReportsPage {
         self.happiness = None;
         self.hs_capability = spp_core::reports_api::ReportsCapability::Unknown;
         self.hs_cached.clear();
+        // Item 150: the tracked breach count reloads; the threshold editor
+        // keeps its state.
+        self.tracked_breaches = 0;
+        // Item 56: the builder outcome describes the previous mirror
+        // snapshot — clear it; the saved list + insights data reload.
+        self.b_outcome = None;
+        self.b_saved.clear();
+        self.i_health = None;
+        self.i_effectiveness = None;
+        self.i_friction_top.clear();
+        self.i_graph_nodes.clear();
+        self.i_graph_pick = None;
+        self.i_graph_neighbors.clear();
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -178,7 +287,7 @@ impl ReportsPage {
         self.radar = radar;
         self.quality = quality;
         self.quality_rows = quality_rows;
-        let (digests, happiness, capability, hs_cached) = db.with_read(|conn| {
+        let (digests, happiness, capability, hs_cached, tracked) = db.with_read(|conn| {
             (
                 spp_core::digest::list_digests(
                     conn,
@@ -201,12 +310,55 @@ impl ReportsPage {
                         )
                     })
                     .collect(),
+                // Item 150: the persisted breach log's size.
+                spp_core::intelligence_features::count_sla_breaches(conn).unwrap_or(0),
             )
         });
         self.digests = digests;
         self.happiness = happiness;
         self.hs_capability = capability;
         self.hs_cached = hs_cached;
+        self.tracked_breaches = tracked;
+        // Item 56: saved reports + the insights surface read in one pass.
+        let (saved, health, effectiveness, high_friction, friction_top, graph_nodes) = db
+            .with_read(|conn| {
+                (
+                    spp_core::reports::list_saved_reports(conn).unwrap_or_default(),
+                    spp_core::reports::get_health_facts(
+                        conn,
+                        u32::try_from(self.days).unwrap_or(30),
+                    )
+                    .ok(),
+                    spp_core::reports::get_effectiveness_report(conn).ok(),
+                    spp_core::reports::count_high_friction(conn).unwrap_or(0),
+                    {
+                        conn.prepare(
+                            "SELECT conversation_id, effort_score, factors_json
+                             FROM friction_scores ORDER BY effort_score DESC LIMIT 5",
+                        )
+                        .and_then(|mut stmt| {
+                            stmt.query_map([], |r| {
+                                Ok((
+                                    r.get::<_, i64>(0)?,
+                                    r.get::<_, f64>(1)?,
+                                    r.get::<_, Option<String>>(2)?
+                                        .and_then(|t| serde_json::from_str(&t).ok())
+                                        .unwrap_or(serde_json::Value::Null),
+                                ))
+                            })
+                            .map(|rows| rows.flatten().collect())
+                        })
+                        .unwrap_or_default()
+                    },
+                    spp_core::reports::list_graph_nodes(conn, Some(50)).unwrap_or_default(),
+                )
+            });
+        self.b_saved = saved;
+        self.i_health = health;
+        self.i_effectiveness = effectiveness;
+        self.i_high_friction = high_friction;
+        self.i_friction_top = friction_top;
+        self.i_graph_nodes = graph_nodes;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
@@ -288,7 +440,7 @@ impl ReportsPage {
         let (why, questions) = (self.why_contacting.clone(), self.top_questions.clone());
         match self.tab {
             Tab::Overview => self.overview_ui(ui),
-            Tab::Sla => self.sla_ui(ui),
+            Tab::Sla => self.sla_ui(ui, db),
             Tab::WhyContacting => Self::list_ui(ui, &why, "why contacting"),
             Tab::TopQuestions => Self::list_ui(ui, &questions, "top questions"),
             Tab::Radar => self.radar_ui(ui),
@@ -296,6 +448,8 @@ impl ReportsPage {
             Tab::Digest => self.digest_ui(ui, db),
             Tab::Happiness => self.happiness_ui(ui),
             Tab::HelpScout => self.help_scout_ui(ui, db),
+            Tab::Builder => self.builder_ui(ui, db),
+            Tab::Insights => self.insights_ui(ui, db),
         }
     }
 
@@ -363,7 +517,7 @@ impl ReportsPage {
         });
     }
 
-    fn sla_ui(&mut self, ui: &mut egui::Ui) {
+    fn sla_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let Some(report) = &self.sla else {
             design::empty_state(
                 ui,
@@ -460,6 +614,883 @@ impl ReportsPage {
                 },
             );
         });
+
+        // Item 150: the persisted breach tracking — the intelligence sweep
+        // stores the live SLA verdicts here (deduped per conversation +
+        // kind), and mailboxes WITHOUT business-hours config are tracked
+        // coarsely against the thresholds edited below (the sla_configs
+        // write API, previously dead).
+        let mailboxes: Vec<(i64, String)> = report
+            .mailboxes
+            .iter()
+            .map(|m| (m.mailbox_id, m.mailbox_name.clone()))
+            .collect();
+        design::card_titled(
+            ui,
+            "Persisted breach tracking",
+            Some(
+                "recorded breach events; the thresholds feed the coarse \
+                 tracker for mailboxes without business-hours config",
+            ),
+            |ui| {
+                design::badge(
+                    ui,
+                    &format!("{} recorded breach event(s)", self.tracked_breaches),
+                    BadgeTone::Info,
+                );
+                ui.add_space(6.0);
+                design::section_title(ui, "Tracking thresholds (hours)");
+                ui.horizontal_wrapped(|ui| {
+                    if mailboxes.is_empty() {
+                        design::hint_text(ui, "(no mailboxes synced yet)");
+                    }
+                    for (id, name) in &mailboxes {
+                        if design::chip(ui, self.sla_cfg_pick == Some(*id), name).clicked() {
+                            self.pick_sla_cfg_mailbox(db, *id);
+                        }
+                    }
+                });
+                design::form_grid(ui, "sla-track-cfg", |ui| {
+                    design::field_label(ui, "first response hours:");
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut self.sla_cfg_fr).desired_width(120.0))
+                        .changed()
+                    {
+                        self.sla_cfg_note = None;
+                    }
+                    ui.end_row();
+                    design::field_label(ui, "resolution hours:");
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut self.sla_cfg_res).desired_width(120.0))
+                        .changed()
+                    {
+                        self.sla_cfg_note = None;
+                    }
+                    ui.end_row();
+                });
+                ui.horizontal(|ui| {
+                    if design::button(ui, "Save thresholds", ButtonVariant::Primary).clicked() {
+                        self.save_sla_cfg(db);
+                    }
+                    if let Some((ok, msg)) = &self.sla_cfg_note {
+                        if *ok {
+                            design::success_text(ui, msg);
+                        } else {
+                            design::error_text(ui, msg);
+                        }
+                    }
+                });
+                design::hint_text(
+                    ui,
+                    "Mailboxes with business-hours config are tracked by the live \
+                     evaluation; these plain hours apply only where it has no \
+                     config (defaults 24h / 72h). Breaches persist deduped per \
+                     conversation and kind, and land on the customer's milestone \
+                     timeline.",
+                );
+            },
+        );
+    }
+
+    /// Item 150: selecting a mailbox loads its current tracking
+    /// thresholds (or the schema defaults when unset) into the editor.
+    fn pick_sla_cfg_mailbox(&mut self, db: &DbHandle, mailbox_id: i64) {
+        self.sla_cfg_pick = Some(mailbox_id);
+        self.sla_cfg_note = None;
+        let cfg = db.with_read(|conn| {
+            spp_core::intelligence_features::get_sla_config(conn, mailbox_id)
+                .ok()
+                .flatten()
+        });
+        match cfg {
+            Some(cfg) => {
+                self.sla_cfg_fr = cfg.first_response_hours.to_string();
+                self.sla_cfg_res = cfg.resolution_hours.to_string();
+            }
+            None => {
+                self.sla_cfg_fr = "24".into();
+                self.sla_cfg_res = "72".into();
+            }
+        }
+    }
+
+    /// Item 150: save the per-mailbox tracking thresholds through the
+    /// core write API (set_sla_config), then run the coarse tracker for
+    /// the unmonitored mailboxes so the recorded count reflects the new
+    /// thresholds immediately.
+    fn save_sla_cfg(&mut self, db: &DbHandle) {
+        let Some(mailbox_id) = self.sla_cfg_pick else {
+            self.sla_cfg_note = Some((false, "pick a mailbox first".into()));
+            return;
+        };
+        let fr = self.sla_cfg_fr.trim().parse::<f64>();
+        let res = self.sla_cfg_res.trim().parse::<f64>();
+        let (fr, res) = match (fr, res) {
+            (Ok(fr), Ok(res)) if fr > 0.0 && res > 0.0 => (fr, res),
+            _ => {
+                self.sla_cfg_note =
+                    Some((false, "both thresholds must be positive numbers".into()));
+                return;
+            }
+        };
+        let outcome = db.with_write(|conn| {
+            spp_core::intelligence_features::set_sla_config(conn, mailbox_id, fr, res)?;
+            spp_core::intelligence_features::sweep_unmonitored_sla(conn)?;
+            Ok::<(), spp_core::error::Error>(())
+        });
+        match outcome {
+            Ok(()) => {
+                self.sla_cfg_note = Some((true, "thresholds saved".into()));
+                self.tracked_breaches = db
+                    .with_read(spp_core::intelligence_features::count_sla_breaches)
+                    .unwrap_or(0);
+            }
+            Err(e) => {
+                self.sla_cfg_note = Some((false, format!("save failed: {e}")));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Item 56: the Builder tab — the report-builder surface, previously
+    // computed but never rendered, is live here: catalog-driven
+    // metric × dimension, the filter set, comparison, sort, limit, and
+    // the saved-report CRUD over report_definitions.
+    // ------------------------------------------------------------------
+
+    /// The form's current config. Err carries the validation message.
+    fn build_config(&self) -> std::result::Result<spp_core::reports::ReportBuilderConfig, String> {
+        let metric = spp_core::catalog::ReportMetricKey::ALL
+            .get(self.b_metric)
+            .copied()
+            .ok_or_else(|| "pick a metric".to_string())?;
+        let dimension = spp_core::catalog::ReportDimensionKey::ALL
+            .get(self.b_dimension)
+            .copied()
+            .ok_or_else(|| "pick a dimension".to_string())?;
+        if self.b_from.trim().len() != 10 || self.b_to.trim().len() != 10 {
+            return Err("dates use the YYYY-MM-DD form".into());
+        }
+        let mut filters = spp_core::reports::ReportFilters::default();
+        let text = |s: &str| {
+            let t = s.trim();
+            (!t.is_empty()).then(|| t.to_string())
+        };
+        filters.channel = text(&self.b_f_channel);
+        filters.min_priority = text(&self.b_f_min_priority);
+        filters.attribute_key = text(&self.b_f_attr_key);
+        filters.attribute_value = text(&self.b_f_attr_value);
+        filters.state_key = text(&self.b_f_state_key);
+        let list = |s: &str| {
+            let items: Vec<String> = s
+                .split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string)
+                .collect();
+            (!items.is_empty()).then_some(items)
+        };
+        filters.statuses = list(&self.b_f_statuses);
+        filters.tags_any = list(&self.b_f_tags_any);
+        filters.tags_none = list(&self.b_f_tags_none);
+        let ids = |s: &str| -> std::result::Result<Option<Vec<i64>>, String> {
+            let mut out = Vec::new();
+            for item in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+                out.push(
+                    item.parse::<i64>()
+                        .map_err(|_| format!("'{item}' is not an id"))?,
+                );
+            }
+            Ok((!out.is_empty()).then_some(out))
+        };
+        filters.mailbox_local_ids = ids(&self.b_f_mailbox_ids)?;
+        filters.assignee_local_ids = ids(&self.b_f_assignee_ids)?;
+        let limit = if self.b_limit.trim().is_empty() {
+            None
+        } else {
+            Some(
+                self.b_limit
+                    .trim()
+                    .parse::<i64>()
+                    .map_err(|_| "limit must be a number".to_string())?,
+            )
+        };
+        Ok(spp_core::reports::ReportBuilderConfig {
+            metric,
+            dimension,
+            date_from: self.b_from.trim().to_string(),
+            date_to: self.b_to.trim().to_string(),
+            comparison: if self.b_compare {
+                spp_core::reports::ReportComparison::PreviousPeriod
+            } else {
+                spp_core::reports::ReportComparison::None
+            },
+            filters,
+            sort: match self.b_sort {
+                1 => spp_core::reports::ReportSort::MetricAsc,
+                2 => spp_core::reports::ReportSort::DimensionAsc,
+                _ => spp_core::reports::ReportSort::MetricDesc,
+            },
+            limit,
+        })
+    }
+
+    fn builder_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        use spp_core::catalog::{ReportDimensionKey, ReportMetricKey};
+        design::card(ui, |ui| {
+            design::section_title(ui, "Report definition");
+            ui.horizontal_wrapped(|ui| {
+                design::field_label(ui, "metric:");
+                let metrics = ReportMetricKey::ALL;
+                egui::ComboBox::from_id_salt("b-metric")
+                    .selected_text(
+                        spp_core::catalog::reporting::metric_entry(metrics[self.b_metric]).label,
+                    )
+                    .show_ui(ui, |ui| {
+                        for (i, key) in metrics.iter().enumerate() {
+                            ui.selectable_value(
+                                &mut self.b_metric,
+                                i,
+                                spp_core::catalog::reporting::metric_entry(*key).label,
+                            );
+                        }
+                    });
+                design::field_label(ui, "grouped by:");
+                let dims = ReportDimensionKey::ALL;
+                egui::ComboBox::from_id_salt("b-dim")
+                    .selected_text(
+                        spp_core::catalog::reporting::dimension_entry(dims[self.b_dimension]).label,
+                    )
+                    .show_ui(ui, |ui| {
+                        for (i, key) in dims.iter().enumerate() {
+                            ui.selectable_value(
+                                &mut self.b_dimension,
+                                i,
+                                spp_core::catalog::reporting::dimension_entry(*key).label,
+                            );
+                        }
+                    });
+                ui.checkbox(&mut self.b_compare, "compare with previous period");
+                design::field_label(ui, "sort:");
+                for (i, label) in ["metric ↓", "metric ↑", "label A→Z"].iter().enumerate() {
+                    if design::chip(ui, self.b_sort == i, label).clicked() {
+                        self.b_sort = i;
+                    }
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                design::field_label(ui, "from (YYYY-MM-DD):");
+                ui.add(egui::TextEdit::singleline(&mut self.b_from).desired_width(110.0));
+                design::field_label(ui, "to:");
+                ui.add(egui::TextEdit::singleline(&mut self.b_to).desired_width(110.0));
+                design::field_label(ui, "limit:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.b_limit)
+                        .hint_text("50")
+                        .desired_width(60.0),
+                );
+            });
+            ui.add_space(4.0);
+            design::section_title(ui, "Filters (blank = unfiltered)");
+            design::form_grid(ui, "b-filters", |ui| {
+                for (label, field) in [
+                    ("channel:", &mut self.b_f_channel),
+                    ("statuses (csv):", &mut self.b_f_statuses),
+                    ("tags any (csv):", &mut self.b_f_tags_any),
+                    ("tags none (csv):", &mut self.b_f_tags_none),
+                    ("min priority:", &mut self.b_f_min_priority),
+                    ("attribute key:", &mut self.b_f_attr_key),
+                    ("attribute value:", &mut self.b_f_attr_value),
+                    ("state key:", &mut self.b_f_state_key),
+                    ("mailbox ids (csv):", &mut self.b_f_mailbox_ids),
+                    ("assignee ids (csv):", &mut self.b_f_assignee_ids),
+                ] {
+                    design::field_label(ui, label);
+                    ui.add(egui::TextEdit::singleline(field).desired_width(180.0));
+                    ui.end_row();
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                if design::button(ui, "Run report", ButtonVariant::Primary).clicked() {
+                    self.b_outcome = Some(match self.build_config() {
+                        Ok(config) => db
+                            .with_read(|conn| spp_core::reports::run_builder_report(conn, &config)),
+                        Err(e) => Err(e),
+                    });
+                }
+                design::field_label(ui, "save as:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.b_save_name)
+                        .hint_text("name")
+                        .desired_width(160.0),
+                );
+                if design::button(ui, "Save", ButtonVariant::Outline).clicked() {
+                    self.save_report_config(db);
+                }
+                if let Some((ok, msg)) = &self.b_note {
+                    if *ok {
+                        design::success_text(ui, msg);
+                    } else {
+                        design::error_text(ui, msg);
+                    }
+                }
+            });
+        });
+        ui.add_space(8.0);
+
+        design::card_titled(
+            ui,
+            "Saved reports",
+            Some("load or delete a saved configuration"),
+            |ui| {
+                let saved = self.b_saved.clone();
+                if saved.is_empty() {
+                    design::hint_text(ui, "(none saved yet)");
+                }
+                for saved in &saved {
+                    ui.horizontal(|ui| {
+                        ui.monospace(&saved.name);
+                        design::hint_text(ui, &saved.created_at);
+                        if design::button(ui, "load", ButtonVariant::Outline).clicked() {
+                            self.load_saved_report(&saved.config);
+                        }
+                        if design::button(ui, "delete", ButtonVariant::Outline).clicked() {
+                            self.delete_saved_report(db, saved.id);
+                        }
+                    });
+                }
+            },
+        );
+        ui.add_space(8.0);
+
+        match &self.b_outcome {
+            None => design::hint_text(ui, "run a report to see its rows"),
+            Some(Err(e)) => design::error_text(ui, &format!("error: {e}")),
+            Some(Ok(outcome)) => {
+                design::card_titled(
+                    ui,
+                    &format!("{} — {}", outcome.metric.label, outcome.dimension.label),
+                    Some(&format!(
+                        "{} → {}",
+                        outcome.date_range.date_from, outcome.date_range.date_to
+                    )),
+                    |ui| {
+                        design::badge(ui, outcome.origin, BadgeTone::Info);
+                        ui.add_space(4.0);
+                        if outcome.rows.is_empty() {
+                            design::empty_state(
+                                ui,
+                                Icon::BarChart,
+                                "no rows",
+                                "Nothing matched in the range.",
+                            );
+                        } else {
+                            let format = outcome.metric.format;
+                            let has_comparison = outcome.comparison_rows.is_some();
+                            let headers: Vec<&str> = if has_comparison {
+                                vec!["group", "value", "Δ vs previous"]
+                            } else {
+                                vec!["group", "value"]
+                            };
+                            design::table(ui, "b-rows", &headers, 24.0, |ui| {
+                                for row in &outcome.rows {
+                                    ui.label(&row.dimension_label);
+                                    design::td_num(
+                                        ui,
+                                        &Self::format_metric_value(format, row.value),
+                                    );
+                                    if has_comparison {
+                                        let delta =
+                                            outcome.comparison_rows.as_ref().and_then(|prev| {
+                                                prev.iter()
+                                                    .find(|p| {
+                                                        p.dimension_value == row.dimension_value
+                                                    })
+                                                    .map(|p| row.value - p.value)
+                                            });
+                                        match delta {
+                                            Some(d) => design::td_num(ui, &format!("{d:+.1}")),
+                                            None => design::td_num(ui, "—"),
+                                        }
+                                    }
+                                    ui.end_row();
+                                }
+                            });
+                        }
+                        ui.add_space(4.0);
+                        for note in &outcome.notes {
+                            design::hint_text(ui, note);
+                        }
+                    },
+                );
+            }
+        }
+    }
+
+    /// Metric values render by their catalog format (counts as integers,
+    /// rates as percentages, durations with their unit).
+    fn format_metric_value(format: spp_core::catalog::reporting::MetricFormat, v: f64) -> String {
+        use spp_core::catalog::reporting::MetricFormat;
+        match format {
+            MetricFormat::Count => format!("{}", v.round() as i64),
+            MetricFormat::Rate => format!("{:.1}%", v * 100.0),
+            MetricFormat::Minutes => format!("{:.1} min", v),
+            MetricFormat::Hours => format!("{:.1} h", v),
+            MetricFormat::Score => format!("{:.2}", v),
+        }
+    }
+
+    fn save_report_config(&mut self, db: &DbHandle) {
+        let name = self.b_save_name.trim().to_string();
+        if name.is_empty() {
+            self.b_note = Some((false, "give the report a name first".into()));
+            return;
+        }
+        match self.build_config() {
+            Ok(config) => {
+                match db.with_write(|conn| spp_core::reports::save_report(conn, &name, &config)) {
+                    Ok(saved) => {
+                        self.b_note = Some((true, format!("saved as \"{}\"", saved.name)));
+                        self.b_save_name.clear();
+                        self.b_saved = db
+                            .with_read(spp_core::reports::list_saved_reports)
+                            .unwrap_or_default();
+                    }
+                    Err(e) => self.b_note = Some((false, format!("save failed: {e}"))),
+                }
+            }
+            Err(e) => self.b_note = Some((false, e)),
+        }
+    }
+
+    fn load_saved_report(&mut self, config: &serde_json::Value) {
+        match spp_core::reports::parse_report_config(config) {
+            Ok(config) => {
+                self.b_metric = spp_core::catalog::ReportMetricKey::ALL
+                    .iter()
+                    .position(|k| *k == config.metric)
+                    .unwrap_or(0);
+                self.b_dimension = spp_core::catalog::ReportDimensionKey::ALL
+                    .iter()
+                    .position(|k| *k == config.dimension)
+                    .unwrap_or(0);
+                self.b_from = config.date_from;
+                self.b_to = config.date_to;
+                self.b_compare =
+                    config.comparison == spp_core::reports::ReportComparison::PreviousPeriod;
+                self.b_sort = match config.sort {
+                    spp_core::reports::ReportSort::MetricAsc => 1,
+                    spp_core::reports::ReportSort::DimensionAsc => 2,
+                    spp_core::reports::ReportSort::MetricDesc => 0,
+                };
+                self.b_limit = config.limit.map(|l| l.to_string()).unwrap_or_default();
+                let f = config.filters;
+                self.b_f_channel = f.channel.unwrap_or_default();
+                self.b_f_statuses = f.statuses.unwrap_or_default().join(", ");
+                self.b_f_tags_any = f.tags_any.unwrap_or_default().join(", ");
+                self.b_f_tags_none = f.tags_none.unwrap_or_default().join(", ");
+                self.b_f_min_priority = f.min_priority.unwrap_or_default();
+                self.b_f_attr_key = f.attribute_key.unwrap_or_default();
+                self.b_f_attr_value = f.attribute_value.unwrap_or_default();
+                self.b_f_state_key = f.state_key.unwrap_or_default();
+                self.b_f_mailbox_ids = f
+                    .mailbox_local_ids
+                    .map(|v| {
+                        v.iter()
+                            .map(|i| i.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                self.b_f_assignee_ids = f
+                    .assignee_local_ids
+                    .map(|v| {
+                        v.iter()
+                            .map(|i| i.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                self.b_note = Some((true, "loaded — run to refresh".into()));
+            }
+            Err(issues) => {
+                let first = issues
+                    .first()
+                    .map(|(f, m)| format!("{f}: {m}"))
+                    .unwrap_or_else(|| "invalid saved config".into());
+                self.b_note = Some((false, first));
+            }
+        }
+    }
+
+    fn delete_saved_report(&mut self, db: &DbHandle, id: i64) {
+        match db.with_write(|conn| spp_core::reports::delete_saved_report(conn, id)) {
+            Ok(true) => {
+                self.b_note = Some((true, "deleted".into()));
+                self.b_saved = db
+                    .with_read(spp_core::reports::list_saved_reports)
+                    .unwrap_or_default();
+            }
+            Ok(false) => self.b_note = Some((false, "already gone".into())),
+            Err(e) => self.b_note = Some((false, format!("delete failed: {e}"))),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Item 56: the Insights tab — health facts (dashboard metrics composed
+    // with the friction count), the QA effectiveness report, the friction
+    // stack with a bounded recompute action, and the graph-node surface.
+    // ------------------------------------------------------------------
+
+    fn insights_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let health = self.i_health.clone();
+        let effectiveness = self.i_effectiveness.clone();
+        if let Some(health) = &health {
+            design::card_titled(
+                ui,
+                "Health facts",
+                Some(&format!(
+                    "the last {} days, over the whole mirror",
+                    self.days
+                )),
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        design::metric_card(
+                            ui,
+                            "conversations",
+                            &health.total_conversations.to_string(),
+                            None,
+                        );
+                        design::metric_card(
+                            ui,
+                            "SLA breaches (tracked)",
+                            &health.sla_breach_count.to_string(),
+                            health
+                                .sla_breach_rate
+                                .map(|r| format!("{:.1}% of conversations", r * 100.0))
+                                .as_deref(),
+                        );
+                        design::metric_card(
+                            ui,
+                            "high friction",
+                            &health.high_friction_count.to_string(),
+                            health
+                                .high_friction_rate
+                                .map(|r| format!("{:.1}% of conversations", r * 100.0))
+                                .as_deref(),
+                        );
+                        design::metric_card(
+                            ui,
+                            "avg first response",
+                            &health
+                                .avg_first_response_minutes
+                                .map(|m| format!("{m:.0} min"))
+                                .unwrap_or_else(|| "—".into()),
+                            None,
+                        );
+                        design::metric_card(
+                            ui,
+                            "resolution rate",
+                            &health
+                                .resolution_rate
+                                .map(|r| format!("{:.1}%", r * 100.0))
+                                .unwrap_or_else(|| "—".into()),
+                            None,
+                        );
+                    });
+                },
+            );
+            ui.add_space(8.0);
+        }
+
+        if let Some(eff) = &effectiveness {
+            design::card_titled(
+                ui,
+                "Post-resolution QA effectiveness",
+                Some("avg QA score and the score distribution over every stored check"),
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        design::metric_card(
+                            ui,
+                            "avg QA score",
+                            &eff.avg_qa_score
+                                .map(|s| format!("{s:.2}"))
+                                .unwrap_or_else(|| "—".into()),
+                            None,
+                        );
+                        design::metric_card(
+                            ui,
+                            "checks stored",
+                            &eff.total_qa_checks.to_string(),
+                            None,
+                        );
+                        for (bucket, count) in &eff.score_distribution {
+                            design::badge(ui, &format!("{bucket}: {count}"), BadgeTone::Neutral);
+                        }
+                    });
+                },
+            );
+            ui.add_space(8.0);
+        }
+
+        design::card_titled(
+            ui,
+            "Customer effort (friction)",
+            Some(
+                "scores persist per conversation; crossing the threshold records a customer milestone",
+            ),
+            |ui| {
+                ui.horizontal(|ui| {
+                    design::badge(
+                        ui,
+                        &format!("{} high-friction conversation(s)", self.i_high_friction),
+                        BadgeTone::Warning,
+                    );
+                    if design::button(ui, "Recompute (last 100 closed)", ButtonVariant::Outline)
+                        .clicked()
+                    {
+                        match db.with_write(|conn| {
+                            spp_core::reports::recompute_recent_friction(conn, 100)
+                        }) {
+                            Ok((computed, high)) => {
+                                self.i_note = Some((
+                                    true,
+                                    format!("recomputed {computed} conversation(s), {high} high-friction"),
+                                ));
+                                self.reload(db);
+                            }
+                            Err(e) => {
+                                self.i_note = Some((false, format!("recompute failed: {e}")))
+                            }
+                        }
+                    }
+                    if let Some((ok, msg)) = &self.i_note {
+                        if *ok {
+                            design::success_text(ui, msg);
+                        } else {
+                            design::error_text(ui, msg);
+                        }
+                    }
+                });
+                if self.i_friction_top.is_empty() {
+                    design::hint_text(
+                        ui,
+                        "(no friction scores stored — recompute to fill the table)",
+                    );
+                } else {
+                    design::table(
+                        ui,
+                        "insights-friction",
+                        &[
+                            "conversation",
+                            "effort",
+                            "messages",
+                            "resolution",
+                            "reopens",
+                            "escalated",
+                        ],
+                        24.0,
+                        |ui| {
+                            for (conv, score, factors) in &self.i_friction_top {
+                                design::td_num(ui, &conv.to_string());
+                                design::td_num(ui, &format!("{score:.2}"));
+                                design::td_num(
+                                    ui,
+                                    &factors
+                                        .get("message_count")
+                                        .and_then(serde_json::Value::as_u64)
+                                        .map(|v| v.to_string())
+                                        .unwrap_or_else(|| "—".into()),
+                                );
+                                design::td_num(
+                                    ui,
+                                    &factors
+                                        .get("resolution_hours")
+                                        .and_then(serde_json::Value::as_f64)
+                                        .map(|v| format!("{v:.1} h"))
+                                        .unwrap_or_else(|| "—".into()),
+                                );
+                                design::td_num(
+                                    ui,
+                                    &factors
+                                        .get("reopen_count")
+                                        .and_then(serde_json::Value::as_u64)
+                                        .map(|v| v.to_string())
+                                        .unwrap_or_else(|| "—".into()),
+                                );
+                                ui.label(
+                                    factors
+                                        .get("escalated")
+                                        .and_then(serde_json::Value::as_bool)
+                                        .map(|b| if b { "yes" } else { "no" })
+                                        .unwrap_or("—"),
+                                );
+                                ui.end_row();
+                            }
+                        },
+                    );
+                }
+            },
+        );
+        ui.add_space(8.0);
+
+        let nodes = self.i_graph_nodes.clone();
+        design::card_titled(
+            ui,
+            "Graph nodes",
+            Some("custom nodes over the support graph; neighbors come from the live human edges"),
+            |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    design::field_label(ui, "kind:");
+                    let kinds = spp_core::catalog::GraphNodeKind::ALL;
+                    egui::ComboBox::from_id_salt("g-kind")
+                        .selected_text(kinds[self.i_g_kind].as_str())
+                        .show_ui(ui, |ui| {
+                            for (i, kind) in kinds.iter().enumerate() {
+                                ui.selectable_value(&mut self.i_g_kind, i, kind.as_str());
+                            }
+                        });
+                    design::field_label(ui, "label:");
+                    ui.add(egui::TextEdit::singleline(&mut self.i_g_label).desired_width(140.0));
+                    design::field_label(ui, "entity id:");
+                    ui.add(egui::TextEdit::singleline(&mut self.i_g_entity).desired_width(80.0));
+                    design::field_label(ui, "properties (JSON):");
+                    ui.add(egui::TextEdit::singleline(&mut self.i_g_props).desired_width(180.0));
+                    if design::button(ui, "Add node", ButtonVariant::Primary).clicked() {
+                        self.add_graph_node_action(db);
+                    }
+                });
+                ui.add_space(4.0);
+                if nodes.is_empty() {
+                    design::hint_text(ui, "(no nodes stored)");
+                } else {
+                    design::table(
+                        ui,
+                        "insights-graph",
+                        &["kind", "label", "entity", "created", ""],
+                        24.0,
+                        |ui| {
+                            for node in &nodes {
+                                ui.label(node.kind.as_str());
+                                ui.label(node.label.as_deref().unwrap_or("—"));
+                                design::td_num(
+                                    ui,
+                                    &node
+                                        .entity_id
+                                        .map(|e| e.to_string())
+                                        .unwrap_or_else(|| "—".into()),
+                                );
+                                design::td_num(ui, &node.created_at);
+                                if design::button(ui, "inspect", ButtonVariant::Outline).clicked() {
+                                    self.inspect_graph_node(db, node.id);
+                                }
+                                ui.end_row();
+                            }
+                        },
+                    );
+                }
+                if self.i_graph_pick.is_some() && !self.i_graph_neighbors.is_empty() {
+                    ui.add_space(4.0);
+                    design::section_title(ui, "Neighbors (live human edges)");
+                    ui.horizontal_wrapped(|ui| {
+                        for neighbor in &self.i_graph_neighbors {
+                            design::badge(
+                                ui,
+                                &format!("{} #{}", neighbor.kind, neighbor.local_id),
+                                BadgeTone::Info,
+                            );
+                        }
+                    });
+                }
+            },
+        );
+    }
+
+    /// Item 56: add a graph node through the core write API (the kind is
+    /// validated there against the closed catalog).
+    fn add_graph_node_action(&mut self, db: &DbHandle) {
+        let Some(kind) = spp_core::catalog::GraphNodeKind::ALL
+            .get(self.i_g_kind)
+            .copied()
+        else {
+            return;
+        };
+        let label = self.i_g_label.trim().to_string();
+        let props = self.i_g_props.trim().to_string();
+        if !props.is_empty() && serde_json::from_str::<serde_json::Value>(&props).is_err() {
+            self.i_note = Some((false, "properties must be valid JSON".into()));
+            return;
+        }
+        let entity = if self.i_g_entity.trim().is_empty() {
+            Ok(None)
+        } else {
+            self.i_g_entity
+                .trim()
+                .parse::<i64>()
+                .map(Some)
+                .map_err(|_| "entity id must be a number".to_string())
+        };
+        let entity = match entity {
+            Ok(e) => e,
+            Err(msg) => {
+                self.i_note = Some((false, msg));
+                return;
+            }
+        };
+        match db.with_write(|conn| {
+            spp_core::reports::add_graph_node(
+                conn,
+                kind.as_str(),
+                entity,
+                (!label.is_empty()).then_some(label.as_str()),
+                (!props.is_empty()).then_some(props.as_str()),
+            )
+        }) {
+            Ok(_) => {
+                self.i_note = Some((true, "node added".into()));
+                self.i_g_label.clear();
+                self.i_g_entity.clear();
+                self.i_g_props.clear();
+                self.refresh_graph(db);
+            }
+            Err(e) => self.i_note = Some((false, format!("add failed: {e}"))),
+        }
+    }
+
+    /// Item 56: inspect a node — get_graph_node for the stored row and
+    /// get_graph_neighbors for the live human edges touching its entity.
+    fn inspect_graph_node(&mut self, db: &DbHandle, node_id: Option<i64>) {
+        let Some(node_id) = node_id else {
+            return;
+        };
+        let picked = db.with_read(|conn| {
+            spp_core::reports::get_graph_node(conn, node_id)
+                .ok()
+                .flatten()
+        });
+        self.i_graph_pick = Some(node_id);
+        self.i_graph_neighbors = picked
+            .as_ref()
+            .filter(|n| n.entity_id.is_some())
+            .map(|n| {
+                db.with_read(|conn| {
+                    spp_core::reports::get_graph_neighbors(conn, &n.kind, n.entity_id.unwrap_or(0))
+                        .unwrap_or_default()
+                })
+            })
+            .unwrap_or_default();
+    }
+
+    /// Item 56: refresh the node list (after an add) keeping the current
+    /// selection's neighbors consistent.
+    fn refresh_graph(&mut self, db: &DbHandle) {
+        let pick = self.i_graph_pick;
+        self.i_graph_nodes = db
+            .with_read(|conn| spp_core::reports::list_graph_nodes(conn, Some(50)))
+            .unwrap_or_default();
+        if let Some(pick) = pick {
+            self.inspect_graph_node(db, Some(pick));
+        }
     }
 
     /// A3.3: the Quality tab — post-resolution QA aggregates plus the most
@@ -1060,5 +2091,85 @@ mod tests {
         let row = serde_json::json!({ "category": "billing", "count": 3 });
         assert_eq!(i64_field(&row, "count"), 3);
         assert_eq!(str_field(&row, "category"), "billing");
+    }
+
+    /// Item 56: the builder form's config builds, runs through
+    /// run_builder_report, saves, lists, loads back into the form, and
+    /// deletes — the full Builder-tab path over a real fixture DB.
+    #[test]
+    fn builder_tab_run_save_load_delete_round_trip() {
+        let db = fixture(Vec::new());
+        let mut page = ReportsPage::new();
+        page.reload(&db);
+        page.b_save_name = "my report".into();
+        page.save_report_config(&db);
+        assert!(
+            page.b_note.as_ref().expect("note").0,
+            "save over a clean mirror succeeds"
+        );
+        assert_eq!(page.b_saved.len(), 1);
+
+        // Loading restores the form fields from the stored JSON.
+        let config_json = page.b_saved[0].config.clone();
+        page.b_metric = 3;
+        page.b_from = "2000-01-01".into();
+        page.load_saved_report(&config_json);
+        assert_eq!(page.b_metric, 0, "the saved metric is restored");
+        assert!(page.b_note.as_ref().expect("note").0);
+
+        // Running the loaded config produces an outcome with notes.
+        let config = page.build_config().expect("config");
+        let outcome = db
+            .with_read(|conn| spp_core::reports::run_builder_report(conn, &config))
+            .expect("run");
+        assert!(!outcome.notes.is_empty());
+        page.delete_saved_report(&db, page.b_saved[0].id);
+        assert!(page.b_saved.is_empty(), "deleted");
+    }
+
+    /// Item 56: the builder form validates its inputs instead of sending
+    /// garbage to the core (bad ids / bad limit / short dates are errors).
+    #[test]
+    fn builder_form_validates_inputs() {
+        let mut page = ReportsPage::new();
+        page.b_f_mailbox_ids = "abc".into();
+        assert!(page.build_config().is_err());
+        page.b_f_mailbox_ids.clear();
+        page.b_limit = "many".into();
+        assert!(page.build_config().is_err());
+        page.b_limit.clear();
+        page.b_from = "bad".into();
+        assert!(page.build_config().is_err());
+        page.b_from = "2026-01-01".into();
+        assert!(page.build_config().is_ok());
+    }
+
+    /// Item 56: the Insights tab's data loads with the page — health
+    /// facts, effectiveness, friction, and the graph-node list all come
+    /// from the reload pass.
+    #[test]
+    fn insights_tab_loads_surface_data() {
+        let db = fixture(Vec::new());
+        let mut page = ReportsPage::new();
+        page.reload(&db);
+        assert!(page.i_health.is_some(), "health facts loaded");
+        assert!(page.i_effectiveness.is_some(), "effectiveness loaded");
+
+        // The graph-node surface round-trips through the page action.
+        page.i_g_kind = 8; // Campaign — any catalog kind
+        page.i_g_label = "Spring push".into();
+        page.add_graph_node_action(&db);
+        assert!(page.i_note.as_ref().expect("note").0, "node added");
+        assert_eq!(page.i_graph_nodes.len(), 1);
+        let node = &page.i_graph_nodes[0];
+        assert_eq!(node.kind, "campaign");
+        assert_eq!(node.label.as_deref(), Some("Spring push"));
+
+        // Invalid JSON properties are rejected before any write.
+        page.i_g_label = "bad".into();
+        page.i_g_props = "{not json".into();
+        page.add_graph_node_action(&db);
+        assert!(!page.i_note.as_ref().expect("note").0, "rejected");
+        assert_eq!(page.i_graph_nodes.len(), 1, "nothing was written");
     }
 }

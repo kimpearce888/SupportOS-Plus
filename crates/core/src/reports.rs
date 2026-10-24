@@ -2415,3 +2415,222 @@ mod batch30_tests {
         assert_eq!(report.rows[0].metric_value, 1.0);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Item 56: the wiring the owner's "wire it" decision asked for. The
+// builder + insights surface below reports.rs:1110 was computed but never
+// rendered; the app-shell Reports page now renders it. This helper is the
+// one NEW write path the render needs: a bounded friction recompute whose
+// high scores persist as customer_timeline milestones (the same milestone
+// lane the SLA-breach sweep writes).
+// ---------------------------------------------------------------------------
+
+/// Bounded friction recompute over the most recently closed conversations.
+/// Every computed score persists to `friction_scores`
+/// (compute_friction's INSERT OR REPLACE), and a conversation that
+/// crosses HIGH_FRICTION_THRESHOLD records a customer_timeline milestone
+/// (deduped per conversation via the event's JSON payload). Returns
+/// (computed_count, high_friction_found).
+pub fn recompute_recent_friction(conn: &Connection, limit: u32) -> Result<(u32, u32)> {
+    let limit = limit.clamp(1, 500) as i64;
+    let ids: Vec<i64> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM conversations
+              WHERE status = 'closed' AND deleted_at IS NULL
+              ORDER BY COALESCE(closed_at, remote_updated_at, created_at) DESC
+              LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |r| r.get(0))?;
+        rows.flatten().collect()
+    };
+    let mut high = 0u32;
+    for id in &ids {
+        let score = compute_friction(conn, *id)?;
+        if score.effort_score >= HIGH_FRICTION_THRESHOLD {
+            let customer_id: Option<i64> = conn
+                .query_row(
+                    "SELECT customer_local_id FROM conversations WHERE id = ?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .ok()
+                .flatten();
+            if let Some(customer_id) = customer_id {
+                let already: i64 = conn
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM customer_timeline
+                          WHERE customer_id = ?1 AND event_type = 'high_friction'
+                            AND json_extract(event_data_json, '$.conversation_id') = ?2)",
+                        params![customer_id, id],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(1);
+                if already == 0 {
+                    let data = format!(
+                        "{{\"conversation_id\":{id},\"effort_score\":{:.2}}}",
+                        score.effort_score
+                    );
+                    let _ = record_timeline_event(conn, customer_id, "high_friction", Some(&data));
+                }
+            }
+            high += 1;
+        }
+    }
+    Ok((u32::try_from(ids.len()).unwrap_or(0), high))
+}
+
+#[cfg(test)]
+mod item56_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// Item 56: the bounded recompute persists friction scores, and a
+    /// conversation crossing the threshold gains exactly one customer
+    /// timeline milestone even across repeated recomputes.
+    #[test]
+    fn recompute_friction_persists_scores_and_deduped_milestones() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO customers (id, remote_id, first_name) VALUES (1, 1, 'Test')",
+            [],
+        )
+        .expect("customer");
+        // A closed conversation that took 3 days (48h+ resolution) with 21
+        // message events: effort score 0.3 + 0.3 = 0.6 >= threshold.
+        conn.execute(
+            "INSERT INTO conversations (id, remote_id, number, subject, preview, status,
+                                        customer_local_id, created_at, closed_at)
+             VALUES (10, 10, 10, 'rough ride', 'p', 'closed', 1,
+                     '2026-01-01T00:00:00.000Z', '2026-01-04T00:00:00.000Z')",
+            [],
+        )
+        .expect("conversation");
+        for i in 0..21 {
+            conn.execute(
+                "INSERT INTO activity_events (conversation_id, event_type, actor_type, occurred_at, dedup_key)
+                 VALUES (10, 'message', 'customer', ?1, ?2)",
+                params![
+                    format!("2026-01-0{}T00:00:{:02}.000Z", 1 + (i % 4), i),
+                    format!("m-{i}")
+                ],
+            )
+            .expect("activity event");
+        }
+
+        let (computed, high) = recompute_recent_friction(&conn, 100).expect("recompute");
+        assert_eq!(computed, 1);
+        assert_eq!(high, 1, "0.6 crosses the 0.6 threshold");
+        assert_eq!(count_high_friction(&conn).expect("count"), 1);
+        let milestones: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM customer_timeline
+                  WHERE event_type = 'high_friction' AND customer_id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("milestones");
+        assert_eq!(milestones, 1);
+
+        // A second recompute must not duplicate the milestone.
+        let (_again, _high) = recompute_recent_friction(&conn, 100).expect("recompute 2");
+        let milestones: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM customer_timeline WHERE event_type = 'high_friction'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("milestones 2");
+        assert_eq!(milestones, 1, "milestone deduped per conversation");
+    }
+
+    /// Item 56: the builder path round-trips — a config runs, serializes,
+    /// and parses back equal, which is exactly what the saved-report CRUD
+    /// rides on.
+    #[test]
+    fn builder_config_round_trips_through_json() {
+        let conn = db();
+        let config = ReportBuilderConfig {
+            metric: crate::catalog::ReportMetricKey::Conversations,
+            dimension: crate::catalog::ReportDimensionKey::Day,
+            date_from: "2026-01-01".into(),
+            date_to: "2026-01-31".into(),
+            comparison: ReportComparison::PreviousPeriod,
+            filters: ReportFilters::default(),
+            sort: ReportSort::MetricDesc,
+            limit: Some(20),
+        };
+        let outcome = run_builder_report(&conn, &config);
+        assert!(outcome.is_ok(), "the builder runs over an empty mirror");
+        let json = config_to_json(&config);
+        let parsed = parse_report_config(&json).expect("parse");
+        assert_eq!(parsed.metric, config.metric);
+        assert_eq!(parsed.dimension, config.dimension);
+        assert_eq!(parsed.comparison, config.comparison);
+        assert_eq!(parsed.sort, config.sort);
+        assert_eq!(parsed.limit, config.limit);
+    }
+
+    /// Item 56: saved-report CRUD — save, list, delete.
+    #[test]
+    fn saved_reports_crud_round_trips() {
+        let conn = db();
+        let config = ReportBuilderConfig {
+            metric: crate::catalog::ReportMetricKey::Closures,
+            dimension: crate::catalog::ReportDimensionKey::None,
+            date_from: "2026-02-01".into(),
+            date_to: "2026-02-28".into(),
+            comparison: ReportComparison::None,
+            filters: ReportFilters::default(),
+            sort: ReportSort::MetricDesc,
+            limit: None,
+        };
+        let saved = save_report(&conn, "Closures this month", &config).expect("save");
+        assert_eq!(saved.name, "Closures this month");
+        let listed = list_saved_reports(&conn).expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, saved.id);
+        let restored = parse_report_config(&listed[0].config).expect("parse saved");
+        assert_eq!(restored.metric, config.metric);
+        assert!(delete_saved_report(&conn, saved.id).expect("delete"));
+        assert!(list_saved_reports(&conn).expect("list").is_empty());
+    }
+
+    /// Item 56: the graph-node surface validates kinds on write and the
+    /// list/get/count read path returns what was stored.
+    #[test]
+    fn graph_nodes_validate_and_round_trip() {
+        let conn = db();
+        assert!(add_graph_node(&conn, "not_a_kind", None, None, None).is_err());
+        let id = add_graph_node(
+            &conn,
+            "product",
+            None,
+            Some("SupportOS+"),
+            Some("{\"tier\":\"app\"}"),
+        )
+        .expect("add node");
+        let node = get_graph_node(&conn, id)
+            .expect("get")
+            .expect("node exists");
+        assert_eq!(node.kind, "product");
+        assert_eq!(node.label.as_deref(), Some("SupportOS+"));
+        let listed = list_graph_nodes(&conn, None).expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            count_graph_nodes_by_kind(&conn, "product").expect("count"),
+            1
+        );
+        assert_eq!(
+            validate_graph_node_kind("product")
+                .expect("valid kind")
+                .as_str(),
+            "product"
+        );
+    }
+}

@@ -177,3 +177,55 @@ pub fn copilot_tool_allowlist() -> &'static [CopilotTool] {
 pub fn ai_features_enabled(status: &AiStatus) -> bool {
     status.provider_kind != ProviderKind::None && status.chat_model.is_some()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// Item 151: the write API round-trips through get_ai_status — the
+    /// AI Center panel's Save path writes exactly these setters, and
+    /// the pipeline's pre-hub fallback reads exactly get_ai_status.
+    #[test]
+    fn setters_round_trip_through_get_ai_status() {
+        let conn = db();
+        let status = get_ai_status(&conn).expect("status");
+        assert_eq!(status.provider_kind, ProviderKind::None);
+        assert!(status.chat_model.is_none());
+
+        set_provider_kind(&conn, ProviderKind::LmStudio).expect("kind");
+        set_chat_model(&conn, "qwen2.5-7b-instruct").expect("chat");
+        set_embedding_model(&conn, "bge-m3", 1024).expect("embed");
+        set_base_url(&conn, "http://127.0.0.1:1234").expect("base");
+
+        let status = get_ai_status(&conn).expect("status");
+        assert_eq!(status.provider_kind, ProviderKind::LmStudio);
+        assert_eq!(status.chat_model.as_deref(), Some("qwen2.5-7b-instruct"));
+        assert_eq!(status.embedding_model.as_deref(), Some("bge-m3"));
+        assert_eq!(status.embedding_dim, Some(1024));
+        assert_eq!(status.base_url.as_deref(), Some("http://127.0.0.1:1234"));
+        assert!(ai_features_enabled(&status));
+
+        set_provider_kind(&conn, ProviderKind::None).expect("kind back");
+        let status = get_ai_status(&conn).expect("status");
+        assert!(!ai_features_enabled(&status));
+    }
+
+    /// ai_features_enabled is the ready indicator the AI Center panel
+    /// renders — it requires BOTH an explicit provider and a chat model.
+    #[test]
+    fn ai_features_enabled_requires_provider_and_chat_model() {
+        let mut status = AiStatus::default();
+        assert!(!ai_features_enabled(&status));
+        status.provider_kind = ProviderKind::LmStudio;
+        assert!(!ai_features_enabled(&status));
+        status.chat_model = Some("m".into());
+        assert!(ai_features_enabled(&status));
+    }
+}

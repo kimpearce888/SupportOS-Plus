@@ -188,6 +188,10 @@ pub struct CustomersPage {
     timeline: Vec<TimelineEvent>,
     kind_counts: Vec<(String, i64)>,
     conversations: Vec<spp_core::inbox::ConversationListItem>,
+    /// Item 56: the support-milestone timeline (persisted SLA breaches
+    /// and high-friction recomputes) — the writers are the intelligence
+    /// sweep and the Insights recompute; this is the reader.
+    milestones: Vec<spp_core::reports::TimelineEvent>,
     error: Option<String>,
     /// Set by `invalidate`; the next frame reloads the visible surface.
     stale: bool,
@@ -210,6 +214,7 @@ impl CustomersPage {
             timeline: Vec::new(),
             kind_counts: Vec::new(),
             conversations: Vec::new(),
+            milestones: Vec::new(),
             error: None,
             stale: false,
         }
@@ -254,8 +259,8 @@ impl CustomersPage {
     }
 
     fn load_profile(&mut self, db: &DbHandle, customer_id: i64) {
-        let (profile, interaction, health, timeline, kind_counts, conversations) =
-            db.with_read(|conn| {
+        let (profile, interaction, health, timeline, kind_counts, conversations, milestones) = db
+            .with_read(|conn| {
                 let profile = spp_core::people_store::get_customer_detail(conn, customer_id)
                     .ok()
                     .flatten();
@@ -284,6 +289,8 @@ impl CustomersPage {
                     Err(_) => Vec::new(),
                 };
                 let conversations = conversations_for(conn, customer_id).unwrap_or_default();
+                let milestones =
+                    spp_core::reports::get_timeline(conn, customer_id, 50).unwrap_or_default();
                 (
                     profile,
                     interaction,
@@ -291,6 +298,7 @@ impl CustomersPage {
                     timeline,
                     kind_counts,
                     conversations,
+                    milestones,
                 )
             });
         self.profile = profile;
@@ -299,6 +307,7 @@ impl CustomersPage {
         self.timeline = timeline;
         self.kind_counts = kind_counts;
         self.conversations = conversations;
+        self.milestones = milestones;
     }
 
     /// Render the page.
@@ -558,6 +567,9 @@ impl CustomersPage {
         timeline_ui(ui, &self.timeline);
         ui.add_space(10.0);
 
+        milestones_ui(ui, &self.milestones);
+        ui.add_space(10.0);
+
         conversations_ui(ui, &self.conversations);
     }
 }
@@ -770,6 +782,63 @@ fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
                 }
             });
     });
+}
+
+/// Item 56: the support-milestone timeline — SLA breaches persisted by
+/// the intelligence sweep and high-friction recomputes from the Reports
+/// Insights action. Each event's JSON payload carries its context.
+fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent]) {
+    let t = design::tokens(ui);
+    design::card_titled(
+        ui,
+        "Support milestones",
+        Some("tracked SLA breaches and high-friction flags from the intelligence sweep"),
+        |ui| {
+            if events.is_empty() {
+                design::hint_text(ui, "(no milestones recorded)");
+                return;
+            }
+            egui::ScrollArea::vertical()
+                .id_salt("customer-milestones")
+                .max_height(160.0)
+                .show_rows(ui, 20.0, events.len(), |ui, range| {
+                    for event in &events[range] {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(event.occurred_at.as_str())
+                                    .small()
+                                    .color(t.muted_foreground),
+                            );
+                            ui.label(
+                                egui::RichText::new(event.event_type.as_str())
+                                    .size(13.0)
+                                    .strong()
+                                    .color(t.foreground),
+                            );
+                            let detail = event
+                                .event_data
+                                .as_deref()
+                                .and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
+                                .map(|v| match (&v["breach_type"], &v["effort_score"]) {
+                                    (serde_json::Value::String(kind), _) => {
+                                        format!("breach: {kind}")
+                                    }
+                                    (_, serde_json::Value::Number(score)) => {
+                                        format!("effort score {score}")
+                                    }
+                                    _ => String::new(),
+                                })
+                                .unwrap_or_default();
+                            if !detail.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(detail).size(13.0).color(t.foreground),
+                                );
+                            }
+                        });
+                    }
+                });
+        },
+    );
 }
 
 fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationListItem]) {
