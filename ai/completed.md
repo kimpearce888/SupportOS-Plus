@@ -4083,3 +4083,146 @@ completed — check runs "fmt, clippy, test, deny" and
 "AppImage + .deb build, smoke" both concluded `success`.
 (The owner's batch-34 opening commit `7bab5b1` — items 147-149, 152-158
 moved to progress.md — is theirs to record.)
+
+## Batch 35 — clean-audit items 159-165 (LOW tier: the AppImage arch that ignored its own host, the tool cache that could be corrupted by a crash and hung without a timeout, the bans promise nobody evaluated, the workspace deps nobody consumed, the catalog vectors nobody read, the icon verifier nobody ran, and the cargo invocations that rebuilt the lockfile silently) — opened 2026-10-24, executed concurrently with batch 34 at the owner's direction
+
+Batch 35 ran alongside batch 34 (items 147-149, 152-158) by the owner's
+explicit instruction ("another agent is working on other items"): this
+batch touched only its own seven items' files; the `xtask/package.rs`
+overlap with batch-34 items 157/158 was kept to this batch's regions and
+every push rebased on the remote first.
+
+**159. AppImage arch hardcoded x86_64 while the deb lane follows the host** (low|bug)
+— `package()` hardcoded `x86_64` in both the artifact name
+(`SupportOS-Plus-x86_64.AppImage`) and the appimagetool `ARCH` env, while
+`package_deb()` mapped the build host through `deb_arch()` (x86_64→amd64,
+aarch64→arm64): an aarch64 host shipped an arm64 .deb next to an AppImage
+labeled — and runtime-pinned by ARCH — to the wrong architecture. New
+`appimage_arch_for()`/`appimage_arch()` (same host set as `deb_arch`:
+x86_64 and aarch64, anything else fails loudly) drive the artifact name
+and the `ARCH` env. Pinned by the
+`appimage_arch_covers_the_same_hosts_as_the_deb_lane` regression (both
+mappings, the loud error branch, and host-agreement). Boundary note: a
+full aarch64 AppImage lane additionally needs the appimagetool download
+URL to be arch-aware — that URL is item 158's citation (batch 34) and was
+deliberately left untouched here. crates/xtask/src/package.rs.
+
+**160. Non-atomic tool-cache write + unbounded download** (low|bug)
+— `download_appimagetool` wrote the download straight to the cached path
+(`fs::write(dest)`): a crash or interrupt mid-write left a truncated file
+at exactly the path `resolve_appimagetool` trusted on every later run
+(`cached.is_file()` → run a corrupt "tool" → the package step failed with
+a confusing cannot-execute error), and the download itself was a default
+`reqwest::blocking::get` with no timeout — a stalled connection hung a CI
+job forever. Now: a blocking client with connect_timeout(15s) +
+timeout(300s), and the payload lands via `install_tool_bytes` — write +
+fsync a `.part` sibling, chmod 0755, atomic rename (temp sibling removed
+on error). Pinned by the `tool_cache_lands_atomically_at_the_final_path`
+regression (install, re-install, no `.part` leftover, executable bit).
+crates/xtask/src/package.rs.
+
+**161. deny.toml stale "becomes deny" promise; bans never evaluated** (low|gap)
+— `[bans] multiple-versions = "warn"` carried the comment "the reqwest
+0.12/0.13 dedupe is a tracked plan item; this becomes deny after that
+lands" — but the dedupe already landed (Cargo.lock carries exactly one
+reqwest), no tracked item exists anymore, and CI ran only `cargo deny
+check advisories licenses`, so the bans section was configured and then
+evaluated by no one, ever. The promise is now enforced instead of
+promised: `multiple-versions = "deny"`, and CI's deny step is `cargo deny
+check advisories licenses bans`. A new duplicate crate version fails CI;
+the pre-existing transitive duplicates of the checked
+x86_64-unknown-linux-gnu graph are skipped by name with per-crate reasons
+(crypto-stack generations, wayland stacks via winit, syn/thiserror
+transitions, quick-xml 0.41 via pdf-extract, …); duplicates that exist
+only on non-Linux targets (the Apple objc2 stack, windows-sys, jni-sys,
+r-efi, redox_syscall) are outside the checked graph and documented as
+re-add-on-target-widening instead of carried as dead skips.
+deny.toml, .github/workflows/ci.yml.
+
+**162. egui/egui_extras workspace deps unconsumed** (low|gap)
+— the workspace declared `egui = "=0.37"` and `egui_extras = "=0.37"` in
+`[workspace.dependencies]`, but no crate consumes either
+(app-shell's only egui-stack dependency is `eframe`, which re-exports
+egui); egui_extras was not even in Cargo.lock. Both entries removed; the
+`eframe` entry (and its v1.1.1 glow-renderer rationale) stays, and the
+section comment now states the policy: only consumed deps are declared.
+`cargo metadata --locked` clean and Cargo.lock byte-unchanged by the
+edit. Cargo.toml.
+
+**163. catalog all_metric_entries/all_dimension_entries dead** (low|gap)
+— both functions computed full catalog vectors (26 metrics, 13
+dimensions) and had zero callers anywhere in the workspace; the per-key
+`metric_entry`/`dimension_entry` constructors and the entry structs stay
+(core/reports.rs pins every report's catalog entry with them, and the
+`ALL` consts are consumed by core's str round-trips). The dead wrappers
+are removed with a pointer comment at the site.
+crates/catalog/src/reporting.rs.
+
+**164. verify-icons never invoked by any automation** (low|gap)
+— `xtask verify-icons` (full PNG-dimension, ICO-entry and ICNS-chunk
+verification of the checked-in icon set) existed but nothing ever ran it:
+CI didn't call it, and neither packaging lane did — packaging only
+checked icon file existence. Now both `package()` and `package_deb()`
+verify the set before staging anything (new `verify_icon_set`), and CI's
+check job gains a `Verify icons` step (`cargo run --locked -p
+supportos-plus-xtask -- verify-icons`) so icon corruption fails before
+any expensive lane. The stale "consumes it in a later plan item" comment
+at icons.rs:186 now states the real wiring. crates/xtask/src/icons.rs,
+crates/xtask/src/package.rs, .github/workflows/ci.yml.
+
+**165. No `--locked` on CI/release cargo invocations** (low|gap)
+— every cargo build/test/clippy/run invocation in ci.yml (6) and
+release.yml (7, including both sandbox-feature passes and the explicit
+release build) could silently rewrite Cargo.lock on a drifted manifest
+and build/test/ship artifacts from unpinned versions. All of them carry
+`--locked` now, and xtask's own `release_build()` (the build CI's
+`xtask package` performs) passes `--locked` too — the release path can
+only build exactly the committed lock, and lock drift fails loudly
+instead. `cargo metadata --locked` is clean on the committed tree.
+crates/xtask/src/package.rs, .github/workflows/ci.yml,
+.github/workflows/release.yml.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `python3 scripts/gate_no_simulation.py`: clean.
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo clippy -p supportos-plus-core --all-targets --features sandbox
+  -- -D warnings`: clean.
+- Tests: core 467 passed / 0 failed / 4 ignored; sandbox-feature suite
+  472 passed / 0 failed / 4 ignored; app-shell 221 passed / 0 failed;
+  xtask 8 passed / 0 failed (6 pre-existing + 2 new batch-35
+  regressions: the appimage-arch mapping and the atomic tool-cache
+  landing); catalog 0. (A disk-full episode — rootfs at 100% — produced
+  39 environmental sandbox failures identical in class to batch 33's;
+  after clearing the incremental cache and stale /tmp fixtures the
+  identical suite was rerun cleanly: 472/0/4.)
+- `cargo metadata --locked`: clean; the Cargo.lock stayed byte-identical
+  through the manifest edit (item 162's premise, re-proven).
+- `cargo deny check advisories licenses bans` (cargo-deny 0.20.2):
+  advisories ok, bans ok, licenses ok — the bans verdict is new this
+  batch; the only note is the pre-existing CDLA-Permissive-2.0
+  unmatched-allowance warning recorded since batch 33, and the
+  unmatched-skip warnings from platform-only skips are gone (the skip
+  list carries exactly the checked graph's duplicates).
+- `cargo run --locked -p supportos-plus-xtask -- verify-icons`: "icon set
+  verified: png/ico/icns structures are consistent" (the exact CI step).
+- Both workflow YAMLs re-parse (yaml.safe_load) after the edits.
+- Harnesses: batch-18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 and
+  33 all pass. The batch-20 (item-21 upsert-site needle restructured by
+  batch-24's per-chunk partitioning) and batch-22 (the wrapped fence
+  literal and the volume-spike flake check) failures are the documented
+  pre-existing stale needles, unchanged from the pre-batch state (proven
+  pre-batch during batch 30); batch-17's script remains
+  environment-bound as documented.
+- SPP_SMOKE: not run locally this batch — batch 35 changes no runtime app
+  surface (xtask packaging code, a dead-code removal in catalog,
+  manifests, CI and deny config only); the AppImage boot-chain smoke runs
+  in the CI packages job on the pushed commit and is recorded below as
+  the runner verification.
+- Security: staged diff token-scanned clean before the push; remote
+  fetched (and rebased when needed) before every push per the
+  concurrent-batch discipline.
+
+Runner verification (batch 35, code commit — CI on the tracking commit
+that contains it): follows once CI completes (recorded below when the
+runs finish).
