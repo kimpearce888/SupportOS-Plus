@@ -232,3 +232,36 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
   surface; backups live in Settings only.
 - Evidence: WORKFLOW/W10-01..07.png (PIL+visual), E-096..E-104;
   WORKFLOW-COVERAGE W-010 → DONE-PARTIAL. Next workflow: W-006.
+
+## 2026-10-24 ~23:20 UTC — W-006 automation rule executed (DONE-PARTIAL: creation tooling-limited)
+
+- Mouse-only pass with real input (evidence/artifacts/w006-automation.py;
+  4 runs, all retained):
+  * Automation page via pill-verified walk; empty states confirmed
+    ('0 rule(s)', 'No approvals waiting').
+  * 'New Rule' toggle opens/closes the form (C-AUTO-01; button is a dark
+    Primary+icon — OCR-blind, dark-rect detector).
+  * Trigger chips 3/3 with conditional swaps (C-AUTO-03): Tag added replaces
+    from→to with a tag field; SLA at risk removes the row entirely (action
+    row pulls up 41px — structural evidence); Status changed restores.
+  * Action chips 5/5 with conditional fields (C-AUTO-06): assignee id /
+    note body / priority / new status / tag.
+  * 'Create Rule' on an EMPTY form → 'error: rule name required' (name-first
+    validation) with ZERO records (C-AUTO-12 empty path; DB read back 0).
+- BLOCKED (recorded as tooling-limited, NOT exceptions): rule CREATION needs
+  text input (XTEST keyboard limitation, verified twice) — consequently the
+  rule-row controls (enabled/disabled, delete confirm) and the approvals
+  queue (approve/reject) are unreachable with no rule in existence. The
+  C-SET-66 'really restore' deferral extends (W-006 cannot produce QA data
+  rows as planned; only a text-capable run or an explicit QA-fixture
+  decision can unblock it).
+- RUNTIME OBSERVATION (minor, recorded not filed): the validation error
+  'error: rule name required' persists after the form is closed (toggle
+  does not clear self.error).
+- Tooling history (retained): run-1 S004b predicate false-negative (the
+  action row's 'Add tag' chip slid into the trigger OCR band after the SLA
+  layout shift) → action-row-position-aware predicates; run-2 'new status'
+  hint OCR truncation ('new statu') → needle fix; run-3 stale-error
+  close-check fix.
+- Evidence: WORKFLOW/W006-01..08.png (12 frames, PIL+visual), E-105..E-118;
+  WORKFLOW-COVERAGE W-006 → DONE-PARTIAL. Next workflow: W-005.

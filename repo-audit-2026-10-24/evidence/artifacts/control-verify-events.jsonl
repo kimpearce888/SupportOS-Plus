@@ -498,3 +498,53 @@
 {"t": 1792880800.22, "kind": "w10-S009-cancel", "attempts": [{"pos": [283, 448], "ok": true}], "disarmed": true, "verdict": "PASS", "note": "'really restore' deliberately NOT clicked (deferred until QA data exists per NEXT-ACTIONS); two-step gate runtime-verified up to the cancel branch"}
 {"t": 1792880802.229, "kind": "w10-S010-end", "proc_gone": true, "db": {"organizations": 0, "conversations": 0, "sync_runs": 0, "jobs": 0, "knowledge_documents": 0, "automation_rules": 0, "customers": 0, "theme": "light", "integrity": "ok"}, "backups_dir": {"supportos-backup-2026-10-24T15-42-38-603Z.db": 1847296, "supportos-backup-2026-10-24T15-42-38-603Z.settings.json": 149, "supportos-backup-2026-10-24T22-23-19-986Z.db": 1847296, "supportos-backup-2026-10-24T22-23-19-986Z.settings.json": 660, "supportos-backup-2026-10-24T22-25-55-627Z.db": 1847296, "supportos-backup-2026-10-24T22-25-55-627Z.settings.json": 660, "supportos-conversations-1792880616856.csv": 65, "supportos-conversations-1792880776259.csv": 65, "supportos-export-1792880611754.json": 252, "supportos-export-1792880769998.json": 252}, "counts_unchanged": true, "verdict": "PASS", "note": "never-synced precondition intact; theme unchanged"}
 {"t": 1792880802.229, "kind": "w10-summary", "verdict": "PASS", "steps": "S001..S010", "executed": "C-SET-06 tab, C-SET-61 create backup, C-SET-62 export JSON, C-SET-63 export CSV, C-SET-64 arm, C-SET-65 cancel", "deferred": "C-SET-66 'really restore' (per NEXT-ACTIONS: restore-replace deferred until QA data exists; two-step gate verified)"}
+{"t": 1792881237.575, "kind": "w006-S001-pre", "db": {"automation_rules": 0, "automation_approvals": 0, "automation_runs": 0, "theme": "light", "integrity": "ok"}, "expect": "automation_rules=0, approvals=0 (empty; never-synced intact)"}
+{"t": 1792881243.581, "kind": "w006-app-started", "tag": "launch-1", "pid": 6705, "ready": true, "lock_error": false}
+{"t": 1792881258.4, "kind": "w006-S002-nav", "to": "12-automation", "pill_y": 505, "verdict": "PASS"}
+{"t": 1792881261.741, "kind": "w006-S003-form-open", "attempts": [{"pos": [1117, 91], "ok": true}], "verdict": "PASS"}
+{"t": 1792881264.05, "kind": "w006-S004a-trigger-tag", "attempts": [{"pos": [495, 280], "ok": true}], "expect": "from\u2192to fields replaced by tag field", "verdict": "PASS"}
+{"t": 1792881271.911, "kind": "w006-S004b-trigger-sla", "attempts": [{"pos": [590, 280], "ok": false}, {"pos": [565, 280], "ok": false}, {"pos": [615, 279], "ok": false}], "expect": "no conditional trigger fields", "verdict": "FAIL"}
+{"t": 1792881271.911, "kind": "w006-fatal", "error": "S004b: trigger 'SLA at risk' conditional swap not verified"}
+{"t": 1792881403.877, "kind": "w006-S001-pre", "db": {"automation_rules": 0, "automation_approvals": 0, "automation_runs": 0, "theme": "light", "integrity": "ok"}, "expect": "automation_rules=0, approvals=0 (empty; never-synced intact)"}
+{"t": 1792881409.89, "kind": "w006-app-started", "tag": "launch-1", "pid": 7113, "ready": true, "lock_error": false}
+{"t": 1792881424.698, "kind": "w006-S002-nav", "to": "12-automation", "pill_y": 514, "verdict": "PASS"}
+{"t": 1792881427.947, "kind": "w006-S003-form-open", "attempts": [{"pos": [1117, 91], "ok": true}], "verdict": "PASS"}
+{"t": 1792881430.597, "kind": "w006-S004a-trigger-tag", "attempts": [{"pos": [495, 280], "ok": true}], "expect": "trigger tag field replaces from\u2192to; action row unchanged", "verdict": "PASS"}
+{"t": 1792881433.251, "kind": "w006-S004b-trigger-sla", "attempts": [{"pos": [590, 280], "ok": true}], "expect": "no conditional trigger fields (action row pulled up)", "verdict": "PASS"}
+{"t": 1792881435.421, "kind": "w006-S004c-trigger-status", "attempts": [{"pos": [392, 281], "ok": true}], "expect": "from\u2192to fields restored", "verdict": "PASS"}
+{"t": 1792881437.717, "kind": "w006-S005-action-assign", "attempts": [{"pos": [357, 368], "ok": true}], "expect": "assignee id field", "verdict": "PASS"}
+{"t": 1792881439.947, "kind": "w006-S005-action-sendnote", "attempts": [{"pos": [515, 368], "ok": true}], "expect": "note body field", "verdict": "PASS"}
+{"t": 1792881442.082, "kind": "w006-S005-action-setpriority", "attempts": [{"pos": [733, 368], "ok": true}], "expect": "priority field", "verdict": "PASS"}
+{"t": 1792881449.36, "kind": "w006-S005-action-changestatus", "attempts": [{"pos": [622, 368], "ok": false}, {"pos": [597, 368], "ok": false}, {"pos": [647, 367], "ok": false}], "expect": "new status field", "verdict": "FAIL"}
+{"t": 1792881449.361, "kind": "w006-fatal", "error": "S005: action 'changestatus' conditional field not verified"}
+{"t": 1792881481.413, "kind": "w006-S001-pre", "db": {"automation_rules": 0, "automation_approvals": 0, "automation_runs": 0, "theme": "light", "integrity": "ok"}, "expect": "automation_rules=0, approvals=0 (empty; never-synced intact)"}
+{"t": 1792881487.419, "kind": "w006-app-started", "tag": "launch-1", "pid": 7665, "ready": true, "lock_error": false}
+{"t": 1792881502.274, "kind": "w006-S002-nav", "to": "12-automation", "pill_y": 514, "verdict": "PASS"}
+{"t": 1792881505.55, "kind": "w006-S003-form-open", "attempts": [{"pos": [1117, 91], "ok": true}], "verdict": "PASS"}
+{"t": 1792881508.184, "kind": "w006-S004a-trigger-tag", "attempts": [{"pos": [495, 280], "ok": true}], "expect": "trigger tag field replaces from\u2192to; action row unchanged", "verdict": "PASS"}
+{"t": 1792881510.834, "kind": "w006-S004b-trigger-sla", "attempts": [{"pos": [590, 280], "ok": true}], "expect": "no conditional trigger fields (action row pulled up)", "verdict": "PASS"}
+{"t": 1792881513.007, "kind": "w006-S004c-trigger-status", "attempts": [{"pos": [392, 281], "ok": true}], "expect": "from\u2192to fields restored", "verdict": "PASS"}
+{"t": 1792881515.246, "kind": "w006-S005-action-assign", "attempts": [{"pos": [357, 368], "ok": true}], "expect": "assignee id field", "verdict": "PASS"}
+{"t": 1792881517.432, "kind": "w006-S005-action-sendnote", "attempts": [{"pos": [515, 368], "ok": true}], "expect": "note body field", "verdict": "PASS"}
+{"t": 1792881519.563, "kind": "w006-S005-action-setpriority", "attempts": [{"pos": [733, 368], "ok": true}], "expect": "priority field", "verdict": "PASS"}
+{"t": 1792881521.633, "kind": "w006-S005-action-changestatus", "attempts": [{"pos": [622, 368], "ok": true}], "expect": "new status field", "verdict": "PASS"}
+{"t": 1792881523.744, "kind": "w006-S005-action-addtag", "attempts": [{"pos": [443, 368], "ok": true}], "expect": "tag field", "verdict": "PASS"}
+{"t": 1792881527.053, "kind": "w006-S006-create-empty", "attempts": [{"pos": [300, 450], "ok": true}], "error_shown": true, "db_automation_rules": 0, "verdict": "PASS", "note": "validation order: name first (automation.rs:286-289)"}
+{"t": 1792881536.256, "kind": "w006-S007-form-closed", "attempts": [{"pos": [1117, 91], "ok": false}, {"pos": [1092, 91], "ok": false}, {"pos": [1142, 90], "ok": false}], "verdict": "FAIL"}
+{"t": 1792881536.256, "kind": "w006-fatal", "error": "S007: New Rule toggle did not close the form"}
+{"t": 1792881585.599, "kind": "w006-S001-pre", "db": {"automation_rules": 0, "automation_approvals": 0, "automation_runs": 0, "theme": "light", "integrity": "ok"}, "expect": "automation_rules=0, approvals=0 (empty; never-synced intact)"}
+{"t": 1792881591.607, "kind": "w006-app-started", "tag": "launch-1", "pid": 8282, "ready": true, "lock_error": false}
+{"t": 1792881606.441, "kind": "w006-S002-nav", "to": "12-automation", "pill_y": 509, "verdict": "PASS"}
+{"t": 1792881609.702, "kind": "w006-S003-form-open", "attempts": [{"pos": [1117, 91], "ok": true}], "verdict": "PASS"}
+{"t": 1792881612.342, "kind": "w006-S004a-trigger-tag", "attempts": [{"pos": [495, 280], "ok": true}], "expect": "trigger tag field replaces from\u2192to; action row unchanged", "verdict": "PASS"}
+{"t": 1792881614.997, "kind": "w006-S004b-trigger-sla", "attempts": [{"pos": [590, 280], "ok": true}], "expect": "no conditional trigger fields (action row pulled up)", "verdict": "PASS"}
+{"t": 1792881617.127, "kind": "w006-S004c-trigger-status", "attempts": [{"pos": [392, 281], "ok": true}], "expect": "from\u2192to fields restored", "verdict": "PASS"}
+{"t": 1792881619.379, "kind": "w006-S005-action-assign", "attempts": [{"pos": [357, 368], "ok": true}], "expect": "assignee id field", "verdict": "PASS"}
+{"t": 1792881621.582, "kind": "w006-S005-action-sendnote", "attempts": [{"pos": [515, 368], "ok": true}], "expect": "note body field", "verdict": "PASS"}
+{"t": 1792881623.746, "kind": "w006-S005-action-setpriority", "attempts": [{"pos": [733, 368], "ok": true}], "expect": "priority field", "verdict": "PASS"}
+{"t": 1792881625.807, "kind": "w006-S005-action-changestatus", "attempts": [{"pos": [622, 368], "ok": true}], "expect": "new status field", "verdict": "PASS"}
+{"t": 1792881627.891, "kind": "w006-S005-action-addtag", "attempts": [{"pos": [443, 368], "ok": true}], "expect": "tag field", "verdict": "PASS"}
+{"t": 1792881631.101, "kind": "w006-S006-create-empty", "attempts": [{"pos": [300, 450], "ok": true}], "error_shown": true, "db_automation_rules": 0, "verdict": "PASS", "note": "validation order: name first (automation.rs:286-289)"}
+{"t": 1792881635.84, "kind": "w006-S007-form-closed", "attempts": [{"pos": [1117, 91], "ok": true}], "verdict": "PASS", "stale_error_after_close": true, "note": "observation: validation error text persists after the form is closed (toggle does not clear self.error) \u2014 recorded, minor"}
+{"t": 1792881637.848, "kind": "w006-S008-end", "proc_gone": true, "db": {"automation_rules": 0, "automation_approvals": 0, "automation_runs": 0, "theme": "light", "integrity": "ok"}, "verdict": "PASS", "note": "zero records; never-synced precondition intact; theme unchanged"}
+{"t": 1792881637.848, "kind": "w006-summary", "verdict": "PASS", "steps": "S001..S008", "executed": "C-AUTO-01 toggle (open+close), C-AUTO-03 trigger chips (3/3 + conditional swaps), C-AUTO-06 action chips (5/5 + conditional swaps), C-AUTO-12 empty-create validation ('rule name required'), zero records", "blocked": "rule creation + enabled/disabled toggle + delete dialog + approve/reject: require TEXT INPUT (XTEST keyboard limitation, verified twice) or existing data \u2014 recorded as tooling-limited, NOT exceptions; C-SET-66 deferral extends"}

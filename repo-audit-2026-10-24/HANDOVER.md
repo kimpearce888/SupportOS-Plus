@@ -11,9 +11,10 @@
 - Audit commits (audit artifacts only, folder `repo-audit-2026-10-24/`):
   `e15ffa8` (checkpoint 1), `eec1eed` (checkpoint 1a), `fe7101a` (checkpoint 2,
   feature walk), pass-2 control-ledger checkpoint, `006d047` (checkpoint 4,
-  W-008), `a5e47ef` (checkpoint 5, W-007 + log-publication fix)
+  W-008), `a5e47ef` (checkpoint 5, W-007 + log-publication fix), `8074dd7`
+  (checkpoint 6, W-010)
 - Remote: `https://github.com/kimpearce888/SupportOS-Plus` (credential store,
-  kimpearce888); push of `a5e47ef` verified 2026-10-24 ~22:40 UTC
+  kimpearce888); push of `8074dd7` verified 2026-10-24 ~23:00 UTC
 - PUBLICATION NOTE (checkpoint 5): the repo-root `.gitignore` `*.log` rule had
   silently excluded ALL audit log evidence from checkpoints 1–4; every
   manifest-referenced log is now force-added and tracked; the missing E-002
@@ -45,9 +46,14 @@ original light precondition restored. **W-010 executed DONE-PARTIAL** (E-096..
 E-104): Backups & export tab, create backup (new pair on disk), export JSON
 + CSV, restore ARMS-ONLY two-step gate runtime-verified (red REPLACED
 warning, DB stable, no swap files), cancel disarms; "really restore"
-(C-SET-66) deliberately deferred until QA data exists. Findings now FIND-001
-(Medium) + FIND-002..FIND-011 (Low). Next workflow: W-006 (creates first QA
-data rows).
+(C-SET-66) deliberately deferred until QA data exists. **W-006 executed
+DONE-PARTIAL** (E-105..E-118, mouse-only): New Rule form toggle, trigger
+chips 3/3 + conditional field swaps, action chips 5/5 + conditional fields,
+empty-create validation ('rule name required', zero records); rule CREATION
+is tooling-blocked (text input limitation) so rule-row/approval-queue
+controls are unreachable — recorded as tooling-limited, not exceptions;
+minor observation: validation error persists after form close. Findings now
+FIND-001 (Medium) + FIND-002..FIND-011 (Low). Next workflow: W-005.
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -62,8 +68,8 @@ data rows).
   evidence/artifacts/control-verify.py + control-verify-events.jsonl (incl.
   retained v1/v2 tool-calibration rows); evidence/logs/CONTROL-app.log
 - Findings: FINDINGS.md (FIND-001..FIND-010)
-- Workflows: WORKFLOW-COVERAGE.md (W-007 DONE; W-010 DONE-PARTIAL, C-SET-66
-  deferred; W-008 PARTIAL; W-001..W-006, W-009 queued)
+- Workflows: WORKFLOW-COVERAGE.md (W-006 DONE-PARTIAL; W-007 DONE; W-010
+  DONE-PARTIAL, C-SET-66 deferred; W-008 PARTIAL; W-001..W-005, W-009 queued)
 - Report: REPORT.md (skeleton, IN PROGRESS)
 
 ## Tooling facts a new session must know
@@ -96,38 +102,48 @@ data rows).
   v2 in w010-backups.py). "really restore" red Destructive button is
   OCR-blind → red-pixel detector. Backups dir QA artifacts now include 3
   backup pairs + 2 CSVs + 2 JSONs (all audit-created, harmless).
+- W-006 positions (real-input verified): New Rule toggle (1117,91; dark
+  Primary+icon, OCR-blind); trigger chips Status changed (392,281) / Tag
+  added (495,280) / SLA (590,280); action chips Assign (357,368) / Add tag
+  (443,368) / Send note (515,368) / Change status (622,368) / Set priority
+  (733,368); Create Rule (300,450; dark rect). Conditional-row layout shifts
+  with trigger kind — position-aware OCR predicates required ('tag' in the
+  trigger band is ambiguous with the action row's 'Add tag' chip). 'new
+  status' hint OCRs as 'new statu'.
 - Sandbox reaps background processes between tool calls: keep each app run
   self-contained in one call (the scripts already pkill orphans and verify
   the instance lock).
 - Do NOT use the `ui-screenshot` cargo feature for evidence (non-default
   build); its existence is recorded as a discovered QA affordance instead.
 
-## Coverage snapshot (2026-10-24 ~22:55 UTC)
+## Coverage snapshot (2026-10-24 ~23:20 UTC)
 - Pages inventoried w/ evidence: 23/23; shell-level features: 3
 - Control/option ledger rows: 535; controls runtime-exercised: 46 pass-2
   steps + W-007 (both theme controls, both directions, 2 restarts) + W-010
-  (6 backup/export controls incl. the two-step restore gate)
+  (6 backup/export controls incl. the two-step restore gate) + W-006
+  (toggle, 3 trigger chips, 5 action chips, empty-create validation)
 - Formal control testing (QA-001..007 ledger): NOT STARTED (pass-2 exercises
   are inventory verification, not the formal ledger)
-- Workflows identified / executed: 10 identified; W-007 DONE, W-010
-  DONE-PARTIAL (C-SET-66 deferred until data exists), W-008 PARTIAL;
-  7 queued (W-006 next)
-- Evidence: E-001..E-104, all validated; every manifest path exists AND is
+- Workflows identified / executed: 10 identified; W-006 DONE-PARTIAL
+  (creation tooling-limited), W-007 DONE, W-010 DONE-PARTIAL (C-SET-66
+  deferred), W-008 PARTIAL; 6 queued (W-005 next)
+- Evidence: E-001..E-118, all validated; every manifest path exists AND is
   git-tracked (log-evidence gap closed at checkpoint 5)
 - Accepted exceptions: none · Unresolved gaps: none new (W-001/W-003 external
-  data blockers unchanged; C-SET-66 deferred by plan)
+  data blockers unchanged; C-SET-66 + W-006 creation deferred by tooling)
 - Findings: FIND-001 Medium; FIND-002..FIND-011 Low
-- DB state after W-010 (read-only check): theme=light; all sampled counters 0
-  (never-synced precondition intact); PRAGMA integrity_check ok
-- Coverage snapshot time: 2026-10-24 ~22:55 UTC
+- DB state after W-006 (read-only check): theme=light; automation_rules=0,
+  approvals=0, runs=0 (never-synced precondition intact); integrity ok
+- Coverage snapshot time: 2026-10-24 ~23:20 UTC
 
 ## Outstanding tasks (ordered)
-1. Workflow execution order per NEXT-ACTIONS.md #2 (W-006 automation rule
-   [creates first QA data rows] → W-005 knowledge ingest → W-002 sync
-   lifecycle [consumes never-synced state] → W-003/W-004 as data allows →
-   W-009; then the deferred C-SET-66 "really restore"; W-008 PARTIAL done —
-   remaining W-008 steps are keyboard-blocked, record as tooling-limited,
-   not exceptions).
+1. Workflow execution order per NEXT-ACTIONS.md #2 (W-005 knowledge ingest
+   [paste-a-document path — but note the paste field is a TextEdit; the
+   ingest may be tooling-limited the same way; verify the expander/controls
+   reachable by mouse] → W-002 sync lifecycle [consumes never-synced state]
+   → W-003/W-004 as data allows → W-009; then deferred C-SET-66 + W-006
+   creation, both awaiting a text-capable run or QA-fixture decision;
+   W-008 remaining steps keyboard-blocked, record as tooling-limited).
 3. FIND-001 UI-signal + webhook-drain checks.
 4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
    second-instance UI check (FIND-002 reclassification decision).
@@ -166,8 +182,9 @@ data rows).
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-24 ~22:55 UTC
-- Validator/check: W-010 10/10 steps PASS (events JSONL w10-* rows; C-SET-66
-  deferred by plan); 7 W-10 PNGs + 7 W-07 PNGs PIL+visually validated;
-  manifest E-001..E-104 zero missing paths; DB integrity ok, theme=light,
-  never-synced intact; app log read (only the known FIND-001 WARN)
+- Timestamp/timezone: 2026-10-24 ~23:20 UTC
+- Validator/check: W-006 8/8 steps PASS (events JSONL w006-* rows; creation
+  tooling-limited + stale-error observation recorded); W-006 PNGs (12) +
+  W-10 (7) + W-07 (7) PIL+visually validated; manifest E-001..E-118 zero
+  missing paths; DB integrity ok, theme=light, never-synced intact; app log
+  read (only the known FIND-001 WARN)

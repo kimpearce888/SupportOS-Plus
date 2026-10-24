@@ -1,0 +1,176 @@
+  2026-10-24T22:33:58.587307Z  INFO supportos_plus: SupportOS-Plus native shell starting
+    at crates/app-shell/src/main.rs:15
+
+  2026-10-24T22:33:58.587460Z  INFO supportos_plus: data directory, data_dir: "/home/z/.local/share/supportos-plus"
+    at crates/app-shell/src/main.rs:24
+
+  2026-10-24T22:33:58.591836Z DEBUG spp_core::migrations: migrations up to date, current: 52, target: 2
+    at crates/core/src/migrations.rs:197
+
+  2026-10-24T22:33:58.599062Z  INFO supportos_plus: database ready (all migrations applied), path: /home/z/.local/share/supportos-plus/supportos-plus.db
+    at crates/app-shell/src/main.rs:51
+
+  2026-10-24T22:33:58.599489Z  INFO spp_shell: boot services built, mode: Empty
+    at crates/app-shell/src/lib.rs:183
+
+  2026-10-24T22:33:58.600546Z  INFO spp_core::workers: worker auto-sync timer armed (adaptive: 30 s busy, backing off toward the ceiling), operation: "start", quiet_ceiling_minutes: 1, busy_poll_seconds: 30
+    at crates/core/src/workers.rs:279
+
+  2026-10-24T22:33:58.601317Z  INFO spp_core::workers: Background workers started, operation: "start"
+    at crates/core/src/workers.rs:397
+
+  2026-10-24T22:33:58.601372Z  INFO supportos_plus: background workers started (job, webhook, embedding, maintenance timers)
+    at crates/app-shell/src/main.rs:96
+
+  2026-10-24T22:33:58.601501Z  WARN supportos_plus: loopback listener could not be started, error: Address already in use (os error 98)
+    at crates/app-shell/src/main.rs:129
+
+  2026-10-24T22:33:58.601616Z  INFO spp_shell: renderer: glow (default; set SPP_RENDERER=wgpu to switch), renderer: "glow"
+    at crates/app-shell/src/lib.rs:222
+
+  2026-10-24T22:33:58.601656Z  INFO eframe: Both the glow and wgpu renderers are available. Using glow.
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.37.0/src/lib.rs:433
+
+  2026-10-24T22:33:58.603536Z  WARN winit::platform_impl::linux::x11::xdisplay: error setting XSETTINGS; Xft options won't reload automatically
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/xdisplay.rs:118
+
+  2026-10-24T22:33:58.618408Z  WARN winit::platform_impl::linux::x11::util::randr: XRandR reported that the display's 0mm in size, which is certifiably insane
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/util/randr.rs:24
+
+  2026-10-24T22:33:58.638633Z  INFO winit::platform_impl::linux::x11::window: Guessed window scale factor: 1
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/window.rs:192
+
+
+===== W-006 launch-1 =====
+  2026-10-24T22:36:44.896268Z  INFO supportos_plus: SupportOS-Plus native shell starting
+    at crates/app-shell/src/main.rs:15
+
+  2026-10-24T22:36:44.896404Z  INFO supportos_plus: data directory, data_dir: "/home/z/.local/share/supportos-plus"
+    at crates/app-shell/src/main.rs:24
+
+  2026-10-24T22:36:44.900873Z DEBUG spp_core::migrations: migrations up to date, current: 52, target: 2
+    at crates/core/src/migrations.rs:197
+
+  2026-10-24T22:36:44.908161Z  INFO supportos_plus: database ready (all migrations applied), path: /home/z/.local/share/supportos-plus/supportos-plus.db
+    at crates/app-shell/src/main.rs:51
+
+  2026-10-24T22:36:44.908553Z  INFO spp_shell: boot services built, mode: Empty
+    at crates/app-shell/src/lib.rs:183
+
+  2026-10-24T22:36:44.909615Z  INFO spp_core::workers: worker auto-sync timer armed (adaptive: 30 s busy, backing off toward the ceiling), operation: "start", quiet_ceiling_minutes: 1, busy_poll_seconds: 30
+    at crates/core/src/workers.rs:279
+
+  2026-10-24T22:36:44.910406Z  INFO spp_core::workers: Background workers started, operation: "start"
+    at crates/core/src/workers.rs:397
+
+  2026-10-24T22:36:44.910510Z  INFO supportos_plus: background workers started (job, webhook, embedding, maintenance timers)
+    at crates/app-shell/src/main.rs:96
+
+  2026-10-24T22:36:44.910657Z  WARN supportos_plus: loopback listener could not be started, error: Address already in use (os error 98)
+    at crates/app-shell/src/main.rs:129
+
+  2026-10-24T22:36:44.910796Z  INFO spp_shell: renderer: glow (default; set SPP_RENDERER=wgpu to switch), renderer: "glow"
+    at crates/app-shell/src/lib.rs:222
+
+  2026-10-24T22:36:44.910897Z  INFO eframe: Both the glow and wgpu renderers are available. Using glow.
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.37.0/src/lib.rs:433
+
+  2026-10-24T22:36:44.912876Z  WARN winit::platform_impl::linux::x11::xdisplay: error setting XSETTINGS; Xft options won't reload automatically
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/xdisplay.rs:118
+
+  2026-10-24T22:36:44.928472Z  WARN winit::platform_impl::linux::x11::util::randr: XRandR reported that the display's 0mm in size, which is certifiably insane
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/util/randr.rs:24
+
+  2026-10-24T22:36:44.950585Z  INFO winit::platform_impl::linux::x11::window: Guessed window scale factor: 1
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/window.rs:192
+
+
+===== W-006 launch-1 =====
+  2026-10-24T22:38:02.425542Z  INFO supportos_plus: SupportOS-Plus native shell starting
+    at crates/app-shell/src/main.rs:15
+
+  2026-10-24T22:38:02.425705Z  INFO supportos_plus: data directory, data_dir: "/home/z/.local/share/supportos-plus"
+    at crates/app-shell/src/main.rs:24
+
+  2026-10-24T22:38:02.430302Z DEBUG spp_core::migrations: migrations up to date, current: 52, target: 2
+    at crates/core/src/migrations.rs:197
+
+  2026-10-24T22:38:02.437646Z  INFO supportos_plus: database ready (all migrations applied), path: /home/z/.local/share/supportos-plus/supportos-plus.db
+    at crates/app-shell/src/main.rs:51
+
+  2026-10-24T22:38:02.438138Z  INFO spp_shell: boot services built, mode: Empty
+    at crates/app-shell/src/lib.rs:183
+
+  2026-10-24T22:38:02.439174Z  INFO spp_core::workers: worker auto-sync timer armed (adaptive: 30 s busy, backing off toward the ceiling), operation: "start", quiet_ceiling_minutes: 1, busy_poll_seconds: 30
+    at crates/core/src/workers.rs:279
+
+  2026-10-24T22:38:02.439924Z  INFO spp_core::workers: Background workers started, operation: "start"
+    at crates/core/src/workers.rs:397
+
+  2026-10-24T22:38:02.439985Z  INFO supportos_plus: background workers started (job, webhook, embedding, maintenance timers)
+    at crates/app-shell/src/main.rs:96
+
+  2026-10-24T22:38:02.440114Z  WARN supportos_plus: loopback listener could not be started, error: Address already in use (os error 98)
+    at crates/app-shell/src/main.rs:129
+
+  2026-10-24T22:38:02.440221Z  INFO spp_shell: renderer: glow (default; set SPP_RENDERER=wgpu to switch), renderer: "glow"
+    at crates/app-shell/src/lib.rs:222
+
+  2026-10-24T22:38:02.440270Z  INFO eframe: Both the glow and wgpu renderers are available. Using glow.
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.37.0/src/lib.rs:433
+
+  2026-10-24T22:38:02.442103Z  WARN winit::platform_impl::linux::x11::xdisplay: error setting XSETTINGS; Xft options won't reload automatically
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/xdisplay.rs:118
+
+  2026-10-24T22:38:02.458204Z  WARN winit::platform_impl::linux::x11::util::randr: XRandR reported that the display's 0mm in size, which is certifiably insane
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/util/randr.rs:24
+
+  2026-10-24T22:38:02.478357Z  INFO winit::platform_impl::linux::x11::window: Guessed window scale factor: 1
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/window.rs:192
+
+
+===== W-006 launch-1 =====
+  2026-10-24T22:39:46.613883Z  INFO supportos_plus: SupportOS-Plus native shell starting
+    at crates/app-shell/src/main.rs:15
+
+  2026-10-24T22:39:46.614026Z  INFO supportos_plus: data directory, data_dir: "/home/z/.local/share/supportos-plus"
+    at crates/app-shell/src/main.rs:24
+
+  2026-10-24T22:39:46.618458Z DEBUG spp_core::migrations: migrations up to date, current: 52, target: 2
+    at crates/core/src/migrations.rs:197
+
+  2026-10-24T22:39:46.626037Z  INFO supportos_plus: database ready (all migrations applied), path: /home/z/.local/share/supportos-plus/supportos-plus.db
+    at crates/app-shell/src/main.rs:51
+
+  2026-10-24T22:39:46.626458Z  INFO spp_shell: boot services built, mode: Empty
+    at crates/app-shell/src/lib.rs:183
+
+  2026-10-24T22:39:46.627447Z  INFO spp_core::workers: worker auto-sync timer armed (adaptive: 30 s busy, backing off toward the ceiling), operation: "start", quiet_ceiling_minutes: 1, busy_poll_seconds: 30
+    at crates/core/src/workers.rs:279
+
+  2026-10-24T22:39:46.628193Z  INFO spp_core::workers: Background workers started, operation: "start"
+    at crates/core/src/workers.rs:397
+
+  2026-10-24T22:39:46.628286Z  INFO supportos_plus: background workers started (job, webhook, embedding, maintenance timers)
+    at crates/app-shell/src/main.rs:96
+
+  2026-10-24T22:39:46.628422Z  WARN supportos_plus: loopback listener could not be started, error: Address already in use (os error 98)
+    at crates/app-shell/src/main.rs:129
+
+  2026-10-24T22:39:46.628546Z  INFO spp_shell: renderer: glow (default; set SPP_RENDERER=wgpu to switch), renderer: "glow"
+    at crates/app-shell/src/lib.rs:222
+
+  2026-10-24T22:39:46.628587Z  INFO eframe: Both the glow and wgpu renderers are available. Using glow.
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.37.0/src/lib.rs:433
+
+  2026-10-24T22:39:46.630452Z  WARN winit::platform_impl::linux::x11::xdisplay: error setting XSETTINGS; Xft options won't reload automatically
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/xdisplay.rs:118
+
+  2026-10-24T22:39:46.645581Z  WARN winit::platform_impl::linux::x11::util::randr: XRandR reported that the display's 0mm in size, which is certifiably insane
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/util/randr.rs:24
+
+  2026-10-24T22:39:46.665658Z  INFO winit::platform_impl::linux::x11::window: Guessed window scale factor: 1
+    at /home/z/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/x11/window.rs:192
+
+
+===== W-006 launch-1 =====
