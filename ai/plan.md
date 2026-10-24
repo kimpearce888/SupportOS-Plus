@@ -175,13 +175,15 @@ AppDir staging cleaned before packaging, and appimagetool pinned and
 checksummed in the release path) — opened 2026-10-25. Items 150/151
 stay parked pending the owner's wire-or-prune decisions.
 
-159. [low|bug] AppImage arch hardcoded x86_64 vs aarch64 deb support — xtask/package.rs:162,173
-160. [low|bug] Non-atomic tool-cache write + no download timeout — xtask/package.rs:551-571
-161. [low|gap] deny.toml stale "becomes deny" promise; bans never evaluated in CI — deny.toml:49-51 + ci.yml
-162. [low|gap] egui/egui_extras workspace deps unconsumed (egui_extras not in lock) — Cargo.toml:50,58
-163. [low|gap] catalog all_metric_entries/all_dimension_entries dead — catalog/reporting.rs:328,401
-164. [low|gap] verify-icons never invoked by any automation — xtask/icons.rs:186
-165. [low|gap] No `--locked` on CI/release cargo invocations — ci.yml, release.yml
+Batch 35 = items 159-165 (the AppImage arch following the build host
+instead of a hardcoded x86_64, the atomic + timeouted tool-cache
+download, the deny.toml bans promise made enforceable and evaluated in
+CI, the unconsumed egui/egui_extras workspace deps, the dead catalog
+all-entries surfaces, verify-icons wired into packaging and CI, and
+`--locked` on the CI/release cargo invocations) — opened 2026-10-24 and
+executed concurrently with batch 34 by a second agent at the owner's
+direction; the items live in `progress.md` (batch 35 section) while the
+work runs.
 
 ## Notes
 
