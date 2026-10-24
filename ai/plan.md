@@ -162,7 +162,8 @@ validated and honored, the ops drill-down layering onto stale filters,
 the `#778` number search silently dropped, the support-graph
 invalidation clearing results nothing refetches, the onboarding
 save_step dead with its unread setting, and the outreach recipient
-snapshot cap discarding matches) — opened 2026-10-25.
+snapshot cap discarding matches) — opened 2026-10-25, verified and recorded in `completed.md`.
+
 
 147. [low|issue] ensure_loaded-on-empty re-query pattern (7 pages, wasted work) — pages/outreach.rs:121 + 6 more
 

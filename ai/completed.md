@@ -3943,3 +3943,136 @@ completed — check runs "fmt, clippy, test, deny" and
 (Also recorded: the batch-31 tracking commit's own CI run `40048669638`
 on `41e9f01` — success; and run `40055912050` on the owner's batch-33
 opening commit `31e2e58` is theirs to record.)
+
+### Batch 33 — 2026-10-25 (code commit `b9d0f3c`; batch opened by the owner at `31e2e58`)
+
+**137. Filter/assign refs load once per session** (low|gap)
+— the inbox's users/mailboxes/tags/mention-directory loaded behind an
+`is_empty` gate that fired exactly once: new teammates, mailboxes and
+tags a sync brought in never reached the filter dropdowns or the mention
+popup until restart. Invalidation clears the refs caches now, and the
+next frame's empty-gate reloads them. Pinned by a regression test that
+seeds a tag after load and asserts it reaches the tag filter following
+an invalidate+reload. pages/inbox.rs.
+
+**138. log_level saved, never read; display_timezone dead control**
+(low|gap)
+— two settings, two honest outcomes. `log_level`: the settings row was
+written and never consumed — the tracing filter now sits behind a
+reload layer; the stored level applies at boot (main, after the database
+opens) and live on every settings save, with the pre-fix default's
+directive shape preserved. `display_timezone`: written and loaded by the
+form but consumed by NOTHING anywhere (the shell renders stored stamps
+verbatim), so the control was a lie — it is removed from the struct,
+load, save, and the General tab. The data-reset preservation test now
+exercises `agent_language` (a live, wired setting) as its example row.
+crates/core/src/logging.rs, crates/app-shell/src/main.rs,
+pages/settings.rs. (The SPP_SMOKE shape count moves 4043 → 4040: the
+removed timezone form row.)
+
+**139. qdrant_enabled hint references a nonexistent control;
+Integrations tab hint wrong** (low|gap)
+— the Vector-index subtitle claimed "the index follows the
+qdrant_enabled setting" but no UI control exposed it anywhere, and the
+AI Center hint sent users to a Settings → Integrations tab that does not
+exist. The toggle lives on the Vector-index tab now (applies on the next
+start — the workers open the store at boot), and it is REMOVED from the
+General form's blind load/save so a stale General save cannot clobber
+the tab's toggle. The hint names Settings → LM Studio.
+pages/settings.rs, pages/ai_center.rs.
+
+**140. Unconfirmed destructive deletes** (low|issue)
+— knowledge docs, custom-object types and records, connectors, outreach
+segments and the diagnostics clear-log all deleted on a single click.
+Every one now raises `NavRequest::Confirm` (the item-70 machinery) with
+a dialog that names what is about to go; the shell's
+`execute_confirmed` runs the owning page's method on confirm (the
+page-level state handling — selection clears, reloads, the chunk-orphan
+embed sweep — rides along) and the toast reports the honest outcome.
+The confirmed path also fixed a silent swallow on the way: the knowledge
+delete's `unwrap_or(false)` is gone (the core result reaches the
+toast). pages/mod.rs, app.rs, pages/{knowledge,custom_objects,
+connectors,outreach,diagnostics}.rs.
+
+**141. Business-hours `days` unvalidated, silently ignored**
+(low|issue)
+— the editor saved the raw string; anything the SLA side could not
+parse ("1-5", "mon-fri", "1; 2; 3") fell back to the default schedule
+with no word to the user, and an all-out-of-range list ("[7,8]") passed
+the raw is_empty check and then filtered to nothing — the SLA window
+silently DISABLED. The save now parses, range-checks (0=Sun…6=Sat),
+dedupes, sorts and normalizes the list (the JSON bracket form the form
+pre-fills still parses), rejecting garbage with a message; the read
+side degrades an all-out-of-range stored list to the default schedule
+instead of disabling. Pinned by a save-side validation test and an
+sla.rs effective_config regression. pages/settings.rs, sla.rs.
+
+**142. Ops drill-down layers onto stale filters** (low|issue)
+— clicking an Operations tile set `bar.ops` on top of whatever the user
+had filtered in the inbox (view/query/mailbox), ANDing the tile fragment
+with stale filters and shrinking the drill-down to a confusing subset.
+The drill-down is a fresh navigation: the bar resets to the tile.
+Pinned by a shell-level regression test. app.rs.
+
+**143. `#778` number search silently dropped** (low|bug)
+— the number field's own hint is `#`, but typing "#778" failed the
+`parse::<i64>()` and `.ok()` silently dropped the filter. The entry
+strips leading hashes now (`parse_number_entry`). Pinned by a parser
+test. pages/inbox.rs.
+
+**144. Support-graph invalidation clears results nothing refetches**
+(low|gap)
+— a sync event cleared the visible results of an active graph search
+and nothing refetched them: the search stayed blank until the user
+re-submitted. Invalidation schedules a refetch (`results_stale`) and
+the next frame re-runs the query against the refreshed mirror. Pinned
+by a regression test. pages/support_graph.rs.
+
+**145. onboarding save_step dead; setting unread** (low|gap)
+— `save_step` (the `/api/onboarding/step` route logic) had no caller
+and the `onboarding_step` setting it wrote had no reader — the page's
+step is derived from `first_run_done`. The dead writer, its test, and
+the unread row are removed. pages/onboarding.rs.
+
+**146. Recipient snapshot cap 5000, matched discarded** (low|gap)
+— the campaign creator previewed a fixed 5000-row page and threw the
+`matched` total away: every matched customer past the cap silently
+never became a recipient while the segment said otherwise. The snapshot
+now takes every matched row (page 1, unbounded page size) and the
+success message reports the true count. Pinned by a regression test
+matching 5001 customers and asserting all 5001 ship.
+pages/outreach.rs.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `python3 scripts/gate_no_simulation.py`: clean.
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- Tests: core 467 passed / 0 failed / 4 ignored (2 new batch-33
+  regressions: the audit141 out-of-range-days fallback; the
+  apply_log_level no-panic guard); sandbox-feature suite 472 passed /
+  0 failed / 4 ignored; app-shell 221 passed / 0 failed (5 new
+  batch-33 regressions: the invalidation refs refresh, the ops
+  drill-down reset, the hash-prefixed number entries, the
+  support-graph refetch, and the 5001-recipient snapshot); xtask 6;
+  catalog 0. (A mid-batch disk-full episode — 100% rootfs — produced
+  68 environmental core failures identical to batch 31's; after
+  clearing the incremental cache and stale /tmp fixtures every suite
+  was rebuilt and rerun cleanly.)
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4040 shapes (4043 − the removed display_timezone form row).
+- Fresh harness `scripts/verify_batch33.py` (committed): all checks
+  pass; the batch-18, batch-19, batch-21, batch-23, batch-24, batch-25,
+  batch-26, batch-27, batch-28, batch-29, batch-30, batch-31 and
+  batch-32 harnesses all pass. Pre-existing stale needles in batch-20
+  (item-21 upsert-site needle restructured by batch-24's per-chunk
+  partitioning) and batch-22 (the wrapped fence literal and the
+  volume-spike flake check) unchanged — proven pre-batch during batch
+  30; batch-17's script remains environment-bound as documented.
+- `cargo deny check advisories licenses`: ok (the CDLA-Permissive-2.0
+  note is the pre-existing unmatched-allowance warning, not a failure).
+- Security: staged diff token-scanned clean before the push; remote
+  fetched before the push (the owner's batch-33 opening commit
+  `31e2e58` was rebased onto, not overwritten).
+- Runner verification: follows once CI on code commit `b9d0f3c`
+  completes (recorded below when the runs finish).
