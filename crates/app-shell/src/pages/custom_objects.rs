@@ -15,7 +15,7 @@ use eframe::egui;
 use spp_core::custom_objects::{FieldInput, LinkInput, TypeDetail};
 use spp_core::db::DbHandle;
 
-use super::{i64_field, str_field};
+use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
@@ -266,9 +266,12 @@ impl CustomObjectsPage {
         }
     }
 
-    fn delete_type(&mut self, db: &DbHandle, id: i64) {
+    /// Delete a custom-object type (runs on shell confirmation only —
+    /// clean-audit item 140). Returns the core outcome for the shell's
+    /// toast.
+    pub fn delete_type(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::custom_objects::delete_type(conn, id));
-        match result {
+        match &result {
             Ok(_) => {
                 if self.selected_type == Some(id) {
                     self.selected_type = None;
@@ -279,6 +282,7 @@ impl CustomObjectsPage {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+        result.map(|_| ())
     }
 
     fn create_object(&mut self, db: &DbHandle) {
@@ -344,17 +348,22 @@ impl CustomObjectsPage {
         }
     }
 
-    fn delete_object(&mut self, db: &DbHandle, id: i64) {
+    /// Delete one custom-object record (runs on shell confirmation only
+    /// — clean-audit item 140). Returns the core outcome for the toast.
+    pub fn delete_object(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::custom_objects::delete_object(conn, id));
-        if let Err(e) = result {
+        if let Err(e) = &result {
             self.error = Some(e.to_string());
         }
         self.reload_objects(db);
         self.reload_types(db);
+        result.map(|_| ())
     }
 
-    /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// Render the page. Returns a confirm request when the user asked to
+    /// delete a type or an object (clean-audit item 140 — the deletes run
+    /// only after the shell dialog confirms).
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         let subtitle = self.report.as_ref().map(|report| {
@@ -386,10 +395,11 @@ impl CustomObjectsPage {
             ui.add_space(10.0);
         }
 
+        let mut nav: Option<NavRequest> = None;
         ui.columns(2, |columns| {
             let types = self.types.clone();
             let mut picked: Option<i64> = None;
-            let mut deleted_type: Option<i64> = None;
+            let mut deleted_type: Option<(i64, String)> = None;
             egui::ScrollArea::vertical()
                 .id_salt("co-types")
                 .show(&mut columns[0], |ui| {
@@ -407,7 +417,7 @@ impl CustomObjectsPage {
                                 picked = Some(t.id);
                             }
                             if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
-                                deleted_type = Some(t.id);
+                                deleted_type = Some((t.id, t.name.clone()));
                             }
                         });
                         if let Some(desc) = &t.description {
@@ -426,15 +436,23 @@ impl CustomObjectsPage {
             if let Some(id) = picked {
                 self.select_type(db, id);
             }
-            if let Some(id) = deleted_type {
-                self.delete_type(db, id);
+            // Clean-audit item 140: arming the dialog replaces the
+            // unconfirmed delete.
+            if let Some((id, name)) = deleted_type {
+                nav = Some(NavRequest::Confirm(ConfirmRequest::delete_custom_type(
+                    id, &name,
+                )));
             }
 
-            self.objects_ui(&mut columns[1], db);
+            // The type-delete request wins over the object pane's.
+            if nav.is_none() {
+                nav = self.objects_ui(&mut columns[1], db);
+            }
         });
+        nav
     }
 
-    fn objects_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    fn objects_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         let Some(type_id) = self.selected_type else {
             design::empty_state(
                 ui,
@@ -442,11 +460,9 @@ impl CustomObjectsPage {
                 "Select a type",
                 "Pick a type on the left to see its objects.",
             );
-            return;
+            return None;
         };
-        let Some(t) = self.types.iter().find(|t| t.id == type_id) else {
-            return;
-        };
+        let t = self.types.iter().find(|t| t.id == type_id)?;
         design::section_title(ui, &format!("{} objects ({})", t.name, self.objects_total));
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -467,7 +483,7 @@ impl CustomObjectsPage {
         ui.add_space(6.0);
 
         let objects = self.objects.clone();
-        let mut deleted: Option<i64> = None;
+        let mut deleted: Option<(i64, String)> = None;
         egui::ScrollArea::vertical()
             .id_salt("co-objects")
             .show(ui, |ui| {
@@ -482,7 +498,8 @@ impl CustomObjectsPage {
                                     .color(tokens.foreground),
                             );
                             if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
-                                deleted = Some(i64_field(object, "id"));
+                                deleted =
+                                    Some((i64_field(object, "id"), str_field(object, "title")));
                             }
                         });
                         if let Some(props) = object.get("properties").and_then(|p| p.as_object()) {
@@ -513,9 +530,11 @@ impl CustomObjectsPage {
                     );
                 }
             });
-        if let Some(id) = deleted {
-            self.delete_object(db, id);
-        }
+        // Clean-audit item 140: arming the dialog replaces the
+        // unconfirmed delete.
+        let nav = deleted.map(|(id, title)| {
+            NavRequest::Confirm(ConfirmRequest::delete_custom_object(id, &title))
+        });
         ui.add_space(10.0);
 
         let keys: Vec<String> = self
@@ -542,6 +561,7 @@ impl CustomObjectsPage {
                 self.create_object(db);
             }
         });
+        nav
     }
 
     fn new_type_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {

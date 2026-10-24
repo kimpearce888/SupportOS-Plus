@@ -24,6 +24,7 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 
 use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::pages::{ConfirmRequest, NavRequest};
 
 /// Which events the log table shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,13 +181,17 @@ impl DiagnosticsPage {
         self.audit = Some(audit);
     }
 
-    /// Delete every stored diagnostics event.
-    fn clear_log(&mut self, db: &DbHandle) {
+    /// Delete every stored diagnostics event. Runs on shell confirmation
+    /// only (clean-audit item 140); clean-audit item 132 pins the writer
+    /// lane and the surfaced error. Returns the core outcome for the
+    /// shell's toast.
+    pub fn clear_log(&mut self, db: &DbHandle) -> spp_core::Result<()> {
         // Clean-audit item 132: the DELETE ran on the reader lane (with
         // its pooled read-only connections) and `unwrap_or(0)` swallowed
         // every failure as a success with 0 rows. The write belongs on
         // the writer lane; the error surfaces instead of faking success.
-        match db.with_write(|conn| spp_core::audit::clear_events(conn)) {
+        let result = db.with_write(|conn| spp_core::audit::clear_events(conn));
+        match &result {
             Ok(cleared) => {
                 self.error = None;
                 self.message = Some(format!("event log cleared ({cleared} rows removed)"));
@@ -197,10 +202,13 @@ impl DiagnosticsPage {
             }
         }
         self.invalidate();
+        result.map(|_| ())
     }
 
-    /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// Render the page. Returns a confirm request when the user asked to
+    /// clear the event log (clean-audit item 140 — the clear runs only
+    /// after the shell dialog confirms).
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         if self.events.is_none() || self.runs.is_none() || self.audit.is_none() {
             self.reload(db);
         }
@@ -238,6 +246,7 @@ impl DiagnosticsPage {
             error_count,
             warn_count
         );
+        let mut clear_requested = false;
         design::card_titled(ui, "Event log", Some(&subtitle), |ui| {
             ui.horizontal(|ui| {
                 for filter in [
@@ -258,7 +267,11 @@ impl DiagnosticsPage {
                 if !events.is_empty()
                     && design::button(ui, "clear log", ButtonVariant::Destructive).clicked()
                 {
-                    self.clear_log(db);
+                    // Clean-audit item 140: the clear arms the shell dialog
+                    // (with the row count it is about to destroy) instead of
+                    // running unconfirmed. Deferred out of the card closure —
+                    // a `return` here would only exit the closure.
+                    clear_requested = true;
                 }
             });
             ui.add_space(6.0);
@@ -497,6 +510,13 @@ impl DiagnosticsPage {
                 );
             }
         });
+        // Clean-audit item 140: the armed clear request leaves the page.
+        if clear_requested {
+            return Some(NavRequest::Confirm(ConfirmRequest::clear_diagnostics_log(
+                events.len(),
+            )));
+        }
+        None
     }
 }
 
@@ -585,7 +605,7 @@ mod tests {
             spp_core::audit::log_event(conn, "warn", "webhook", "w", None, None).expect("w");
         });
         let mut page = DiagnosticsPage::new();
-        page.clear_log(&db);
+        let _ = page.clear_log(&db);
         page.reload(&db);
         let events = page.events.clone().expect("events");
         assert!(events.is_empty());

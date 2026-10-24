@@ -250,10 +250,16 @@ fn effective_config(conn: &Connection, mailbox_local_id: i64) -> Result<Option<E
         return Ok(None);
     };
     let mut days = default_business_hours().days;
-    if let Ok(parsed) = serde_json::from_str::<Vec<i64>>(&stored.days)
-        && !parsed.is_empty()
-    {
-        days = parsed;
+    if let Ok(parsed) = serde_json::from_str::<Vec<i64>>(&stored.days) {
+        // Clean-audit item 141: only in-range weekdays participate (the
+        // business-hours math drops the rest anyway). Pre-fix, a list
+        // like "[7,8]" passed the raw is_empty check and then filtered
+        // to nothing downstream — the window silently DISABLED instead
+        // of degrading to the default schedule.
+        let in_range: Vec<i64> = parsed.into_iter().filter(|d| (0..=6).contains(d)).collect();
+        if !in_range.is_empty() {
+            days = in_range;
+        }
     }
     Ok(Some(EffectiveConfig {
         business_hours: BusinessHoursConfig {
@@ -982,5 +988,54 @@ mod batch24_audit53_tests {
         assert_eq!(stats.at_risk, 0);
         let no_cfg = waiting_stats(&conn, mailbox, None).expect("waiting stats");
         assert_eq!(no_cfg.at_risk, 0);
+    }
+    /// Clean-audit item 141: a stored `days` list whose every entry sits
+    /// outside 0..=6 used to pass the raw is_empty check and then filter
+    /// to nothing downstream — the SLA window silently DISABLED. It now
+    /// degrades to the default schedule; in-range lists stay verbatim.
+    #[test]
+    fn audit141_out_of_range_days_fall_back_to_the_default_schedule() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO mailboxes (remote_id, name) VALUES (501, 'Support')",
+            [],
+        )
+        .expect("mailbox");
+        let mailbox = conn.last_insert_rowid();
+        ensure_sla_schema(&conn).expect("sla schema");
+
+        let seed = |conn: &Connection, days: &str| {
+            conn.execute(
+                "INSERT INTO mailbox_business_hours (mailbox_local_id, timezone, days,
+                     start_minute, end_minute, first_response_target_min,
+                     resolution_target_min, updated_at)
+                 VALUES (?1, 'UTC', ?2, 540, 1020, 240, 1440, datetime('now'))",
+                params![mailbox, days],
+            )
+            .expect("seed hours");
+        };
+
+        seed(&conn, "[7,8]");
+        let cfg = effective_config(&conn, mailbox)
+            .expect("cfg")
+            .expect("configured");
+        assert_eq!(
+            cfg.business_hours.days,
+            default_business_hours().days,
+            "an all-out-of-range list degrades to the default schedule"
+        );
+
+        conn.execute("DELETE FROM mailbox_business_hours", [])
+            .expect("clear");
+        seed(&conn, "[0,6]");
+        let cfg = effective_config(&conn, mailbox)
+            .expect("cfg")
+            .expect("configured");
+        assert_eq!(
+            cfg.business_hours.days,
+            vec![0, 6],
+            "an in-range list stays verbatim"
+        );
     }
 }

@@ -981,7 +981,7 @@ impl AiCenterPage {
             design::hint_text(
                 ui,
                 "Start LM Studio locally (default http://127.0.0.1:1234) and configure the \
-                 models in Settings → Integrations. Attributes stay local and never sync back.",
+                 models in Settings → LM Studio. Attributes stay local and never sync back.",
             );
             if let Some(status) = self
                 .connection_status

@@ -91,6 +91,19 @@ pub struct FilterBar {
 /// is now a page size with prev/next controls under the list).
 pub const INBOX_PAGE_SIZE: u32 = 50;
 
+/// Parse the `#` number-filter field ("#778", "778", " 778 " → 778;
+/// anything non-numeric → None). Clean-audit item 143: the leading `#`
+/// the field's own hint suggests used to fail the parse and the number
+/// filter silently dropped.
+#[must_use]
+pub fn parse_number_entry(text: &str) -> Option<i64> {
+    text.trim()
+        .trim_start_matches('#')
+        .trim()
+        .parse::<i64>()
+        .ok()
+}
+
 /// Map the filter bar to the core `InboxFilters`.
 ///
 /// The operations-tile fragment needs the waiting-threshold setting, so
@@ -467,9 +480,18 @@ impl InboxPage {
     /// reloaded (selection preserved) on the next frame. Before 1.3.0
     /// this nulled the open conversation on every sync event, so the
     /// pane flashed to "Select a conversation" right after sending.
+    /// Clean-audit item 137: the filter/assign refs (users, mailboxes,
+    /// tags, the mention directory) loaded once per session — new
+    /// teammates, mailboxes and tags a sync brought in never reached the
+    /// dropdowns until restart. Invalidation clears the refs caches too;
+    /// the next frame's empty-gate reloads them.
     pub fn invalidate(&mut self) {
         self.list.clear();
         self.detail = None;
+        self.users.clear();
+        self.mailboxes.clear();
+        self.tags.clear();
+        self.directory = Directory::default();
     }
 
     fn reload_refs(&mut self, db: &DbHandle) {
@@ -1194,7 +1216,7 @@ impl InboxPage {
                 } else {
                     Some(trimmed.to_string())
                 };
-                self.bar.number = self.number_edit.trim().parse::<i64>().ok();
+                self.bar.number = parse_number_entry(&self.number_edit);
                 self.page = 0;
                 self.reload_list(db);
             }
@@ -3712,6 +3734,67 @@ mod batch27_audit79_tests {
         assert_eq!(
             page.composer_body, "mid-thought",
             "clicking the open row changes nothing"
+        );
+    }
+}
+
+/// Clean-audit item 137: the filter/assign refs (users, mailboxes, tags,
+/// the mention directory) loaded once per session — a sync bringing new
+/// tags never reached the dropdowns until restart. Invalidation clears
+/// the refs caches and the next frame's empty-gate reloads them.
+#[cfg(test)]
+mod batch33_audit137_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    #[test]
+    fn invalidation_refreshes_the_filter_refs() {
+        let db = fixture(vec![("conv", 1, "First", "active", "email", 1, 5, 9)]);
+        let mut page = InboxPage::new();
+        page.select(&db, 1);
+        page.reload_list(&db);
+        assert!(!page.mailboxes.is_empty(), "refs load with the page");
+        assert!(page.tags.is_empty(), "no tags seeded yet");
+
+        // A sync lands a new tag...
+        db.with_write(|conn| crate::testsupport::seed_tag(conn, 1, "billing"));
+
+        // ...before the fix, only a restart surfaced it (the empty-gate
+        // never fired again). Invalidation must clear the caches and the
+        // reload must pick the new tag up.
+        page.invalidate();
+        assert!(
+            page.mailboxes.is_empty(),
+            "invalidation clears the refs caches"
+        );
+        page.reload_list(&db);
+        assert!(
+            page.tags.iter().any(|t| t == "billing"),
+            "the synced tag reaches the tag filter: {:?}",
+            page.tags
+        );
+    }
+}
+
+/// Clean-audit item 143: the `#` field's own hint suggests "#778", but
+/// the leading hash used to fail the parse and the number filter
+/// silently dropped.
+#[cfg(test)]
+mod batch33_audit143_tests {
+    use super::*;
+
+    #[test]
+    fn hash_prefixed_number_entries_parse() {
+        assert_eq!(parse_number_entry("#778"), Some(778));
+        assert_eq!(parse_number_entry("778"), Some(778));
+        assert_eq!(parse_number_entry("  # 778  "), Some(778));
+        assert_eq!(parse_number_entry("# 778"), Some(778));
+        assert_eq!(parse_number_entry(""), None);
+        assert_eq!(parse_number_entry("#abc"), None);
+        assert_eq!(
+            parse_number_entry("##42"),
+            Some(42),
+            "leading hashes all strip"
         );
     }
 }

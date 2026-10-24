@@ -105,13 +105,10 @@ impl OnboardingPage {
         self.reload(db);
     }
 
-    /// Save the current step (the `/api/onboarding/step` route logic).
-    pub fn save_step(&mut self, db: &DbHandle, step: &str) {
-        db.with_write(|conn| {
-            let _ = spp_core::settings::set_string(conn, "onboarding_step", step);
-        });
-        self.reload(db);
-    }
+    // Clean-audit item 145: the `save_step` route logic (writing the
+    // `onboarding_step` setting) had no caller and nothing ever read the
+    // setting — the page's step is derived from `first_run_done`. The
+    // dead writer and its unread row are removed.
 
     /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, engine: Option<&Arc<SyncEngine>>) {
@@ -269,18 +266,5 @@ mod tests {
         let status = page.status.clone().expect("status");
         assert!(status.completed);
         assert_eq!(status.step, "complete");
-    }
-
-    #[test]
-    fn save_step_persists_the_setting() {
-        let db = fixture(Vec::new());
-        let mut page = OnboardingPage::new();
-        page.save_step(&db, "connect");
-        let stored = db.with_read(|conn| {
-            spp_core::settings::get_string(conn, "onboarding_step")
-                .ok()
-                .flatten()
-        });
-        assert_eq!(stored.as_deref(), Some("connect"));
     }
 }
