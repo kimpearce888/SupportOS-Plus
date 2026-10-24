@@ -3779,3 +3779,159 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
 Runner verification (batch 31, code commit `763824c`): GitHub Actions run
 `40047045028` completed — check runs "fmt, clippy, test, deny" and
 "AppImage + .deb build, smoke" both concluded `success`.
+
+### Batch 32 — 2026-10-24 (code commit `0458753`)
+
+**127. Digest chip 16.max slice (dead truncation + OOB risk)** (low|bug)
+— the chip formatted `&digest.created_at[..16.max(len)]`: with `max`,
+a stamp SHORTER than 16 sliced at byte 16 (`byte index 16 is out of
+bounds` panic) and a stamp LONGER than 16 sliced at its full length, so
+the intended `YYYY-MM-DD HH:MM` truncation never happened — exactly
+inverted. The cap is `16.min(len)` now, matching the sibling
+period-start/period-end slices. pages/reports.rs.
+
+**128. QA rows render `#Some(42)`** (low|bug)
+— the recent-closures list printed `format!("#{id:?}")` with
+`id: Option<i64>`, so every row read `#Some(42)` (and a missing id read
+`#None`). A present id renders `#42`; a missing one `#?`.
+pages/reports.rs.
+
+**129. Literal `\` mid-sentence in 3 hover texts** (low|bug)
+— three issue-radar strings ended their first line with an ESCAPED
+backslash (`\\` = one literal `\` in the output) followed by a real
+newline, so the rendered hover/error/notice text carried a stray `\`
+and a broken, space-indented second line; the sibling strings correctly
+use a single trailing `\` as the line continuation. All three now
+continue the line like their siblings. pages/issue_radar.rs.
+
+**130. Notification toggle reads the wrong list for Mentions rows**
+(low|bug)
+— the Mentions tab renders `self.mentions`, but `toggle_read` looked
+the row up only in `self.records` (the All list, capped at 100 rows):
+a READ mention pushed out of that window fell through to
+`.unwrap_or(true)`, so its "unread" button re-marked it read — a
+silent no-op. The lookup walks both lists now (every rendered row
+lives in one of them). Pinned by a regression test that buries a read
+mention under 100 fillers: the toggle must flip it back to unread.
+pages/notifications.rs.
+
+**131. Incidents: invalid ids silently dropped; filters without
+refetch** (low|issue)
+— two defects. The creator's id field silently dropped every
+unparseable/non-positive token and every id with no live conversation
+row (`filter_map(...ok())` then a silent existence filter), so a typo'd
+id just vanished from the link list — the dropped tokens are collected
+and named in a post-create notice now ("linked N conversation(s) —
+unknown or nonexistent id(s) skipped: …", mirroring the issue-radar
+known-issue form). And the status/severity selects plus the open-only
+checkbox only mutated state — the list refetched only when the user
+happened to hit "apply"; each control refetches on change now (the
+text query keeps its explicit button — per-keystroke queries would
+thrash). Pinned by a regression test naming "999" and "abc" in the
+notice while the valid id still links. pages/incidents.rs.
+
+**132. Diagnostics clear_log via reader lane, errors swallowed**
+(low|issue)
+— the event-log clear ran its DELETE through `with_read` (the pooled
+reader lane) and `unwrap_or(0)` turned every failure into a success
+message reading "event log cleared (0 rows removed)". The clear runs on
+the writer lane now and a failure surfaces as an inline error instead
+of a fake success. pages/diagnostics.rs.
+
+**133. Palette: same-frame Enter confirms stale hit; no outside-click
+close** (low|bug)
+— two defects. `palette_take` was stored inside the query row and the
+confirm consumed it AFTER `run_search` had been deferred to post-window,
+so an Enter processed in the same frame the query changed (fast typing,
+paste+Enter) confirmed the PREVIOUS query's result set — navigated to a
+stale hit and closed before the new search ever ran; the confirm is
+guarded by `!query_changed` now, the fresh search lands next frame, and
+the field keeps focus so Enter can be pressed again on fresh hits (the
+item-72 dry-Enter refocus widened to cover the suppressed case, its
+regression test still green). And the palette had no outside-click
+close: a full-screen backdrop area now sits behind the window — an
+outside click closes the palette and no longer leaks to the UI
+underneath. Both pinned by headless egui passes
+(audit133_same_frame_enter_confirms_nothing_stale,
+audit133_clicking_outside_the_palette_closes_it). palette.rs.
+
+**134. Concave polygon to convex_polygon (area fill)** (low|bug)
+— the line chart's soft area fill built
+`[baseline-left, series..., baseline-right]` and drew it with
+`Shape::convex_polygon`, which fan-triangulates from the first vertex —
+a general data series is CONCAVE, so the fill bled past the polyline
+and left holes wherever the line bent. The fill is an explicit mesh now
+(`area_fill_mesh`): two triangles per segment, exact for any series
+shape, pinned by a test asserting the mesh's total triangle area equals
+the shoelace area of the baseline-closed polygon for a V-shaped series.
+chart.rs.
+
+**135. Stale inserted_draft provenance → phantom AI-draft acceptances**
+(low|bug)
+— `inserted_draft` survived composer content that did not come from the
+inserted draft: the copilot suggested reply replaced the composer text
+while the previous LM-draft provenance stayed armed, switching the
+composer to internal note mode kept it (submit_composer records the
+acceptance in whichever mode is active), and wiping the composer kept it
+— all three recorded `accepted` + an edit distance against a draft the
+sent text no longer derived from. The provenance dies with the draft
+now: the copilot insert clears it (field writes — `report` borrows
+`self.copilot` across the render closure, so a `&mut self` helper
+cannot be called there), note-mode switching and composer wipes spend it
+via `set_composer_mode`/`composer_edited`; edits that keep text keep the
+provenance (the edit distance is the metric). pages/inbox.rs.
+
+**136. Mention popup highlight never moves** (low|gap)
+— `mention_active` was only ever reset to 0; the popup's highlighted
+chip was immovable and only mouse clicks picked an entry, though the
+hint text promised Enter/Tab completion of "the highlighted entry".
+While the popup is open and the composer focused, ArrowDown/ArrowUp are
+consumed BEFORE the TextEdit renders and move the highlight through
+`move_selection` — consuming ahead of the field is load-bearing: an
+un-consumed ArrowDown moves the caret, changes the @-query and closes
+the popup on the very first press (and the popup code runs after the
+field, too late to undo that). pages/inbox.rs.
+
+Housekeeping: the batch-26 harness needle for item 72 was re-pointed to
+the equivalent post-133 code (the confirm now guarded by
+`!query_changed`; the dry-Enter refocus widened to the same disjunct) —
+the invariant itself is unchanged and its regression test still passes.
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `python3 scripts/gate_no_simulation.py`: clean.
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- Tests: core 465 passed / 0 failed / 4 ignored (unchanged — no core
+  changes this batch); sandbox-feature suite 470 passed / 0 failed /
+  4 ignored; app-shell 216 passed / 0 failed (7 new batch-32
+  regressions: the read mention outside the All window flipping back to
+  unread; the skipped-ids notice naming 999 and abc while the valid id
+  links; the clear-log success asserting the writer-lane path and the
+  "1 rows removed" message; the palette same-frame Enter confirming
+  nothing stale with the palette staying open; the palette closing on
+  an outside click; the area-fill mesh matching the shoelace polygon
+  area on a V-shaped series plus the degenerate-input empty mesh; and
+  the audit72 dry-Enter test still green on the widened refocus);
+  xtask 6; catalog 0.
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4043 shapes painted (identical to the batch-29/30/31 baseline).
+- Fresh harness `scripts/verify_batch32.py` (committed): all 37 checks
+  pass; the batch-18, batch-19, batch-21, batch-23, batch-24, batch-25,
+  batch-26 (item-72 needles re-pointed to the post-133 code, documented
+  above), batch-27, batch-28, batch-29, batch-30 and batch-31 harnesses
+  all pass. Pre-existing stale needles in batch-20 (item-21 upsert-site
+  needle restructured by batch-24's per-chunk partitioning) and batch-22
+  (the one-line fence literal rustfmt has since wrapped, and the
+  volume-spike flake check) unchanged — proven pre-batch by the batch-30
+  stash-run; batch-17's script remains environment-bound as documented.
+- `cargo deny check advisories licenses`: ok (the CDLA-Permissive-2.0
+  note is the pre-existing unmatched-allowance warning, not a failure).
+  (A mid-batch disk-full episode — 100% rootfs during the release
+  build — was cleared by removing the 2.9 GB incremental cache; every
+  suite was rebuilt and rerun cleanly, the debug binary for the smoke
+  included.)
+- Security: staged diff token-scanned clean before the push; remote
+  fetched before the push.
+- Runner verification: follows once CI on code commit `0458753`
+  completes (recorded below when the runs finish).

@@ -151,7 +151,7 @@ stale-filter refetch, the diagnostics clear_log on the reader lane with
 swallowed errors, the palette same-frame stale-Enter confirm + no
 outside-click close, the concave polygon area fill, the stale
 inserted_draft provenance phantom acceptances, and the mention-popup
-highlight that never moves) — in `progress.md`.
+highlight that never moves) — verified and recorded in `completed.md`.
 
 137. [low|gap] Filter/assign refs load once per session — pages/inbox.rs:455,882
 138. [low|gap] log_level/display_timezone saved, never read — pages/settings.rs:232
