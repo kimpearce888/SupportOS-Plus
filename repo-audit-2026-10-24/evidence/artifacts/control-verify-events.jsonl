@@ -1,0 +1,414 @@
+{"t": 1792874077.573, "kind": "app-started", "pid": 21604, "ready": true, "lock_error": false}
+{"t": 1792874079.199, "kind": "launch", "pill_y": 180, "note": "app restored last page (Shell after walk)"}
+{"t": 1792874082.511, "kind": "home", "pill_y": 180}
+{"t": 1792874111.514, "kind": "app-started", "pid": 21712, "ready": true, "lock_error": false}
+{"t": 1792874113.151, "kind": "launch", "pill_y": 180, "note": "app restored last page (Shell after walk)"}
+{"t": 1792874116.455, "kind": "home", "pill_y": 180}
+{"t": 1792874116.456, "kind": "normalized", "page": "01-dashboard"}
+{"t": 1792874116.456, "kind": "skip", "id": "D01"}
+{"t": 1792874116.456, "kind": "skip", "id": "I01"}
+{"t": 1792874116.456, "kind": "skip", "id": "I02"}
+{"t": 1792874116.456, "kind": "skip", "id": "L01"}
+{"t": 1792874116.456, "kind": "skip", "id": "L02"}
+{"t": 1792874116.456, "kind": "skip", "id": "O01"}
+{"t": 1792874116.456, "kind": "skip", "id": "O02"}
+{"t": 1792874116.456, "kind": "skip", "id": "O03"}
+{"t": 1792874116.456, "kind": "skip", "id": "CU1"}
+{"t": 1792874116.456, "kind": "skip", "id": "OR1"}
+{"t": 1792874116.456, "kind": "skip", "id": "K01"}
+{"t": 1792874116.456, "kind": "skip", "id": "K02"}
+{"t": 1792874116.456, "kind": "skip", "id": "K03"}
+{"t": 1792874116.456, "kind": "skip", "id": "R01"}
+{"t": 1792874116.456, "kind": "skip", "id": "R02"}
+{"t": 1792874116.456, "kind": "skip", "id": "RA1"}
+{"t": 1792874116.456, "kind": "skip", "id": "RA2"}
+{"t": 1792874116.456, "kind": "skip", "id": "IN1"}
+{"t": 1792874116.456, "kind": "skip", "id": "IN2"}
+{"t": 1792874116.456, "kind": "skip", "id": "IN3"}
+{"t": 1792874116.456, "kind": "skip", "id": "CO1"}
+{"t": 1792874116.456, "kind": "skip", "id": "AU1"}
+{"t": 1792874116.456, "kind": "skip", "id": "A01"}
+{"t": 1792874116.456, "kind": "skip", "id": "A02"}
+{"t": 1792874116.456, "kind": "skip", "id": "A03"}
+{"t": 1792874116.456, "kind": "skip", "id": "A04"}
+{"t": 1792874116.456, "kind": "skip", "id": "OU1"}
+{"t": 1792874116.456, "kind": "skip", "id": "OU2"}
+{"t": 1792874116.456, "kind": "skip", "id": "OU3"}
+{"t": 1792874116.456, "kind": "skip", "id": "N01"}
+{"t": 1792874116.456, "kind": "skip", "id": "N02"}
+{"t": 1792874116.456, "kind": "skip", "id": "N03"}
+{"t": 1792874116.456, "kind": "skip", "id": "S01"}
+{"t": 1792874116.456, "kind": "skip", "id": "S02"}
+{"t": 1792874116.456, "kind": "skip", "id": "S03"}
+{"t": 1792874116.456, "kind": "skip", "id": "G01"}
+{"t": 1792874116.456, "kind": "skip", "id": "CN1"}
+{"t": 1792874116.456, "kind": "skip", "id": "DI1"}
+{"t": 1792874116.456, "kind": "skip", "id": "DI2"}
+{"t": 1792874116.456, "kind": "skip", "id": "SY1"}
+{"t": 1792874116.456, "kind": "skip", "id": "SE1"}
+{"t": 1792874116.456, "kind": "skip", "id": "SE2"}
+{"t": 1792874116.456, "kind": "skip", "id": "SE3"}
+{"t": 1792874116.456, "kind": "skip", "id": "SE4"}
+{"t": 1792874116.456, "kind": "skip", "id": "F01"}
+{"t": 1792874117.004, "kind": "done", "steps": 0, "failed": []}
+{"t": 1792874138.314, "kind": "app-started", "pid": 21833, "ready": true, "lock_error": false}
+{"t": 1792874139.939, "kind": "launch", "pill_y": 180, "note": "app restored last page (Shell after walk)"}
+{"t": 1792874143.258, "kind": "home", "pill_y": 180}
+{"t": 1792874143.258, "kind": "normalized", "page": "01-dashboard"}
+{"t": 1792874144.202, "kind": "step", "id": "D01", "result": "ocr-miss", "label": "7 days"}
+{"t": 1792874145.147, "kind": "nav", "page": "02-inbox", "pill_y": 220}
+{"t": 1792874239.721, "kind": "app-started", "pid": 22079, "ready": true, "lock_error": false}
+{"t": 1792874241.349, "kind": "launch", "pill_y": 180, "note": "app restored last page (Shell after walk)"}
+{"t": 1792874244.658, "kind": "home", "pill_y": 180}
+{"t": 1792874244.658, "kind": "normalized", "page": "01-dashboard"}
+{"t": 1792874246.609, "kind": "step", "id": "D01", "action": "click", "label": "7 days", "at": [313, 163], "diff": 0.082, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874247.555, "kind": "nav", "page": "02-inbox", "pill_y": 220}
+{"t": 1792874249.388, "kind": "step", "id": "I01", "action": "click", "label": "pending", "at": [388, 148], "diff": 0.07, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874251.145, "kind": "step", "id": "I02", "action": "click", "label": "all", "at": [257, 147], "diff": 0.07, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874252.089, "kind": "nav", "page": "03-live-chats", "pill_y": 260}
+{"t": 1792874253.942, "kind": "step", "id": "L01", "action": "click", "label": "showendedchats", "at": [298, 149], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874255.842, "kind": "step", "id": "L02", "action": "click", "label": "openchats", "at": [264, 151], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874256.787, "kind": "nav", "page": "04-operations", "pill_y": 300}
+{"t": 1792874258.731, "kind": "step", "id": "O01", "action": "click", "label": "workload", "at": [438, 108], "diff": 0.081, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874260.651, "kind": "step", "id": "O02", "action": "click", "label": "library", "at": [416, 150], "diff": 2.192, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874262.499, "kind": "step", "id": "O03", "action": "click", "label": "tiles", "at": [261, 151], "diff": 2.192, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874263.447, "kind": "nav", "page": "05-customers", "pill_y": 372}
+{"t": 1792874267.471, "kind": "step", "id": "CU1", "action": "type", "field_at": [270, 132], "button_at": [270, 132], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874268.416, "kind": "nav", "page": "06-organizations", "pill_y": 412}
+{"t": 1792874270.258, "kind": "step", "id": "OR1", "action": "click", "label": "neworganization", "at": [268, 242], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874271.203, "kind": "nav", "page": "07-knowledge", "pill_y": 452}
+{"t": 1792874273.411, "kind": "step", "id": "K01", "action": "click", "label": "importdocuments", "at": [277, 243], "diff": 2.191, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874275.332, "kind": "step", "id": "K02", "action": "click", "label": "sources", "at": [353, 110], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874277.189, "kind": "step", "id": "K03", "action": "click", "label": "documents", "at": [296, 109], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874278.13, "kind": "nav", "page": "08-reports", "pill_y": 524}
+{"t": 1792874280.23, "kind": "step", "id": "R01", "action": "click", "label": "builder", "at": [1071, 149], "diff": 3.09, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874282.397, "kind": "step", "id": "R02", "action": "click", "label": "overview", "at": [277, 149], "diff": 3.09, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874283.343, "kind": "nav", "page": "09-issue-radar", "pill_y": 564}
+{"t": 1792874284.222, "kind": "step", "id": "RA1", "result": "ocr-miss", "label": "reloadclusters"}
+{"t": 1792874286.075, "kind": "step", "id": "RA2", "action": "click", "label": "alerts", "at": [310, 107], "diff": 0.0, "changed": false, "expect": null, "result": "ok"}
+{"t": 1792874287.017, "kind": "nav", "page": "10-incidents", "pill_y": 604}
+{"t": 1792874288.899, "kind": "step", "id": "IN1", "action": "click", "label": "newincident", "at": [542, 249], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874289.784, "kind": "step", "id": "IN2", "result": "ocr-miss", "label": "openonly"}
+{"t": 1792874290.673, "kind": "step", "id": "IN3", "result": "ocr-miss", "label": "openonly"}
+{"t": 1792874291.618, "kind": "nav", "page": "11-custom-objects", "pill_y": 676}
+{"t": 1792874292.41, "kind": "step", "id": "CO1", "result": "ocr-miss", "label": "newtype"}
+{"t": 1792874295.188, "kind": "nav", "page": "12-automation", "pill_y": 508}
+{"t": 1792874295.903, "kind": "step", "id": "AU1", "result": "ocr-miss", "label": "newrule"}
+{"t": 1792874296.846, "kind": "nav", "page": "13-ai-center", "pill_y": 548}
+{"t": 1792874297.65, "kind": "step", "id": "A01", "result": "ocr-miss", "label": "copilot"}
+{"t": 1792874298.455, "kind": "step", "id": "A02", "result": "ocr-miss", "label": "usage"}
+{"t": 1792874300.276, "kind": "step", "id": "A03", "action": "click", "label": "jobs", "at": [650, 127], "diff": 3.947, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874302.035, "kind": "step", "id": "A04", "action": "click", "label": "health", "at": [269, 129], "diff": 3.947, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874302.994, "kind": "nav", "page": "14-outreach", "pill_y": 588}
+{"t": 1792874304.715, "kind": "step", "id": "OU1", "action": "click", "label": "segments", "at": [373, 128], "diff": 0.603, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874305.44, "kind": "step", "id": "OU2", "result": "ocr-miss", "label": "donotcontact"}
+{"t": 1792874307.149, "kind": "step", "id": "OU3", "action": "click", "label": "campaigns", "at": [281, 129], "diff": 0.603, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874308.094, "kind": "nav", "page": "15-notifications", "pill_y": 660}
+{"t": 1792874309.856, "kind": "step", "id": "N01", "action": "click", "label": "mentions", "at": [324, 149], "diff": 0.074, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874311.63, "kind": "step", "id": "N02", "action": "click", "label": "unread", "at": [310, 107], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874313.372, "kind": "step", "id": "N03", "action": "click", "label": "all", "at": [1109, 91], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874314.317, "kind": "nav", "page": "16-search", "pill_y": 700}
+{"t": 1792874316.05, "kind": "step", "id": "S01", "action": "click", "label": "tickets", "at": [356, 193], "diff": 0.063, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874317.78, "kind": "step", "id": "S02", "action": "click", "label": "knowledge", "at": [444, 192], "diff": 0.105, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874319.506, "kind": "step", "id": "S03", "action": "click", "label": "all", "at": [299, 191], "diff": 0.086, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874322.27, "kind": "nav", "page": "17-support-graph", "pill_y": 534}
+{"t": 1792874326.118, "kind": "step", "id": "G01", "action": "type", "field_at": [664, 266], "button_at": [664, 266], "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874327.061, "kind": "nav", "page": "18-connectors", "pill_y": 574}
+{"t": 1792874327.738, "kind": "step", "id": "CN1", "result": "ocr-miss", "label": "newconnector"}
+{"t": 1792874328.682, "kind": "nav", "page": "19-diagnostics", "pill_y": 614}
+{"t": 1792874329.474, "kind": "step", "id": "DI1", "result": "ocr-miss", "label": "clearlog"}
+{"t": 1792874330.302, "kind": "step", "id": "DI2", "result": "dialog-miss", "note": "no Cancel word found"}
+{"t": 1792874331.245, "kind": "nav", "page": "20-sync-health", "pill_y": 654}
+{"t": 1792874332.088, "kind": "step", "id": "SY1", "result": "ocr-miss", "label": "cancelrunningsync"}
+{"t": 1792874333.031, "kind": "nav", "page": "21-settings", "pill_y": 694}
+{"t": 1792874334.86, "kind": "step", "id": "SE1", "action": "click", "label": "backups", "at": [577, 93], "diff": 4.027, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874335.876, "kind": "step", "id": "SE2", "result": "ocr-miss", "label": "lmstudio"}
+{"t": 1792874337.892, "kind": "step", "id": "SE3", "action": "click", "label": "scout", "at": [1045, 91], "diff": 5.416, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874339.859, "kind": "step", "id": "SE4", "action": "click", "label": "sync", "at": [1107, 92], "diff": 4.767, "changed": true, "expect": "change", "result": "ok"}
+{"t": 1792874343.702, "kind": "home", "pill_y": 180}
+{"t": 1792874345.638, "kind": "step", "id": "F01", "action": "home+click", "label": "30days", "at": [385, 164], "diff": 0.082, "changed": false, "expect": "change", "result": "verify-failed"}
+{"t": 1792874346.18, "kind": "done", "steps": 45, "failed": ["D01", "I01", "I02", "L01", "L02", "O01", "CU1", "OR1", "K02", "K03", "RA1", "IN1", "IN2", "IN3", "CO1", "AU1", "A01", "A02", "OU1", "OU2", "OU3", "N01", "N02", "N03", "S01", "S02", "S03", "G01", "CN1", "DI1", "DI2", "SY1", "SE2", "F01"]}
+{"t": 1792874890.687, "kind": "app-started", "pid": 23850, "ready": true, "lock_error": false}
+{"t": 1792874892.323, "kind": "launch", "pill_y": 180, "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715]}
+{"t": 1792874895.639, "kind": "home", "pill_y": 180}
+{"t": 1792874895.64, "kind": "normalized", "page": "01-dashboard"}
+{"t": 1792874897.399, "kind": "step", "id": "D01", "diff": 0.082, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "7 days", "at": [328, 165]}
+{"t": 1792874898.345, "kind": "nav", "page": "02-inbox", "pill_y": 220}
+{"t": 1792874900.158, "kind": "step", "id": "I01", "diff": 0.07, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "pending", "at": [388, 148]}
+{"t": 1792874902.002, "kind": "step", "id": "I02", "diff": 0.07, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "all", "at": [257, 147]}
+{"t": 1792874902.947, "kind": "nav", "page": "03-live-chats", "pill_y": 260}
+{"t": 1792874904.648, "kind": "step", "id": "L01", "diff": 0.241, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "showendedchats", "at": [357, 150]}
+{"t": 1792874906.338, "kind": "step", "id": "L02", "diff": 0.241, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "openchats", "at": [281, 150]}
+{"t": 1792874907.281, "kind": "nav", "page": "04-operations", "pill_y": 300}
+{"t": 1792874909.047, "kind": "step", "id": "O01", "diff": 3.194, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "workload", "at": [335, 149]}
+{"t": 1792874910.742, "kind": "step", "id": "O02", "diff": 1.959, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "library", "at": [416, 150]}
+{"t": 1792874912.439, "kind": "step", "id": "O03", "diff": 2.193, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "tiles", "at": [263, 149]}
+{"t": 1792874913.383, "kind": "nav", "page": "05-customers", "pill_y": 372}
+{"t": 1792874917.429, "kind": "step", "id": "CU1", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "type", "field_at": [298, 132], "button_at": [608, 274], "typed": "zzqa"}
+{"t": 1792874918.376, "kind": "nav", "page": "06-organizations", "pill_y": 412}
+{"t": 1792874919.257, "kind": "step", "id": "OR1", "result": "ocr-miss", "label": "createorganization"}
+{"t": 1792874920.203, "kind": "nav", "page": "07-knowledge", "pill_y": 452}
+{"t": 1792874922.093, "kind": "step", "id": "K01", "diff": 2.191, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "importdocuments", "at": [291, 242]}
+{"t": 1792874923.823, "kind": "step", "id": "K02", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sources", "at": [371, 171]}
+{"t": 1792874925.553, "kind": "step", "id": "K03", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "documents", "at": [283, 171]}
+{"t": 1792874926.498, "kind": "nav", "page": "08-reports", "pill_y": 524}
+{"t": 1792874928.506, "kind": "step", "id": "R01", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "builder", "at": [1071, 149]}
+{"t": 1792874930.744, "kind": "step", "id": "R02", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "overview", "at": [277, 149]}
+{"t": 1792874931.691, "kind": "nav", "page": "09-issue-radar", "pill_y": 564}
+{"t": 1792874933.543, "kind": "step", "id": "RA1", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "clusters", "at": [352, 107]}
+{"t": 1792874935.248, "kind": "step", "id": "RA2", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "alerts", "at": [267, 149]}
+{"t": 1792874936.193, "kind": "nav", "page": "10-incidents", "pill_y": 604}
+{"t": 1792874936.879, "kind": "step", "id": "IN1", "result": "ocr-miss", "label": "newincident"}
+{"t": 1792874938.64, "kind": "step", "id": "IN2", "diff": 0.007, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "openonly", "at": [685, 174]}
+{"t": 1792874940.366, "kind": "step", "id": "IN3", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "openonly", "at": [465, 173]}
+{"t": 1792874941.309, "kind": "nav", "page": "11-custom-objects", "pill_y": 676}
+{"t": 1792874942.004, "kind": "step", "id": "CO1", "result": "ocr-miss", "label": "newtype"}
+{"t": 1792874944.778, "kind": "nav", "page": "12-automation", "pill_y": 511}
+{"t": 1792874945.472, "kind": "step", "id": "AU1", "result": "ocr-miss", "label": "newrule"}
+{"t": 1792874946.418, "kind": "nav", "page": "13-ai-center", "pill_y": 551}
+{"t": 1792874947.16, "kind": "step", "id": "A01", "result": "ocr-miss", "label": "copilot"}
+{"t": 1792874947.899, "kind": "step", "id": "A02", "result": "ocr-miss", "label": "usage"}
+{"t": 1792874949.616, "kind": "step", "id": "A03", "diff": 3.947, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "jobs", "at": [650, 127]}
+{"t": 1792874951.349, "kind": "step", "id": "A04", "diff": 3.947, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "health", "at": [269, 127]}
+{"t": 1792874952.297, "kind": "nav", "page": "14-outreach", "pill_y": 591}
+{"t": 1792874954.006, "kind": "step", "id": "OU1", "diff": 0.603, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "segments", "at": [374, 128]}
+{"t": 1792874955.704, "kind": "step", "id": "OU2", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "donotcontact", "at": [391, 128]}
+{"t": 1792874957.403, "kind": "step", "id": "OU3", "diff": 0.603, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "campaigns", "at": [282, 128]}
+{"t": 1792874958.347, "kind": "nav", "page": "15-notifications", "pill_y": 663}
+{"t": 1792874960.035, "kind": "step", "id": "N01", "diff": 0.074, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "mentions", "at": [324, 149]}
+{"t": 1792874961.727, "kind": "step", "id": "N02", "diff": 0.097, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "unread", "at": [404, 149]}
+{"t": 1792874963.418, "kind": "step", "id": "N03", "diff": 0.066, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "all", "at": [257, 149]}
+{"t": 1792874966.199, "kind": "nav", "page": "16-search", "pill_y": 497}
+{"t": 1792874967.911, "kind": "step", "id": "S01", "diff": 0.063, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "tickets", "at": [358, 191]}
+{"t": 1792874969.625, "kind": "step", "id": "S02", "diff": 0.105, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "knowledge", "at": [444, 192]}
+{"t": 1792874971.349, "kind": "step", "id": "S03", "diff": 0.086, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "all", "at": [299, 191]}
+{"t": 1792874972.296, "kind": "nav", "page": "17-support-graph", "pill_y": 537}
+{"t": 1792874974.565, "kind": "step", "id": "G01", "result": "button-miss", "field_at": [699, 266], "label": "search"}
+{"t": 1792874975.51, "kind": "nav", "page": "18-connectors", "pill_y": 577}
+{"t": 1792874976.417, "kind": "step", "id": "CN1", "result": "ocr-miss", "label": "newconnector"}
+{"t": 1792874977.36, "kind": "nav", "page": "19-diagnostics", "pill_y": 617}
+{"t": 1792874978.164, "kind": "step", "id": "DI1", "result": "ocr-miss", "label": "clearlog"}
+{"t": 1792874978.987, "kind": "step", "id": "DI2", "result": "dialog-miss", "note": "no Cancel word"}
+{"t": 1792874979.959, "kind": "nav", "page": "20-sync-health", "pill_y": 657}
+{"t": 1792874980.78, "kind": "step", "id": "SY1", "result": "ocr-miss", "label": "cancelrunningsync"}
+{"t": 1792874981.731, "kind": "nav", "page": "21-settings", "pill_y": 697}
+{"t": 1792874983.573, "kind": "step", "id": "SE1", "diff": 4.027, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "backups", "at": [577, 93]}
+{"t": 1792874984.616, "kind": "step", "id": "SE2", "result": "ocr-miss", "label": "lmstudio"}
+{"t": 1792874986.638, "kind": "step", "id": "SE3", "diff": 5.416, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "scout", "at": [1045, 91]}
+{"t": 1792874988.59, "kind": "step", "id": "SE4", "diff": 4.767, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sync", "at": [1107, 92]}
+{"t": 1792874992.438, "kind": "home", "pill_y": 180}
+{"t": 1792874994.189, "kind": "step", "id": "F01", "diff": 0.082, "changed": false, "expect": "change", "result": "verify-failed", "action": "home+click", "label": "30days", "at": [400, 165]}
+{"t": 1792874994.733, "kind": "done", "steps": 45, "failed": ["D01", "I01", "I02", "CU1", "OR1", "IN1", "IN2", "IN3", "CO1", "AU1", "A01", "A02", "OU2", "N01", "N02", "N03", "S01", "S02", "S03", "G01", "CN1", "DI1", "DI2", "SY1", "SE2", "F01"]}
+{"t": 1792875532.988, "kind": "app-started", "pid": 25974, "ready": true, "lock_error": false}
+{"t": 1792875534.6, "kind": "launch", "pill_y": 180, "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715]}
+{"t": 1792875537.915, "kind": "home", "pill_y": 180}
+{"t": 1792875537.915, "kind": "normalized", "page": "01-dashboard"}
+{"t": 1792875540.541, "kind": "step", "id": "D01", "diff": 0.082, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "7 days", "at": [328, 165], "method": "ocr"}
+{"t": 1792875541.483, "kind": "nav", "page": "02-inbox", "pill_y": 220}
+{"t": 1792875544.036, "kind": "step", "id": "I01", "diff": 0.07, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "pending", "at": [388, 148], "method": "ocr"}
+{"t": 1792875546.823, "kind": "step", "id": "I02", "diff": 0.07, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "all", "at": [257, 147], "method": "ocr"}
+{"t": 1792875547.766, "kind": "nav", "page": "03-live-chats", "pill_y": 260}
+{"t": 1792875549.884, "kind": "step", "id": "L01", "diff": 0.241, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "showendedchats", "at": [396, 149], "method": "ocr"}
+{"t": 1792875551.997, "kind": "step", "id": "L02", "diff": 0.241, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "openchats", "at": [281, 151], "method": "ocr"}
+{"t": 1792875552.939, "kind": "nav", "page": "04-operations", "pill_y": 300}
+{"t": 1792875555.492, "kind": "step", "id": "O01", "diff": 3.187, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "workload", "at": [335, 149], "method": "ocr"}
+{"t": 1792875557.62, "kind": "step", "id": "O02", "diff": 1.956, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "library", "at": [416, 150], "method": "ocr"}
+{"t": 1792875559.722, "kind": "step", "id": "O03", "diff": 2.19, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "tiles", "at": [263, 149], "method": "ocr"}
+{"t": 1792875560.666, "kind": "nav", "page": "05-customers", "pill_y": 372}
+{"t": 1792875565.627, "kind": "step", "id": "CU1", "result": "button-miss", "field_at": [298, 132]}
+{"t": 1792875566.573, "kind": "nav", "page": "06-organizations", "pill_y": 412}
+{"t": 1792875568.159, "kind": "step", "id": "OR1", "diff": 9.219, "changed": true, "expect": null, "result": "ok", "action": "dark_button", "at": [465, 375]}
+{"t": 1792875569.101, "kind": "nav", "page": "07-knowledge", "pill_y": 452}
+{"t": 1792875572.71, "kind": "step", "id": "K01", "diff": 2.191, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "importdocuments", "at": [291, 242], "method": "ocr"}
+{"t": 1792875575.067, "kind": "step", "id": "K02", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sources", "at": [370, 171], "method": "ocr"}
+{"t": 1792875577.433, "kind": "step", "id": "K03", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "documents", "at": [283, 171], "method": "ocr"}
+{"t": 1792875578.376, "kind": "nav", "page": "08-reports", "pill_y": 524}
+{"t": 1792875582.743, "kind": "step", "id": "R01", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "builder", "at": [1071, 149], "method": "ocr"}
+{"t": 1792875588.157, "kind": "step", "id": "R02", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "overview", "at": [277, 149], "method": "ocr"}
+{"t": 1792875589.098, "kind": "nav", "page": "09-issue-radar", "pill_y": 564}
+{"t": 1792875592.084, "kind": "step", "id": "RA1", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "clusters", "at": [1015, 91], "method": "ocr"}
+{"t": 1792875594.251, "kind": "step", "id": "RA2", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "alerts", "at": [267, 149], "method": "ocr"}
+{"t": 1792875595.193, "kind": "nav", "page": "10-incidents", "pill_y": 604}
+{"t": 1792875596.783, "kind": "step", "id": "IN1", "diff": 2.967, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1105, 91]}
+{"t": 1792875599.272, "kind": "step", "id": "IN2", "diff": 0.007, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "openonly", "at": [671, 174], "method": "ocr"}
+{"t": 1792875601.778, "kind": "step", "id": "IN3", "diff": 0.007, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "openonly", "at": [671, 174], "method": "ocr"}
+{"t": 1792875602.722, "kind": "nav", "page": "11-custom-objects", "pill_y": 676}
+{"t": 1792875604.303, "kind": "step", "id": "CO1", "diff": 3.657, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1115, 91]}
+{"t": 1792875607.075, "kind": "nav", "page": "12-automation", "pill_y": 505}
+{"t": 1792875608.66, "kind": "step", "id": "AU1", "diff": 3.235, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1117, 92]}
+{"t": 1792875609.603, "kind": "nav", "page": "13-ai-center", "pill_y": 545}
+{"t": 1792875611.935, "kind": "step", "id": "A01", "diff": 4.938, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "copilot", "at": [516, 127], "method": "ocr"}
+{"t": 1792875614.248, "kind": "step", "id": "A02", "diff": 2.971, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "usage", "at": [587, 128], "method": "ocr"}
+{"t": 1792875616.594, "kind": "step", "id": "A03", "diff": 2.024, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "jobs", "at": [650, 127], "method": "ocr"}
+{"t": 1792875618.945, "kind": "step", "id": "A04", "diff": 3.947, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "health", "at": [269, 127], "method": "ocr"}
+{"t": 1792875619.888, "kind": "nav", "page": "14-outreach", "pill_y": 585}
+{"t": 1792875622.274, "kind": "step", "id": "OU1", "diff": 0.603, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "segments", "at": [374, 128], "method": "ocr"}
+{"t": 1792875624.46, "kind": "step", "id": "OU2", "diff": 2.934, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "contact", "at": [499, 127], "method": "ocr"}
+{"t": 1792875626.655, "kind": "step", "id": "OU3", "diff": 2.976, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "campaigns", "at": [282, 128], "method": "ocr"}
+{"t": 1792875627.609, "kind": "nav", "page": "15-notifications", "pill_y": 657}
+{"t": 1792875629.676, "kind": "step", "id": "N01", "diff": 0.074, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "mentions", "at": [324, 149], "method": "ocr"}
+{"t": 1792875631.746, "kind": "step", "id": "N02", "diff": 0.097, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "unread", "at": [404, 149], "method": "ocr"}
+{"t": 1792875633.847, "kind": "step", "id": "N03", "diff": 0.066, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "all", "at": [257, 149], "method": "ocr"}
+{"t": 1792875634.791, "kind": "nav", "page": "16-search", "pill_y": 697}
+{"t": 1792875637.329, "kind": "step", "id": "S01", "diff": 0.063, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "tickets", "at": [358, 191], "method": "ocr"}
+{"t": 1792875639.785, "kind": "step", "id": "S02", "diff": 0.105, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "knowledge", "at": [443, 192], "method": "ocr"}
+{"t": 1792875642.243, "kind": "step", "id": "S03", "diff": 0.086, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "all", "at": [299, 191], "method": "ocr"}
+{"t": 1792875645.014, "kind": "nav", "page": "17-support-graph", "pill_y": 529}
+{"t": 1792875649.595, "kind": "step", "id": "G01", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "type_enter", "field_at": [305, 148], "typed": "zzqa"}
+{"t": 1792875650.538, "kind": "nav", "page": "18-connectors", "pill_y": 569}
+{"t": 1792875652.125, "kind": "step", "id": "CN1", "diff": 1.564, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1098, 92]}
+{"t": 1792875653.065, "kind": "nav", "page": "19-diagnostics", "pill_y": 609}
+{"t": 1792875654.652, "kind": "step", "id": "DI1", "diff": 1.843, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [628, 216]}
+{"t": 1792875659.489, "kind": "step", "id": "DI2", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "dialog", "button": "geometric-left-of-cancel", "at": [584, 417]}
+{"t": 1792875660.445, "kind": "nav", "page": "20-sync-health", "pill_y": 649}
+{"t": 1792875665.361, "kind": "step", "id": "SY1", "diff": 4.986, "changed": true, "expect": null, "result": "ok", "action": "click", "label": "cancelrunningsync", "at": [716, 287], "method": "ocr"}
+{"t": 1792875666.312, "kind": "nav", "page": "21-settings", "pill_y": 689}
+{"t": 1792875669.636, "kind": "step", "id": "SE1", "diff": 3.793, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "backups", "at": [578, 91], "method": "ocr"}
+{"t": 1792875673.555, "kind": "step", "id": "SE2", "diff": 3.349, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "lmstudio", "at": [830, 91], "method": "ocr"}
+{"t": 1792875678.169, "kind": "step", "id": "SE3", "diff": 3.756, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "scout", "at": [1045, 91], "method": "ocr"}
+{"t": 1792875682.066, "kind": "step", "id": "SE4", "diff": 4.084, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sync", "at": [1107, 92], "method": "ocr"}
+{"t": 1792875685.902, "kind": "home", "pill_y": 180}
+{"t": 1792875688.489, "kind": "step", "id": "F01", "diff": 0.082, "changed": true, "expect": "change", "result": "ok", "action": "home+click", "label": "30days", "at": [400, 165]}
+{"t": 1792875689.037, "kind": "done", "steps": 45, "failed": ["CU1", "IN2", "IN3", "G01", "DI2"]}
+{"t": 1792875879.317, "kind": "app-started", "pid": 28254, "ready": true, "lock_error": false}
+{"t": 1792875880.94, "kind": "launch", "pill_y": 180, "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715]}
+{"t": 1792875884.255, "kind": "home", "pill_y": 180}
+{"t": 1792875884.255, "kind": "normalized", "page": "01-dashboard"}
+{"t": 1792875884.255, "kind": "skip", "id": "D01"}
+{"t": 1792875884.255, "kind": "skip", "id": "I01"}
+{"t": 1792875884.255, "kind": "skip", "id": "I02"}
+{"t": 1792875884.255, "kind": "skip", "id": "L01"}
+{"t": 1792875884.255, "kind": "skip", "id": "L02"}
+{"t": 1792875884.255, "kind": "skip", "id": "O01"}
+{"t": 1792875884.255, "kind": "skip", "id": "O02"}
+{"t": 1792875884.255, "kind": "skip", "id": "O03"}
+{"t": 1792875888.025, "kind": "nav", "page": "05-customers", "pill_y": 372}
+{"t": 1792875893.068, "kind": "step", "id": "CU1", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "type", "field_at": [298, 132], "button_at": [556, 134], "how": "bbox", "typed": "zzqa"}
+{"t": 1792875894.014, "kind": "nav", "page": "06-organizations", "pill_y": 412}
+{"t": 1792875895.608, "kind": "step", "id": "OR1", "diff": 9.219, "changed": true, "expect": null, "result": "ok", "action": "dark_button", "at": [465, 375]}
+{"t": 1792875896.553, "kind": "nav", "page": "07-knowledge", "pill_y": 452}
+{"t": 1792875900.254, "kind": "step", "id": "K01", "diff": 2.191, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "importdocuments", "at": [291, 242], "method": "ocr"}
+{"t": 1792875902.63, "kind": "step", "id": "K02", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sources", "at": [370, 171], "method": "ocr"}
+{"t": 1792875904.981, "kind": "step", "id": "K03", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "documents", "at": [283, 171], "method": "ocr"}
+{"t": 1792875905.925, "kind": "nav", "page": "08-reports", "pill_y": 524}
+{"t": 1792875910.154, "kind": "step", "id": "R01", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "builder", "at": [1071, 149], "method": "ocr"}
+{"t": 1792875915.733, "kind": "step", "id": "R02", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "overview", "at": [277, 149], "method": "ocr"}
+{"t": 1792875916.678, "kind": "nav", "page": "09-issue-radar", "pill_y": 564}
+{"t": 1792875919.765, "kind": "step", "id": "RA1", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "clusters", "at": [1015, 91], "method": "ocr"}
+{"t": 1792875922.057, "kind": "step", "id": "RA2", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "alerts", "at": [267, 149], "method": "ocr"}
+{"t": 1792875923.011, "kind": "nav", "page": "10-incidents", "pill_y": 604}
+{"t": 1792875924.603, "kind": "step", "id": "IN1", "diff": 2.967, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1105, 91]}
+{"t": 1792875927.084, "kind": "step", "id": "IN2", "diff": 0.007, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "openonly", "at": [658, 174], "method": "ocr"}
+{"t": 1792875929.581, "kind": "step", "id": "IN3", "diff": 0.007, "changed": false, "expect": "change", "result": "verify-failed", "action": "click", "label": "openonly", "at": [658, 174], "method": "ocr"}
+{"t": 1792875930.52, "kind": "nav", "page": "11-custom-objects", "pill_y": 676}
+{"t": 1792875932.102, "kind": "step", "id": "CO1", "diff": 3.657, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1115, 91]}
+{"t": 1792875934.868, "kind": "nav", "page": "12-automation", "pill_y": 505}
+{"t": 1792875936.45, "kind": "step", "id": "AU1", "diff": 3.235, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1117, 92]}
+{"t": 1792875937.389, "kind": "nav", "page": "13-ai-center", "pill_y": 545}
+{"t": 1792875939.695, "kind": "step", "id": "A01", "diff": 4.938, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "copilot", "at": [516, 127], "method": "ocr"}
+{"t": 1792875942.028, "kind": "step", "id": "A02", "diff": 2.971, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "usage", "at": [587, 128], "method": "ocr"}
+{"t": 1792875944.373, "kind": "step", "id": "A03", "diff": 2.024, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "jobs", "at": [650, 127], "method": "ocr"}
+{"t": 1792875946.724, "kind": "step", "id": "A04", "diff": 3.947, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "health", "at": [269, 127], "method": "ocr"}
+{"t": 1792875947.665, "kind": "nav", "page": "14-outreach", "pill_y": 585}
+{"t": 1792875950.025, "kind": "step", "id": "OU1", "diff": 0.603, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "segments", "at": [374, 128], "method": "ocr"}
+{"t": 1792875952.22, "kind": "step", "id": "OU2", "diff": 2.934, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "contact", "at": [499, 127], "method": "ocr"}
+{"t": 1792875954.689, "kind": "step", "id": "OU3", "diff": 2.976, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "campaigns", "at": [282, 128], "method": "ocr"}
+{"t": 1792875955.629, "kind": "nav", "page": "15-notifications", "pill_y": 657}
+{"t": 1792875957.695, "kind": "step", "id": "N01", "diff": 0.074, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "mentions", "at": [324, 149], "method": "ocr"}
+{"t": 1792875959.803, "kind": "step", "id": "N02", "diff": 0.097, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "unread", "at": [404, 149], "method": "ocr"}
+{"t": 1792875961.916, "kind": "step", "id": "N03", "diff": 0.066, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "all", "at": [257, 149], "method": "ocr"}
+{"t": 1792875962.856, "kind": "nav", "page": "16-search", "pill_y": 697}
+{"t": 1792875965.328, "kind": "step", "id": "S01", "diff": 0.063, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "tickets", "at": [358, 191], "method": "ocr"}
+{"t": 1792875967.764, "kind": "step", "id": "S02", "diff": 0.105, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "knowledge", "at": [443, 192], "method": "ocr"}
+{"t": 1792875970.189, "kind": "step", "id": "S03", "diff": 0.086, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "all", "at": [299, 191], "method": "ocr"}
+{"t": 1792875972.963, "kind": "nav", "page": "17-support-graph", "pill_y": 528}
+{"t": 1792875978.084, "kind": "step", "id": "G01", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "type", "field_at": [305, 148], "button_at": [596, 149], "how": "bbox", "typed": "zzqa"}
+{"t": 1792875979.03, "kind": "nav", "page": "18-connectors", "pill_y": 568}
+{"t": 1792875980.614, "kind": "step", "id": "CN1", "diff": 1.564, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1098, 92]}
+{"t": 1792875981.557, "kind": "nav", "page": "19-diagnostics", "pill_y": 608}
+{"t": 1792875983.145, "kind": "step", "id": "DI1", "diff": 1.843, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [628, 216]}
+{"t": 1792875987.719, "kind": "step", "id": "DI2", "diff": 4.7, "changed": true, "expect": "change", "result": "ok", "action": "dialog", "button": "red-bbox-right-of-cancel", "at": [752, 417]}
+{"t": 1792875988.661, "kind": "nav", "page": "20-sync-health", "pill_y": 648}
+{"t": 1792875991.737, "kind": "step", "id": "SY1", "result": "ocr-miss", "label": "cancelrunningsync"}
+{"t": 1792875992.716, "kind": "nav", "page": "21-settings", "pill_y": 688}
+{"t": 1792875996.235, "kind": "step", "id": "SE1", "diff": 4.027, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "backups", "at": [578, 91], "method": "ocr"}
+{"t": 1792875999.895, "kind": "step", "id": "SE2", "diff": 3.379, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "lmstudio", "at": [830, 91], "method": "ocr"}
+{"t": 1792876004.575, "kind": "step", "id": "SE3", "diff": 4.242, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "scout", "at": [1045, 91], "method": "ocr"}
+{"t": 1792876008.831, "kind": "step", "id": "SE4", "diff": 4.767, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sync", "at": [1107, 92], "method": "ocr"}
+{"t": 1792876012.667, "kind": "home", "pill_y": 180}
+{"t": 1792876015.246, "kind": "step", "id": "F01", "diff": 0.0, "changed": false, "expect": "change", "result": "verify-failed", "action": "home+click", "label": "30days", "at": [400, 165]}
+{"t": 1792876015.785, "kind": "done", "steps": 37, "failed": ["CU1", "IN2", "IN3", "G01", "SY1", "F01"]}
+{"t": 1792876196.954, "kind": "app-started", "pid": 30229, "ready": true, "lock_error": false}
+{"t": 1792876203.885, "kind": "home", "pill_y": 180}
+{"t": 1792876207.66, "kind": "diag-nav", "page": "05-customers"}
+{"t": 1792876399.277, "kind": "app-started", "pid": 30598, "ready": true, "lock_error": false}
+{"t": 1792876400.898, "kind": "launch", "pill_y": 180, "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715]}
+{"t": 1792876404.209, "kind": "home", "pill_y": 180}
+{"t": 1792876404.209, "kind": "normalized", "page": "01-dashboard"}
+{"t": 1792876404.209, "kind": "skip", "id": "D01"}
+{"t": 1792876404.209, "kind": "skip", "id": "I01"}
+{"t": 1792876404.209, "kind": "skip", "id": "I02"}
+{"t": 1792876404.209, "kind": "skip", "id": "L01"}
+{"t": 1792876404.209, "kind": "skip", "id": "L02"}
+{"t": 1792876404.209, "kind": "skip", "id": "O01"}
+{"t": 1792876404.209, "kind": "skip", "id": "O02"}
+{"t": 1792876404.209, "kind": "skip", "id": "O03"}
+{"t": 1792876407.98, "kind": "nav", "page": "05-customers", "pill_y": 372}
+{"t": 1792876412.699, "kind": "step", "id": "CU1", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "type", "field_at": [298, 132], "button_at": [556, 134], "how": "bbox", "typed": "(none - keyboard limitation)", "field_clicked": true}
+{"t": 1792876413.644, "kind": "nav", "page": "06-organizations", "pill_y": 412}
+{"t": 1792876415.232, "kind": "step", "id": "OR1", "diff": 9.219, "changed": true, "expect": null, "result": "ok", "action": "dark_button", "at": [465, 375]}
+{"t": 1792876416.176, "kind": "nav", "page": "07-knowledge", "pill_y": 452}
+{"t": 1792876419.869, "kind": "step", "id": "K01", "diff": 2.191, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "importdocuments", "at": [291, 242], "method": "ocr"}
+{"t": 1792876422.233, "kind": "step", "id": "K02", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sources", "at": [370, 171], "method": "ocr"}
+{"t": 1792876424.505, "kind": "step", "id": "K03", "diff": 2.593, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "documents", "at": [283, 171], "method": "ocr"}
+{"t": 1792876425.445, "kind": "nav", "page": "08-reports", "pill_y": 524}
+{"t": 1792876429.484, "kind": "step", "id": "R01", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "builder", "at": [1071, 149], "method": "ocr"}
+{"t": 1792876434.364, "kind": "step", "id": "R02", "diff": 3.09, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "overview", "at": [277, 149], "method": "ocr"}
+{"t": 1792876435.308, "kind": "nav", "page": "09-issue-radar", "pill_y": 564}
+{"t": 1792876438.229, "kind": "step", "id": "RA1", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "clusters", "at": [1015, 91], "method": "ocr"}
+{"t": 1792876440.409, "kind": "step", "id": "RA2", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "click", "label": "alerts", "at": [267, 149], "method": "ocr"}
+{"t": 1792876441.349, "kind": "nav", "page": "10-incidents", "pill_y": 604}
+{"t": 1792876442.933, "kind": "step", "id": "IN1", "diff": 2.967, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1105, 91]}
+{"t": 1792876445.361, "kind": "step", "id": "IN2", "diff": 0.007, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "openonly", "at": [658, 174], "method": "ocr"}
+{"t": 1792876447.755, "kind": "step", "id": "IN3", "diff": 0.007, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "openonly", "at": [658, 174], "method": "ocr"}
+{"t": 1792876448.696, "kind": "nav", "page": "11-custom-objects", "pill_y": 676}
+{"t": 1792876450.277, "kind": "step", "id": "CO1", "diff": 3.657, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1115, 91]}
+{"t": 1792876453.052, "kind": "nav", "page": "12-automation", "pill_y": 508}
+{"t": 1792876454.637, "kind": "step", "id": "AU1", "diff": 3.235, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1117, 92]}
+{"t": 1792876455.58, "kind": "nav", "page": "13-ai-center", "pill_y": 548}
+{"t": 1792876457.91, "kind": "step", "id": "A01", "diff": 4.938, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "copilot", "at": [516, 127], "method": "ocr"}
+{"t": 1792876460.23, "kind": "step", "id": "A02", "diff": 2.971, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "usage", "at": [587, 128], "method": "ocr"}
+{"t": 1792876462.571, "kind": "step", "id": "A03", "diff": 2.024, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "jobs", "at": [650, 127], "method": "ocr"}
+{"t": 1792876464.828, "kind": "step", "id": "A04", "diff": 3.947, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "health", "at": [269, 127], "method": "ocr"}
+{"t": 1792876465.771, "kind": "nav", "page": "14-outreach", "pill_y": 588}
+{"t": 1792876468.142, "kind": "step", "id": "OU1", "diff": 0.603, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "segments", "at": [374, 128], "method": "ocr"}
+{"t": 1792876470.341, "kind": "step", "id": "OU2", "diff": 2.934, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "contact", "at": [499, 127], "method": "ocr"}
+{"t": 1792876472.57, "kind": "step", "id": "OU3", "diff": 2.976, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "campaigns", "at": [282, 128], "method": "ocr"}
+{"t": 1792876473.514, "kind": "nav", "page": "15-notifications", "pill_y": 660}
+{"t": 1792876475.598, "kind": "step", "id": "N01", "diff": 0.074, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "mentions", "at": [324, 149], "method": "ocr"}
+{"t": 1792876477.727, "kind": "step", "id": "N02", "diff": 0.097, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "unread", "at": [404, 149], "method": "ocr"}
+{"t": 1792876479.815, "kind": "step", "id": "N03", "diff": 0.066, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "all", "at": [257, 149], "method": "ocr"}
+{"t": 1792876480.759, "kind": "nav", "page": "16-search", "pill_y": 700}
+{"t": 1792876483.495, "kind": "step", "id": "S01", "diff": 0.063, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "tickets", "at": [358, 191], "method": "ocr"}
+{"t": 1792876486.058, "kind": "step", "id": "S02", "diff": 0.105, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "knowledge", "at": [443, 192], "method": "ocr"}
+{"t": 1792876488.522, "kind": "step", "id": "S03", "diff": 0.086, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "all", "at": [299, 191], "method": "ocr"}
+{"t": 1792876491.3, "kind": "nav", "page": "17-support-graph", "pill_y": 539}
+{"t": 1792876496.14, "kind": "step", "id": "G01", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "type", "field_at": [305, 148], "button_at": [596, 149], "how": "bbox", "typed": "(none - keyboard limitation)", "field_clicked": true}
+{"t": 1792876497.088, "kind": "nav", "page": "18-connectors", "pill_y": 579}
+{"t": 1792876498.677, "kind": "step", "id": "CN1", "diff": 1.564, "changed": true, "expect": "change", "result": "ok", "action": "dark_button", "at": [1098, 92]}
+{"t": 1792876499.619, "kind": "nav", "page": "19-diagnostics", "pill_y": 619}
+{"t": 1792876500.219, "kind": "step", "id": "DI1", "result": "rect-miss"}
+{"t": 1792876503.004, "kind": "step", "id": "DI2", "result": "dialog-miss", "note": "no Cancel word"}
+{"t": 1792876503.95, "kind": "nav", "page": "20-sync-health", "pill_y": 659}
+{"t": 1792876507.016, "kind": "step", "id": "SY1", "result": "ocr-miss", "label": "cancelrunningsync"}
+{"t": 1792876507.963, "kind": "nav", "page": "21-settings", "pill_y": 699}
+{"t": 1792876511.26, "kind": "step", "id": "SE1", "diff": 4.027, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "backups", "at": [578, 91], "method": "ocr"}
+{"t": 1792876515.044, "kind": "step", "id": "SE2", "diff": 3.379, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "lmstudio", "at": [830, 91], "method": "ocr"}
+{"t": 1792876519.488, "kind": "step", "id": "SE3", "diff": 4.242, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "scout", "at": [1045, 91], "method": "ocr"}
+{"t": 1792876523.545, "kind": "step", "id": "SE4", "diff": 4.767, "changed": true, "expect": "change", "result": "ok", "action": "click", "label": "sync", "at": [1107, 92], "method": "ocr"}
+{"t": 1792876527.38, "kind": "home", "pill_y": 180}
+{"t": 1792876530.0, "kind": "step", "id": "F01", "diff": 0.0, "changed": false, "expect": null, "result": "ok", "action": "home+click", "label": "30days", "at": [400, 165]}
+{"t": 1792876530.548, "kind": "done", "steps": 37, "failed": ["DI1", "DI2", "SY1"]}
+{"t": 1792876719.724, "kind": "app-started", "pid": 32528, "ready": true, "lock_error": false}
+{"t": 1792876726.678, "kind": "home", "pill_y": 180}
+{"t": 1792876751.256, "kind": "step", "id": "SE2b", "action": "click", "label": "LM Studio tab (tight crop)", "at": [948, 91], "diff": 3.02, "changed": true, "result": "ok"}

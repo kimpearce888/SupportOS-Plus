@@ -17,7 +17,13 @@ See BUILD-AND-INSTALL.md (live). Summary so far: Debian sandbox, 2 vCPU/4 GB, Ru
 - FIND-002 (Low, confirmed observation): second-instance flock guard works; console-only message — UI dialog presence TBD
 - FIND-003 (Low, confirmed, pre-existing): prior audit committed app-local secret-envelope key material as repo artifacts (observation for the maintainer; not touched)
 - FIND-004 (Low, confirmed): pinned theme row overlaps the bottom sidebar navigation rows; the Shell row is only clickable through a ~10 px sliver at the default 1180x760 window
-- Environment note: sandbox lacked libxkbcommon-x11/libxcb-xkb (remediated environment-only; not an app defect)
+- FIND-005 (Low, source-verified): destructive actions without confirmation on several pages while equivalent deletes elsewhere are shell-confirm-gated (inconsistent destructive-action UX)
+- FIND-006 (Low, runtime + source): Sync Health "Cancel running sync" on an idle engine toasts "(started in background)" — misleading feedback; no state change (DB-verified)
+- FIND-007 (Low, source-verified): zero-hit help-center searches silently persist knowledge-gap records (hidden write from a read-looking control)
+- FIND-008 (Low, source-verified): Issue Radar "Detect gaps now"/"Cluster now" discard enqueue results; no completion signal
+- FIND-009 (Low, source-verified): silent input coercion (Connectors refresh-seconds → default 3600; Operations capacity clamp 1..=500; Builder dates length-10 only)
+- FIND-010 (Low, source-verified): Customers "← back to search" clears results without re-running the applied query
+- Environment note: sandbox lacked libxkbcommon-x11/libxcb-xkb (remediated environment-only; not an app defect); XTEST keyboard injection does not reach egui TextEdits in this sandbox (test tooling limitation, recorded)
 
 ## 4. Program purpose and problem coverage
 (pending)
@@ -26,13 +32,14 @@ See BUILD-AND-INSTALL.md (live). Summary so far: Debian sandbox, 2 vCPU/4 GB, Ru
 (pending — ARCHITECTURE.md will be created during discovery)
 
 ## 6. Complete feature inventory (reference FEATURE-INVENTORY.md)
-Pass 1 COMPLETE (2026-10-24): 23/23 sidebar pages opened in the running app by XTEST-injected, machine-verified clicks with per-page screenshots (E-006..E-028), plus 3 shell-level features (F-024 sidebar/header chrome, F-025 header, F-026 persistence & instance behavior). Page-level primary controls named per page; the full control/option ledger (FEAT-002/003) is queued as pass 2.
+Pass 1 COMPLETE (2026-10-24): 23/23 sidebar pages opened in the running app by XTEST-injected, machine-verified clicks with per-page screenshots (E-006..E-031), plus 3 shell-level features (F-024..F-026).
+Pass 2 COMPLETE (2026-10-24): 535-row source-first control/option ledger (C-<PAGE>-<nn>) with per-row conditions, validation/constraints, effect paths, dependencies and non-obvious notes; reconciled by 46 real-input runtime control exercises over 21 pages (control-verify.py v3; E-032..E-080). Recorded notes: XTEST keyboard injection does not reach egui TextEdits in this sandbox (Customers/Support Graph text entry source-verified only); Onboarding/Shell sync-controls deliberately deferred to W-002/W-007 to preserve the never-synced precondition; Diagnostics clear-log executed end-to-end through its confirmation dialog.
 
 ## 7. Distinctive implementation behavior
 Observed so far: fresh launches always open Dashboard with nav scroll 0 (no last-page/scroll restore); theme persists via the settings table; single-instance flock (exit 1, log-only message); loopback listener degradation is log-only in the default config (FIND-001); the Shell page is sidebar-only reachable (no CLI arg, no cross-links; palette searches records, not pages).
 
 ## 8. Partial/incomplete/unreachable implementations
-Nothing assessed yet at control level. Known candidate areas queued: Help Scout OAuth round-trip (external dependency), conversation lifecycle (needs data).
+Control-level assessment (source-first, pass 2): no no-op buttons found in the main flows — every enumerated control has a wired handler; notable gaps are behavioral, not missing handlers: FIND-005 (destructive UX inconsistency), FIND-006 (misleading idle-cancel toast), FIND-007 (hidden writes), FIND-008 (fire-and-forget enqueues), FIND-009 (silent input coercion), FIND-010 (query loss on back). Known candidate areas queued for workflow testing: Help Scout OAuth round-trip (external dependency), conversation lifecycle (needs data).
 
 ## 9. Workflow map and branch coverage
 (pending)
@@ -53,7 +60,7 @@ None: build 0 warnings; launch verified (E-001); runtime WARN only for the sandb
 `cargo test --workspace` @ 3affe7e, 2026-10-24: spp_shell 228/0/0-ign; spp_core 466/0/4-ign; spp_xtask 9/0; spp_catalog 0; **703 passed / 0 failed / 4 ignored** (details + run notes in BUILD-AND-INSTALL.md). Supplementary only — not proof of product correctness.
 
 ## 15. Evidence index and validation results
-See evidence/manifest.csv: E-001..E-031 — all validated (PIL open + visual read for screenshots; full read for logs; machine events cross-checked). 24 validated screenshots in evidence/screenshots/FEATURE/ + 1 in evidence/screenshots/BUILD/.
+See evidence/manifest.csv: E-001..E-080 — all validated (PIL open + visual read for screenshots; full read for logs; machine events cross-checked). 24 validated screenshots in evidence/screenshots/FEATURE/, 66 in evidence/screenshots/CONTROL/, 1 in evidence/screenshots/BUILD/.
 
 ## 16. Evidence exceptions and unresolved gaps
 None accepted, none unresolved (evidence/exceptions.csv not yet needed).
@@ -62,6 +69,6 @@ None accepted, none unresolved (evidence/exceptions.csv not yet needed).
 (pending)
 
 ## 18. Continuity and publication status
-Live state: HANDOVER.md (authoritative), PROGRESS.md, NEXT-ACTIONS.md, SESSION-LOG.md. Audit folder committed incrementally to `main` (audit artifacts only).
+Live state: HANDOVER.md (authoritative), PROGRESS.md, NEXT-ACTIONS.md, SESSION-LOG.md. Audit folder committed incrementally to the audit branch `repo-audit/2026-10-24` (audit artifacts only).
 
 Do not remove the IN PROGRESS status until inventory, test, evidence, and handover records are reconciled.

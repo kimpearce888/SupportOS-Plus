@@ -46,3 +46,53 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 - **Regression risks:** Pure layout change; verify all 23 rows reachable at 1180x760 and at larger sizes, and that the theme toggle still sits bottom-left.
 - **Acceptance criteria:** At the default window size every sidebar row, including Shell, is fully visible and directly clickable; hover of the theme row no longer covers any nav row.
 - **Next action:** none queued beyond fix recommendation (layout defect confirmed; no deeper test needed)
+
+## FIND-005 — Destructive actions without confirmation on several pages, while equivalent deletes elsewhere are confirm-gated (inconsistent destructive-action UX)
+- **Classification:** UX safety inconsistency (no data loss observed at runtime; none of these were executed)
+- **Severity:** Low · **Confidence/status:** Confirmed by implementation analysis (pass-2 source enumeration, four independent agents)
+- **Instances (no confirmation):** Operations Library saved-reply "delete" (C-OPS-25, operations.rs — enqueues platform-side `saved_reply_write` delete via `jobs::enqueue_on(conn,"sync",…)`; failure surfaces only as an inline hint); Reports Builder saved-report "delete" (C-REPT-25..29, reports.rs:913-963, 1796-1820); Outreach "cancel remaining" sends (C-OUTR-11) and DNC "remove" (C-OUTR-29); AI Center global AI kill switch (C-AIC-42/43 — one click disables all AI behavior).
+- **Contrast (confirm-gated equivalents):** knowledge document delete (shell confirm, knowledge.rs:823-841), custom-object type/object deletes (C-COBJ-03/06, shell confirm with "cannot be undone" text), connector delete (C-CONN-12), segment delete (C-OUTR-25), automation rule delete, diagnostics clear log (ConfirmRequest; exercised at runtime in pass 2).
+- **Impact:** one accidental click silently deletes platform data or flips global behavior; the inconsistency makes the dangerous paths look as safe as the gated ones.
+- **Evidence:** source line refs above (pass-2 ledger rows in FEATURE-INVENTORY.md); runtime reproduction deliberately not attempted (destructive).
+- **Recommended fix:** route all destructive actions through the existing shell ConfirmDialog (the pattern is already implemented and proven at runtime).
+- **Next action:** none queued (maintainer decision).
+
+## FIND-006 — Sync Health "Cancel running sync" on an idle engine is a silent no-op that still toasts "(started in background)" (misleading feedback)
+- **Classification:** UX feedback defect
+- **Severity:** Low · **Confidence/status:** Confirmed at runtime (click exercised; transient re-render measured) + Confirmed by implementation analysis (sync_health.rs:376 toast format; the already-running guard is deliberately skipped for Cancel)
+- **Reproduction:** open Sync Health with no sync running (state NEW), click the red "Cancel running sync". A transient UI change renders (content diff 4.986 in the pass-2 run — consistent with the toast documented in source), while nothing is running and nothing is cancelled.
+- **Evidence:** evidence/screenshots/CONTROL/SY1.png; control-verify-events.jsonl (SY1 rows); read-only DB check after the run: sync_runs=0, sync_cursors=0, sync_checkpoints=0, jobs=0 (no state consumed). The transient toast itself was not captured in the post frame (its lifetime was shorter than the parked-frame capture) — the toast text is source-quoted instead (sync_health.rs:376).
+- **Recommended fix:** when no sync is running, disable "Cancel running sync" or toast "No sync is running" instead of "(started in background)".
+- **Next action:** none queued.
+
+## FIND-007 — Help-center search with zero hits silently persists "knowledge gap" records (hidden write side effect of a read-looking control)
+- **Classification:** behavior surprise / data hygiene
+- **Severity:** Low · **Confidence/status:** Confirmed by implementation analysis (knowledge.rs:1344-1366, fire-and-forget `record_knowledge_gap`)
+- **Mechanism:** every zero-hit help-center search writes a knowledge-gap candidate row used by the Drafts gap picker and the "Knowledge gaps (tracked)" card. The control looks read-only; repeated empty searches accumulate rows without user awareness.
+- **Runtime:** not reproduced (needs help-center data/credentials); the search control itself was exercised on the empty-query path (CONTROL/CU1.png is Customers; the knowledge search button is source-verified only).
+- **Recommended fix:** keep the gap tracking but make it visible (e.g. a toast "tracked as a knowledge gap" or a badge on the search box), and/or dedupe+cap.
+- **Next action:** none queued.
+
+## FIND-008 — Issue Radar "Detect gaps now" / "Cluster now": enqueue results silently discarded, no completion signal
+- **Classification:** feedback/degradation gap (related in spirit to FIND-001's log-only degradation, but a distinct control path)
+- **Severity:** Low · **Confidence/status:** Confirmed by implementation analysis (issue_radar.rs — `let _ = jobs::enqueue_on("ai", …)`; agent pass-2 read)
+- **Mechanism:** clicking these buttons enqueues an AI job and returns immediately; the enqueue result is discarded and the UI instructs the user to "reload in a few seconds". Job failure (e.g. LM Studio unreachable) lands only in the jobs table — no toast, no badge.
+- **Runtime:** "Reload clusters" exercised (no-op with zero clusters, diff 0.0 — CONTROL/RA1.png); the enqueue path itself was not executed (avoids queue churn while the AI backend is unreachable in the sandbox).
+- **Recommended fix:** surface enqueue/failure state (toast on enqueue + failed-jobs badge on the page).
+- **Next action:** none queued.
+
+## FIND-009 — Silent input coercion / weak validation on several numeric and date fields
+- **Classification:** validation gaps
+- **Severity:** Low · **Confidence/status:** Confirmed by implementation analysis (pass-2 source enumeration)
+- **Instances:** Connectors refresh-seconds field — invalid input silently becomes the default 3600 (`parse::<i64>().unwrap_or(3600).clamp(60, 86400)`, no inline error); Operations workload capacity "+"/"−" — clamped 1..=500 with no boundary feedback; Reports Builder date fields — validated by length-10 only, calendar-invalid dates pass through.
+- **Runtime:** the Connectors form was opened with the 3600 default visible (CONTROL/CN1.png); invalid-input behavior was not reproduced (would create records).
+- **Recommended fix:** inline validation messages at the field level (the codebase already has this pattern elsewhere, e.g. SLA thresholds "both thresholds must be positive numbers").
+- **Next action:** none queued.
+
+## FIND-010 — Customers "← back to search" clears the results without re-running the still-applied query (UX/QA trap)
+- **Classification:** UX defect (state loss)
+- **Severity:** Low · **Confidence/status:** Confirmed by implementation analysis (customers.rs, agent pass-2 read)
+- **Mechanism:** the back link clears `rows` and resets the pager but does not re-issue the search, so the user lands on "No customers loaded yet" even though a query was applied moments earlier.
+- **Runtime:** not reproduced (needs customer data/credentials); the page's search field + button were exercised on the empty-query path (CONTROL/CU1.png).
+- **Recommended fix:** re-run the last query on "back to search" (or keep the result set and scroll to top).
+- **Next action:** none queued.

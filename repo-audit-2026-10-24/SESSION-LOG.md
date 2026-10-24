@@ -81,3 +81,47 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
 - Decisions: the `ui-screenshot` cargo feature (window-size env override +
   harness) was NOT used — evidence comes from the default build; feature
   existence noted for pass 2 as a discovered QA affordance.
+
+
+## 2026-10-24 ~21:35 UTC — pass 2: control/option ledger (FEAT-002/003) COMPLETE
+
+- Source-first enumeration by 8 read-only agents (worklog Task IDs 3-a..3-h):
+  535 control/option rows across 23 pages + shell/platform (C-<PAGE>-<nn>),
+  each with label, source lines, conditions, validation, effect path,
+  dependencies and non-obvious notes; per-page UI-state lists and
+  FEAT-003 background/integration/persistence lines included.
+- Runtime verification via evidence/artifacts/control-verify.py (v1->v3):
+  46 real-input steps over 21 pages + restore. Machine-verified by content
+  diff with control-calibrated thresholds (chip 0.06-0.1, no-op 0.0-0.01,
+  checkmark 0.007, view switch 0.6-5.5) + OCR label targeting (4-pass) +
+  dark-rect/bbox detectors for +icon buttons + pill-verified navigation.
+- Tool iteration retained for honesty: v1's page-switch threshold (1.0)
+  false-negatived control-level changes (33 rows); calibration evidence
+  (pixel checks, strip reads, TSV dumps) drove the v2/v3 fixes. v3->v4/v5
+  residual fixes: dialog geometry (danger button is RIGHT of Cancel),
+  checkbox box-only response (left_shift 43), type-button bbox crops,
+  SE2 tab ambiguity resolved by targeted rerun SE2b (LM Studio verified).
+- NEXT-ACTIONS targeted controls all exercised: Settings Help Scout & LM
+  Studio tabs (LM Studio via SE2b), Knowledge import expander, Incidents
+  filters (+New Incident form, checkbox on/off), Reports Builder, Connectors
+  form, Diagnostics clear-log CONFIRMED EXECUTED (dialog opened, danger
+  button clicked, log cleared; button then absent with 0 events), AI Center
+  Copilot/Usage/Jobs tabs.
+- Deliberate non-clicks (state preservation for W-002/W-007): all sync
+  triggers, Mark complete, theme toggle. DB after pass 2 (read-only):
+  organizations=0, conversations=0, sync_runs=0, cursors=0, checkpoints=0,
+  jobs=0, application_errors=0 (the 1 synthetic boot event was consumed by
+  the executed clear-log).
+- Environment limitation recorded (NOT an app defect): XTEST KeyPress does
+  not reach egui TextEdit here (Customers/Support Graph text entry
+  source-verified only; xdotool unavailable).
+- New findings FIND-005..FIND-010 (all Low; mostly source-verified):
+  inconsistent destructive-action confirmation; idle Cancel-running-sync
+  misleading toast; hidden knowledge-gap writes; radar fire-and-forget
+  enqueues; silent input coercion (refresh-seconds default, capacity clamp,
+  length-10 dates); Customers back-to-search query loss.
+- Evidence: CONTROL/ 66 PNGs + control-verify-events.jsonl + CONTROL-app.log;
+  manifest E-032..E-080 appended (all validated: PIL + visual reads incl. an
+  8-frame sweep and chip/checkbox pixel checks).
+- Status changes: FEAT-002/003 -> SATISFIED; FEAT-004 IN PROGRESS (columns
+  complete for F- and C- ledgers; workflows pending).
