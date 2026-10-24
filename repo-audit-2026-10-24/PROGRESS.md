@@ -14,9 +14,9 @@
 | Feature inventory — controls | **PASS (pass 2)** | FEATURE-INVENTORY.md ledger: 535 C-rows (source-first, line refs) + 46 runtime control exercises (control-verify.py v3; E-032..E-080) | 2 recorded notes: XTEST keyboard-injection limitation (CU1/G01, env tooling) and Onboarding/Shell sync-control deferral (W-002/W-007 sequencing) |
 | Build/install/launch | PASS (build 0 warnings; launch verified; FIND-001/FIND-002 runtime-characterized) | BUILD-AND-INSTALL.md; evidence/screenshots/BUILD/; evidence/logs/F-CAND-001*.log | — |
 | Control testing | NOT STARTED | — | QA-001..007 after pass 2 |
-| Workflow testing | IN PROGRESS (W-007/W-009 DONE; W-002/W-005/W-006/W-010 DONE-PARTIAL; W-008 PARTIAL) | WORKFLOW-COVERAGE.md; E-081..E-142; FIND-008; FIND-002 closed | W-003/W-004 data-blocked; W-001 credential-blocked (exception registration next) |
+| Workflow testing | IN PROGRESS (W-007/W-009 DONE; W-002/W-005/W-006/W-010 DONE-PARTIAL; W-008 PARTIAL; W-001 BLOCKED w/ exceptions) | WORKFLOW-COVERAGE.md; E-081..E-142; exceptions.csv EXC-001..005; FIND-002 closed | W-003/W-004 data-blocked (exception registration at report time) |
 | Edge/failure/recovery testing | NOT STARTED | — | — |
-| Findings and fix recommendations | IN PROGRESS | FINDINGS.md (FIND-001 Medium; FIND-002..FIND-011 Low; FIND-002 RECLASSIFIED/CLOSED by W-009 — observation stands, no defect; FIND-008 + FIND-011 consequences runtime-characterized) | FIND-001 listener-health message partial (needs credentials) → exception registration; drain check source-verified only |
+| Findings and fix recommendations | IN PROGRESS | FINDINGS.md (FIND-001 Medium w/ EXC-003/004 registered; FIND-002 CLOSED by W-009; FIND-003..FIND-011 Low) | FIND-001 root cause + listener runtime-proven; credential-gated remediation surfaces now exception-registered |
 | Evidence reconciliation | IN PROGRESS | evidence/manifest.csv E-001..E-142 validated (zero missing paths; all logs tracked since checkpoint 5) | keep manifest ↔ files diff-current (EVID-005) |
 | Final report and publication | NOT STARTED | REPORT.md (skeleton) | after COV-001/002 |
 
@@ -30,8 +30,8 @@
 - Formal QA test steps executed (02-BUILD §3 ledger): 0 (pass-2 control exercises are inventory verification, not the formal ledger)
 - Passed / failed / partial / blocked / inconclusive / not attempted: 0 / 0 / 0 / 0 / 0 / 0 (formal ledger)
 - UI steps requiring screenshots: 29 (pass 1) + 46 (pass 2) + 10 W-007 + 10 W-010 + 12 W-006 + 10 W-005 + 9 W-002 + 3 W-009 steps — all covered; validated screenshots: 24 FEATURE + 66 CONTROL + 1 BUILD + 45 WORKFLOW (PIL + visually validated)
-- Accepted exceptions by type: none (the two pass-2 notes are recorded limitations/sequencing decisions in FEATURE-INVENTORY.md + manifest, not E1-E6 evidence exceptions)
-- Unresolved evidence gaps: none new; W-001/W-003 external-data blockers unchanged
+- Accepted exceptions by type: E2 × 5 (EXC-001..EXC-005 in evidence/exceptions.csv — all rooted in the single external Help Scout-credentials blocker; each blocker established by an executed attempt or impossibility inspection, never speculation)
+- Unresolved evidence gaps: W-001 OAuth round-trip + configured-state listener-health message + webhook drain + sync happy path (EXC-001..005, external); W-003/W-004 data-blocked; tooling-deferred items (C-SET-66, W-006 creation, W-005 text path, W-008 keyboard) unchanged
 - Findings by severity/status: FIND-001 Medium confirmed (listener-health sub-check partial: message only renders with credentials — exception registration next); FIND-002 RECLASSIFIED/CLOSED (W-009: observation/informational stands, no defect); FIND-003..FIND-011 Low confirmed (FIND-008 runtime-confirmed; FIND-011 fall-through consequence attributed — a real sync action was triggered)
 
 Counts reconciled? Partial — page/control inventory reconciled (FEATURE-INVENTORY.md + manifest E-001..E-142); workflow counts current through W-002/W-005/W-006/W-007/W-008/W-009/W-010; QA-ledger counts remain preliminary until those execute.

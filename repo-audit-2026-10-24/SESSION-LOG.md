@@ -397,3 +397,31 @@ logs/W009-second-instance.log, E-138..E-142; WORKFLOW-COVERAGE W-009 →
 DONE; FINDINGS FIND-002 closed with decision. Next per HANDOVER: FIND-001
 exception registration (W-001 credential blocker) → QA-004/005 edge tests
 → formal QA ledger.
+
+## 2026-10-25 (cont.) — FIND-001 closing decision: exceptions registered (EXC-001..EXC-005)
+
+Created evidence/exceptions.csv (11 columns per instruction 03 §4) with five
+E2 exceptions, one per affected test step, all rooted in the same external
+blocker (no live Help Scout credentials/endpoint in the sandbox):
+- EXC-001 → W-001-S003 (OAuth authorize redirect) — blocker established by
+  the executed E-135 attempt (unconfigured tab offers no connect surface).
+- EXC-002 → W-001-S004 (callback → provider hot-swap) — leg 2 requires
+  leg 1; listener bind itself runtime-proven both ways (F-CAND-001 logs).
+- EXC-003 → W-001-S005 (webhook persist + drain at worker start) — a signed
+  event cannot be forged outside the app (HMAC secret app-internal);
+  workers.rs:219 source-verified.
+- EXC-004 → W-001-S002 (configured-state listener-health message — the
+  FIND-001 remediation surface) — only the unconfigured state is reachable
+  (E-135); this is the sub-check FIND-001 left open.
+- EXC-005 → W-002-S004 happy-path branch (engine running, checkpoints
+  populate) — the executed branch is the DESIGNED refusal (E-132), correct
+  behavior without credentials.
+All: Test Status Blocked, review status accepted-as-justified (each blocker
+established by an executed attempt or by impossibility inspection, never
+speculation). W-001 steps enumerated S001..S005 in WORKFLOW-COVERAGE with
+per-step status; W-001 row → BLOCKED (external). Manifest: E-135 linked to
+EXC-001/002/004; E-132/E-133 linked to EXC-005. FIND-001 Next-action
+paragraph updated; finding stays CONFIRMED/Medium (root cause + listener
+behavior runtime-proven; only credential-gated remediation surfaces remain).
+Next per NEXT-ACTIONS: edge/failure/recovery + cross-feature tests
+(QA-004/005) → formal QA ledger (QA-001..007).

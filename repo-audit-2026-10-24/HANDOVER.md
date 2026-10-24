@@ -78,8 +78,13 @@ stays observation/informational (Low), no defect. All pre-existing
 fatal.log rows attributed (3 bring-up panics + build test + 2 walk relaunch
 races; zero orphans). Findings now FIND-001 (Medium) + FIND-003..FIND-011 (Low; FIND-008
 runtime-confirmed; FIND-011 consequence attributed); FIND-002 closed by the
-W-009 decision. Next: FIND-001 exception registration → QA-004/005 edge
-tests → formal QA ledger; W-003/W-004 data-blocked, W-001 credential-blocked.
+W-009 decision. **FIND-001 closing decision executed:** exceptions.csv
+created with EXC-001..EXC-005 (all E2, one per affected step — OAuth legs
+1/2, webhook drain, configured-state listener-health message, sync happy
+path; every blocker established by an executed attempt or impossibility
+inspection; W-001 steps enumerated S001..S005, row → BLOCKED). Next:
+QA-004/005 edge tests → formal QA ledger; W-003/W-004 data-blocked, W-001
+exception-covered.
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -93,7 +98,11 @@ tests → formal QA ledger; W-003/W-004 data-blocked, W-001 credential-blocked.
   (groups a–h merged); evidence/screenshots/CONTROL/ (66 PNGs);
   evidence/artifacts/control-verify.py + control-verify-events.jsonl (incl.
   retained v1/v2 tool-calibration rows); evidence/logs/CONTROL-app.log
-- Findings: FINDINGS.md (FIND-001..FIND-011; FIND-002 closed by W-009)
+- Findings: FINDINGS.md (FIND-001..FIND-011; FIND-002 closed by W-009;
+  FIND-001 external sub-checks exception-registered)
+- Exceptions: evidence/exceptions.csv (EXC-001..EXC-005, all E2, all
+  accepted-as-justified; manifest linked E-135→EXC-001/002/004,
+  E-132/E-133→EXC-005)
 - Workflows: WORKFLOW-COVERAGE.md (W-007/W-009 DONE; W-002/W-005/W-006/
   W-010 DONE-PARTIAL; W-008 PARTIAL; W-001/W-003/W-004 blocked)
 - Report: REPORT.md (skeleton, IN PROGRESS)
@@ -179,10 +188,12 @@ tests → formal QA ledger; W-003/W-004 data-blocked, W-001 credential-blocked.
   blocked (external/data) — all 10 now executed or explicitly blocked
 - Evidence: E-001..E-142, all validated; every manifest path exists AND is
   git-tracked (log-evidence gap closed at checkpoint 5)
-- Accepted exceptions: none yet · Unresolved gaps: W-001 OAuth round-trip +
-  W-003 deep steps blocked on external credentials/data (exception
-  registration is the immediate next action); C-SET-66, W-006 creation,
-  W-005 text path, W-008 keyboard steps deferred by tooling
+- Accepted exceptions: E2 × 5 (EXC-001..EXC-005 — Help Scout external
+  dependency: OAuth legs 1/2, webhook drain, configured-state listener
+  message, sync happy path; all accepted-as-justified) · Unresolved gaps:
+  W-003/W-004 deep steps blocked on data (exception registration at report
+  time); C-SET-66, W-006 creation, W-005 text path, W-008 keyboard steps
+  deferred by tooling
 - Findings: FIND-001 Medium; FIND-003..FIND-011 Low (FIND-008
   runtime-confirmed; FIND-011 consequence attributed); FIND-002 CLOSED by
   W-009 (observation/informational stands, no defect)
@@ -195,17 +206,13 @@ tests → formal QA ledger; W-003/W-004 data-blocked, W-001 credential-blocked.
 - Coverage snapshot time: 2026-10-25 ~00:35 UTC
 
 ## Outstanding tasks (ordered)
-1. FIND-001 closing decision: register the W-001 OAuth round-trip +
-   listener-health sub-checks as an evidence exception (external
-   dependency) in evidence/exceptions.csv per instruction 05 (E-135
-   already captures the unconfigured tab); webhook drain stays
-   source-verified.
-2. Edge/failure/recovery + cross-feature tests (QA-004/005) — the
-   second-instance UI check is DONE (W-009, FIND-002 closed); carry its
-   result in.
-3. Formal QA ledger (QA-001..007) with per-step screenshots (EVID-001..006);
-   exceptions to evidence/exceptions.csv as they arise (W-001 credential
-   blocker likely becomes one — see #1).
+1. Edge/failure/recovery + cross-feature tests (QA-004/005) — the
+   second-instance UI check is DONE (W-009, FIND-002 closed); the external
+   blockers are exception-registered (exceptions.csv EXC-001..EXC-005,
+   E2, accepted-as-justified; W-001 row BLOCKED with steps enumerated).
+2. Formal QA ledger (QA-001..007) with per-step screenshots (EVID-001..006);
+   exceptions to evidence/exceptions.csv as they arise (W-003/W-004
+   data-blocked steps likely become EXC-006+ at report time).
 4. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001 completion.
 5. Coverage reconciliation (COV-001/002) + evidence accounting (EVID-006).
 6. REPORT.md consolidation (REPORT-001) and completion gate (04 §5).
@@ -241,8 +248,9 @@ tests → formal QA ledger; W-003/W-004 data-blocked, W-001 credential-blocked.
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-25 ~00:35 UTC
-- Validator/check: W-009 6/6 steps PASS (w009-* JSONL rows; flock probes
+- Timestamp/timezone: 2026-10-25 ~00:50 UTC
+- Validator/check: exceptions.csv parsed (5 rows × 11 columns, all
+  populated, csv.DictWriter-quoted); W-009 6/6 steps PASS (w009-* JSONL rows; flock probes
   held/acquirable; second-attempt exit 1; pixel diffs 0.0/0.0/0.0; DB
   unchanged; fatal.log +1 designed row); W009 PNGs (3) PIL-validated;
   manifest E-001..E-142 zero missing paths; DB integrity ok, theme=light,

@@ -1,20 +1,19 @@
 # Next Actions
 
 ## Immediate next action
-1. **Action:** FIND-001 closing decision: register the W-001 OAuth
-   round-trip + listener-health message sub-checks as an evidence
-   exception (type E2 external dependency) in evidence/exceptions.csv,
-   per instruction 05 — the sandbox has no live Help Scout endpoint or
-   credentials, and W-002 already captured the unconfigured-tab state
-   (E-135). Webhook drain stays source-verified (cannot forge a signed
-   event).
-   - Relevant IDs/files: FIND-001; W-001; evidence/exceptions.csv (create);
-     INSTRUCTION-LOADING-RECORD.md §05 reference
-   - Prerequisites: none
-   - Records: exceptions.csv, FINDINGS.md FIND-001, manifest, SESSION-LOG
-   - Then: edge/failure/recovery + cross-feature tests (QA-004/005) — the
-     FIND-002 reclassification is DONE (W-009), carry its result in.
-
+1. **Action:** Edge/failure/recovery + cross-feature tests (QA-004/005):
+   enumerate the edge cases that are executable in this sandbox (restart
+   during operation, double-launch — DONE via W-009, empty-state pages,
+   zero-data exports, malformed-env handling) and execute them with
+   per-step screenshots; the FIND-002 reclassification is already DONE
+   (W-009). The externally blocked steps are exception-registered
+   (exceptions.csv EXC-001..EXC-005, created 2026-10-25).
+   - Relevant IDs/files: QA-004/005 ledger (02-BUILD §3); exceptions.csv;
+     W-009 result in WORKFLOW-COVERAGE.md
+   - Prerequisites: Xvfb tooling proven
+   - Records: SESSION-LOG.md, manifest, exceptions.csv as they arise
+   - Then: formal QA ledger (QA-001..007) consolidation with per-step
+     screenshots (EVID-001..006).
 ## Remaining actions (dependency order)
 2. W-003/W-004 remain data-blocked (register as exceptions if still
    unexecutable at report time); deferred (tooling): C-SET-66 "really

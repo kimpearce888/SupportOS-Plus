@@ -18,7 +18,7 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 - **Regression risks:** changing port preference may break Help Scout redirect-URI matching (redirect must match exactly per main.rs comment) — the fix must keep the OAuth redirect functional and tested against both sources.
 - **Acceptance criteria:** with :3000 occupied and SPP_LOOPBACK_PORT set, listener binds the override; UI shows listener state; OAuth flow + webhook POST succeed on the bound port.
 - **Verification plan:** runtime matrix: (a) :3000 free, default URI → ready; (b) :3000 occupied, default URI → degraded + visible UI signal; (c) :3000 occupied, SPP_LOOPBACK_PORT=3999 → ready on 3999; (d) webhook POST delivered while degraded → drained at next worker start.
-- **Next action:** Settings/Connectors UI runtime check of the health-check message; webhook drain runtime test.
+- **Next action (updated 2026-10-25):** both remaining runtime sub-checks are externally blocked and now carry registered exceptions: the configured-state listener-health message (EXC-004 — the only reachable tab state, unconfigured, was executed and captured as E-135) and the webhook drain (EXC-003 — a signed event cannot be forged outside the app; workers.rs:219 source-verified). The OAuth round-trip legs carry EXC-001/EXC-002. All evidence/exceptions.csv E2, accepted-as-justified. The finding stays CONFIRMED/Medium — its root cause (port-preference chain) and the listener both/behavior are runtime-proven; only the credential-gated remediation surfaces remain runtime-unverified.
 
 ## FIND-002 — Second-instance guard works; message only in stderr log (observation, not a defect)
 - **Classification:** observation/informational
