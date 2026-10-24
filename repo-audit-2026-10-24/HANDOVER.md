@@ -8,11 +8,11 @@
 
 ## Repository and Git state
 - Local path: /home/z/my-project/audit/SupportOS-Plus
-- Original application revision audited: `main` @ `3affe7e` (full: `git rev-parse HEAD` = 3affe7e…; subject "ai: batch 36 runner verification recorded …")
-- Current branch / HEAD: `main` @ `3affe7e`, working tree clean except new untracked `repo-audit-2026-10-24/`
-- Audit branch: not yet created
-- Audit state: local / uncommitted (audit folder only)
-- Latest verified remote branch/commit: origin/main @ 3affe7e (fresh clone); push access verified 2026-10-24 via authenticated `git ls-remote` on this account
+- Original application revision audited: `main` @ `3affe7e` (3affe7ede6fbb0da32b50726409e3898619b2d50)
+- Current branch / HEAD: `repo-audit/2026-10-24` @ checkpoint-1 (e15ffa8fac2d175739fd4bbde207e8c90b3c1717); main untouched
+- Audit branch: `repo-audit/2026-10-24` (created from main @ 3affe7e)
+- Audit state: committed + pushed (checkpoint 1: 32 files, audit folder only; app code byte-identical to 3affe7e)
+- Latest verified remote branch/commit: origin/repo-audit/2026-10-24 @ e15ffa8 (verified via git ls-remote 2026-10-24); origin/main @ 3affe7e
 
 ## Current phase and exact progress
 - Phase / batch ID: Batch 1 (build/install/launch + environment + tests) COMPLETE; Batch 2 (feature inventory pass 1) QUEUED

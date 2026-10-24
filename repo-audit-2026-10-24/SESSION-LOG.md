@@ -30,3 +30,12 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
 - Records/files updated: PROGRESS.md, SESSION-LOG.md, NEXT-ACTIONS.md, HANDOVER.md, REPORT.md §14
 - Status changes or decisions: SPP_LOOPBACK_PORT found ineffective when redirect URI has a port (implementation-confirmed root cause, main.rs:103–113); loopback.rs settings health check (1.1.4) identified as existing mitigation — UI verification queued
 - Next action: Feature inventory pass 1 (pages/ sources + runtime UI walk with XTEST injection), then workflow ledger
+
+### `2026-10-24 16:10 UTC` — Z.ai Code (same session)
+- Revision/branch: repo-audit/2026-10-24 @ e15ffa8 (checkpoint 1)
+- Action performed: Created audit branch from main @ 3affe7e; staged ONLY repo-audit-2026-10-24/ (32 files); secret scan of staged set clean; commit + push + remote verification via ls-remote; recorded FIND-003 (pre-existing qa-audit secrets.key artifacts — observation only, no user content modified)
+- Actual result: publication VERIFIED — origin/repo-audit/2026-10-24 @ e15ffa8
+- Evidence/output paths: git ls-remote output recorded in HANDOVER.md §Git state
+- Records/files updated: HANDOVER.md, FINDINGS.md (FIND-003), SESSION-LOG.md
+- Status changes or decisions: findings renumbered: F-001/F-002 are findings (kept for continuity with SESSION-LOG references), new pre-existing-content observation = FIND-003; feature IDs will use F-<nnn> namespace (collision-free)
+- Next action: feature-inventory pass 1 (page walk with XTEST + per-page screenshots)
