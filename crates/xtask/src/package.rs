@@ -14,9 +14,10 @@
 //!   unit-tested directly.
 //! * [`package`] / [`package_deb`] — release build + staging + running
 //!   `appimagetool` (located via `APPIMAGETOOL`, cached under
-//!   `target/tools/`, or downloaded once from the official continuous
-//!   release; run with `APPIMAGE_EXTRACT_AND_RUN=1` so it works on
-//!   FUSE-less builders) / `dpkg-deb --root-owner-group`.
+//!   `target/tools/`, or downloaded from the version-pinned release and
+//!   SHA-256-verified before execution — item 158; run with
+//!   `APPIMAGE_EXTRACT_AND_RUN=1` so it works on FUSE-less builders) /
+//!   `dpkg-deb --root-owner-group`.
 //!
 //! Naming layers (maintainer instruction, 2026-10-19; completed for
 //! 1.0.0): `SupportOS+` is the human display name (window title, desktop
@@ -27,6 +28,7 @@
 //! `+`, and the hyphenated form matches the package name).
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -59,8 +61,15 @@ const ICON_SIZES: &[(&str, &str)] = &[
     ("1024x1024", "1024x1024.png"),
 ];
 
+/// The pinned appimagetool release (clean-audit item 158). The URL used
+/// to point at the moving `continuous` build with no integrity check —
+/// whatever GitHub served that day was executed in the release path. The
+/// version tag and SHA-256 are pinned instead: a mismatched tool (tampered
+/// download, corrupted cache, upstream re-upload) refuses to run.
 const APPIMAGETOOL_URL: &str = "https://github.com/AppImage/appimagetool/releases/download/\
-                                continuous/appimagetool-x86_64.AppImage";
+                                1.9.1/appimagetool-x86_64.AppImage";
+const APPIMAGETOOL_SHA256: &str =
+    "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0";
 
 /// Host libraries that must ship inside the AppImage. winit loads the
 /// X11 keyboard stack via `dlopen` at window creation
@@ -304,6 +313,14 @@ fn copy_hicolor_icons(icons_dir: &Path, hicolor_root: &Path) -> anyhow::Result<(
 /// └── usr/share/icons/hicolor/<size>/apps/supportos-plus.png
 /// ```
 pub fn stage_appdir(workspace_root: &Path, appdir: &Path) -> anyhow::Result<()> {
+    // Clean-audit item 157: a leftover staging tree from a previous build
+    // must not ship — the .deb path already wipes `debroot` the same way.
+    // Without this, files that are no longer part of the layout (a
+    // renamed artifact, a removed icon size, a stale AppRun) would ride
+    // along inside the packed AppImage forever.
+    if appdir.exists() {
+        fs::remove_dir_all(appdir)?;
+    }
     let bin_src = workspace_root
         .join("target")
         .join("release")
@@ -596,11 +613,44 @@ fn resolve_appimagetool(
         .join("target")
         .join("tools")
         .join("appimagetool-x86_64.AppImage");
-    if cached.is_file() {
+    if cached.is_file() && verify_appimagetool(&cached).is_ok() {
         return Ok(cached);
     }
     download_appimagetool(&cached)?;
+    verify_appimagetool(&cached)?;
     Ok(cached)
+}
+
+/// SHA-256 of the tool on disk (streamed; the AppImage is ~15 MB).
+fn sha256_file(path: &Path) -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
+/// Refuse to execute a tool that does not match the pinned checksum.
+fn verify_appimagetool(path: &Path) -> anyhow::Result<()> {
+    let got = sha256_file(path)?;
+    anyhow::ensure!(
+        got == APPIMAGETOOL_SHA256,
+        "appimagetool checksum mismatch at {} — expected {APPIMAGETOOL_SHA256}, got {got}; \
+         refusing to execute an unverified tool in the release path",
+        path.display()
+    );
+    Ok(())
 }
 
 /// Verify the checked-in icon set that both packages stage. Kept here so
@@ -617,7 +667,7 @@ fn download_appimagetool(dest: &Path) -> anyhow::Result<()> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
-    eprintln!("package: downloading appimagetool from the continuous release…");
+    eprintln!("package: downloading appimagetool 1.9.1 (sha256 {APPIMAGETOOL_SHA256})…");
     // Bounded download (audit item 160): a default blocking GET has no
     // timeout, so a stalled connection could hang a CI job forever.
     let client = reqwest::blocking::Client::builder()
@@ -746,6 +796,31 @@ mod tests {
         let apprun = fs::read_to_string(appdir.join("AppRun")).expect("AppRun");
         assert!(apprun.contains(&format!("usr/bin/{BINARY_NAME}")));
         assert!(apprun.contains("export LD_LIBRARY_PATH=\"$HERE/usr/lib"));
+    }
+
+    /// Clean-audit item 157: staging wipes a leftover AppDir first, so
+    /// files that are no longer part of the layout cannot ship.
+    #[test]
+    fn stage_appdir_cleans_a_stale_staging_tree() {
+        let root = temp_root("stale");
+        fake_release_build(&root);
+        real_icons(&root);
+
+        let appdir = root.join("out").join(format!("{BINARY_NAME}.AppDir"));
+        let stale = appdir.join("usr").join("bin").join("removed-artifact.old");
+        fs::create_dir_all(appdir.join("usr").join("bin")).expect("stale tree");
+        fs::write(&stale, b"stale build output").expect("stale file");
+
+        stage_appdir(&root, &appdir).expect("stage");
+
+        assert!(
+            !stale.exists(),
+            "the stale file must not survive the re-stage"
+        );
+        assert!(
+            appdir.join("usr").join("bin").join(BINARY_NAME).is_file(),
+            "the fresh layout is staged"
+        );
     }
 
     #[test]

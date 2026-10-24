@@ -21,4 +21,7 @@ clap = { version = "4", features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
+# Item 158: the release path executes the downloaded appimagetool, so the
+# pinned checksum is verified with the same hash crate the core uses.
+sha2 = "0.11"
 supportos-plus-core = { workspace = true }

@@ -40,6 +40,10 @@ pub struct IncidentsPage {
     filter_query: String,
     applied_query: String,
     rows: Vec<serde_json::Value>,
+    /// Clean-audit item 147: reload latch — an empty mirror is a legal
+    /// steady state, so "list empty" can no longer mean "re-query every
+    /// frame".
+    loaded: bool,
     total: i64,
     selected: Option<i64>,
     detail: Option<serde_json::Value>,
@@ -90,6 +94,7 @@ impl IncidentsPage {
             filter_query: String::new(),
             applied_query: String::new(),
             rows: Vec::new(),
+            loaded: false,
             total: 0,
             selected: None,
             detail: None,
@@ -112,6 +117,7 @@ impl IncidentsPage {
 
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
+        self.loaded = false;
         self.rows.clear();
         self.detail = None;
     }
@@ -142,6 +148,7 @@ impl IncidentsPage {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+        self.loaded = true;
     }
 
     fn reload_detail(&mut self, db: &DbHandle, id: i64) {
@@ -162,7 +169,7 @@ impl IncidentsPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.rows.is_empty() {
+        if !self.loaded {
             self.reload_list(db);
         }
     }

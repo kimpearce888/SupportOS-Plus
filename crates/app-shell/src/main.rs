@@ -18,31 +18,33 @@ fn main() {
     // move + database rename); no-op on fresh installs and repeat runs.
     spp_core::config::migrate_legacy_data_dir();
 
-    let app_config = spp_core::config::AppConfig::default();
-    tracing::info!(?app_config.data_dir, "data directory");
+    // Clean-audit item 153: the AppConfig struct carried four fields
+    // nothing consumed; only `data_dir` was ever read.
+    let data_dir = spp_core::config::default_data_dir();
+    tracing::info!(?data_dir, "data directory");
 
     // v1.1.1: from here on, panics also land in logs/fatal.log. Desktop
     // entries discard stderr, so without this a renderer or context
     // panic leaves nothing behind ("opened it, nothing appeared").
-    spp_shell::fatal::install_panic_hook(app_config.data_dir.clone());
+    spp_shell::fatal::install_panic_hook(data_dir.clone());
 
-    let lock = match spp_shell::single_instance::acquire(&app_config.data_dir) {
+    let lock = match spp_shell::single_instance::acquire(&data_dir) {
         Ok(lock) => lock,
         Err(e) => {
             tracing::error!(error = %e, "cannot acquire the instance lock");
-            spp_shell::fatal::fatal(&app_config.data_dir, "cannot start", &e);
+            spp_shell::fatal::fatal(&data_dir, "cannot start", &e);
             std::process::exit(1);
         }
     };
     // Held for the whole process lifetime; releasing is automatic on exit.
     let _lock = lock;
 
-    let db_path = app_config.data_dir.join(spp_core::config::DB_FILE_NAME);
+    let db_path = data_dir.join(spp_core::config::DB_FILE_NAME);
     let db = match spp_shell::open_db(&db_path) {
         Ok(db) => db,
         Err(e) => {
             tracing::error!(error = %e, path = %db_path.display(), "failed to open SQLite DB");
-            spp_shell::fatal::fatal(&app_config.data_dir, "failed to open SQLite DB", &e);
+            spp_shell::fatal::fatal(&data_dir, "failed to open SQLite DB", &e);
             std::process::exit(1);
         }
     };
@@ -72,7 +74,7 @@ fn main() {
             .with_read(|conn| spp_core::settings::get_bool(conn, "qdrant_enabled", true))
             .unwrap_or(true);
         std::sync::Arc::new(spp_core::vectorstore_sqlitevec::VectorIndex::new(
-            app_config.data_dir.clone(),
+            data_dir.clone(),
             enabled,
         ))
     };
@@ -81,17 +83,13 @@ fn main() {
         Some(boot.engine.clone()),
         boot.provider.clone(),
         bus.clone(),
-        app_config.data_dir.clone(),
+        data_dir.clone(),
         Some(vector_index.clone()),
     ) {
         Ok(host) => host,
         Err(e) => {
             tracing::error!(error = %e, "failed to start background workers");
-            spp_shell::fatal::fatal(
-                &app_config.data_dir,
-                "failed to start background workers",
-                &e,
-            );
+            spp_shell::fatal::fatal(&data_dir, "failed to start background workers", &e);
             std::process::exit(1);
         }
     };
@@ -138,7 +136,7 @@ fn main() {
     let options = spp_shell::ShellOptions {
         db,
         bus,
-        data_dir: app_config.data_dir.clone(),
+        data_dir: data_dir.clone(),
         sync: Some(boot.engine),
         handle: Some(boot.handle),
         workers: Some(std::sync::Arc::new(_workers)),
@@ -155,7 +153,7 @@ fn main() {
     if std::env::var("SPP_SMOKE").as_deref() == Ok("1") {
         if let Err(e) = spp_shell::smoke::run_shell_smoke(options) {
             tracing::error!(error = %e, "SPP_SMOKE: shell smoke failed");
-            spp_shell::fatal::fatal(&app_config.data_dir, "smoke failed", e);
+            spp_shell::fatal::fatal(&data_dir, "smoke failed", e);
             std::process::exit(1);
         }
         tracing::info!(
@@ -169,7 +167,7 @@ fn main() {
         tracing::error!(error = %e, "shell failed");
         // No window exists at this point; make the failure findable
         // (fatal.log) and visible (dialog) instead of a silent exit.
-        spp_shell::fatal::fatal(&app_config.data_dir, "shell failed", &e);
+        spp_shell::fatal::fatal(&data_dir, "shell failed", &e);
         std::process::exit(1);
     }
 }

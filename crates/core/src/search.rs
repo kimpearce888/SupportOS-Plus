@@ -120,11 +120,10 @@ pub fn apply_fts_migration(conn: &Connection) -> Result<()> {
             object_id UNINDEXED
         );
 
-        -- Legacy pre-parity tables (index_conversation / index_customer).
-        CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts
-         USING fts5(remote_id UNINDEXED, subject, preview);
-        CREATE VIRTUAL TABLE IF NOT EXISTS customers_fts
-         USING fts5(remote_id UNINDEXED, first_name, last_name, email, organization);",
+        -- Clean-audit item 155: the legacy pre-parity tables
+        -- (conversations_fts / customers_fts, written by the dead
+        -- index_conversation / index_customer writers and never queried
+        -- by any search lane) are no longer created.",
     )?;
 
     if table_exists(conn, "conversations")? {
@@ -193,7 +192,6 @@ pub fn apply_fts_migration(conn: &Connection) -> Result<()> {
             embedding_state TEXT DEFAULT 'not_indexed',
             embedding_model TEXT,
             embedding       BLOB,
-            chunk_version   INTEGER DEFAULT 2,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE (document_id, chunk_index)
         );
@@ -1327,8 +1325,6 @@ fn rebuild_indexes_tx(conn: &Connection) -> Result<usize> {
         "fts_ai_analyses",
         "docs_fts",
         "fts_custom_objects",
-        "conversations_fts",
-        "customers_fts",
     ] {
         conn.execute(&format!("DELETE FROM {table}"), [])?;
     }
@@ -1409,19 +1405,6 @@ fn rebuild_indexes_tx(conn: &Connection) -> Result<usize> {
         rebuild_custom_objects_fts(conn)?;
     }
 
-    conn.execute(
-        "INSERT INTO conversations_fts (remote_id, subject, preview)
-         SELECT remote_id, COALESCE(subject, ''), COALESCE(preview, '')
-           FROM conversations WHERE deleted_at IS NULL",
-        [],
-    )?;
-    conn.execute(
-        "INSERT INTO customers_fts (remote_id, first_name, last_name, email, organization)
-         SELECT remote_id, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), COALESCE(organization, '')
-           FROM customers WHERE deleted_at IS NULL",
-        [],
-    )?;
-
     if table_exists(conn, "application_settings")? {
         conn.execute(
             "INSERT OR REPLACE INTO application_settings (key, value) VALUES ('fts_version', '3')",
@@ -1475,49 +1458,11 @@ fn build_custom_object_search_text(title: &str, data_json: Option<&str>) -> Stri
     }
 }
 
-pub fn index_conversation(
-    conn: &Connection,
-    remote_id: i64,
-    subject: &str,
-    preview: &str,
-) -> Result<()> {
-    conn.execute(
-        "DELETE FROM conversations_fts WHERE remote_id = ?1",
-        params![remote_id],
-    )?;
-    conn.execute(
-        "INSERT INTO conversations_fts (remote_id, subject, preview) VALUES (?1, ?2, ?3)",
-        params![remote_id, subject, preview],
-    )?;
-    if let Ok(local_id) = conn.query_row(
-        "SELECT id FROM conversations WHERE remote_id = ?1",
-        params![remote_id],
-        |r| r.get::<_, i64>(0),
-    ) {
-        index_conversation_fts(conn, local_id)?;
-    }
-    Ok(())
-}
-
-pub fn index_customer(
-    conn: &Connection,
-    remote_id: i64,
-    first_name: &str,
-    last_name: &str,
-    email: &str,
-    organization: &str,
-) -> Result<()> {
-    conn.execute(
-        "DELETE FROM customers_fts WHERE remote_id = ?1",
-        params![remote_id],
-    )?;
-    conn.execute(
-        "INSERT INTO customers_fts (remote_id, first_name, last_name, email, organization)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![remote_id, first_name, last_name, email, organization],
-    )?;
-    Ok(())
-}
+// Clean-audit item 155: `index_conversation` and `index_customer`
+// are gone. They fed the legacy `conversations_fts` / `customers_fts`
+// tables, which no search lane ever queried (the live lanes read
+// `fts_conversations` / `fts_threads` / `customers`); the writers had
+// no callers left.
 
 #[cfg(test)]
 mod batch13_a4_search_tests {
@@ -1621,8 +1566,8 @@ mod batch25_search_tests {
             let document_id = conn.last_insert_rowid();
             for (index, content) in chunks.iter().enumerate() {
                 conn.execute(
-                    "INSERT INTO knowledge_chunks (document_id, chunk_index, content, chunk_version)
-                     VALUES (?1, ?2, ?3, 2)",
+                    "INSERT INTO knowledge_chunks (document_id, chunk_index, content)
+                     VALUES (?1, ?2, ?3)",
                     params![document_id, index as i64, content],
                 )
                 .expect("chunk");
@@ -1709,8 +1654,8 @@ mod batch25_search_tests {
             .expect("document");
             let document_id = conn.last_insert_rowid();
             conn.execute(
-                "INSERT INTO knowledge_chunks (document_id, chunk_index, content, chunk_version)
-                 VALUES (?1, 0, 'billing content', 2)",
+                "INSERT INTO knowledge_chunks (document_id, chunk_index, content)
+                 VALUES (?1, 0, 'billing content')",
                 params![document_id],
             )
             .expect("chunk");

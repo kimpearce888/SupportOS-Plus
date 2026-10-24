@@ -58,8 +58,13 @@ def function_body(src: str, needle: str, end: str = "\n}\n") -> str:
 
 # ----------------------------------------------------------------- item 107
 def verify_item107() -> None:
+    # Batch 34 (item 153) re-point: `redact_string` moved into the
+    # test-only `batch30_tests` module (its production caller,
+    # HelpScoutConfig::redacted, was removed with the dead AppConfig
+    # surface), so the function body is indented and closes with a
+    # four-space brace.
     config = read_code(CORE, "config.rs")
-    body = function_body(config, "fn redact_string")
+    body = function_body(config, "fn redact_string", end="\n    }\n")
     check(
         "107: head/tail take CHARACTERS, not byte offsets",
         "s.chars().collect()" in body

@@ -255,8 +255,8 @@ pub fn upsert_document(
         )?;
         for (index, chunk) in chunks.iter().enumerate() {
             conn.execute(
-                "INSERT INTO knowledge_chunks (document_id, chunk_index, content, chunk_version)
-                 VALUES (?1, ?2, ?3, 2)",
+                "INSERT INTO knowledge_chunks (document_id, chunk_index, content)
+                 VALUES (?1, ?2, ?3)",
                 params![doc_id, index as i64, chunk],
             )?;
             let chunk_id = conn.last_insert_rowid();

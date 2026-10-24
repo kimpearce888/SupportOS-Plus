@@ -355,10 +355,10 @@ impl ServerEvent {
     }
 }
 
-pub trait EventEmitter: Send + Sync {
-    fn emit(&self, event: &ServerEvent) -> Result<(), String>;
-}
-
+// Clean-audit item 148: the `EventEmitter` trait (and its only impl on
+// [`crate::eventing::EventBus`]) is gone — every emitter calls the bus's
+// inherent `emit` directly, so the trait was a second, never-used way to
+// do the same thing.
 #[cfg(test)]
 mod batch20_audit23_tests {
     use super::*;

@@ -217,6 +217,10 @@ pub struct OperationsPage {
     workload: Option<WorkloadSnapshot>,
     capacity: Option<CapacityModel>,
     suggestions: Vec<spp_core::workload::SuggestedAssignee>,
+    /// Clean-audit item 147: reload latch for the suggestions lane — an
+    /// empty suggestion list is a legal steady state, so "empty" can no
+    /// longer mean "re-query every frame".
+    suggestions_loaded: bool,
     error: Option<String>,
     library: Option<LibraryModel>,
 }
@@ -230,6 +234,7 @@ impl OperationsPage {
             workload: None,
             capacity: None,
             suggestions: Vec::new(),
+            suggestions_loaded: false,
             error: None,
             library: None,
         }
@@ -242,6 +247,7 @@ impl OperationsPage {
     pub fn invalidate(&mut self) {
         self.snapshot = None;
         self.workload = None;
+        self.suggestions_loaded = false;
         self.suggestions.clear();
         if let Some(library) = &mut self.library {
             library.stale = true;
@@ -274,10 +280,11 @@ impl OperationsPage {
         if self.workload.is_none() {
             self.reload(db);
         }
-        if self.workload.is_some() && self.suggestions.is_empty() {
+        if self.workload.is_some() && !self.suggestions_loaded {
             self.suggestions = db.with_read(|conn| {
                 spp_core::workload::suggested_assignees(conn, 10).unwrap_or_default()
             });
+            self.suggestions_loaded = true;
         }
     }
 

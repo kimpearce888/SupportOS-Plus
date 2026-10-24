@@ -49,12 +49,9 @@ impl Default for EventBus {
     }
 }
 
-impl crate::events::EventEmitter for EventBus {
-    fn emit(&self, event: &ServerEvent) -> Result<(), String> {
-        let _ = EventBus::emit(self, event);
-        Ok(())
-    }
-}
+// Clean-audit item 148: the `EventEmitter` trait impl lived here and had
+// no caller — every producer (this module's `notify_*` helpers and the
+// engines) emits through the inherent `EventBus::emit` directly.
 
 pub fn notify_conversation_updated(bus: &EventBus, event: &ConversationUpdatedEvent) {
     bus.emit(&ServerEvent::ConversationUpdated(event.clone()));

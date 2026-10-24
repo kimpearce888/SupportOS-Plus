@@ -10,12 +10,10 @@ use crate::ai_prompts::{
     InteractionChangeInput, MEMORY_EXTRACTION_SYSTEM, PROMPT_VERSIONS_CUSTOMER_DRAFT,
     PROMPT_VERSIONS_DRAFT_VERIFICATION, PROMPT_VERSIONS_INTERACTION_OBSERVATION,
     PROMPT_VERSIONS_INTERACTION_RECOMMENDATION, PROMPT_VERSIONS_ISSUE_CLUSTER,
-    PROMPT_VERSIONS_MEMORY_EXTRACTION, PROMPT_VERSIONS_REPORT_NARRATIVE,
-    PROMPT_VERSIONS_TICKET_ANALYSIS, REPORT_NARRATIVE_SYSTEM, TICKET_ANALYSIS_SYSTEM,
+    PROMPT_VERSIONS_MEMORY_EXTRACTION, PROMPT_VERSIONS_TICKET_ANALYSIS, TICKET_ANALYSIS_SYSTEM,
     TicketAnalysis, build_customer_draft_user, build_draft_verification_user,
     build_interaction_observation_user, build_interaction_recommendation_user,
-    build_issue_cluster_user, build_memory_extraction_user, build_report_narrative_user,
-    build_ticket_analysis_user, truncate,
+    build_issue_cluster_user, build_memory_extraction_user, build_ticket_analysis_user, truncate,
 };
 use crate::ai_provider::ChatMessage;
 use crate::error::Result;
@@ -1936,55 +1934,10 @@ fn compute_trends(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub async fn report_narrative(
-    conn: &Connection,
-    backend: &AiBackend,
-    report_name: &str,
-    facts: &serde_json::Value,
-) -> std::result::Result<String, LmStudioError> {
-    let run_id = start_run(
-        conn,
-        "report_narrative",
-        None,
-        None,
-        PROMPT_VERSIONS_REPORT_NARRATIVE,
-        None,
-        &serde_json::json!([]),
-    )
-    .map_err(|e| LmStudioError::new(e.to_string(), true))?;
-    let res = backend
-        .chat_json(
-            conn,
-            REPORT_NARRATIVE_SYSTEM,
-            &build_report_narrative_user(report_name, facts),
-            true,
-            None,
-        )
-        .await;
-    let res = match res {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = fail_run(conn, run_id, &e.message);
-            return Err(e);
-        }
-    };
-    let narrative = res
-        .json
-        .as_ref()
-        .and_then(|j| j.get("narrative"))
-        .and_then(|n| n.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| res.raw.clone().unwrap_or_default().trim().to_string());
-    let _ = complete_run_with_usage(
-        conn,
-        run_id,
-        &serde_json::json!({ "narrative": narrative }),
-        res.latency_ms,
-        res.usage.as_ref(),
-        backend.endpoint_id(),
-    );
-    Ok(narrative)
-}
+// Clean-audit item 149: the standalone `report_narrative` runner is gone —
+// it had no caller (the weekly digest runs its own narrative lane with
+// its own run bookkeeping since batch 28), so the dead surface, its
+// system prompt and its prompt-version constant are removed with it.
 
 pub fn build_ai_note(
     _conversation_local_id: i64,

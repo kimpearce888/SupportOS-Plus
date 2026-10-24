@@ -83,6 +83,10 @@ pub struct ConnectorsPage {
     message: Option<String>,
     error: Option<String>,
     data_dir: Option<PathBuf>,
+    /// Clean-audit item 147: reload latch — an empty mirror is a legal
+    /// steady state, so "list empty" can no longer mean "re-query every
+    /// frame".
+    loaded: bool,
 }
 
 impl ConnectorsPage {
@@ -90,6 +94,7 @@ impl ConnectorsPage {
     pub fn new() -> Self {
         Self {
             connectors: Vec::new(),
+            loaded: false,
             selected: None,
             rows: Vec::new(),
             rows_total: 0,
@@ -114,6 +119,7 @@ impl ConnectorsPage {
 
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
+        self.loaded = false;
         self.connectors.clear();
         self.rows.clear();
     }
@@ -133,6 +139,7 @@ impl ConnectorsPage {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+        self.loaded = true;
         if let Some(id) = self.selected {
             self.reload_rows(db, id);
         }
@@ -160,7 +167,7 @@ impl ConnectorsPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.connectors.is_empty() {
+        if !self.loaded {
             self.reload(db);
         }
     }

@@ -44,6 +44,10 @@ pub struct NotificationsPage {
     unread: i64,
     mentions: Vec<NotificationRecord>,
     error: Option<String>,
+    /// Clean-audit item 147: reload latch — an empty mirror is a legal
+    /// steady state, so "list empty" can no longer mean "re-query every
+    /// frame".
+    loaded: bool,
 }
 
 impl NotificationsPage {
@@ -56,11 +60,13 @@ impl NotificationsPage {
             unread: 0,
             mentions: Vec::new(),
             error: None,
+            loaded: false,
         }
     }
 
     /// Live-update invalidation (web: the notification unread version key).
     pub fn invalidate(&mut self) {
+        self.loaded = false;
         self.records.clear();
         self.mentions.clear();
     }
@@ -95,10 +101,11 @@ impl NotificationsPage {
             Err(e) => self.error = Some(e.to_string()),
         }
         self.mentions = mentions_result.unwrap_or_default();
+        self.loaded = true;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.records.is_empty() {
+        if !self.loaded {
             self.reload(db);
         }
     }

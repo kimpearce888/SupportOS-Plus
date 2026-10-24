@@ -31,6 +31,10 @@ pub struct OrganizationsPage {
     new_name: String,
     new_domains: String,
     error: Option<String>,
+    /// Clean-audit item 147: reload latch — an empty mirror is a legal
+    /// steady state, so "list empty" can no longer mean "re-query every
+    /// frame".
+    loaded: bool,
 }
 
 impl OrganizationsPage {
@@ -46,11 +50,13 @@ impl OrganizationsPage {
             new_name: String::new(),
             new_domains: String::new(),
             error: None,
+            loaded: false,
         }
     }
 
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
+        self.loaded = false;
         self.orgs.clear();
         self.detail = None;
     }
@@ -82,6 +88,7 @@ impl OrganizationsPage {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+        self.loaded = true;
         if let Some(id) = self.selected {
             self.reload_detail(db, id);
         }
@@ -95,7 +102,7 @@ impl OrganizationsPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.orgs.is_empty() {
+        if !self.loaded {
             self.reload(db);
         }
     }

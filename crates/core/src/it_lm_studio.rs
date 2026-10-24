@@ -61,7 +61,7 @@ fn chat_roundtrip_against_mock_server() {
             crate::mockserver::MockResponse::json(404, r#"{"error":"no"}"#)
         }))
         .expect("mock server");
-    let provider = LmStudioProvider::with_base_url(mock.url());
+    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
 
     let resp = runtime()
         .block_on(async { provider.chat("test-model", &[user_message("hi")]).await })
@@ -205,7 +205,7 @@ fn list_models_and_role_inference_roundtrip() {
             )
         }))
         .expect("mock server");
-    let provider = LmStudioProvider::with_base_url(mock.url());
+    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
 
     let models = runtime()
         .block_on(async { provider.list_models().await })
@@ -236,7 +236,7 @@ fn embed_roundtrip_against_mock_server() {
             )
         }))
         .expect("mock server");
-    let provider = LmStudioProvider::with_base_url(mock.url());
+    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
 
     let resp = runtime()
         .block_on(async { provider.embed("nomic-embed-text-v1.5", "hello").await })
@@ -262,7 +262,7 @@ fn availability_probe_reflects_server_state() {
             crate::mockserver::MockResponse::json(200, json!({"data": []}))
         }))
         .expect("mock server");
-    let provider = LmStudioProvider::with_base_url(mock.url());
+    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
     assert!(
         runtime().block_on(async { provider.is_available().await }),
         "a healthy server must report available"
@@ -279,7 +279,9 @@ fn availability_probe_reflects_server_state() {
         .parse()
         .expect("port");
     drop(dead);
-    let dead_provider = LmStudioProvider::with_base_url(format!("http://127.0.0.1:{dead_port}"));
+    let dead_provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(format!(
+        "http://127.0.0.1:{dead_port}"
+    )));
     assert!(
         !runtime().block_on(async { dead_provider.is_available().await }),
         "a refused connection must report unavailable (no panic, no hang)"
@@ -292,7 +294,7 @@ fn server_error_surfaces_http_status_and_body() {
         crate::mockserver::MockResponse::json(500, r#"{"error": {"message": "model crashed"}}"#),
     ))
     .expect("mock server");
-    let provider = LmStudioProvider::with_base_url(mock.url());
+    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
 
     let err = runtime()
         .block_on(async { provider.chat("test-model", &[user_message("hi")]).await })
@@ -354,9 +356,11 @@ fn connection_refused_reports_cleanly_and_client_recovers() {
     // failed one.
     assert!(!runtime().block_on(async {
         use crate::ai_provider::LocalAiProvider as _;
-        LmStudioProvider::with_base_url(format!("http://127.0.0.1:{dead_port}"))
-            .is_available()
-            .await
+        LmStudioProvider::with_client(OpenAiCompatibleClient::new(format!(
+            "http://127.0.0.1:{dead_port}"
+        )))
+        .is_available()
+        .await
     }));
     let healthy = OpenAiCompatibleClient::new_with_timeout(mock.url(), 2_000);
     let resp = runtime()
@@ -409,7 +413,7 @@ fn malformed_success_body_is_a_parse_error() {
         crate::mockserver::MockResponse::json(200, "not-json-at-all"),
     ))
     .expect("mock server");
-    let provider = LmStudioProvider::with_base_url(mock.url());
+    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
 
     let err = runtime()
         .block_on(async { provider.chat("m", &[user_message("hi")]).await })

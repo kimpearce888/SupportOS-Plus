@@ -22,18 +22,11 @@ pub struct LmStudioProvider {
 }
 
 impl LmStudioProvider {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::with_base_url(LM_STUDIO_BASE_URL)
-    }
-
-    #[must_use]
-    pub fn with_base_url(base_url: impl Into<String>) -> Self {
-        Self {
-            client: OpenAiCompatibleClient::new(base_url),
-        }
-    }
-
+    // Clean-audit item 152: the `new` / `with_base_url` constructors and
+    // the `Default` impl are gone — zero callers anywhere. The provider is
+    // built through `with_client` (the hub hands out configured clients,
+    // ai_attributes.rs) or `with_base_url_and_timeout` (the integration
+    // tests).
     #[must_use]
     /// Wrap an existing client (the provider hub hands out clients that
     /// already carry the endpoint base URL, timeout and optional API key).
@@ -45,12 +38,6 @@ impl LmStudioProvider {
         Self {
             client: OpenAiCompatibleClient::new_with_timeout(base_url, timeout_ms),
         }
-    }
-}
-
-impl Default for LmStudioProvider {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
