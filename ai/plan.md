@@ -130,22 +130,14 @@ nonexistent updated_at column without the self-heal, and the two bare
 ORDER BY remote_created_at thread lanes) — verified and recorded in
 `completed.md`.
 
+Batch 31 = items 117-126 — in progress (moved to `progress.md`).
+
 ### MEDIUM — wrong behavior on realistic paths
 
 56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of any batch until then)
 
 ### LOW — edge cases, provable minor defects
 
-117. [low|bug] refresh_replies can count the campaign's own message (clock skew) — outreach.rs:1146-1150
-118. [low|bug] Duplicate graph edges for mutual links — support_graph.rs:1883-1884
-119. [low|bug] Tag-filter case-folding asymmetry (Rust Unicode vs SQL ASCII LOWER) — saved_views.rs:1692-1698
-120. [low|bug] Entity decode order double-decodes (&apos; missing) — knowledge_store.rs:1105-1114
-121. [low|bug] Byte-unsafe slicing helpers (html helpers İ-misalignment, valid_iso_date, copilot truncate_result) — knowledge_store.rs:1136-1176, custom_objects.rs:460, copilot.rs:24
-122. [low|bug] Numeric customer_property filters CAST text→0 — saved_views.rs:1843
-123. [low|gap] freshness_low_usage_days setting dead — knowledge_store.rs:376,415
-124. [low|bug] Pre-release vs pre-release compares as Same — version_check.rs:56-60
-125. [low|bug] Sweep windows drop oldest of a burst (DESC+stamp) — notification_sweep.rs:360 (+4 sites)
-126. [low|bug] parse_csv header/data index misalignment on empty headers — connectors.rs:904-916
 127. [low|bug] Digest chip 16.max slice (dead truncation + OOB risk) — pages/reports.rs:544
 128. [low|bug] QA rows render `#Some(42)` — pages/reports.rs:885
 129. [low|bug] Literal `\` mid-sentence in 3 hover texts — pages/issue_radar.rs:282,292,309
