@@ -4382,54 +4382,11 @@ mismatch (tampered download, corrupted cache, upstream re-upload)
 refuses to run with an explicit error instead of executing an unverified
 binary. xtask hashes with sha2 (the same crate major the core already
 pins). crates/xtask/src/package.rs, Cargo.toml, Cargo.lock.
->>>>>>> c7b976f (ai: batch 34 (audit items 147-149, 152-158) verified and recorded - executed concurrently with the owner's batch 35; the full record with local verification lives in completed.md: gate clean, fmt clean, workspace clippy clean, core 455/0/4 (467 minus the 13 removed dead-fusion tests plus the new RRF pin), sandbox 460/0/4, app-shell 222/0 with the new latch regression, xtask 7/0 with the new staging-clean regression, catalog 0, SPP_SMOKE exit 0 (24 pages, 4040 shapes, all 52 boot migrations applied), deny advisories+licenses ok, fresh verify_batch34.py harness (116 checks) plus harnesses 18-33 green with the two documented needle re-points (batch-30 item-107 to the test-module redact_string, batch-31 item-121 to the live chat-loop truncation); runner verification follows once CI on this code commit completes)
 
 Verification (Rule 5, all on the pinned 1.99.1 toolchain):
 - `python3 scripts/gate_no_simulation.py`: clean.
 - `cargo fmt --all --check`: clean.
 - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
-<<<<<<< HEAD
-- `cargo clippy -p supportos-plus-core --all-targets --features sandbox
-  -- -D warnings`: clean.
-- Tests: core 467 passed / 0 failed / 4 ignored; sandbox-feature suite
-  472 passed / 0 failed / 4 ignored; app-shell 221 passed / 0 failed;
-  xtask 8 passed / 0 failed (6 pre-existing + 2 new batch-35
-  regressions: the appimage-arch mapping and the atomic tool-cache
-  landing); catalog 0. (A disk-full episode — rootfs at 100% — produced
-  39 environmental sandbox failures identical in class to batch 33's;
-  after clearing the incremental cache and stale /tmp fixtures the
-  identical suite was rerun cleanly: 472/0/4.)
-- `cargo metadata --locked`: clean; the Cargo.lock stayed byte-identical
-  through the manifest edit (item 162's premise, re-proven).
-- `cargo deny check advisories licenses bans` (cargo-deny 0.20.2):
-  advisories ok, bans ok, licenses ok — the bans verdict is new this
-  batch; the only note is the pre-existing CDLA-Permissive-2.0
-  unmatched-allowance warning recorded since batch 33, and the
-  unmatched-skip warnings from platform-only skips are gone (the skip
-  list carries exactly the checked graph's duplicates).
-- `cargo run --locked -p supportos-plus-xtask -- verify-icons`: "icon set
-  verified: png/ico/icns structures are consistent" (the exact CI step).
-- Both workflow YAMLs re-parse (yaml.safe_load) after the edits.
-- Harnesses: batch-18, 19, 21, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 and
-  33 all pass. The batch-20 (item-21 upsert-site needle restructured by
-  batch-24's per-chunk partitioning) and batch-22 (the wrapped fence
-  literal and the volume-spike flake check) failures are the documented
-  pre-existing stale needles, unchanged from the pre-batch state (proven
-  pre-batch during batch 30); batch-17's script remains
-  environment-bound as documented.
-- SPP_SMOKE: not run locally this batch — batch 35 changes no runtime app
-  surface (xtask packaging code, a dead-code removal in catalog,
-  manifests, CI and deny config only); the AppImage boot-chain smoke runs
-  in the CI packages job on the pushed commit and is recorded below as
-  the runner verification.
-- Security: staged diff token-scanned clean before the push; remote
-  fetched (and rebased when needed) before every push per the
-  concurrent-batch discipline.
-
-Runner verification (batch 35, code commit — CI on the tracking commit
-that contains it): follows once CI completes (recorded below when the
-runs finish).
-=======
 - Tests: core 455 passed / 0 failed / 4 ignored (467 − 13 removed
   hybrid_search dead-fusion tests + 1 new RRF pin test = 455; the
   copilot truncate test was replaced 1:1 by the live-path regression);
@@ -4459,4 +4416,23 @@ runs finish).
   data_tools export/import code); remote fetched before the push.
 - Runner verification: follows once CI on the batch-34 code commit
   completes (recorded below when the runs finish).
->>>>>>> c7b976f (ai: batch 34 (audit items 147-149, 152-158) verified and recorded - executed concurrently with the owner's batch 35; the full record with local verification lives in completed.md: gate clean, fmt clean, workspace clippy clean, core 455/0/4 (467 minus the 13 removed dead-fusion tests plus the new RRF pin), sandbox 460/0/4, app-shell 222/0 with the new latch regression, xtask 7/0 with the new staging-clean regression, catalog 0, SPP_SMOKE exit 0 (24 pages, 4040 shapes, all 52 boot migrations applied), deny advisories+licenses ok, fresh verify_batch34.py harness (116 checks) plus harnesses 18-33 green with the two documented needle re-points (batch-30 item-107 to the test-module redact_string, batch-31 item-121 to the live chat-loop truncation); runner verification follows once CI on this code commit completes)
+
+Runner verification (batch 35, code commit `8c72b95` — CI on tracking
+commit `9ffbc1b`, which contains it): GitHub Actions run `40069963833`
+completed — check runs "fmt, clippy, test, deny" and "AppImage + .deb
+build, smoke" both concluded `success`. Green among the steps are the
+three this batch added: "Verify icons" (item 164's CI wiring), "Deny
+(advisories, licenses, bans)" (item 161 — the bans section enforced and
+evaluated for the first time), and "Build the AppImage (xtask package)"
+running the arch-following, `--locked` release path (items 159/165) plus
+both boot-chain smoke tests (the SPP_SMOKE evidence for this batch).
+
+File repair note (completed.md only, no code touched): batch 34's
+tracking commit `1a9445d` landed with two unresolved rebase-conflict
+markers inside its batch-34 record (an orphaned `>>>>>>>` closer after
+item 158 and a full `<<<<<<< HEAD` block whose HEAD side duplicated
+batch 35's verification bullets above; the block's own batch-34 side —
+the tests 455/460/222/7 list, the SPP_SMOKE record and the
+verify_batch34 harness note — is kept verbatim). Both markers are
+removed here so the file carries both batches' records cleanly;
+plan.md/progress.md were verified marker-free.
