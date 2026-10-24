@@ -172,8 +172,10 @@ helpscout/ai/sync/loopback fields removed, the dead hybrid_search fusion
 stack removed, the legacy FTS tables and chunk_version column retired,
 the connector AI-search/auth-edit + data_tools runtime retired, the
 AppDir staging cleaned before packaging, and appimagetool pinned and
-checksummed in the release path) — opened 2026-10-25. Items 150/151
-stay parked pending the owner's wire-or-prune decisions.
+checksummed in the release path) — opened 2026-10-25, executed
+concurrently with batch 34's rebase onto this batch's commits, verified
+and recorded in `completed.md`. Items 150/151 stay parked pending the
+owner's wire-or-prune decisions.
 
 Batch 35 = items 159-165 (the AppImage arch following the build host
 instead of a hardcoded x86_64, the atomic + timeouted tool-cache
@@ -182,8 +184,7 @@ CI, the unconsumed egui/egui_extras workspace deps, the dead catalog
 all-entries surfaces, verify-icons wired into packaging and CI, and
 `--locked` on the CI/release cargo invocations) — opened 2026-10-24 and
 executed concurrently with batch 34 by a second agent at the owner's
-direction; the items live in `progress.md` (batch 35 section) while the
-work runs.
+direction; verified and recorded in `completed.md`.
 
 ## Notes
 
