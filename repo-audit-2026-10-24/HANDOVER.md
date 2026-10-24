@@ -10,9 +10,15 @@
 - Pre-existing HEAD (audited revision): `3affe7e`
 - Audit commits (audit artifacts only, folder `repo-audit-2026-10-24/`):
   `e15ffa8` (checkpoint 1), `eec1eed` (checkpoint 1a), `fe7101a` (checkpoint 2,
-  feature walk), then the pass-2 control-ledger checkpoint (hash in git log)
+  feature walk), pass-2 control-ledger checkpoint, `006d047` (checkpoint 4,
+  W-008), `a5e47ef` (checkpoint 5, W-007 + log-publication fix)
 - Remote: `https://github.com/kimpearce888/SupportOS-Plus` (credential store,
-  kimpearce888); push verified at checkpoint time
+  kimpearce888); push of `a5e47ef` verified 2026-10-24 ~22:40 UTC
+- PUBLICATION NOTE (checkpoint 5): the repo-root `.gitignore` `*.log` rule had
+  silently excluded ALL audit log evidence from checkpoints 1–4; every
+  manifest-referenced log is now force-added and tracked; the missing E-002
+  log was regenerated from the exact FIND-001 scenario (launch-only, no state
+  consumed)
 - Publish rule (05 §8–9): only `repo-audit-2026-10-24/` may be committed/pushed;
   never app code, never force-push
 
@@ -35,8 +41,13 @@ the click-outside backdrop is unreliable → FIND-011. **W-007 executed DONE**
 (C-APP-005) flip light↔dark in both directions; `application_settings.theme`
 follows every click synchronously; dark AND light persistence across restarts
 verified (two relaunches, rendered frames structurally identical, diff 0.0);
-original light precondition restored. Findings now FIND-001 (Medium) +
-FIND-002..FIND-011 (Low). Next workflow: W-010.
+original light precondition restored. **W-010 executed DONE-PARTIAL** (E-096..
+E-104): Backups & export tab, create backup (new pair on disk), export JSON
++ CSV, restore ARMS-ONLY two-step gate runtime-verified (red REPLACED
+warning, DB stable, no swap files), cancel disarms; "really restore"
+(C-SET-66) deliberately deferred until QA data exists. Findings now FIND-001
+(Medium) + FIND-002..FIND-011 (Low). Next workflow: W-006 (creates first QA
+data rows).
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -51,8 +62,8 @@ FIND-002..FIND-011 (Low). Next workflow: W-010.
   evidence/artifacts/control-verify.py + control-verify-events.jsonl (incl.
   retained v1/v2 tool-calibration rows); evidence/logs/CONTROL-app.log
 - Findings: FINDINGS.md (FIND-001..FIND-010)
-- Workflows: WORKFLOW-COVERAGE.md (W-007 DONE with evidence; W-008 PARTIAL;
-  W-001..W-006, W-009, W-010 queued)
+- Workflows: WORKFLOW-COVERAGE.md (W-007 DONE; W-010 DONE-PARTIAL, C-SET-66
+  deferred; W-008 PARTIAL; W-001..W-006, W-009 queued)
 - Report: REPORT.md (skeleton, IN PROGRESS)
 
 ## Tooling facts a new session must know
@@ -76,34 +87,47 @@ FIND-002..FIND-011 (Low). Next workflow: W-010.
   (100,728) inside FIND-004 rect [714,743]. Theme key lives in the
   `application_settings` table (NOT `settings`); a missing key = Light
   default (theme.rs::from_setting_value); toggles store synchronously.
+- W-010 positions (real-input verified): Settings nav row; "Backups &
+  export" tab chip (606,91); "create backup" dark Primary+icon button
+  (307,198; OCR-blind — dark-rect detector); "export JSON" (423,221);
+  "export conversations CSV" (574,221); per-row "restore" (880,269);
+  armed-state "cancel" (283,448-ish). The Settings tab row merges with the
+  page title in OCR — use same-row-constrained window matching (find_label
+  v2 in w010-backups.py). "really restore" red Destructive button is
+  OCR-blind → red-pixel detector. Backups dir QA artifacts now include 3
+  backup pairs + 2 CSVs + 2 JSONs (all audit-created, harmless).
 - Sandbox reaps background processes between tool calls: keep each app run
   self-contained in one call (the scripts already pkill orphans and verify
   the instance lock).
 - Do NOT use the `ui-screenshot` cargo feature for evidence (non-default
   build); its existence is recorded as a discovered QA affordance instead.
 
-## Coverage snapshot (2026-10-24 ~22:25 UTC)
+## Coverage snapshot (2026-10-24 ~22:55 UTC)
 - Pages inventoried w/ evidence: 23/23; shell-level features: 3
 - Control/option ledger rows: 535; controls runtime-exercised: 46 pass-2
-  steps + W-007 (both theme controls, both directions, 2 restarts)
+  steps + W-007 (both theme controls, both directions, 2 restarts) + W-010
+  (6 backup/export controls incl. the two-step restore gate)
 - Formal control testing (QA-001..007 ledger): NOT STARTED (pass-2 exercises
   are inventory verification, not the formal ledger)
-- Workflows identified / executed: 10 identified; W-007 DONE, W-008 PARTIAL;
-  8 queued (W-010 next)
-- Evidence: E-001..E-095, all validated
+- Workflows identified / executed: 10 identified; W-007 DONE, W-010
+  DONE-PARTIAL (C-SET-66 deferred until data exists), W-008 PARTIAL;
+  7 queued (W-006 next)
+- Evidence: E-001..E-104, all validated; every manifest path exists AND is
+  git-tracked (log-evidence gap closed at checkpoint 5)
 - Accepted exceptions: none · Unresolved gaps: none new (W-001/W-003 external
-  data blockers unchanged)
+  data blockers unchanged; C-SET-66 deferred by plan)
 - Findings: FIND-001 Medium; FIND-002..FIND-011 Low
-- DB state after W-007 (read-only check): theme='light' (original state
-  restored); never-synced precondition intact
-- Coverage snapshot time: 2026-10-24 ~22:25 UTC
+- DB state after W-010 (read-only check): theme=light; all sampled counters 0
+  (never-synced precondition intact); PRAGMA integrity_check ok
+- Coverage snapshot time: 2026-10-24 ~22:55 UTC
 
 ## Outstanding tasks (ordered)
-1. Workflow execution order per NEXT-ACTIONS.md #2 (W-010 backups → W-006
-   automation rule → W-005 knowledge ingest → W-002 sync lifecycle [consumes
-   never-synced state] → W-003/W-004 as data allows → W-009; W-008 PARTIAL
-   done — remaining W-008 steps are keyboard-blocked, record as
-   tooling-limited, not exceptions).
+1. Workflow execution order per NEXT-ACTIONS.md #2 (W-006 automation rule
+   [creates first QA data rows] → W-005 knowledge ingest → W-002 sync
+   lifecycle [consumes never-synced state] → W-003/W-004 as data allows →
+   W-009; then the deferred C-SET-66 "really restore"; W-008 PARTIAL done —
+   remaining W-008 steps are keyboard-blocked, record as tooling-limited,
+   not exceptions).
 3. FIND-001 UI-signal + webhook-drain checks.
 4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
    second-instance UI check (FIND-002 reclassification decision).
@@ -142,7 +166,8 @@ FIND-002..FIND-011 (Low). Next workflow: W-010.
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-24 ~22:25 UTC
-- Validator/check: W-007 10/10 steps PASS (events JSONL w07-* rows); 7
-  WORKFLOW PNGs PIL+visually validated (same-theme frames diff 0.0); DB
-  theme='light' restored; app log read (only the known FIND-001 WARN)
+- Timestamp/timezone: 2026-10-24 ~22:55 UTC
+- Validator/check: W-010 10/10 steps PASS (events JSONL w10-* rows; C-SET-66
+  deferred by plan); 7 W-10 PNGs + 7 W-07 PNGs PIL+visually validated;
+  manifest E-001..E-104 zero missing paths; DB integrity ok, theme=light,
+  never-synced intact; app log read (only the known FIND-001 WARN)

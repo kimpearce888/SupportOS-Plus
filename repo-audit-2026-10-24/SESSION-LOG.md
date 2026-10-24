@@ -195,3 +195,40 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
   left untouched.
 - Checkpoint 5 commit includes W-007 (E-087..E-095) + this fix; manifest
   re-verified: zero missing paths.
+
+## 2026-10-24 ~22:55 UTC — W-010 backups/export executed (DONE-PARTIAL: C-SET-66 deferred by plan)
+
+- Full pass with real input (evidence/artifacts/w010-backups.py; 4 runs, all
+  retained in the events JSONL):
+  * Settings reached via the pill-verified walk (S003); "Backups & export"
+    tab opened on first click (S004, (606,91)).
+  * "create backup" (S005): new pair on disk
+    supportos-backup-2026-10-24T22-25-55-627Z.db (1847296 bytes) +
+    .settings.json sidecar; inline green success message
+    "backup /home/z/.../supportos-backup-….db"; list refreshed newest-first.
+    Note: the confirmation is an INLINE success_text (settings.rs
+    self.message), not a floating toast — ledger wording "toast" reconciled.
+  * "export JSON" (S006): supportos-export-1792880769998.json (252 B).
+  * "export conversations CSV" (S007): supportos-conversations-….csv
+    (65 B, header-only — zero conversations).
+  * "restore" (S008): FIRST CLICK ARMS ONLY — red warning "Restore …? The
+    current database will be REPLACED by this backup (verified first)…" +
+    cancel + red "really restore" Destructive button (1706 red px detected);
+    DB counters stable; NO .restore-tmp/.restore-prev swap files — the
+    audit-item-11 two-step gate is runtime-verified.
+  * "cancel" (S009) disarms. S010: DB integrity ok, counters unchanged,
+    theme=light, never-synced precondition intact.
+  * C-SET-66 "really restore" deliberately NOT executed (NEXT-ACTIONS
+    defers restore-replace until QA data exists; W-006 will create the
+    first data rows). Swap mechanics source-verified only.
+- Tooling history (retained): run-1 transient XTEST no-op at correct coords
+  (live probe reproduced the click working); run-2 find_label v1 wide-window
+  defect (Settings title merged into the OCR line; ranking picked the widest
+  window → click 150px left) fixed in v2 (same-visual-row dy≤5 +
+  tightest-window ranking — v1's comment claimed "tightest" but sorted the
+  opposite); run-3 white-on-red "really restore" OCR miss → red-pixel
+  detector. All click steps now verify-and-retry with every attempt logged.
+- Entry-point correction recorded: the Shell runtime card has no backup
+  surface; backups live in Settings only.
+- Evidence: WORKFLOW/W10-01..07.png (PIL+visual), E-096..E-104;
+  WORKFLOW-COVERAGE W-010 → DONE-PARTIAL. Next workflow: W-006.
