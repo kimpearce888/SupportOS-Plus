@@ -12,9 +12,10 @@
   `e15ffa8` (checkpoint 1), `eec1eed` (checkpoint 1a), `fe7101a` (checkpoint 2,
   feature walk), pass-2 control-ledger checkpoint, `006d047` (checkpoint 4,
   W-008), `a5e47ef` (checkpoint 5, W-007 + log-publication fix), `8074dd7`
-  (checkpoint 6, W-010), `9e91910` (checkpoint 7, W-006)
+  (checkpoint 6, W-010), `9e91910` (checkpoint 7, W-006), `9db4045`
+  (checkpoint 8, W-005)
 - Remote: `https://github.com/kimpearce888/SupportOS-Plus` (credential store,
-  kimpearce888); push of `9e91910` verified 2026-10-24 ~23:25 UTC
+  kimpearce888); push of `9db4045` verified 2026-10-24 ~23:50 UTC
 - PUBLICATION NOTE (checkpoint 5): the repo-root `.gitignore` `*.log` rule had
   silently excluded ALL audit log evidence from checkpoints 1–4; every
   manifest-referenced log is now force-added and tracked; the missing E-002
@@ -58,9 +59,19 @@ disabled-Import gate no-op runtime-verified (C-KNOW-08), visibility chips
 clicked, Issue Radar enqueues runtime-verified ('gap detection queued —
 reload in a few seconds' inline line; jobs 0→2 ai/completed; NO completion
 signal — FIND-008 upgraded to runtime-confirmed); ingest TEXT path
-tooling-blocked. Findings now FIND-001 (Medium) + FIND-002..FIND-011 (Low;
-FIND-008 runtime-confirmed). Next workflow: W-002 (consumes the never-synced
-state).
+tooling-blocked. **W-002 executed DONE-PARTIAL** (E-131..E-137, no-
+credentials leg — the sanctioned consumer of the never-synced
+precondition): 'Run initial sync' + Dashboard 'Sync now' both refused by
+the DESIGNED guard (error toast captured visually, application_errors +1
+each, sync tables stay 0, freshness chip unchanged); Settings→Help Scout
+tab shows 'not configured' + redirect uri http://localhost:3000/oauth
+callback (FIND-001 visual); listener-health surface needs credentials
+(external). FORENSIC: a pre-existing application_errors row (21:31:15)
+was attributed to the W-008 FIND-011 fall-through click at (1100,90)
+pressing the Dashboard 'Sync now' button — FIND-011 impact upgraded.
+Findings now FIND-001 (Medium) + FIND-002..FIND-011 (Low; FIND-008
+runtime-confirmed; FIND-011 consequence attributed). Next workflow: W-009
+(second-instance UX); W-003/W-004 data-blocked.
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -75,8 +86,8 @@ state).
   evidence/artifacts/control-verify.py + control-verify-events.jsonl (incl.
   retained v1/v2 tool-calibration rows); evidence/logs/CONTROL-app.log
 - Findings: FINDINGS.md (FIND-001..FIND-010)
-- Workflows: WORKFLOW-COVERAGE.md (W-005/W-006/W-010 DONE-PARTIAL; W-007
-  DONE; W-008 PARTIAL; W-001..W-004, W-009 queued)
+- Workflows: WORKFLOW-COVERAGE.md (W-002/W-005/W-006/W-010 DONE-PARTIAL;
+  W-007 DONE; W-008 PARTIAL; W-001/W-003/W-004 blocked, W-009 next)
 - Report: REPORT.md (skeleton, IN PROGRESS)
 
 ## Tooling facts a new session must know
@@ -127,53 +138,63 @@ state).
   seconds' line that clears on reload (FIND-008 behavior).
 - W-005 DB note: two `ai` jobs (completed) remain in the jobs table as QA
   artifacts; sync tables untouched.
+- W-002 positions/facts: Sync Health 'Run initial sync' (277,288; dark
+  button — inverted-pass OCR only, crop tight to the row); header chip
+  'never synced' at (860-1020, 8-48) — OCRs as 'neversynce' (use prefix
+  'neversync'); Dashboard 'Sync now' (1100,90; Outline+Refresh icon,
+  OCR-blind — the position is evidence-backed via FIND-011's fall-through
+  consequence). Sync refusals write to application_errors (NOT the tracing
+  log); the guard refuses BEFORE creating run rows. Backward sidebar nav:
+  scroll-top + click first band + pill-verify (scroll alone leaves the old
+  page selected).
 - Sandbox reaps background processes between tool calls: keep each app run
   self-contained in one call (the scripts already pkill orphans and verify
   the instance lock).
 - Do NOT use the `ui-screenshot` cargo feature for evidence (non-default
   build); its existence is recorded as a discovered QA affordance instead.
 
-## Coverage snapshot (2026-10-24 ~23:45 UTC)
+## Coverage snapshot (2026-10-25 ~00:10 UTC)
 - Pages inventoried w/ evidence: 23/23; shell-level features: 3
 - Control/option ledger rows: 535; controls runtime-exercised: 46 pass-2
-  steps + W-007 (both theme controls, both directions, 2 restarts) + W-010
-  (6 backup/export controls incl. the two-step restore gate) + W-006
-  (toggle, 3 trigger chips, 5 action chips, empty-create validation) + W-005
-  (import expander, disabled gate, 2 visibility chips, 2 radar enqueues,
-  reload no-op)
+  steps + W-007 + W-010 + W-006 + W-005 + W-002 (both sync entry points'
+  designed refusals, freshness chip, Help Scout tab state)
 - Formal control testing (QA-001..007 ledger): NOT STARTED (pass-2 exercises
   are inventory verification, not the formal ledger)
-- Workflows identified / executed: 10 identified; W-005/W-006/W-010
-  DONE-PARTIAL, W-007 DONE, W-008 PARTIAL; 5 queued (W-002 next — consumes
-  the never-synced state)
-- Evidence: E-001..E-130, all validated; every manifest path exists AND is
+- Workflows identified / executed: 10 identified; W-002/W-005/W-006/W-010
+  DONE-PARTIAL, W-007 DONE, W-008 PARTIAL; W-001/W-003/W-004 blocked
+  (external/data); W-009 next
+- Evidence: E-001..E-137, all validated; every manifest path exists AND is
   git-tracked (log-evidence gap closed at checkpoint 5)
-- Accepted exceptions: none · Unresolved gaps: none new (W-001/W-003 external
-  data blockers unchanged; C-SET-66 + W-006 creation + W-005 text path
-  deferred by tooling)
+- Accepted exceptions: none · Unresolved gaps: W-001 OAuth round-trip +
+  W-003 deep steps blocked on external credentials/data; C-SET-66, W-006
+  creation, W-005 text path, W-008 keyboard steps deferred by tooling
 - Findings: FIND-001 Medium; FIND-002..FIND-011 Low (FIND-008
-  runtime-confirmed)
-- DB state after W-005 (read-only check): theme=light; knowledge_documents=0;
-  jobs=2 (ai/completed, QA artifacts); sync_runs=0 (never-synced intact);
-  integrity ok
-- Coverage snapshot time: 2026-10-24 ~23:45 UTC
+  runtime-confirmed; FIND-011 consequence attributed)
+- DB state after W-002 (read-only check): theme=light; sync_runs/cursors/
+  checkpoints=0 (never-synced DB state survives); application_errors=5
+  (1 pre-existing attributed to FIND-011 + run-2 partial 1 + run-3 partial
+  1 + final-run 2 — DB-verified; the initial '4' derivation missed run-3's
+  row, corrected after a read-only DB reconciliation; see the
+  w002-reconciliation JSONL row);
+  jobs=2 (ai/completed, QA artifacts); integrity ok
+- Coverage snapshot time: 2026-10-25 ~00:10 UTC
 
 ## Outstanding tasks (ordered)
-1. Workflow execution order per NEXT-ACTIONS.md #2 (W-002 sync lifecycle
-   [consumes never-synced state: 'Run initial sync'/'Sync now' fails without
-   credentials — record designed behavior + FIND-001 webhook-drain check] →
-   W-003/W-004 as data allows → W-009; then deferred tooling items
-   (C-SET-66, W-006 creation, W-005 text path, W-008 keyboard steps);
-   W-001 OAuth round-trip blocked on external credentials — register
-   exception if unexecutable).
-3. FIND-001 UI-signal + webhook-drain checks.
-4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
-   second-instance UI check (FIND-002 reclassification decision).
-5. Formal QA ledger (QA-001..007) with per-step screenshots (EVID-001..006);
-   exceptions to evidence/exceptions.csv as they arise.
-6. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001 completion.
-7. COV-001/002 reconciliation → REPORT-001 → completion gate (04 §5).
-8. Final publication pass (GIT-001..003).
+1. W-009 second-instance UX (launch a second instance while one runs —
+   exit 1 + stderr message already recorded as FIND-002; check for any UI
+   affordance and make the FIND-002 reclassification decision).
+2. FIND-001 remaining sub-checks: listener-health message needs saved
+   credentials (external) — register the exception per 05 if the round-trip
+   cannot be executed; webhook drain stays source-verified.
+3. Edge/failure/recovery + cross-feature tests (QA-004/005) incl. the
+   FIND-002 reclassification.
+4. Formal QA ledger (QA-001..007) with per-step screenshots (EVID-001..006);
+   exceptions to evidence/exceptions.csv as they arise (W-001 credential
+   blocker likely becomes one).
+5. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001 completion.
+6. Coverage reconciliation (COV-001/002) + evidence accounting (EVID-006).
+7. REPORT.md consolidation (REPORT-001) and completion gate (04 §5).
+8. Git publication of audit folder per 05 §8–9 (GIT-001..003).
 
 ## Blockers and known problems
 - W-001 OAuth round-trip needs external Help Scout credentials (likely
@@ -204,9 +225,9 @@ state).
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-24 ~23:45 UTC
-- Validator/check: W-005 10/10 steps PASS (events JSONL w005-* rows +
-  w005-correction row); W-005 PNGs (10) + all earlier WORKFLOW PNGs
-  PIL+visually validated; manifest E-001..E-130 zero missing paths; DB
-  integrity ok, theme=light, never-synced intact; FIND-008 upgraded to
-  runtime-confirmed; app log read (only the known FIND-001 WARN)
+- Timestamp/timezone: 2026-10-25 ~00:10 UTC
+- Validator/check: W-002 9/9 steps PASS (events JSONL w002-* rows; toast
+  captured visually, OCR miss noted); W-002 PNGs (6) + all earlier WORKFLOW
+  PNGs PIL+visually validated; manifest E-001..E-137 zero missing paths; DB
+  integrity ok, theme=light, sync tables 0, application_errors=5 (all
+  attributed); app log read (only the known FIND-001 WARN)

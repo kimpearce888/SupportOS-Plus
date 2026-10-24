@@ -299,3 +299,47 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
 - Evidence: WORKFLOW/W005-01..08.png (10 frames, PIL+visual), E-119..E-130;
   WORKFLOW-COVERAGE W-005 → DONE-PARTIAL; FINDINGS FIND-008 updated.
   Next workflow: W-002 (sync lifecycle; consumes the never-synced state).
+
+## 2026-10-25 ~00:10 UTC — W-002 sync lifecycle (no-credentials leg) executed (DONE-PARTIAL; never-synced precondition consumed)
+
+- Mouse-only pass with real input (evidence/artifacts/w002-sync.py; 4 runs,
+  all retained):
+  * Sync Health pre-state captured (Engine NEW / last success (never) /
+    webhook queue zeros / '(no checkpoints yet)' / '(no runs recorded)' /
+    header chip 'never synced').
+  * 'Run initial sync' AND Dashboard 'Sync now' (Incremental) both refused
+    by the DESIGNED guard_provider_connected (sync_engine.rs:1012-1022):
+    the error toast 'error Run initial sync failed: Help Scout is not
+    connected — nothing to sync…' was CAPTURED VISUALLY (bottom-right;
+    the tooling OCR missed it — noted honestly, visual read is the
+    validation); application_errors +1 per attempt (jobs::log_error);
+    sync_runs/cursors/checkpoints stay 0 — the guard refuses BEFORE any
+    run row is created; freshness chip stays 'never synced'.
+  * FORENSIC ATTRIBUTION (recorded in FIND-011): a pre-existing
+    application_errors row (21:31:15) was traced to the W-008 FIND-011
+    backdrop fall-through click at (1100,90) — it pressed the Dashboard
+    'Sync now' button while the palette was open. FIND-011's impact
+    upgraded: fall-through clicks can trigger REAL actions.
+  * Settings → Help Scout tab captured: 'credentials stored: not
+    configured' + redirect uri http://localhost:3000/oauth/callback
+    (FIND-001's colliding port, visual); the listener-health/connect
+    surface only renders after credentials are saved (external blocker)
+    → that FIND-001 sub-check is partial.
+- DESIGNED side effects: application_errors now holds 5 rows (1 pre-
+  existing attributed to FIND-011 + run-2 partial 1 + run-3 partial 1 +
+  final-run 2 — DB-verified; the initial '4' derivation missed run-3's
+  row because run-3 DID execute the S004 click before hitting the S006
+  OCR blindness; corrected after a read-only DB reconciliation — see
+  the w002-reconciliation JSONL row); Diagnostics will show them and
+  the clear-log button returns. sync tables remain 0 (the never-synced
+  DB state survives the attempts; only the ATTEMPT was consumed).
+- Tooling history (retained): run-1 pre-state OCR (chip in the header y≈26;
+  'synced'→'synce' truncation); run-2 backward-nav bug (scroll-top left the
+  old page selected; pill=None exposed it) → click+pill-verify; run-3
+  'Sync now' icon-merge OCR blindness → evidence-backed position (1100,90).
+- Blocked (recorded): webhook-drain runtime check (needs a signed webhook
+  event — cannot be forged outside the app); happy-path sync (needs live
+  Help Scout credentials — external).
+- Evidence: WORKFLOW/W002-01..06.png (6 frames, PIL+visual), E-131..E-137;
+  WORKFLOW-COVERAGE W-002 → DONE-PARTIAL; FINDINGS FIND-011 updated.
+  Next: W-009 (second-instance UX) — W-003/W-004 remain data-blocked.
