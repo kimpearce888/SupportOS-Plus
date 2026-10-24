@@ -89,6 +89,11 @@ pub struct SupportGraphPage {
     selected: Option<(String, i64)>,
     neighborhood: Option<Neighborhood>,
     error: Option<String>,
+    /// Clean-audit item 144: invalidation clears the visible results of
+    /// an active search — this flag schedules the refetch on the next
+    /// frame so the search survives sync events instead of blanking
+    /// until the user re-submits it.
+    results_stale: bool,
 }
 
 impl SupportGraphPage {
@@ -102,6 +107,7 @@ impl SupportGraphPage {
             selected: None,
             neighborhood: None,
             error: None,
+            results_stale: false,
         }
     }
 
@@ -112,6 +118,17 @@ impl SupportGraphPage {
             return;
         }
         self.results.clear();
+        // Clean-audit item 144: the cleared search refetches next frame.
+        self.results_stale = true;
+    }
+
+    /// Clean-audit item 144: the invalidation-cleared search refetches
+    /// against the refreshed mirror.
+    fn refetch_if_stale(&mut self, db: &DbHandle) {
+        if self.results_stale {
+            self.results_stale = false;
+            self.reload_results(db);
+        }
     }
 
     fn reload_stats(&mut self, db: &DbHandle) {
@@ -161,6 +178,7 @@ impl SupportGraphPage {
         if self.stats.is_none() {
             self.reload_stats(db);
         }
+        self.refetch_if_stale(db);
 
         let subtitle = if let Some(stats) = &self.stats {
             format!(
@@ -328,6 +346,42 @@ mod tests {
                 .iter()
                 .any(|n| super::super::str_field(n, "kind") == "conversation")
         );
+    }
+
+    /// Clean-audit item 144: invalidation used to clear the visible
+    /// results of an active search with nothing refetching them — the
+    /// search stayed blank until the user re-submitted it. The cleared
+    /// search now refetches on the next frame.
+    #[test]
+    fn invalidation_refetches_the_cleared_search() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let mut page = SupportGraphPage::new();
+        page.query = "Export".into();
+        page.query_edit = page.query.clone();
+        page.reload_results(&db);
+        assert!(!page.results.is_empty());
+
+        // A sync event invalidates the page...
+        page.invalidate();
+        assert!(page.results.is_empty(), "the cache is cleared");
+        assert!(page.results_stale, "a refetch is scheduled");
+
+        // ...and the next frame's refetch restores the active search.
+        page.refetch_if_stale(&db);
+        assert!(
+            !page.results.is_empty(),
+            "the active search survives the sync event"
+        );
+        assert!(!page.results_stale, "the refetch consumed the flag");
     }
 
     #[test]

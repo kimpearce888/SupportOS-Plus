@@ -45,10 +45,20 @@ use spp_core::events::ServerEvent;
 /// dialog and executes the action only on `DialogOutcome::Confirmed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DestructiveAction {
-    /// Delete an automation rule by row id (the item-70 sample wiring;
-    /// the remaining destructive surfaces route through this mechanism
-    /// in their own audit items).
+    /// Delete an automation rule by row id (the item-70 sample wiring).
     DeleteAutomationRule { id: i64 },
+    /// Delete a knowledge document by row id (clean-audit item 140).
+    DeleteKnowledgeDoc { id: i64 },
+    /// Delete a custom-object TYPE (and its records) by row id.
+    DeleteCustomType { id: i64 },
+    /// Delete one custom-object record by row id.
+    DeleteCustomObject { id: i64 },
+    /// Delete a data-tools connector by row id.
+    DeleteConnector { id: i64 },
+    /// Delete an outreach segment by row id.
+    DeleteSegment { id: i64 },
+    /// Clear the diagnostics event log (every stored event).
+    ClearDiagnosticsLog,
 }
 
 /// A request to arm the shell-level confirmation dialog for a
@@ -79,6 +89,94 @@ impl ConfirmRequest {
             confirm_label: "Delete rule".into(),
             danger: true,
             action: DestructiveAction::DeleteAutomationRule { id },
+        }
+    }
+
+    /// Confirmation for deleting a knowledge document (clean-audit item 140).
+    #[must_use]
+    pub fn delete_knowledge_doc(id: i64, title: &str) -> Self {
+        Self {
+            title: "Delete knowledge document?".into(),
+            message: format!(
+                "The document \"{title}\" and its embedded chunks are removed. \
+                 Search and AI answers lose it immediately. This cannot be undone."
+            ),
+            confirm_label: "Delete document".into(),
+            danger: true,
+            action: DestructiveAction::DeleteKnowledgeDoc { id },
+        }
+    }
+
+    /// Confirmation for deleting a custom-object type (clean-audit item 140).
+    #[must_use]
+    pub fn delete_custom_type(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete custom type?".into(),
+            message: format!(
+                "The type \"{name}\" and every record stored under it are removed. \
+                 This cannot be undone."
+            ),
+            confirm_label: "Delete type".into(),
+            danger: true,
+            action: DestructiveAction::DeleteCustomType { id },
+        }
+    }
+
+    /// Confirmation for deleting one custom-object record (item 140).
+    #[must_use]
+    pub fn delete_custom_object(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete object?".into(),
+            message: format!(
+                "The object \"{name}\" is removed from its type. This cannot be undone."
+            ),
+            confirm_label: "Delete object".into(),
+            danger: true,
+            action: DestructiveAction::DeleteCustomObject { id },
+        }
+    }
+
+    /// Confirmation for deleting a data-tools connector (item 140).
+    #[must_use]
+    pub fn delete_connector(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete connector?".into(),
+            message: format!(
+                "The connector \"{name}\" stops syncing immediately; its stored \
+                 rows stay in the mirror. This cannot be undone."
+            ),
+            confirm_label: "Delete connector".into(),
+            danger: true,
+            action: DestructiveAction::DeleteConnector { id },
+        }
+    }
+
+    /// Confirmation for deleting an outreach segment (item 140).
+    #[must_use]
+    pub fn delete_segment(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete segment?".into(),
+            message: format!(
+                "The segment \"{name}\" is removed; campaigns that targeted it \
+                 keep their recipient snapshots. This cannot be undone."
+            ),
+            confirm_label: "Delete segment".into(),
+            danger: true,
+            action: DestructiveAction::DeleteSegment { id },
+        }
+    }
+
+    /// Confirmation for clearing the diagnostics event log (item 140).
+    #[must_use]
+    pub fn clear_diagnostics_log(count: usize) -> Self {
+        Self {
+            title: "Clear the event log?".into(),
+            message: format!(
+                "All {count} stored diagnostics event(s) are deleted. This cannot be undone."
+            ),
+            confirm_label: "Clear log".into(),
+            danger: true,
+            action: DestructiveAction::ClearDiagnosticsLog,
         }
     }
 

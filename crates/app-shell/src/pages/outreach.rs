@@ -17,7 +17,7 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::segment::{SegmentDefinition, SegmentEngine};
 
-use super::{i64_field, str_field};
+use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -187,10 +187,15 @@ impl OutreachPage {
             );
             return;
         };
-        const SNAPSHOT_LIMIT: i64 = 5000;
+        // Clean-audit item 146: the snapshot previewed a fixed 5000-row
+        // page and threw the matched total away — every recipient past
+        // the cap silently never became one, while the segment said
+        // otherwise. The snapshot now takes EVERY matched row (page 1,
+        // unbounded page size); the success message reports the same
+        // count the user matched against.
         let engine_result = db.with_read(|conn| {
             let engine = SegmentEngine::new(conn);
-            let preview = engine.preview(&tree, 1, SNAPSHOT_LIMIT);
+            let preview = engine.preview(&tree, 1, i64::MAX);
             let rows = preview
                 .get("rows")
                 .and_then(|v| v.as_array())
@@ -201,11 +206,16 @@ impl OutreachPage {
                 rows,
             )
         });
-        let (_matched, rows) = engine_result;
+        let (matched, rows) = engine_result;
         if rows.is_empty() {
             self.error = Some("No recipients selected.".into());
             return;
         }
+        debug_assert_eq!(
+            matched as usize,
+            rows.len(),
+            "the unbounded snapshot must carry every matched recipient"
+        );
         let recipients: Vec<serde_json::Value> = rows;
         let snapshot = serde_json::to_string(&tree.to_json()).unwrap_or_default();
         let result = db.with_write(|conn| {
@@ -282,12 +292,15 @@ impl OutreachPage {
         }
     }
 
-    fn delete_segment(&mut self, db: &DbHandle, id: i64) {
+    /// Delete an outreach segment (runs on shell confirmation only —
+    /// clean-audit item 140). Returns the core outcome for the toast.
+    pub fn delete_segment(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::delete_segment(conn, id));
-        if let Err(e) = result {
+        if let Err(e) = &result {
             self.error = Some(e.to_string());
         }
         self.reload(db);
+        result.map(|_| ())
     }
 
     fn add_dnc(&mut self, db: &DbHandle) {
@@ -326,8 +339,10 @@ impl OutreachPage {
         self.reload(db);
     }
 
-    /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// Render the page. Returns a confirm request when the user asked to
+    /// delete a segment (clean-audit item 140 — the delete runs only
+    /// after the shell dialog confirms).
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         design::page_header(ui, "Outreach", None, |_| {});
@@ -347,9 +362,15 @@ impl OutreachPage {
         design::divider(ui);
 
         match self.tab {
-            Tab::Campaigns => self.campaigns_ui(ui, db),
+            Tab::Campaigns => {
+                self.campaigns_ui(ui, db);
+                None
+            }
             Tab::Segments => self.segments_ui(ui, db),
-            Tab::Dnc => self.dnc_ui(ui, db),
+            Tab::Dnc => {
+                self.dnc_ui(ui, db);
+                None
+            }
         }
     }
 
@@ -538,7 +559,9 @@ impl OutreachPage {
         });
     }
 
-    fn segments_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// The Segments tab. Returns a confirm request when the user asked
+    /// to delete a segment (clean-audit item 140).
+    fn segments_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         ui.horizontal(|ui| {
             if design::button_with_icon(ui, Icon::Plus, "New Segment", ButtonVariant::Primary)
                 .clicked()
@@ -573,7 +596,7 @@ impl OutreachPage {
         }
 
         let segments = self.segments.clone();
-        let mut deleted: Option<i64> = None;
+        let mut deleted: Option<(i64, String)> = None;
         egui::ScrollArea::vertical()
             .id_salt("outreach-segments")
             .show(ui, |ui| {
@@ -591,7 +614,7 @@ impl OutreachPage {
                             .color(t.foreground),
                         );
                         if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
-                            deleted = Some(i64_field(segment, "id"));
+                            deleted = Some((i64_field(segment, "id"), str_field(segment, "name")));
                         }
                     });
                 }
@@ -604,9 +627,14 @@ impl OutreachPage {
                     );
                 }
             });
-        if let Some(id) = deleted {
-            self.delete_segment(db, id);
+        // Clean-audit item 140: arming the dialog replaces the
+        // unconfirmed delete.
+        if let Some((id, name)) = deleted {
+            return Some(NavRequest::Confirm(ConfirmRequest::delete_segment(
+                id, &name,
+            )));
         }
+        None
     }
 
     fn dnc_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -821,7 +849,7 @@ mod tests {
         assert_eq!(page.segments.len(), 1);
 
         let segment_id = i64_field(&page.segments[0], "id");
-        page.delete_segment(&db, segment_id);
+        let _ = page.delete_segment(&db, segment_id);
         assert!(page.segments.is_empty());
 
         page.new_dnc_customer = "9".into();
@@ -848,5 +876,60 @@ mod tests {
         page.new_dnc_customer = "abc".into();
         page.add_dnc(&db);
         assert!(page.error.is_some());
+    }
+    /// Clean-audit item 146: the recipient snapshot previewed a fixed
+    /// 5000-row page and threw the matched total away — recipients past
+    /// the cap silently never became recipients. A segment matching
+    /// 5001 customers now snapshots all 5001.
+    #[test]
+    fn campaign_snapshot_carries_every_matched_recipient_past_the_cap() {
+        let db = fixture(vec![("conv", 1, "Hello", "active", "email", 1, 5, 9)]);
+        db.with_write(|conn| {
+            for i in 0..5001 {
+                conn.execute(
+                    "INSERT INTO customers (id, remote_id, first_name, last_name, email)
+                     VALUES (?1, ?1, 'Bulk', 'Segment', ?2)",
+                    rusqlite::params![10_000 + i, format!("bulk{i}@bulkmail.example")],
+                )
+                .expect("bulk customer");
+                // The contact/email_domain condition reads
+                // customer_emails — give each bulk customer its row.
+                conn.execute(
+                    "INSERT INTO customer_emails (customer_id, value, type)
+                     VALUES (?1, ?2, 'work')",
+                    rusqlite::params![10_000 + i, format!("bulk{i}@bulkmail.example")],
+                )
+                .expect("bulk email");
+            }
+        });
+        const BULK_DOMAIN_DEFINITION: &str = r#"{"combinator":"all","conditions":[{"kind":"contact","field":"email_domain","op":"equals","value":"bulkmail.example"}],"exclude":[]}"#;
+        let segment_id = db.with_write(|conn| seed_segment(conn, "Bulk", BULK_DOMAIN_DEFINITION));
+
+        let mut page = OutreachPage::new();
+        page.reload(&db);
+        page.new_name = "Everyone".into();
+        page.new_subject = "Hello all".into();
+        page.new_body = "Hi {{first_name}}.".into();
+        page.new_mailbox = "1".into();
+        page.new_segment_json = segment_id.to_string();
+        page.create_campaign(&db);
+
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let recipients: i64 = db
+            .with_read(|conn| {
+                conn.query_row("SELECT COUNT(*) FROM outreach_recipients", [], |r| r.get(0))
+            })
+            .expect("count");
+        assert_eq!(
+            recipients, 5001,
+            "every matched customer ships, not just the first 5000"
+        );
+        assert!(
+            page.message
+                .as_deref()
+                .is_some_and(|m| m.contains("5001 recipient(s)")),
+            "the report names the true count: {:?}",
+            page.message
+        );
     }
 }

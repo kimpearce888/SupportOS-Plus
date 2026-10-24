@@ -23,7 +23,7 @@ use serde_json::Value;
 use spp_core::db::DbHandle;
 use spp_core::sync_engine::SyncEngine;
 
-use super::{i64_field, str_field};
+use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -529,10 +529,13 @@ impl KnowledgePage {
         self.documents.clear();
     }
 
-    /// Delete a knowledge document.
-    pub fn delete_document(&mut self, db: &DbHandle, id: i64) {
-        let deleted = db.with_write(|conn| {
-            let removed = spp_core::knowledge_store::delete_document(conn, id).unwrap_or(false);
+    /// Delete a knowledge document (runs on shell confirmation only —
+    /// clean-audit item 140). Returns the core outcome so the shell's
+    /// toast reports the truth; the pre-fix `unwrap_or(false)` swallow
+    /// is gone with it.
+    pub fn delete_document(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
+        db.with_write(|conn| {
+            let removed = spp_core::knowledge_store::delete_document(conn, id)?;
             if removed {
                 // Clean-audit item 60: the delete hard-deletes the
                 // document's chunk rows, orphaning their vector points
@@ -549,14 +552,11 @@ impl KnowledgePage {
                     2,
                 );
             }
-            removed
-        });
-        self.status_message = Some(if deleted {
-            format!("Document {id} deleted.")
-        } else {
-            format!("Document {id} not found.")
-        });
+            Ok::<_, spp_core::error::Error>(removed)
+        })?;
+        self.status_message = Some(format!("Document {id} deleted."));
         self.documents.clear();
+        Ok(())
     }
 
     /// The import panel (web `ImportKnowledgeModal`): paste-import plus
@@ -668,12 +668,15 @@ impl KnowledgePage {
     /// Render the page. `engine` powers the "Sync Help Center now"
     /// action (a real Docs API v1 pull — before 1.3.0 the page had no
     /// way to fetch and the /v2/ endpoint paths it used did not exist).
+    /// Returns a confirm request when the user asked to delete a
+    /// document (clean-audit item 140 — the delete runs only after the
+    /// shell dialog confirms).
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
         db: &DbHandle,
         engine: Option<&std::sync::Arc<SyncEngine>>,
-    ) {
+    ) -> Option<NavRequest> {
         design::page_header(
             ui,
             "Knowledge",
@@ -726,14 +729,28 @@ impl KnowledgePage {
 
         match self.tab {
             Tab::Documents => self.documents_ui(ui, db),
-            Tab::Sources => self.sources_ui(ui, db),
-            Tab::Freshness => self.freshness_ui(ui, db),
-            Tab::HelpCenter => self.help_center_ui(ui, db),
-            Tab::Drafts => self.drafts_ui(ui, db),
+            Tab::Sources => {
+                self.sources_ui(ui, db);
+                None
+            }
+            Tab::Freshness => {
+                self.freshness_ui(ui, db);
+                None
+            }
+            Tab::HelpCenter => {
+                self.help_center_ui(ui, db);
+                None
+            }
+            Tab::Drafts => {
+                self.drafts_ui(ui, db);
+                None
+            }
         }
     }
 
-    fn documents_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// The Documents tab. Returns a confirm request when the user asked
+    /// to delete a document (clean-audit item 140).
+    fn documents_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         if self.documents.is_empty() {
             self.reload_all(db);
         }
@@ -750,10 +767,10 @@ impl KnowledgePage {
                 "(no documents)",
                 "Import a document to get started.",
             );
-            return;
+            return None;
         }
         // Actions are deferred out of the borrow of `self.documents`.
-        let mut action: Option<(i64, &str)> = None;
+        let mut action: Option<(i64, String, &str)> = None;
         egui::ScrollArea::vertical().show_rows(ui, 24.0, self.documents.len(), |ui, range| {
             design::table(
                 ui,
@@ -782,13 +799,13 @@ impl KnowledgePage {
                         design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
                         ui.horizontal(|ui| {
                             if design::button(ui, "reviewed", ButtonVariant::Outline).clicked() {
-                                action = Some((id, "reviewed"));
+                                action = Some((id, str_field(doc, "title"), "reviewed"));
                             }
                             if design::button(ui, "verify", ButtonVariant::Outline).clicked() {
-                                action = Some((id, "verify"));
+                                action = Some((id, str_field(doc, "title"), "verify"));
                             }
                             if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
-                                action = Some((id, "delete"));
+                                action = Some((id, str_field(doc, "title"), "delete"));
                             }
                         });
                         ui.end_row();
@@ -796,13 +813,20 @@ impl KnowledgePage {
                 },
             );
         });
-        if let Some((id, what)) = action {
+        if let Some((id, title, what)) = action {
             match what {
                 "reviewed" => self.mark_reviewed(db, id),
                 "verify" => self.mark_verified(db, id),
-                _ => self.delete_document(db, id),
+                // Clean-audit item 140: arming the dialog replaces the
+                // unconfirmed delete.
+                _ => {
+                    return Some(NavRequest::Confirm(ConfirmRequest::delete_knowledge_doc(
+                        id, &title,
+                    )));
+                }
             }
         }
+        None
     }
 
     fn sources_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -1535,7 +1559,7 @@ mod tests {
         // Freshness report now classifies the reviewed document.
         assert!(page.freshness.is_some());
 
-        page.delete_document(&db, doc_id);
+        let _ = page.delete_document(&db, doc_id);
         page.reload_all(&db);
         assert!(page.documents.is_empty());
     }

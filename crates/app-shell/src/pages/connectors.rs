@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use eframe::egui;
 use spp_core::db::DbHandle;
 
-use super::{i64_field, opt_str_field, str_field};
+use super::{ConfirmRequest, NavRequest, i64_field, opt_str_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -211,9 +211,11 @@ impl ConnectorsPage {
         }
     }
 
-    fn delete(&mut self, db: &DbHandle, id: i64) {
+    /// Delete a connector (runs on shell confirmation only — clean-audit
+    /// item 140). Returns the core outcome for the shell's toast.
+    pub fn delete(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::connectors::delete(conn, id));
-        match result {
+        match &result {
             Ok(_) => {
                 if self.selected == Some(id) {
                     self.selected = None;
@@ -224,6 +226,7 @@ impl ConnectorsPage {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+        result.map(|_| ())
     }
 
     /// Refresh one connector on a background thread (the async route
@@ -247,8 +250,10 @@ impl ConnectorsPage {
         self.message = Some("refresh started".into());
     }
 
-    /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    /// Render the page. Returns a confirm request when the user asked to
+    /// delete a connector (clean-audit item 140 — the delete itself runs
+    /// only after the shell dialog confirms).
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         design::page_header(
@@ -281,7 +286,7 @@ impl ConnectorsPage {
 
         let connectors = self.connectors.clone();
         let mut picked: Option<i64> = None;
-        let mut deleted: Option<i64> = None;
+        let mut deleted: Option<(i64, String)> = None;
         let mut refreshed: Option<i64> = None;
         egui::ScrollArea::vertical()
             .id_salt("connector-list")
@@ -329,7 +334,7 @@ impl ConnectorsPage {
                                 if design::button(ui, "delete", ButtonVariant::Destructive)
                                     .clicked()
                                 {
-                                    deleted = Some(id);
+                                    deleted = Some((id, name.clone()));
                                 }
                             });
                             ui.end_row();
@@ -344,14 +349,16 @@ impl ConnectorsPage {
         if let Some(id) = refreshed {
             self.refresh(db, id);
         }
-        if let Some(id) = deleted {
-            self.delete(db, id);
-        }
+        // Clean-audit item 140: the delete arms the shell dialog instead
+        // of running unconfirmed.
+        let nav = deleted
+            .map(|(id, name)| NavRequest::Confirm(ConfirmRequest::delete_connector(id, &name)));
 
         if self.selected.is_some() {
             ui.add_space(10.0);
             self.rows_ui(ui, db);
         }
+        nav
     }
 
     fn rows_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -487,7 +494,7 @@ mod tests {
         assert_eq!(str_field(&record, "refresh_method"), "manual");
         let id = i64_field(&record, "id");
 
-        page.delete(&db, id);
+        let _ = page.delete(&db, id);
         assert!(page.connectors.is_empty());
         assert!(page.selected.is_none());
     }

@@ -62,7 +62,6 @@ pub struct GeneralSettings {
     pub automatic_draft_enabled: bool,
     pub automation_enabled: bool,
     pub automation_write_actions_enabled: bool,
-    pub qdrant_enabled: bool,
     pub attachment_auto_download: bool,
     pub automatic_reply_sending: bool,
     /// v1.4.0 (R4, D9): the status a conversation moves to when a reply
@@ -75,7 +74,6 @@ pub struct GeneralSettings {
     /// (the pre-1.4.0 behavior).
     pub reply_status_after: String,
     pub log_level: String,
-    pub display_timezone: String,
     pub agent_language: String,
 }
 
@@ -90,12 +88,10 @@ impl Default for GeneralSettings {
             automatic_draft_enabled: false,
             automation_enabled: false,
             automation_write_actions_enabled: false,
-            qdrant_enabled: true,
             attachment_auto_download: true,
             automatic_reply_sending: false,
             reply_status_after: "pending".into(),
             log_level: "info".into(),
-            display_timezone: "system".into(),
             agent_language: "en".into(),
         }
     }
@@ -151,12 +147,8 @@ impl GeneralSettings {
                 defaults.automation_write_actions_enabled,
             )
             .unwrap_or(defaults.automation_write_actions_enabled),
-            qdrant_enabled: spp_core::settings::get_bool(
-                conn,
-                "qdrant_enabled",
-                defaults.qdrant_enabled,
-            )
-            .unwrap_or(defaults.qdrant_enabled),
+            // `qdrant_enabled` is owned by the Vector-index tab (clean-audit
+            // item 139) — the General form neither loads nor saves it.
             attachment_auto_download: spp_core::settings::get_bool(
                 conn,
                 "attachment_auto_download",
@@ -185,10 +177,6 @@ impl GeneralSettings {
                 .ok()
                 .flatten()
                 .unwrap_or(defaults.log_level),
-            display_timezone: spp_core::settings::get_string(conn, "display_timezone")
-                .ok()
-                .flatten()
-                .unwrap_or(defaults.display_timezone),
             agent_language: spp_core::settings::get_string(conn, "agent_language")
                 .ok()
                 .flatten()
@@ -221,7 +209,9 @@ impl GeneralSettings {
             "automation_write_actions_enabled",
             self.automation_write_actions_enabled,
         )?;
-        spp_core::settings::set_bool(conn, "qdrant_enabled", self.qdrant_enabled)?;
+        // `qdrant_enabled` is owned by the Vector-index tab (clean-audit
+        // item 139: the setting had no control anywhere; the General
+        // form's blind save would have clobbered the tab's toggle).
         spp_core::settings::set_bool(
             conn,
             "attachment_auto_download",
@@ -234,7 +224,6 @@ impl GeneralSettings {
         )?;
         spp_core::settings::set_string(conn, "reply_status_after", &self.reply_status_after)?;
         spp_core::settings::set_string(conn, "log_level", &self.log_level)?;
-        spp_core::settings::set_string(conn, "display_timezone", &self.display_timezone)?;
         spp_core::settings::set_string(conn, "agent_language", &self.agent_language)?;
         Ok(())
     }
@@ -352,10 +341,56 @@ pub fn load_business_hours(conn: &rusqlite::Connection) -> Vec<BusinessHoursRow>
         .collect()
 }
 
+/// Parse the free-text `days` field ("1,2,3" or "1, 2, 3") into the
+/// normalized JSON list the SLA layer reads. Every token must be a
+/// weekday number (0=Sun…6=Sat), deduped and sorted, and at least one
+/// day must remain (clean-audit item 141: the raw string used to save
+/// verbatim, and anything it could not parse silently meant "the default
+/// schedule" on the SLA side).
+fn parse_weekdays(raw: &str) -> spp_core::Result<String> {
+    // Accept both the editor's plain "1,2,3" and the JSON "[1,2,3]" the
+    // form pre-fills from the stored row.
+    let trimmed = raw.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    let mut days: Vec<i64> = Vec::new();
+    for token in inner.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let day: i64 = token.parse().map_err(|_| {
+            spp_core::error::Error::Validation(format!(
+                "invalid weekday {token:?} — use numbers 0=Sun…6=Sat separated by commas"
+            ))
+        })?;
+        if !(0..=6).contains(&day) {
+            return Err(spp_core::error::Error::Validation(format!(
+                "weekday {day} is out of range — use 0=Sun…6=Sat"
+            )));
+        }
+        if !days.contains(&day) {
+            days.push(day);
+        }
+    }
+    if days.is_empty() {
+        return Err(spp_core::error::Error::Validation(
+            "at least one weekday is required — use 0=Sun…6=Sat separated by commas".into(),
+        ));
+    }
+    days.sort_unstable();
+    serde_json::to_string(&days).map_err(|e| {
+        spp_core::error::Error::Validation(format!("could not serialize the weekday list: {e}"))
+    })
+}
+
 /// Save one mailbox's business hours (the set route's upsert).
 ///
 /// # Errors
-/// Propagates SQL failures or invalid timezone.
+/// Propagates SQL failures, an invalid timezone, or an invalid weekday
+/// list.
 pub fn save_business_hours(
     conn: &rusqlite::Connection,
     row: &BusinessHoursRow,
@@ -371,6 +406,7 @@ pub fn save_business_hours(
             "the end time must be after the start time".into(),
         ));
     }
+    let days = parse_weekdays(&row.days)?;
     conn.execute(
         "INSERT INTO mailbox_business_hours (mailbox_local_id, timezone, days, start_minute,
                 end_minute, first_response_target_min, resolution_target_min, updated_at)
@@ -382,7 +418,7 @@ pub fn save_business_hours(
         rusqlite::params![
             row.mailbox_id,
             row.timezone,
-            row.days,
+            days,
             row.start_minute,
             row.end_minute,
             row.first_response_target_min,
@@ -688,6 +724,17 @@ impl SettingsPage {
         // restart that never mattered.
         let concurrency_before = db
             .with_read(|conn| spp_core::settings::get_i64(conn, "api_concurrency", 2).unwrap_or(2));
+        // Clean-audit item 138: same for `log_level` — the saved row
+        // reaches the live tracing filter instead of sitting unread.
+        let level_before = db
+            .with_read(|conn| {
+                spp_core::settings::get_string(conn, "log_level")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+            })
+            .trim()
+            .to_ascii_lowercase();
         let result = db.with_write(|conn| general.save(conn));
         match result {
             Ok(()) => {
@@ -716,6 +763,13 @@ impl SettingsPage {
                         after = general.api_concurrency,
                         current = real.api_concurrency(),
                         "api concurrency changed: applied to the live provider queues"
+                    );
+                }
+                if level_before != general.log_level.to_ascii_lowercase() {
+                    spp_core::logging::apply_log_level(&general.log_level);
+                    tracing::info!(
+                        level = %general.log_level,
+                        "log level changed: applied to the live subscriber"
                     );
                 }
                 self.message = Some("settings saved".into())
@@ -1174,7 +1228,7 @@ impl SettingsPage {
                 ui.add(egui::DragValue::new(&mut general.api_concurrency).range(1..=8));
                 ui.end_row();
                 design::field_label(ui, "log level:");
-                egui::ComboBox::from_id_salt("settings-log-level")
+                let combo = egui::ComboBox::from_id_salt("settings-log-level")
                     .width(160.0)
                     .selected_text(general.log_level.clone())
                     .show_ui(ui, |ui| {
@@ -1182,11 +1236,9 @@ impl SettingsPage {
                             ui.selectable_value(&mut general.log_level, level.into(), level);
                         }
                     });
-                ui.end_row();
-                design::field_label(ui, "display timezone:");
-                ui.add_sized(
-                    [220.0, 28.0],
-                    egui::TextEdit::singleline(&mut general.display_timezone),
+                combo.response.on_hover_text(
+                    "Clean-audit item 138: drives the real tracing filter — \
+                     applied at boot from the saved value and immediately on save.",
                 );
                 ui.end_row();
                 design::field_label(ui, "agent language:");
@@ -2062,6 +2114,37 @@ impl SettingsPage {
                         .color(design::tokens(ui).foreground),
                     );
                     ui.end_row();
+                    // Clean-audit item 139: the card subtitle references the
+                    // qdrant_enabled setting, but no control exposed it
+                    // anywhere — the toggle lives here now. The workers open
+                    // the store at boot, so a change lands on the next start.
+                    let prev = db
+                        .with_read(|conn| {
+                            spp_core::settings::get_bool(conn, "qdrant_enabled", true)
+                        })
+                        .unwrap_or(true);
+                    let mut enabled = prev;
+                    let toggle = ui.checkbox(&mut enabled, "vector index enabled");
+                    toggle.on_hover_text(
+                        "Dense vectors are embedded and searched while enabled; searches \
+                         fall back to FTS5 when disabled. Applies on the next start — \
+                         the workers open the store at boot.",
+                    );
+                    ui.end_row();
+                    if enabled != prev {
+                        let result = db.with_write(|conn| {
+                            spp_core::settings::set_bool(conn, "qdrant_enabled", enabled)
+                        });
+                        match result {
+                            Ok(()) => {
+                                self.message = Some(
+                                    "vector index preference saved — applies on the next start"
+                                        .into(),
+                                );
+                            }
+                            Err(e) => self.error = Some(e.to_string()),
+                        }
+                    }
                 });
             },
         );
@@ -2363,6 +2446,50 @@ mod tests {
         assert!(result2.is_err());
     }
 
+    /// Clean-audit item 141: the `days` field used to save verbatim —
+    /// "1-5", "mon-fri" or "1; 2; 3" parsed as nothing on the SLA side
+    /// and silently meant the default schedule. The save now rejects
+    /// anything that is not a real weekday list and normalizes the
+    /// stored value.
+    #[test]
+    fn business_hours_days_are_validated_and_normalized() {
+        let db = fixture(Vec::new());
+        let rows = db.with_read(load_business_hours);
+        let mut row = rows.into_iter().find(|r| r.name == "Support").unwrap();
+        row.timezone = "UTC".into();
+        row.end_minute = row.start_minute + 480;
+
+        for bad in ["1-5", "mon-fri", "1; 2; 3", "9", "", "  "] {
+            row.days = bad.into();
+            let result = db.with_write(|conn| save_business_hours(conn, &row));
+            assert!(result.is_err(), "{bad:?} must be rejected");
+        }
+
+        row.days = "5, 1, 3".into();
+        db.with_write(|conn| save_business_hours(conn, &row))
+            .expect("save");
+        let saved = db
+            .with_read(load_business_hours)
+            .into_iter()
+            .find(|r| r.name == "Support")
+            .unwrap();
+        assert_eq!(
+            saved.days, "[1,3,5]",
+            "the stored list is normalized (deduped, sorted, JSON)"
+        );
+
+        // The default row text round-trips unchanged.
+        row.days = "[1,2,3,4,5]".into();
+        db.with_write(|conn| save_business_hours(conn, &row))
+            .expect("save");
+        let saved = db
+            .with_read(load_business_hours)
+            .into_iter()
+            .find(|r| r.name == "Support")
+            .unwrap();
+        assert_eq!(saved.days, "[1,2,3,4,5]");
+    }
+
     #[test]
     fn backup_create_lists_and_restores() {
         let db = fixture(vec![("conv", 1, "Keep me", "active", "email", 1, 5, 9)]);
@@ -2468,7 +2595,7 @@ mod tests {
             9,
         )]);
         db.with_write(|conn| {
-            spp_core::settings::set_string(conn, "display_timezone", "Asia/Dhaka").expect("tz");
+            spp_core::settings::set_string(conn, "agent_language", "English").expect("lang");
         });
 
         let mut page = SettingsPage::new();
@@ -2488,7 +2615,7 @@ mod tests {
             "the confirmation disarms after the reset"
         );
 
-        let (convs, users, mailboxes, tz, sync_state) = db.with_read(|conn| {
+        let (convs, users, mailboxes, lang, sync_state) = db.with_read(|conn| {
             let count = |table: &str| -> i64 {
                 conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| {
                     r.get::<_, i64>(0)
@@ -2499,7 +2626,7 @@ mod tests {
                 count("conversations"),
                 count("users"),
                 count("mailboxes"),
-                spp_core::settings::get_string(conn, "display_timezone")
+                spp_core::settings::get_string(conn, "agent_language")
                     .expect("read")
                     .expect("present"),
                 spp_core::sync_engine::get_state(conn),
@@ -2508,7 +2635,7 @@ mod tests {
         assert_eq!(convs, 0, "seeded conversations must be purged");
         assert_eq!(users, 0, "mirror users must be purged");
         assert_eq!(mailboxes, 0, "mirror mailboxes must be purged");
-        assert_eq!(tz, "Asia/Dhaka", "application settings must survive");
+        assert_eq!(lang, "English", "application settings must survive");
         assert_eq!(sync_state, "NEW", "the reset arms a fresh first sync");
     }
 

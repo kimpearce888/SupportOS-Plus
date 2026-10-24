@@ -48,6 +48,18 @@ fn main() {
     };
     tracing::info!(path = %db_path.display(), "database ready (all migrations applied)");
 
+    // Clean-audit item 138: the settings page's `log_level` row drives
+    // the real subscriber — applied at boot from the stored setting (the
+    // env/LOG_LEVEL default stood in until the database was readable),
+    // and live on every settings save through the same handle.
+    if let Some(level) = db.with_read(|conn| {
+        spp_core::settings::get_string(conn, "log_level")
+            .ok()
+            .flatten()
+    }) {
+        spp_core::logging::apply_log_level(&level);
+    }
+
     let bus = spp_core::eventing::EventBus::default();
     let boot = spp_shell::build_boot_services(&db, &bus);
 

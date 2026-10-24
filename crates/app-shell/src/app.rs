@@ -251,7 +251,16 @@ impl ShellApp {
         match nav {
             NavRequest::InboxTile(tile) => {
                 self.page = PageKey::Inbox;
-                self.inbox.bar.ops = Some(tile);
+                // Clean-audit item 142: the drill-down is a FRESH
+                // navigation (the web route defined the whole filter
+                // state) — whatever filters the user had set in the inbox
+                // bar before the tile click must not layer underneath the
+                // tile's fragment and shrink the result to a confusing
+                // subset.
+                self.inbox.bar = crate::pages::inbox::FilterBar {
+                    ops: Some(tile),
+                    ..crate::pages::inbox::FilterBar::default()
+                };
                 self.inbox.invalidate();
             }
             NavRequest::Page(page) => {
@@ -268,26 +277,51 @@ impl ShellApp {
     }
 
     /// Clean-audit item 70: execute a CONFIRMED destructive action. The
-    /// toast records the outcome; the owning page invalidates so the
-    /// next frame re-reads the mirror.
+    /// owning page runs the write (its own state handling rides along)
+    /// and the toast records the honest outcome. Clean-audit item 140:
+    /// every destructive surface routes through here.
     fn execute_confirmed(&mut self, action: DestructiveAction) {
-        match action {
+        let (label, verb, outcome): (&str, &str, spp_core::Result<()>) = match action {
             DestructiveAction::DeleteAutomationRule { id } => {
-                let result = self
+                let outcome = self
                     .db
-                    .with_write(|conn| spp_core::automation::delete_rule(conn, id));
-                match result {
-                    Ok(_) => {
-                        self.automation.invalidate();
-                        self.toasts.success(format!("Automation rule {id} deleted"));
-                    }
-                    Err(e) => {
-                        self.automation.invalidate();
-                        self.toasts
-                            .error(format!("Could not delete rule {id}: {e}"));
-                    }
-                }
+                    .with_write(|conn| spp_core::automation::delete_rule(conn, id))
+                    .map(|_| ());
+                self.automation.invalidate();
+                ("automation rule", "deleted", outcome)
             }
+            DestructiveAction::DeleteKnowledgeDoc { id } => (
+                "knowledge document",
+                "deleted",
+                self.knowledge.delete_document(&self.db, id),
+            ),
+            DestructiveAction::DeleteCustomType { id } => (
+                "custom type",
+                "deleted",
+                self.custom_objects.delete_type(&self.db, id),
+            ),
+            DestructiveAction::DeleteCustomObject { id } => (
+                "custom object",
+                "deleted",
+                self.custom_objects.delete_object(&self.db, id),
+            ),
+            DestructiveAction::DeleteConnector { id } => {
+                ("connector", "deleted", self.connectors.delete(&self.db, id))
+            }
+            DestructiveAction::DeleteSegment { id } => (
+                "segment",
+                "deleted",
+                self.outreach.delete_segment(&self.db, id),
+            ),
+            DestructiveAction::ClearDiagnosticsLog => {
+                ("event log", "cleared", self.diagnostics.clear_log(&self.db))
+            }
+        };
+        match outcome {
+            Ok(()) => self.toasts.success(format!("{label} {verb}")),
+            Err(e) => self
+                .toasts
+                .error(format!("Could not delete the {label}: {e}")),
         }
     }
 
@@ -698,7 +732,7 @@ impl ShellApp {
                                         self.customers.ui(ui, &self.db, sync.as_ref());
                                     }
                                     PageKey::Knowledge => {
-                                        self.knowledge.ui(ui, &self.db, sync.as_ref());
+                                        nav = self.knowledge.ui(ui, &self.db, sync.as_ref());
                                     }
                                     PageKey::Reports => {
                                         self.reports.ui(ui, &self.db, sync.as_ref());
@@ -713,9 +747,11 @@ impl ShellApp {
                                     PageKey::Automation => {
                                         nav = self.automation.ui(ui, &self.db);
                                     }
-                                    PageKey::Connectors => self.connectors.ui(ui, &self.db),
+                                    PageKey::Connectors => {
+                                        nav = self.connectors.ui(ui, &self.db);
+                                    }
                                     PageKey::CustomObjects => {
-                                        self.custom_objects.ui(ui, &self.db);
+                                        nav = self.custom_objects.ui(ui, &self.db);
                                     }
                                     PageKey::Incidents => self.incidents.ui(ui, &self.db),
                                     PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
@@ -728,12 +764,14 @@ impl ShellApp {
                                     PageKey::Organizations => {
                                         self.organizations.ui(ui, &self.db, sync.as_ref());
                                     }
-                                    PageKey::Outreach => self.outreach.ui(ui, &self.db),
+                                    PageKey::Outreach => {
+                                        nav = self.outreach.ui(ui, &self.db);
+                                    }
                                     PageKey::Search => self.search.ui(ui, &self.db),
                                     PageKey::Settings => self.settings.ui(ui, &self.db),
                                     PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
                                     PageKey::Diagnostics => {
-                                        self.diagnostics.ui(ui, &self.db);
+                                        nav = self.diagnostics.ui(ui, &self.db);
                                     }
                                     PageKey::SyncHealth => {
                                         self.sync_health.ui(ui, &self.db, sync.as_ref());
@@ -1422,6 +1460,31 @@ mod headless_tests {
         assert_eq!(rules_now(&db), 0, "confirming deletes the rule");
         // The outcome toast records the decision.
         assert!(!app.toasts.is_empty(), "the deletion outcome is toasted");
+    }
+
+    /// Clean-audit item 142: the ops drill-down defines the WHOLE filter
+    /// state (the web route was a fresh navigation) — stale bar filters
+    /// must not layer underneath the tile fragment.
+    #[test]
+    fn audit142_ops_drill_down_resets_stale_bar_filters() {
+        let (mut app, _db) = headless_shell(Vec::new());
+
+        // The user filtered the inbox by hand first.
+        app.inbox.bar.view = Some(crate::pages::inbox::ViewFilter::Closed);
+        app.inbox.bar.query = Some("stale search".into());
+        app.inbox.bar.mailbox = Some(9);
+
+        app.apply_nav(NavRequest::InboxTile("unassigned".into()));
+
+        assert_eq!(app.page, PageKey::Inbox);
+        assert_eq!(
+            app.inbox.bar,
+            crate::pages::inbox::FilterBar {
+                ops: Some("unassigned".into()),
+                ..crate::pages::inbox::FilterBar::default()
+            },
+            "the tile replaces the bar instead of layering onto it"
+        );
     }
 }
 
