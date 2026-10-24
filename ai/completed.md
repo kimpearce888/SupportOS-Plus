@@ -3775,3 +3775,7 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   fetched before each push (unmoved at push time).
 - Runner verification: follows once CI on code commit `763824c`
   completes (recorded below when the runs finish).
+
+Runner verification (batch 31, code commit `763824c`): GitHub Actions run
+`40047045028` completed — check runs "fmt, clippy, test, deny" and
+"AppImage + .deb build, smoke" both concluded `success`.
