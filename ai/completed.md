@@ -3623,3 +3623,155 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   `b3d8904` landed mid-batch and was rebased onto, not overwritten).
 - Runner verification: follows once CI on code commit `ecc7228`
   completes (recorded below when the runs finish).
+
+### Batch 31 — 2026-10-24 (code commit `763824c`)
+
+**117. refresh_replies can count the campaign's own message (clock
+skew)** (low|bug)
+— the campaign's own message is mirrored as a `type = 'customer'`
+thread (`helpscout_real::create_conversation` sends it with
+`"type": "customer"`), and the reply guard compared platform thread
+stamps against a LOCAL clock stamp (`sent_at = datetime('now')`
+taken right after the API call) — any platform-clock-ahead skew put
+the campaign's own email after the guard and the sweep counted it as
+the recipient's reply. Reply detection now anchors on the mirrored
+campaign thread itself — the conversation's first thread
+(create_conversation creates the conversation with exactly one
+thread) — and accepts only a customer thread strictly after it (or
+sharing its stamp but created after it); both sides of the
+comparison read from the same clock. Pinned by a skew test (campaign
+message 1s after sent_at must not count; the hour-later reply must)
+and a suppression test. core/outreach.rs.
+
+**118. Duplicate graph edges for mutual links** (low|bug)
+— a mutual link is two `graph_edges` rows (A→B and B→A) and "both"
+expansion returns both, so the subgraph BFS pushed the same logical
+link once per expansion — and twice more when the far node expanded.
+Pushed edges dedupe through a canonical unordered
+(relation, node-pair) key now, so a mutual link renders once
+regardless of how many expansions return it, while genuinely
+distinct relations between the same pair stay distinct.
+core/support_graph.rs.
+
+**119. Tag-filter case-folding asymmetry** (low|bug)
+— the Rust side folded filter values with Unicode rules
+(`str::to_lowercase`) while SQL `LOWER` folds ASCII only: a stored
+tag never matched its own uppercase spelling when the name carried a
+non-ASCII letter (É folded to é on one side only). The Rust side
+folds ASCII-only now, so both sides agree — ASCII tags match
+case-insensitively, non-ASCII names compare symmetrically.
+core/saved_views.rs.
+
+**120. Entity decode order double-decodes; &apos; missing**
+(low|bug)
+— the html text extractor decoded `&amp;` FIRST, so an author's
+literal `&amp;lt;` became `&lt;` and then decoded again into a real
+`<`; `&apos;` never decoded at all. Single-decode semantics decode
+every other entity first and `&amp;` LAST (`&amp;lt;` lands as the
+literal text `&lt;`), with `&apos;` added alongside `&#39;`.
+core/knowledge_store.rs.
+
+**121. Byte-unsafe slicing helpers** (low|bug)
+— three slicing classes trusted Unicode-lowercased or raw-byte
+offsets against the original string: the knowledge html helpers
+(`strip_tag_block`, `replace_ci`, `extract_html_title`) used the
+lowercased haystack as an OFFSET MAP over the original — İ (U+0130)
+expands to two chars under Unicode lowercasing, so the offsets
+stopped matching and the helpers sliced garbage or panicked;
+`valid_iso_date` sliced its prefix at raw byte offset 10 (any
+multi-byte character in the first ten bytes panicked); and
+`truncate_result` sliced the tool-output cap at a raw byte offset.
+All of them fold/slice CHARACTER-safely now (ASCII lowercasing keeps
+byte offsets 1:1 for the html helpers), each pinned by a
+multi-byte-shape test. core/knowledge_store.rs, core/custom_objects.rs,
+core/copilot.rs.
+
+**122. Numeric customer_property filters CAST text→0** (low|bug)
+— `CAST(cp.value AS REAL)` turns any non-numeric text into 0.0, so
+"N/A", "blue" and "yes" satisfied every `lt`/`lte` comparison
+against a positive threshold. Only values that are actually numeric
+participate now: at least one digit and nothing outside a number's
+character set (sign, digits, decimal point, exponent), trimmed
+before the check. core/saved_views.rs.
+
+**123. freshness_low_usage_days setting dead** (low|gap)
+— the setting was read (default 60) and dropped: the low_usage flag
+was `usage_count == 0`, firing for every unused document including
+one created five minutes ago. The setting is the grace period now —
+a document counts as low-usage once it has existed at least
+`freshness_low_usage_days` (created_at, falling back to the update
+stamp) and still has no recorded usage. core/knowledge_store.rs.
+
+**124. Pre-release vs pre-release compares as Same** (low|bug)
+— same-numeric-core versions both carrying pre-release suffixes
+returned Same, so a running `1.4.0-beta.1` never learned that
+`1.4.0-beta.2` existed. Pre-releases compare per semver identifier
+rules now (numeric identifiers numerically and below alphanumeric
+ones; a larger identifier set outranks its prefix), with the
+release-vs-pre-release rule unchanged. core/version_check.rs.
+
+**125. Sweep windows drop oldest of a burst (DESC+stamp)** (low|bug)
+— six notification-sweep lanes (failed jobs, campaign replies, known
+issues, issue spikes, AI escalations, not-good ratings) selected
+`ORDER BY id DESC LIMIT N` FIRST and filtered by stamp in Rust
+afterwards: already-swept rows filled the cap and the oldest rows of
+a burst fell outside it — never notified, since the next sweep's
+stamp skips them forever. The stamp filter runs in SQL before the
+cap now (`datetime(col) > datetime(?1)`, normalizing the mixed
+space/ISO-T formats exactly like the Rust parser did), the
+redundant Rust filters and their now-dead helpers are removed, and
+the ratings lane carries its stamp in the row instead of a per-row
+re-query. Pinned by a burst test: five new failures buried under
+205 already-swept ones all notify. core/notification_sweep.rs.
+
+**126. parse_csv header/data index misalignment on empty headers**
+(low|bug)
+— empty headers were FILTERED OUT of the header list while data
+records kept all their columns, so with a header row like `a,,c`
+every data field after the gap shifted one column left (`c`
+received the unnamed column's value). Empty headers keep their
+positional slots now and simply produce no key.
+core/connectors.rs.
+
+Housekeeping: this batch's opening commit also repairs a pre-existing
+`plan.md` typo on the parked item 56 (`ed|gap]` → `[med|gap]`,
+introduced with the batch-16 tracking commit `68161a8`).
+
+Verification (Rule 5, all on the pinned 1.99.1 toolchain):
+- `python3 scripts/gate_no_simulation.py`: clean.
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- Tests: core 465 passed / 0 failed / 4 ignored (12 new batch-31
+  regressions: the skew test where the campaign's own message must
+  not count and the hour-later reply must; the no-reply suppression
+  test; the mutual-link subgraph rendering one edge for two
+  graph_edges rows; the tag filter matching a stored non-ASCII tag's
+  own spelling and the ASCII pair case-insensitively; the
+  single-pass entity decode with &apos; and the İ-prefixed html
+  surviving the tag stripper; the multibyte date prefix and the
+  multi-byte tool output across the truncation cap; the numeric
+  filter matching 5 and " 7 " while N/A and blue stay out and 15
+  joins at a higher threshold; the semver pre-release table;
+  the five-new-failures-under-205-swept-ones burst notifying all
+  five; and the parse_csv positional alignment); sandbox-feature
+  suite 470 passed / 0 failed / 4 ignored; app-shell 209 passed /
+  0 failed; xtask 6; catalog 0. (One full-suite rerun initially
+  reported 68 failures: the disk filled mid-build and a stale
+  partially-linked binary ran — after clearing 4.2 GB of build
+  artifacts every suite was rebuilt and rerun cleanly; the failures
+  were environmental, not code.)
+- End-to-end smoke: `SPP_SMOKE=1` on the freshly built binary —
+  exit 0, boot chain + shell/renderer verified, 24 pages rendered,
+  4043 shapes painted (identical to the batch-29/30 baseline).
+- Fresh harness `scripts/verify_batch31.py` (committed): all
+  checks pass; the batch-18, batch-19, batch-21, batch-23, batch-24,
+  batch-25, batch-26, batch-27, batch-28, batch-29 and batch-30
+  harnesses still pass. The batch-20 and batch-22 stale needles are
+  the same two documented pre-existing failures proven pre-batch by
+  the batch-30 stash-run; batch-17 remains environment-bound.
+- `cargo deny check advisories licenses`: ok (the CDLA-Permissive-2.0
+  note is the pre-existing unmatched-allowance warning, not a failure).
+- Security: staged diff token-scanned clean before each push; remote
+  fetched before each push (unmoved at push time).
+- Runner verification: follows once CI on code commit `763824c`
+  completes (recorded below when the runs finish).
