@@ -130,7 +130,13 @@ nonexistent updated_at column without the self-heal, and the two bare
 ORDER BY remote_created_at thread lanes) — verified and recorded in
 `completed.md`.
 
-Batch 31 = items 117-126 — in progress (moved to `progress.md`).
+Batch 31 = items 117-126 (the refresh_replies clock-skew self-count, the
+duplicate graph edges for mutual links, the tag-filter case-folding
+asymmetry, the entity decode double-decode with the missing &apos;, the
+byte-unsafe slicing helpers, the numeric customer_property CAST-to-0, the
+dead freshness_low_usage_days setting, the pre-release Same comparison, the
+sweep windows dropping the oldest of a burst, and the parse_csv empty-header
+misalignment) — verified and recorded in `completed.md`.
 
 ### MEDIUM — wrong behavior on realistic paths
 
