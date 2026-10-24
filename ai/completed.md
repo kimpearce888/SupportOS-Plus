@@ -4605,3 +4605,13 @@ rows.
   secrets, no credential-shaped strings; the remote was re-fetched and
   is at the opening commit's descendant (no concurrent batches).
 - Runner verification follows once CI on this code commit completes.
+
+Runner verification (batch 36, code commit `7b96ada` — CI on tracking
+commit `8b4c2af`, which contains it): GitHub Actions completed with BOTH
+check runs concluded `success`, every step green — "fmt, clippy, test,
+deny" (no-simulation gate, fmt, verify-icons, clippy workspace + sandbox,
+tests workspace + sandbox, deny advisories/licenses/bans) and
+"AppImage + .deb build, smoke" (the real packaging path exercising the
+batch-36 wiring, then both boot-chain smoke tests on the packaged
+artifacts). The v1.7.0 clean-audit queue stands fully consumed and
+runner-verified.
