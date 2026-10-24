@@ -3935,3 +3935,11 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   fetched before the push.
 - Runner verification: follows once CI on code commit `0458753`
   completes (recorded below when the runs finish).
+
+Runner verification (batch 32, code commit `0458753` — CI on tracking
+commit `94d7ea3`, which contains it): GitHub Actions run `40055344060`
+completed — check runs "fmt, clippy, test, deny" and
+"AppImage + .deb build, smoke" both concluded `success`.
+(Also recorded: the batch-31 tracking commit's own CI run `40048669638`
+on `41e9f01` — success; and run `40055912050` on the owner's batch-33
+opening commit `31e2e58` is theirs to record.)
