@@ -4413,9 +4413,30 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   chat-loop truncation plus the removal of the dead helper (item 152).
 - Security: staged diff token-scanned clean before the push (the only
   password/secret-shaped lines in the diff are the REMOVED dead
-  data_tools export/import code); remote fetched before the push.
-- Runner verification: follows once CI on the batch-34 code commit
-  completes (recorded below when the runs finish).
+  data_tools export/import code); remote fetched (and rebased onto the
+  owner's concurrent batch-35 commits) before the push.
+- Concurrent-batch merge: the owner's batch 35 (items 159-165, commits
+  0d24ece/8c72b95/9ffbc1b) landed while batch 34 ran. The rebase merged
+  both batches' package.rs work (the item-158 version pin + SHA-256
+  verify now ride batch 35's timeout-bounded atomic download, and the
+  item-157 staging clean rides its verify-icons wiring); the tracking
+  files were merged so both records live here and the queue is empty.
+  The merged tree was re-verified locally end to end before the push
+  (fmt/gate/clippy clean, core 455/0/4, sandbox 460/0/4, app-shell
+  222/0, xtask 9/0, `cargo metadata --locked` clean, deny
+  advisories+bans+licenses ok, harnesses 18-34 green, SPP_SMOKE exit 0
+  with 24 pages / 4040 shapes).
+- Runner verification (batch 34, code commit `2d3cdb4`, rebased onto
+  batch 35's `8c72b95` — CI on tracking commit `1a9445d`, which contains
+  both): GitHub Actions run `40071675943` completed with BOTH check
+  runs concluded `success`, every step green — "fmt, clippy, test,
+  deny" (no-simulation gate, fmt, verify-icons, clippy workspace +
+  sandbox, tests workspace + sandbox, deny advisories/licenses/bans)
+  and "AppImage + .deb build, smoke" (the real packaging path exercised
+  the item-157 staging clean and the item-158 pinned/checksum-verified
+  appimagetool, then booted the AppImage and the extracted .deb payload
+  under SPP_SMOKE). The same run also completes batch 35's runner
+  verification (its code commit rides in it).
 
 Runner verification (batch 35, code commit `8c72b95` — CI on tracking
 commit `9ffbc1b`, which contains it): GitHub Actions run `40069963833`
