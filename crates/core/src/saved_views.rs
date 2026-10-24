@@ -1689,7 +1689,15 @@ impl<'a> ViewEngine<'a> {
                 })
             }
             ViewNode::Tags { tags, mode } => {
-                let lowered: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
+                // Audit item 119: the Rust side folded with Unicode rules
+                // (`str::to_lowercase`) while SQL `LOWER` folds ASCII
+                // only — a tag stored as "ELECTRONICS" (or any name with
+                // a non-ASCII letter) produced a parameter the SQL side
+                // could never match. Both sides now fold ASCII-only, so
+                // the filter agrees with the stored collation: ASCII
+                // tags match case-insensitively, non-ASCII names compare
+                // symmetrically on both sides.
+                let lowered: Vec<String> = tags.iter().map(|t| t.to_ascii_lowercase()).collect();
                 if lowered.is_empty() {
                     return Ok(Fragment::empty());
                 }
@@ -1839,9 +1847,20 @@ impl<'a> ViewEngine<'a> {
                             "lt" => "<",
                             _ => "<=",
                         };
+                        // Audit item 122: `CAST(cp.value AS REAL)` turns
+                        // any non-numeric text into 0.0 — "N/A", "blue",
+                        // "yes" all satisfied `lt`/`lte` comparisons
+                        // against positive thresholds. Only values that
+                        // are actually numeric participate now: at least
+                        // one digit, and nothing outside a number's
+                        // character set (sign, digits, decimal point,
+                        // exponent).
                         Ok(Fragment {
                             sql: format!(
-                                "EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} AND CAST(cp.value AS REAL) {op_sql} ?)"
+                                "EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} \
+                                  AND TRIM(cp.value) GLOB '*[0-9]*' \
+                                  AND TRIM(cp.value) NOT GLOB '*[^0-9.+-eE]*' \
+                                  AND CAST(cp.value AS REAL) {op_sql} ?)"
                             ),
                             params: vec![integer(*definition_id), real(n)],
                         })
@@ -2421,4 +2440,179 @@ pub fn delete_view(conn: &Connection, id: i64) -> Result<bool> {
         rusqlite::params![id],
     )?;
     Ok(changes > 0)
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_tagged(conn: &Connection, remote: i64, tag: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (?1, ?1, 'tag seed', 'p', 'active')",
+            [remote],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO tags (remote_id, name) VALUES (?1, ?2)",
+            rusqlite::params![remote, tag],
+        )
+        .expect("tag");
+        conn.execute(
+            "INSERT INTO conversation_tags (conversation_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![conv, conn.last_insert_rowid()],
+        )
+        .expect("tag link");
+        conv
+    }
+
+    fn tag_where(conn: &Connection, tags: &[&str]) -> Vec<i64> {
+        let engine = ViewEngine::new("UTC");
+        let def = ViewDefinition {
+            combinator: "all".to_string(),
+            conditions: vec![ViewNode::Tags {
+                tags: tags.iter().map(|t| t.to_string()).collect(),
+                mode: "any".to_string(),
+            }],
+        };
+        let compiled = engine.compile(&def).expect("compile");
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT id FROM conversations c WHERE c.deleted_at IS NULL AND {}",
+                compiled.where_sql
+            ))
+            .expect("prepare");
+        let refs: Vec<&dyn rusqlite::ToSql> = compiled
+            .params
+            .iter()
+            .map(|p| p as &dyn rusqlite::ToSql)
+            .collect();
+        stmt.query_map(refs.as_slice(), |r| r.get(0))
+            .expect("query")
+            .filter_map(|x| x.ok())
+            .collect()
+    }
+
+    /// Audit item 119: the Rust side folded the filter value with Unicode
+    /// rules while SQL LOWER folds ASCII only — a non-ASCII filter value
+    /// produced a parameter the SQL side could never match. Both sides
+    /// fold ASCII-only now, so a stored non-ASCII tag matches its own
+    /// uppercase spelling, and ASCII tags stay case-insensitive.
+    #[test]
+    fn tag_filter_folds_consistently_with_sql() {
+        let conn = db();
+        let ascii = seed_tagged(&conn, 1, "electronics");
+        let accent = seed_tagged(&conn, 2, "ÉCLAIR");
+
+        // ASCII: case-insensitive both pre- and post-fix.
+        assert_eq!(tag_where(&conn, &["ELECTRONICS"]), vec![ascii]);
+
+        // Non-ASCII: pre-fix the Rust fold rewrote É→é and SQL LOWER left
+        // the stored É — the stored tag could never match its own name.
+        assert_eq!(tag_where(&conn, &["ÉCLAIR"]), vec![accent]);
+    }
+
+    fn seed_property(conn: &Connection, remote: i64, value: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (?1, 'C')",
+            [remote],
+        )
+        .expect("customer");
+        let customer = conn.last_insert_rowid();
+        let def: i64 = conn
+            .query_row(
+                "SELECT id FROM customer_property_definitions WHERE slug = 'seats'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| {
+                conn.execute(
+                    "INSERT INTO customer_property_definitions (remote_id, name, slug, type)
+                     VALUES (1, 'Seats', 'seats', 'number')",
+                    [],
+                )
+                .expect("definition");
+                conn.last_insert_rowid()
+            });
+        conn.execute(
+            "INSERT INTO customer_properties (customer_id, definition_id, value) VALUES (?1, ?2, ?3)",
+            rusqlite::params![customer, def, value],
+        )
+        .expect("property");
+        // CustomerProperty fragments run on the conversations surface
+        // (cp.customer_id = c.customer_local_id), so each customer gets a
+        // conversation to match on.
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status, customer_local_id)
+             VALUES (?1, ?1, 'prop conv', 'p', 'active', ?2)",
+            rusqlite::params![remote, customer],
+        )
+        .expect("conversation");
+        conn.last_insert_rowid()
+    }
+
+    fn numeric_lt(conn: &Connection, n: f64) -> Vec<i64> {
+        let def: i64 = conn
+            .query_row(
+                "SELECT id FROM customer_property_definitions WHERE slug = 'seats'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("definition id");
+        let engine = ViewEngine::new("UTC");
+        let def_view = ViewDefinition {
+            combinator: "all".to_string(),
+            conditions: vec![ViewNode::CustomerProperty {
+                definition_id: def,
+                op: "lt".to_string(),
+                value: Some(n.to_string()),
+            }],
+        };
+        let compiled = engine.compile(&def_view).expect("compile");
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT id FROM conversations c WHERE c.deleted_at IS NULL AND {}",
+                compiled.where_sql
+            ))
+            .expect("prepare");
+        let refs: Vec<&dyn rusqlite::ToSql> = compiled
+            .params
+            .iter()
+            .map(|p| p as &dyn rusqlite::ToSql)
+            .collect();
+        stmt.query_map(refs.as_slice(), |r| r.get(0))
+            .expect("query")
+            .filter_map(|x| x.ok())
+            .collect()
+    }
+
+    /// Audit item 122: `CAST(cp.value AS REAL)` turned any non-numeric
+    /// text into 0.0, so "N/A" satisfied every `lt` comparison against a
+    /// positive threshold. Only numeric values participate now.
+    #[test]
+    fn numeric_property_filter_ignores_non_numeric_text() {
+        let conn = db();
+        let small = seed_property(&conn, 1, "5");
+        let spaced = seed_property(&conn, 2, " 7 ");
+        seed_property(&conn, 3, "N/A");
+        seed_property(&conn, 4, "blue");
+        let big = seed_property(&conn, 5, "15");
+
+        let mut hits = numeric_lt(&conn, 10.0);
+        hits.sort_unstable();
+        assert_eq!(hits, vec![small, spaced], "only real numbers below 10");
+
+        let mut all = numeric_lt(&conn, 100.0);
+        all.sort_unstable();
+        assert_eq!(all.len(), 3, "15 also matches at a higher threshold");
+        assert!(all.contains(&big), "15 participates at a higher threshold");
+    }
 }

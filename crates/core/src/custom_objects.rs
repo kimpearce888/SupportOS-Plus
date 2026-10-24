@@ -462,11 +462,15 @@ pub fn validate_properties(
 }
 
 fn valid_iso_date(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    if bytes.len() < 10 {
+    // Audit item 121: the prefix was sliced at raw BYTE offset 10, so a
+    // value with any multi-byte character in its first ten bytes panicked
+    // ("byte index 10 is not a char boundary"). The prefix is taken by
+    // CHARACTER count now; the year/month/day checks below reject any
+    // non-ASCII residue anyway.
+    let date: String = s.chars().take(10).collect();
+    if s.chars().count() < 10 {
         return false;
     }
-    let date = &s[..10];
     let mut parts = date.split('-');
     let (y, m, d) = (
         parts.next().unwrap_or(""),
@@ -1259,6 +1263,30 @@ mod batch25_item61_tests {
         assert!(
             err.to_string().contains("Unrecognized key"),
             "the input validation is unchanged: {err}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+
+    /// Audit item 121: the date prefix was sliced at raw byte offset 10 —
+    /// any multi-byte character in the first ten bytes panicked. The
+    /// prefix is character-based now.
+    #[test]
+    fn valid_iso_date_survives_multibyte_prefixes() {
+        assert!(valid_iso_date("2024-01-15"));
+        assert!(!valid_iso_date("2024-1-5"));
+        assert!(!valid_iso_date("2024/01/15"));
+        // Four 3-byte ideographs then a date: the byte-slice panic shape.
+        assert!(
+            !valid_iso_date("日日日日2024-01-15"),
+            "rejects, never panics"
+        );
+        assert!(
+            valid_iso_date("2024-01-15T10:00:00Z"),
+            "trailing time ignored"
         );
     }
 }

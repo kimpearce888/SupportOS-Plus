@@ -35,10 +35,39 @@ pub enum VersionOrdering {
     RunningIsOlder,
 }
 
-/// Compare two dotted versions, tolerating a leading `v`, build
-/// metadata (`+...`, ignored) and pre-release suffixes: `1.4.0-beta.1`
-/// sorts before `1.4.0` (semver rule) because a pre-release of a version
-/// is lower than the version itself.
+/// Same numeric core: a pre-release sorts below its own release, and two
+/// pre-releases compare by their dot-separated identifiers (numeric
+/// identifiers numerically and lower than alphanumeric ones; a larger
+/// identifier set outranks its prefix) — audit item 124: `beta.1` vs
+/// `beta.2` (or `-rc.1` vs `-beta.2`) used to compare as Same, so a
+/// running pre-release never learned a newer pre-release existed.
+fn compare_prerelease(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut a_ids = a.split('.');
+    let mut b_ids = b.split('.');
+    loop {
+        match (a_ids.next(), b_ids.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            // A larger identifier set outranks its prefix.
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) => {
+                let xn = x.parse::<i64>().ok();
+                let yn = y.parse::<i64>().ok();
+                let ord = match (xn, yn) {
+                    (Some(xi), Some(yi)) => xi.cmp(&yi),
+                    // Numeric identifiers sort below alphanumeric ones.
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => x.cmp(y),
+                };
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+        }
+    }
+}
+
 #[must_use]
 pub fn compare_versions(running: &str, latest: &str) -> VersionOrdering {
     let (a_core, a_pre) = split_version(running);
@@ -52,11 +81,15 @@ pub fn compare_versions(running: &str, latest: &str) -> VersionOrdering {
             std::cmp::Ordering::Equal => continue,
         }
     }
-    // Same numeric core: a pre-release sorts below its own release.
     match (a_pre, b_pre) {
         (Some(_), None) => VersionOrdering::RunningIsOlder,
         (None, Some(_)) => VersionOrdering::RunningIsNewer,
-        _ => VersionOrdering::Same,
+        (Some(a), Some(b)) => match compare_prerelease(&a, &b) {
+            std::cmp::Ordering::Less => VersionOrdering::RunningIsOlder,
+            std::cmp::Ordering::Greater => VersionOrdering::RunningIsNewer,
+            std::cmp::Ordering::Equal => VersionOrdering::Same,
+        },
+        (None, None) => VersionOrdering::Same,
     }
 }
 
@@ -152,5 +185,44 @@ mod tests {
         );
         // Missing segments read as zero: 1.4 == 1.4.0.
         assert_eq!(compare_versions("1.4", "v1.4.0"), VersionOrdering::Same);
+    }
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+
+    /// Audit item 124: two pre-releases of the same core compared as Same
+    /// — a running `1.4.0-beta.1` never learned `1.4.0-beta.2` existed.
+    /// Pre-release identifiers compare per semver now.
+    #[test]
+    fn pre_release_versions_order_against_each_other() {
+        use VersionOrdering::*;
+        assert_eq!(
+            compare_versions("1.4.0-beta.1", "1.4.0-beta.2"),
+            RunningIsOlder
+        );
+        assert_eq!(
+            compare_versions("1.4.0-beta.2", "1.4.0-beta.1"),
+            RunningIsNewer
+        );
+        assert_eq!(compare_versions("1.4.0-beta.1", "1.4.0-beta.1"), Same);
+        // A larger identifier set outranks its prefix.
+        assert_eq!(
+            compare_versions("1.4.0-beta", "1.4.0-beta.1"),
+            RunningIsOlder
+        );
+        // Numeric identifiers sort below alphanumeric ones.
+        assert_eq!(compare_versions("1.4.0-1", "1.4.0-alpha"), RunningIsOlder);
+        // Alphanumeric identifiers compare lexically.
+        assert_eq!(
+            compare_versions("1.4.0-alpha.2", "1.4.0-beta.1"),
+            RunningIsOlder
+        );
+        // A pre-release still sorts below its own release (unchanged).
+        assert_eq!(compare_versions("1.4.0-beta.1", "1.4.0"), RunningIsOlder);
+        assert_eq!(compare_versions("1.4.0", "1.4.0-beta.1"), RunningIsNewer);
+        assert_eq!(compare_versions("1.4.0", "1.4.0"), Same);
+        assert_eq!(compare_versions("1.5.0", "1.4.0-beta.9"), RunningIsNewer);
     }
 }

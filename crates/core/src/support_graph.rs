@@ -1860,6 +1860,25 @@ pub fn subgraph_json(
     let mut seen: std::collections::HashSet<String> =
         std::collections::HashSet::from([node_key(&seed_json)]);
     let mut edges: Vec<Value> = Vec::new();
+    // Audit item 118: a mutual link is two graph_edges rows (A→B and
+    // B→A), and "both" expansion returns both — so every node's
+    // expansion pushed the same logical link again, and expanding the far
+    // node pushed it twice more. Edges are deduped by their canonical
+    // unordered (relation, node-pair) key, so a mutual link renders once
+    // regardless of how many expansions return it; genuinely distinct
+    // relations between the same pair stay distinct.
+    let mut edge_keys: std::collections::HashSet<(String, String, String)> =
+        std::collections::HashSet::new();
+    let edge_key = |e: &Value| -> (String, String, String) {
+        let relation = e["relation"].as_str().unwrap_or("").to_string();
+        let sk = node_key(&e["source"]);
+        let tk = node_key(&e["target"]);
+        if sk <= tk {
+            (relation, sk, tk)
+        } else {
+            (relation, tk, sk)
+        }
+    };
     let mut frontier: Vec<Value> = vec![seed_json.clone()];
     let mut depth_reached: u32 = 0;
     for d in 0..depth {
@@ -1881,6 +1900,9 @@ pub fn subgraph_json(
                 continue;
             };
             for edge in nb["edges"].as_array().cloned().unwrap_or_default() {
+                if !edge_keys.insert(edge_key(&edge)) {
+                    continue;
+                }
                 edges.push(edge.clone());
                 let far = if node_key(&edge["source"]) == node_key(f) {
                     edge["target"].clone()
@@ -1920,4 +1942,56 @@ pub fn subgraph_json(
             }
         ]
     })))
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// Audit item 118: a mutual link is two graph_edges rows, and both
+    /// directions of "both" expansion return them — the subgraph pushed
+    /// the same logical link once per expansion (and twice more when the
+    /// far node expanded). The canonical unordered key renders it once.
+    #[test]
+    fn subgraph_renders_a_mutual_link_once() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        for remote in [1_i64, 2] {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (?1, ?1, 'graph node', 'p', 'active')",
+                [remote],
+            )
+            .expect("conversation");
+        }
+        let a: i64 = conn.last_insert_rowid(); // id 2
+        let b = a - 1; // id 1
+        // The mutual pair: A→B and B→A.
+        conn.execute(
+            "INSERT INTO graph_edges (source_kind, source_local_id, target_kind, target_local_id, relation)
+             VALUES ('conversation', ?1, 'conversation', ?2, 'related_to')",
+            params![b, a],
+        )
+        .expect("edge A→B");
+        conn.execute(
+            "INSERT INTO graph_edges (source_kind, source_local_id, target_kind, target_local_id, relation)
+             VALUES ('conversation', ?1, 'conversation', ?2, 'related_to')",
+            params![a, b],
+        )
+        .expect("edge B→A");
+
+        let g = subgraph_json(&conn, GraphNodeKind::Conversation, b, 2, 50)
+            .expect("subgraph")
+            .expect("seed found");
+        let edges = g["edges"].as_array().expect("edges");
+        assert_eq!(
+            edges.len(),
+            1,
+            "one mutual link, not one per direction per expansion: {edges:?}"
+        );
+        // The far node is still discovered.
+        let nodes = g["nodes"].as_array().expect("nodes");
+        assert_eq!(nodes.len(), 2, "both endpoints present");
+    }
 }
