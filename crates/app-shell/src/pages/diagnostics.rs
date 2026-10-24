@@ -133,6 +133,9 @@ pub struct DiagnosticsPage {
     audit: Option<Vec<AuditRow>>,
     filter: LevelFilter,
     message: Option<String>,
+    /// Clean-audit item 132: a failed clear reported "event log cleared
+    /// (0 rows removed)" — the error surfaces here now.
+    error: Option<String>,
 }
 
 impl DiagnosticsPage {
@@ -144,6 +147,7 @@ impl DiagnosticsPage {
             audit: None,
             filter: LevelFilter::All,
             message: None,
+            error: None,
         }
     }
 
@@ -178,8 +182,20 @@ impl DiagnosticsPage {
 
     /// Delete every stored diagnostics event.
     fn clear_log(&mut self, db: &DbHandle) {
-        let cleared = db.with_read(spp_core::audit::clear_events).unwrap_or(0);
-        self.message = Some(format!("event log cleared ({cleared} rows removed)"));
+        // Clean-audit item 132: the DELETE ran on the reader lane (with
+        // its pooled read-only connections) and `unwrap_or(0)` swallowed
+        // every failure as a success with 0 rows. The write belongs on
+        // the writer lane; the error surfaces instead of faking success.
+        match db.with_write(|conn| spp_core::audit::clear_events(conn)) {
+            Ok(cleared) => {
+                self.error = None;
+                self.message = Some(format!("event log cleared ({cleared} rows removed)"));
+            }
+            Err(e) => {
+                self.message = None;
+                self.error = Some(format!("could not clear the event log: {e}"));
+            }
+        }
         self.invalidate();
     }
 
@@ -203,6 +219,10 @@ impl DiagnosticsPage {
         if let Some(message) = &self.message {
             design::success_text(ui, message);
             self.message = None;
+        }
+        if let Some(err) = &self.error {
+            design::error_text(ui, &format!("error: {err}"));
+            self.error = None;
         }
 
         let events = self.events.clone().unwrap_or_default();
@@ -570,6 +590,14 @@ mod tests {
         let events = page.events.clone().expect("events");
         assert!(events.is_empty());
         assert!(page.message.is_some());
+        // Clean-audit item 132: the clear runs on the writer lane and a
+        // success stays a success — no swallowed-error masquerade.
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert!(
+            page.message
+                .as_deref()
+                .is_some_and(|m| m.contains("1 rows removed"))
+        );
     }
 
     /// Clean-audit item 68: the audit trail (`audit_log`) surfaces on the

@@ -206,6 +206,24 @@ impl CommandPalette {
         if !self.open {
             return None;
         }
+        // Clean-audit item 133: the palette is a modal overlay — a
+        // full-screen catcher behind the window closes it on an outside
+        // click (the web overlay's backdrop) and keeps that click from
+        // landing on whatever is underneath. Created before the window,
+        // same layer order: the window wins hits inside itself, the
+        // catcher takes everything else.
+        egui::Area::new(egui::Id::unique("command-palette-backdrop"))
+            .order(egui::Order::Middle)
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                // The area's max rect spans the screen (constrained), so
+                // the click catcher covers everything except what higher
+                // layers (the palette window itself) take first.
+                let backdrop = ui.allocate_response(ui.available_size(), egui::Sense::click());
+                if backdrop.clicked() {
+                    self.close();
+                }
+            });
         let mut nav = None;
         let mut query_changed = false;
         let frame_tokens = crate::design::tokens_for(ctx);
@@ -265,7 +283,10 @@ impl CommandPalette {
                     // clicked back in. Grab the focus right back so typing
                     // continues (a hit-bearing Enter keeps the old
                     // confirm-and-close path).
-                    if take && take_hits(&self.hits).is_empty() {
+                    // Clean-audit item 133: a same-frame Enter after a
+                    // query change is suppressed below — the field keeps
+                    // focus so Enter can be pressed again on fresh hits.
+                    if take && (query_changed || take_hits(&self.hits).is_empty()) {
                         response.request_focus();
                     }
                 });
@@ -303,7 +324,15 @@ impl CommandPalette {
                     ui.add_space(4.0);
                     crate::design::hint_text(ui, "↑ ↓ to move · Enter to open · Esc to close");
                 }
-                if take && let Some(hit) = hits.get(self.selected) {
+                if take
+                    // Clean-audit item 133: an Enter processed in the same
+                    // frame the query changed must not confirm the PREVIOUS
+                    // query's result set — the search for the new text only
+                    // runs after this window closes. Suppress the stale
+                    // confirm; the fresh hits land next frame.
+                    && !query_changed
+                    && let Some(hit) = hits.get(self.selected)
+                {
                     nav = href_to_nav(&hit.href);
                     self.open = false;
                 }
@@ -625,6 +654,124 @@ mod tests {
             "DEFECT-02: Enter must confirm the selected palette hit"
         );
         assert!(!palette.is_open());
+    }
+
+    /// Clean-audit item 133: an Enter processed in the same frame the
+    /// query changed must not confirm the PREVIOUS query's result set —
+    /// the hits still belong to the old text. The confirm is suppressed,
+    /// the palette stays open, and the fresh search lands.
+    #[test]
+    fn audit133_same_frame_enter_confirms_nothing_stale() {
+        let (ctx, mut palette, db) = seeded_palette_ctx();
+
+        // Pass 1: open + focus.
+        ctx.run_pass(egui::RawInput::default(), |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+
+        // Pass 2: type "Export" — hits land for that query.
+        let mut typing = egui::RawInput::default();
+        typing.events.push(egui::Event::Text("Export".into()));
+        ctx.run_pass(typing, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(!palette.hits.is_empty(), "the fixture matches Export");
+
+        // Pass 3: append text AND press Enter in the SAME frame. The hits
+        // still belong to "Export" — the search for the new text has not
+        // run. Pre-fix this navigated to the stale hit and closed.
+        let mut type_and_enter = egui::RawInput::default();
+        type_and_enter.events.push(egui::Event::Text("zz".into()));
+        type_and_enter.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let mut nav = None;
+        ctx.run_pass(type_and_enter, |ctx| {
+            nav = palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(nav.is_none(), "the stale hit must not be confirmed");
+        assert!(palette.is_open(), "the palette stays open for fresh hits");
+        assert_eq!(palette.query, "Exportzz", "the new query was recorded");
+
+        // Pass 4: the fresh (empty — nothing matches "Exportzz") results
+        // have landed and the field holds focus; a dry Enter keeps the
+        // palette open and the keystrokes flowing (item 72 intact).
+        assert!(palette.hits.is_empty(), "Exportzz matches nothing");
+        let mut enter = egui::RawInput::default();
+        enter.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let mut nav2 = None;
+        ctx.run_pass(enter, |ctx| {
+            nav2 = palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(nav2.is_none(), "nothing to confirm on the fresh query");
+        assert!(palette.is_open(), "a dry Enter keeps the palette open");
+    }
+
+    /// Clean-audit item 133: clicking outside the palette window closes
+    /// it (the web overlay's backdrop), and the click does not leak to
+    /// the UI underneath.
+    #[test]
+    fn audit133_clicking_outside_the_palette_closes_it() {
+        let (ctx, mut palette, db) = seeded_palette_ctx();
+
+        ctx.run_pass(egui::RawInput::default(), |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(palette.is_open());
+
+        // A press, then a release in the bottom-left corner — far from
+        // the center-top anchored window (560 wide, starts at y=80). egui
+        // registers the click on the release pass; the motion event puts
+        // the synthetic pointer on screen first.
+        let mut move_pointer = egui::RawInput::default();
+        move_pointer
+            .events
+            .push(egui::Event::PointerMoved(egui::pos2(10.0, 300.0)));
+        ctx.run_pass(move_pointer, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+
+        let mut press = egui::RawInput::default();
+        press.events.push(egui::Event::PointerButton {
+            pos: egui::pos2(10.0, 300.0),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        ctx.run_pass(press, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(palette.is_open(), "the press alone does not close");
+
+        let mut release = egui::RawInput::default();
+        release.events.push(egui::Event::PointerButton {
+            pos: egui::pos2(10.0, 300.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        ctx.run_pass(release, |ctx| {
+            palette.ui(ctx, &db);
+        })
+        .drop_without_applying_deltas();
+        assert!(!palette.is_open(), "an outside click closes the palette");
     }
 
     /// Clean-audit item 72: Enter with ZERO hits must not strand the

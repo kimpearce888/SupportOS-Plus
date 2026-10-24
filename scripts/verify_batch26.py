@@ -234,12 +234,21 @@ def verify_item72() -> None:
     palette = read(SHELL, "palette.rs")
     check(
         "72: a dry Enter re-grabs focus for the query field",
-        "if take && take_hits(&self.hits).is_empty() {" in palette
+        # Batch 32 (item 133) widens the re-grab to also cover the
+        # suppressed same-frame Enter — the zero-hits dry Enter is the
+        # `|| take_hits(...)` disjunct, still re-grabbing focus.
+        "if take && (query_changed || take_hits(&self.hits).is_empty()) {"
+        in palette
         and "response.request_focus();" in palette,
     )
     check(
         "72: the hit-bearing Enter path is untouched",
-        "if take && let Some(hit) = hits.get(self.selected)" in palette,
+        # Batch 32 (item 133) guards the confirm with `!query_changed` —
+        # an Enter processed in the same frame as a query change must not
+        # confirm the previous query's result set. The confirm itself
+        # (take + selected hit -> nav + close) survives unchanged.
+        "&& !query_changed\n                    && let Some(hit) = hits.get(self.selected)"
+        in palette,
     )
 
 
