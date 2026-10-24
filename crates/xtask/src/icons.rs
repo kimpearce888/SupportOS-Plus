@@ -184,7 +184,8 @@ pub fn verify_icons(shell_dir: &Path) -> Result<()> {
     check_icns(&icons.join("icon.icns"))?;
 
     // The Phase 4 cutover removed tauri.conf.json; the icon set itself is
-    // the contract now (AppImage/desktop-integration packaging consumes
-    // it in a later plan item).
+    // the contract now — both packaging lanes (`xtask package` / `xtask
+    // deb`) run this verification before staging, and CI invokes
+    // `xtask verify-icons` directly (audit item 164).
     Ok(())
 }

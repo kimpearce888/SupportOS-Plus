@@ -29,6 +29,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 /// Human-facing display name (window title / desktop entry Name).
 pub const DISPLAY_NAME: &str = "SupportOS+";
@@ -89,6 +90,26 @@ fn deb_arch() -> anyhow::Result<&'static str> {
     }
 }
 
+/// AppImage architecture for a Rust target arch, using the appimagetool
+/// `ARCH` convention and the artifact-name suffix (the official tool
+/// publishes `-x86_64` and `-aarch64` images).
+///
+/// # Errors
+/// Returns an error on architectures with no mapping (only x86_64 and
+/// aarch64 hosts are packaged today — the same set [`deb_arch`] maps).
+fn appimage_arch_for(arch: &str) -> anyhow::Result<&'static str> {
+    match arch {
+        "x86_64" => Ok("x86_64"),
+        "aarch64" => Ok("aarch64"),
+        other => anyhow::bail!("no AppImage architecture mapped for {other}"),
+    }
+}
+
+/// The AppImage architecture of the current build host.
+fn appimage_arch() -> anyhow::Result<&'static str> {
+    appimage_arch_for(std::env::consts::ARCH)
+}
+
 /// The GUI stack loads its windowing and graphics libraries at runtime
 /// (`winit`'s X11 backends, `xkbcommon`, `glutin`/`glow`, wgpu's GLES
 /// fallback and the Wayland client all `dlopen` their system libraries),
@@ -135,8 +156,17 @@ pub struct DebOptions {
 /// Linux-only.
 fn release_build(workspace_root: &Path, extra_args: &[String]) -> anyhow::Result<()> {
     let mut cmd = Command::new("cargo");
-    cmd.args(["build", "--release", "-p", "supportos-plus-app-shell"])
-        .current_dir(workspace_root);
+    // `--locked` (audit item 165): the release path builds exactly the
+    // committed Cargo.lock — a silently rewritten lock (stale lock vs
+    // drifted manifests) would ship artifacts from unpinned versions.
+    cmd.args([
+        "build",
+        "--release",
+        "--locked",
+        "-p",
+        "supportos-plus-app-shell",
+    ])
+    .current_dir(workspace_root);
     if cfg!(target_os = "linux") {
         cmd.args(["--features", "supportos-plus-core/sandbox"]);
     }
@@ -154,12 +184,23 @@ pub fn package(opts: PackageOptions) -> anyhow::Result<PathBuf> {
         release_build(&opts.workspace_root, &opts.extra_cargo_args)?;
     }
 
+    // The checked-in icon set is packaging's contract: verify the full
+    // set (PNG dimensions, ICO/ICNS structure) before anything consumes
+    // it (audit item 164 — `verify-icons` had no automation caller).
+    verify_icon_set(&opts.workspace_root)?;
+
     let appdir = opts.out_dir.join(format!("{BINARY_NAME}.AppDir"));
     stage_appdir(&opts.workspace_root, &appdir)?;
     ensure_host_libs_bundled(&appdir)?;
 
     let tool = resolve_appimagetool(&opts.workspace_root, opts.appimagetool.as_deref())?;
-    let output = opts.out_dir.join(format!("{PRODUCT_ID}-x86_64.AppImage"));
+    // Audit item 159: the AppImage lane used to hardcode `x86_64` in both
+    // the artifact name and the tool's ARCH env while the .deb lane
+    // followed the host (`deb_arch`) — an aarch64 host shipped an arm64
+    // .deb next to an AppImage labeled (and runtime-pinned) x86_64. The
+    // artifact now follows the build host exactly like the deb.
+    let arch = appimage_arch()?;
+    let output = opts.out_dir.join(format!("{PRODUCT_ID}-{arch}.AppImage"));
     if output.exists() {
         fs::remove_file(&output)?;
     }
@@ -170,7 +211,7 @@ pub fn package(opts: PackageOptions) -> anyhow::Result<PathBuf> {
     let status = Command::new(&tool)
         .arg(&appdir)
         .arg(&output)
-        .env("ARCH", "x86_64")
+        .env("ARCH", arch)
         .env("APPIMAGE_EXTRACT_AND_RUN", "1")
         .env("NO_STRIP", "1")
         .status()?;
@@ -186,6 +227,9 @@ pub fn package_deb(opts: DebOptions) -> anyhow::Result<PathBuf> {
     if !opts.skip_build {
         release_build(&opts.workspace_root, &opts.extra_cargo_args)?;
     }
+
+    // Same icon contract as the AppImage lane (audit item 164).
+    verify_icon_set(&opts.workspace_root)?;
 
     let staging = opts.out_dir.join("debroot");
     if staging.exists() {
@@ -559,17 +603,57 @@ fn resolve_appimagetool(
     Ok(cached)
 }
 
+/// Verify the checked-in icon set that both packages stage. Kept here so
+/// the packaging entry points own the contract (audit item 164): PNG
+/// payloads must be real, correctly sized images and the ICO/ICNS
+/// containers must carry the full declared size set.
+fn verify_icon_set(workspace_root: &Path) -> anyhow::Result<()> {
+    let shell_dir = workspace_root.join("crates").join("app-shell");
+    crate::icons::verify_icons(&shell_dir)
+        .map_err(|e| anyhow::anyhow!("icon set failed verification: {e}"))
+}
+
 fn download_appimagetool(dest: &Path) -> anyhow::Result<()> {
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
     eprintln!("package: downloading appimagetool from the continuous release…");
-    let bytes = reqwest::blocking::get(APPIMAGETOOL_URL)?
+    // Bounded download (audit item 160): a default blocking GET has no
+    // timeout, so a stalled connection could hang a CI job forever.
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(300))
+        .build()?;
+    let bytes = client
+        .get(APPIMAGETOOL_URL)
+        .send()?
         .error_for_status()?
         .bytes()?;
-    fs::write(dest, &bytes)?;
-    make_executable(dest)?;
+    // Land the tool at its final path atomically (audit item 160):
+    // write + fsync a `.part` sibling, then rename. A crash mid-download
+    // used to leave a truncated file at the cached path itself, which
+    // `resolve_appimagetool` trusted on every later run — the package
+    // step then failed with a confusing "cannot execute" error.
+    install_tool_bytes(dest, &bytes).inspect_err(|_| {
+        let _ = fs::remove_file(dest.with_extension("part"));
+    })?;
     eprintln!("package: appimagetool cached at {}", dest.display());
+    Ok(())
+}
+
+/// Write the tool payload to `dest` atomically: temp sibling + fsync +
+/// rename, executable bit set before the rename so the cached tool is
+/// runnable the moment it exists.
+fn install_tool_bytes(dest: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let tmp = dest.with_extension("part");
+    {
+        use std::io::Write as _;
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    make_executable(&tmp)?;
+    fs::rename(&tmp, dest)?;
     Ok(())
 }
 
@@ -797,5 +881,51 @@ mod tests {
         assert_eq!(DEB_PACKAGE, "supportos-plus");
         assert!(!DEB_PACKAGE.contains('+'), "dpkg names cannot carry +");
         assert!(!PRODUCT_ID.contains('+'), "artifact names stay URL-safe");
+    }
+
+    #[test]
+    fn appimage_arch_covers_the_same_hosts_as_the_deb_lane() {
+        // Audit item 159: the AppImage lane must map exactly the host set
+        // the .deb lane already maps — x86_64 and aarch64 — and refuse
+        // anything else instead of silently mislabeling the artifact.
+        assert_eq!(appimage_arch_for("x86_64").expect("x86_64"), "x86_64");
+        assert_eq!(appimage_arch_for("aarch64").expect("aarch64"), "aarch64");
+        let err = appimage_arch_for("riscv64").expect_err("unmapped arch");
+        assert!(err.to_string().contains("no AppImage architecture mapped"));
+        // The host mapping agrees with the compile-time target.
+        assert_eq!(
+            appimage_arch().expect("host arch"),
+            appimage_arch_for(std::env::consts::ARCH).expect("host arch")
+        );
+    }
+
+    #[test]
+    fn tool_cache_lands_atomically_at_the_final_path() {
+        // Audit item 160: the cached tool must never exist in partial
+        // form — write + fsync + rename leaves either the absent path or
+        // the complete, executable file, and never a `.part` sibling.
+        let root = temp_root("atomic-tool");
+        let dest = root.join("tools").join("appimagetool-x86_64.AppImage");
+        fs::create_dir_all(dest.parent().unwrap()).expect("tools dir");
+
+        install_tool_bytes(&dest, b"first").expect("first install");
+        assert_eq!(fs::read(&dest).expect("read dest"), b"first");
+        assert!(
+            !dest.with_extension("part").exists(),
+            "no temp sibling left"
+        );
+
+        // A re-install replaces the file in place (the download-retry
+        // path), still without a temp leftover.
+        install_tool_bytes(&dest, b"second-and-longer").expect("re-install");
+        assert_eq!(fs::read(&dest).expect("read dest"), b"second-and-longer");
+        assert!(!dest.with_extension("part").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&dest).expect("stat").permissions().mode();
+            assert_eq!(mode & 0o777, 0o755, "cached tool must be executable");
+        }
     }
 }

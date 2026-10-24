@@ -40,29 +40,41 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
+      # The checked-in icon set is packaging's contract (PNG dimensions,
+      # ICO/ICNS structure); the packaging lanes verify it before staging
+      # too. CI validates it directly so icon corruption fails before any
+      # expensive lane runs (audit item 164 — the check had no automation
+      # caller before).
+      - name: Verify icons
+        run: cargo run --locked -p supportos-plus-xtask -- verify-icons
+
       - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Test (workspace)
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       # Landlock + seccomp sandbox (plan row): the sandboxed pdf/zip
       # parsing paths only compile on Linux with the feature on, so they
       # need their own clippy/test pass (ubuntu-latest kernels also
       # actually enforce Landlock, exercising the real restriction).
       - name: Clippy (sandbox feature)
-        run: cargo clippy -p supportos-plus-core --all-targets --features sandbox -- -D warnings
+        run: cargo clippy --locked -p supportos-plus-core --all-targets --features sandbox -- -D warnings
 
       - name: Test (sandbox feature)
-        run: cargo test -p supportos-plus-core --features sandbox
+        run: cargo test --locked -p supportos-plus-core --features sandbox
 
       - name: Install cargo-deny
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: cargo-deny
 
-      - name: Deny (advisories, licenses)
-        run: cargo deny check advisories licenses
+      # `bans` joined the check in audit item 161: duplicate crate
+      # versions are denied (see the documented skip list in deny.toml),
+      # and running the section here is what makes that real — bans were
+      # configured once but never evaluated anywhere.
+      - name: Deny (advisories, licenses, bans)
+        run: cargo deny check advisories licenses bans
 
   packages:
     name: AppImage + .deb build, smoke
@@ -93,7 +105,7 @@ jobs:
         # AppDir (desktop entry, hicolor icons, AppRun) and packs the
         # type-2 AppImage; appimagetool is downloaded (and cached under
         # target/tools) by the xtask itself.
-        run: cargo run -p supportos-plus-xtask -- package
+        run: cargo run --locked -p supportos-plus-xtask -- package
 
       - name: Smoke test (boot chain inside the AppImage)
         # APPIMAGE_EXTRACT_AND_RUN self-extracts and executes AppRun —
@@ -110,7 +122,7 @@ jobs:
         # Stages the dpkg tree (control metadata, absolute-path desktop
         # entry, hicolor icons) and packs it with dpkg-deb from the same
         # release binary as the AppImage.
-        run: cargo run -p supportos-plus-xtask -- deb --skip-build
+        run: cargo run --locked -p supportos-plus-xtask -- deb --skip-build
 
       - name: Inspect the .deb (control metadata)
         run: dpkg-deb -I target/deb/supportos-plus_*_amd64.deb

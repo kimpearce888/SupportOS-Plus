@@ -61,28 +61,31 @@ jobs:
       - name: Format check
         run: cargo fmt --all --check
 
+      # Every cargo invocation on the release path carries `--locked`
+      # (audit item 165): a release must be built from exactly the
+      # committed Cargo.lock, never from a silently rewritten one.
       - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Clippy (sandbox feature)
-        run: cargo clippy -p supportos-plus-core --all-targets --features sandbox -- -D warnings
+        run: cargo clippy --locked -p supportos-plus-core --all-targets --features sandbox -- -D warnings
 
       - name: Test (workspace)
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Test (sandbox feature)
-        run: cargo test -p supportos-plus-core --features sandbox
+        run: cargo test --locked -p supportos-plus-core --features sandbox
 
       # The release build carries the Landlock + seccomp parse sandbox
       # in both packages, exactly as `xtask package`/`xtask deb` enable it.
       - name: Release build (sandbox feature on)
-        run: cargo build --release -p supportos-plus-app-shell --features supportos-plus-core/sandbox
+        run: cargo build --locked --release -p supportos-plus-app-shell --features supportos-plus-core/sandbox
 
       - name: Package the AppImage
-        run: cargo run -p supportos-plus-xtask -- package --skip-build
+        run: cargo run --locked -p supportos-plus-xtask -- package --skip-build
 
       - name: Package the .deb
-        run: cargo run -p supportos-plus-xtask -- deb --skip-build
+        run: cargo run --locked -p supportos-plus-xtask -- deb --skip-build
 
       - name: Stage dist/ (versioned names + SHA-256 checksums)
         run: |
