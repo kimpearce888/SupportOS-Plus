@@ -1,19 +1,20 @@
 # Next Actions
 
 ## Immediate next action
-1. **Action:** Edge/failure/recovery + cross-feature tests (QA-004/005):
-   enumerate the edge cases that are executable in this sandbox (restart
-   during operation, double-launch — DONE via W-009, empty-state pages,
-   zero-data exports, malformed-env handling) and execute them with
-   per-step screenshots; the FIND-002 reclassification is already DONE
-   (W-009). The externally blocked steps are exception-registered
-   (exceptions.csv EXC-001..EXC-005, created 2026-10-25).
-   - Relevant IDs/files: QA-004/005 ledger (02-BUILD §3); exceptions.csv;
-     W-009 result in WORKFLOW-COVERAGE.md
-   - Prerequisites: Xvfb tooling proven
-   - Records: SESSION-LOG.md, manifest, exceptions.csv as they arise
-   - Then: formal QA ledger (QA-001..007) consolidation with per-step
-     screenshots (EVID-001..006).
+1. **Action:** Formal QA ledger consolidation (QA-001..007): assign final
+   statuses from the already-executed work — QA-001 (operate the real UI:
+   pass-1 walk + all workflows), QA-002 (entry points: pass 1), QA-003
+   (controls: pass-2 535-row ledger + 46 exercises + workflow exercises),
+   QA-006 (accessibility/usability: disabled gates, dialogs, focus/
+   keyboard limitation observations), QA-007 (continuity: HANDOVER/
+   NEXT-ACTIONS) — and EVID-001..006 evidence accounting (screenshot
+   coverage math per 03 §9). QA-004/005 are DONE (E-143..E-157).
+   - Relevant IDs/files: REQUIREMENT-TRACEABILITY.csv; PROGRESS.md §counts;
+     evidence/manifest.csv; exceptions.csv; instruction 03 §9 math
+   - Prerequisites: none
+   - Records: traceability statuses, PROGRESS counts, REPORT.md inputs
+   - Then: ARCHITECTURE.md deep-dive (ARCH-001) → COV-001/002 → REPORT-001
+     → completion gate → final publication.
 ## Remaining actions (dependency order)
 2. W-003/W-004 remain data-blocked (register as exceptions if still
    unexecutable at report time); deferred (tooling): C-SET-66 "really

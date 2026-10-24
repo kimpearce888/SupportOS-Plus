@@ -425,3 +425,57 @@ paragraph updated; finding stays CONFIRMED/Medium (root cause + listener
 behavior runtime-proven; only credential-gated remediation surfaces remain).
 Next per NEXT-ACTIONS: edge/failure/recovery + cross-feature tests
 (QA-004/005) → formal QA ledger (QA-001..007).
+
+## 2026-10-25 (cont.) — QA-004/005 edge/failure/recovery executed (E-143..E-157)
+
+Script: evidence/artifacts/qa45-edge-recovery.py (helpers ported VERBATIM
+from w002-sync.py/w010-backups.py after two aborted runs exposed that my
+re-transcriptions deviated — see tooling history below).
+
+Executed PASS (S001..S008, 272.8 s):
+- QA-004 repetition/duplicate: 'create backup' ×2 → two DISTINCT pairs
+  (…23-49-48Z + …23-49-50Z, 1847296 bytes each + sidecars), newest-first,
+  no dedupe/crash. The 2nd click needed the dark-rect detector to adapt —
+  the success message pushed the button down 22 px.
+- QA-004 gate repetition/re-arm: restore arm→cancel→arm→cancel ×2 clean;
+  DB stable; zero swap files in every phase. The armed card's y SHIFTS
+  with the backup-list length (7 rows now vs W-010's 1) — cancel/red
+  located POSITION-AWARE relative to the red REPLACED warning.
+- QA-005 designed-refusal delta: Dashboard 'Sync now' → application_errors
+  5→6 (row verified in DB; toast OCR miss again — honest note).
+- QA-005 C-SET-66 'really restore' EXECUTED (closes the W-010 deferral):
+  red Destructive clicked → inline 'restored … — restart the app to reload
+  it' (settings.rs:1165); ON-DISK DB verified reverted 6→5 (the S004
+  refusal row GONE), jobs=2, sync 0, theme light, integrity ok; swap files
+  consumed. backup_service::restore verify-first swap now RUNTIME-proven.
+- QA-005 SIGKILL recovery: kill -9 mid-session → relaunch boots on the
+  RESTORED db (app_errors=5 live — restart-to-reload semantics verified
+  end-to-end), integrity ok; the 2 new backup pairs persist on disk AND
+  render (cross-feature: Settings ↔ filesystem ↔ restart).
+- QA-004 clear-log round trip WITH events: button exists at 5 rows →
+  confirm dialog (danger right of Cancel, (752,417)) → DB 5→0 → button
+  absent again (round-trips the pass-2 empty-case observation). The 5 rows
+  were fully evidenced before deletion.
+- End state: app_errors=0, jobs=2, sync 0, theme light, integrity ok;
+  7 backup pairs on disk (5 pre-existing + 2 new — QA artifacts).
+
+Tooling history (retained honestly): run-1 died 'scroll budget exhausted'
+(nav assumed k_cur=0 but the app RESTORES last page + sidebar scroll);
+run-2 died 'no sidebar rows' (my re-transcribed bands()/pill() counted
+BRIGHT pixels — the proven implementations count DARK text strokes and
+darker-than-247 pill runs); run-3 died on an open_backups_tab 3-tuple
+unpack bug; run-4 died on the tab predicate not being idempotent (already-
+open tab must pass). Fixes: normalize_to_dashboard, verbatim w002 helpers,
+3-tuple unpacks, idempotent tab check, position-aware armed-card locator.
+Final run (5th) = the published evidence.
+
+NOT EXECUTABLE (recorded with reasons): TEXT-input boundary matrix (XTEST
+keyboard limitation; empty-form gates verified instead in pass 2/W-005/
+W-006); mid-sync cancel (no credentials — EXC-005); malformed-credential
+paths (EXC-001/002/004).
+
+Traceability: QA-004 → EXECUTED (mouse-reachable subset); QA-005 →
+EXECUTED (feasible subset); FEAT-004 note updated (C-SET-66 no longer
+deferred). Manifest E-143..E-157 (157 rows, zero missing). Next per
+NEXT-ACTIONS: formal QA ledger consolidation (QA-001..003/006/007 statuses
+from the existing passes) → ARCHITECTURE deep-dive → COV/REPORT.

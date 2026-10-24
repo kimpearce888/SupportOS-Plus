@@ -82,9 +82,17 @@ W-009 decision. **FIND-001 closing decision executed:** exceptions.csv
 created with EXC-001..EXC-005 (all E2, one per affected step — OAuth legs
 1/2, webhook drain, configured-state listener-health message, sync happy
 path; every blocker established by an executed attempt or impossibility
-inspection; W-001 steps enumerated S001..S005, row → BLOCKED). Next:
-QA-004/005 edge tests → formal QA ledger; W-003/W-004 data-blocked, W-001
-exception-covered.
+inspection; W-001 steps enumerated S001..S005, row → BLOCKED). **QA-004/
+005 edge/failure/recovery EXECUTED** (E-143..E-157, S001..S008 PASS):
+repetition/duplicate (backup ×2), gate re-arm ×2, clear-log round trip
+WITH events (5→0→button absent), designed-refusal delta (5→6), C-SET-66
+'really restore' EXECUTED — closes the W-010 deferral (verify-first swap
+runtime-proven, refusal row reverted 6→5, restart-to-reload semantics
+verified end-to-end), SIGKILL recovery + cross-restart persistence.
+NOT EXECUTABLE with reasons: TEXT-input boundaries (keyboard), mid-sync
+cancel + malformed credentials (external — exceptions). Next: formal QA
+ledger consolidation (QA-001..003/006/007 from existing passes) →
+ARCHITECTURE deep-dive → COV/REPORT.
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -164,6 +172,14 @@ exception-covered.
   log); the guard refuses BEFORE creating run rows. Backward sidebar nav:
   scroll-top + click first band + pill-verify (scroll alone leaves the old
   page selected).
+- QA45 facts: helpers MUST be ported verbatim from w002-sync.py (bands
+  counts DARK text strokes cnt>1 + merges <10px gaps; pill looks for runs
+  <= PILL_LUM) — a bright-pixel re-transcription silently breaks nav. The
+  app RESTORES last page + sidebar scroll across relaunch → always
+  normalize (scroll-top + first-band click + pill-verify) before forward
+  nav. The Settings armed-card y SHIFTS with the backup-list length →
+  locate cancel/'really restore' relative to the red REPLACED word.
+  'really restore' red button was clicked at (375,609) with 7 list rows.
 - W-009 facts: no input injection needed — the workflow is process-level.
   Independent flock probe pattern: open instance.lock, flock LOCK_EX|NB →
   'held' = another instance lives, 'acquirable' = free. Notifier probe:
@@ -181,12 +197,13 @@ exception-covered.
   steps + W-007 + W-010 + W-006 + W-005 + W-002 (both sync entry points'
   designed refusals, freshness chip, Help Scout tab state) + W-009
   (lock probes, second-attempt refusal, UI-affordance pixel diffs)
-- Formal control testing (QA-001..007 ledger): NOT STARTED (pass-2 exercises
-  are inventory verification, not the formal ledger)
+- Formal control testing: QA-004/005 EXECUTED (E-143..E-157; 8/8 steps
+  PASS; 3 not-executable subsets with reasons); QA-001..003/006/007
+  statuses pending consolidation from the existing passes
 - Workflows identified / executed: 10 identified; W-007/W-009 DONE;
   W-002/W-005/W-006/W-010 DONE-PARTIAL; W-008 PARTIAL; W-001/W-003/W-004
   blocked (external/data) — all 10 now executed or explicitly blocked
-- Evidence: E-001..E-142, all validated; every manifest path exists AND is
+- Evidence: E-001..E-157, all validated; every manifest path exists AND is
   git-tracked (log-evidence gap closed at checkpoint 5)
 - Accepted exceptions: E2 × 5 (EXC-001..EXC-005 — Help Scout external
   dependency: OAuth legs 1/2, webhook drain, configured-state listener
@@ -197,22 +214,19 @@ exception-covered.
 - Findings: FIND-001 Medium; FIND-003..FIND-011 Low (FIND-008
   runtime-confirmed; FIND-011 consequence attributed); FIND-002 CLOSED by
   W-009 (observation/informational stands, no defect)
-- DB state after W-009 (read-only check): theme=light; sync_runs/cursors/
-  checkpoints=0 (never-synced DB state survives); application_errors=5
-  (all attributed — 1 FIND-011 + run-2 1 + run-3 1 + final-run 2, see the
-  w002-reconciliation JSONL row); jobs=2 (ai/completed, QA artifacts);
-  integrity ok; fatal.log 7 rows (3 bring-up panics + 4 cannot-start, all
-  audit-attributed incl. W-009's own)
-- Coverage snapshot time: 2026-10-25 ~00:35 UTC
+- DB state after QA45 (read-only check): theme=light; sync tables 0;
+  application_errors=0 (the 5 attributed rows were DELETED by the executed
+  clear-log round trip — all evidenced beforehand: E-132/E-133/JSONL);
+  jobs=2 (ai/completed, QA artifacts); integrity ok; backups dir now 7
+  pairs (5 pre-existing + 2 QA45 repetition artifacts); fatal.log 7 rows
+  (all audit-attributed)
+- Coverage snapshot time: 2026-10-25 ~01:15 UTC
 
 ## Outstanding tasks (ordered)
-1. Edge/failure/recovery + cross-feature tests (QA-004/005) — the
-   second-instance UI check is DONE (W-009, FIND-002 closed); the external
-   blockers are exception-registered (exceptions.csv EXC-001..EXC-005,
-   E2, accepted-as-justified; W-001 row BLOCKED with steps enumerated).
-2. Formal QA ledger (QA-001..007) with per-step screenshots (EVID-001..006);
-   exceptions to evidence/exceptions.csv as they arise (W-003/W-004
-   data-blocked steps likely become EXC-006+ at report time).
+1. Formal QA ledger consolidation (QA-001..003/006/007 statuses from
+   existing passes + EVID-001..006 accounting per 03 §9; QA-004/005 DONE).
+2. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001
+   completion.
 4. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001 completion.
 5. Coverage reconciliation (COV-001/002) + evidence accounting (EVID-006).
 6. REPORT.md consolidation (REPORT-001) and completion gate (04 §5).
@@ -248,9 +262,10 @@ exception-covered.
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-25 ~00:50 UTC
-- Validator/check: exceptions.csv parsed (5 rows × 11 columns, all
-  populated, csv.DictWriter-quoted); W-009 6/6 steps PASS (w009-* JSONL rows; flock probes
+- Timestamp/timezone: 2026-10-25 ~01:15 UTC
+- Validator/check: QA45 14 PNGs PIL-valid; manifest E-001..E-157 zero
+  missing; QA-004/005 8/8 steps PASS; exceptions.csv parsed (5 rows × 11
+  columns, all populated); W-009 6/6 steps PASS (w009-* JSONL rows; flock probes
   held/acquirable; second-attempt exit 1; pixel diffs 0.0/0.0/0.0; DB
   unchanged; fatal.log +1 designed row); W009 PNGs (3) PIL-validated;
   manifest E-001..E-142 zero missing paths; DB integrity ok, theme=light,
