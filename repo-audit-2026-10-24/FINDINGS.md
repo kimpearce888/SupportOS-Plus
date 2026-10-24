@@ -26,3 +26,10 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 - **Reproduction:** launch second `supportos-plus` while one runs → exit code 1, log `ERROR supportos_plus: cannot acquire the instance lock, error: another SupportOS+ instance is already running` (main.rs:34, flock on instance.lock).
 - **Evidence:** evidence/logs/single-instance-second-run.log
 - **Note:** source comments state no IPC/focus-existing-window behavior in the native shell (single_instance.rs header). Whether a user-visible dialog appears is queued for UI verification; a bare non-zero exit with console-only message may be a UX gap for double-click launches. Will reclassify after UI test.
+
+## FIND-003 — Prior audit committed app-local secret-envelope keys as repo artifacts (pre-existing; observation only)
+- **Classification:** repository hygiene / security observation about pre-existing content, NOT a product-code defect and NOT introduced by this audit
+- **Severity:** Low · **Confidence/status:** Confirmed at runtime (file inspection)
+- **Details:** `qa-audit/20261019T050847Z/evidence/artifacts/qa-profile-*/secrets.key` are 32-byte binary files (app secret-envelope local keys per m049/m053 migrations) captured from QA app profiles. No reference found in that audit's README/summary. Anyone with repo access holds key material whose matching encrypted payloads (profile DBs) are plausibly also present in evidence artifacts.
+- **This audit's action:** none (preserve user work; do not modify/delete pre-existing evidence). Recorded so the maintainer can decide (e.g. treat those QA profiles as fully synthetic, or rotate/purge if any real data was ever captured).
+- **Evidence:** file inspection 2026-10-24 (masked; contents not reproduced here).
