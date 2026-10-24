@@ -1,89 +1,103 @@
-# Audit Handover — IN PROGRESS
+# HANDOVER.md — authoritative breakpoint record
 
-## Current objective and constraints
-- Repository: https://github.com/kimpearce888/SupportOS-Plus
-- Audit folder: `repo-audit-2026-10-24/` (repository root)
-- Governing instruction versions/hash: instruction package v. per PACKAGE-MANIFEST.md (14 hashes verified; see instructions/FILE-PROVENANCE.md)
-- Important constraints: source of truth = actual implementation + observed runtime; documentation/tests/comments are not authoritative; NO application-code changes and no test weakening (audit artifacts only); every executed manual UI step needs a validated step-specific screenshot or a recorded E1–E6 exception; never claim unverified tests/commits/pushes; preserve user changes; never commit secrets; no force-push; no PR/merge unless authorized; publish only the audit folder.
+> New session: read this file first, then PROGRESS.md → NEXT-ACTIONS.md →
+> SESSION-LOG.md (tail) → FINDINGS.md. Work only from the recorded state;
+> do not redo completed items (see NEXT-ACTIONS.md §Do not repeat).
 
 ## Repository and Git state
-- Local path: /home/z/my-project/audit/SupportOS-Plus
-- Original application revision audited: `main` @ `3affe7e` (3affe7ede6fbb0da32b50726409e3898619b2d50)
-- Current branch / HEAD: `repo-audit/2026-10-24` @ checkpoint-1 (e15ffa8fac2d175739fd4bbde207e8c90b3c1717); main untouched
-- Audit branch: `repo-audit/2026-10-24` (created from main @ 3affe7e)
-- Audit state: committed + pushed (checkpoint 1: 32 files, audit folder only; app code byte-identical to 3affe7e)
-- Latest verified remote branch/commit: origin/repo-audit/2026-10-24 @ e15ffa8 (verified via git ls-remote 2026-10-24); origin/main @ 3affe7e
+- Working tree: clean at last checkpoint (verify with `git -C /home/z/my-project/audit/SupportOS-Plus status --short`)
+- Branch: `main`
+- Pre-existing HEAD (audited revision): `3affe7e`
+- Audit commits (audit artifacts only, folder `repo-audit-2026-10-24/`): `e15ffa8` (checkpoint 1), `eec1eed` (checkpoint 1a), then the feature-walk checkpoint (this handover's commit — hash recorded in git log)
+- Remote: `https://github.com/kimpearce888/SupportOS-Plus` (credential store, kimpearce888); push verified at checkpoint time
+- Publish rule (05 §8–9): only `repo-audit-2026-10-24/` may be committed/pushed; never app code, never force-push
 
-## Current phase and exact progress
-- Phase / batch ID: Batch 1 (build/install/launch + environment + tests) COMPLETE; Batch 2 (feature inventory pass 1) QUEUED
-- Last fully completed phase/batch: Instruction loading; Build/install/launch (BUILD-001/002); Existing test suite (TEST-001)
-- Last completed feature/workflow/test-step ID: F-001/F-002 runtime characterization; E-001..E-005 validated
-- Current partial activity: none (clean stop)
-- Last action and actual result: test suite completed (703/0/4-ign); records updated; findings F-001/F-002 recorded
-- Exact stop point: before feature-inventory pass 1 (page walk)
-- In-flight operation and whether it is safe to repeat: none; page walk is repeatable (idempotent reads/screenshots)
+## Where the audit stands (one paragraph)
+Instruction gate SATISFIED (15/15 files, hashes verified). Build (0 warnings)
++ launch + TEST-001 (703/0/4) recorded. Architecture v1 written. **Feature
+inventory pass 1 is COMPLETE:** all 23 sidebar pages opened in the real app
+by XTEST-injected clicks with machine-verified navigation (selection-pill
+tracking) and per-page screenshots, all visually validated (E-006..E-031);
+3 shell-level features recorded (F-024..F-026). Findings: FIND-001 (Medium,
+loopback :3000 collision + ineffective env override + log-only degradation),
+FIND-002 (Low, single-instance console-only message), FIND-003 (Low,
+pre-existing key material in old audit artifacts), FIND-004 (Low, pinned
+theme row overlaps bottom sidebar rows; Shell reachable only via ~10 px
+sliver at default window). Finding IDs were renamed F-00x → FIND-00x across
+all docs (features own the F- namespace).
 
-## Exact next action
-> Start feature-inventory pass 1: `./start-xvfb.sh`, `./run-app.sh` (see helpers), then XTEST-click each sidebar nav item, capture per-page screenshots to `evidence/screenshots/F-pages/<Page>.png`, and reconcile each page against its `crates/app-shell/src/pages/<page>.rs` source into `FEATURE-INVENTORY.md` (stable IDs; findings renamed FIND-xxx to avoid ID collision). Batch 3–5 pages per tool call (sandbox reaps background processes between calls). Do NOT repeat: build, launch verification, test suite, F-001/F-002 runtime tests (see SESSION-LOG.md).
+## What is verified and where the evidence lives
+- Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
+- Traceability: REQUIREMENT-TRACEABILITY.csv (50/50 rows; statuses being
+  reconciled incrementally — BUILD/TEST/ENV/FEAT-001 updated this checkpoint)
+- Build/launch/tests: BUILD-AND-INSTALL.md; evidence/screenshots/BUILD/; evidence/logs/F-CAND-001*.log; single-instance-second-run.log
+- Page walk: FEATURE-INVENTORY.md (F-001..F-026 with per-page observed UI);
+  evidence/screenshots/FEATURE/01..24*.png; evidence/artifacts/feature-walk.py;
+  evidence/artifacts/feature-walk-events.jsonl (includes retained v1–v4
+  defect/orphan records for honesty); evidence/logs/FEATURE-walk-app.log
+- Findings: FINDINGS.md (FIND-001..FIND-004)
+- Workflows: WORKFLOW-COVERAGE.md (W-001..W-010 queued, entry points confirmed)
+- Report: REPORT.md (skeleton, IN PROGRESS)
 
-## Completed work
-- Instruction package: 15/15 files downloaded from Drive, 14/14 manifest hashes verified, all read completely → INSTRUCTION-LOADING-RECORD.md
-- Traceability: 50/50 requirements reconciled, none dropped → REQUIREMENT-TRACEABILITY.csv
-- Environment: Rust 1.99.1 (pinned) installed; missing sandbox libs (libxkbcommon-x11, libxcb-xkb) remediated env-only via local deb extraction + LD_LIBRARY_PATH; python-xlib working (XTEST ready)
-- Build: cargo build SUCCESS 3m57s, 0 warnings → target/debug/supportos-plus (BUILD-001)
-- Launch: VERIFIED on Xvfb :99 — 52 migrations, workers started, Dashboard rendered (BUILD-002, screenshot validated)
-- Runtime tests: loopback port matrix (F-001 evidence: fail@3000, ready@3999, SPP_LOOPBACK_PORT ineffective), second-instance flock (exit 1, F-002)
-- TEST-001: cargo test --workspace = 703 passed / 0 failed / 4 ignored (BUILD-AND-INSTALL.md §Existing test-suite results)
-- ARCHITECTURE.md v1 (workspace map, lifecycle, UI structure, data/state, integrations, open questions)
-- FINDINGS.md opened (F-001 Medium confirmed, F-002 Low confirmed); evidence/manifest.csv E-001..E-005 validated
+## Tooling facts a new session must know
+- Environment: Rust 1.99.1 pinned; Xvfb :99 helper `./start-xvfb.sh`; app
+  launcher `./run-app.sh` (DISPLAY/LD_LIBRARY_PATH preset); app data dir
+  ~/.local/share/supportos-plus (QA-owned; DB has ≤1 info event, zero
+  business records; theme=light; last page = Shell after the walk)
+- Input injection: python-xlib XTEST works. Rules learned: capture analysis
+  frames with the pointer parked OFF the sidebar; wait for egui scroll
+  settle (two identical frames); verify clicks via the selection pill
+  (luminance 244 vs 250 at x=185, tolerance ±4); never click y>700 in the
+  sidebar (theme-row overlay; FIND-004); ffmpeg+PIL snapshots must be
+  independent in-memory copies (lazy handles alias reused files).
+- Sandbox reaps background processes between tool calls: keep each app run
+  self-contained in one call; the walk script already pkills orphans and
+  verifies the instance lock before driving the UI.
+- Do NOT use the `ui-screenshot` cargo feature for evidence (non-default
+  build); its existence is recorded as a discovered QA affordance instead.
 
-## Coverage snapshot
-- Discovered features/controls: 0 — inventory not started
-- Tested / untested controls: 0 / 0
-- Identified / completed workflows: 0 / 0
-- Passed / failed / blocked / inconclusive / not attempted: 0 / 0 / 0 / 0 / 0
-- Evidence captured / validated: 0 / 0
-- Accepted exceptions by type / unresolved evidence gaps: none / none
-- Findings by severity and status: none yet
-- Counts reconciled? no — preliminary (testing not started)
+## Coverage snapshot (2026-10-24 ~20:10 UTC)
+- Pages inventoried w/ evidence: 23/23; shell-level features: 3
+- Formal control ledger (FEAT-002): NOT STARTED
+- Workflows identified / completed: 10 queued / 0
+- Formal QA test steps: 0 (walk navigation steps: 29/29 verified — discovery, not QA ledger)
+- Evidence: E-001..E-031, all validated
+- Accepted exceptions: none · Unresolved gaps: none
+- Findings: FIND-001 Medium · FIND-002 Low · FIND-003 Low (pre-existing) · FIND-004 Low
 
 ## Outstanding tasks (ordered)
-1. Verify build outcome → BUILD-AND-INSTALL.md (BUILD-001/002)
-2. ARCHITECTURE.md from source (ARCH-001)
-3. FEATURE-INVENTORY.md (FEAT-001..004), WORKFLOW-COVERAGE.md (FLOW-001)
-4. Input-injection setup: install python-xlib or xdotool (required for real-UI QA)
-5. Manual QA phases per 02-BUILD §3 (QA-001..007) with evidence per 03-EVIDENCE
-6. cargo test run recorded separately (TEST-001)
-7. FINDINGS.md (FIND-001/002, FIX-001), coverage reconciliation (COV-001/002)
-8. REPORT.md consolidation (REPORT-001), completion gate (04 §5), final response (04 §6)
-9. Git publication of `repo-audit-2026-10-24/` only (GIT-001..003)
+1. Control/option ledger pass 2 (FEAT-002/003) — see NEXT-ACTIONS.md #1
+2. Command palette runtime check (W-008)
+3. Workflow execution order per NEXT-ACTIONS.md #3
+4. FIND-001 UI-signal + webhook-drain checks
+5. Formal QA ledger + exceptions register (QA-001..007, EVID-001..006)
+6. ARCHITECTURE.md deep-dive (ARCH-001 completion)
+7. COV-001/002 reconciliation → REPORT-001 → completion gate (04 §5)
+8. Final publication pass (GIT-001..003)
 
 ## Blockers and known problems
-- None confirmed. Watch: build resource constraints (2 vCPU/4 GB); python-xlib absent (installable); egui app needs virtual display (Xvfb present, expected OK).
-
-## Evidence and artifact locations
-- Report: REPORT.md (skeleton, IN PROGRESS) · Architecture: ARCHITECTURE.md (pending)
-- Feature inventory / Workflow coverage / Findings: pending (will be created at first batch)
-- Evidence: evidence/{screenshots,videos,logs,artifacts} (empty), evidence/manifest.csv + exceptions.csv pending first evidence
-- Instructions: instructions/ (15 files + FILE-PROVENANCE.md)
-
-## Environment and constraints
-- OS Debian sandbox, 2 vCPU, 4159 MB RAM, 7.9G free disk; cargo 1.99.1 at /home/z/.cargo/bin (RUSTUP_HOME=/home/z/.rustup, CARGO_HOME=/home/z/.cargo required in env)
-- Xvfb/xvfb-run + ffmpeg available; python-xlib missing (input injection TBD); no real display
-- GitHub push authorized via credential store (~/.git-credentials, kimpearce888)
+- W-001 OAuth round-trip needs external Help Scout credentials (likely
+  exception registration); W-003 deep steps need data.
+- None environmental: Xvfb/XTEST tooling proven end-to-end.
 
 ## Decisions and constraints to preserve
-- New audit under new instruction package; qa-audit/20261019T050847Z is completed prior art (different spec) — may inform but never substitute for source/runtime evidence
-- ENV-001 recorded in BUILD-AND-INSTALL.md (source/CSV filename discrepancy documented)
-- Audit folder name fixed: repo-audit-2026-10-24/ (per README/bootstrap convention)
+- Source of truth = actual implementation + observed runtime behavior; prior
+  audit `qa-audit/20261019T050847Z` is background only.
+- Do not modify app code; do not weaken tests; only the audit folder is
+  published; incremental commits; no overclaims (failures recorded as such).
+- ID namespaces: features F-xxx, controls C-xxx, workflows W-xxx (steps
+  W-xxx-Snnn), evidence E-xxx, exceptions EXC-xxx, findings FIND-xxx.
+- The walk's v1–v4 tool defects and the orphan-process incident are retained
+  in SESSION-LOG.md and the events JSONL for honesty; v5 is the evidence run.
 
 ## Publication status
-- Local status: see "Repository and Git state" — audit branch created at first checkpoint
-- Last local commit: (audit) checkpoint-1 — see branch/commit below; (pre-existing HEAD) 3affe7e
-- Remote branch/commit verified: recorded at checkpoint time
-- Unpushed/uncommitted work: see checkpoint
-- Publication blocker: none (push auth verified)
+- Local: audit commits on main (see §Repository); remote push verified at
+  checkpoint time
+- Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-24 ~16:10 UTC
-- Validator/check performed: manifest hashes; evidence files opened/validated (PIL + visual + text reads); test exit codes 0; git state via status/log; counts cross-checked against manifest entries
+- Timestamp/timezone: 2026-10-24 ~20:10 UTC
+- Validator/check: all 24 walk PNGs opened with PIL + visually read (page
+  identity + pill state); events JSONL cross-checked per click; manifest
+  E-006..E-031 rows match files on disk; app log read (lock acquired, no
+  ERROR besides the sandbox's FIND-001 WARN path)

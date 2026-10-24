@@ -4,7 +4,7 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 
 ---
 
-## F-001 — Default webhook/OAuth loopback port (:3000) collides with common dev servers; webhook-only degradation is log-invisible
+## FIND-001 — Default webhook/OAuth loopback port (:3000) collides with common dev servers; webhook-only degradation is log-invisible
 - **Classification:** design weakness / integration failure risk (not a crash bug)
 - **Severity:** Medium · **Confidence/status:** Confirmed at runtime (listener behavior), Confirmed by implementation analysis (port-selection logic)
 - **Affected:** Help Scout webhook ingress (`POST /webhook`), OAuth callback (`GET /oauth/callback`), Connectors/Settings OAuth flow, Dashboard "never synced"/sync behavior; candidates W-TBD (OAuth connect, webhook health)
@@ -20,7 +20,7 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 - **Verification plan:** runtime matrix: (a) :3000 free, default URI → ready; (b) :3000 occupied, default URI → degraded + visible UI signal; (c) :3000 occupied, SPP_LOOPBACK_PORT=3999 → ready on 3999; (d) webhook POST delivered while degraded → drained at next worker start.
 - **Next action:** Settings/Connectors UI runtime check of the health-check message; webhook drain runtime test.
 
-## F-002 — Second-instance guard works; message only in stderr log (observation, not a defect)
+## FIND-002 — Second-instance guard works; message only in stderr log (observation, not a defect)
 - **Classification:** observation/informational
 - **Severity:** Low · **Confidence/status:** Confirmed at runtime
 - **Reproduction:** launch second `supportos-plus` while one runs → exit code 1, log `ERROR supportos_plus: cannot acquire the instance lock, error: another SupportOS+ instance is already running` (main.rs:34, flock on instance.lock).
@@ -33,3 +33,16 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 - **Details:** `qa-audit/20261019T050847Z/evidence/artifacts/qa-profile-*/secrets.key` are 32-byte binary files (app secret-envelope local keys per m049/m053 migrations) captured from QA app profiles. No reference found in that audit's README/summary. Anyone with repo access holds key material whose matching encrypted payloads (profile DBs) are plausibly also present in evidence artifacts.
 - **This audit's action:** none (preserve user work; do not modify/delete pre-existing evidence). Recorded so the maintainer can decide (e.g. treat those QA profiles as fully synthetic, or rotate/purge if any real data was ever captured).
 - **Evidence:** file inspection 2026-10-24 (masked; contents not reproduced here).
+
+## FIND-004 — Pinned theme row overlaps the bottom sidebar navigation rows; Shell row only clickable through a ~10 px sliver at the default window size
+- **Classification:** UI layout defect (usability; no data loss)
+- **Severity:** Low · **Confidence/status:** Confirmed at runtime (pixel-measured + click-verified) and by implementation analysis
+- **Affected:** Sidebar navigation at the default 1180x760 window (`lib.rs:241`); worst-hit row: "Shell" (last of 23); same overlap previously observed over "Automation"/"Support Graph"/"Onboarding" at scroll offset 0
+- **Reproduction:** Launch the app at default size, scroll the sidebar nav to the bottom. The pinned theme row ("Switch to dark theme") is painted over the lower part of the last nav row: in the final walk the Shell row's text band is at y≈717 while the theme row's hover rect measures [714,743] (`feature-walk-events.jsonl`, `shell-probe`); the row is only half visible.
+- **Root cause:** `app.rs sidebar_ui` (397–466): the nav `ScrollArea` (line 434) is laid out over the full remaining panel height, then the theme row is added in a `bottom_up` section (line 455) that paints on top instead of the scroll area reserving space for it.
+- **Impact:** The last nav row looks truncated/cut and its clickable area is a thin sliver; for "Shell" no scroll position exposes it fully (max scroll keeps it under the overlay). A user can still click the sliver (the audit did, verified by selection pill + content diff), but the interaction is fragile and visually broken. Keyboard/palette alternatives for Shell were checked and do not exist (palette searches records, not pages; no CLI page arg).
+- **Evidence:** evidence/screenshots/FEATURE/23-shell.png (Shell selected with theme text overlapping the row), 01-dashboard.png … 22-onboarding.png (overlap visible on the then-bottom row), evidence/artifacts/feature-walk-events.jsonl (`shell-probe` theme_rect [714,743]; `shell-attempt` y=703 verified), feature-walk.py (click zone capped at y≤700 to avoid theme toggles)
+- **Recommended fix:** Reserve layout space for the pinned theme row (end the nav ScrollArea above it) so no nav row is ever occluded; alternatively shrink the scroll viewport. Keep the theme row inside the sidebar per design.
+- **Regression risks:** Pure layout change; verify all 23 rows reachable at 1180x760 and at larger sizes, and that the theme toggle still sits bottom-left.
+- **Acceptance criteria:** At the default window size every sidebar row, including Shell, is fully visible and directly clickable; hover of the theme row no longer covers any nav row.
+- **Next action:** none queued beyond fix recommendation (layout defect confirmed; no deeper test needed)

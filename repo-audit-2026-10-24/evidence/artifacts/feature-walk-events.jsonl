@@ -1,0 +1,116 @@
+{"t": 1792870814.611, "kind": "app-started", "pid": 17083, "ready": true}
+{"t": 1792870815.323, "kind": "page", "page": "01-dashboard", "pill_y": 180, "method": "launch-default", "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677]}
+{"t": 1792870816.219, "kind": "click", "page": "02-inbox", "y": 219, "pill_after": 220, "verified": true}
+{"t": 1792870817.164, "kind": "click", "page": "03-live-chats", "y": 259, "pill_after": 260, "verified": true}
+{"t": 1792870818.109, "kind": "click", "page": "04-operations", "y": 299, "pill_after": 300, "verified": true}
+{"t": 1792870819.06, "kind": "click", "page": "05-customers", "y": 371, "pill_after": 372, "verified": true}
+{"t": 1792870820.007, "kind": "click", "page": "06-organizations", "y": 413, "pill_after": 412, "verified": true}
+{"t": 1792870820.96, "kind": "click", "page": "07-knowledge", "y": 452, "pill_after": 452, "verified": true}
+{"t": 1792870821.904, "kind": "click", "page": "08-reports", "y": 523, "pill_after": 524, "verified": true}
+{"t": 1792870822.861, "kind": "click", "page": "09-issue-radar", "y": 563, "pill_after": 564, "verified": true}
+{"t": 1792870823.812, "kind": "click", "page": "10-incidents", "y": 605, "pill_after": 604, "verified": true}
+{"t": 1792870824.759, "kind": "click", "page": "11-custom-objects", "y": 677, "pill_after": 676, "verified": true}
+{"t": 1792870825.587, "kind": "scroll", "step": 1, "pill_y": 436, "bands": [173, 212, 283, 323, 365, 391, 408, 435, 475, 515, 555, 627, 667]}
+{"t": 1792870826.477, "kind": "click", "page": "12-automation", "y": 475, "pill_after": 476, "verified": true}
+{"t": 1792870827.422, "kind": "click", "page": "13-ai-center", "y": 515, "pill_after": 516, "verified": true}
+{"t": 1792870828.37, "kind": "click", "page": "14-outreach", "y": 555, "pill_after": 556, "verified": true}
+{"t": 1792870829.313, "kind": "click", "page": "15-notifications", "y": 627, "pill_after": 628, "verified": true}
+{"t": 1792870830.259, "kind": "click", "page": "16-search", "y": 667, "pill_after": 668, "verified": true}
+{"t": 1792870831.092, "kind": "scroll", "step": 2, "pill_y": 398, "bands": [207, 245, 285, 325, 405, 437, 477, 517, 559, 599, 639, 679]}
+{"t": 1792870831.987, "kind": "click", "page": "17-support-graph", "y": 437, "pill_after": 438, "verified": true}
+{"t": 1792870832.932, "kind": "click", "page": "18-connectors", "y": 477, "pill_after": 478, "verified": true}
+{"t": 1792870833.878, "kind": "click", "page": "19-diagnostics", "y": 517, "pill_after": 518, "verified": true}
+{"t": 1792870834.822, "kind": "click", "page": "20-sync-health", "y": 559, "pill_after": 558, "verified": true}
+{"t": 1792870835.768, "kind": "click", "page": "21-settings", "y": 599, "pill_after": 598, "verified": true}
+{"t": 1792870836.715, "kind": "click", "page": "22-onboarding", "y": 639, "pill_after": 638, "verified": true}
+{"t": 1792870837.665, "kind": "click", "page": "23-shell", "y": 679, "pill_after": 678, "verified": true}
+{"t": 1792870837.898, "kind": "done", "pages": ["01-dashboard", "02-inbox", "03-live-chats", "04-operations", "05-customers", "06-organizations", "07-knowledge", "08-reports", "09-issue-radar", "10-incidents", "11-custom-objects", "12-automation", "13-ai-center", "14-outreach", "15-notifications", "16-search", "17-support-graph", "18-connectors", "19-diagnostics", "20-sync-health", "21-settings", "22-onboarding", "23-shell"], "scroll_steps": 2, "shell_verified": null}
+{"t": 1792871307.908, "kind": "app-started", "pid": 17617, "ready": true}
+{"t": 1792871309.598, "kind": "page", "page": "01-dashboard", "pill_y": 180, "method": "launch-default", "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715]}
+{"t": 1792871310.543, "kind": "click", "page": "02-inbox", "attempt": 1, "y": 219, "pill_after": 220, "verified": true}
+{"t": 1792871311.541, "kind": "click", "page": "03-live-chats", "attempt": 1, "y": 259, "pill_after": 260, "verified": true}
+{"t": 1792871312.54, "kind": "click", "page": "04-operations", "attempt": 1, "y": 299, "pill_after": 300, "verified": true}
+{"t": 1792871313.54, "kind": "click", "page": "05-customers", "attempt": 1, "y": 371, "pill_after": 372, "verified": true}
+{"t": 1792871314.536, "kind": "click", "page": "06-organizations", "attempt": 1, "y": 413, "pill_after": 412, "verified": true}
+{"t": 1792871315.532, "kind": "click", "page": "07-knowledge", "attempt": 1, "y": 452, "pill_after": 452, "verified": true}
+{"t": 1792871316.529, "kind": "click", "page": "08-reports", "attempt": 1, "y": 523, "pill_after": 524, "verified": true}
+{"t": 1792871317.53, "kind": "click", "page": "09-issue-radar", "attempt": 1, "y": 563, "pill_after": 564, "verified": true}
+{"t": 1792871318.531, "kind": "click", "page": "10-incidents", "attempt": 1, "y": 605, "pill_after": 604, "verified": true}
+{"t": 1792871319.528, "kind": "click", "page": "11-custom-objects", "attempt": 1, "y": 677, "pill_after": 676, "verified": true}
+{"t": 1792871321.414, "kind": "scroll", "step": 1, "settled_frames": 2, "pill_y": 466, "bands": [161, 203, 242, 313, 353, 395, 465, 505, 545, 585, 657, 697, 737]}
+{"t": 1792871322.38, "kind": "click", "page": "12-automation", "attempt": 1, "y": 505, "pill_after": 506, "verified": true}
+{"t": 1792871323.378, "kind": "click", "page": "13-ai-center", "attempt": 1, "y": 545, "pill_after": 546, "verified": true}
+{"t": 1792871324.381, "kind": "click", "page": "14-outreach", "attempt": 1, "y": 585, "pill_after": 586, "verified": true}
+{"t": 1792871325.385, "kind": "click", "page": "15-notifications", "attempt": 1, "y": 657, "pill_after": 658, "verified": true}
+{"t": 1792871326.381, "kind": "click", "page": "16-search", "attempt": 1, "y": 697, "pill_after": 698, "verified": true}
+{"t": 1792871328.26, "kind": "scroll", "step": 2, "settled_frames": 2, "pill_y": 488, "bands": [146, 185, 257, 295, 335, 375, 447, 487, 527, 567, 609, 649, 689, 729]}
+{"t": 1792871329.202, "kind": "click", "page": "17-support-graph", "attempt": 1, "y": 527, "pill_after": 528, "verified": true}
+{"t": 1792871330.198, "kind": "click", "page": "18-connectors", "attempt": 1, "y": 567, "pill_after": 568, "verified": true}
+{"t": 1792871331.193, "kind": "click", "page": "19-diagnostics", "attempt": 1, "y": 609, "pill_after": 608, "verified": true}
+{"t": 1792871332.191, "kind": "click", "page": "20-sync-health", "attempt": 1, "y": 649, "pill_after": 648, "verified": true}
+{"t": 1792871333.193, "kind": "click", "page": "21-settings", "attempt": 1, "y": 689, "pill_after": 688, "verified": true}
+{"t": 1792871335.087, "kind": "scroll", "step": 3, "settled_frames": 2, "pill_y": 638, "bands": [207, 245, 285, 325, 397, 437, 477, 517, 559, 599, 639, 679, 717]}
+{"t": 1792871336.03, "kind": "click", "page": "22-onboarding", "attempt": 1, "y": 679, "pill_after": 678, "verified": true}
+{"t": 1792871531.055, "kind": "app-started", "pid": 18098, "ready": false}
+{"t": 1792871532.769, "kind": "page", "page": "01-dashboard", "pill_y": 678, "method": "launch-default", "bands": [207, 245, 285, 325, 397, 437, 477, 517, 559, 599, 639, 679, 717]}
+{"t": 1792871536.564, "kind": "abort", "reason": "sidebar at max scroll but next page is 02-inbox, not Shell"}
+{"t": 1792871668.898, "kind": "app-started", "pid": 18209, "ready": false}
+{"t": 1792871670.522, "kind": "launch-state", "pill_y": 678, "bands": [207, 245, 285, 325, 397, 437, 477, 517, 559, 599, 639, 679, 717], "note": "app restores last page + sidebar scroll across restarts"}
+{"t": 1792871673.9, "kind": "page", "page": "01-dashboard", "pill_y": 180, "method": "launch+normalize", "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715]}
+{"t": 1792871674.841, "kind": "click", "page": "02-inbox", "attempt": 1, "y": 219, "pill_after": 220, "verified": true}
+{"t": 1792871675.84, "kind": "click", "page": "03-live-chats", "attempt": 1, "y": 259, "pill_after": 260, "verified": true}
+{"t": 1792871676.835, "kind": "click", "page": "04-operations", "attempt": 1, "y": 299, "pill_after": 300, "verified": true}
+{"t": 1792871677.833, "kind": "click", "page": "05-customers", "attempt": 1, "y": 371, "pill_after": 372, "verified": true}
+{"t": 1792871678.828, "kind": "click", "page": "06-organizations", "attempt": 1, "y": 413, "pill_after": 412, "verified": true}
+{"t": 1792871679.826, "kind": "click", "page": "07-knowledge", "attempt": 1, "y": 452, "pill_after": 452, "verified": true}
+{"t": 1792871680.824, "kind": "click", "page": "08-reports", "attempt": 1, "y": 523, "pill_after": 524, "verified": true}
+{"t": 1792871681.822, "kind": "click", "page": "09-issue-radar", "attempt": 1, "y": 563, "pill_after": 564, "verified": true}
+{"t": 1792871682.821, "kind": "click", "page": "10-incidents", "attempt": 1, "y": 605, "pill_after": 604, "verified": true}
+{"t": 1792871683.82, "kind": "click", "page": "11-custom-objects", "attempt": 1, "y": 677, "pill_after": 676, "verified": true}
+{"t": 1792871685.705, "kind": "scroll", "step": 1, "settled_frames": 2, "pill_y": 468, "bands": [163, 205, 244, 315, 355, 397, 467, 507, 547, 587, 659, 699, 738]}
+{"t": 1792871686.647, "kind": "click", "page": "12-automation", "attempt": 1, "y": 507, "pill_after": 508, "verified": true}
+{"t": 1792871687.645, "kind": "click", "page": "13-ai-center", "attempt": 1, "y": 547, "pill_after": 548, "verified": true}
+{"t": 1792871688.647, "kind": "click", "page": "14-outreach", "attempt": 1, "y": 587, "pill_after": 588, "verified": true}
+{"t": 1792871689.644, "kind": "click", "page": "15-notifications", "attempt": 1, "y": 659, "pill_after": 660, "verified": true}
+{"t": 1792871690.641, "kind": "click", "page": "16-search", "attempt": 1, "y": 699, "pill_after": 700, "verified": true}
+{"t": 1792871692.528, "kind": "scroll", "step": 2, "settled_frames": 2, "pill_y": 496, "bands": [151, 193, 265, 303, 343, 383, 455, 495, 535, 575, 617, 657, 697, 735]}
+{"t": 1792871693.468, "kind": "click", "page": "17-support-graph", "attempt": 1, "y": 535, "pill_after": 536, "verified": true}
+{"t": 1792871694.469, "kind": "click", "page": "18-connectors", "attempt": 1, "y": 575, "pill_after": 576, "verified": true}
+{"t": 1792871695.464, "kind": "click", "page": "19-diagnostics", "attempt": 1, "y": 617, "pill_after": 616, "verified": true}
+{"t": 1792871696.463, "kind": "click", "page": "20-sync-health", "attempt": 1, "y": 657, "pill_after": 656, "verified": true}
+{"t": 1792871697.464, "kind": "click", "page": "21-settings", "attempt": 1, "y": 697, "pill_after": 696, "verified": true}
+{"t": 1792871699.375, "kind": "scroll", "step": 3, "settled_frames": 2, "pill_y": 638, "bands": [207, 245, 285, 325, 397, 437, 477, 517, 559, 599, 639, 679, 717]}
+{"t": 1792871700.317, "kind": "click", "page": "22-onboarding", "attempt": 1, "y": 679, "pill_after": 678, "verified": true}
+{"t": 1792871705.793, "kind": "shell-probe", "theme_rect": [714, 743]}
+{"t": 1792871706.743, "kind": "shell-attempt", "y": 703, "content_diff": 4.181, "changed": true, "pill_lower": 718, "verified": true}
+{"t": 1792871707.334, "kind": "done", "pages": ["01-dashboard", "02-inbox", "03-live-chats", "04-operations", "05-customers", "06-organizations", "07-knowledge", "08-reports", "09-issue-radar", "10-incidents", "11-custom-objects", "12-automation", "13-ai-center", "14-outreach", "15-notifications", "16-search", "17-support-graph", "18-connectors", "19-diagnostics", "20-sync-health", "21-settings", "22-onboarding", "23-shell"], "scroll_steps": 4, "shell_verified": true}
+{"t": 1792871866.036, "kind": "app-started", "pid": 18958, "ready": true, "lock_error": false}
+{"t": 1792871867.668, "kind": "launch-state", "pill_y": 180, "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715], "note": "app restores last page + sidebar scroll across restarts"}
+{"t": 1792871871.03, "kind": "page", "page": "01-dashboard", "pill_y": 180, "method": "launch+normalize", "bands": [179, 219, 259, 299, 371, 413, 452, 523, 563, 605, 677, 715]}
+{"t": 1792871871.98, "kind": "click", "page": "02-inbox", "attempt": 1, "y": 219, "pill_after": 220, "verified": true}
+{"t": 1792871872.976, "kind": "click", "page": "03-live-chats", "attempt": 1, "y": 259, "pill_after": 260, "verified": true}
+{"t": 1792871873.97, "kind": "click", "page": "04-operations", "attempt": 1, "y": 299, "pill_after": 300, "verified": true}
+{"t": 1792871874.969, "kind": "click", "page": "05-customers", "attempt": 1, "y": 371, "pill_after": 372, "verified": true}
+{"t": 1792871875.961, "kind": "click", "page": "06-organizations", "attempt": 1, "y": 413, "pill_after": 412, "verified": true}
+{"t": 1792871876.957, "kind": "click", "page": "07-knowledge", "attempt": 1, "y": 452, "pill_after": 452, "verified": true}
+{"t": 1792871877.951, "kind": "click", "page": "08-reports", "attempt": 1, "y": 523, "pill_after": 524, "verified": true}
+{"t": 1792871878.958, "kind": "click", "page": "09-issue-radar", "attempt": 1, "y": 563, "pill_after": 564, "verified": true}
+{"t": 1792871879.957, "kind": "click", "page": "10-incidents", "attempt": 1, "y": 605, "pill_after": 604, "verified": true}
+{"t": 1792871880.952, "kind": "click", "page": "11-custom-objects", "attempt": 1, "y": 677, "pill_after": 676, "verified": true}
+{"t": 1792871882.834, "kind": "scroll", "step": 1, "settled_frames": 2, "pill_y": 472, "bands": [167, 209, 248, 319, 359, 401, 471, 511, 551, 591, 663, 703, 740]}
+{"t": 1792871883.774, "kind": "click", "page": "12-automation", "attempt": 1, "y": 511, "pill_after": 512, "verified": true}
+{"t": 1792871884.77, "kind": "click", "page": "13-ai-center", "attempt": 1, "y": 551, "pill_after": 552, "verified": true}
+{"t": 1792871885.771, "kind": "click", "page": "14-outreach", "attempt": 1, "y": 591, "pill_after": 592, "verified": true}
+{"t": 1792871886.765, "kind": "click", "page": "15-notifications", "attempt": 1, "y": 663, "pill_after": 664, "verified": true}
+{"t": 1792871888.651, "kind": "scroll", "step": 2, "settled_frames": 2, "pill_y": 467, "bands": [162, 204, 276, 314, 354, 394, 466, 506, 546, 586, 628, 668, 708]}
+{"t": 1792871889.589, "kind": "click", "page": "16-search", "attempt": 1, "y": 506, "pill_after": 507, "verified": true}
+{"t": 1792871890.583, "kind": "click", "page": "17-support-graph", "attempt": 1, "y": 546, "pill_after": 547, "verified": true}
+{"t": 1792871891.579, "kind": "click", "page": "18-connectors", "attempt": 1, "y": 586, "pill_after": 587, "verified": true}
+{"t": 1792871892.583, "kind": "click", "page": "19-diagnostics", "attempt": 1, "y": 628, "pill_after": 627, "verified": true}
+{"t": 1792871893.583, "kind": "click", "page": "20-sync-health", "attempt": 1, "y": 668, "pill_after": 667, "verified": true}
+{"t": 1792871895.474, "kind": "scroll", "step": 3, "settled_frames": 2, "pill_y": 598, "bands": [207, 245, 285, 325, 397, 437, 477, 517, 559, 599, 639, 679, 717]}
+{"t": 1792871896.412, "kind": "click", "page": "21-settings", "attempt": 1, "y": 639, "pill_after": 638, "verified": true}
+{"t": 1792871897.418, "kind": "click", "page": "22-onboarding", "attempt": 1, "y": 679, "pill_after": 678, "verified": true}
+{"t": 1792871902.918, "kind": "shell-probe", "theme_rect": [714, 743]}
+{"t": 1792871903.87, "kind": "shell-attempt", "y": 703, "content_diff": 4.181, "changed": true, "pill_lower": 718, "verified": true}
+{"t": 1792871904.476, "kind": "done", "pages": ["01-dashboard", "02-inbox", "03-live-chats", "04-operations", "05-customers", "06-organizations", "07-knowledge", "08-reports", "09-issue-radar", "10-incidents", "11-custom-objects", "12-automation", "13-ai-center", "14-outreach", "15-notifications", "16-search", "17-support-graph", "18-connectors", "19-diagnostics", "20-sync-health", "21-settings", "22-onboarding", "23-shell"], "scroll_steps": 4, "shell_verified": true}
