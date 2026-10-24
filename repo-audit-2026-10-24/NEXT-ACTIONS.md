@@ -1,23 +1,24 @@
 # Next Actions
 
 ## Immediate next action
-1. **Action:** W-005 knowledge ingest (mouse-reachable portion): Knowledge →
-   "Import documents" expander — the paste-a-document path requires TEXT
-   INPUT (title/content TextEdits; XTEST keyboard limitation), so expect the
-   same tooling-limited scope as W-006: exercise the expander, the
-   Source/Documents tabs, the empty-import validation (click Import with
-   empty fields → C-KNOW-08 disabled-state/validation), and Issue Radar
-   'Reload clusters' empty path. Record honestly what is reachable.
-   - Relevant IDs/files: W-005; C-KNOW-04/07/08; issue_radar.rs controls
-   - Prerequisites: Xvfb tooling proven; never-synced precondition intact
-   - Records: WORKFLOW-COVERAGE.md (W-005), manifest, SESSION-LOG.md
+1. **Action:** W-002 sync lifecycle (consumes the never-synced precondition
+   — the audit has deliberately preserved it until now): Dashboard
+   "Sync now" and/or Sync Health "Run initial sync" with NO Help Scout
+   credentials — record the designed no-credentials failure behavior
+   (engine state, toasts, sync_runs/sync_cursors tables), the header
+   freshness-chip behavior, and the Sync Health "Cancel running sync" path.
+   Also cover the FIND-001 webhook-drain check if reachable at worker start.
+   - Relevant IDs/files: W-002; sync_health.rs; dashboard.rs sync section;
+     FIND-001 sub-checks
+   - Prerequisites: Xvfb tooling proven; sync tables currently 0
+   - Records: WORKFLOW-COVERAGE.md (W-002), manifest, SESSION-LOG.md,
+     FINDINGS.md (FIND-001 sub-checks)
 
 ## Remaining actions (dependency order)
-2. **W-002 sync lifecycle (consumes the never-synced precondition: initial
-   sync attempt fails without credentials — record as designed behavior +
-   FIND-001 webhook-drain check)** → W-003/W-004 as data allows → W-009;
-   deferred (tooling): C-SET-66 "really restore" + W-006 rule creation
-   (await a text-capable run or an explicit QA-fixture decision).
+2. W-003/W-004 as data allows → W-009 (second-instance UX; FIND-002
+   reclassification); deferred (tooling): C-SET-66 "really restore" + W-006
+   rule creation + W-005 ingest text path + W-008 keyboard steps (await a
+   text-capable run or an explicit QA-fixture decision).
 3. FIND-001 queued runtime checks: Settings → Help Scout tab listener-health
    message; webhook drain at worker start (degraded listener path).
 4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
@@ -51,5 +52,6 @@
   palette check (E-081..E-086, FIND-011), the W-007 theme round-trip
   (E-087..E-095; theme restored to light, never-synced precondition intact),
   the W-010 backups/export pass (E-096..E-104; "really restore" deferred),
-  and the W-006 automation pass (E-105..E-118; creation tooling-limited)
+  the W-006 automation pass (E-105..E-118; creation tooling-limited), and
+  the W-005 knowledge/radar pass (E-119..E-130; FIND-008 runtime-confirmed)
   — all recorded.

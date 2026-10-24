@@ -75,9 +75,9 @@ Status: IN PROGRESS — findings added as evidence supports them. Confidence lab
 
 ## FIND-008 — Issue Radar "Detect gaps now" / "Cluster now": enqueue results silently discarded, no completion signal
 - **Classification:** feedback/degradation gap (related in spirit to FIND-001's log-only degradation, but a distinct control path)
-- **Severity:** Low · **Confidence/status:** Confirmed by implementation analysis (issue_radar.rs — `let _ = jobs::enqueue_on("ai", …)`; agent pass-2 read)
+- **Severity:** Low · **Confidence/status:** Confirmed at runtime (W-005, 2026-10-24: both enqueue buttons exercised; inline "gap detection queued — reload in a few seconds" instruction appears; jobs completed with zero data and NO completion toast/badge; results only visible after the manual reload) + Confirmed by implementation analysis (issue_radar.rs — `let _ = jobs::enqueue_on("ai", …)`; agent pass-2 read)
 - **Mechanism:** clicking these buttons enqueues an AI job and returns immediately; the enqueue result is discarded and the UI instructs the user to "reload in a few seconds". Job failure (e.g. LM Studio unreachable) lands only in the jobs table — no toast, no badge.
-- **Runtime:** "Reload clusters" exercised (no-op with zero clusters, diff 0.0 — CONTROL/RA1.png); the enqueue path itself was not executed (avoids queue churn while the AI backend is unreachable in the sandbox).
+- **Runtime:** RUNTIME-CONFIRMED 2026-10-24 (W-005, E-125..E-130): 'Detect gaps now' and 'Cluster now' each enqueued an `ai` job (jobs 0→2); an inline instruction line 'gap detection queued — reload in a few seconds to see what landed' appears on enqueue; with zero conversations/documents both jobs completed trivially (`ai`/`completed` ×2) and NO toast/badge/signal marked the completion — the stale instruction remained until the manual 'Reload clusters' click re-rendered the (still empty) page. "Reload clusters" exercised (empty path; matches pass-2 RA1). The instruction line itself is the behavior the original finding quoted; the finding's core claim (no completion signal; user must know to reload) stands.
 - **Recommended fix:** surface enqueue/failure state (toast on enqueue + failed-jobs badge on the page).
 - **Next action:** none queued.
 

@@ -12,9 +12,9 @@
   `e15ffa8` (checkpoint 1), `eec1eed` (checkpoint 1a), `fe7101a` (checkpoint 2,
   feature walk), pass-2 control-ledger checkpoint, `006d047` (checkpoint 4,
   W-008), `a5e47ef` (checkpoint 5, W-007 + log-publication fix), `8074dd7`
-  (checkpoint 6, W-010)
+  (checkpoint 6, W-010), `9e91910` (checkpoint 7, W-006)
 - Remote: `https://github.com/kimpearce888/SupportOS-Plus` (credential store,
-  kimpearce888); push of `8074dd7` verified 2026-10-24 ~23:00 UTC
+  kimpearce888); push of `9e91910` verified 2026-10-24 ~23:25 UTC
 - PUBLICATION NOTE (checkpoint 5): the repo-root `.gitignore` `*.log` rule had
   silently excluded ALL audit log evidence from checkpoints 1–4; every
   manifest-referenced log is now force-added and tracked; the missing E-002
@@ -52,8 +52,15 @@ chips 3/3 + conditional field swaps, action chips 5/5 + conditional fields,
 empty-create validation ('rule name required', zero records); rule CREATION
 is tooling-blocked (text input limitation) so rule-row/approval-queue
 controls are unreachable — recorded as tooling-limited, not exceptions;
-minor observation: validation error persists after form close. Findings now
-FIND-001 (Medium) + FIND-002..FIND-011 (Low). Next workflow: W-005.
+minor observation: validation error persists after form close. **W-005
+executed DONE-PARTIAL** (E-119..E-130, mouse-only): import expander +
+disabled-Import gate no-op runtime-verified (C-KNOW-08), visibility chips
+clicked, Issue Radar enqueues runtime-verified ('gap detection queued —
+reload in a few seconds' inline line; jobs 0→2 ai/completed; NO completion
+signal — FIND-008 upgraded to runtime-confirmed); ingest TEXT path
+tooling-blocked. Findings now FIND-001 (Medium) + FIND-002..FIND-011 (Low;
+FIND-008 runtime-confirmed). Next workflow: W-002 (consumes the never-synced
+state).
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -68,8 +75,8 @@ FIND-001 (Medium) + FIND-002..FIND-011 (Low). Next workflow: W-005.
   evidence/artifacts/control-verify.py + control-verify-events.jsonl (incl.
   retained v1/v2 tool-calibration rows); evidence/logs/CONTROL-app.log
 - Findings: FINDINGS.md (FIND-001..FIND-010)
-- Workflows: WORKFLOW-COVERAGE.md (W-006 DONE-PARTIAL; W-007 DONE; W-010
-  DONE-PARTIAL, C-SET-66 deferred; W-008 PARTIAL; W-001..W-005, W-009 queued)
+- Workflows: WORKFLOW-COVERAGE.md (W-005/W-006/W-010 DONE-PARTIAL; W-007
+  DONE; W-008 PARTIAL; W-001..W-004, W-009 queued)
 - Report: REPORT.md (skeleton, IN PROGRESS)
 
 ## Tooling facts a new session must know
@@ -110,40 +117,55 @@ FIND-001 (Medium) + FIND-002..FIND-011 (Low). Next workflow: W-005.
   with trigger kind — position-aware OCR predicates required ('tag' in the
   trigger band is ambiguous with the action row's 'Add tag' chip). 'new
   status' hint OCRs as 'new statu'.
+- W-005 positions (real-input verified): 'Import documents' toggle row
+  STABLE at (313,242) when open or closed (find_label on the open frame can
+  mis-match inside the folder explainer — constrain the search row);
+  disabled 'Import document' (317,650); visibility chips customer-safe
+  (702,481) / internal-only (440,482); radar header buttons Detect gaps now
+  (856,93) / Reload clusters (992,91) / Cluster now (1112,92). The radar
+  enqueue renders an inline 'gap detection queued — reload in a few
+  seconds' line that clears on reload (FIND-008 behavior).
+- W-005 DB note: two `ai` jobs (completed) remain in the jobs table as QA
+  artifacts; sync tables untouched.
 - Sandbox reaps background processes between tool calls: keep each app run
   self-contained in one call (the scripts already pkill orphans and verify
   the instance lock).
 - Do NOT use the `ui-screenshot` cargo feature for evidence (non-default
   build); its existence is recorded as a discovered QA affordance instead.
 
-## Coverage snapshot (2026-10-24 ~23:20 UTC)
+## Coverage snapshot (2026-10-24 ~23:45 UTC)
 - Pages inventoried w/ evidence: 23/23; shell-level features: 3
 - Control/option ledger rows: 535; controls runtime-exercised: 46 pass-2
   steps + W-007 (both theme controls, both directions, 2 restarts) + W-010
   (6 backup/export controls incl. the two-step restore gate) + W-006
-  (toggle, 3 trigger chips, 5 action chips, empty-create validation)
+  (toggle, 3 trigger chips, 5 action chips, empty-create validation) + W-005
+  (import expander, disabled gate, 2 visibility chips, 2 radar enqueues,
+  reload no-op)
 - Formal control testing (QA-001..007 ledger): NOT STARTED (pass-2 exercises
   are inventory verification, not the formal ledger)
-- Workflows identified / executed: 10 identified; W-006 DONE-PARTIAL
-  (creation tooling-limited), W-007 DONE, W-010 DONE-PARTIAL (C-SET-66
-  deferred), W-008 PARTIAL; 6 queued (W-005 next)
-- Evidence: E-001..E-118, all validated; every manifest path exists AND is
+- Workflows identified / executed: 10 identified; W-005/W-006/W-010
+  DONE-PARTIAL, W-007 DONE, W-008 PARTIAL; 5 queued (W-002 next — consumes
+  the never-synced state)
+- Evidence: E-001..E-130, all validated; every manifest path exists AND is
   git-tracked (log-evidence gap closed at checkpoint 5)
 - Accepted exceptions: none · Unresolved gaps: none new (W-001/W-003 external
-  data blockers unchanged; C-SET-66 + W-006 creation deferred by tooling)
-- Findings: FIND-001 Medium; FIND-002..FIND-011 Low
-- DB state after W-006 (read-only check): theme=light; automation_rules=0,
-  approvals=0, runs=0 (never-synced precondition intact); integrity ok
-- Coverage snapshot time: 2026-10-24 ~23:20 UTC
+  data blockers unchanged; C-SET-66 + W-006 creation + W-005 text path
+  deferred by tooling)
+- Findings: FIND-001 Medium; FIND-002..FIND-011 Low (FIND-008
+  runtime-confirmed)
+- DB state after W-005 (read-only check): theme=light; knowledge_documents=0;
+  jobs=2 (ai/completed, QA artifacts); sync_runs=0 (never-synced intact);
+  integrity ok
+- Coverage snapshot time: 2026-10-24 ~23:45 UTC
 
 ## Outstanding tasks (ordered)
-1. Workflow execution order per NEXT-ACTIONS.md #2 (W-005 knowledge ingest
-   [paste-a-document path — but note the paste field is a TextEdit; the
-   ingest may be tooling-limited the same way; verify the expander/controls
-   reachable by mouse] → W-002 sync lifecycle [consumes never-synced state]
-   → W-003/W-004 as data allows → W-009; then deferred C-SET-66 + W-006
-   creation, both awaiting a text-capable run or QA-fixture decision;
-   W-008 remaining steps keyboard-blocked, record as tooling-limited).
+1. Workflow execution order per NEXT-ACTIONS.md #2 (W-002 sync lifecycle
+   [consumes never-synced state: 'Run initial sync'/'Sync now' fails without
+   credentials — record designed behavior + FIND-001 webhook-drain check] →
+   W-003/W-004 as data allows → W-009; then deferred tooling items
+   (C-SET-66, W-006 creation, W-005 text path, W-008 keyboard steps);
+   W-001 OAuth round-trip blocked on external credentials — register
+   exception if unexecutable).
 3. FIND-001 UI-signal + webhook-drain checks.
 4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
    second-instance UI check (FIND-002 reclassification decision).
@@ -182,9 +204,9 @@ FIND-001 (Medium) + FIND-002..FIND-011 (Low). Next workflow: W-005.
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-24 ~23:20 UTC
-- Validator/check: W-006 8/8 steps PASS (events JSONL w006-* rows; creation
-  tooling-limited + stale-error observation recorded); W-006 PNGs (12) +
-  W-10 (7) + W-07 (7) PIL+visually validated; manifest E-001..E-118 zero
-  missing paths; DB integrity ok, theme=light, never-synced intact; app log
-  read (only the known FIND-001 WARN)
+- Timestamp/timezone: 2026-10-24 ~23:45 UTC
+- Validator/check: W-005 10/10 steps PASS (events JSONL w005-* rows +
+  w005-correction row); W-005 PNGs (10) + all earlier WORKFLOW PNGs
+  PIL+visually validated; manifest E-001..E-130 zero missing paths; DB
+  integrity ok, theme=light, never-synced intact; FIND-008 upgraded to
+  runtime-confirmed; app log read (only the known FIND-001 WARN)

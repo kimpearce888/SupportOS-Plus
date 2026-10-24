@@ -265,3 +265,37 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
   close-check fix.
 - Evidence: WORKFLOW/W006-01..08.png (12 frames, PIL+visual), E-105..E-118;
   WORKFLOW-COVERAGE W-006 → DONE-PARTIAL. Next workflow: W-005.
+
+## 2026-10-24 ~23:45 UTC — W-005 knowledge ingest + gaps executed (DONE-PARTIAL: text path tooling-limited; FIND-008 runtime-confirmed)
+
+- Mouse-only pass with real input (evidence/artifacts/w005-knowledge.py;
+  2 runs, both retained):
+  * Knowledge page; 'Import documents' expander open/close ✓; the full
+    paste-a-document form captured (Title / Visibility chips / Source name /
+    Content (Markdown) / disabled 'Import document').
+  * DISABLED-gate (C-KNOW-08) runtime-verified: clicking the disabled
+    'Import document' (empty title/content) is a NO-OP — diff 0.0, zero
+    records, jobs unchanged.
+  * Visibility chips exercised (customer-safe ↔ internal-only; form state
+    only, no records).
+  * Issue Radar: 'Detect gaps now' + 'Cluster now' each enqueued an ai job
+    (jobs 0→2, both completed trivially with zero data); an INLINE status
+    line 'gap detection queued — reload in a few seconds to see what landed'
+    appears on enqueue; NO completion toast/badge; the stale instruction
+    remained until the manual 'Reload clusters' click re-rendered the still
+    empty page → FIND-008 runtime-CONFIRMED (its FINDINGS entry updated from
+    implementation-analysis to runtime-confirmed, with the nuance that the
+    enqueue itself shows the instruction line).
+  * Honesty correction: run-1's S007 event note said 'small UI diff and no
+    toast' — the visual read showed the inline instruction line (diff 2.58);
+    an explicit w005-correction JSONL row supersedes that wording.
+  * 'Reload clusters' empty no-op (matches pass-2 RA1).
+- BLOCKED (tooling-limited, not exceptions): the ingest text path
+  (title/source/content typing; XTEST keyboard limitation) — enabled import
+  + FTS/vector indexing source-verified only.
+- Tooling history (retained): run-1 expander-close mis-location (toggle text
+  matched inside the folder explainer) → row-constrained search + the
+  probe-verified toggle position.
+- Evidence: WORKFLOW/W005-01..08.png (10 frames, PIL+visual), E-119..E-130;
+  WORKFLOW-COVERAGE W-005 → DONE-PARTIAL; FINDINGS FIND-008 updated.
+  Next workflow: W-002 (sync lifecycle; consumes the never-synced state).
