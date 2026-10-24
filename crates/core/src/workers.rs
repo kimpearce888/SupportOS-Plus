@@ -90,6 +90,9 @@ pub struct WorkerManager {
     processing: AtomicBool,
     sweeping_notifications: AtomicBool,
     sweeping_customer_events: AtomicBool,
+    /// Item 150: the intelligence sweep's tick guard (SLA-breach
+    /// persistence, unmonitored-mailbox tracking, doc freshness).
+    sweeping_intelligence: AtomicBool,
     refreshing_connectors: AtomicBool,
     /// R8 (D10): wakes the adaptive auto-sync timer immediately — armed
     /// after every successful outbound send ("poll right after the app
@@ -120,6 +123,7 @@ impl WorkerManager {
             processing: AtomicBool::new(false),
             sweeping_notifications: AtomicBool::new(false),
             sweeping_customer_events: AtomicBool::new(false),
+            sweeping_intelligence: AtomicBool::new(false),
             refreshing_connectors: AtomicBool::new(false),
             sync_nudge: std::sync::Arc::new(tokio::sync::Notify::new()),
             handles: Mutex::new(Vec::new()),
@@ -181,6 +185,7 @@ impl WorkerManager {
         self.processing.store(false, Ordering::SeqCst);
         self.sweeping_notifications.store(false, Ordering::SeqCst);
         self.sweeping_customer_events.store(false, Ordering::SeqCst);
+        self.sweeping_intelligence.store(false, Ordering::SeqCst);
         self.refreshing_connectors.store(false, Ordering::SeqCst);
         {
             let conn = self.lock();
@@ -349,6 +354,31 @@ impl WorkerManager {
                     interval.tick().await;
                     Self::contained("customer_event_sweep", async {
                         this.customer_event_sweep_tick();
+                    })
+                    .await;
+                }
+            });
+        }
+        {
+            // Item 150: the intelligence sweep cadence. Breach persistence
+            // is deduped per conversation + kind, so a slow cadence loses
+            // nothing; 15 minutes keeps the tracked log near the live page.
+            let seconds = {
+                let conn = self.lock();
+                crate::settings::get_i64(&conn, "intelligence_sweep_seconds", 900)
+                    .unwrap_or(900)
+                    .clamp(60, 86400)
+            };
+            self.intelligence_sweep_tick();
+            let this = self.clone();
+            self.spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(
+                    u64::try_from(seconds).unwrap_or(900),
+                ));
+                loop {
+                    interval.tick().await;
+                    Self::contained("intelligence_sweep", async {
+                        this.intelligence_sweep_tick();
                     })
                     .await;
                 }
@@ -1193,6 +1223,29 @@ impl WorkerManager {
             Ok(_) => {}
             Err(e) => {
                 tracing::warn!(error = %e, operation = "customer_event_sweep", "Customer event sweep failed")
+            }
+        }
+    }
+
+    /// Item 150: the intelligence sweep — persist the live SLA verdicts
+    /// (deduped) into `sla_breaches`, track mailboxes the business-hours
+    /// system does not monitor against their `sla_configs` thresholds,
+    /// and refresh the tracked doc-freshness state. These are the writers
+    /// the M018/M019 tables never had; the dashboard breach metric, the
+    /// Knowledge gaps list and the stale count read what lands here.
+    pub fn intelligence_sweep_tick(&self) {
+        if self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+        // A1: latch clears the guard on every exit path (see TickGuard).
+        let Some(_guard) = TickGuard::acquire(&self.sweeping_intelligence) else {
+            return;
+        };
+        let conn = self.lock();
+        match crate::intelligence_features::sweep(&conn) {
+            Ok(()) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, operation = "intelligence_sweep", "Intelligence sweep failed")
             }
         }
     }

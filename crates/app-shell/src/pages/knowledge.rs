@@ -384,6 +384,10 @@ pub struct KnowledgePage {
     draft_pick: Option<i64>,
     gap_pick: Option<i64>,
     publish_collection_pick: Option<i64>,
+    // Item 150: the tracked knowledge gaps (zero-hit searches) and the
+    // tracked stale-doc count from the intelligence freshness sweep.
+    query_gaps: Vec<(String, i64)>,
+    stale_docs_tracked: u32,
 }
 
 impl KnowledgePage {
@@ -412,6 +416,8 @@ impl KnowledgePage {
             draft_pick: None,
             gap_pick: None,
             publish_collection_pick: None,
+            query_gaps: Vec::new(),
+            stale_docs_tracked: 0,
         }
     }
 
@@ -504,7 +510,17 @@ impl KnowledgePage {
     }
 
     fn reload_docs(&mut self, db: &DbHandle) {
-        self.articles = db.with_read(|conn| list_articles(conn, &self.filter));
+        let (articles, query_gaps, stale) = db.with_read(|conn| {
+            (
+                list_articles(conn, &self.filter),
+                // Item 150: the tracked zero-hit queries, best-hit order.
+                spp_core::intelligence_features::list_knowledge_gaps(conn, 10).unwrap_or_default(),
+                spp_core::intelligence_features::count_stale_docs(conn).unwrap_or(0),
+            )
+        });
+        self.articles = articles;
+        self.query_gaps = query_gaps;
+        self.stale_docs_tracked = stale;
     }
 
     /// Mark a knowledge document reviewed/verified (freshness actions).
@@ -1335,9 +1351,56 @@ impl KnowledgePage {
                 self.filter.collection = self.collection_pick;
                 self.filter.status = self.status_pick.clone();
                 self.reload_docs(db);
+                // Item 150: a non-blank search that returns nothing is a
+                // knowledge gap — record it (deduped by the core writer)
+                // so the tracked gaps list can drive new articles.
+                if self.filter.query.is_some()
+                    && self.articles.is_empty()
+                    && let Some(q) = self.filter.query.clone()
+                {
+                    let _ = db.with_write(|conn| {
+                        spp_core::intelligence_features::record_knowledge_gap(conn, &q)
+                    });
+                    self.reload_docs(db);
+                }
             }
         });
         design::divider(ui);
+
+        // Item 150: the tracked knowledge gaps — every zero-hit search
+        // gains a row, and the stale count comes from the freshness rows
+        // the ingest stamps and the intelligence sweep maintains.
+        if !self.query_gaps.is_empty() || self.stale_docs_tracked > 0 {
+            design::card_titled(
+                ui,
+                "Knowledge gaps (tracked)",
+                Some(
+                    "zero-hit searches recorded as gaps; stale count from the tracked freshness rows",
+                ),
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        if self.query_gaps.is_empty() {
+                            design::hint_text(ui, "(no zero-hit searches recorded)");
+                        }
+                        for (q, hits) in &self.query_gaps {
+                            design::badge(ui, &format!("{q} ×{hits}"), BadgeTone::Warning);
+                        }
+                    });
+                    if self.stale_docs_tracked > 0 {
+                        ui.add_space(4.0);
+                        design::badge(
+                            ui,
+                            &format!(
+                                "{} stale doc(s) tracked — re-ingest to refresh",
+                                self.stale_docs_tracked
+                            ),
+                            BadgeTone::Warning,
+                        );
+                    }
+                },
+            );
+            ui.add_space(8.0);
+        }
 
         if self.articles.is_empty() {
             design::empty_state(

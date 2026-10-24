@@ -219,6 +219,11 @@ pub fn upsert_document(
     if let Some((id, existing_checksum)) = &existing
         && existing_checksum.as_deref() == Some(checksum.as_str())
     {
+        // Item 150: an unchanged re-ingest is still a sync — stamp the
+        // freshness row (last_synced_at, hash, stale cleared) so the
+        // tracked staleness sweep sees current truth.
+        let _ =
+            crate::intelligence_features::update_doc_freshness(conn, *id, Some(&checksum), false);
         return Ok((*id, false));
     }
 
@@ -275,6 +280,15 @@ pub fn upsert_document(
     match outcome {
         Ok(id) => {
             conn.execute_batch("COMMIT")?;
+            // Item 150: the ingest is the freshness writer — every
+            // successful upsert stamps the tracked freshness row. A
+            // freshness failure must not fail the ingest itself.
+            let _ = crate::intelligence_features::update_doc_freshness(
+                conn,
+                id,
+                Some(&checksum),
+                false,
+            );
             Ok((id, true))
         }
         Err(e) => {
