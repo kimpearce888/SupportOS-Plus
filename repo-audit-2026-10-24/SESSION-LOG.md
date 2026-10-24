@@ -144,3 +144,54 @@ Use chronological, factual entries. Do not put secrets in this file. Each entry 
   limitation (recorded, not an app defect); sidebar trigger row not clicked
   (FIND-004 overlap zone; same open() call source-verified).
 - WORKFLOW-COVERAGE W-008 -> PARTIAL; manifest E-081..E-086.
+
+## 2026-10-24 ~22:25 UTC — W-007 theme round-trip executed (DONE, all steps PASS)
+
+- Full light↔dark round-trip under real input (evidence/artifacts/w07-theme.py,
+  self-contained XTEST stack; 3 app launches + 1 precondition-restore launch):
+  * S002 initial light (lum 252.3); moon icon bbox measured [1138,19,1179,54]
+    on the icon-only header button (C-APP-006 renders tooltip only).
+  * S003 header button (1145,30) light→dark: whole-UI diff 237.2, lum 19.7,
+    application_settings.theme='dark' synchronously.
+  * S004 sidebar row (100,728 — FIND-004 rect) dark→light: diff 237.2; frame
+    identical to initial (0.0).
+  * S005 sidebar row light→dark again (restart prep).
+  * S006 process exit with theme='dark' already stored.
+  * S007 RELAUNCH BOOTS DARK — frame structurally identical to pre-restart
+    dark (diff 0.0); persistence (F-026 / theme.rs boot-load) confirmed.
+  * S008 header button dark→light. S009 second RELAUNCH BOOTS LIGHT (0.0).
+  * S010 end: theme='light', original precondition restored; never-synced
+    precondition untouched.
+- Tooling honesty (run-1 defects, both fixed and retained in the events
+  JSONL): (1) db_matches check wrongly demanded an explicit 'light' value for
+  the unset-key default state — corrected to theme.rs semantics (missing key
+  → Light); (2) verdict all() treated the numeric same_ref_diff 0.0 as
+  falsy, producing one false FAIL at S007 despite all boolean checks true —
+  verdict now computed from the boolean subset. Between runs the theme was
+  restored to light THROUGH THE APP's own sidebar control (restore run in
+  W07-app.log) — no out-of-band DB writes.
+- Evidence: WORKFLOW/W07-01..07.png (7 frames, PIL+visual), E-087..E-095;
+  WORKFLOW-COVERAGE W-007 → DONE; FEATURE-INVENTORY carried-bullet updated.
+- Next workflow: W-010 (backups/export), then W-006 → W-005 → W-002 →
+  W-003/W-004 → W-009 (NEXT-ACTIONS order).
+
+## 2026-10-24 ~22:35 UTC — publication-completeness fix: audit log evidence was git-ignored; E-002 log regenerated
+
+- DISCOVERED: the repo-root `.gitignore` (`*.log`) silently excluded every
+  file under repo-audit-2026-10-24/evidence/logs/ from all audit commits —
+  `git status` reported clean because ignored files are invisible to it, so
+  the "push verified" checkpoints shipped WITHOUT the log evidence. Only the
+  logs/ subtree is affected (full ignored-scan of the audit folder = logs
+  only; screenshots/artifacts/JSONLs are tracked).
+- ALSO FOUND: manifest E-002 referenced evidence/logs/F-CAND-001-port-free.log
+  which no longer existed on disk (never committed; locally lost).
+- FIX (no app code, no user config touched): (1) regenerated the E-002 log by
+  re-running the exact FIND-001 scenario (default config launch while
+  next-server holds :3000; launch-only capture, no state consumed) — the log
+  again shows `WARN supportos_plus: loopback listener could not be started,
+  error: Address already in use (os error 98)` at main.rs:129 (42 lines,
+  evidence/logs/F-CAND-001-port-free.log); (2) all audit logs force-added
+  (git add -f) so every manifest-referenced path is now tracked; .gitignore
+  left untouched.
+- Checkpoint 5 commit includes W-007 (E-087..E-095) + this fix; manifest
+  re-verified: zero missing paths.

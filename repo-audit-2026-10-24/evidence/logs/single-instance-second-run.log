@@ -1,0 +1,10 @@
+  2026-10-24T15:50:27.378388Z  INFO supportos_plus: SupportOS-Plus native shell starting
+    at crates/app-shell/src/main.rs:15
+
+  2026-10-24T15:50:27.378497Z  INFO supportos_plus: data directory, data_dir: "/home/z/.local/share/supportos-plus"
+    at crates/app-shell/src/main.rs:24
+
+  2026-10-24T15:50:27.378596Z ERROR supportos_plus: cannot acquire the instance lock, error: another SupportOS+ instance is already running
+    at crates/app-shell/src/main.rs:34
+
+SupportOS-Plus: cannot start: another SupportOS+ instance is already running

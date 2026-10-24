@@ -30,8 +30,13 @@ sandbox (now also verified for chords — Ctrl+K is a no-op) and the
 Onboarding/Shell sync-controls are deliberately deferred to W-002/W-007 to
 preserve the never-synced precondition. **W-008 executed PARTIAL** (E-081..
 E-086): palette opens via the header button with the correct empty state;
-the click-outside backdrop is unreliable → FIND-011. Findings now FIND-001
-(Medium) + FIND-002..FIND-011 (Low). Next workflow: W-007.
+the click-outside backdrop is unreliable → FIND-011. **W-007 executed DONE**
+(E-087..E-095): header icon button (C-APP-006) and sidebar theme row
+(C-APP-005) flip light↔dark in both directions; `application_settings.theme`
+follows every click synchronously; dark AND light persistence across restarts
+verified (two relaunches, rendered frames structurally identical, diff 0.0);
+original light precondition restored. Findings now FIND-001 (Medium) +
+FIND-002..FIND-011 (Low). Next workflow: W-010.
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -46,7 +51,8 @@ the click-outside backdrop is unreliable → FIND-011. Findings now FIND-001
   evidence/artifacts/control-verify.py + control-verify-events.jsonl (incl.
   retained v1/v2 tool-calibration rows); evidence/logs/CONTROL-app.log
 - Findings: FINDINGS.md (FIND-001..FIND-010)
-- Workflows: WORKFLOW-COVERAGE.md (W-008 PARTIAL with evidence; W-001..W-010 otherwise queued)
+- Workflows: WORKFLOW-COVERAGE.md (W-007 DONE with evidence; W-008 PARTIAL;
+  W-001..W-006, W-009, W-010 queued)
 - Report: REPORT.md (skeleton, IN PROGRESS)
 
 ## Tooling facts a new session must know
@@ -61,33 +67,43 @@ the click-outside backdrop is unreliable → FIND-011. Findings now FIND-001
 - control-verify.py v3 patterns: OCR 4-pass label targeting (plain/inverted/
   3×/sparse-2×, conf≥15), sliding-window needle matching, dark-rect and bbox
   detectors for `+icon` buttons, per-step diff thresholds (chip 0.06–0.10,
-  no-op 0.0–0.01, checkmark 0.007, view switch 0.6–5.5), dialog danger button
-  is RIGHT of Cancel, incidents checkbox responds only to the box
-  (word center −43 px), Diagnostics clear-log button absent when 0 events.
+  no-op 0.0–0.01, checkmark 0.007, view switch 0.6–5.5, theme flip 237.2),
+  dialog danger button is RIGHT of Cancel, incidents checkbox responds only
+  to the box (word center −43 px), Diagnostics clear-log button absent when
+  0 events.
+- W-007 control positions (real-input verified both directions): header
+  theme icon button (1145,30) — icon-only, tooltip label; sidebar theme row
+  (100,728) inside FIND-004 rect [714,743]. Theme key lives in the
+  `application_settings` table (NOT `settings`); a missing key = Light
+  default (theme.rs::from_setting_value); toggles store synchronously.
 - Sandbox reaps background processes between tool calls: keep each app run
   self-contained in one call (the scripts already pkill orphans and verify
   the instance lock).
 - Do NOT use the `ui-screenshot` cargo feature for evidence (non-default
   build); its existence is recorded as a discovered QA affordance instead.
 
-## Coverage snapshot (2026-10-24 ~21:35 UTC)
+## Coverage snapshot (2026-10-24 ~22:25 UTC)
 - Pages inventoried w/ evidence: 23/23; shell-level features: 3
-- Control/option ledger rows: 535; controls runtime-exercised: 46 steps
-  (42 PASS, 2 PARTIAL w/ recorded env limitation, 2 documented no-ops)
+- Control/option ledger rows: 535; controls runtime-exercised: 46 pass-2
+  steps + W-007 (both theme controls, both directions, 2 restarts)
 - Formal control testing (QA-001..007 ledger): NOT STARTED (pass-2 exercises
   are inventory verification, not the formal ledger)
-- Workflows identified / completed: 10 queued / 0
-- Evidence: E-001..E-086, all validated
+- Workflows identified / executed: 10 identified; W-007 DONE, W-008 PARTIAL;
+  8 queued (W-010 next)
+- Evidence: E-001..E-095, all validated
 - Accepted exceptions: none · Unresolved gaps: none new (W-001/W-003 external
   data blockers unchanged)
 - Findings: FIND-001 Medium; FIND-002..FIND-011 Low
-- Coverage snapshot time: 2026-10-24 ~22:05 UTC
+- DB state after W-007 (read-only check): theme='light' (original state
+  restored); never-synced precondition intact
+- Coverage snapshot time: 2026-10-24 ~22:25 UTC
 
 ## Outstanding tasks (ordered)
-1. Workflow execution order per NEXT-ACTIONS.md #3 (W-007 → W-010 → W-006 →
-   W-005 → W-002 [consumes never-synced state] → W-003/W-004 → W-009;
-   W-008 PARTIAL done — remaining W-008 steps are keyboard-blocked, record
-   as tooling-limited, not exceptions).
+1. Workflow execution order per NEXT-ACTIONS.md #2 (W-010 backups → W-006
+   automation rule → W-005 knowledge ingest → W-002 sync lifecycle [consumes
+   never-synced state] → W-003/W-004 as data allows → W-009; W-008 PARTIAL
+   done — remaining W-008 steps are keyboard-blocked, record as
+   tooling-limited, not exceptions).
 3. FIND-001 UI-signal + webhook-drain checks.
 4. Edge/failure/recovery + cross-feature tests (QA-004/005) incl.
    second-instance UI check (FIND-002 reclassification decision).
@@ -126,8 +142,7 @@ the click-outside backdrop is unreliable → FIND-011. Findings now FIND-001
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-24 ~22:05 UTC
-- Validator/check: 46/46 pass-2 steps dispositioned (events JSONL final rows);
-  key PNGs visually read (8-frame sweep + chip/checkbox pixel checks + dialog
-  and post-clear states); DB state read-only verified; manifest E-032..E-080
-  rows match files on disk; app log read (no errors beyond the FIND-001 WARN)
+- Timestamp/timezone: 2026-10-24 ~22:25 UTC
+- Validator/check: W-007 10/10 steps PASS (events JSONL w07-* rows); 7
+  WORKFLOW PNGs PIL+visually validated (same-theme frames diff 0.0); DB
+  theme='light' restored; app log read (only the known FIND-001 WARN)

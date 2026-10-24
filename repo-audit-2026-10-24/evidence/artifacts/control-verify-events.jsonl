@@ -433,3 +433,33 @@
 {"t": 1792877474.498, "kind": "step", "id": "W08c-backdrop", "at": [450, 620], "diff": 0.081, "palette_still_visible": true, "result": "still-open"}
 {"t": 1792877479.258, "kind": "step", "id": "W08c-backdrop", "at": [1100, 90], "diff": 0.449, "palette_still_visible": true, "result": "still-open"}
 {"t": 1792877483.843, "kind": "step", "id": "W08c-backdrop", "at": [300, 300], "diff": 1.69, "palette_still_visible": false, "result": "closed"}
+{"t": 1792879296.254, "kind": "w07-S001-pre-db", "theme_key": null, "expected": "None (unset) -> Theme::Light per theme.rs::from_setting_value"}
+{"t": 1792879302.259, "kind": "w07-app-started", "tag": "launch-1", "pid": 2280, "ready": true, "lock_error": false}
+{"t": 1792879304.839, "kind": "w07-S002-initial", "tag": "01-light-initial", "lum": 252.3, "db_theme": null, "want": "light", "checks": {"lum_is_light": true, "db_matches": false}, "verdict": "FAIL"}
+{"t": 1792879304.839, "kind": "w07-fatal", "error": "S002-initial (01-light-initial) verification failed: {'lum_is_light': True, 'db_matches': False}"}
+{"t": 1792879322.068, "kind": "w07-S001-pre-db", "theme_key": null, "expected": "None (unset) -> Theme::Light per theme.rs::from_setting_value"}
+{"t": 1792879328.073, "kind": "w07-app-started", "tag": "launch-1", "pid": 2338, "ready": true, "lock_error": false}
+{"t": 1792879330.65, "kind": "w07-S002-initial", "tag": "01-light-initial", "lum": 252.3, "db_theme": null, "want": "light", "checks": {"lum_is_light": true, "db_matches": true}, "verdict": "PASS"}
+{"t": 1792879330.652, "kind": "w07-S002-icon-presence", "moon_icon_bbox_px": [1138, 19, 1179, 54, 63], "note": "dark-pixel bbox of the icon-only header button (C-APP-006, tooltip 'switch to dark theme'; icon_button renders no text)"}
+{"t": 1792879332.491, "kind": "w07-S003-header-to-dark", "tag": "02-dark-after-header", "lum": 19.7, "db_theme": "dark", "want": "dark", "checks": {"lum_is_dark": true, "db_matches": true, "flip_diff": 237.191, "flip_ok": true}, "verdict": "PASS"}
+{"t": 1792879334.333, "kind": "w07-S004-sidebar-to-light", "tag": "03-light-after-sidebar", "lum": 252.3, "db_theme": "light", "want": "light", "checks": {"lum_is_light": true, "db_matches": true, "flip_diff": 237.191, "flip_ok": true}, "verdict": "PASS"}
+{"t": 1792879336.175, "kind": "w07-S005-sidebar-to-dark", "tag": "04-dark-before-restart", "lum": 19.7, "db_theme": "dark", "want": "dark", "checks": {"lum_is_dark": true, "db_matches": true, "flip_diff": 237.191, "flip_ok": true}, "verdict": "PASS"}
+{"t": 1792879338.18, "kind": "w07-S006-exit", "proc_gone": true, "db_theme_after_exit": "dark", "verdict": "PASS"}
+{"t": 1792879344.185, "kind": "w07-app-started", "tag": "launch-2", "pid": 2404, "ready": true, "lock_error": false}
+{"t": 1792879346.727, "kind": "w07-S007-dark-persisted", "tag": "05-dark-after-restart", "lum": 19.7, "db_theme": "dark", "want": "dark", "checks": {"lum_is_dark": true, "db_matches": true, "same_ref_diff": 0.0, "same_ok": true}, "verdict": "FAIL"}
+{"t": 1792879346.727, "kind": "w07-fatal", "error": "S007-dark-persisted (05-dark-after-restart) verification failed: {'lum_is_dark': True, 'db_matches': True, 'same_ref_diff': 0.0, 'same_ok': True}"}
+{"t": 1792879405.777, "kind": "w07-S001-pre-db", "theme_key": "light", "expected": "None (unset) -> Theme::Light per theme.rs::from_setting_value"}
+{"t": 1792879411.782, "kind": "w07-app-started", "tag": "launch-1", "pid": 2519, "ready": true, "lock_error": false}
+{"t": 1792879414.362, "kind": "w07-S002-initial", "tag": "01-light-initial", "lum": 252.3, "db_theme": "light", "want": "light", "checks": {"lum_is_light": true, "db_matches": true}, "verdict": "PASS"}
+{"t": 1792879414.365, "kind": "w07-S002-icon-presence", "moon_icon_bbox_px": [1138, 19, 1179, 54, 63], "note": "dark-pixel bbox of the icon-only header button (C-APP-006, tooltip 'switch to dark theme'; icon_button renders no text)"}
+{"t": 1792879416.206, "kind": "w07-S003-header-to-dark", "tag": "02-dark-after-header", "lum": 19.7, "db_theme": "dark", "want": "dark", "checks": {"lum_is_dark": true, "db_matches": true, "flip_diff": 237.191, "flip_ok": true}, "verdict": "PASS"}
+{"t": 1792879418.049, "kind": "w07-S004-sidebar-to-light", "tag": "03-light-after-sidebar", "lum": 252.3, "db_theme": "light", "want": "light", "checks": {"lum_is_light": true, "db_matches": true, "flip_diff": 237.191, "flip_ok": true}, "verdict": "PASS"}
+{"t": 1792879419.89, "kind": "w07-S005-sidebar-to-dark", "tag": "04-dark-before-restart", "lum": 19.7, "db_theme": "dark", "want": "dark", "checks": {"lum_is_dark": true, "db_matches": true, "flip_diff": 237.191, "flip_ok": true}, "verdict": "PASS"}
+{"t": 1792879421.896, "kind": "w07-S006-exit", "proc_gone": true, "db_theme_after_exit": "dark", "verdict": "PASS"}
+{"t": 1792879427.902, "kind": "w07-app-started", "tag": "launch-2", "pid": 2585, "ready": true, "lock_error": false}
+{"t": 1792879430.442, "kind": "w07-S007-dark-persisted", "tag": "05-dark-after-restart", "lum": 19.7, "db_theme": "dark", "want": "dark", "checks": {"lum_is_dark": true, "db_matches": true, "same_ref_diff": 0.0, "same_ok": true}, "verdict": "PASS"}
+{"t": 1792879432.278, "kind": "w07-S008-header-to-light", "tag": "06-light-after-header", "lum": 252.3, "db_theme": "light", "want": "light", "checks": {"lum_is_light": true, "db_matches": true}, "verdict": "PASS"}
+{"t": 1792879440.286, "kind": "w07-app-started", "tag": "launch-3", "pid": 2627, "ready": true, "lock_error": false}
+{"t": 1792879442.828, "kind": "w07-S009-light-persisted", "tag": "07-light-after-restart", "lum": 252.3, "db_theme": "light", "want": "light", "checks": {"lum_is_light": true, "db_matches": true, "same_ref_diff": 0.0, "same_ok": true}, "verdict": "PASS"}
+{"t": 1792879444.833, "kind": "w07-S010-end", "proc_gone": true, "db_theme_end": "light", "note": "round-trip closed: light->dark->light->dark->restart->light; original precondition (light) restored"}
+{"t": 1792879444.833, "kind": "w07-summary", "verdict": "PASS", "steps": "S001..S010", "controls": "C-APP-006 header icon button (both directions), C-APP-005 sidebar row (both directions)", "persistence": "dark across restart (S007) AND light across restart (S009)"}

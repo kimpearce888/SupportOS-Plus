@@ -107,8 +107,14 @@ a measured click in the free top sliver of the row (y=703; theme row hover rect
   Incidents filters, Reports tabs incl. Builder, Connectors form, Diagnostics
   clear-log confirm, AI Center Copilot/Usage/Jobs tabs — all runtime-exercised
   (see the runtime verification section below).
-- CARRIED: theme toggle round-trip (W-007) and Help Scout listener-health
-  message / webhook drain (FIND-001 sub-checks) — unchanged, queued.
+- CARRIED → DONE: theme toggle round-trip (W-007) executed 2026-10-24 —
+  header icon button (C-APP-006) and sidebar theme row (C-APP-005) flip both
+  directions; `application_settings.theme` follows every click synchronously;
+  dark AND light persistence across restarts verified (WORKFLOW-COVERAGE
+  W-007; E-087..E-095). Shell-page button (C-APP-009) shares theme.rs
+  store/load semantics (source-verified; not separately clicked).
+- CARRIED (unchanged): Help Scout listener-health message / webhook drain
+  (FIND-001 sub-checks) — queued (NEXT-ACTIONS #3).
 
 ## Runtime verification of controls (pass 2) — real-input exercises
 
