@@ -164,22 +164,17 @@ invalidation clearing results nothing refetches, the onboarding
 save_step dead with its unread setting, and the outreach recipient
 snapshot cap discarding matches) — opened 2026-10-25, verified and recorded in `completed.md`.
 
+Batch 34 = items 147-149, 152-158 (the ensure_loaded-on-empty re-query
+pattern across seven pages, the dead Runner/JobRegistry/bulk_*/
+EventEmitter machinery removed, the dead prompt surfaces removed, the
+dead copilot/embedding helper surface removed, the unconsumed AppConfig
+helpscout/ai/sync/loopback fields removed, the dead hybrid_search fusion
+stack removed, the legacy FTS tables and chunk_version column retired,
+the connector AI-search/auth-edit + data_tools runtime retired, the
+AppDir staging cleaned before packaging, and appimagetool pinned and
+checksummed in the release path) — opened 2026-10-25. Items 150/151
+stay parked pending the owner's wire-or-prune decisions.
 
-147. [low|issue] ensure_loaded-on-empty re-query pattern (7 pages, wasted work) — pages/outreach.rs:121 + 6 more
-
-### GAPS — dead surfaces, drift traps, build/policy hygiene
-
-148. [low|gap] Remove dead Runner/JobRegistry/bulk_*/EventEmitter machinery — runner.rs, workers.rs, eventing.rs
-149. [low|gap] Dead prompt surfaces (report_narrative, duplicate attribute prompt, ai_features runtime incl. mismatched translation-v1) — ai_pipeline.rs:1780, ai_prompts.rs:454, ai_features.rs:159
-150. [low|gap] intelligence_features ~70% dead (SLA-breach + knowledge-gap tracking never gain rows) — decide: wire or prune
-151. [low|gap] ai_settings write API dead (provider_kind inert plumbing) — ai_center.rs:135-179
-152. [low|gap] Dead copilot/embedding helper surface — copilot.rs:24-63, embeddings.rs:96-161, ai_lm_studio.rs:24-55
-153. [low|gap] AppConfig helpscout/ai/sync/loopback fields constructed, never consumed — config.rs:18-61
-154. [low|gap] Dead hybrid_search fusion stack (id-namespace mismatch latent) — hybrid_search.rs:162
-155. [low|gap] Legacy FTS tables written every sync, never queried; chunk_version never read — search.rs:1356
-156. [low|gap] Connector AI-search/auth-edit + data_tools runtime dead (legacy-schema drift) — connectors.rs:1024, data_tools.rs:63
-157. [low|gap] AppDir staging never cleaned (stale files ship) — xtask/package.rs:157
-158. [med|gap] appimagetool: unversioned URL, no checksum, executed in the release path — xtask/package.rs:61,551-574
 159. [low|bug] AppImage arch hardcoded x86_64 vs aarch64 deb support — xtask/package.rs:162,173
 160. [low|bug] Non-atomic tool-cache write + no download timeout — xtask/package.rs:551-571
 161. [low|gap] deny.toml stale "becomes deny" promise; bans never evaluated in CI — deny.toml:49-51 + ci.yml
