@@ -138,10 +138,6 @@ dead freshness_low_usage_days setting, the pre-release Same comparison, the
 sweep windows dropping the oldest of a burst, and the parse_csv empty-header
 misalignment) — verified and recorded in `completed.md`.
 
-### MEDIUM — wrong behavior on realistic paths
-
-56. [med|gap] Entire report-builder/dashboard surface computed but never rendered (32 endpoints) — reports.rs:1110+ — owner decision needed: wire or remove (parked; not part of any batch until then)
-
 ### LOW — edge cases, provable minor defects
 
 Batch 32 = items 127-136 (the digest chip 16.max slice, the `#Some(42)` QA
@@ -186,8 +182,25 @@ all-entries surfaces, verify-icons wired into packaging and CI, and
 executed concurrently with batch 34 by a second agent at the owner's
 direction; verified and recorded in `completed.md`.
 
+Batch 36 = items 56, 150, 151 — opened 2026-10-25 when the owner
+resolved the final three parked decisions with explicit "wire it"
+choices and the items moved to `progress.md` per Rule 2: the
+report-builder surface rendered (Reports Builder tab: metric/dimension
+form over the catalog, filters, comparison, saved-report CRUD) and the
+dashboard surface rendered (Insights tab: health facts via
+dashboard metrics, effectiveness, friction with a bounded recompute
+action, graph nodes) plus the per-customer support-milestone timeline
+with real writers; the intelligence SLA-breach / knowledge-gap / doc
+freshness tracking wired to real writers (a workers intelligence sweep
+persisting breaches from the live sla.rs alert evaluation, zero-hit
+knowledge searches recorded as gaps, ingest stamps freshness and the
+sweep marks stale docs); the ai_settings write API wired to an AI Center
+provider panel over the pre-hub fallback layer the pipeline consumes.
+
 ## Notes
 
 - Severity is the audit's call; the owner may re-order freely before any batch.
-- Items 56 (report-builder wire-or-remove) and 150/151 (dead-feature decisions) need an owner decision; they stay parked at their tier until then.
+- Items 56, 150 and 151 left the parked state on 2026-10-25 (owner decision:
+  wire all three) and opened batch 36 in `progress.md`; `plan.md` holds no
+  further items — the v1.7.0 clean-audit queue is fully consumed by that batch.
 - Every item keeps its full evidence (excerpt + failure scenario) in the audit report and the worklog; this file is the execution queue only.
