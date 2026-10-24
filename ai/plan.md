@@ -195,7 +195,8 @@ freshness tracking wired to real writers (a workers intelligence sweep
 persisting breaches from the live sla.rs alert evaluation, zero-hit
 knowledge searches recorded as gaps, ingest stamps freshness and the
 sweep marks stale docs); the ai_settings write API wired to an AI Center
-provider panel over the pre-hub fallback layer the pipeline consumes.
+provider panel over the pre-hub fallback layer the pipeline consumes —
+verified and recorded in `completed.md`.
 
 ## Notes
 

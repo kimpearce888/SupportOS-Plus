@@ -4457,3 +4457,151 @@ the tests 455/460/222/7 list, the SPP_SMOKE record and the
 verify_batch34 harness note — is kept verbatim). Both markers are
 removed here so the file carries both batches' records cleanly;
 plan.md/progress.md were verified marker-free.
+
+---
+
+## Batch 36 — clean-audit items 56, 150, 151 (2026-10-25)
+
+The owner resolved the final three parked decisions with an explicit
+"wire it" for each on 2026-10-25; the items moved from `plan.md` to
+`progress.md` (opening commit `7166f2a`) before implementation began
+(Rule 2). This batch WIRES the formerly computed-but-unrendered and
+never-written surfaces — every formerly caller-less function named below
+now has a live production caller, and every writer-less table now gains
+rows.
+
+### Item 56 — the report-builder/dashboard surface rendered (reports.rs:1110+)
+
+- **Builder tab (Reports page):** the full builder form over the closed
+  catalog — metric (21 entries) and dimension (14 entries) combos driven
+  by `catalog::reporting` labels, the date range (YYYY-MM-DD, validated
+  in the form before it reaches the engine), previous-period comparison
+  toggle, sort, limit, and the ten-filter set (channel, statuses, tags
+  any/none, min priority, attribute key/value, state key, mailbox and
+  assignee id lists — CSV parsed with per-item validation). Run goes
+  through `run_builder_report`; rows render grouped by
+  `dimension_label` with the metric's catalog format (count/rate/
+  minutes/hours/score) and the comparison delta column; the outcome's
+  notes render verbatim under the table. `config_to_json` +
+  `parse_report_config` back the saved-report CRUD: save (named),
+  list, load-into-form, delete over `report_definitions`.
+- **Insights tab (Reports page):** health facts
+  (`get_health_facts` over `get_dashboard_metrics` — total, tracked SLA
+  breaches with rate, high-friction with rate, avg first response,
+  resolution rate), the QA effectiveness report (avg score, checks,
+  low/medium/high distribution), and the graph-node surface
+  (`list_graph_nodes` table, `add_graph_node` form with JSON-property
+  validation and core-side kind validation, `get_graph_node` +
+  `get_graph_neighbors` inspect action over the live human edges).
+- **NEW write path (core):** `reports::recompute_recent_friction(conn,
+  limit)` — the bounded recompute over the most recent 100 closed
+  conversations that persists scores via compute_friction's own upsert
+  and records a `customer_timeline` milestone for every conversation
+  crossing HIGH_FRICTION_THRESHOLD, deduped per conversation through
+  `json_extract(event_data_json, '$.conversation_id')` (a recompute
+  never duplicates a milestone).
+- **Support milestones timeline (Customers page):** the profile view
+  gains a "Support milestones" card reading `get_timeline` — the reader
+  for the milestone writers (breaches from the item-150 sweep,
+  high-friction from the recompute above), rendered with the parsed
+  breach kind / effort score per event.
+
+### Item 150 — the intelligence tracking wired to real writers
+
+- **Workers intelligence sweep:** `intelligence_sweep_tick` on the
+  WorkerManager (own TickGuard latch `sweeping_intelligence`, restart
+  reset, `intelligence_sweep_seconds` settings cadence defaulting to
+  900 s clamped 60..86400, immediate first tick) running
+  `intelligence_features::sweep` — three independent legs where one
+  failure never eats the others' work.
+- **SLA breaches gain rows from the LIVE evaluation:** the sweep
+  persists every `sla::sla_alerts` Breached verdict into `sla_breaches`
+  (deduped per conversation + breach kind via EXISTS), so
+  `reports::get_dashboard_metrics`'s breach count — previously a
+  permanently empty table — reflects the same authority the SLA page
+  uses. Each persisted breach also records a `customer_timeline`
+  "sla_breach" milestone for the conversation's
+  `customer_local_id` (best-effort; a milestone failure never fails the
+  sweep).
+- **`sla_configs` write API wired:** mailboxes WITHOUT a
+  `mailbox_business_hours` row (exactly the ones `sla_alerts` reports
+  unconfigured) are tracked by a coarse wall-clock sweep against
+  `get_sla_config` thresholds (schema defaults 24 h / 72 h) — disjoint
+  from the live evaluator by construction, so no double-recording. The
+  Reports SLA tab gains the "Persisted breach tracking" card: recorded
+  count + per-mailbox threshold editor writing `set_sla_config` and
+  running the unmonitored sweep immediately so the count reflects the
+  new thresholds.
+- **Knowledge gaps gain rows:** a non-blank Knowledge-page search that
+  returns zero articles records `record_knowledge_gap` (deduped
+  hit_count upsert in core), and the page renders the "Knowledge gaps
+  (tracked)" card listing `list_knowledge_gaps` (top 10, hit order) —
+  the actionable list of what agents searched for and never found.
+- **Doc freshness gains rows:** `knowledge_store::upsert_document`
+  stamps `update_doc_freshness` on BOTH paths (changed commit and
+  unchanged re-ingest — a re-sync is still a sync), best-effort so
+  freshness can never fail an ingest; the sweep prunes orphaned
+  freshness rows, marks docs stale when their content has not been
+  re-ingested within the live `freshness_stale_days` window (same
+  setting the Knowledge freshness report uses), and clears the flag
+  when content refreshed; the tracked stale count renders on the
+  Knowledge page.
+
+### Item 151 — the ai_settings write API wired
+
+- The AI Center Health tab gains the "AI provider record (ai_settings)"
+  panel writing all four previously caller-less setters on Save —
+  `set_provider_kind` (None / LM Studio chips),
+  `set_chat_model`, `set_embedding_model` (requires a positive
+  integer dim whenever a model name is set; an empty model leaves the
+  embedding columns untouched — the write API has no NULL-clearing
+  path and none was invented), and `set_base_url`. The row is the
+  pre-hub fallback layer `ai_pipeline::backend_from_settings` and
+  `embeddings::lm_studio_embedding_settings` already consume, so the
+  edits are load-bearing, not decorative; Settings → LM Studio remains
+  the primary editor for the settings-key layer and the pipeline
+  precedence is unchanged (no regression for existing installs).
+- `ai_features_enabled` (previously caller-less) is the panel's
+  "features ready" badge — provider configured AND chat model present.
+- Form discipline follows the batch-27 convention: a clean form
+  re-seeds from the stored record on every reload; a dirty (typed)
+  form keeps its edits across invalidation until Save commits them
+  through the core write API and re-reads the stored row.
+
+### Verification (local, before the push)
+
+- No-simulation gate clean; `cargo fmt --all --check` clean.
+- `cargo clippy --workspace --all-targets -- -D warnings` clean;
+  sandbox clippy (`-p supportos-plus-core --all-targets --features
+  sandbox`) clean.
+- Workspace tests: core **466/0/4** (455 + the 11 new batch-36
+  regressions: ai_center setter round-trip + ready-indicator truth
+  table; the breach sweep live-persistence + dedup + timeline, the
+  unmonitored sweep honoring sla_configs, knowledge gaps upsert, doc
+  freshness stamp/mark/clear/prune, the combined sweep; friction
+  recompute with deduped milestones, builder-config JSON round-trip,
+  saved-report CRUD, graph-node validation), app-shell **228/0** (222
+  + 6 new: provider-record save round-trip / dim validation / dirty-form
+  survival; builder run-save-load-delete / form validation / insights
+  data + graph action), xtask 9/0, catalog 0.
+- Sandbox suite: **471/0/4** (460 + the same 11 new core tests).
+- `cargo metadata --locked` clean; `cargo deny check advisories
+  licenses bans` all ok; `xtask verify-icons` green.
+- SPP_SMOKE exit 0 on the built binary: boot chain + shell verified,
+  **24 pages, 4070 shapes** (4040 at batch 34/35 + the rendered
+  Builder/Insights tabs, provider panel, gaps card, tracking card and
+  milestones card), all 52 boot migrations applied.
+- Fresh harness `scripts/verify_batch36.py` (52 checks) all pass —
+  needles pin every new call site listed above in non-comment source.
+  Harnesses 18, 19, 21, 23–34 all green. The two documented
+  pre-existing stale needles (batch-20's item-107 re-point, batch-22's
+  item-121 re-point plus its 00:00–09:00 UTC volume-spike window check)
+  fail exactly as recorded since batch 30; this batch touches none of
+  the files those needles read, and batch-17 remains environment-bound.
+- Environment note: the sandbox disk filled mid-verification (the
+  recurring ENOSPC, 9.9 GB root); the debug incremental cache (1.9 GB)
+  was removed and `CARGO_INCREMENTAL=0` held for every suite above.
+- Security: the staged diff was token-scanned before the push — no
+  secrets, no credential-shaped strings; the remote was re-fetched and
+  is at the opening commit's descendant (no concurrent batches).
+- Runner verification follows once CI on this code commit completes.
