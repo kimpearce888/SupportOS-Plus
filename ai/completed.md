@@ -4076,3 +4076,10 @@ Verification (Rule 5, all on the pinned 1.99.1 toolchain):
   `31e2e58` was rebased onto, not overwritten).
 - Runner verification: follows once CI on code commit `b9d0f3c`
   completes (recorded below when the runs finish).
+
+Runner verification (batch 33, code commit `b9d0f3c` — CI on tracking
+commit `ef7e120`, which contains it): GitHub Actions run `40061678083`
+completed — check runs "fmt, clippy, test, deny" and
+"AppImage + .deb build, smoke" both concluded `success`.
+(The owner's batch-34 opening commit `7bab5b1` — items 147-149, 152-158
+moved to progress.md — is theirs to record.)
