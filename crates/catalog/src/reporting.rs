@@ -324,13 +324,11 @@ pub fn metric_entry(key: ReportMetricKey) -> MetricCatalogEntry {
     }
 }
 
-#[must_use]
-pub fn all_metric_entries() -> Vec<MetricCatalogEntry> {
-    ReportMetricKey::ALL
-        .iter()
-        .map(|k| metric_entry(*k))
-        .collect()
-}
+// (audit item 163) `all_metric_entries` / `all_dimension_entries` were
+// removed: computed catalog vectors with zero callers anywhere in the
+// workspace. The per-key `metric_entry` / `dimension_entry` constructors
+// below stay — the report engine (core/reports.rs) pins each report's
+// catalog entry with them.
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DimensionCatalogEntry {
@@ -395,12 +393,4 @@ pub fn dimension_entry(key: ReportDimensionKey) -> DimensionCatalogEntry {
         label,
         definition,
     }
-}
-
-#[must_use]
-pub fn all_dimension_entries() -> Vec<DimensionCatalogEntry> {
-    ReportDimensionKey::ALL
-        .iter()
-        .map(|k| dimension_entry(*k))
-        .collect()
 }

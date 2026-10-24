@@ -46,6 +46,57 @@ allow = [
 ignore = true
 
 [bans]
-# Duplicate versions are a warning for now — the reqwest 0.12/0.13 dedupe is
-# a tracked plan item; this becomes "deny" after that lands.
-multiple-versions = "warn"
+# Duplicate crate versions are DENIED, and CI evaluates this section
+# (`cargo deny check advisories licenses bans`) since audit item 161 —
+# before that, bans were configured but never run anywhere, and the
+# comment promised a future "deny" that nothing tracked anymore.
+#
+# The premise of the old promise (a reqwest 0.12/0.13 dedupe "still to
+# do") is gone: Cargo.lock carries exactly one reqwest. New duplicate
+# versions therefore fail CI, and a maintainer either dedupes (preferred)
+# or adds a documented skip line here.
+#
+# The skips below are today's pre-existing transitive duplicates of the
+# checked graph (x86_64-unknown-linux-gnu) — semver-incompatible
+# generations required by different upstreams (crypto-stack generations,
+# wayland-stack generations via winit, proc-macro ecosystem
+# transitions). Skipped by crate name, each with its reason; when an
+# upstream dedupes one of them, drop the line (CI stays green — the skip
+# is then simply unused). Duplicates that exist only on other targets
+# (the Apple objc2 stack, windows-sys, jni-sys, r-efi, redox_syscall)
+# are outside this graph entirely; a skip line must be re-added for them
+# if [graph] targets ever widen.
+multiple-versions = "deny"
+skip = [
+    # Two crypto-stack generations in the tree: the workspace lane uses
+    # the sha2 0.11-era stack (sha2/digest/crypto-common/block-buffer),
+    # while aes-gcm/scrypt consumers still require the 0.8/0.10-era one.
+    { crate = "aes", reason = "transitive: crypto-stack generations from different upstreams" },
+    { crate = "block-buffer", reason = "transitive: crypto-stack generations from different upstreams" },
+    { crate = "cipher", reason = "transitive: crypto-stack generations from different upstreams" },
+    { crate = "crypto-common", reason = "transitive: crypto-stack generations from different upstreams" },
+    { crate = "digest", reason = "transitive: crypto-stack generations from different upstreams" },
+    { crate = "inout", reason = "transitive: crypto-stack generations from different upstreams" },
+    { crate = "sha2", reason = "workspace uses 0.11; egui/accesskit tree still pulls 0.10" },
+    # Ecosystem-wide library generations.
+    { crate = "bitflags", reason = "transitive: 1.x legacy alongside 2.x" },
+    { crate = "cpufeatures", reason = "transitive: generations from different upstreams" },
+    { crate = "euclid", reason = "transitive: generations from different upstreams" },
+    { crate = "foldhash", reason = "transitive: generations from different upstreams" },
+    { crate = "getrandom", reason = "transitive: 0.2/0.3/0.4 generations required by different upstreams" },
+    { crate = "hashbrown", reason = "transitive: 0.15/0.16/0.17 generations required by different upstreams" },
+    { crate = "linux-raw-sys", reason = "transitive: rustix generations" },
+    { crate = "miniz_oxide", reason = "transitive: generations from different upstreams" },
+    { crate = "phf", reason = "transitive: generations from different upstreams" },
+    { crate = "phf_shared", reason = "transitive: generations from different upstreams" },
+    { crate = "quick-xml", reason = "workspace uses 0.42; pdf-extract still requires 0.41" },
+    { crate = "rustc-hash", reason = "transitive: 1.x legacy alongside 2.x" },
+    { crate = "rustix", reason = "transitive: 0.38 legacy alongside 1.x" },
+    { crate = "syn", reason = "transitive: proc-macro ecosystem 2.x/3.x transition" },
+    { crate = "thiserror", reason = "transitive: ecosystem 1.x/2.x transition" },
+    { crate = "thiserror-impl", reason = "transitive: ecosystem 1.x/2.x transition" },
+    # Wayland client-stack generations via winit.
+    { crate = "calloop", reason = "transitive: winit wayland-stack generations" },
+    { crate = "calloop-wayland-source", reason = "transitive: winit wayland-stack generations" },
+    { crate = "smithay-client-toolkit", reason = "transitive: winit wayland-stack generations" },
+]

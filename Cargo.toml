@@ -46,8 +46,12 @@ scrypt = "0.12"
 rand = "0.10"
 subtle = "2.6"
 
-# --- egui stack (decision D1): exact pins, first consumed by crates/app-shell in Phase 2 ---
-egui = { version = "=0.37" }
+# --- egui stack (decision D1): exact pins. Only what a member actually
+# consumes is declared here — `eframe` (which re-exports `egui`) is the
+# sole entry point; bare `egui`/`egui_extras` workspace entries had no
+# consumer in any crate (egui_extras was not even in Cargo.lock) and were
+# removed (audit item 162). Adopt a dedicated entry in both places if a
+# crate ever needs one directly.
 # v1.1.1: `glow` is compiled into every build and is the default
 # renderer (see app-shell `resolve_renderer`). eframe's own default
 # (wgpu alone) needs a Vulkan driver or a GLES stack — neither is
@@ -55,7 +59,6 @@ egui = { version = "=0.37" }
 # start outside CI. wgpu stays compiled in via eframe defaults; it is
 # reachable again with SPP_RENDERER=wgpu.
 eframe = { version = "=0.37", features = ["glow"] }
-egui_extras = { version = "=0.37" }
 # NOTE: egui_plot 0.37 builds against egui 0.36 (no release targets 0.37
 # yet — releases lag one minor). Re-pin and adopt it once it catches up;
 # until then the shell renders its charts with the egui painter
