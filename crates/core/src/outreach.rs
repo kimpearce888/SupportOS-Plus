@@ -1239,21 +1239,24 @@ pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Va
 
 pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
     let tx = conn.unchecked_transaction()?;
-    let sent: Vec<(i64, Option<i64>, Option<String>)> = {
+    // The sent_at stamp is no longer read here — audit item 117 anchors
+    // the reply detection on the mirrored campaign thread, not on the
+    // local clock.
+    let sent: Vec<(i64, Option<i64>)> = {
         let mut stmt = tx.prepare(
-            "SELECT r.id, r.hs_conversation_remote_id, r.sent_at
+            "SELECT r.id, r.hs_conversation_remote_id
                FROM outreach_recipients r
               WHERE r.campaign_id = ?1 AND r.state = 'sent'
                 AND r.replied_at IS NULL
                 AND r.hs_conversation_remote_id IS NOT NULL",
         )?;
 
-        stmt.query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        stmt.query_map([campaign_id], |r| Ok((r.get(0)?, r.get(1)?)))?
             .filter_map(|r| r.ok())
             .collect()
     };
     let mut replied = 0i64;
-    for (id, remote_id, sent_at) in sent {
+    for (id, remote_id) in sent {
         let Some(remote) = remote_id else { continue };
         let Some(conv_local): Option<i64> = tx
             .query_row(
@@ -1265,14 +1268,45 @@ pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
         else {
             continue;
         };
+        // Audit item 117: the guard used to be `created_at > sent_at`,
+        // with sent_at stamped by the LOCAL clock (`datetime('now')`) and
+        // created_at stamped by the platform — and the campaign's own
+        // message is mirrored as a `type = 'customer'` thread
+        // (helpscout_real::create_conversation sends it with
+        // `"type": "customer"`). Any platform-clock-ahead skew put the
+        // campaign's own email after the local sent_at stamp, and the
+        // sweep counted it as the recipient's reply. The anchor is now
+        // the mirrored campaign thread itself — the conversation's first
+        // thread (create_conversation creates the conversation with
+        // exactly one thread) — so both sides of the comparison come
+        // from the same clock; a reply is a customer thread strictly
+        // after it (or sharing its stamp but created after it).
+        let campaign_thread: Option<(i64, String)> = tx
+            .query_row(
+                "SELECT id, created_at FROM conversation_threads
+                  WHERE conversation_id = ?1 AND deleted_at IS NULL
+                  ORDER BY created_at ASC, id ASC LIMIT 1",
+                [conv_local],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    ))
+                },
+            )
+            .ok();
+        let Some((campaign_thread_id, campaign_at)) = campaign_thread else {
+            continue;
+        };
         let customer_thread: Option<String> = tx
             .query_row(
                 "SELECT created_at FROM conversation_threads
                   WHERE conversation_id = ?1 AND type = 'customer'
                     AND deleted_at IS NULL
-                    AND julianday(created_at) > julianday(COALESCE(?2, '1970-01-01'))
-                  ORDER BY created_at ASC LIMIT 1",
-                rusqlite::params![conv_local, sent_at],
+                    AND (julianday(created_at) > julianday(?2)
+                         OR (julianday(created_at) = julianday(?2) AND id > ?3))
+                  ORDER BY created_at ASC, id ASC LIMIT 1",
+                rusqlite::params![conv_local, campaign_at, campaign_thread_id],
                 |r| r.get(0),
             )
             .ok();
@@ -3014,5 +3048,139 @@ mod batch30_tests {
             has_column,
             "the reconcile path must self-heal the clock column"
         );
+    }
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// Audit item 117: the campaign's own message is mirrored as a
+    /// `type = 'customer'` thread, and the old `created_at > sent_at`
+    /// guard compared platform stamps against a LOCAL clock stamp — any
+    /// platform-clock-ahead skew counted the campaign's own email as the
+    /// recipient's reply. The anchor is the mirrored campaign thread now,
+    /// so only a genuinely later reply counts.
+    #[test]
+    fn refresh_replies_ignores_the_campaigns_own_message_under_clock_skew() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO outreach_campaigns (name, subject, body, status)
+             VALUES ('skew', 'Hi', 'Body', 'sending')",
+            [],
+        )
+        .expect("campaign");
+        let campaign: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (1, 'Casey')",
+            [],
+        )
+        .expect("customer");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (500, 500, 'campaign conv', 'p', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO outreach_recipients
+                 (campaign_id, customer_local_id, customer_remote_id, email, state,
+                  hs_conversation_remote_id, sent_at)
+             VALUES (?1, 1, 1, 'c@example.com', 'sent', 500, '2026-10-24 10:00:00')",
+            params![campaign],
+        )
+        .expect("recipient");
+        // The campaign's own message, mirrored from the platform with a
+        // stamp ONE SECOND after the local sent_at (clock skew) — the old
+        // guard counted exactly this row.
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text, created_at)
+             VALUES (?1, 'customer', 'published', 'the campaign email itself',
+                     '2026-10-24T10:00:01.000Z')",
+            [conv],
+        )
+        .expect("campaign thread");
+        // The recipient's real reply, an hour later.
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text, created_at)
+             VALUES (?1, 'customer', 'published', 'thanks — where do I find it?',
+                     '2026-10-24T11:00:00.000Z')",
+            [conv],
+        )
+        .expect("reply thread");
+
+        let replied = refresh_replies(&conn, campaign).expect("refresh");
+        assert_eq!(replied, 1, "exactly one real reply");
+        let replied_at: String = conn
+            .query_row(
+                "SELECT replied_at FROM outreach_recipients WHERE campaign_id = ?1",
+                [campaign],
+                |r| r.get(0),
+            )
+            .expect("replied_at");
+        assert_eq!(
+            replied_at, "2026-10-24T11:00:00.000Z",
+            "the reply must be the LATER thread, not the campaign's own message"
+        );
+    }
+
+    /// Audit item 117, the suppression half: with the skew present but no
+    /// real reply, nothing may be counted.
+    #[test]
+    fn refresh_replies_counts_nothing_when_only_the_campaign_message_exists() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO outreach_campaigns (name, subject, body, status)
+             VALUES ('skew2', 'Hi', 'Body', 'sending')",
+            [],
+        )
+        .expect("campaign");
+        let campaign: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name) VALUES (1, 'Casey')",
+            [],
+        )
+        .expect("customer");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (501, 501, 'campaign conv', 'p', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO outreach_recipients
+                 (campaign_id, customer_local_id, customer_remote_id, email, state,
+                  hs_conversation_remote_id, sent_at)
+             VALUES (?1, 1, 1, 'c@example.com', 'sent', 501, '2026-10-24 10:00:00')",
+            params![campaign],
+        )
+        .expect("recipient");
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text, created_at)
+             VALUES (?1, 'customer', 'published', 'the campaign email itself',
+                     '2026-10-24T10:00:01.000Z')",
+            [conv],
+        )
+        .expect("campaign thread");
+
+        let replied = refresh_replies(&conn, campaign).expect("refresh");
+        assert_eq!(replied, 0, "the campaign's own message is not a reply");
+        let replied_at: Option<String> = conn
+            .query_row(
+                "SELECT replied_at FROM outreach_recipients WHERE campaign_id = ?1",
+                [campaign],
+                |r| r.get(0),
+            )
+            .expect("replied_at");
+        assert!(replied_at.is_none());
     }
 }

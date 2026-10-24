@@ -407,13 +407,22 @@ fn sweep_failed_jobs(
     bus: Option<&crate::eventing::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
+    // Audit item 125: the window selected `ORDER BY id DESC LIMIT 200`
+    // FIRST and filtered by stamp in Rust afterwards — already-swept rows
+    // filled the cap, and the oldest rows of a burst fell outside it and
+    // were never notified (the next sweep's stamp skips them forever).
+    // The stamp filter runs in SQL now (datetime() normalizes the mixed
+    // space/ISO-T formats, matching the Rust parse_stamp), so the cap can
+    // only ever hide rows that are still newer.
     let rows: Vec<SweepRow> = {
         let mut stmt = conn.prepare(
             "SELECT id, queue, type, error, completed_at FROM jobs
-             WHERE status = 'failed' ORDER BY id DESC LIMIT 200",
+             WHERE status = 'failed'
+               AND datetime(completed_at) > datetime(?1)
+             ORDER BY id DESC LIMIT 200",
         )?;
 
-        stmt.query_map([], |r| {
+        stmt.query_map([since_stamp], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
@@ -423,9 +432,7 @@ fn sweep_failed_jobs(
         let Some(completed) = completed_at else {
             continue;
         };
-        if before_or_equal(&completed, since_stamp) {
-            continue;
-        }
+        let _ = completed;
         let r = record_notification(
             conn,
             bus,
@@ -484,10 +491,12 @@ fn sweep_campaign_replies(
             "SELECT r.id, r.campaign_id, r.customer_local_id, r.replied_at,
                     c.name, c.subject
              FROM outreach_recipients r JOIN outreach_campaigns c ON c.id = r.campaign_id
-             WHERE r.replied_at IS NOT NULL ORDER BY r.id DESC LIMIT 200",
+             WHERE r.replied_at IS NOT NULL
+               AND datetime(r.replied_at) > datetime(?1)
+             ORDER BY r.id DESC LIMIT 200",
         )?;
 
-        stmt.query_map([], |r| {
+        stmt.query_map([since_stamp], |r| {
             Ok((
                 r.get(0)?,
                 r.get(1)?,
@@ -501,12 +510,11 @@ fn sweep_campaign_replies(
     };
     let mut created = 0u32;
     for (id, campaign_id, customer_local_id, replied_at, name, subject) in rows {
-        let Some(replied_at) = replied_at else {
+        // The stamp only ever fed the removed Rust-side filter; the SQL
+        // filter guarantees it now, so the binding is an invariant check.
+        let Some(_stamp) = replied_at else {
             continue;
         };
-        if before_or_equal(&replied_at, since_stamp) {
-            continue;
-        }
         let customer = customer_display(conn, customer_local_id);
         let campaign_name = name.as_deref().unwrap_or("campaign");
         let r = record_notification(
@@ -548,20 +556,18 @@ fn sweep_known_issues(
     let rows: Vec<SweepRows1> = {
         let mut stmt = conn.prepare(
             "SELECT id, title, name, status, created_at FROM known_issues
+             WHERE datetime(created_at) > datetime(?1)
              ORDER BY id DESC LIMIT 100",
         )?;
 
-        stmt.query_map([], |r| {
+        stmt.query_map([since_stamp], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
     for (id, title, name, status, created_at) in rows {
-        let at = created_at.unwrap_or_default();
-        if before_or_equal(&at, since_stamp) {
-            continue;
-        }
+        let _ = created_at;
         let display = title.or(name).unwrap_or_default();
         let r = record_notification(
             conn,
@@ -600,10 +606,12 @@ fn sweep_issue_spikes(
     let rows: Vec<SweepRows2> = {
         let mut stmt = conn.prepare(
             "SELECT id, title, name, conversation_count, updated_at FROM issue_clusters
-             WHERE trend = 'rising' ORDER BY id DESC LIMIT 100",
+             WHERE trend = 'rising'
+               AND datetime(updated_at) > datetime(?1)
+             ORDER BY id DESC LIMIT 100",
         )?;
 
-        stmt.query_map([], |r| {
+        stmt.query_map([since_stamp], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
@@ -611,10 +619,7 @@ fn sweep_issue_spikes(
     let mut created = 0u32;
     let day = day_stamp();
     for (id, title, name, conversation_count, updated_at) in rows {
-        let at = updated_at.unwrap_or_default();
-        if before_or_equal(&at, since_stamp) {
-            continue;
-        }
+        let _ = updated_at;
         let display = title.or(name).unwrap_or_default();
         let r = record_notification(
             conn,
@@ -660,10 +665,11 @@ fn sweep_ai_escalations(
              FROM ai_runs a JOIN conversations c ON c.id = a.conversation_id
              WHERE a.type = 'ticket_analysis' AND a.status = 'completed'
                AND a.conversation_id IS NOT NULL
+               AND datetime(a.created_at) > datetime(?1)
              ORDER BY a.id DESC LIMIT 200",
         )?;
 
-        stmt.query_map([], |r| {
+        stmt.query_map([since_stamp], |r| {
             Ok((
                 r.get(0)?,
                 r.get(1)?,
@@ -678,10 +684,7 @@ fn sweep_ai_escalations(
     };
     let mut created = 0u32;
     for (run_id, conversation_id, output, created_at, number, subject, status) in rows {
-        let at = created_at.unwrap_or_default();
-        if before_or_equal(&at, since_stamp) {
-            continue;
-        }
+        let _ = created_at;
         if status.as_deref() == Some("closed") {
             continue;
         }
@@ -740,32 +743,42 @@ fn sweep_ratings(
     bus: Option<&crate::eventing::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
-    type RatingRow = (i64, Option<i64>, Option<i64>, Option<String>, Option<i64>);
+    // Audit item 125: same window repair as the other stamp lanes — the
+    // filter runs in SQL (datetime()-normalized) before the cap, so
+    // already-swept ratings can no longer fill the window and starve the
+    // oldest unrated ones; the stamp rides in the row now instead of a
+    // per-row re-query.
+    type RatingRow = (
+        i64,
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+    );
     let rows: Vec<RatingRow> = {
         let mut stmt = conn.prepare(
-            "SELECT id, remote_id, customer_local_id, comments, conversation_id
-             FROM ratings WHERE rating = 'not-good' ORDER BY id DESC LIMIT 100",
+            "SELECT id, remote_id, customer_local_id, comments, conversation_id, remote_created_at
+             FROM ratings
+             WHERE rating = 'not-good'
+               AND datetime(remote_created_at) > datetime(?1)
+             ORDER BY id DESC LIMIT 100",
         )?;
 
-        stmt.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        stmt.query_map([since_stamp], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?
     };
     let mut created = 0u32;
-    for (id, remote_id, customer_local_id, comments, conversation_id) in rows {
-        let at: Option<String> = conn
-            .query_row(
-                "SELECT remote_created_at FROM ratings WHERE id = ?1",
-                params![id],
-                |r| r.get(0),
-            )
-            .ok()
-            .flatten();
-        let at = at.unwrap_or_default();
-        if before_or_equal(&at, since_stamp) {
-            continue;
-        }
+    for (id, remote_id, customer_local_id, comments, conversation_id, _at) in rows {
         let customer = customer_display(conn, customer_local_id);
         let r = record_notification(
             conn,
@@ -886,24 +899,6 @@ fn safe_json_object(v: Option<&str>) -> serde_json::Value {
         .cloned()
         .map(serde_json::Value::Object)
         .unwrap_or(serde_json::json!({}))
-}
-
-fn before_or_equal(stamp: &str, reference: &str) -> bool {
-    match (parse_stamp(stamp), parse_stamp(reference)) {
-        (Some(a), Some(b)) => a <= b,
-        _ => true,
-    }
-}
-
-fn parse_stamp(s: &str) -> Option<i64> {
-    let normalized = if s.contains('T') {
-        s.to_string()
-    } else {
-        format!("{}Z", s.replace(' ', "T"))
-    };
-    chrono::DateTime::parse_from_rfc3339(&normalized)
-        .ok()
-        .map(|d| d.timestamp_millis())
 }
 
 fn trim(s: &str, max: usize) -> String {
@@ -1076,6 +1071,53 @@ mod batch25_item65_tests {
         assert_eq!(
             cursor, max_id,
             "the filter can never select those rows — the cursor advances"
+        );
+    }
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+    use rusqlite::{Connection, params};
+
+    /// Audit item 125: the sweep window selected `ORDER BY id DESC LIMIT
+    /// N` FIRST and filtered by stamp in Rust afterwards — already-swept
+    /// rows filled the cap and the oldest rows of a burst were never
+    /// notified. The stamp filter runs in SQL now: five new failures
+    /// buried under 205 already-swept ones still all notify.
+    #[test]
+    fn sweep_burst_oldest_are_not_dropped() {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::sync_engine::set_state(&conn, "LIVE");
+        crate::settings::set_i64(&conn, CURSOR_KEY, 0).expect("cursor");
+        let sweep_at = "2026-10-24 10:00:00";
+        crate::settings::set_string(&conn, SWEEP_AT_KEY, sweep_at).expect("sweep_at");
+
+        // The burst: five NEW failures seeded FIRST (lowest ids), then 205
+        // already-swept failures. The old DESC LIMIT 200 window never
+        // reached the burst.
+        for i in 1..=5_i64 {
+            conn.execute(
+                "INSERT INTO jobs (queue, type, status, error, completed_at)
+                 VALUES ('outreach', 'demo_job', 'failed', ?1, '2026-10-24 11:00:00')",
+                params![format!("job {i} exploded")],
+            )
+            .expect("new failed job");
+        }
+        for _ in 0..205 {
+            conn.execute(
+                "INSERT INTO jobs (queue, type, status, error, completed_at)
+                 VALUES ('outreach', 'demo_job', 'failed', 'old', '2026-10-24 09:00:00')",
+                [],
+            )
+            .expect("swept failed job");
+        }
+
+        let outcome = sweep(&conn, None).expect("sweep");
+        assert_eq!(
+            outcome.created, 5,
+            "every new failure notifies, none starved by the old rows"
         );
     }
 }

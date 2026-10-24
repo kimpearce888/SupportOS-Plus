@@ -905,19 +905,28 @@ pub fn parse_csv(text: &str, max_rows: usize) -> Vec<Value> {
     let Some(headers) = records.first() else {
         return Vec::new();
     };
-    let headers: Vec<&str> = headers
+    // Audit item 126: empty headers were FILTERED OUT of the header list
+    // while the data records kept all their columns — with a header row
+    // like "a,,c" every data field after the gap shifted one column left
+    // ("c" received what belonged to the unnamed column). Empty headers
+    // keep their positions now; they just produce no key.
+    let headers: Vec<Option<&str>> = headers
         .iter()
-        .map(|h| h.trim())
-        .filter(|h| !h.is_empty())
+        .map(|h| {
+            let t = h.trim();
+            (!t.is_empty()).then_some(t)
+        })
         .collect();
     let mut rows = Vec::new();
     for rec in records.iter().take(max_rows + 1).skip(1) {
         let mut obj = Map::new();
         for (idx, h) in headers.iter().enumerate() {
-            obj.insert(
-                (*h).to_string(),
-                json!(rec.get(idx).map(String::as_str).unwrap_or("")),
-            );
+            if let Some(h) = h {
+                obj.insert(
+                    (*h).to_string(),
+                    json!(rec.get(idx).map(String::as_str).unwrap_or("")),
+                );
+            }
         }
         if !obj.is_empty() {
             rows.push(Value::Object(obj));
@@ -1102,4 +1111,30 @@ pub fn ai_visible_connector_names(conn: &Connection) -> Vec<String> {
     stmt.query_map([], |r| r.get(0))
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+
+    /// Audit item 126: empty headers were filtered out of the header list
+    /// while data records kept all columns — every field after the gap
+    /// shifted one column left. Empty headers keep their positions now.
+    #[test]
+    fn parse_csv_keeps_positional_alignment_across_empty_headers() {
+        let rows = parse_csv("a,,c\n1,2,3\n", 100);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["a"], "1");
+        assert_eq!(rows[0]["c"], "3", "c must receive the THIRD field");
+        assert!(
+            rows[0].get("").is_none(),
+            "the unnamed column produces no key"
+        );
+
+        // Regular CSV is unchanged.
+        let plain = parse_csv("x,y\n10,20\n", 100);
+        assert_eq!(plain.len(), 1);
+        assert_eq!(plain[0]["x"], "10");
+        assert_eq!(plain[0]["y"], "20");
+    }
 }

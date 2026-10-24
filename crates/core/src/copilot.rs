@@ -22,10 +22,15 @@ pub struct CopilotResult {
 
 #[must_use]
 pub fn truncate_result(output: &str) -> (String, bool) {
-    if output.len() <= TOOL_RESULT_MAX_CHARS {
+    // Audit item 121: the cap sliced at a raw BYTE offset
+    // (`&output[..TOOL_RESULT_MAX_CHARS]`), so any tool output whose
+    // TOOL_RESULT_MAX_CHARS-th byte sat inside a multi-byte character
+    // panicked. The cap is a display bound — it counts CHARACTERS now.
+    let char_count = output.chars().count();
+    if char_count <= TOOL_RESULT_MAX_CHARS {
         (output.to_string(), false)
     } else {
-        let truncated = &output[..TOOL_RESULT_MAX_CHARS];
+        let truncated: String = output.chars().take(TOOL_RESULT_MAX_CHARS).collect();
         (format!("{truncated}… [truncated]"), true)
     }
 }
@@ -1020,5 +1025,29 @@ mod batch23_audit_tests {
             2,
             "the 2 over-budget calls are refused explicitly"
         );
+    }
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+
+    /// Audit item 121: the truncation cap sliced at a raw BYTE offset —
+    /// an é landing across the cap's byte index panicked. The cap counts
+    /// characters now.
+    #[test]
+    fn truncate_result_is_char_safe_at_the_cap() {
+        let short = "abc";
+        let (out, truncated) = truncate_result(short);
+        assert_eq!(out, "abc");
+        assert!(!truncated);
+
+        // 3999 ASCII bytes, then a 2-byte é across byte 4000, then more.
+        let s = format!("{}é{}", "a".repeat(3999), "b".repeat(20));
+        let (out, truncated) = truncate_result(&s);
+        assert!(truncated);
+        assert_eq!(out.chars().count(), 4000 + "… [truncated]".chars().count());
+        assert!(out.starts_with(&"a".repeat(3999)));
+        assert!(out.contains('é'), "the multi-byte character survives whole");
     }
 }

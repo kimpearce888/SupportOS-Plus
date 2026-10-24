@@ -397,6 +397,7 @@ pub fn freshness_report(conn: &Connection) -> Value {
     let sql = format!(
         "SELECT d.id, d.title, d.visibility, d.version, d.updated_at,
                 d.last_reviewed_at, d.last_verified_at, s.name AS source_name,
+                d.created_at,
                 (SELECT COUNT(*) FROM knowledge_chunks c WHERE c.document_id = d.id) AS chunk_count,
                 {usage_subquery} AS usage_count
          FROM knowledge_documents d JOIN knowledge_sources s ON s.id = d.source_id
@@ -409,7 +410,8 @@ pub fn freshness_report(conn: &Connection) -> Value {
                 let updated_at: Option<String> = r.get(4)?;
                 let reviewed_at: Option<String> = r.get(5)?;
                 let verified_at: Option<String> = r.get(6)?;
-                let usage_count: i64 = r.get::<_, i64>(9).unwrap_or(0);
+                let created_at: Option<String> = r.get(7)?;
+                let usage_count: i64 = r.get::<_, i64>(10).unwrap_or(0);
                 let days_since_update = updated_at.as_deref().and_then(days_since);
                 let days_since_review = reviewed_at.as_deref().and_then(days_since);
                 let stale = days_since_update.is_some_and(|d| d > stale_days);
@@ -418,7 +420,18 @@ pub fn freshness_report(conn: &Connection) -> Value {
                     Some(d) => d > unreviewed_days,
                 };
                 let unverified = verified_at.is_none();
-                let low_usage = usage_count == 0;
+                // Audit item 123: `freshness_low_usage_days` was read and
+                // dropped — the low_usage flag fired for every unused doc,
+                // including one created five minutes ago. The setting is
+                // the grace period now: a doc counts as low-usage once it
+                // has existed at least `low_usage_days` (falling back to
+                // the update stamp when created_at is missing) and still
+                // has no recorded usage.
+                let age_days = created_at
+                    .as_deref()
+                    .and_then(days_since)
+                    .or(days_since_update);
+                let low_usage = usage_count == 0 && age_days.is_some_and(|d| d >= low_usage_days);
                 let conflicting = false;
                 let recurring_questions = usage_count > 5;
                 Ok(json!({
@@ -431,7 +444,7 @@ pub fn freshness_report(conn: &Connection) -> Value {
                     "last_reviewed_at": reviewed_at,
                     "last_verified_at": verified_at,
                     "source_name": r.get::<_, Option<String>>(7)?,
-                    "chunk_count": r.get::<_, i64>(8)?,
+                    "chunk_count": r.get::<_, i64>(9)?,
                     "usage_count": usage_count,
                     "days_since_update": days_since_update,
                     "days_since_review": days_since_review,
@@ -1108,13 +1121,19 @@ pub fn html_to_text_keep_structure(html: &str) -> String {
             _ => {}
         }
     }
+    // Audit item 120: the decode order double-decoded — `&amp;` ran
+    // FIRST, so an author's literal `&amp;lt;` became `&lt;` and then
+    // decoded again into `<`; `&apos;` never decoded at all. Single-decode
+    // semantics decode every other entity first and `&amp;` LAST, so
+    // `&amp;lt;` lands as the literal text `&lt;`.
     for (entity, decoded) in [
         ("&nbsp;", " "),
-        ("&amp;", "&"),
         ("&lt;", "<"),
         ("&gt;", ">"),
         ("&quot;", "\""),
         ("&#39;", "'"),
+        ("&apos;", "'"),
+        ("&amp;", "&"),
     ] {
         text = text.replace(entity, decoded);
     }
@@ -1139,7 +1158,13 @@ pub fn html_to_text_keep_structure(html: &str) -> String {
 }
 
 fn strip_tag_block(input: &str, tag: &str) -> String {
-    let lower = input.to_lowercase();
+    // Audit item 121: the haystack was lowercased with Unicode rules and
+    // then used as an OFFSET MAP over the original — but some characters
+    // (İ U+0130) expand to two chars when lowercased, so the offsets in
+    // `lower` stop matching `input` and the slicing panics or mis-slices.
+    // ASCII lowercasing is byte-for-byte 1:1, so the offsets stay valid;
+    // the tags searched here are ASCII anyway.
+    let lower = input.to_ascii_lowercase();
     let open = format!("<{tag}");
     let close = format!("</{tag}>");
     let mut out = String::with_capacity(input.len());
@@ -1161,8 +1186,12 @@ fn strip_tag_block(input: &str, tag: &str) -> String {
 }
 
 fn replace_ci(input: &str, from: &str, to: &str) -> String {
-    let lower = input.to_lowercase();
-    let from_lower = from.to_lowercase();
+    // Audit item 121: same offset-map hazard as strip_tag_block — the
+    // Unicode-lowercased haystack's byte offsets were applied to the
+    // original string (an İ anywhere before a match mis-sliced or
+    // panicked). ASCII lowercasing keeps the offsets 1:1.
+    let lower = input.to_ascii_lowercase();
+    let from_lower = from.to_ascii_lowercase();
     let mut out = String::with_capacity(input.len());
     let mut pos = 0usize;
     while let Some(idx) = lower[pos..].find(&from_lower) {
@@ -1176,7 +1205,9 @@ fn replace_ci(input: &str, from: &str, to: &str) -> String {
 }
 
 fn extract_html_title(html: &str) -> Option<String> {
-    let lower = html.to_lowercase();
+    // Audit item 121: the same offset-map hazard as the sibling helpers —
+    // ASCII lowercasing keeps the offsets 1:1 with the original.
+    let lower = html.to_ascii_lowercase();
     let start = lower.find("<title>")? + "<title>".len();
     let end = lower[start..].find("</title>")? + start;
     let title = html[start..end].trim();
@@ -1514,4 +1545,46 @@ pub fn article_draft_queue_counts(conn: &Connection) -> (i64, i64, i64) {
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )
     .unwrap_or((0, 0, 0))
+}
+
+#[cfg(test)]
+mod batch31_tests {
+    use super::*;
+
+    /// Audit item 120: `&amp;` decoded FIRST double-decoded authored text
+    /// — `&amp;lt;` became `&lt;` and then `<` — and `&apos;` never
+    /// decoded at all. Single-decode semantics land `&amp;lt;` as the
+    /// literal text `&lt;` and decode `&apos;`.
+    #[test]
+    fn entity_decode_is_single_pass_and_decodes_apos() {
+        let out = html_to_text_keep_structure("a &amp;lt;script&amp;gt; b");
+        assert_eq!(out, "a &lt;script&gt; b", "no double decode: {out:?}");
+        assert_eq!(
+            html_to_text_keep_structure("it&#39;s Dave&apos;s"),
+            "it's Dave's",
+            "both apostrophe entities decode"
+        );
+        assert_eq!(html_to_text_keep_structure("a &amp; b"), "a & b");
+    }
+
+    /// Audit item 121: İ (U+0130) expands to two chars when Unicode-
+    /// lowercased, so the lowercased haystack's byte offsets stopped
+    /// matching the original and the tag stripper sliced garbage. The
+    /// helpers fold ASCII-only now — offsets stay 1:1 and the strip still
+    /// works.
+    #[test]
+    fn html_helpers_survive_italian_i_before_tag_blocks() {
+        let html = "İstruzioni <style>body { color: red }</style> visibili";
+        let out = html_to_text_keep_structure(html);
+        assert!(
+            !out.contains("color"),
+            "the style block is stripped: {out:?}"
+        );
+        assert!(
+            out.contains("visibili"),
+            "content after the block survives: {out:?}"
+        );
+        let out2 = html_to_text_keep_structure("İ<br>next");
+        assert!(out2.contains("next"), "br handling still works: {out2:?}");
+    }
 }
