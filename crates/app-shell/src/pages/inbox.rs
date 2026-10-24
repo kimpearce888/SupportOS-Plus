@@ -287,6 +287,10 @@ pub struct InboxPage {
     composer_bcc: String,
     mention_active: usize,
     mention_caret: usize,
+    /// Clean-audit item 136: last frame's composer focus, read BEFORE
+    /// the TextEdit renders so the open mention popup can consume the
+    /// arrow keys ahead of it.
+    composer_focused: bool,
     users: Vec<(i64, String)>,
     mailboxes: Vec<(i64, String)>,
     tags: Vec<String>,
@@ -418,6 +422,7 @@ impl InboxPage {
             composer_bcc: String::new(),
             mention_active: 0,
             mention_caret: 0,
+            composer_focused: false,
             users: Vec::new(),
             mailboxes: Vec::new(),
             tags: Vec::new(),
@@ -834,6 +839,40 @@ impl InboxPage {
         self.assistant_pending = None;
         self.assistant_error = None;
         self.reload_detail(db);
+    }
+
+    /// Clean-audit item 135: the AI-draft provenance dies with the draft
+    /// — any composer content that did not come from the inserted draft
+    /// (or an edit of it) must not be recorded as an acceptance of that
+    /// draft row.
+    ///
+    /// The copilot suggested reply is not an `ai_drafts` row, so it
+    /// carries no provenance of its own — and it REPLACES whatever sat in
+    /// the composer, killing any inserted draft's claim on the text. That
+    /// insert site applies the rule with field writes (`report` borrows
+    /// `self.copilot` across the render closure, so a `&mut self` helper
+    /// cannot be called there); the note-mode and wipe rules live in the
+    /// helpers below.
+    /// Clean-audit item 135: an internal note is not the customer reply
+    /// the draft was generated for, and `submit_composer` records the
+    /// acceptance in whichever mode is active — switching to note mode
+    /// therefore spends the provenance.
+    pub fn set_composer_mode(&mut self, mode: ComposerMode) {
+        if mode == ComposerMode::Note {
+            self.inserted_draft = None;
+        }
+        self.composer_mode = mode;
+    }
+
+    /// Clean-audit item 135: an edit that WIPES the composer abandons
+    /// the inserted draft — keeping the provenance would record a
+    /// phantom acceptance for whatever the user types next. Edits that
+    /// keep text keep the provenance (the edit distance is the metric).
+    pub fn composer_edited(&mut self, body: String) {
+        if body.trim().is_empty() {
+            self.inserted_draft = None;
+        }
+        self.composer_body = body;
     }
 
     /// Submit the composer (reply or note). The job is dispatched to
@@ -1541,7 +1580,13 @@ impl InboxPage {
                 .on_hover_text("put the draft in the composer for editing")
                 .clicked()
                 {
+                    // Clean-audit item 135: the suggested reply is not a
+                    // drafts row — replacing the composer content with it
+                    // kills any inserted draft's provenance (field writes:
+                    // `report` borrows `self.copilot` across this closure,
+                    // so a `&mut self` method call would conflict).
                     self.composer_mode = ComposerMode::Reply;
+                    self.inserted_draft = None;
                     self.composer_body = report.suggested_reply.clone();
                 }
                 let (gen_ok, has_draft) = db.with_read(|conn| {
@@ -2227,7 +2272,7 @@ impl InboxPage {
                     )
                     .clicked()
                     {
-                        self.composer_mode = ComposerMode::Reply;
+                        self.set_composer_mode(ComposerMode::Reply);
                     }
                     if design::chip_with_icon(
                         ui,
@@ -2237,7 +2282,7 @@ impl InboxPage {
                     )
                     .clicked()
                     {
-                        self.composer_mode = ComposerMode::Note;
+                        self.set_composer_mode(ComposerMode::Note);
                     }
                 });
                 let hint = match self.composer_mode {
@@ -2246,6 +2291,25 @@ impl InboxPage {
                         "Type an internal note (visible only to your team) — @ to mention (Ctrl+Enter sends)"
                     }
                 };
+                // Clean-audit item 136: while the mention popup is open it
+                // owns the arrow keys — the highlight moves. The keys are
+                // consumed BEFORE the TextEdit renders: an un-consumed
+                // ArrowDown would move the caret, change the @-query and
+                // close the popup on the very first press (and the popup
+                // code runs after the field, too late to undo that).
+                let mention_len = caret_query(&self.composer_body, self.mention_caret)
+                    .map_or(0, |(q, _)| filter_matches(&self.directory, &q).len());
+                if mention_len > 0 && self.composer_focused {
+                    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown))
+                    {
+                        self.mention_active =
+                            crate::palette::move_selection(self.mention_active, mention_len, 1);
+                    }
+                    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                        self.mention_active =
+                            crate::palette::move_selection(self.mention_active, mention_len, -1);
+                    }
+                }
                 let mut body = self.composer_body.clone();
                 let output = egui::TextEdit::multiline(&mut body)
                     .hint_text(hint)
@@ -2255,9 +2319,12 @@ impl InboxPage {
                     .show(ui);
                 let mut changed = false;
                 if output.response.changed() {
-                    self.composer_body = body.clone();
+                    // Clean-audit item 135: routed through the helper so a
+                    // wiped composer abandons the draft provenance.
+                    self.composer_edited(body.clone());
                     changed = true;
                 }
+                self.composer_focused = output.response.has_focus();
                 if let Some(range) = output.cursor_range {
                     let caret = char_index_to_byte(&body, range.primary.index.0);
                     self.mention_caret = caret;

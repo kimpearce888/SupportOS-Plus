@@ -56,6 +56,9 @@ pub struct IncidentsPage {
     new_note: String,
     link_conversation: String,
     error: Option<String>,
+    /// Post-action feedback (clean-audit item 131): which typed
+    /// conversation ids were skipped and why, after a create.
+    notice: Option<String>,
 }
 
 /// Incident severity → badge tone (redesign of the raw RED/YELLOW/GRAY).
@@ -103,6 +106,7 @@ impl IncidentsPage {
             new_note: String::new(),
             link_conversation: String::new(),
             error: None,
+            notice: None,
         }
     }
 
@@ -182,25 +186,48 @@ impl IncidentsPage {
             self.error = Some("Invalid severity.".into());
             return;
         }
-        let conversation_ids: Vec<i64> = self
+        // Clean-audit item 131: keep what the user typed so the skipped
+        // ids can be named in the notice — the old chain dropped a
+        // non-numeric or non-positive token before anyone saw it.
+        let parsed: Vec<(Option<i64>, String)> = self
             .new_conversation_ids
             .split(',')
-            .filter_map(|id| id.trim().parse::<i64>().ok().filter(|v| *v > 0))
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                (
+                    s.trim().parse::<i64>().ok().filter(|v| *v > 0),
+                    s.trim().to_string(),
+                )
+            })
             .collect();
-        // The route validated each id exists; skip missing ones the same way.
-        let valid_ids = db.with_read(|conn| {
-            conversation_ids
-                .into_iter()
-                .filter(|id| {
-                    conn.query_row(
-                        "SELECT id FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
-                        rusqlite::params![id],
-                        |r| r.get::<_, i64>(0),
-                    )
-                    .is_ok()
-                })
-                .collect::<Vec<_>>()
-        });
+        let unparseable: Vec<String> = parsed
+            .iter()
+            .filter(|(v, _)| v.is_none())
+            .map(|(_, s)| s.clone())
+            .collect();
+        let conversation_ids: Vec<i64> = parsed.iter().filter_map(|(v, _)| *v).collect();
+        // The route validated each id exists; skip missing ones the same
+        // way — but say so (clean-audit item 131: the drop used to be
+        // silent, so a typo'd id just vanished from the link list).
+        let mut valid_ids = Vec::new();
+        let mut missing = unparseable;
+        for id in conversation_ids {
+            let exists = db.with_read(|conn| {
+                conn.query_row(
+                    "SELECT id FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
+                    rusqlite::params![id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .is_ok()
+            });
+            if exists {
+                valid_ids.push(id);
+            } else {
+                missing.push(id.to_string());
+            }
+        }
+        // The count is read before `valid_ids` moves into the incident.
+        let linked_count = valid_ids.len();
         let incident = ManualIncident {
             title,
             status: self.new_status.clone(),
@@ -230,6 +257,18 @@ impl IncidentsPage {
                 self.new_title.clear();
                 self.new_description.clear();
                 self.new_conversation_ids.clear();
+                // Clean-audit item 131: name the dropped ids instead of
+                // silently losing them.
+                self.notice = if missing.is_empty() {
+                    None
+                } else {
+                    Some(format!(
+                        "incident created; linked {} conversation(s) — unknown or \
+                         nonexistent id(s) skipped: {}",
+                        linked_count,
+                        missing.join(", ")
+                    ))
+                };
                 self.reload_list(db);
                 self.select(db, id);
             }
@@ -309,11 +348,20 @@ impl IncidentsPage {
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
         }
+        if let Some(note) = &self.notice {
+            design::hint_text(ui, note);
+        }
         design::divider(ui);
 
         design::card(ui, |ui| {
             ui.horizontal(|ui| {
                 design::field_label(ui, "status:");
+                // Clean-audit item 131: the selects and the checkbox only
+                // mutated state — the list refetched only when the user
+                // happened to hit "apply". Each control refetches on
+                // change now (the text query keeps its explicit button —
+                // per-keystroke queries would thrash).
+                let prev_status = self.filter_status.clone();
                 egui::ComboBox::from_id_salt("incident-filter-status")
                     .width(150.0)
                     .selected_text(self.filter_status.clone().unwrap_or_else(|| "Any".into()))
@@ -327,7 +375,11 @@ impl IncidentsPage {
                             );
                         }
                     });
+                if self.filter_status != prev_status {
+                    self.reload_list(db);
+                }
                 design::field_label(ui, "severity:");
+                let prev_severity = self.filter_severity.clone();
                 egui::ComboBox::from_id_salt("incident-filter-severity")
                     .width(130.0)
                     .selected_text(self.filter_severity.clone().unwrap_or_else(|| "Any".into()))
@@ -341,7 +393,14 @@ impl IncidentsPage {
                             );
                         }
                     });
+                if self.filter_severity != prev_severity {
+                    self.reload_list(db);
+                }
+                let prev_open_only = self.filter_open_only;
                 ui.checkbox(&mut self.filter_open_only, "open only");
+                if self.filter_open_only != prev_open_only {
+                    self.reload_list(db);
+                }
                 let mut q = self.filter_query.clone();
                 ui.add_sized(
                     [180.0, 28.0],
@@ -653,6 +712,39 @@ mod tests {
         assert_eq!(i64_field(&row, "conversation_count"), 1, "id 999 skipped");
         assert!(page.detail.is_some(), "creation selects the incident");
         assert_eq!(page.conversations.len(), 1);
+    }
+
+    /// Clean-audit item 131: the create path used to drop invalid and
+    /// nonexistent conversation ids silently — a typo'd id just vanished
+    /// from the link list. The notice names every skipped token.
+    #[test]
+    fn create_names_the_skipped_conversation_ids() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let mut page = IncidentsPage::new();
+        page.new_title = "Checkout outage".into();
+        page.new_status = "investigating".into();
+        page.new_severity = "sev2".into();
+        page.new_conversation_ids = "1, abc, 999".into();
+        page.create(&db);
+
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let note = page.notice.as_deref().expect("the skips are named");
+        assert!(note.contains("999"), "the nonexistent id is named: {note}");
+        assert!(note.contains("abc"), "the unparseable id is named: {note}");
+        assert!(
+            note.contains("linked 1 conversation(s)"),
+            "the kept count is stated: {note}"
+        );
+        assert_eq!(page.conversations.len(), 1, "the valid id still links");
     }
 
     #[test]

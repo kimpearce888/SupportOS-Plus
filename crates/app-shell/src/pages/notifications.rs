@@ -108,9 +108,16 @@ impl NotificationsPage {
             .with_read(spp_core::notifications::me_user_local_id)
             .ok()
             .flatten();
+        // Clean-audit item 130: the Mentions tab renders `self.mentions`,
+        // not `self.records` — a mention row can sit outside the All
+        // list's 100-row window, and the records-only lookup fell through
+        // to `unwrap_or(true)`, re-marking a READ mention as read (the
+        // "unread" button silently did nothing). Look the row up in both
+        // lists — every rendered row lives in one of them.
         let read = self
             .records
             .iter()
+            .chain(self.mentions.iter())
             .find(|r| r.id == id)
             .map(|r| r.read_at.is_none())
             .unwrap_or(true);
@@ -324,6 +331,48 @@ mod tests {
         );
         assert!(page.mentions.iter().any(|r| r.title.contains("mentioned")));
         assert!(page.records.iter().any(|r| r.title.contains("sync done")));
+    }
+
+    /// Clean-audit item 130: a READ mention pushed out of the All list's
+    /// 100-row window (the fillers outrank it on `id DESC`) is still
+    /// rendered by the Mentions tab — toggling it must read the row's
+    /// real state from the mentions list and flip it to unread, not fall
+    /// through to the records-only miss and re-mark it read.
+    #[test]
+    fn mention_toggle_reads_the_mentions_list_when_records_miss_the_row() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            set_me(conn);
+            for i in 0..100 {
+                seed_notification(conn, 1000 + i, "sync_failure", "filler", false);
+            }
+            // Same created_at as the fillers, lowest id: outside the
+            // All list's LIMIT 100 window, inside the mentions list.
+            seed_notification(conn, 1, "mentioned", "old read mention", true);
+        });
+        let mut page = NotificationsPage::new();
+        page.reload(&db);
+        assert!(
+            page.records.iter().all(|r| r.id != 1),
+            "the mention sits outside the All list window"
+        );
+        assert!(
+            page.mentions.iter().any(|r| r.id == 1),
+            "the Mentions tab still renders the row"
+        );
+
+        page.toggle_read(&db, 1); // the row's "unread" button
+        let read_at: Option<String> = db
+            .with_read(|conn| {
+                conn.query_row("SELECT read_at FROM notifications WHERE id = 1", [], |r| {
+                    r.get::<_, Option<String>>(0)
+                })
+            })
+            .expect("the mention row exists");
+        assert!(
+            read_at.is_none(),
+            "the read mention must flip back to unread"
+        );
     }
 
     #[test]

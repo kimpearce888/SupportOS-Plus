@@ -541,7 +541,13 @@ impl ReportsPage {
                 selected,
                 &format!(
                     "{} — {}",
-                    &digest.created_at[..16.max(digest.created_at.len())],
+                    // Clean-audit item 127: the cap must be `min`, not
+                    // `max` — `16.max(len)` sliced a short stamp at byte
+                    // 16 (panic on out-of-bounds) and a long stamp at the
+                    // full length (the truncation never happened). Take
+                    // the first 16 characters, or the whole stamp when
+                    // shorter.
+                    &digest.created_at[..16.min(digest.created_at.len())],
                     status_chip
                 ),
             )
@@ -882,7 +888,12 @@ impl ReportsPage {
                             let id = row.get("conversation_id").and_then(|v| v.as_i64());
                             let det = row.get("deterministic").cloned().unwrap_or_default();
                             ui.horizontal(|ui| {
-                                ui.monospace(format!("#{id:?}"));
+                                // Clean-audit item 128: `id` is an Option —
+                                // the Debug format rendered `#Some(42)`.
+                                ui.monospace(match id {
+                                    Some(n) => format!("#{n}"),
+                                    None => "#?".to_string(),
+                                });
                                 for (key, label) in [
                                     ("back_and_forth_count", "b&f"),
                                     ("handoff_count", "handoffs"),

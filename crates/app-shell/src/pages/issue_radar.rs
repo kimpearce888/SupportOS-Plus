@@ -331,7 +331,7 @@ impl IssueRadarPage {
                 // and a reload refetches whatever has landed.
                 if crate::design::button(ui, "Cluster now", crate::design::ButtonVariant::Outline)
                     .on_hover_text(
-                        "group the last 14 days of conversations into issue clusters \\
+                        "group the last 14 days of conversations into issue clusters \
                      through the Classify role (needs a routed AI endpoint)",
                     )
                     .clicked()
@@ -341,7 +341,7 @@ impl IssueRadarPage {
                     });
                     if !feature_on {
                         self.error = Some(
-                            "issue clustering is disabled — enable it in AI Center \\
+                            "issue clustering is disabled — enable it in AI Center \
                              (Features & kill switches)."
                                 .into(),
                         );
@@ -358,7 +358,7 @@ impl IssueRadarPage {
                         });
                         self.error = None;
                         self.notice = Some(
-                            "clustering queued — reload clusters in a few seconds \\
+                            "clustering queued — reload clusters in a few seconds \
                              to see what landed."
                                 .into(),
                         );

@@ -73,15 +73,18 @@ pub fn line_chart(ui: &mut egui::Ui, _id: &str, points: &[Point], label: &str) -
     paint_frame(ui, rect, t);
     if let Some(scaled) = scale_points(points, rect) {
         paint_grid(ui, rect, t);
-        // Soft area fill under the line.
-        let mut area = vec![egui::pos2(scaled[0].x, rect.max.y - 8.0)];
-        area.extend_from_slice(&scaled);
-        area.push(egui::pos2(scaled[scaled.len() - 1].x, rect.max.y - 8.0));
-        ui.painter().add(egui::Shape::convex_polygon(
-            area,
-            t.chart_accent.gamma_multiply(0.16),
-            egui::Stroke::NONE,
-        ));
+        // Soft area fill under the line. Clean-audit item 134: a general
+        // series is usually CONCAVE — `Shape::convex_polygon`
+        // fan-triangulates from the first vertex, so the fill bled past
+        // the polyline and left holes wherever the series bent. The fill
+        // is now an explicit mesh: two triangles per segment, exact for
+        // any series shape.
+        let fill = t.chart_accent.gamma_multiply(0.16);
+        let baseline_y = rect.max.y - 8.0;
+        ui.painter()
+            .add(egui::Shape::Mesh(std::sync::Arc::new(area_fill_mesh(
+                &scaled, baseline_y, fill,
+            ))));
         let endpoints = [scaled[0], scaled[scaled.len() - 1]];
         ui.painter().add(egui::Shape::line(
             scaled,
@@ -177,6 +180,32 @@ fn paint_frame(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
     );
 }
 
+/// The exact area fill between a polyline and a horizontal baseline, as
+/// a triangle mesh (clean-audit item 134).
+///
+/// Two triangles per segment (`p_i, p_i+1, base_i, base_i+1`) tile the
+/// region under the line — a general data series is concave, and the
+/// previous `Shape::convex_polygon` fill fan-triangulated it from the
+/// first vertex, over-drawing outside the polygon and leaving holes
+/// wherever the line bent. Triangles carry no convexity assumption, so
+/// the mesh is exact for any series shape.
+#[must_use]
+pub fn area_fill_mesh(points: &[egui::Pos2], baseline_y: f32, fill: egui::Color32) -> egui::Mesh {
+    let mut mesh = egui::Mesh::default();
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let base_a = egui::pos2(a.x, baseline_y);
+        let base_b = egui::pos2(b.x, baseline_y);
+        let idx = mesh.vertices.len() as u32;
+        for p in [a, b, base_a, base_b] {
+            mesh.colored_vertex(p, fill);
+        }
+        mesh.indices
+            .extend_from_slice(&[idx, idx + 1, idx + 2, idx + 1, idx + 3, idx + 2]);
+    }
+    mesh
+}
+
 /// Three faint horizontal gridlines inside the chart area.
 fn paint_grid(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
     let inset = 8.0;
@@ -220,5 +249,85 @@ mod tests {
     fn scale_handles_descending_series() {
         let scaled = scale_points(&[[0.0, 10.0], [1.0, 2.0]], rect()).expect("scaled");
         assert!(scaled[0].y < scaled[1].y, "higher value maps higher");
+    }
+
+    /// Clean-audit item 134: the area fill mesh carries exactly two
+    /// triangles per segment and colors every vertex.
+    #[test]
+    fn area_fill_mesh_counts_scale_with_segments() {
+        let fill = egui::Color32::from_rgba_unmultiplied(1, 2, 3, 4);
+        let pts = [
+            egui::pos2(0.0, 10.0),
+            egui::pos2(10.0, 4.0),
+            egui::pos2(20.0, 8.0),
+            egui::pos2(30.0, 2.0),
+        ];
+        let mesh = area_fill_mesh(&pts, 20.0, fill);
+        assert_eq!(mesh.vertices.len(), 4 * (pts.len() - 1));
+        assert_eq!(mesh.indices.len(), 6 * (pts.len() - 1));
+        assert!(mesh.vertices.iter().all(|v| v.color == fill));
+        // Every index stays inside the vertex list.
+        let n = mesh.vertices.len() as u32;
+        assert!(mesh.indices.iter().all(|i| *i < n));
+    }
+
+    /// Clean-audit item 134: the per-segment triangles tile the region
+    /// under the polyline EXACTLY — their total area equals the shoelace
+    /// area of the baseline-closed polygon, including for the concave
+    /// series whose convex-polygon fill used to bleed.
+    #[test]
+    fn area_fill_mesh_area_matches_the_polygon_even_when_concave() {
+        let baseline = 20.0_f32;
+        // A V-shaped (concave) series: deep dip in the middle.
+        let pts = [
+            egui::pos2(0.0, 5.0),
+            egui::pos2(10.0, 18.0),
+            egui::pos2(20.0, 4.0),
+        ];
+        let mesh = area_fill_mesh(&pts, baseline, egui::Color32::BLACK);
+
+        let tri_area = |a: egui::Pos2, b: egui::Pos2, c: egui::Pos2| {
+            ((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)).abs() / 2.0
+        };
+        let mesh_area: f32 = mesh
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| {
+                tri_area(
+                    mesh.vertices[t[0] as usize].pos,
+                    mesh.vertices[t[1] as usize].pos,
+                    mesh.vertices[t[2] as usize].pos,
+                )
+            })
+            .sum();
+
+        // Shoelace over [base_a, p0, p1, p2, base_b] (closed — the last
+        // edge wraps back to base_a).
+        let mut poly = vec![egui::pos2(pts[0].x, baseline)];
+        poly.extend_from_slice(&pts);
+        poly.push(egui::pos2(pts[pts.len() - 1].x, baseline));
+        let polygon_area: f32 = {
+            let mut acc = 0.0_f32;
+            for w in poly.windows(2) {
+                acc += w[0].x * w[1].y - w[1].x * w[0].y;
+            }
+            let (first, last) = (poly[0], *poly.last().unwrap());
+            acc += last.x * first.y - first.x * last.y;
+            (acc / 2.0).abs()
+        };
+        assert!(
+            (mesh_area - polygon_area).abs() < 0.01,
+            "mesh tiles {mesh_area} but the polygon encloses {polygon_area}"
+        );
+    }
+
+    /// Clean-audit item 134: fewer than two points yield an empty mesh —
+    /// nothing to fill (mirrors scale_points' degenerate contract).
+    #[test]
+    fn area_fill_mesh_degenerate_input_is_empty() {
+        let mesh = area_fill_mesh(&[egui::pos2(0.0, 5.0)], 20.0, egui::Color32::BLACK);
+        assert!(mesh.is_empty());
     }
 }
