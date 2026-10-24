@@ -678,8 +678,8 @@ fn rechunk_doc_article(
     )?;
     for (i, content) in chunks.iter().enumerate() {
         tx.execute(
-            "INSERT INTO docs_chunks (article_id, chunk_index, content, chunk_version)
-             VALUES (?1, ?2, ?3, 2)",
+            "INSERT INTO docs_chunks (article_id, chunk_index, content)
+             VALUES (?1, ?2, ?3)",
             params![article_id, i64::try_from(i).unwrap_or(0), content],
         )?;
     }

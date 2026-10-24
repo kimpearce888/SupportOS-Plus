@@ -62,6 +62,10 @@ pub struct OutreachPage {
     new_dnc_reason: String,
     message: Option<String>,
     error: Option<String>,
+    /// Clean-audit item 147: reload latch — an empty mirror is a legal
+    /// steady state, so "lists empty" can no longer mean "re-query every
+    /// frame".
+    loaded: bool,
 }
 
 impl OutreachPage {
@@ -69,6 +73,7 @@ impl OutreachPage {
     pub fn new() -> Self {
         Self {
             tab: Tab::Campaigns,
+            loaded: false,
             campaigns: Vec::new(),
             segments: Vec::new(),
             dnc: Vec::new(),
@@ -92,6 +97,7 @@ impl OutreachPage {
 
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
+        self.loaded = false;
         self.campaigns.clear();
         self.segments.clear();
         self.dnc.clear();
@@ -109,6 +115,7 @@ impl OutreachPage {
         self.campaigns = campaigns;
         self.segments = segments;
         self.dnc = dnc;
+        self.loaded = true;
         if let Some(id) = self.selected {
             self.reload_report(db, id);
         }
@@ -119,7 +126,7 @@ impl OutreachPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.campaigns.is_empty() {
+        if !self.loaded {
             self.reload(db);
         }
     }
@@ -772,6 +779,54 @@ mod tests {
     }
 
     const TICKET_CUSTOMERS_DEFINITION: &str = r#"{"combinator":"all","conditions":[{"kind":"history","metric":"ticket_count","op":"gte","value":1}],"exclude":[]}"#;
+
+    /// Clean-audit item 147: the reload latch — an empty outreach mirror
+    /// is a legal steady state, so the second `ensure_loaded` on an empty
+    /// database must not flip any state (the old `is_empty()` gate
+    /// re-queried every frame); a real invalidation still reloads.
+    #[test]
+    fn ensure_loaded_latches_and_invalidate_refetches() {
+        let db = fixture(vec![("conv", 1, "Hello", "active", "email", 1, 5, 9)]);
+
+        let mut page = OutreachPage::new();
+        assert!(!page.loaded);
+        page.ensure_loaded(&db);
+        assert!(page.loaded);
+        assert!(page.campaigns.is_empty(), "no campaigns seeded yet");
+
+        // Seed a campaign behind the page's back (as a sync would) and
+        // prove the stale page does NOT hot-reload without invalidation.
+        let segment_id = db.with_write(|conn| seed_segment(conn, "S", TICKET_CUSTOMERS_DEFINITION));
+        let mailbox = db
+            .with_read(|conn| {
+                conn.query_row(
+                    "INSERT INTO mailboxes (remote_id, name, email)
+                 VALUES (777, 'Latched', 'latched@example.test') RETURNING id",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+            })
+            .expect("mailbox");
+        page.new_name = "Latched".into();
+        page.new_subject = "Sub".into();
+        page.new_body = "Body".into();
+        page.new_mailbox = mailbox.to_string();
+        page.new_segment_json = segment_id.to_string();
+        page.create_campaign(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+
+        // The latch path: a second ensure_loaded keeps whatever reload
+        // produced (no re-query churn, same mirror).
+        page.ensure_loaded(&db);
+        assert_eq!(page.campaigns.len(), 1);
+
+        // Invalidation clears the latch; the next ensure_loaded refetches.
+        page.invalidate();
+        assert!(!page.loaded);
+        page.ensure_loaded(&db);
+        assert!(page.loaded);
+        assert_eq!(page.campaigns.len(), 1);
+    }
 
     #[test]
     fn campaign_create_queues_and_reports() {

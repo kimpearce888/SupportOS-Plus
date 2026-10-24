@@ -101,20 +101,6 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Value>> {
     Ok(row)
 }
 
-fn get_by_name(conn: &Connection, name: &str) -> Result<Option<Value>> {
-    let row = conn
-        .query_row(
-            "SELECT id, name, kind, config_json, auth, refresh_method, refresh_seconds,
-                    allowed_ai, enabled, schema_json, last_sync_at, last_sync_status,
-                    last_sync_error, last_sync_rows, health, created_at, updated_at, provenance
-             FROM connectors WHERE name = ?1",
-            params![name],
-            hydrate_row,
-        )
-        .ok();
-    Ok(row)
-}
-
 fn hydrate_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let config_json: Option<String> = row.get("config_json")?;
     let auth: Option<String> = row.get("auth")?;
@@ -243,74 +229,10 @@ pub fn create(
     get(conn, id)?.ok_or_else(|| Error::Config("connector vanished".into()))
 }
 
-pub fn patch(conn: &Connection, id: i64, changes: &Value) -> Result<Option<Value>> {
-    let Some(existing) = get(conn, id)? else {
-        return Ok(None);
-    };
-    if let Some(name) = changes.get("name").and_then(|v| v.as_str()) {
-        if name != existing.get("name").and_then(|v| v.as_str()).unwrap_or("") {
-            let dupe: Option<i64> = conn
-                .query_row(
-                    "SELECT 1 FROM connectors WHERE name = ?1 AND id != ?2",
-                    params![name, id],
-                    |r| r.get(0),
-                )
-                .ok();
-            if dupe.is_some() {
-                return Err(Error::Config(format!(
-                    "Connector \"{name}\" already exists"
-                )));
-            }
-        }
-        conn.execute(
-            "UPDATE connectors SET name = ?1 WHERE id = ?2",
-            params![name, id],
-        )?;
-    }
-    if let Some(config) = changes.get("config") {
-        conn.execute(
-            "UPDATE connectors SET config_json = ?1 WHERE id = ?2",
-            params![
-                serde_json::to_string(config).unwrap_or_else(|_| "{}".into()),
-                id
-            ],
-        )?;
-    }
-    if let Some(auth) = changes.get("auth") {
-        conn.execute(
-            "UPDATE connectors SET auth = ?1 WHERE id = ?2",
-            params![
-                serde_json::to_string(auth).unwrap_or_else(|_| "{}".into()),
-                id
-            ],
-        )?;
-    }
-    if let Some(rm) = changes.get("refreshMethod").and_then(|v| v.as_str()) {
-        conn.execute(
-            "UPDATE connectors SET refresh_method = ?1 WHERE id = ?2",
-            params![rm, id],
-        )?;
-    }
-    if let Some(rs) = changes.get("refreshSeconds").and_then(|v| v.as_i64()) {
-        conn.execute(
-            "UPDATE connectors SET refresh_seconds = ?1 WHERE id = ?2",
-            params![rs, id],
-        )?;
-    }
-    if let Some(ai) = changes.get("allowedAi").and_then(|v| v.as_bool()) {
-        conn.execute(
-            "UPDATE connectors SET allowed_ai = ?1 WHERE id = ?2",
-            params![i64::from(ai), id],
-        )?;
-    }
-    if let Some(en) = changes.get("enabled").and_then(|v| v.as_bool()) {
-        conn.execute(
-            "UPDATE connectors SET enabled = ?1 WHERE id = ?2",
-            params![i64::from(en), id],
-        )?;
-    }
-    get(conn, id)
-}
+// Clean-audit item 156: `patch` — the connector edit/auth-change
+// route logic — is gone. It had no caller: the shell's connector page
+// creates, deletes and refreshes connectors but exposes no edit form,
+// so no code path could ever change a stored auth payload.
 
 pub fn delete(conn: &Connection, id: i64) -> Result<bool> {
     conn.execute(
@@ -1034,84 +956,12 @@ fn infer_schema(rows: &[NormalizedRow]) -> Option<Value> {
     Some(Value::Array(schema))
 }
 
-pub fn search_for_ai(
-    conn: &Connection,
-    connector_name_or_id: &str,
-    query: &str,
-    limit: usize,
-) -> Value {
-    let record = match connector_name_or_id.parse::<i64>() {
-        Ok(id) => get(conn, id).ok().flatten(),
-        Err(_) => get_by_name(conn, connector_name_or_id).ok().flatten(),
-    };
-    let Some(connector) = record else {
-        return json!({ "error": "Connector not found" });
-    };
-    let allowed = connector
-        .get("allowed_ai")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    if allowed == 0 {
-        let name = connector.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        return json!({ "error": format!("Connector \"{name}\" is not marked as AI-visible. Data stays private to the UI.") });
-    }
-    let enabled = connector
-        .get("enabled")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    if enabled == 0 {
-        let name = connector.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        return json!({ "error": format!("Connector \"{name}\" is disabled.") });
-    }
-    let q = query.to_lowercase();
-    let limit = limit.clamp(1, 10);
-    let id = connector.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-    let (rows, _) = list_rows(conn, id, None, limit as i64, 0).unwrap_or_default();
-    let results: Vec<Value> = rows
-        .into_iter()
-        .filter(|r| {
-            if q.is_empty() {
-                return true;
-            }
-            r.get("data")
-                .and_then(|d| serde_json::to_string(&d).ok())
-                .map(|s| s.to_lowercase().contains(&q))
-                .unwrap_or(false)
-        })
-        .take(limit)
-        .map(|r| {
-            let mut out = Map::new();
-            if let Some(data) = r.get("data").and_then(|d| d.as_object()) {
-                for (k, v) in data {
-                    let redacted = match v {
-                        Value::String(s) => {
-                            let sliced: String = s.chars().take(300).collect();
-                            let (text, _) = crate::security::redact_text(&sliced, true);
-                            Value::String(text)
-                        }
-                        other => other.clone(),
-                    };
-                    out.insert(k.clone(), redacted);
-                }
-            }
-            Value::Object(out)
-        })
-        .collect();
-    let name = connector.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    json!({ "connector": name, "results": results })
-}
-
-pub fn ai_visible_connector_names(conn: &Connection) -> Vec<String> {
-    let mut stmt = match conn
-        .prepare("SELECT name FROM connectors WHERE allowed_ai = 1 AND enabled = 1 ORDER BY name")
-    {
-        Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
-    };
-    stmt.query_map([], |r| r.get(0))
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
-}
+// Clean-audit item 156: the connector AI-search surface
+// (`search_for_ai`, `ai_visible_connector_names`) is gone. Nothing
+// called it — the copilot's tool set reads the local archive through
+// `ai_tools`, not through connectors — and the dead lane also carried
+// a legacy-schema assumption (string rows through `list_rows`) that
+// drifted from the live storage shape.
 
 #[cfg(test)]
 mod batch31_tests {

@@ -1,7 +1,7 @@
 use crate::catalog::copilot::{
     CopilotTool, MAX_TOOL_CALLS, MAX_TOOL_ROUNDS, TOOL_RESULT_MAX_CHARS,
 };
-use crate::error::{Error, Result};
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -20,52 +20,11 @@ pub struct CopilotResult {
     pub terminated_by_bound: bool,
 }
 
-#[must_use]
-pub fn truncate_result(output: &str) -> (String, bool) {
-    // Audit item 121: the cap sliced at a raw BYTE offset
-    // (`&output[..TOOL_RESULT_MAX_CHARS]`), so any tool output whose
-    // TOOL_RESULT_MAX_CHARS-th byte sat inside a multi-byte character
-    // panicked. The cap is a display bound — it counts CHARACTERS now.
-    let char_count = output.chars().count();
-    if char_count <= TOOL_RESULT_MAX_CHARS {
-        (output.to_string(), false)
-    } else {
-        let truncated: String = output.chars().take(TOOL_RESULT_MAX_CHARS).collect();
-        (format!("{truncated}… [truncated]"), true)
-    }
-}
-
-#[must_use]
-pub fn should_stop(rounds: u32, tool_calls: u32) -> bool {
-    rounds >= MAX_TOOL_ROUNDS || tool_calls >= MAX_TOOL_CALLS
-}
-
-pub fn validate_tool_allowed(tool: &CopilotTool) -> Result<()> {
-    if CopilotTool::ALL.contains(tool) {
-        Ok(())
-    } else {
-        Err(Error::Config(format!(
-            "tool {tool:?} is not in the read-only allowlist"
-        )))
-    }
-}
-
-#[must_use]
-pub fn tool_allowlist() -> &'static [CopilotTool] {
-    &CopilotTool::ALL
-}
-
-pub const fn max_tool_rounds() -> u32 {
-    MAX_TOOL_ROUNDS
-}
-
-pub const fn max_tool_calls() -> u32 {
-    MAX_TOOL_CALLS
-}
-
-pub const fn tool_result_max_chars() -> usize {
-    TOOL_RESULT_MAX_CHARS
-}
+// Clean-audit item 152: the copilot helper surface (`truncate_result`,
+// `should_stop`, `validate_tool_allowed`, `tool_allowlist`, and the
+// three constant accessors) is gone — every one had zero production
+// callers. The live chat loop reads the same constants directly and
+// truncates tool results by characters inline (the item-121 fix).
 
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
@@ -1032,22 +991,20 @@ mod batch23_audit_tests {
 mod batch31_tests {
     use super::*;
 
-    /// Audit item 121: the truncation cap sliced at a raw BYTE offset —
-    /// an é landing across the cap's byte index panicked. The cap counts
-    /// characters now.
+    // Audit item 121: the tool-result truncation cap sliced at a raw BYTE
+    // offset — an é landing across the cap's byte index panicked. The cap
+    // counts characters now. (Clean-audit item 152 removed the standalone
+    // `truncate_result` helper; this regression pins the live chat-loop
+    // truncation, which is the only place the cap runs.)
     #[test]
-    fn truncate_result_is_char_safe_at_the_cap() {
-        let short = "abc";
-        let (out, truncated) = truncate_result(short);
-        assert_eq!(out, "abc");
-        assert!(!truncated);
-
-        // 3999 ASCII bytes, then a 2-byte é across byte 4000, then more.
-        let s = format!("{}é{}", "a".repeat(3999), "b".repeat(20));
-        let (out, truncated) = truncate_result(&s);
-        assert!(truncated);
-        assert_eq!(out.chars().count(), 4000 + "… [truncated]".chars().count());
-        assert!(out.starts_with(&"a".repeat(3999)));
-        assert!(out.contains('é'), "the multi-byte character survives whole");
+    fn tool_result_cap_truncates_by_characters() {
+        let output = "a".repeat(3999) + "é" + &"b".repeat(20);
+        let content: String = output.chars().take(TOOL_RESULT_MAX_CHARS).collect();
+        assert_eq!(content.chars().count(), TOOL_RESULT_MAX_CHARS);
+        assert!(
+            content.contains('é'),
+            "the multi-byte character survives whole"
+        );
+        assert!(content.starts_with(&"a".repeat(3999)));
     }
 }

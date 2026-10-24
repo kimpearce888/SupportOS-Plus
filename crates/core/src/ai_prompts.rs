@@ -4,11 +4,13 @@ pub const PROMPT_VERSIONS_TICKET_ANALYSIS: &str = "ticket_analysis_v1";
 pub const PROMPT_VERSIONS_CUSTOMER_DRAFT: &str = "customer_draft_v1";
 pub const PROMPT_VERSIONS_DRAFT_VERIFICATION: &str = "draft_verification_v1";
 pub const PROMPT_VERSIONS_ISSUE_CLUSTER: &str = "issue_cluster_v1";
-pub const PROMPT_VERSIONS_REPORT_NARRATIVE: &str = "report_narrative_v1";
 pub const PROMPT_VERSIONS_MEMORY_EXTRACTION: &str = "memory_extraction_v1";
 pub const PROMPT_VERSIONS_INTERACTION_OBSERVATION: &str = "interaction_observation_v1";
 pub const PROMPT_VERSIONS_INTERACTION_RECOMMENDATION: &str = "interaction_recommendation_v1";
-pub const PROMPT_VERSIONS_ATTRIBUTE_EXTRACTION: &str = "attribute_extraction_v1";
+// Clean-audit item 149: the ai_prompts copies of the report-narrative and
+// attribute-extraction prompt surfaces are gone — the attribute feature
+// owns its prompt and version in `ai_attributes.rs`, and the report
+// narrative runner had no caller.
 pub const PROMPT_VERSIONS_COPILOT_CHAT: &str = "copilot_chat_v1";
 pub const PROMPT_VERSIONS_DRAFT_REWRITE: &str = "draft_rewrite_v1";
 pub const PROMPT_VERSIONS_TRANSLATION: &str = "translation_v1";
@@ -371,15 +373,6 @@ pub struct ClusterConversation {
     pub tags: Vec<String>,
 }
 
-pub const REPORT_NARRATIVE_SYSTEM: &str = "You write a short factual narrative for a support report. SQL-computed numbers are given to you as facts - never recalculate or invent numbers. Clearly flag any statement you are unsure about with \"requires verification\". Respond ONLY with JSON: {\"narrative\": \"...\"}";
-
-pub fn build_report_narrative_user(report_name: &str, facts: &serde_json::Value) -> String {
-    format!(
-        "Report: {report_name}\n\nComputed facts (authoritative, do not change):\n{}\n\nWrite a 3-5 sentence narrative for a support lead summarizing what matters. The narrative will be clearly labeled as AI-generated.",
-        serde_json::to_string_pretty(facts).unwrap_or_else(|_| "{}".to_string())
-    )
-}
-
 pub const MEMORY_EXTRACTION_SYSTEM: &str = "You extract durable customer facts worth remembering for future support interactions. Only include facts clearly supported by the conversation. Do NOT include sensitive payment data or credentials. Respond ONLY with JSON: {\"memories\": [{\"key\": \"short_label\", \"value\": \"one sentence fact\", \"confidence\": \"high|medium|low\"}]}";
 
 pub fn build_memory_extraction_user(customer_name: &str, threads: &[(String, String)]) -> String {
@@ -464,33 +457,6 @@ pub fn interaction_strategy_block(
     }
     out.push_str("Use this to shape HOW you answer, not WHAT you answer.");
     out
-}
-
-pub const ATTRIBUTE_EXTRACTION_SYSTEM: &str = "You extract structured attributes from a customer support conversation. You are part of a LOCAL-first support tool: everything you output is stored as versioned, evidence-backed local metadata - never sent to the customer.
-
-Rules:
-- Extract ONLY what the messages support. A missing attribute is simply omitted - never invent values.
-- \"intent\" MUST be exactly one of: question | bug_report | feature_request | billing | how_to | account_management | feedback | other.
-- \"response_style\" MUST be exactly one of: concise | detailed | step_by_step | technical | conversational | outcome_focused - pick the style the CUSTOMER's own messages ask for, not what you would write.
-- \"product\", \"feature\", \"issue\", \"customer_goal\" are short free text (max ~12 words each).
-- For every attribute with confidence \"medium\" or \"high\" you MUST include an evidence_excerpt copied from the messages provided, plus the thread id it came from.
-- Use confidence \"low\" when the signal is weak or ambiguous.
-- Respond with a single JSON object, no prose.
-
-JSON shape:
-{\"attributes\": [{\"attribute\": \"intent|product|feature|issue|customer_goal|response_style\", \"value\": \"...\", \"confidence\": \"high|medium|low|unknown\", \"evidence_excerpt\": \"...\", \"evidence_thread_local_id\": 123}]}";
-
-pub fn build_attribute_extraction_user(subject: &str, messages: &[(String, i64)]) -> String {
-    let mut parts = vec![
-        format!("SUBJECT: {}", truncate(subject, 300)),
-        "CUSTOMER MESSAGES (oldest first):".to_string(),
-    ];
-    for (text, thread_id) in messages {
-        parts.push(format!("  [thread {thread_id}] {text}"));
-    }
-    parts.push(String::new());
-    parts.push("Extract the attributes that are actually supported by these messages.".to_string());
-    parts.join("\n")
 }
 
 pub const COPILOT_SYSTEM: &str = "You are the SupportOS Local Copilot - an assistant for one support rep, running fully locally. You help the rep understand a ticket, its customer and the local knowledge base BEFORE they reply.

@@ -40,7 +40,6 @@ pub fn apply_m039(conn: &Connection) -> Result<()> {
             embedding_state TEXT DEFAULT 'not_indexed',
             embedding_model TEXT,
             embedding       BLOB,
-            chunk_version   INTEGER DEFAULT 2,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE (document_id, chunk_index)
         );
@@ -54,7 +53,6 @@ pub fn apply_m039(conn: &Connection) -> Result<()> {
             embedding       BLOB,
             embedding_model TEXT,
             embedding_state TEXT NOT NULL DEFAULT 'not_indexed',
-            chunk_version   INTEGER NOT NULL DEFAULT 2,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE (article_id, chunk_index)
         );
@@ -69,7 +67,6 @@ pub fn apply_m039(conn: &Connection) -> Result<()> {
             embedding       BLOB,
             embedding_model TEXT,
             embedding_state TEXT NOT NULL DEFAULT 'not_indexed',
-            chunk_version   INTEGER NOT NULL DEFAULT 2,
             created_at      TEXT NOT NULL DEFAULT (datetime('now')),
             UNIQUE (conversation_id, chunk_index)
         );

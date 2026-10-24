@@ -1,6 +1,5 @@
 use rusqlite::{Connection, params};
 
-use crate::ai_provider::{EmbedResponse, LocalAiProvider};
 use crate::error::{Error, Result};
 
 pub const M008_SQL: &str = r#"
@@ -39,8 +38,6 @@ pub fn apply_m008(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub const MAX_EMBED_RETRIES: u32 = 3;
-
 #[must_use]
 pub fn content_hash(text: &str) -> String {
     use std::hash::{Hash, Hasher};
@@ -49,116 +46,12 @@ pub fn content_hash(text: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn lookup_cache(
-    conn: &Connection,
-    input_hash: &str,
-    prompt_version: &str,
-    model: &str,
-) -> Result<Option<EmbedResponse>> {
-    let json: Option<String> = conn
-        .query_row(
-            "SELECT response_json FROM ai_runs
-             WHERE input_hash = ?1 AND prompt_version = ?2 AND model = ?3
-             ORDER BY created_at DESC
-             LIMIT 1",
-            params![input_hash, prompt_version, model],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-    match json {
-        None => Ok(None),
-        Some(j) => {
-            let resp: EmbedResponse = serde_json::from_str(&j)
-                .map_err(|e| Error::Config(format!("ai_runs cache deserialization failed: {e}")))?;
-            Ok(Some(resp))
-        }
-    }
-}
-
-fn store_cache(
-    conn: &Connection,
-    input_hash: &str,
-    prompt_version: &str,
-    model: &str,
-    response: &EmbedResponse,
-) -> Result<()> {
-    let json = serde_json::to_string(response)
-        .map_err(|e| Error::Config(format!("ai_runs cache serialization failed: {e}")))?;
-    conn.execute(
-        "INSERT INTO ai_runs (input_hash, prompt_version, model, response_json)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![input_hash, prompt_version, model, json],
-    )?;
-    Ok(())
-}
-
-pub async fn embed_with_cache(
-    conn: &Connection,
-    provider: &dyn LocalAiProvider,
-    model: &str,
-    text: &str,
-    prompt_version: &str,
-) -> Result<EmbedResponse> {
-    let hash = content_hash(text);
-
-    if let Some(cached) = lookup_cache(conn, &hash, prompt_version, model)? {
-        return Ok(cached);
-    }
-
-    let mut last_error: Option<String> = None;
-    for attempt in 0..MAX_EMBED_RETRIES {
-        match provider.embed(model, text).await {
-            Ok(response) => {
-                store_cache(conn, &hash, prompt_version, model, &response)?;
-                return Ok(response);
-            }
-            Err(e) => {
-                last_error = Some(e.to_string());
-                if attempt + 1 < MAX_EMBED_RETRIES {
-                    let delay_ms = 100_u64 * (1 << attempt);
-                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-                }
-            }
-        }
-    }
-
-    Err(Error::Other(
-        format!(
-            "embedding failed after {MAX_EMBED_RETRIES} attempts (model={model}): {}",
-            last_error.unwrap_or_else(|| "unknown error".into())
-        )
-        .into(),
-    ))
-}
-
-pub fn count_cache_entries(conn: &Connection, model: &str) -> Result<u32> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM ai_runs WHERE model = ?1",
-        params![model],
-        |r| r.get(0),
-    )?;
-    Ok(u32::try_from(count).unwrap_or(0))
-}
-
-pub fn trim_cache_per_model(conn: &Connection, max_entries: u32) -> Result<u32> {
-    let rows = conn.execute(
-        "DELETE FROM ai_runs
-         WHERE id NOT IN (
-             SELECT id FROM ai_runs a
-             WHERE (SELECT COUNT(*) FROM ai_runs b
-                    WHERE b.model = a.model AND b.created_at >= a.created_at)
-                   <= ?1
-         )",
-        params![i64::from(max_entries as i32)],
-    )?;
-    Ok(u32::try_from(rows).unwrap_or(0))
-}
-
-pub fn clear_cache(conn: &Connection) -> Result<u32> {
-    let rows = conn.execute("DELETE FROM ai_runs", [])?;
-    Ok(u32::try_from(rows).unwrap_or(0))
-}
+// Clean-audit item 152: the dead embedding-cache runner surface is
+// gone — `embed_with_cache` (with its private `lookup_cache`/
+// `store_cache` helpers and `MAX_EMBED_RETRIES`) had zero callers, as
+// did the `count_cache_entries` / `trim_cache_per_model` /
+// `clear_cache` maintenance trio. The live embed pass writes the same
+// `ai_runs` ledger rows directly (batch 23 put every run there).
 
 pub const EMBED_PASS_LIMIT: i64 = 60;
 
@@ -338,8 +231,8 @@ pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<usi
         )?;
         let mut ins = conn.prepare(
             "INSERT INTO conversation_chunks
-                (conversation_id, chunk_index, content, chunk_version, chunk_kind)
-             VALUES (?1, ?2, ?3, 1, ?4)",
+                (conversation_id, chunk_index, content, chunk_kind)
+             VALUES (?1, ?2, ?3, ?4)",
         )?;
         let thread_count = chunks.len().saturating_sub(usize::from(has_resolution));
         for (i, c) in chunks.iter().enumerate() {

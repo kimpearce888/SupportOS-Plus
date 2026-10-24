@@ -121,7 +121,10 @@ impl SearchPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.response.is_none() && self.error.is_none() && !self.query.is_empty() {
+        // Clean-audit item 147: the trim guard — a whitespace-only query
+        // can never produce a response (reload early-returns), so without
+        // the trim this lane re-ran the (no-op) reload every frame.
+        if self.response.is_none() && self.error.is_none() && !self.query.trim().is_empty() {
             self.reload(db);
         }
     }

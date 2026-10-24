@@ -143,6 +143,10 @@ pub fn load_pending_approvals(conn: &rusqlite::Connection) -> Vec<ApprovalRow> {
 /// The interactive automation page state.
 pub struct AutomationPage {
     rules: Vec<AutomationRule>,
+    /// Clean-audit item 147: reload latch — an empty mirror is a legal
+    /// steady state, so "list empty" can no longer mean "re-query every
+    /// frame".
+    loaded: bool,
     approvals: Vec<ApprovalRow>,
     show_new_rule: bool,
     new_name: String,
@@ -164,6 +168,7 @@ impl AutomationPage {
     pub fn new() -> Self {
         Self {
             rules: Vec::new(),
+            loaded: false,
             approvals: Vec::new(),
             show_new_rule: false,
             new_name: String::new(),
@@ -183,6 +188,7 @@ impl AutomationPage {
 
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
+        self.loaded = false;
         self.rules.clear();
         self.approvals.clear();
     }
@@ -197,10 +203,11 @@ impl AutomationPage {
             Err(e) => self.error = Some(e.to_string()),
         }
         self.approvals = db.with_read(load_pending_approvals);
+        self.loaded = true;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.rules.is_empty() {
+        if !self.loaded {
             self.reload(db);
         }
     }

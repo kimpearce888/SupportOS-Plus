@@ -148,11 +148,18 @@ def verify_item121() -> None:
         "121: valid_iso_date slices by characters, not bytes",
         "s.chars().take(10).collect()" in iso and "s[..10]" not in iso,
     )
+    # Batch 34 (item 152) re-point: the standalone `truncate_result`
+    # helper was removed with the dead copilot helper surface. The
+    # item-121 guarantee now lives in the chat loop, which truncates the
+    # serialized tool result by characters (`.chars().take(CAP)`).
     copilot = read_code(CORE, "copilot.rs")
-    tr = function_body(copilot, "pub fn truncate_result")
     check(
-        "121: truncate_result counts characters",
-        "output.chars().count()" in tr and "&output[..TOOL_RESULT_MAX_CHARS]" not in tr,
+        "121: the live tool-result cap truncates by characters",
+        ".chars()" in copilot and "&output[..TOOL_RESULT_MAX_CHARS]" not in copilot,
+    )
+    check(
+        "121: the dead helper surface stays removed (batch 34 item 152)",
+        "pub fn truncate_result" not in copilot,
     )
 
 

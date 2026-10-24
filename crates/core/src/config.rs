@@ -15,62 +15,14 @@ const LEGACY_DATA_DIR_NAME: &str = "supportos-plusplus";
 /// Pre-1.0.0 database file name.
 const LEGACY_DB_FILE_NAME: &str = "supportos-plusplus.db";
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AppConfig {
-    pub data_dir: PathBuf,
-    pub helpscout: HelpScoutConfig,
-    pub ai: AiConfig,
-    pub sync_interval_minutes: u32,
-    pub loopback_port: u16,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct HelpScoutConfig {
-    pub client_id: String,
-    #[serde(skip_serializing, default)]
-    pub client_secret: String,
-    pub redirect_uri: String,
-    #[serde(skip_serializing, default)]
-    pub webhook_secret: String,
-    #[serde(skip_serializing, default)]
-    pub docs_api_key: String,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct AiConfig {
-    pub provider: String,
-    pub base_url: String,
-    pub chat_model: String,
-    pub embedding_model: String,
-    pub timeout_ms: u32,
-    pub concurrency: u32,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            data_dir: default_data_dir(),
-            helpscout: HelpScoutConfig::default(),
-            ai: AiConfig::default(),
-            // 1.4.0 R8 (D18): unified with the workers default and the
-            // SYNC_INTERVAL_MINUTES env fallback — one product default.
-            sync_interval_minutes: 1,
-            loopback_port: 0,
-        }
-    }
-}
-
-impl HelpScoutConfig {
-    pub fn redacted(&self) -> HelpScoutConfig {
-        HelpScoutConfig {
-            client_id: redact_string(&self.client_id),
-            client_secret: String::new(),
-            redirect_uri: self.redirect_uri.clone(),
-            webhook_secret: String::new(),
-            docs_api_key: String::new(),
-        }
-    }
-}
+// Clean-audit item 153: the `AppConfig` surface (`helpscout`, `ai`,
+// `sync_interval_minutes`, `loopback_port` — and the `HelpScoutConfig`/
+// `AiConfig` structs with their `redacted()` helper) is gone. Every
+// field was constructed and never consumed: credentials come from the
+// env (`EnvConfig`), settings live in the database, the sync interval
+// is the settings row, and the loopback listener binds an OS-assigned
+// port. Only `data_dir` was ever read (`main.rs`), so the shell now
+// calls `default_data_dir()` directly.
 
 fn data_dir_root() -> PathBuf {
     let base = std::env::var("XDG_DATA_HOME")
@@ -294,25 +246,6 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn redact_string(s: &str) -> String {
-    // Audit item 107: head/tail were raw BYTE offsets (`&s[..2]`), so any
-    // secret whose second byte sits inside a multi-byte character — a CJK,
-    // emoji, or accented-Latin client id — panicked with "byte index 2 is
-    // not a char boundary" the moment the redacted config was rendered.
-    // Redaction is a display helper: take the first and last two
-    // CHARACTERS and mask short strings by character count, never bytes.
-    if s.is_empty() {
-        return String::new();
-    }
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= 4 {
-        return "••••".into();
-    }
-    let head: String = chars[..2].iter().collect();
-    let tail: String = chars[chars.len() - 2..].iter().collect();
-    format!("{head}••••{tail}")
-}
-
 #[cfg(test)]
 mod migrate_tests {
     use super::*;
@@ -425,7 +358,30 @@ mod migrate_tests {
 
 #[cfg(test)]
 mod batch30_tests {
-    use super::*;
+    // Batch 34 (item 153): the helper moved INTO this module, so nothing
+    // is imported from the parent anymore.
+    /// Batch 34 (item 153) note: `redact_string` was the `HelpScoutConfig
+    /// ::redacted` helper until the dead AppConfig surface was removed.
+    /// It stays here, test-only, so the item-107 regression below keeps
+    /// its pinned proof (the batch-30 harness reads this file).
+    fn redact_string(s: &str) -> String {
+        // Audit item 107: head/tail were raw BYTE offsets (`&s[..2]`), so any
+        // secret whose second byte sits inside a multi-byte character — a CJK,
+        // emoji, or accented-Latin client id — panicked with "byte index 2 is
+        // not a char boundary" the moment the redacted config was rendered.
+        // Redaction is a display helper: take the first and last two
+        // CHARACTERS and mask short strings by character count, never bytes.
+        if s.is_empty() {
+            return String::new();
+        }
+        let chars: Vec<char> = s.chars().collect();
+        if chars.len() <= 4 {
+            return "••••".into();
+        }
+        let head: String = chars[..2].iter().collect();
+        let tail: String = chars[chars.len() - 2..].iter().collect();
+        format!("{head}••••{tail}")
+    }
 
     /// Audit item 107: the head/tail offsets were raw byte indices, so a
     /// secret whose second byte sits inside a multi-byte character panicked
