@@ -302,7 +302,7 @@ completion gate → publication.
 - [x] HANDOVER.md states final verified state and any remaining work — this file
 - [x] Progress and session records agree with the final report — reconciled at checkpoint 16
 - [x] Only intended audit artifacts are committed — every commit touched ONLY repo-audit-2026-10-24/
-- [x] Commit push verified — every checkpoint push output checked; head `5a19003` (final)
+- [x] Commit push verified — every checkpoint push output checked; branch head is authoritative (`git ls-remote`); substantive checkpoints end at `5a19003`
 - [x] Branch, commit hash, and publication status recorded — §Publication status + REPORT.md §18
 
 Blocked/infeasible items and their reasons are NOT marked complete: W-001 round-trip legs (external credentials — EXC-001/002/004), webhook drain (EXC-003), sync happy path (EXC-005), W-003/W-004 deep steps (data), QA-004 text-input subset + QA-006 keyboard focus-order (XTEST tooling limitation), notifier-alert leg (environment). No claim of exhaustive testing or absence of all possible bugs is made.
