@@ -497,3 +497,23 @@ from the existing passes) → ARCHITECTURE deep-dive → COV/REPORT.
 - Remaining open traceability rows: SRC/PUR/DIFF/PART/SAFE (source-review
   batches), ARCH-001 deep-dive, HAND-*/REPORT-*/GIT-*/FINAL-001 (report +
   publication phase), COV-001/002, TEST-001-adjacent re-runs none.
+
+## 2026-10-25 (cont.) — honesty correction: EVID-003 video claim + FIND-011 supplemental video (E-158..E-160)
+
+During report preparation the on-disk evidence survey found evidence/videos/
+EMPTY while the fresh EVID-003 traceability note claimed a "BUILD-phase
+launch video" — a FALSE claim (BUILD-AND-INSTALL only ever verified ffmpeg
+CAPABILITY via screenshots). Corrected immediately: the EVID-003 note is
+superseded with the true state, and the substantive gap was CLOSED rather
+than papered over — instruction 03 §6 warrants video for intermittent
+behavior, and FIND-011 (palette dismissal unreliable/intermittent) is that
+case. evidence/artifacts/w011-palette-video.py recorded the live dismissal
+matrix: 6 timestamped actions, ALL PASS — outside clicks (600,500),
+(950,120), (450,620) leave the palette open; (300,300) closes it; reopen
+works. W-011-palette-dismissal.mp4 (11.7 s, 117 frames, h264,
+ffprobe-validated) + 2 representative extracted frames (E-159/E-160 —
+cursor visibly over the UI underneath while the overlay is open).
+FINDINGS.md FIND-011 evidence updated. Tooling note: the run's bash
+invocation hit the tool timeout from pipe handling AFTER the script had
+fully completed (all events + files present) — the evidence itself is
+complete; no re-run needed.
