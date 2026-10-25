@@ -4511,7 +4511,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "supportos-plus-app-shell"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "eframe",
  "hex",
@@ -4526,14 +4526,14 @@ dependencies = [
 
 [[package]]
 name = "supportos-plus-catalog"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "supportos-plus-core"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "aes-gcm",
  "ammonia",
@@ -4572,7 +4572,7 @@ dependencies = [
 
 [[package]]
 name = "supportos-plus-xtask"
-version = "1.7.0"
+version = "1.7.1"
 dependencies = [
  "anyhow",
  "clap",
