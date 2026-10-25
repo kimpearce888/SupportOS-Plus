@@ -11,7 +11,7 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::sla::SlaReport;
 
-use super::{i64_field, str_field};
+use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::chart;
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
@@ -87,6 +87,10 @@ pub struct ReportsPage {
     /// R8 (D5): outcome note for the page's "Sync now" action — the
     /// completion itself is reported by the global sync toast.
     pub sync_note: String,
+    /// FIND-005: armed shell-confirm request for a destructive action —
+    /// raised by [`Self::ui`] at the end of the frame (the click happens
+    /// inside nested render closures).
+    pending_confirm: Option<ConfirmRequest>,
 
     tab: Tab,
     days: i64,
@@ -207,6 +211,7 @@ impl ReportsPage {
             b_saved: Vec::new(),
             b_save_name: String::new(),
             b_note: None,
+            pending_confirm: None,
             i_health: None,
             i_effectiveness: None,
             i_high_friction: 0,
@@ -373,7 +378,7 @@ impl ReportsPage {
         ui: &mut egui::Ui,
         db: &DbHandle,
         engine: Option<&std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
-    ) {
+    ) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         design::page_header(
@@ -451,6 +456,11 @@ impl ReportsPage {
             Tab::Builder => self.builder_ui(ui, db),
             Tab::Insights => self.insights_ui(ui, db),
         }
+        // FIND-005: raise the armed confirm request (see the field doc).
+        if let Some(request) = self.pending_confirm.take() {
+            return Some(NavRequest::Confirm(request));
+        }
+        None
     }
 
     fn overview_ui(&mut self, ui: &mut egui::Ui) {
@@ -955,7 +965,13 @@ impl ReportsPage {
                             self.load_saved_report(&saved.config);
                         }
                         if design::button(ui, "delete", ButtonVariant::Outline).clicked() {
-                            self.delete_saved_report(db, saved.id);
+                            // FIND-005: the delete used to run immediately —
+                            // arm the shell confirm instead (it executes only
+                            // when the dialog resolves Confirmed).
+                            self.pending_confirm = Some(ConfirmRequest::delete_saved_report(
+                                saved.id,
+                                &saved.name,
+                            ));
                         }
                     });
                 }
@@ -1123,16 +1139,25 @@ impl ReportsPage {
         }
     }
 
-    fn delete_saved_report(&mut self, db: &DbHandle, id: i64) {
+    /// FIND-005: runs only after the shell dialog confirms; keeps the
+    /// Builder-tab note behavior and reports the outcome to the shell.
+    pub fn delete_saved_report(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         match db.with_write(|conn| spp_core::reports::delete_saved_report(conn, id)) {
             Ok(true) => {
                 self.b_note = Some((true, "deleted".into()));
                 self.b_saved = db
                     .with_read(spp_core::reports::list_saved_reports)
                     .unwrap_or_default();
+                Ok(())
             }
-            Ok(false) => self.b_note = Some((false, "already gone".into())),
-            Err(e) => self.b_note = Some((false, format!("delete failed: {e}"))),
+            Ok(false) => {
+                self.b_note = Some((false, "already gone".into()));
+                Ok(())
+            }
+            Err(e) => {
+                self.b_note = Some((false, format!("delete failed: {e}")));
+                Err(e)
+            }
         }
     }
 
@@ -2123,7 +2148,7 @@ mod tests {
             .with_read(|conn| spp_core::reports::run_builder_report(conn, &config))
             .expect("run");
         assert!(!outcome.notes.is_empty());
-        page.delete_saved_report(&db, page.b_saved[0].id);
+        page.delete_saved_report(&db, page.b_saved[0].id).ok();
         assert!(page.b_saved.is_empty(), "deleted");
     }
 

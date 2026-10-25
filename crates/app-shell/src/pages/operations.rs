@@ -22,7 +22,7 @@ use spp_core::catalog::OperationsTileKey;
 use spp_core::db::DbHandle;
 use spp_core::workload::{CapacityModel, WorkloadSnapshot};
 
-use super::NavRequest;
+use super::{ConfirmRequest, NavRequest};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -223,6 +223,9 @@ pub struct OperationsPage {
     suggestions_loaded: bool,
     error: Option<String>,
     library: Option<LibraryModel>,
+    /// FIND-005: armed shell-confirm request for a destructive Library
+    /// action — raised by [`Self::ui`] at the end of the frame.
+    pending_confirm: Option<ConfirmRequest>,
 }
 
 impl OperationsPage {
@@ -237,6 +240,7 @@ impl OperationsPage {
             suggestions_loaded: false,
             error: None,
             library: None,
+            pending_confirm: None,
         }
     }
 
@@ -319,6 +323,10 @@ impl OperationsPage {
             Tab::Tiles => nav = self.tiles_ui(ui),
             Tab::Workload => self.workload_ui(ui, db),
             Tab::Library => self.library_ui(ui, db),
+        }
+        // FIND-005: raise the armed confirm request (see the field doc).
+        if let Some(request) = self.pending_confirm.take() {
+            return Some(NavRequest::Confirm(request));
         }
         nav
     }
@@ -902,20 +910,20 @@ impl OperationsPage {
                 }
             }
             LibraryAction::DeleteReply(remote_id) => {
-                let payload =
-                    reply_write_payload("delete", mailbox.remote_id, Some(remote_id), "", "");
-                match db.with_write(|conn| {
-                    spp_core::jobs::enqueue_on(conn, "sync", "saved_reply_write", &payload, 1, 2)
-                }) {
-                    Ok(_) => {
-                        library.notice = Some(
-                            "delete sent to Help Scout — the table re-reads the \
-                             platform's post-write list when it lands"
-                                .to_string(),
-                        );
-                    }
-                    Err(e) => library.notice = Some(format!("could not queue the delete: {e}")),
-                }
+                // FIND-005: the platform-side delete used to enqueue
+                // immediately — arm the shell confirm instead; the write
+                // lands only when the dialog resolves Confirmed.
+                let name = library
+                    .replies
+                    .iter()
+                    .find(|r| r.remote_id == remote_id)
+                    .map(|r| r.name.clone())
+                    .unwrap_or_else(|| format!("reply {remote_id}"));
+                self.pending_confirm = Some(ConfirmRequest::delete_saved_reply(
+                    mailbox.remote_id,
+                    remote_id,
+                    &name,
+                ));
             }
             LibraryAction::RunWorkflow {
                 workflow_remote_id,
@@ -936,6 +944,42 @@ impl OperationsPage {
                     }
                     Err(e) => library.notice = Some(format!("could not queue the run: {e}")),
                 }
+            }
+        }
+    }
+
+    /// FIND-005: runs only after the shell dialog confirms — the
+    /// platform-side delete job is enqueued here (the removal lands when
+    /// the sync queue drains).
+    pub fn delete_saved_reply(
+        &mut self,
+        db: &DbHandle,
+        mailbox_remote_id: i64,
+        remote_id: i64,
+    ) -> spp_core::Result<()> {
+        let payload =
+            reply_write_payload("delete", mailbox_remote_id, Some(remote_id), "", "");
+        let Some(library) = self.library.as_mut() else {
+            // The Library tab was left before the dialog was confirmed —
+            // nothing to delete against.
+            return Err(spp_core::Error::Config(
+                "the saved-replies library is not loaded".into(),
+            ));
+        };
+        match db.with_write(|conn| {
+            spp_core::jobs::enqueue_on(conn, "sync", "saved_reply_write", &payload, 1, 2)
+        }) {
+            Ok(_) => {
+                library.notice = Some(
+                    "delete sent to Help Scout — the table re-reads the \
+                     platform's post-write list when it lands"
+                        .to_string(),
+                );
+                Ok(())
+            }
+            Err(e) => {
+                library.notice = Some(format!("could not queue the delete: {e}"));
+                Err(e)
             }
         }
     }

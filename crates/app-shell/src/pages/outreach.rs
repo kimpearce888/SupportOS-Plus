@@ -62,6 +62,9 @@ pub struct OutreachPage {
     new_dnc_reason: String,
     message: Option<String>,
     error: Option<String>,
+    /// FIND-005: armed shell-confirm request for a destructive action —
+    /// raised by [`Self::ui`] at the end of the frame.
+    pending_confirm: Option<ConfirmRequest>,
     /// Clean-audit item 147: reload latch — an empty mirror is a legal
     /// steady state, so "lists empty" can no longer mean "re-query every
     /// frame".
@@ -92,6 +95,7 @@ impl OutreachPage {
             new_dnc_reason: String::new(),
             message: None,
             error: None,
+            pending_confirm: None,
         }
     }
 
@@ -338,12 +342,34 @@ impl OutreachPage {
         }
     }
 
-    fn remove_dnc(&mut self, db: &DbHandle, customer_id: i64) {
+    /// FIND-005: runs only after the shell dialog confirms.
+    pub fn remove_dnc(&mut self, db: &DbHandle, customer_id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::remove_from_dnc(conn, customer_id));
-        if let Err(e) = result {
+        if let Err(e) = &result {
             self.error = Some(e.to_string());
         }
         self.reload(db);
+        result.map(|_| ())
+    }
+
+    /// FIND-005: runs only after the shell dialog confirms — discards the
+    /// campaign's remaining queued sends.
+    pub fn cancel_campaign_remaining_confirmed(
+        &mut self,
+        db: &DbHandle,
+        id: i64,
+    ) -> spp_core::Result<()> {
+        let result =
+            db.with_write(|conn| spp_core::outreach::campaign_cancel_remaining(conn, id));
+        self.message = Some(
+            result
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("(no message)")
+                .to_string(),
+        );
+        self.reload(db);
+        Ok(())
     }
 
     /// Render the page. Returns a confirm request when the user asked to
@@ -368,7 +394,7 @@ impl OutreachPage {
         }
         design::divider(ui);
 
-        match self.tab {
+        let nav = match self.tab {
             Tab::Campaigns => {
                 self.campaigns_ui(ui, db);
                 None
@@ -378,7 +404,12 @@ impl OutreachPage {
                 self.dnc_ui(ui, db);
                 None
             }
+        };
+        // FIND-005: raise the armed confirm request (see the field doc).
+        if let Some(request) = self.pending_confirm.take() {
+            return Some(NavRequest::Confirm(request));
         }
+        nav
     }
 
     fn campaigns_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -472,7 +503,19 @@ impl OutreachPage {
             self.reload_report(db, id);
         }
         if let Some((id, action)) = acted {
-            self.campaign_action(db, id, action);
+            if action == CampaignAction::CancelRemaining {
+                // FIND-005: discarding every queued send used to run on the
+                // click — arm the shell confirm instead.
+                let name = campaigns
+                    .iter()
+                    .find(|c| i64_field(c, "id") == id)
+                    .map(|c| str_field(c, "name").to_string())
+                    .unwrap_or_else(|| format!("campaign {id}"));
+                self.pending_confirm =
+                    Some(ConfirmRequest::cancel_campaign_remaining(id, &name));
+            } else {
+                self.campaign_action(db, id, action);
+            }
         }
 
         if self.selected.is_some() {
@@ -647,7 +690,6 @@ impl OutreachPage {
     fn dnc_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let t = design::tokens(ui);
         let dnc = self.dnc.clone();
-        let mut removed: Option<i64> = None;
         design::card_titled(
             ui,
             "Do not contact",
@@ -697,7 +739,10 @@ impl OutreachPage {
                                 if design::button(ui, "remove", ButtonVariant::Destructive)
                                     .clicked()
                                 {
-                                    removed = Some(*customer_id);
+                                    // FIND-005: the removal used to run on the
+                                    // click — arm the shell confirm instead.
+                                    self.pending_confirm =
+                                        Some(ConfirmRequest::remove_from_dnc(*customer_id));
                                 }
                             });
                         }
@@ -712,9 +757,6 @@ impl OutreachPage {
                     });
             },
         );
-        if let Some(customer_id) = removed {
-            self.remove_dnc(db, customer_id);
-        }
     }
 }
 
@@ -918,7 +960,7 @@ mod tests {
         let on_dnc = db.with_read(|conn| spp_core::outreach::is_on_dnc(conn, 9));
         assert!(on_dnc.expect("dnc check"));
 
-        page.remove_dnc(&db, 9);
+        page.remove_dnc(&db, 9).ok();
         assert!(page.dnc.is_empty());
         let after = db.with_read(|conn| spp_core::outreach::is_on_dnc(conn, 9));
         assert!(!after.expect("dnc check 2"));

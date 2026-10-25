@@ -316,6 +316,35 @@ impl ShellApp {
             DestructiveAction::ClearDiagnosticsLog => {
                 ("event log", "cleared", self.diagnostics.clear_log(&self.db))
             }
+            DestructiveAction::DeleteSavedReport { id } => (
+                "saved report",
+                "deleted",
+                self.reports.delete_saved_report(&self.db, id),
+            ),
+            DestructiveAction::RemoveFromDnc { customer_id } => (
+                "do-not-contact entry",
+                "removed",
+                self.outreach.remove_dnc(&self.db, customer_id),
+            ),
+            DestructiveAction::CancelCampaignRemaining { id } => (
+                "campaign sends",
+                "cancelled",
+                self.outreach.cancel_campaign_remaining_confirmed(&self.db, id),
+            ),
+            DestructiveAction::DisableAllAi => (
+                "AI",
+                "disabled",
+                self.ai_center.disable_all_ai_confirmed(&self.db),
+            ),
+            DestructiveAction::DeleteSavedReply {
+                mailbox_remote_id,
+                remote_id,
+            } => (
+                "saved reply",
+                "deleted",
+                self.operations
+                    .delete_saved_reply(&self.db, mailbox_remote_id, remote_id),
+            )
         };
         match outcome {
             Ok(()) => self.toasts.success(format!("{label} {verb}")),
@@ -756,7 +785,7 @@ impl ShellApp {
                                         nav = self.knowledge.ui(ui, &self.db, sync.as_ref());
                                     }
                                     PageKey::Reports => {
-                                        self.reports.ui(ui, &self.db, sync.as_ref());
+                                        nav = self.reports.ui(ui, &self.db, sync.as_ref());
                                     }
                                     PageKey::LiveChats => {
                                         self.live_chats.ui(ui, &self.db);
@@ -764,7 +793,9 @@ impl ShellApp {
                                     PageKey::Operations => {
                                         nav = self.operations.ui(ui, &self.db);
                                     }
-                                    PageKey::AiCenter => self.ai_center.ui(ui, &self.db),
+                                    PageKey::AiCenter => {
+                                        nav = self.ai_center.ui(ui, &self.db);
+                                    }
                                     PageKey::Automation => {
                                         nav = self.automation.ui(ui, &self.db);
                                     }

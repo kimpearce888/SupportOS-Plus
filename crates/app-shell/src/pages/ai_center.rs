@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 use spp_core::ai_attributes::AttributeDistribution;
 use spp_core::catalog::AiAttributeKey;
+use super::{ConfirmRequest, NavRequest};
 use spp_core::db::DbHandle;
 
 use crate::design::{self, BadgeTone, ButtonVariant};
@@ -240,6 +241,9 @@ pub struct AiCenterPage {
     analytics: Option<AiAnalytics>,
     distributions: Vec<AttributeDistribution>,
     jobs: Vec<AiJobRow>,
+    /// FIND-005: armed shell-confirm request for the global AI kill
+    /// switch — raised by [`Self::ui`] at the end of the frame.
+    pending_confirm: Option<ConfirmRequest>,
     /// Connection test outcome, written by the background test thread
     /// and polled each frame.
     connection_status: Arc<Mutex<Option<String>>>,
@@ -323,6 +327,7 @@ impl AiCenterPage {
             analytics: None,
             distributions: Vec::new(),
             jobs: Vec::new(),
+            pending_confirm: None,
             connection_status: Arc::new(Mutex::new(None)),
             hub_endpoints: Vec::new(),
             hub_roles: spp_core::ai_hub::RoleMap::default(),
@@ -510,7 +515,7 @@ impl AiCenterPage {
     }
 
     /// Render the page.
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
         // A5: resolve the in-flight copilot chat turn (the worker persists
         // messages; the poll only moves the terminal state into the page).
@@ -534,6 +539,20 @@ impl AiCenterPage {
             Tab::Usage => self.usage_ui(ui, db),
             Tab::Jobs => self.jobs_ui(ui),
         }
+        // FIND-005: raise the armed confirm request (see the field doc).
+        if let Some(request) = self.pending_confirm.take() {
+            return Some(NavRequest::Confirm(request));
+        }
+        None
+    }
+
+    /// FIND-005: runs only after the shell dialog confirms — disables
+    /// every AI feature and endpoint call at once.
+    pub fn disable_all_ai_confirmed(&mut self, db: &DbHandle) -> spp_core::Result<()> {
+        let result =
+            db.with_write(|conn| spp_core::settings::set_bool(conn, "ai_enabled", false));
+        self.reload_hub(db);
+        result
     }
 
     /// A5: poll the in-flight copilot_chat job — completed turns reload the
@@ -1540,10 +1559,10 @@ impl AiCenterPage {
                     .on_hover_text("disables every AI feature and every endpoint call at once")
                     .clicked()
                     {
-                        let _ = db.with_write(|conn| {
-                            spp_core::settings::set_bool(conn, "ai_enabled", false)
-                        });
-                        self.reload_hub(db);
+                        // FIND-005: the write used to run on the click — arm
+                        // the shell confirm instead (one click disabled all
+                        // AI behavior).
+                        self.pending_confirm = Some(ConfirmRequest::disable_all_ai());
                     }
                 } else if design::button(
                     ui,

@@ -59,6 +59,16 @@ pub enum DestructiveAction {
     DeleteSegment { id: i64 },
     /// Clear the diagnostics event log (every stored event).
     ClearDiagnosticsLog,
+    /// Delete a saved Builder report by row id (FIND-005).
+    DeleteSavedReport { id: i64 },
+    /// Remove a customer from the do-not-contact list (FIND-005).
+    RemoveFromDnc { customer_id: i64 },
+    /// Discard a campaign's remaining queued sends (FIND-005).
+    CancelCampaignRemaining { id: i64 },
+    /// Disable every AI feature via the global kill switch (FIND-005).
+    DisableAllAi,
+    /// Delete a Help Scout saved reply (platform-side sync write) (FIND-005).
+    DeleteSavedReply { mailbox_remote_id: i64, remote_id: i64 },
 }
 
 /// A request to arm the shell-level confirmation dialog for a
@@ -177,6 +187,84 @@ impl ConfirmRequest {
             confirm_label: "Clear log".into(),
             danger: true,
             action: DestructiveAction::ClearDiagnosticsLog,
+        }
+    }
+
+    /// Confirmation for deleting a saved Builder report (FIND-005).
+    #[must_use]
+    pub fn delete_saved_report(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete saved report?".into(),
+            message: format!(
+                "The saved report \"{name}\" is removed. This cannot be undone."
+            ),
+            confirm_label: "Delete report".into(),
+            danger: true,
+            action: DestructiveAction::DeleteSavedReport { id },
+        }
+    }
+
+    /// Confirmation for removing a customer from the do-not-contact list
+    /// (FIND-005) — they become contactable by campaigns again.
+    #[must_use]
+    pub fn remove_from_dnc(customer_id: i64) -> Self {
+        Self {
+            title: "Remove from the do-not-contact list?".into(),
+            message: format!(
+                "Customer {customer_id} becomes contactable by every campaign again."
+            ),
+            confirm_label: "Remove".into(),
+            danger: true,
+            action: DestructiveAction::RemoveFromDnc { customer_id },
+        }
+    }
+
+    /// Confirmation for discarding a campaign's remaining queued sends
+    /// (FIND-005).
+    #[must_use]
+    pub fn cancel_campaign_remaining(id: i64, name: &str) -> Self {
+        Self {
+            title: "Cancel the remaining sends?".into(),
+            message: format!(
+                "Every queued send of the campaign \"{name}\" is discarded. \
+                 This cannot be undone."
+            ),
+            confirm_label: "Cancel sends".into(),
+            danger: true,
+            action: DestructiveAction::CancelCampaignRemaining { id },
+        }
+    }
+
+    /// Confirmation for the global AI kill switch (FIND-005) — one click
+    /// used to disable every AI feature and endpoint call at once.
+    #[must_use]
+    pub fn disable_all_ai() -> Self {
+        Self {
+            title: "Disable all AI?".into(),
+            message: "Every AI feature and every endpoint call is disabled at once. \
+                      Re-enable it here when needed."
+                .into(),
+            confirm_label: "Disable AI".into(),
+            danger: true,
+            action: DestructiveAction::DisableAllAi,
+        }
+    }
+
+    /// Confirmation for deleting a Help Scout saved reply (FIND-005) — the
+    /// platform-side delete lands when the sync queue drains.
+    #[must_use]
+    pub fn delete_saved_reply(mailbox_remote_id: i64, remote_id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete saved reply?".into(),
+            message: format!(
+                "The saved reply \"{name}\" is deleted from Help Scout. This cannot be undone."
+            ),
+            confirm_label: "Delete reply".into(),
+            danger: true,
+            action: DestructiveAction::DeleteSavedReply {
+                mailbox_remote_id,
+                remote_id,
+            },
         }
     }
 
