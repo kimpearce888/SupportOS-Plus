@@ -27,3 +27,9 @@ Thumbs.db
 *.db
 *.db-shm
 *.db-wal
+
+# FIND-003 (2026-10-25): secret-envelope key material must never be tracked.
+# The qa-audit/20261019T050847Z artifacts were purged from history via
+# git-filter-repo; this rule prevents reintroduction. Guarded by the
+# spp_xtask hygiene tests.
+secrets.key
