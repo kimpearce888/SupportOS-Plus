@@ -2,8 +2,8 @@
 
 - Audited application revision: `main` @ `3affe7e` (full sha in HANDOVER.md)
 - Current audit branch/commit: audit checkpoint commits on top of `3affe7e` (see HANDOVER.md §Repository and Git state)
-- Current phase: Phase 4 — edge/recovery testing DONE (QA-004/005 executed); formal QA ledger consolidation next
-- Last update: 2026-10-25 ~01:15 UTC
+- Current phase: **FINAL** — report reconciled, completion gate recorded
+- Last update: 2026-10-25 ~02:00 UTC
 - Traceability reconciliation state: 50/50 rows preserved; BOOT-001..003, ENV-001, BUILD-001/002, TEST-001, FEAT-001/002/003 recorded (FEAT-004 IN PROGRESS); ARCH-001 v1 (deep-dive queued); remainder = workflows/QA ledger/report
 
 | Phase | Status | Evidence/output | Blocker / remaining action |
@@ -18,7 +18,7 @@
 | Edge/failure/recovery testing | **PASS (feasible subset)** | QA-004: repetition/duplicate + gate re-arm ×2 + clear-log round trip; QA-005: designed-refusal path + C-SET-66 really-restore + SIGKILL recovery + cross-restart persistence; E-143..E-157 | TEXT-input boundaries keyboard-limited; mid-sync cancel + malformed credentials externally blocked (EXC-005/001/002/004) |
 | Findings and fix recommendations | IN PROGRESS | FINDINGS.md (FIND-001 Medium w/ EXC-003/004 registered; FIND-002 CLOSED by W-009; FIND-003..FIND-011 Low) | FIND-001 root cause + listener runtime-proven; credential-gated remediation surfaces now exception-registered |
 | Evidence reconciliation | IN PROGRESS | evidence/manifest.csv E-001..E-157 validated (zero missing paths) | keep manifest ↔ files diff-current (EVID-005) |
-| Final report and publication | NOT STARTED | REPORT.md (skeleton) | after COV-001/002 |
+| Final report and publication | **FINAL** | REPORT.md (18 sections, reconciled); completion gate 04 §5 recorded in HANDOVER | — |
 
 ## Current counts (2026-10-25 ~00:10 UTC)
 

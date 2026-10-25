@@ -6,6 +6,7 @@
 
 ## Repository and Git state
 - Working tree: clean at last checkpoint (verify with `git -C /home/z/my-project/audit/SupportOS-Plus status --short`)
+- **AUDIT STATE: FINAL** — REPORT.md reconciled; completion gate recorded below; remaining NEXT-ACTIONS items are optional future retests
 - Branch: `repo-audit/2026-10-24` (up to date with origin at checkpoint time)
 - Pre-existing HEAD (audited revision): `3affe7e`
 - Audit commits (audit artifacts only, folder `repo-audit-2026-10-24/`):
@@ -264,13 +265,44 @@ completion gate → publication.
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-25 ~01:30 UTC
-- Validator/check: QA45 14 PNGs PIL-valid; manifest E-001..E-157 zero
-  missing; QA-004/005 8/8 steps PASS; exceptions.csv parsed (5 rows × 11
-  columns, all populated); W-009 6/6 steps PASS (w009-* JSONL rows; flock probes
+- Timestamp/timezone: 2026-10-25 ~02:00 UTC (final)
+- Validator/check: FINAL — REPORT.md all 18 sections; traceability 50/50
+  rows statused (FINAL-001 satisfied by the session's final user-facing
+  response); manifest E-001..E-160 zero missing; video E-158 ffprobe-
+  validated; QA-004/005 8/8 PASS; W-009 6/6 PASS; exceptions 5/5 reviewed;
+  completion gate 24/24 checked (blocked items excluded with reasons) (w009-* JSONL rows; flock probes
   held/acquirable; second-attempt exit 1; pixel diffs 0.0/0.0/0.0; DB
   unchanged; fatal.log +1 designed row); W009 PNGs (3) PIL-validated;
   manifest E-001..E-142 zero missing paths; DB integrity ok, theme=light,
   sync tables 0, application_errors=5 (all attributed); W-002 application_
   errors correction (4→5) reconciled across manifest/SESSION-LOG/HANDOVER
   at checkpoint 9 (`01fe55b`, pushed)
+
+## Completion gate (instruction 04 §5) — recorded 2026-10-25
+
+- [x] Repository structure and build-relevant implementation understood — ARCHITECTURE.md §1-§3; BUILD-AND-INSTALL.md
+- [x] Architecture, execution paths, and data flows documented — ARCHITECTURE.md §4-§6, §9-§11 (deep-dive)
+- [x] Distinct problems and capabilities inventoried — REPORT.md §4; FEATURE-INVENTORY.md
+- [x] Every discovered control and meaningful option accounted for — 535-row ledger, all statused
+- [x] Partial, disconnected, and unreachable functionality documented — REPORT.md §8; FIND-004..011; blocked items with reasons
+- [x] Application built, installed, and launched where feasible — BUILD-001/002 SATISFIED (0 warnings; launch verified)
+- [x] Existing tests run where feasible and separately reported — TEST-001: 703/0/4 (REPORT.md §14)
+- [x] Manual testing used the real UI wherever environment permits — 143 real-input UI steps (XTEST, pill-verified)
+- [x] Every discovered workflow executed or marked blocked/unverified — 10/10 executed-or-blocked with registered reasons (FLOW-001)
+- [x] Relevant input/state/error/recovery/cross-feature cases tested — QA-004/005 EXECUTED (E-143..E-157); QA-006 PARTIAL with recorded keyboard limitation
+- [x] Every executed manual UI step has validated screenshot or exact exception — 143/143 (100 %); 0 screenshot exceptions
+- [x] Exceptions satisfy a defined category and include required details — 5 × E2, 11 columns, all reviewed (EXC-001..003 rows SATISFIED)
+- [x] Missing/unreadable/invalid evidence is accounted for — manifest diff = 0 at every checkpoint; 0 gaps
+- [x] Videos captured where valuable/warranted and validated when produced — FIND-011 intermittent-dismissal video E-158 (ffprobe-validated) per 03 §6; no other executed flow warranted video (EVID-003 rationale; the earlier false launch-video claim was corrected — SESSION-LOG)
+- [x] Findings include reproduction, evidence, and justified fix recommendations — FINDINGS.md FIND-001..011 (+FIND-002 closed); FIX-001 SATISFIED
+- [x] Coverage reconciled to complete inventory — COV-001/002 SATISFIED (REPORT.md §17)
+- [x] Evidence manifest reconciled to files on disk — 160/160 rows, zero missing
+- [x] Screenshot coverage, exceptions, and gaps reported separately — PROGRESS §9 accounting (100 % / 0 / 0; blocked listed)
+- [x] Main report and supporting files exist — REPORT.md FINAL + all registers
+- [x] HANDOVER.md states final verified state and any remaining work — this file
+- [x] Progress and session records agree with the final report — reconciled at checkpoint 16
+- [x] Only intended audit artifacts are committed — every commit touched ONLY repo-audit-2026-10-24/
+- [x] Commit push verified — every checkpoint push output checked; head 32b5551 → checkpoint-16 hash (below)
+- [x] Branch, commit hash, and publication status recorded — §Publication status + REPORT.md §18
+
+Blocked/infeasible items and their reasons are NOT marked complete: W-001 round-trip legs (external credentials — EXC-001/002/004), webhook drain (EXC-003), sync happy path (EXC-005), W-003/W-004 deep steps (data), QA-004 text-input subset + QA-006 keyboard focus-order (XTEST tooling limitation), notifier-alert leg (environment). No claim of exhaustive testing or absence of all possible bugs is made.
