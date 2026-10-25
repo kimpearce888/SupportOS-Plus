@@ -535,3 +535,28 @@ New session resumed from HANDOVER.md (audit already FINAL at checkpoint
   the ls-remote-verified branch-head state at checkpoint 17.
 - No other files changed; no app code touched; every audit conclusion,
   count, and evidence item is unchanged by this session.
+
+## 2026-10-25 (cont.) — FIND-003 authorized history purge (option (b) executed)
+
+Maintainer authorization received verbatim ("for FIND-003 you have
+authorization, do it."), lifting the no-rewrite/no-force-push constraint for
+this single operation:
+
+- Backups first: `git bundle --all` (verify passed) + bare mirror clone —
+  `spp-pre-rewrite-20261025T021728.bundle` / `spp-mirror-backup-20261025T021728.git`,
+  both retained locally only.
+- `git tag --contains` proved ALL 11 release tags descend from the
+  secret-introducing commits → rewrite scope = `main` + all tags.
+- `git filter-repo --invert-paths` (8 exact paths + `'*secrets.key'` glob):
+  164 commits rewritten; reflog+gc purged all pre-rewrite objects locally.
+- Forward guard committed on the rewritten head (`ae46cf3`): `.gitignore`
+  rule + 2 spp_xtask hygiene tests; full suite **706 passed / 0 failed /
+  4 ignored** (pre-rewrite baseline 704 + 2 new guards, no regression).
+- Pushed `main` with `--force-with-lease` pinned to the pre-rewrite remote
+  head + forced tag update; `git ls-remote` shows zero pre-rewrite SHAs;
+  `main` still the only branch; fresh GitHub clone scans clean.
+- Byte-exact content-leak cross-check (10 key lines from the backup mirror
+  vs 738 tracked files): no purged key material appears anywhere.
+- Full record: `HISTORY-REWRITE.md` (+ `HISTORY-REWRITE-commit-map.txt` /
+  `HISTORY-REWRITE-ref-map.txt`) in this folder. **FIND-003 → CLOSED**
+  (purge executed + forward guard in place).

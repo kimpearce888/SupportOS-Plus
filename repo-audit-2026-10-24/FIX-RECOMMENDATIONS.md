@@ -32,3 +32,18 @@
 7. **FIND-009:** invalid refresh-seconds → inline error, no silent 3600; boundary values 60/86400 accepted; capacity and date fields likewise.
 8. **FIND-010:** back from profile with an applied query → results restored; with no query → previous empty-state behavior.
 9. **FIND-011:** open palette → click each screen quadrant → closed every time; no click reaches the UI underneath while open; header button toggles open/closed; Escape still works.
+
+## Execution log — FIND-003 (2026-10-25)
+
+Option (b) executed with explicit maintainer authorization ("for FIND-003 you
+have authorization, do it"): the 8 `qa-profile-*/secrets.key` +
+`smoke-datadir/secrets.key` artifacts were purged from every commit of every
+ref — `git tag --contains` proved all 11 release tags reachable, so `main` +
+all tags were rewritten via git-filter-repo; pushed with a lease-pinned
+force-push; independently verified by a fresh GitHub clone scan and a
+byte-exact content-leak scan (738 tracked files, zero occurrences). Forward
+guard: `secrets.key` `.gitignore` rule + 2 spp_xtask regression tests (suite
+706/0/4). Full record: `HISTORY-REWRITE.md` in this folder. **FIND-003 is
+CLOSED.** Residual: GitHub-side unreachable-object retention is outside git
+control (see HISTORY-REWRITE.md §Residual risks); the rotation half of option
+(b) still applies if any profile ever encrypted real data with these keys.
