@@ -21,7 +21,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -32,6 +32,25 @@ use crate::error::Result;
 use crate::helpscout_real::HsCredentials;
 use crate::provider_handle::ProviderHandle;
 use crate::webhook_handler::{self, WebhookProcessResult};
+
+/// The port the process's loopback listener actually bound, recorded once
+/// at boot (FIND-001). `None` while no listener is running — the UI reads
+/// this to surface the listener state instead of leaving a webhook/OAuth
+/// outage log-only.
+static BOUND_PORT: OnceLock<u16> = OnceLock::new();
+
+/// The port the loopback listener actually bound this boot (`None` when
+/// it is not running).
+#[must_use]
+pub fn bound_port() -> Option<u16> {
+    BOUND_PORT.get().copied()
+}
+
+/// Record the bound listener port (called by the shell at boot; the first
+/// successful bind wins).
+pub fn record_bound_port(port: u16) {
+    let _ = BOUND_PORT.set(port);
+}
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;

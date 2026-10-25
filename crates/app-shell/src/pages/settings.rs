@@ -1373,6 +1373,23 @@ impl SettingsPage {
             ui.spinner();
             return;
         };
+        // FIND-001: the listener state used to be log-only — an occupied
+        // :3000 silently degraded webhook ingress and the OAuth callback.
+        // Surface the port the listener actually bound (if any).
+        match spp_core::loopback::bound_port() {
+            Some(port) => design::hint_text(
+                ui,
+                &format!(
+                    "loopback listener answering on :{port} (webhook ingress + OAuth callback)"
+                ),
+            ),
+            None => design::error_text(
+                ui,
+                "loopback listener NOT running — webhook ingress and the OAuth \
+                 callback are unavailable; check the startup log for the bind error",
+            ),
+        }
+        ui.add_space(4.0);
         design::card_titled(
             ui,
             "Help Scout connection",
@@ -1925,19 +1942,54 @@ impl SettingsPage {
         creds: &spp_core::helpscout_real::HsCredentials,
         redirect_uri: &str,
     ) {
-        let Some(port) = spp_core::loopback::port_from_redirect_uri(redirect_uri) else {
-            self.error = Some(format!(
-                "the redirect URI {redirect_uri:?} is not a local http URL with \
-                 a port; set HELPSCOUT_REDIRECT_URI to something like \
-                 http://localhost:3000/oauth/callback"
-            ));
+        // FIND-001: prefer the port the loopback listener actually bound
+        // this boot (SPP_LOOPBACK_PORT override or the OS-assigned bind
+        // fallback); fall back to the redirect URI's own port when nothing
+        // was recorded (tests, or a listener started before this change).
+        let bound = spp_core::loopback::bound_port()
+            .or_else(|| spp_core::loopback::port_from_redirect_uri(redirect_uri));
+        self.begin_oauth_on(db, creds, redirect_uri, bound);
+    }
+
+    /// FIND-001: `bound` is the port the loopback listener actually bound
+    /// this boot (`None` when it is not running). It may legitimately
+    /// differ from the redirect URI's port — the recorded redirect URI is
+    /// rewritten to the bound port so the callback's own port-match still
+    /// validates. Help Scout matches the redirect exactly, so the message
+    /// names the URL to register on the Help Scout app. Non-local redirect
+    /// URIs (e.g. a user-run relay) are kept untouched — the callback
+    /// validation accepts those on any port by design.
+    fn begin_oauth_on(
+        &mut self,
+        db: &DbHandle,
+        creds: &spp_core::helpscout_real::HsCredentials,
+        redirect_uri: &str,
+        bound: Option<u16>,
+    ) {
+        let Some(bound_port) = bound else {
+            self.error = Some(
+                "the SupportOS+ callback listener is not running — webhooks and \
+                 the OAuth callback are unavailable. Restart SupportOS+ and \
+                 check the log for the listener bind error."
+                    .into(),
+            );
             self.authorize_url = None;
             return;
         };
-        if !spp_core::loopback::listener_answers(port) {
+        let effective_redirect = match spp_core::loopback::port_from_redirect_uri(redirect_uri)
+        {
+            // A local URI whose port matches the bound listener: keep it.
+            Some(port) if port == bound_port => redirect_uri.to_string(),
+            // A local URI naming a port the listener did NOT bind: rewrite
+            // it to the bound port so the callback validation passes.
+            Some(_) => format!("http://localhost:{bound_port}/oauth/callback"),
+            // A non-local URI (user-run relay): keep it untouched.
+            None => redirect_uri.to_string(),
+        };
+        if !spp_core::loopback::listener_answers(bound_port) {
             self.error = Some(format!(
                 "the SupportOS+ callback listener is not answering on port \
-                 {port}. Either SupportOS+ was not restarted after the \
+                 {bound_port}. Either SupportOS+ was not restarted after the \
                  credentials were saved, or another program is using the \
                  port. Restart SupportOS+ and try again; if the port is \
                  taken, close that program (or set HELPSCOUT_REDIRECT_URI \
@@ -1947,13 +1999,15 @@ impl SettingsPage {
             self.authorize_url = None;
             return;
         }
-        match spp_core::loopback::begin_oauth(db, creds, redirect_uri) {
+        match spp_core::loopback::begin_oauth(db, creds, &effective_redirect) {
             Ok(url) => {
-                self.message = Some(
-                    "Authorization URL ready. Complete the flow in the browser; the loopback \
+                self.message = Some(format!(
+                    "Authorization URL ready — the callback listener answers on \
+                     :{bound_port}. Register {effective_redirect} EXACTLY as the \
+                     callback URL on your Help Scout app if it differs from what \
+                     is registered. Complete the flow in the browser; the loopback \
                      listener stores the token."
-                        .into(),
-                );
+                ));
                 self.authorize_url = Some(url);
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -2707,6 +2761,56 @@ mod tests {
             .unwrap_or(0)
         });
         assert_eq!(states, 1, "one single-use state backs the URL");
+        server.stop();
+    }
+
+    /// FIND-001: the recorded redirect URI is rewritten to the port the
+    /// listener actually bound — a SPP_LOOPBACK_PORT override (or the
+    /// OS-assigned bind fallback) keeps the OAuth round-trip functional
+    /// instead of dead-ending on the callback's own port match.
+    #[test]
+    fn begin_oauth_rewrites_the_recorded_uri_to_the_bound_port() {
+        let db = fixture(Vec::new());
+        let mut server = spp_core::loopback::LoopbackServer::start(
+            db.clone(),
+            std::sync::Arc::new(spp_core::provider_handle::ProviderHandle::new_empty()),
+            0,
+        )
+        .expect("listener");
+        let bound = server.port();
+        // The env redirect URI still names the DEFAULT :3000 — the port the
+        // listener did NOT bind (the FIND-001 collision case).
+        let redirect_uri = "http://localhost:3000/oauth/callback";
+        assert_ne!(
+            spp_core::loopback::port_from_redirect_uri(redirect_uri),
+            Some(bound),
+            "the fixture must exercise the mismatch"
+        );
+        let creds = spp_core::helpscout_real::HsCredentials {
+            client_id: "cid-live".into(),
+            client_secret: "secret-live".into(),
+            redirect_uri: redirect_uri.to_string(),
+            ..Default::default()
+        };
+
+        let mut page = SettingsPage::new();
+        page.begin_oauth_on(&db, &creds, redirect_uri, Some(bound));
+
+        let url = page.authorize_url.clone().expect("authorization URL");
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let state = url
+            .split("state=")
+            .nth(1)
+            .unwrap_or_default()
+            .to_string();
+        let recorded = db.with_read(|conn| {
+            spp_core::oauth_state::redirect_uri_for(conn, &state).expect("redirect lookup")
+        });
+        assert_eq!(
+            recorded.as_deref(),
+            Some(format!("http://localhost:{bound}/oauth/callback").as_str()),
+            "the recorded URI must be rewritten to the bound port"
+        );
         server.stop();
     }
 

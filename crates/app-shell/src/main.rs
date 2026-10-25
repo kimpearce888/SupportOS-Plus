@@ -98,38 +98,57 @@ fn main() {
     let _workers = workers;
 
     // Minimal loopback listener (webhook ingress + OAuth callback only).
-    // Port preference: the localhost port baked into the redirect URI
-    // (Help Scout requires the redirect to match exactly), then
-    // SPP_LOOPBACK_PORT, then an OS-assigned port that gets logged.
+    // Port preference (FIND-001): an explicit SPP_LOOPBACK_PORT override
+    // wins, then the localhost port baked into the redirect URI (Help
+    // Scout requires the redirect to match exactly), then an OS-assigned
+    // port that gets logged. A bind failure falls back to an OS-assigned
+    // port instead of silently degrading to no-inbound-HTTP; the OAuth
+    // flow rewrites its recorded redirect URI to the port actually bound
+    // (settings.rs) and the UI surfaces the listener state.
     let env = spp_core::config::load_env_config();
     let redirect_uri = env.helpscout.redirect_uri.clone();
-    let configured_port = spp_core::loopback::port_from_redirect_uri(&redirect_uri)
-        .or_else(|| {
-            std::env::var("SPP_LOOPBACK_PORT")
-                .ok()
-                .and_then(|p| p.parse::<u16>().ok())
-        })
+    let configured_port = std::env::var("SPP_LOOPBACK_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok().filter(|p| *p > 0))
+        .or_else(|| spp_core::loopback::port_from_redirect_uri(&redirect_uri))
         .unwrap_or(0);
     let loopback = match spp_core::loopback::LoopbackServer::start(
         db.clone(),
         boot.handle.clone(),
         configured_port,
     ) {
-        Ok(server) => {
-            tracing::info!(
-                port = server.port(),
-                base_url = server.base_url(),
-                "loopback listener ready (POST /webhook, GET /oauth/callback)"
-            );
-            Some(server)
-        }
-        Err(e) => {
-            // The shell stays fully usable without inbound HTTP; webhook
-            // events are also drained from the database at worker start.
-            tracing::warn!(error = %e, "loopback listener could not be started");
-            None
+        Ok(server) => Some(server),
+        Err(primary) => {
+            // FIND-001: :3000 (the redirect default) collides with common
+            // dev servers — retry on an OS-assigned port rather than
+            // losing webhook ingress and the OAuth callback entirely.
+            match spp_core::loopback::LoopbackServer::start(db.clone(), boot.handle.clone(), 0) {
+                Ok(server) => {
+                    tracing::warn!(
+                        error = %primary,
+                        port = server.port(),
+                        "loopback listener could not bind the configured port; \
+                         bound an OS-assigned port instead"
+                    );
+                    Some(server)
+                }
+                Err(e) => {
+                    // The shell stays fully usable without inbound HTTP; webhook
+                    // events are also drained from the database at worker start.
+                    tracing::warn!(error = %e, "loopback listener could not be started");
+                    None
+                }
+            }
         }
     };
+    if let Some(server) = &loopback {
+        spp_core::loopback::record_bound_port(server.port());
+        tracing::info!(
+            port = server.port(),
+            base_url = server.base_url(),
+            "loopback listener ready (POST /webhook, GET /oauth/callback)"
+        );
+    }
     // Served for the whole process lifetime.
     let _loopback = loopback;
 
