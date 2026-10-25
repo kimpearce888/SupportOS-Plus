@@ -371,6 +371,14 @@ impl SyncHealthPage {
             self.message = Some("A sync is already running.".into());
             return;
         }
+        // FIND-006: on an idle engine there is nothing to cancel — the
+        // guard above deliberately skips Cancel, which used to fall through
+        // to a spawned no-op and the misleading "(started in background)"
+        // toast. Say what actually happened instead.
+        if action == SyncAction::Cancel && !engine.is_running() {
+            self.message = Some("No sync is running.".into());
+            return;
+        }
         // R8 (D6): the helper now reports whether it really started.
         if spawn_sync_action(db, engine, action) {
             self.message = Some(format!("{} (started in background)", action.label()));

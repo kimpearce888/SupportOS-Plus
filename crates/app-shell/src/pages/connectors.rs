@@ -178,12 +178,16 @@ impl ConnectorsPage {
             self.error = Some("name required".into());
             return;
         }
-        let refresh_seconds: i64 = self
-            .new_refresh_seconds
-            .trim()
-            .parse()
-            .unwrap_or(3600)
-            .clamp(60, 86400);
+        // FIND-009: invalid input used to silently become the 3600 default
+        // (`parse().unwrap_or(3600).clamp(60, 86400)`). Report it instead.
+        let refresh_seconds: i64 = match self.new_refresh_seconds.trim().parse::<i64>() {
+            Ok(v) if (60..=86_400).contains(&v) => v,
+            _ => {
+                self.error =
+                    Some("refresh seconds must be a whole number between 60 and 86400".into());
+                return;
+            }
+        };
         let (file, url) = match self.new_kind {
             Kind::Csv => (self.new_file.trim().to_string(), String::new()),
             Kind::Http => (String::new(), self.new_url.trim().to_string()),

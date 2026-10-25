@@ -180,6 +180,9 @@ pub struct IssueRadarPage {
     error: Option<String>,
     /// A2: outcome note for the manual clustering trigger.
     notice: Option<String>,
+    /// FIND-008: failed `ai` jobs used to land only in the jobs table with
+    /// no signal on this page; the header badges the count instead.
+    failed_ai_jobs: i64,
 }
 
 impl IssueRadarPage {
@@ -200,6 +203,7 @@ impl IssueRadarPage {
             new_conversation_ids: String::new(),
             error: None,
             notice: None,
+            failed_ai_jobs: 0,
         }
     }
 
@@ -213,7 +217,14 @@ impl IssueRadarPage {
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        let (radar, sla, clusters, known, gaps) = db.with_read(|conn| {
+        let (radar, sla, clusters, known, gaps, failed_ai_jobs) = db.with_read(|conn| {
+            let failed_ai_jobs: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM jobs WHERE queue = 'ai' AND status = 'failed'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
             (
                 spp_core::analytics::issue_radar_impl(conn),
                 spp_core::sla::sla_alerts(conn).ok(),
@@ -221,6 +232,7 @@ impl IssueRadarPage {
                 load_known(conn),
                 // K1: the deterministic gap pipeline's current report.
                 spp_core::quality::gap_report(conn),
+                failed_ai_jobs,
             )
         });
         self.radar = radar;
@@ -228,6 +240,7 @@ impl IssueRadarPage {
         self.clusters = clusters;
         self.known = known;
         self.gaps = gaps;
+        self.failed_ai_jobs = failed_ai_jobs;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
@@ -346,22 +359,33 @@ impl IssueRadarPage {
                                 .into(),
                         );
                     } else {
-                        db.with_write(|conn| {
-                            let _ = spp_core::jobs::enqueue_on(
-                                conn,
-                                "ai",
-                                "cluster_issues",
-                                "{}",
-                                3,
-                                2,
-                            );
-                        });
-                        self.error = None;
-                        self.notice = Some(
-                            "clustering queued — reload clusters in a few seconds \
-                             to see what landed."
-                                .into(),
-                        );
+                        // FIND-008: the enqueue result used to be discarded
+                        // (`let _ = …`) — surface success and failure alike.
+                        match db
+                            .with_write(|conn| {
+                                spp_core::jobs::enqueue_on(
+                                    conn,
+                                    "ai",
+                                    "cluster_issues",
+                                    "{}",
+                                    3,
+                                    2,
+                                )
+                            })
+                        {
+                            Ok(_) => {
+                                self.error = None;
+                                self.notice = Some(
+                                    "clustering queued — reload clusters in a few seconds \
+                                     to see what landed."
+                                        .into(),
+                                );
+                            }
+                            Err(e) => {
+                                self.notice = None;
+                                self.error = Some(format!("could not queue clustering: {e}"));
+                            }
+                        }
                     }
                 }
                 if crate::design::button(
@@ -393,24 +417,47 @@ impl IssueRadarPage {
                                 .into(),
                         );
                     } else {
-                        db.with_write(|conn| {
-                            let _ = spp_core::jobs::enqueue_on(
-                                conn,
-                                "ai",
-                                "rebuild_gaps",
-                                "{}",
-                                3,
-                                2,
-                            );
-                        });
-                        self.error = None;
-                        self.notice = Some(
-                            "gap detection queued — reload in a few seconds to see what landed.".into(),
-                        );
+                        // FIND-008: surface the enqueue result here too.
+                        match db
+                            .with_write(|conn| {
+                                spp_core::jobs::enqueue_on(
+                                    conn,
+                                    "ai",
+                                    "rebuild_gaps",
+                                    "{}",
+                                    3,
+                                    2,
+                                )
+                            })
+                        {
+                            Ok(_) => {
+                                self.error = None;
+                                self.notice = Some(
+                                    "gap detection queued — reload in a few seconds to see what landed."
+                                        .into(),
+                                );
+                            }
+                            Err(e) => {
+                                self.notice = None;
+                                self.error = Some(format!("could not queue gap detection: {e}"));
+                            }
+                        }
                     }
                 }
             },
         );
+        // FIND-008: failed `ai` jobs used to be visible only in the jobs
+        // table — badge the count here so failures surface on the page.
+        if self.failed_ai_jobs > 0 {
+            design::error_text(
+                ui,
+                &format!(
+                    "{} failed AI job{} — check AI Center / diagnostics for the error",
+                    self.failed_ai_jobs,
+                    if self.failed_ai_jobs == 1 { "" } else { "s" }
+                ),
+            );
+        }
         if let Some(note) = &self.notice {
             crate::design::hint_text(ui, note);
         }

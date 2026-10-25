@@ -1358,8 +1358,19 @@ impl KnowledgePage {
                     && self.articles.is_empty()
                     && let Some(q) = self.filter.query.clone()
                 {
-                    let _ = db.with_write(|conn| {
-                        spp_core::intelligence_features::record_knowledge_gap(conn, &q)
+                    // FIND-007: the write used to be fire-and-forget
+                    // (`let _ = …`) — a read-looking control silently
+                    // recorded rows. Surface it via the page's standard
+                    // status message.
+                    let recorded = db
+                        .with_write(|conn| {
+                            spp_core::intelligence_features::record_knowledge_gap(conn, &q)
+                        })
+                        .is_ok();
+                    self.status_message = Some(if recorded {
+                        format!("No hits — “{q}” was tracked as a knowledge gap.")
+                    } else {
+                        "Search returned no hits.".into()
                     });
                     self.reload_docs(db);
                 }

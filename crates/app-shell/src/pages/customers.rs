@@ -478,11 +478,16 @@ impl CustomersPage {
         }
     }
 
-    fn profile_ui(&mut self, ui: &mut egui::Ui, _db: &DbHandle, customer_id: i64) {
+    fn profile_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, customer_id: i64) {
         if design::button(ui, "← back to search", ButtonVariant::Outline).clicked() {
             self.mode = Mode::Search;
-            self.rows.clear();
             self.page = 1;
+            // FIND-010: the results used to be cleared without re-running
+            // the still-applied query, landing the user on the empty state
+            // right after a successful search. Re-issue it instead.
+            if self.applied_query.is_some() {
+                self.reload_search(db);
+            }
             return;
         }
         let Some(profile) = self.profile.clone() else {
@@ -528,7 +533,7 @@ impl CustomersPage {
             // A3.4: the AI-stage recommendation (heuristic+ai merge) for the
             // customer's latest analyzed conversation rides the interaction
             // profile card.
-            let recommendation: Option<serde_json::Value> = _db.with_read(|conn| {
+            let recommendation: Option<serde_json::Value> = db.with_read(|conn| {
                 conn.query_row(
                     "SELECT s.recommendation_json, s.sources
                        FROM client_current_signals s
