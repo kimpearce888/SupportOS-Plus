@@ -90,9 +90,13 @@ WITH events (5→0→button absent), designed-refusal delta (5→6), C-SET-66
 runtime-proven, refusal row reverted 6→5, restart-to-reload semantics
 verified end-to-end), SIGKILL recovery + cross-restart persistence.
 NOT EXECUTABLE with reasons: TEXT-input boundaries (keyboard), mid-sync
-cancel + malformed credentials (external — exceptions). Next: formal QA
-ledger consolidation (QA-001..003/006/007 from existing passes) →
-ARCHITECTURE deep-dive → COV/REPORT.
+cancel + malformed credentials (external — exceptions). **Formal QA ledger
+CONSOLIDATED** (traceability: QA-001/002/003/007, FLOW-001, EVID-001..006,
+EXC-001..003, FIND-001/002, FIX-001 all statused from executed work; QA-006
+PARTIAL — keyboard focus-order untestable here; 03 §9 accounting in
+PROGRESS: 143/143 UI steps with validated screenshots, 0 screenshot
+exceptions). Next: ARCHITECTURE deep-dive → COV-001/002 → REPORT-001 →
+completion gate → publication.
 
 ## What is verified and where the evidence lives
 - Instruction loading: INSTRUCTION-LOADING-RECORD.md; instructions/ (15 files)
@@ -223,10 +227,8 @@ ARCHITECTURE deep-dive → COV/REPORT.
 - Coverage snapshot time: 2026-10-25 ~01:15 UTC
 
 ## Outstanding tasks (ordered)
-1. Formal QA ledger consolidation (QA-001..003/006/007 statuses from
-   existing passes + EVID-001..006 accounting per 03 §9; QA-004/005 DONE).
-2. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001
-   completion.
+1. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001
+   completion (the last substantive discovery item).
 4. ARCHITECTURE.md deep-dive (workers/catalog/ai paths) — ARCH-001 completion.
 5. Coverage reconciliation (COV-001/002) + evidence accounting (EVID-006).
 6. REPORT.md consolidation (REPORT-001) and completion gate (04 §5).
@@ -262,7 +264,7 @@ ARCHITECTURE deep-dive → COV/REPORT.
 - Publication blocker: none
 
 ## Last validated
-- Timestamp/timezone: 2026-10-25 ~01:15 UTC
+- Timestamp/timezone: 2026-10-25 ~01:30 UTC
 - Validator/check: QA45 14 PNGs PIL-valid; manifest E-001..E-157 zero
   missing; QA-004/005 8/8 steps PASS; exceptions.csv parsed (5 rows × 11
   columns, all populated); W-009 6/6 steps PASS (w009-* JSONL rows; flock probes

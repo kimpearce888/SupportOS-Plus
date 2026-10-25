@@ -479,3 +479,21 @@ EXECUTED (feasible subset); FEAT-004 note updated (C-SET-66 no longer
 deferred). Manifest E-143..E-157 (157 rows, zero missing). Next per
 NEXT-ACTIONS: formal QA ledger consolidation (QA-001..003/006/007 statuses
 from the existing passes) → ARCHITECTURE deep-dive → COV/REPORT.
+
+## 2026-10-25 (cont.) — formal QA ledger consolidation (traceability + §9 accounting)
+
+- Traceability statuses set from executed work: QA-001 SATISFIED, QA-002
+  SATISFIED, QA-003 SATISFIED (recorded limitations), QA-004 EXECUTED
+  (mouse-reachable subset), QA-005 EXECUTED (feasible subset), QA-006
+  PARTIAL (mouse-reachable observations; REAL keyboard focus-order testing
+  impossible in this sandbox — tooling limitation, recorded), QA-007
+  SATISFIED, FLOW-001 SATISFIED (with registered blockers), EVID-001..006
+  SATISFIED (EVID-003 justified scope: stills + diffs proved all executed
+  transitions; launch video from BUILD phase), EXC-001..003 SATISFIED,
+  FIND-001/FIND-002 SATISFIED, FIX-001 SATISFIED.
+- Evidence accounting (03 §9) added to PROGRESS.md: 143 executed UI steps,
+  143/143 validated step-specific screenshots (100%), 0 accepted screenshot
+  exceptions, 0 unresolved gaps, blocked/not-attempted listed explicitly.
+- Remaining open traceability rows: SRC/PUR/DIFF/PART/SAFE (source-review
+  batches), ARCH-001 deep-dive, HAND-*/REPORT-*/GIT-*/FINAL-001 (report +
+  publication phase), COV-001/002, TEST-001-adjacent re-runs none.

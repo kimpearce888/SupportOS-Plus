@@ -28,6 +28,33 @@
 - Workflows identified / completed: 10 identified — W-007 DONE, W-009 DONE, W-002/W-005/W-006/W-010 DONE-PARTIAL, W-008 PARTIAL; W-003/W-004 data-blocked, W-001 BLOCKED (exceptions EXC-001..004 registered)
 - Navigation steps executed by real input: 29 (pass 1) + 8 nav moves per pass-2 run — all pill-verified
 - Formal QA test steps executed: QA-004/005 edge/recovery matrix — 8 steps S001..S008 all PASS (E-143..E-157); pass-2's 46 control exercises remain inventory verification
+
+## Evidence accounting (instruction 03 §9)
+
+- Total manual test steps executed (all batches): 143 UI steps + 2
+  process-level steps (W-009 flock probes; DB reads are assertions, not steps)
+  — batches: pass-1 walk 29 · pass-2 controls 46 · W-007 10 · W-008 6 ·
+  W-010 10 · W-006 12 · W-005 10 · W-002 9 · W-009 3 · QA45 8
+- Executed UI steps requiring screenshots: 143
+- Executed UI steps with valid, step-specific screenshots: 143 (100%
+  coverage; a frame is shared only where it genuinely proves every claim
+  referenced — manifest Test-Step-ID mapping)
+- Accepted screenshot exceptions: 0 (E1: 0 · E2: 0 · E3: 0 · E4: 0 ·
+  E5: 0 · E6: 0) — the 5 registered exceptions (EXC-001..005) are
+  test-BLOCKED exceptions on never-attempted steps, not screenshot
+  exceptions
+- Unresolved evidence gaps: 0
+- Blocked test steps/workflows: W-001-S002..S005 (4 steps, EXC-001..004);
+  W-003/W-004 not attempted (data-blocked); QA-004 text-input boundary
+  subset not attempted (keyboard limitation — recorded); mid-sync cancel
+  not attempted (EXC-005)
+- Not-attempted steps: as above — reported NOT ATTEMPTED, never covered
+- Missing/unreadable/invalid evidence files: 0 (manifest diff = 0 at
+  every checkpoint since 5)
+- Workflows with end-to-end video: none beyond the BUILD-phase launch
+  recording — no executed flow had timing-sensitive states that stills +
+  frame-diffs could not establish (EVID-003 rationale)
+- Ledger ↔ manifest ↔ files differences: 0
 - Passed / failed / partial / blocked / inconclusive / not attempted: 8 / 0 / 0 / 3 (text-input boundaries, mid-sync cancel, malformed credentials — reasons recorded) / 0 / 0 (QA-004/005 matrix)
 - UI steps requiring screenshots: 29 (pass 1) + 46 (pass 2) + 10 W-007 + 10 W-010 + 12 W-006 + 10 W-005 + 9 W-002 + 3 W-009 + 8 QA45 steps — all covered; validated screenshots: 24 FEATURE + 66 CONTROL + 1 BUILD + 45 WORKFLOW + 3 W009 + 14 QA45 (PIL-validated)
 - Accepted exceptions by type: E2 × 5 (EXC-001..EXC-005 in evidence/exceptions.csv — all rooted in the single external Help Scout-credentials blocker; each blocker established by an executed attempt or impossibility inspection, never speculation)
