@@ -957,8 +957,7 @@ impl OperationsPage {
         mailbox_remote_id: i64,
         remote_id: i64,
     ) -> spp_core::Result<()> {
-        let payload =
-            reply_write_payload("delete", mailbox_remote_id, Some(remote_id), "", "");
+        let payload = reply_write_payload("delete", mailbox_remote_id, Some(remote_id), "", "");
         let Some(library) = self.library.as_mut() else {
             // The Library tab was left before the dialog was confirmed —
             // nothing to delete against.

@@ -968,10 +968,8 @@ impl ReportsPage {
                             // FIND-005: the delete used to run immediately —
                             // arm the shell confirm instead (it executes only
                             // when the dialog resolves Confirmed).
-                            self.pending_confirm = Some(ConfirmRequest::delete_saved_report(
-                                saved.id,
-                                &saved.name,
-                            ));
+                            self.pending_confirm =
+                                Some(ConfirmRequest::delete_saved_report(saved.id, &saved.name));
                         }
                     });
                 }

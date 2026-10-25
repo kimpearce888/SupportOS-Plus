@@ -1976,8 +1976,7 @@ impl SettingsPage {
             self.authorize_url = None;
             return;
         };
-        let effective_redirect = match spp_core::loopback::port_from_redirect_uri(redirect_uri)
-        {
+        let effective_redirect = match spp_core::loopback::port_from_redirect_uri(redirect_uri) {
             // A local URI whose port matches the bound listener: keep it.
             Some(port) if port == bound_port => redirect_uri.to_string(),
             // A local URI naming a port the listener did NOT bind: rewrite
@@ -2798,11 +2797,7 @@ mod tests {
 
         let url = page.authorize_url.clone().expect("authorization URL");
         assert!(page.error.is_none(), "{:?}", page.error);
-        let state = url
-            .split("state=")
-            .nth(1)
-            .unwrap_or_default()
-            .to_string();
+        let state = url.split("state=").nth(1).unwrap_or_default().to_string();
         let recorded = db.with_read(|conn| {
             spp_core::oauth_state::redirect_uri_for(conn, &state).expect("redirect lookup")
         });

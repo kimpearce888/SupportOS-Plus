@@ -68,7 +68,10 @@ pub enum DestructiveAction {
     /// Disable every AI feature via the global kill switch (FIND-005).
     DisableAllAi,
     /// Delete a Help Scout saved reply (platform-side sync write) (FIND-005).
-    DeleteSavedReply { mailbox_remote_id: i64, remote_id: i64 },
+    DeleteSavedReply {
+        mailbox_remote_id: i64,
+        remote_id: i64,
+    },
 }
 
 /// A request to arm the shell-level confirmation dialog for a
@@ -195,9 +198,7 @@ impl ConfirmRequest {
     pub fn delete_saved_report(id: i64, name: &str) -> Self {
         Self {
             title: "Delete saved report?".into(),
-            message: format!(
-                "The saved report \"{name}\" is removed. This cannot be undone."
-            ),
+            message: format!("The saved report \"{name}\" is removed. This cannot be undone."),
             confirm_label: "Delete report".into(),
             danger: true,
             action: DestructiveAction::DeleteSavedReport { id },
@@ -210,9 +211,7 @@ impl ConfirmRequest {
     pub fn remove_from_dnc(customer_id: i64) -> Self {
         Self {
             title: "Remove from the do-not-contact list?".into(),
-            message: format!(
-                "Customer {customer_id} becomes contactable by every campaign again."
-            ),
+            message: format!("Customer {customer_id} becomes contactable by every campaign again."),
             confirm_label: "Remove".into(),
             danger: true,
             action: DestructiveAction::RemoveFromDnc { customer_id },

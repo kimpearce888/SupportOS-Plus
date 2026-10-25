@@ -19,10 +19,10 @@
 
 use std::sync::{Arc, Mutex};
 
+use super::{ConfirmRequest, NavRequest};
 use eframe::egui;
 use spp_core::ai_attributes::AttributeDistribution;
 use spp_core::catalog::AiAttributeKey;
-use super::{ConfirmRequest, NavRequest};
 use spp_core::db::DbHandle;
 
 use crate::design::{self, BadgeTone, ButtonVariant};
@@ -549,8 +549,7 @@ impl AiCenterPage {
     /// FIND-005: runs only after the shell dialog confirms — disables
     /// every AI feature and endpoint call at once.
     pub fn disable_all_ai_confirmed(&mut self, db: &DbHandle) -> spp_core::Result<()> {
-        let result =
-            db.with_write(|conn| spp_core::settings::set_bool(conn, "ai_enabled", false));
+        let result = db.with_write(|conn| spp_core::settings::set_bool(conn, "ai_enabled", false));
         self.reload_hub(db);
         result
     }

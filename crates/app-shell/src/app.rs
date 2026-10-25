@@ -329,7 +329,8 @@ impl ShellApp {
             DestructiveAction::CancelCampaignRemaining { id } => (
                 "campaign sends",
                 "cancelled",
-                self.outreach.cancel_campaign_remaining_confirmed(&self.db, id),
+                self.outreach
+                    .cancel_campaign_remaining_confirmed(&self.db, id),
             ),
             DestructiveAction::DisableAllAi => (
                 "AI",
@@ -344,7 +345,7 @@ impl ShellApp {
                 "deleted",
                 self.operations
                     .delete_saved_reply(&self.db, mailbox_remote_id, remote_id),
-            )
+            ),
         };
         match outcome {
             Ok(()) => self.toasts.success(format!("{label} {verb}")),

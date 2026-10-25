@@ -361,18 +361,9 @@ impl IssueRadarPage {
                     } else {
                         // FIND-008: the enqueue result used to be discarded
                         // (`let _ = …`) — surface success and failure alike.
-                        match db
-                            .with_write(|conn| {
-                                spp_core::jobs::enqueue_on(
-                                    conn,
-                                    "ai",
-                                    "cluster_issues",
-                                    "{}",
-                                    3,
-                                    2,
-                                )
-                            })
-                        {
+                        match db.with_write(|conn| {
+                            spp_core::jobs::enqueue_on(conn, "ai", "cluster_issues", "{}", 3, 2)
+                        }) {
                             Ok(_) => {
                                 self.error = None;
                                 self.notice = Some(

@@ -359,8 +359,7 @@ impl OutreachPage {
         db: &DbHandle,
         id: i64,
     ) -> spp_core::Result<()> {
-        let result =
-            db.with_write(|conn| spp_core::outreach::campaign_cancel_remaining(conn, id));
+        let result = db.with_write(|conn| spp_core::outreach::campaign_cancel_remaining(conn, id));
         self.message = Some(
             result
                 .get("message")
@@ -511,8 +510,7 @@ impl OutreachPage {
                     .find(|c| i64_field(c, "id") == id)
                     .map(|c| str_field(c, "name").to_string())
                     .unwrap_or_else(|| format!("campaign {id}"));
-                self.pending_confirm =
-                    Some(ConfirmRequest::cancel_campaign_remaining(id, &name));
+                self.pending_confirm = Some(ConfirmRequest::cancel_campaign_remaining(id, &name));
             } else {
                 self.campaign_action(db, id, action);
             }
