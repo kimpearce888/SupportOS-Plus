@@ -425,44 +425,64 @@ impl ShellApp {
         ui.add_space(10.0);
 
         // Command-palette trigger (bordered, full width).
+        // FIND-011: toggle — with the palette open, the trigger must be
+        // able to dismiss it (open()-only could not).
         if palette_trigger(ui).clicked() {
-            self.palette.open();
+            self.palette.toggle();
         }
         ui.add_space(12.0);
 
-        // Grouped navigation over the full page surface.
-        egui::ScrollArea::vertical()
-            .id_salt("spp-nav-scroll")
+        // FIND-004: the theme switch used to be pinned with a `bottom_up`
+        // layout that painted it ON TOP of the last nav rows (the scroll
+        // area claimed the full remaining height), leaving rows like
+        // "Shell" half-occluded with only a thin sliver clickable. Reserve
+        // the bottom strip FIRST so the nav scroll area never extends
+        // underneath it.
+        egui::Panel::bottom("spp-sidebar-theme")
+            .show_separator_line(false)
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                left: 10,
+                right: 10,
+                top: 2,
+                bottom: 6,
+            }))
             .show(ui, |ui| {
-                for (group, keys) in NAV_GROUPS {
-                    ui.label(
-                        egui::RichText::new(*group)
-                            .small()
-                            .strong()
-                            .color(t.muted_foreground),
-                    );
-                    ui.add_space(2.0);
-                    for key in keys.iter() {
-                        if nav_row(ui, self.page, *key) {
-                            self.page = *key;
-                        }
+                ui.separator();
+                let next = self.theme.toggle();
+                if theme_row(ui, next) {
+                    self.theme = next;
+                    if let Err(e) = self.theme.store(&self.db) {
+                        tracing::warn!(error = %e, "failed to persist the theme setting");
                     }
-                    ui.add_space(8.0);
+                    self.theme.apply(ui.ctx());
                 }
             });
 
-        // Theme switch pinned to the bottom of the sidebar.
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            ui.separator();
-            let next = self.theme.toggle();
-            if theme_row(ui, next) {
-                self.theme = next;
-                if let Err(e) = self.theme.store(&self.db) {
-                    tracing::warn!(error = %e, "failed to persist the theme setting");
-                }
-                self.theme.apply(ui.ctx());
-            }
-        });
+        // Grouped navigation over the remaining surface (above the
+        // reserved theme strip, never underneath it).
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new())
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("spp-nav-scroll")
+                    .show(ui, |ui| {
+                        for (group, keys) in NAV_GROUPS {
+                            ui.label(
+                                egui::RichText::new(*group)
+                                    .small()
+                                    .strong()
+                                    .color(t.muted_foreground),
+                            );
+                            ui.add_space(2.0);
+                            for key in keys.iter() {
+                                if nav_row(ui, self.page, *key) {
+                                    self.page = *key;
+                                }
+                            }
+                            ui.add_space(8.0);
+                        }
+                    });
+            });
     }
 
     /// The application header above the page content: command-palette
@@ -487,7 +507,8 @@ impl ShellApp {
                 .on_hover_text("command palette (Ctrl/Cmd+K)")
                 .clicked()
             {
-                self.palette.open();
+                // FIND-011: toggle, not open-only.
+                self.palette.toggle();
             }
             // R8 (D10): the global freshness ring — one glance answers
             // "is this thing alive". Click through to Sync Health for

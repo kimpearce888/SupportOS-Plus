@@ -121,6 +121,16 @@ pub struct CommandPalette {
     /// Deferred Enter handling: the query row renders inside a nested
     /// closure, so the take flag is stored here and read after the row.
     palette_take: bool,
+    /// FIND-011: the palette window's on-screen rect from the last
+    /// rendered frame — clicks outside it dismiss the overlay. The old
+    /// full-screen Area catcher's hit-testing was runtime-disproven
+    /// (clicks fell through to the UI underneath at most positions), so
+    /// dismissal now keys off the window rect directly: layer-independent
+    /// by construction.
+    last_window_rect: egui::Rect,
+    /// FIND-011: set by [`Self::open`] so the very click that opened the
+    /// palette (same frame) cannot immediately dismiss it again.
+    just_opened: bool,
 }
 
 impl CommandPalette {
@@ -133,6 +143,8 @@ impl CommandPalette {
             selected: 0,
             wants_focus: false,
             palette_take: false,
+            last_window_rect: egui::Rect::NOTHING,
+            just_opened: false,
         }
     }
 
@@ -149,6 +161,18 @@ impl CommandPalette {
         self.hits.clear();
         self.selected = 0;
         self.wants_focus = true;
+        self.just_opened = true;
+    }
+
+    /// Toggle between open and closed. FIND-011: the mouse triggers only
+    /// ever called [`Self::open`], so with the palette open they could
+    /// never dismiss it.
+    pub fn toggle(&mut self) {
+        if self.open {
+            self.close();
+        } else {
+            self.open();
+        }
     }
 
     /// Close the palette.
@@ -206,31 +230,35 @@ impl CommandPalette {
         if !self.open {
             return None;
         }
-        // Clean-audit item 133: the palette is a modal overlay — a
-        // full-screen catcher behind the window closes it on an outside
-        // click (the web overlay's backdrop) and keeps that click from
-        // landing on whatever is underneath. Created before the window,
-        // same layer order: the window wins hits inside itself, the
-        // catcher takes everything else.
-        egui::Area::new(egui::Id::unique("command-palette-backdrop"))
-            .order(egui::Order::Middle)
-            .fixed_pos(egui::pos2(0.0, 0.0))
-            .show(ctx, |ui| {
-                // The area's max rect spans the screen (constrained), so
-                // the click catcher covers everything except what higher
-                // layers (the palette window itself) take first.
-                let backdrop = ui.allocate_response(ui.available_size(), egui::Sense::click());
-                if backdrop.clicked() {
-                    self.close();
-                }
-            });
+        // FIND-011: dismiss on any click OUTSIDE the palette window rect.
+        // The previous full-screen Area catcher (clean-audit item 133)
+        // claimed "the catcher takes everything else", but the runtime
+        // click matrix proved the opposite at most positions — clicks
+        // fell through to the UI underneath while the overlay stayed open
+        // (one even spawned a real sync action). A pointer-position check
+        // against the remembered window rect is layer-independent by
+        // construction. The overlay stays non-modal (that is what runtime
+        // actually did); the mouse triggers now `toggle()` so they dismiss
+        // it too.
+        if !self.just_opened
+            && ctx.input(|i| i.pointer.any_click())
+            && ctx
+                .pointer_interact_pos()
+                .is_some_and(|p| !self.last_window_rect.contains(p))
+        {
+            self.close();
+        }
+        self.just_opened = false;
+        if !self.open {
+            return None;
+        }
         let mut nav = None;
         let mut query_changed = false;
         let frame_tokens = crate::design::tokens_for(ctx);
         let frame_fill = frame_tokens.card;
         let frame_border = frame_tokens.border;
         let icon_muted = frame_tokens.muted_foreground;
-        egui::Window::new("Command Palette")
+        let win = egui::Window::new("Command Palette")
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 80.0))
             .fixed_size([560.0, 360.0])
             .collapsible(false)
@@ -344,6 +372,11 @@ impl CommandPalette {
                     self.selected = move_selection(self.selected, hits.len(), -1);
                 }
             });
+        // FIND-011: remember the window rect for the outside-click check
+        // (the anchor and size are fixed, so last frame's rect is current).
+        if let Some(win) = &win {
+            self.last_window_rect = win.response.rect;
+        }
         if query_changed {
             self.run_search(db);
         }
