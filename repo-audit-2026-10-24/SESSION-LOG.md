@@ -517,3 +517,21 @@ FINDINGS.md FIND-011 evidence updated. Tooling note: the run's bash
 invocation hit the tool timeout from pipe handling AFTER the script had
 fully completed (all events + files present) — the evidence itself is
 complete; no re-run needed.
+
+## 2026-10-25 (cont.) — continuation session: remote-state re-verification + HANDOVER publication-status correction
+
+New session resumed from HANDOVER.md (audit already FINAL at checkpoint
+16b). Verification-only session plus one honest correction:
+
+- `git ls-remote` against the live remote returned
+  `refs/heads/repo-audit/2026-10-24` = `c2a1023` (checkpoint 16b),
+  identical to local HEAD — zero divergence, branch fully published;
+  `refs/heads/main` = `3affe7e` (the audited revision, untouched);
+  working tree clean; no force-push ever used.
+- Found and corrected one stale internal line: HANDOVER §Publication
+  status still said "push verified through checkpoint 9 (`01fe55b`)" —
+  superseded by §Repository ("through the FINAL checkpoint `5a19003`")
+  and the completion gate ("branch head is authoritative"). Updated to
+  the ls-remote-verified branch-head state at checkpoint 17.
+- No other files changed; no app code touched; every audit conclusion,
+  count, and evidence item is unchanged by this session.

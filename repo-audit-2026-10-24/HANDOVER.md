@@ -261,7 +261,12 @@ completion gate → publication.
 
 ## Publication status
 - Local: audit commits on `repo-audit/2026-10-24` (see §Repository); remote
-  push verified through checkpoint 9 (`01fe55b`)
+  push verified through the branch head — `git ls-remote` (2026-10-25,
+  continuation session) returned `c2a1023` for
+  `refs/heads/repo-audit/2026-10-24`, identical to local HEAD; `main`
+  untouched at `3affe7e` (the audited revision). This section previously
+  said "through checkpoint 9 (`01fe55b`)" — a stale line superseded by
+  §Repository and the completion gate; corrected at checkpoint 17.
 - Publication blocker: none
 
 ## Last validated
