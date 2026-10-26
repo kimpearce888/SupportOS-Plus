@@ -1197,6 +1197,10 @@ impl SyncEngine {
             let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
             rows.filter_map(|r| r.ok()).collect()
         };
+        tracing::info!(
+            candidates = candidates.len(),
+            "thread backfill: re-fetching conversations that came back thread-less"
+        );
         let mut processed = 0i64;
         let mut failed = 0i64;
         for (local, remote) in candidates {
@@ -1263,6 +1267,17 @@ impl SyncEngine {
             set_state(&conn, "INITIALIZING");
             start_run(&conn, "initial")?
         };
+        // 1.7.3: the initial pull's long stages (customers, conversations)
+        // used to run in total terminal silence — the run-row counter only
+        // moves when a whole resource completes — so a healthy crawl looked
+        // exactly like a frozen one and the app kept getting closed mid-run
+        // (nine INITIALIZING runs on one machine, four at the identical
+        // record count). Every resource now announces itself, and the two
+        // multi-minute crawls emit a heartbeat every few hundred records.
+        tracing::info!(
+            resources = INITIAL_SYNC_ORDER.len(),
+            "initial pull started — long stages emit a heartbeat every few hundred records and can take an hour or more on large accounts; leave the app running until 'Initial sync finished' appears"
+        );
         let mut results: Vec<ResourceSyncResult> = Vec::new();
         let outcome: Result<()> = async {
             // R5 (D15): same honest docs-key warning as the docs-only
@@ -1280,6 +1295,13 @@ impl SyncEngine {
                 if self.cancelled() {
                     break;
                 }
+                let stage_started = std::time::Instant::now();
+                tracing::info!(
+                    resource,
+                    stage = results.len() + 1,
+                    total = INITIAL_SYNC_ORDER.len(),
+                    "sync resource: starting"
+                );
                 {
                     let conn = self.lock();
                     set_checkpoint_running(&conn, resource, true);
@@ -1345,6 +1367,13 @@ impl SyncEngine {
                         }
                     }
                 };
+                tracing::info!(
+                    resource,
+                    records = r.processed,
+                    failed = r.failed,
+                    elapsed_s = stage_started.elapsed().as_secs(),
+                    "sync resource: finished"
+                );
                 let processed: i64 = results.iter().map(|x| x.processed).sum::<i64>() + r.processed;
                 let errors = results.iter().filter(|x| x.error.is_some()).count() as i64
                     + i64::from(r.error.is_some());
@@ -2270,6 +2299,8 @@ impl SyncEngine {
         } else {
             None
         };
+        let mut pages = 0i64;
+        let mut heartbeat = -1i64;
         loop {
             let page = self
                 .provider
@@ -2285,6 +2316,26 @@ impl SyncEngine {
                     mirror::upsert_customer(&conn, c)?;
                     processed += 1;
                 }
+            }
+            pages += 1;
+            self.emit_progress(
+                "customers",
+                processed.max(0) as u32,
+                0,
+                processed,
+                page.items.len() as u32,
+            );
+            if initial && processed / 1_000 > heartbeat {
+                heartbeat = processed / 1_000;
+                tracing::info!(processed, pages, "customers crawl in progress");
+            }
+            if initial && pages >= 5_000 {
+                tracing::warn!(
+                    pages,
+                    processed,
+                    "customers crawl: safety page cap reached — stopping; the next run resumes from the stored cursor"
+                );
+                break;
             }
             let empty = page.items.is_empty();
             match page.next_cursor {
@@ -2328,6 +2379,13 @@ impl SyncEngine {
         } else {
             None
         };
+        if initial && cursor.is_some() {
+            tracing::info!(
+                "conversations crawl: resuming from the stored cursor — the previous interrupted run's progress is preserved"
+            );
+        }
+        let mut pages = 0i64;
+        let mut heartbeat = -1i64;
         loop {
             let page = self
                 .provider
@@ -2387,6 +2445,23 @@ impl SyncEngine {
                 processed,
                 page.items.len() as u32,
             );
+            pages += 1;
+            if initial && processed / 500 > heartbeat {
+                heartbeat = processed / 500;
+                tracing::info!(
+                    processed,
+                    pages,
+                    "conversations crawl in progress — one threads request per conversation makes this the longest stage of the initial pull"
+                );
+            }
+            if initial && pages >= 5_000 {
+                tracing::warn!(
+                    pages,
+                    processed,
+                    "conversations crawl: safety page cap reached — stopping; the next run resumes from the stored cursor"
+                );
+                break;
+            }
             let empty = page.items.is_empty();
             match page.next_cursor {
                 Some(next) => {

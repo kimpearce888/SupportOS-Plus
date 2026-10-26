@@ -2250,7 +2250,13 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         // `list_system_users` uses) until the pages run out.
         let mut out: Vec<HsThread> = Vec::new();
         let mut path = format!("/v3/conversations/{conversation_id}/threads");
+        // 1.7.3: belt-and-braces page cap — a looping/patchwork HAL next
+        // link must never turn one conversation's thread walk into an
+        // endless request stream. 200 pages ≈ thousands of threads on one
+        // conversation; far past anything real.
+        let mut pages = 0u32;
         loop {
+            pages += 1;
             let v = self.request(&path, "GET", None).await?;
             let embedded = v["_embedded"]["threads"]
                 .as_array()
@@ -2263,7 +2269,17 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                     .map(|t| Self::map_thread(t, conversation_id)),
             );
             match hal_next_path(&v) {
-                Some(next) if n > 0 => path = next,
+                Some(next) if n > 0 => {
+                    if pages >= 200 {
+                        tracing::warn!(
+                            conversation_id,
+                            pages,
+                            "threads pagination cap reached — keeping the threads fetched so far"
+                        );
+                        break;
+                    }
+                    path = next;
+                }
                 _ => break,
             }
         }
@@ -2309,7 +2325,9 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     async fn list_system_users(&self) -> Result<Vec<HsUser>> {
         let mut out = Vec::new();
         let mut path = String::from("/v3/system-users");
+        let mut pages = 0u32;
         loop {
+            pages += 1;
             let v = self.request(&path, "GET", None).await?;
             let embedded = v["_embedded"]["system-users"]
                 .as_array()
@@ -2319,7 +2337,14 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             let n = embedded.len();
             out.extend(embedded.iter().map(Self::map_user));
             match hal_next_path(&v) {
-                Some(next) if n > 0 => path = next,
+                Some(next) if n > 0 => {
+                    // 1.7.3: same page-cap insurance as list_threads.
+                    if pages >= 50 {
+                        tracing::warn!(pages, "system-users pagination cap reached");
+                        break;
+                    }
+                    path = next;
+                }
                 _ => break,
             }
         }
