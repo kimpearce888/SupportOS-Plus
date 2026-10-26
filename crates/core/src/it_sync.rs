@@ -105,7 +105,7 @@ fn fixture_handler(fix: &Fixture) -> crate::mockserver::Handler {
     let users_json = json!({"_embedded": {"users": [
         me_json.clone(),
         {"id": 43, "firstName": "Ada", "lastName": "Byron", "type": "user"}
-    ]}, "page": {"number": 0, "totalPages": 1}});
+    ]}, "page": {"number": 1, "totalPages": 1}});
     let system_users = json!({
         "_embedded": {"system-users": [{"id": 44, "firstName": "Sys", "type": "user"}]}
     });
@@ -139,15 +139,15 @@ fn fixture_handler(fix: &Fixture) -> crate::mockserver::Handler {
             ("GET", "/v2/mailboxes/2/folders") => {
                 MockResponse::json(200, json!({"_embedded": {"folders": []}}))
             }
-            ("GET", "/v2/tags") if query_page == "0" => MockResponse::json(
-                200,
-                json!({"_embedded": {"tags": [tag(1, "alpha"), tag(2, "beta")]},
-                       "page": {"number": 0, "totalPages": 2}}),
-            ),
             ("GET", "/v2/tags") if query_page == "1" => MockResponse::json(
                 200,
-                json!({"_embedded": {"tags": [tag(3, "gamma"), tag(4, "delta")]},
+                json!({"_embedded": {"tags": [tag(1, "alpha"), tag(2, "beta")]},
                        "page": {"number": 1, "totalPages": 2}}),
+            ),
+            ("GET", "/v2/tags") if query_page == "2" => MockResponse::json(
+                200,
+                json!({"_embedded": {"tags": [tag(3, "gamma"), tag(4, "delta")]},
+                       "page": {"number": 2, "totalPages": 2}}),
             ),
             ("GET", "/v2/mailboxes/1/fields") => MockResponse::json(
                 200,
@@ -171,7 +171,7 @@ fn fixture_handler(fix: &Fixture) -> crate::mockserver::Handler {
                 200,
                 json!({"_embedded": {"organizations": [
                     {"id": 5, "name": "Analytical Engines", "domains": ["example.com"]}
-                ]}, "page": {"number": 0, "totalPages": 1}}),
+                ]}, "page": {"number": 1, "totalPages": 1}}),
             ),
             ("GET", "/v3/customers") if req.query_param("cursor").is_none() => MockResponse::json(
                 200,
@@ -198,7 +198,7 @@ fn fixture_handler(fix: &Fixture) -> crate::mockserver::Handler {
                 json!({"_embedded": {"workflows": [
                     {"id": 71, "name": "Auto-tag", "type": "manual", "status": "active", "mailboxId": 1},
                     {"id": 72, "name": "Escalate", "type": "automatic", "status": "active", "mailboxId": 1}
-                ]}, "page": {"number": 0, "totalPages": 1}}),
+                ]}, "page": {"number": 1, "totalPages": 1}}),
             ),
             ("GET", "/v3/conversations") if req.query_param("cursor").is_none() => {
                 let first_two: Vec<Value> = conversations.iter().take(2).cloned().collect();
@@ -658,8 +658,9 @@ fn audit88_cancelled_initial_sync_is_not_live() {
     let _secrets = install_master_key();
     let fix = Fixture::new();
     let inner = fixture_handler(&fix);
-    // The tags page-0 fetch blocks until the test has armed the
-    // cancellation: the engine finishes the tags resource, then the loop
+    // The tags first-page fetch (page=1 — Mailbox API 2.0 pagination is
+    // 1-based) blocks until the test has armed the cancellation: the
+    // engine finishes the tags resource, then the loop
     // sees `cancelled` at the next resource and breaks partway — the
     // deterministic equivalent of a user hitting Stop mid-sync.
     let (signal_tx, signal_rx) = mpsc::channel::<()>();
@@ -668,7 +669,7 @@ fn audit88_cancelled_initial_sync_is_not_live() {
     let outer: crate::mockserver::Handler = Arc::new(move |req: &MockRequest| {
         if req.method == "GET"
             && req.path == "/v2/tags"
-            && req.query_param("page").unwrap_or_default() == "0"
+            && req.query_param("page").unwrap_or_default() == "1"
         {
             let _ = signal_tx.send(());
             let Ok(rx) = release_rx.lock() else {

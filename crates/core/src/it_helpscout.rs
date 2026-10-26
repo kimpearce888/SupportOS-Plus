@@ -447,20 +447,20 @@ fn v2_pagination_follows_page_numbers_until_total_pages() {
             .unwrap_or(0);
         let tag = |id: i64, slug: &str| json!({"id": id, "tag": slug, "slug": slug});
         match page {
-            0 => MockResponse::json(
-                200,
-                json!({"_embedded": {"tags": [tag(1, "alpha"), tag(2, "beta")]},
-                       "page": {"number": 0, "totalPages": 3}}),
-            ),
             1 => MockResponse::json(
                 200,
-                json!({"_embedded": {"tags": [tag(3, "gamma"), tag(4, "delta")]},
+                json!({"_embedded": {"tags": [tag(1, "alpha"), tag(2, "beta")]},
                        "page": {"number": 1, "totalPages": 3}}),
             ),
             2 => MockResponse::json(
                 200,
-                json!({"_embedded": {"tags": [tag(5, "epsilon")]},
+                json!({"_embedded": {"tags": [tag(3, "gamma"), tag(4, "delta")]},
                        "page": {"number": 2, "totalPages": 3}}),
+            ),
+            3 => MockResponse::json(
+                200,
+                json!({"_embedded": {"tags": [tag(5, "epsilon")]},
+                       "page": {"number": 3, "totalPages": 3}}),
             ),
             _ => MockResponse::json(200, json!({"_embedded": {"tags": []}})),
         }
@@ -481,7 +481,7 @@ fn v2_pagination_follows_page_numbers_until_total_pages() {
         .filter(|h| h.path == "/v2/tags")
         .filter_map(|h| h.query_param("page"))
         .collect();
-    assert_eq!(tag_pages, vec!["0", "1", "2"], "must walk every page once");
+    assert_eq!(tag_pages, vec!["1", "2", "3"], "must walk every page once");
 }
 
 #[test]
@@ -492,7 +492,7 @@ fn v2_pagination_stops_on_empty_page_safely() {
     let mock = MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
         MockResponse::json(
             200,
-            json!({"_embedded": {"users": []}, "page": {"number": 0, "totalPages": 5}}),
+            json!({"_embedded": {"users": []}, "page": {"number": 1, "totalPages": 5}}),
         )
     }))
     .expect("mock server");
