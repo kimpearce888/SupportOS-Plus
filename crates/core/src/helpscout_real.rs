@@ -2197,14 +2197,23 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_organization_property_definitions(&self) -> Result<Vec<HsPropertyDef>> {
-        let v = self
+        // The endpoint is not part of the published Mailbox API 2.0 and
+        // answers 404 on accounts where it does not exist — a missing
+        // definition list is legal (organization custom fields simply
+        // stay unmapped), so a 404 degrades to an empty list instead of
+        // painting an ERROR into the sync log on every account.
+        match self
             .request("/v2/organization-properties", "GET", None)
-            .await?;
-        Ok(v["_embedded"]["organizationProperties"]
-            .as_array()
-            .or_else(|| v["_embedded"]["properties"].as_array())
-            .map(|a| a.iter().map(Self::map_property_def).collect())
-            .unwrap_or_default())
+            .await
+        {
+            Ok(v) => Ok(v["_embedded"]["organizationProperties"]
+                .as_array()
+                .or_else(|| v["_embedded"]["properties"].as_array())
+                .map(|a| a.iter().map(Self::map_property_def).collect())
+                .unwrap_or_default()),
+            Err(e) if is_not_found(&e) => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
     }
 
     async fn list_organizations(&self) -> Result<Vec<HsOrganization>> {
@@ -2811,6 +2820,18 @@ impl RealHelpScoutProvider {
         }
     }
 
+    /// Walk every page of a v2 list endpoint.
+    ///
+    /// Mailbox API 2.0 pagination is 1-BASED: the first page is page 1
+    /// (the docs default), and `page.number` echoes the fetched page.
+    /// The loop therefore starts at 1 and stops once the page just
+    /// fetched is the last one (`number >= total_pages`). The first
+    /// request used to send `page=0`, which Help Scout rejects with
+    /// `Bad request — path:page, "Not a number - expected non-negative
+    /// integer", rejectedValue:"0"` — so users, tags, organizations,
+    /// workflows and saved replies never synced a single row, while
+    /// conversations and customers (HAL next-link pagination, no page
+    /// parameter) kept working and masked the failure.
     async fn list_all_v2<T>(
         &self,
         base: &str,
@@ -2818,7 +2839,7 @@ impl RealHelpScoutProvider {
         map: impl Fn(&Value) -> T,
     ) -> Result<Vec<T>> {
         let mut out: Vec<T> = Vec::new();
-        let mut page_no: u32 = 0;
+        let mut page_no: u32 = 1;
         loop {
             let sep = if base.contains('?') { '&' } else { '?' };
             let v = self
@@ -2831,8 +2852,8 @@ impl RealHelpScoutProvider {
             let n = embedded.len();
             out.extend(embedded.iter().map(&map));
             let total_pages = v["page"]["totalPages"].as_u64().unwrap_or(1);
-            let number = v["page"]["number"].as_u64().unwrap_or(0);
-            if n == 0 || number + 1 >= total_pages {
+            let number = v["page"]["number"].as_u64().unwrap_or(1);
+            if n == 0 || number >= total_pages {
                 break;
             }
             page_no += 1;
