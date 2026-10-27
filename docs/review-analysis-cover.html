@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  @page { size: 794px 1123px; margin: 0; }
+  :root {
+    --c-bg: #f1f0ef;
+    --c-accent: #87702a;
+    --c-text: #1c1c1a;
+    --c-muted: #78766f;
+    --c-mid: #504933;
+  }
+  html, body {
+    margin: 0; padding: 0;
+    width: 794px; height: 1123px;
+    background: var(--c-bg);
+    color: var(--c-text);
+    font-family: 'Inter', sans-serif;
+  }
+  @media screen {
+    html { height: auto; display: flex; justify-content: center; min-height: 100vh; background: var(--c-bg); }
+    body { transform-origin: top center; scale: min(1, calc(100vw / 794), calc(100vh / 1123)); margin: 0 auto; box-shadow: 0 0 60px rgba(0,0,0,0.15); }
+  }
+  .cover { width: 794px; height: 1123px; position: relative; border: none; outline: none; box-shadow: none; }
+
+  /* Layer 1 - background grid (clipped) */
+  .layer1 { position: absolute; inset: 0; overflow: hidden; z-index: 1; }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(80, 73, 51, 0.05) 0.5px, transparent 0.5px),
+      linear-gradient(to bottom, rgba(80, 73, 51, 0.05) 0.5px, transparent 0.5px);
+    background-size: 50px 50px;
+  }
+
+  /* Layer 2 - structure */
+  .layer2 { position: absolute; inset: 0; z-index: 2; }
+  .anchor-line {
+    position: absolute;
+    left: 95px; top: 112px; bottom: 112px;
+    width: 8px;
+    background: var(--c-accent);
+  }
+
+  /* Layer 3 - content */
+  .layer3 { position: absolute; inset: 0; z-index: 3; }
+  .kicker {
+    position: absolute; left: 146px; top: 168px;
+    font-size: 16pt; font-weight: 400;
+    letter-spacing: 3pt; text-transform: uppercase;
+    color: var(--c-text); opacity: 0.6;
+    max-width: 560px;
+  }
+  .hero {
+    position: absolute; left: 146px; top: 300px;
+    font-size: 58pt; font-weight: 900; line-height: 1.15;
+    color: var(--c-text);
+    max-width: 560px;
+  }
+
+  .summary {
+    position: absolute; left: 146px; top: 545px;
+    font-size: 16pt; font-weight: 400; line-height: 1.6;
+    color: var(--c-text); opacity: 0.85;
+    max-width: 476px;
+  }
+  .meta {
+    position: absolute; left: 146px; top: 830px;
+    font-size: 17pt; font-weight: 400; line-height: 1.5;
+    color: var(--c-text);
+  }
+  .meta .muted { color: var(--c-muted); }
+  .footer {
+    position: absolute; left: 146px; bottom: 96px;
+    font-size: 15pt; font-weight: 400;
+    letter-spacing: 3pt; text-transform: uppercase;
+    color: var(--c-text); opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+  <div class="cover">
+    <div class="layer1"><div class="grid"></div></div>
+    <div class="layer2"><div class="anchor-line"></div></div>
+    <div class="layer3">
+      <div class="kicker">Review Analysis &amp; Industry Benchmark Report</div>
+      <div class="hero">SupportOS+</div>
+      <div class="summary">The external code review, decoded against source-grounded evidence:
+        three findings verified, one prescription weighed against the 2025/26
+        engineering standard, and a combined eleven-phase roadmap.</div>
+      <div class="meta">
+        Prepared by Z.ai<br>
+        <span class="muted">Repository: kimpearce888/SupportOS-Plus &middot; Revision bcba02c</span><br>
+        <span class="muted">October 27, 2026</span>
+      </div>
+      <div class="footer">Engineering Audit Series</div>
+    </div>
+  </div>
+</body>
+</html>
