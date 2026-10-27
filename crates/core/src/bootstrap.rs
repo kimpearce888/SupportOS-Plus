@@ -317,6 +317,19 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m061_knowledge_chunk_attempts",
         apply: crate::embeddings::apply_m061_knowledge_chunk_attempts,
     },
+    // Audit fix (C4 follow-up): customer_chats was originally delivered by
+    // editing the already-applied m039 in place. Databases that had run the
+    // released 1.7.3 recorded version 52, so every later boot skipped m039
+    // and the customer chat-channel mirror never existed on upgraded
+    // installs — the first chat-channel sync failed with "no such table".
+    // m062 re-issues the same idempotent CREATE: a no-op where the current
+    // m039 already made the table (fresh installs), the only creator where
+    // it did not (1.7.3 → 1.8.0 upgrades).
+    BootStep {
+        version: 53,
+        label: "m062_customer_chats_upgrade_guard",
+        apply: crate::mirror_tables::apply_m062_customer_chats,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {
