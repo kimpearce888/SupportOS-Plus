@@ -4,6 +4,50 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.7.3] — 2026-10-26
+
+### Added
+- **Live terminal progress for the long sync stages** — the conversation
+  walk and other slow passes report per-resource progress as they run
+  instead of looking dead, and the "Cancel running sync" button is
+  consulted inside the long page loops (not only between resources).
+
+### Fixed
+- HAL-style pagination caps for incremental passes so a looping `next`
+  link can no longer spin forever.
+
+## [1.7.2] — 2026-10-26
+
+### Fixed
+- **Page-1 pagination for the v2 list endpoints** — a malformed page
+  cursor fell back to page 1 instead of erroring the whole pass, and a
+  missing `organization-properties` payload is tolerated rather than
+  fatal.
+- Test mocks moved to the real 1-based Help Scout page convention.
+
+## [1.7.1] — 2026-10-25
+
+The first audit-fix release: every finding from the pre-release audit
+(FIND-001..011) that needed a code change.
+
+### Fixed
+- **FIND-001** — the loopback listener honors `SPP_LOOPBACK_PORT`,
+  falls back to an OS port with an explicit warning when the bind
+  fails, and the actually-bound port is surfaced in Settings (with the
+  "register this EXACTLY" redirect-URI guidance).
+- **FIND-004** — the sidebar layout reserves the theme strip so the
+  bottom navigation rows are reachable again.
+- **FIND-005** — every destructive action (backup overwrite/restore,
+  data reset, log clear, outreach cancel/DNC, AI job deletes) arms the
+  shell confirm dialog before it runs.
+- **FIND-006/007/008/009/010** — honest idle-sync message, knowledge
+  zero-hit search surfaces a gap suggestion, issue-radar enqueue
+  feedback, connector refresh-seconds validation, and the customers
+  back-to-search flow re-runs the applied query.
+- **FIND-011** — command-palette dismissal is layer-independent.
+- **FIND-003 (hygiene)** — `secrets.key` is forward-guarded against
+  being committed, and the audit record is in the docs.
+
 ## [1.7.0] — 2026-10-21
 
 The "AI becomes real, learns, and the long tail ships honestly" release:

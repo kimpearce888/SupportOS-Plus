@@ -427,6 +427,45 @@ pub fn stage_deb(workspace_root: &Path, staging: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(&apps_dir)?;
     fs::write(apps_dir.join(format!("{BINARY_NAME}.desktop")), &desktop)?;
 
+    // Audit §4 hygiene: Debian policy expects every package to ship
+    // usr/share/doc/<pkg>/copyright; the .deb previously installed none.
+    // Machine-readable format, source pointing at the shipped LICENSE.
+    let doc_dir = staging
+        .join("usr")
+        .join("share")
+        .join("doc")
+        .join(DEB_PACKAGE);
+    fs::create_dir_all(&doc_dir)?;
+    fs::write(
+        doc_dir.join("copyright"),
+        format!(
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\
+             Upstream-Name: SupportOS+\n\
+             Source: {HOMEPAGE}\n\
+             \n\
+             Files: *\n\
+             Copyright: 2026 kimpearce888\n\
+             License: MIT\n\
+              Permission is hereby granted, free of charge, to any person\n\
+              obtaining a copy of this software and associated documentation\n\
+              files (the \"Software\"), to deal in the Software without\n\
+              restriction, including without limitation the rights to use,\n\
+              copy, modify, merge, publish, distribute, sublicense, and/or\n\
+              sell copies of the Software, and to permit persons to whom the\n\
+              Software is furnished to do so, subject to the following\n\
+              conditions: The above copyright notice and this permission\n\
+              notice shall be included in all copies or substantial portions\n\
+              of the Software. THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT\n\
+              WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT\n\
+              LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A\n\
+              PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n\
+              AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES\n\
+              OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR\n\
+              OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE\n\
+              SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n",
+        ),
+    )?;
+
     let hicolor = staging
         .join("usr")
         .join("share")

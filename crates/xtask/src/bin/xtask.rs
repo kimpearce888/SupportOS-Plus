@@ -43,23 +43,23 @@ enum Cmd {
         args: Vec<String>,
     },
     Migrate {
-        #[arg(long, default_value = "./data/supportos.db")]
+        #[arg(long, default_value_t = default_db_path_str())]
         db: String,
     },
     Backup {
-        #[arg(long, default_value = "./data/supportos.db")]
+        #[arg(long, default_value_t = default_db_path_str())]
         db: String,
         #[arg(long, default_value = "./data/backups")]
         backups_dir: String,
     },
     Restore {
-        #[arg(long, default_value = "./data/supportos.db")]
+        #[arg(long, default_value_t = default_db_path_str())]
         db: String,
         #[arg(long)]
         backup: String,
     },
     Healthcheck {
-        #[arg(long, default_value = "./data/supportos.db")]
+        #[arg(long, default_value_t = default_db_path_str())]
         db: String,
     },
     /// Count vector-store chunks and evaluate the D4 sqlite-vec gate (< 100k = GO).
@@ -243,6 +243,18 @@ fn default_data_dir_str() -> String {
     spp_core::config::default_data_dir()
         .to_string_lossy()
         .into_owned()
+}
+
+/// Audit (low): the db-ops subcommands used to default to
+/// `./data/supportos.db`, while the app creates `supportos-plus.db`
+/// (config::DB_FILE_NAME) inside its default data dir — every default-path
+/// migrate/backup/restore/healthcheck quietly targeted a file the app
+/// never uses. One shared resolver keeps both on the same source of truth.
+fn default_db_path_str() -> String {
+    std::path::Path::new(&default_data_dir_str())
+        .join(spp_core::config::DB_FILE_NAME)
+        .display()
+        .to_string()
 }
 
 const D4_GATE_CHUNKS: usize = 100_000;

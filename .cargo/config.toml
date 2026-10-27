@@ -1,0 +1,4 @@
+# `cargo xtask <cmd>` runs the developer entry point directly — the README
+# documented this invocation before the alias existed (audit §4).
+[alias]
+xtask = "run --locked -p supportos-plus-xtask --"

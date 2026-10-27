@@ -275,7 +275,7 @@ pub fn list_jobs(
     let mut sql = String::from("SELECT * FROM jobs");
     let mut conds: Vec<&str> = Vec::new();
     if status.is_some() {
-        conds.push("status = ?1");
+        conds.push("status = ?");
     }
     if queue.is_some() {
         conds.push("queue = ?");
@@ -286,15 +286,25 @@ pub fn list_jobs(
     }
     sql.push_str(" ORDER BY id DESC LIMIT ?");
     let mut stmt = conn.prepare(&sql)?;
-    let limit_str = limit.to_string();
-    let rows = stmt.query_map(
-        [
-            status.unwrap_or(""),
-            queue.unwrap_or(""),
-            limit_str.as_str(),
-        ],
-        map_queue_job,
-    )?;
+    // Audit (low): the old SQL mixed `?1` with bare `?`, so the statement's
+    // parameter count drifted with which filters were set while the bind
+    // array always carried three values — every call except the
+    // both-filters-set combination failed to bind. Strictly positional
+    // binding, one value per present placeholder.
+    // Hoisted to function scope so the `&&str` trait objects below outlive
+    // `query_map`; the empty-string fallbacks are never bound (each push is
+    // guarded by the same `is_some` check that added the placeholder).
+    let status_s = status.unwrap_or_default();
+    let queue_s = queue.unwrap_or_default();
+    let mut binds: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(3);
+    if status.is_some() {
+        binds.push(&status_s);
+    }
+    if queue.is_some() {
+        binds.push(&queue_s);
+    }
+    binds.push(&limit);
+    let rows = stmt.query_map(binds.as_slice(), map_queue_job)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -645,6 +655,40 @@ mod batch20_audit24_tests {
 
         // Terminal job cannot be re-completed.
         assert!(complete_with_result(&conn, job_id, "again").is_err());
+    }
+
+    /// Audit (low): the mixed `?1`/`?` numbering in `list_jobs` made every
+    /// filter combination except "both set" fail to bind. All four
+    /// combinations must list the seeded rows.
+    #[test]
+    fn list_jobs_binds_for_every_filter_combination() {
+        let conn = Connection::open_in_memory().expect("db");
+        ensure_jobs_table(&conn).expect("ensure");
+        enqueue_on(&conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue");
+        enqueue_on(&conn, "outbound", "send_reply", "{}", 3, 2).expect("enqueue");
+
+        assert_eq!(
+            list_jobs(&conn, None, None, 10).expect("no filters").len(),
+            2
+        );
+        assert_eq!(
+            list_jobs(&conn, Some(status::QUEUED), None, 10)
+                .expect("status only")
+                .len(),
+            2
+        );
+        assert_eq!(
+            list_jobs(&conn, None, Some("ai"), 10)
+                .expect("queue only")
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_jobs(&conn, Some(status::QUEUED), Some("outbound"), 10)
+                .expect("both filters")
+                .len(),
+            1
+        );
     }
 
     /// Audit item 24: databases created before the `result` column get it

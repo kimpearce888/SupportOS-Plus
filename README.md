@@ -97,6 +97,20 @@ field — useful for CI and headless setups. If the callback listener cannot
 bind its port (another program is using it), the connect button says so
 instead of leaving a dead browser tab.
 
+The remaining environment knobs (audit §4: none of these were documented
+before):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SPP_LOOPBACK_PORT` | OS-assigned | Pin the localhost OAuth/webhook listener port — register the SAME port in the Help Scout app's redirect URI |
+| `LOG_LEVEL` | `info` | tracing filter level |
+| `LMSTUDIO_BASE_URL` | `http://127.0.0.1:1234` | Local LLM server (copilot, embeddings) |
+| `LMSTUDIO_CHAT_MODEL` / `LMSTUDIO_EMBEDDING_MODEL` | server default | Model overrides |
+| `LMSTUDIO_TIMEOUT_MS` / `LMSTUDIO_CONCURRENCY` | `120000` / `2` | Request budget |
+| `QDRANT_URL` / `QDRANT_ENABLED` | `http://127.0.0.1:6333` / `true` | Vector store endpoint |
+| `SYNC_INTERVAL_MINUTES` | `1` | Incremental-sync quiet ceiling |
+| `SYNC_API_CONCURRENCY` | `2` | Parallel Help Scout requests during sync |
+
 **Working in real time** (updated in 1.3.0): the local mirror polls Help
 Scout **every minute by default** (configurable in Settings), streams
 conversations into the inbox while the initial sync is still running
@@ -165,13 +179,13 @@ A single Cargo workspace, split by concern:
 |---|---|
 | `crates/catalog` | Shared type catalog re-exported by every other crate |
 | `crates/core` | Pure-Rust business core — SQLite persistence, sync engine, Help Scout provider (real), AI providers, sqlite-vec vector store, loopback listener, diagnostics event log. No UI deps. |
-| `crates/app-shell` | Native desktop shell (eframe/egui) — 22 pages render in-process against `core`, no HTTP hop |
+| `crates/app-shell` | Native desktop shell (eframe/egui) — 23 pages render in-process against `core`, no HTTP hop |
 | `crates/xtask` | Developer entry point — `dev` / `lint` / `verify-icons` / `package` / `deb` / db ops (`migrate`/`backup`/`restore`/`healthcheck`/`vector-count`) |
 
-The 22 shell pages: Shell, Dashboard, Inbox, Customers, Knowledge, Reports,
+The 23 shell pages: Shell, Dashboard, Inbox, Customers, Knowledge, Reports,
 Operations, AI Center, Automation, Connectors, Custom Objects, Incidents,
 Issue Radar, Notifications, Onboarding, Organizations, Outreach, Search,
-Settings, Support Graph, Sync Health, Diagnostics.
+Settings, Support Graph, Sync Health, Diagnostics, Live Chats.
 
 ## Key design decisions
 
@@ -219,6 +233,10 @@ cargo xtask package   # AppImage → target/appimage/SupportOS-Plus-x86_64.AppIm
 cargo xtask deb       # .deb     → target/deb/supportos-plus_<version>_amd64.deb
 cargo test            # unit tests (crypto round-trips, HMAC vectors, SLA math, page models)
 ```
+
+`cargo xtask` works because `.cargo/config.toml` aliases it to
+`cargo run --locked -p supportos-plus-xtask --` (audit §4: the README
+cited the alias long before it existed).
 
 `xtask package` stages the AppDir (release binary, `.desktop` entry, hicolor
 icons, `AppRun`) and runs `appimagetool` — located via `APPIMAGETOOL`, cached

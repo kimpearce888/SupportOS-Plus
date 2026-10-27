@@ -35,7 +35,6 @@ async-trait = "0.1"
 reqwest = { workspace = true }
 url = { workspace = true }
 futures-util = { workspace = true }
-tokio-stream = { workspace = true }
 supportos-plus-catalog = { workspace = true }
 ammonia = "4.2"
 pdf-extract = "0.12"

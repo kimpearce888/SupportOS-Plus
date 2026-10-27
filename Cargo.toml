@@ -70,7 +70,6 @@ regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form"] }
 
 futures-util = "0.3"
-tokio-stream = { version = "0.1", features = ["sync"] }
 
 url = "2"
 
