@@ -16,6 +16,12 @@ pub const MAGIC: &[u8; 6] = b"SOSYNC";
 pub const FORMAT_VERSION: u32 = 1;
 const SCRYPT_N: u32 = 1 << 15;
 const LOG_N: u8 = SCRYPT_N.trailing_zeros() as u8;
+// Audit fix (M15): sane bounds for a header-declared scrypt N. Writers
+// always emit SCRYPT_N (2^15); the pre-fix reader trusted header.kdf.N
+// unclamped, so a crafted bundle with N = 2^31 forced a multi-GB scrypt
+// allocation (local DoS) before the passphrase was ever tested.
+const SCRYPT_N_MIN: u32 = 1 << 14;
+const SCRYPT_N_MAX: u32 = 1 << 25;
 const KEY_LEN: usize = crypto::KEY_LEN;
 
 #[derive(Debug, Clone, Serialize)]
@@ -317,6 +323,32 @@ pub fn export_bundle(conn: &Connection, bundles_dir: &Path, passphrase: &str) ->
     })
 }
 
+/// Audit fix (M11): scope guard for the plaintext export snapshot.
+/// From creation (VACUUM INTO) until the bundle is fully written, the
+/// snapshot holds the mirror database UNENCRYPTED; the pre-fix code only
+/// removed it on the happy path, so any error after VACUUM INTO — or a
+/// panic — leaked plaintext customer data into the bundles dir. The guard
+/// removes the file on every exit unless the happy path defuses it
+/// (crash/kill residue is caught by the sweep below instead).
+struct SnapshotTempGuard<'a> {
+    path: &'a Path,
+    armed: bool,
+}
+
+impl SnapshotTempGuard<'_> {
+    fn defuse(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SnapshotTempGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(self.path);
+        }
+    }
+}
+
 fn try_export_bundle(
     conn: &Connection,
     bundles_dir: &Path,
@@ -339,6 +371,13 @@ fn try_export_bundle(
 
     let escaped = snapshot_path.to_string_lossy().replace('\'', "''");
     conn.execute_batch(&format!("VACUUM INTO '{escaped}'"))?;
+    // Audit fix (M12): the snapshot is the mirror database in PLAINTEXT —
+    // owner-only on disk, like secrets.key, instead of the umask's 0644.
+    crypto::restrict_permissions(&snapshot_path);
+    let mut snapshot_guard = SnapshotTempGuard {
+        path: &snapshot_path,
+        armed: true,
+    };
 
     let info = snapshot_info(&snapshot_path)?;
     let fingerprint = fingerprint_of_file(&snapshot_path)?;
@@ -377,7 +416,12 @@ fn try_export_bundle(
     out.extend_from_slice(&header_bytes);
     out.extend_from_slice(&ciphertext);
     fs::write(&target, &out)?;
-    let _ = fs::remove_file(&snapshot_path);
+    // Audit fix (M12): the bundle is encrypted, but there is no reason for
+    // it to be world-readable either.
+    crypto::restrict_permissions(&target);
+    // The snapshot is fully consumed (encrypted into `out`); disarm the
+    // guard — this is the only exit where it may survive until here.
+    snapshot_guard.defuse();
 
     let size = fs::metadata(&target)?.len();
     log_sync(conn, "export", &target, size, &info)?;
@@ -402,9 +446,10 @@ fn decrypt_to_temp(
     // Clean-audit item 48: `.import-*.tmp` files hold DECRYPTED plaintext
     // databases. A crash (or the pre-fix verify error paths) could leave
     // them behind forever. Every decrypt entry point sweeps stale
-    // leftovers — only temps whose embedded creation timestamp is at
-    // least an hour old, so a concurrent verify/import's fresh temp is
-    // never touched.
+    // leftovers — `.import-*` temps whose embedded creation timestamp is
+    // at least an hour old, plus stale `.snapshot-*` export leaks (audit
+    // fix (M11), see the sweep) — so a concurrent verify/import's fresh
+    // temp is never touched.
     sweep_stale_import_temps(bundles_dir);
     if !bundle_path.exists() {
         return Err("Bundle file not found.".into());
@@ -442,6 +487,24 @@ fn decrypt_to_temp(
     {
         return Err("Bundle uses an unsupported cipher or KDF.".into());
     }
+    // Audit fix (M15): header.kdf.N is attacker-controlled. The pre-fix
+    // code turned it into log_n via trailing_zeros with no bounds check,
+    // so a crafted bundle with N = 2^31 reached scrypt and forced a
+    // multi-GB memory allocation. Reject anything outside
+    // [SCRYPT_N_MIN, SCRYPT_N_MAX] or not a power of two with an honest
+    // error — clamping would silently derive a wrong key and surface as a
+    // misleading "wrong passphrase". (r and p stay pinned to the writer's
+    // 8/1 by the check above, well inside their sane [8, 64] / [1, 16]
+    // ranges.)
+    if header.kdf.n < SCRYPT_N_MIN
+        || header.kdf.n > SCRYPT_N_MAX
+        || !header.kdf.n.is_power_of_two()
+    {
+        return Err(format!(
+            "Bundle declares an out-of-range scrypt work factor (N = {}).",
+            header.kdf.n
+        ));
+    }
     let ciphertext = &raw[offset + header_len as usize..];
 
     let salt = B64
@@ -465,35 +528,54 @@ fn decrypt_to_temp(
     ));
     fs::create_dir_all(bundles_dir).map_err(|e| e.to_string())?;
     fs::write(&temp_path, plain).map_err(|e| e.to_string())?;
+    // Audit fix (M12): the decrypted database is plaintext customer data;
+    // it used to inherit the umask (0644).
+    crypto::restrict_permissions(&temp_path);
     Ok(temp_path)
 }
 
-/// Clean-audit item 48: remove leftover decrypted-plaintext import temps
-/// from crashed runs. The `.import-{millis}.tmp` name embeds the creation
-/// time; anything at least an hour old is definitively stale (a verify or
-/// import finishes in seconds) and is deleted. Fresh temps are left alone
-/// so a concurrent operation keeps working.
+/// Clean-audit item 48 + audit fix (M11): remove leftover plaintext temps
+/// from crashed runs. `.import-{millis}.tmp` embeds its creation time;
+/// anything at least an hour old is definitively stale (a verify or
+/// import finishes in seconds) and is deleted. Audit fix (M11) extends
+/// the sweep to export snapshots (`.snapshot-*.tmp`, plaintext DB copies
+/// the pre-fix export could leak on a crash): their name embeds an
+/// rfc3339 stamp that does not parse as an epoch, so the file mtime is
+/// used with a one-day threshold instead. Fresh temps are left alone so
+/// a concurrent operation keeps working.
 fn sweep_stale_import_temps(bundles_dir: &Path) {
     const STALE_AFTER_MS: i64 = 60 * 60 * 1000;
+    const SNAPSHOT_STALE_AFTER_MS: i64 = 24 * 60 * 60 * 1000;
     let Ok(entries) = fs::read_dir(bundles_dir) else {
         return;
     };
     let cutoff = chrono::Utc::now().timestamp_millis() - STALE_AFTER_MS;
+    let snapshot_cutoff =
+        chrono::Utc::now().timestamp_millis() - SNAPSHOT_STALE_AFTER_MS;
     for entry in entries.flatten() {
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        let Some(stem) = name
+        if let Some(stem) = name
             .strip_prefix(".import-")
             .and_then(|s| s.strip_suffix(".tmp"))
-        else {
-            continue;
-        };
-        let Ok(created_ms) = stem.parse::<i64>() else {
-            continue;
-        };
-        if created_ms < cutoff {
-            let _ = fs::remove_file(entry.path());
+        {
+            let Ok(created_ms) = stem.parse::<i64>() else {
+                continue;
+            };
+            if created_ms < cutoff {
+                let _ = fs::remove_file(entry.path());
+            }
+        } else if name.starts_with(".snapshot-") && name.ends_with(".tmp") {
+            let modified_ms = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64);
+            if modified_ms.is_some_and(|ms| ms < snapshot_cutoff) {
+                let _ = fs::remove_file(entry.path());
+            }
         }
     }
 }
@@ -644,7 +726,18 @@ pub fn import_bundle(
         };
     }
 
-    let restore_tmp = format!("{}.restore-tmp", db_path.to_string_lossy());
+    // Audit fix (H7): stale-WAL corruption on import. The pre-fix order
+    // renamed the imported DB into its final place FIRST and only then
+    // deleted the live -wal/-shm — a crash inside that window left the
+    // fresh file paired with the previous generation's WAL, and SQLite
+    // replays those foreign pages onto it on next open. This is the exact
+    // bug backup_service::restore documents and fixed; the import path
+    // now follows the same ordering: stage + fsync, move the live DB and
+    // its WAL/SHM aside as one unit, swap, fsync, then discard the
+    // moved-aside generation.
+    let db_str = db_path.to_string_lossy();
+    let restore_tmp = format!("{db_str}.restore-tmp");
+    let prev = format!("{db_str}.restore-prev");
     if fs::copy(&temp, &restore_tmp).is_err() {
         let _ = fs::remove_file(&temp);
         return ImportResult {
@@ -653,20 +746,72 @@ pub fn import_bundle(
             require_restart: None,
         };
     }
+    // Audit fix (M12): the staged copy is decrypted plaintext customer data.
+    crypto::restrict_permissions(Path::new(&restore_tmp));
+    // Stage the copy and fsync it BEFORE anything is swapped, so a power
+    // cut cannot leave a half-written database in place.
+    if fs::File::open(&restore_tmp)
+        .and_then(|f| f.sync_all())
+        .is_err()
+    {
+        let _ = fs::remove_file(&temp);
+        let _ = fs::remove_file(&restore_tmp);
+        return ImportResult {
+            ok: false,
+            message: "Import failed: could not flush the staged database.".into(),
+            require_restart: None,
+        };
+    }
     let _ = fs::remove_file(&temp);
+    // A stale prev from an earlier import must not block the renames.
+    let _ = fs::remove_file(&prev);
+    let _ = fs::remove_file(format!("{prev}-wal"));
+    let _ = fs::remove_file(format!("{prev}-shm"));
+    // Move the LIVE database and its WAL/SHM aside as one unit BEFORE the
+    // imported file takes its final place. Between the renames the db
+    // path simply does not exist — SQLite treats that as "open fresh",
+    // never as a cross-generation pair.
+    if db_path.exists() && fs::rename(db_path, &prev).is_err() {
+        let _ = fs::remove_file(&restore_tmp);
+        return ImportResult {
+            ok: false,
+            message: "Import failed: could not set the live database aside.".into(),
+            require_restart: None,
+        };
+    }
+    for ext in ["-wal", "-shm"] {
+        let live = format!("{db_str}{ext}");
+        if Path::new(&live).exists() {
+            let _ = fs::rename(&live, format!("{prev}{ext}"));
+        }
+    }
     if fs::rename(&restore_tmp, db_path).is_err() {
+        // Roll back: the live database (and its WAL) return to place.
+        if Path::new(&prev).exists() {
+            let _ = fs::rename(&prev, db_path);
+        }
+        for ext in ["-wal", "-shm"] {
+            let side = format!("{prev}{ext}");
+            if Path::new(&side).exists() {
+                let _ = fs::rename(&side, format!("{db_str}{ext}"));
+            }
+        }
         return ImportResult {
             ok: false,
             message: "Import failed: could not swap the database into place.".into(),
             require_restart: None,
         };
     }
-    for ext in ["-wal", "-shm"] {
-        let p = format!("{}{ext}", db_path.to_string_lossy());
-        if Path::new(&p).exists() {
-            let _ = fs::remove_file(&p);
-        }
+    // Durability: fsync the swapped file and the directory entry that
+    // now names it.
+    let _ = fs::File::open(db_path).and_then(|f| f.sync_all());
+    if let Some(parent) = db_path.parent() {
+        let _ = fs::File::open(parent).and_then(|d| d.sync_all());
     }
+    // Success: the pre-import generation is discarded with its WAL/SHM.
+    let _ = fs::remove_file(&prev);
+    let _ = fs::remove_file(format!("{prev}-wal"));
+    let _ = fs::remove_file(format!("{prev}-shm"));
     let size = fs::metadata(bundle_path).map(|m| m.len()).unwrap_or(0);
     let _ = log_sync(conn, "import", bundle_path, size, &info);
     ImportResult {
@@ -894,7 +1039,12 @@ mod tests {
     /// Hand-craft a valid bundle whose decrypted payload is arbitrary
     /// bytes — decryption succeeds, but snapshot_info fails on it, which
     /// is exactly the error path that used to leak the plaintext temp.
-    fn craft_bundle_with_plaintext(dir: &Path, passphrase: &str, plain: &[u8]) -> PathBuf {
+    fn craft_bundle_with_plaintext(
+        dir: &Path,
+        passphrase: &str,
+        plain: &[u8],
+        n: u32,
+    ) -> PathBuf {
         let salt = crypto::random_salt();
         let key = derive_key(passphrase, &salt).expect("key");
         let (iv, ciphertext) = crypto::encrypt(&key, plain).expect("encrypt");
@@ -902,7 +1052,7 @@ mod tests {
             v: FORMAT_VERSION,
             kdf: KdfParams {
                 name: "scrypt".into(),
-                n: SCRYPT_N,
+                n,
                 r: 8,
                 p: 1,
                 salt: B64.encode(salt),
@@ -948,6 +1098,7 @@ mod tests {
             &dir,
             "passphrase-ok",
             b"this is definitely not a sqlite database",
+            SCRYPT_N,
         );
         let result = verify_bundle(&conn, &dir, &bundle, "passphrase-ok");
         assert_eq!(result["ok"], json!(false), "verify must fail on garbage");
@@ -991,6 +1142,53 @@ mod tests {
         sweep_stale_import_temps(&dir);
         assert!(!stale.exists(), "the two-hour-old temp is swept");
         assert!(fresh.exists(), "the fresh temp survives the sweep");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Audit fix (M11): the extended sweep also removes stale export
+    /// snapshots — plaintext DB copies a crashed export could leak. Their
+    /// name carries an rfc3339 stamp (not an epoch), so the sweep keys on
+    /// the file mtime with a one-day threshold; fresh snapshots survive.
+    #[test]
+    fn audit_m11_sweep_removes_stale_export_snapshots() {
+        let dir = temp_dir("snap-sweep");
+        let stale = dir.join(".snapshot-2020-01-01T00-00-00-000Z.tmp");
+        let fresh = dir.join(".snapshot-latest.tmp");
+        fs::write(&stale, b"stale plaintext db").expect("stale");
+        fs::write(&fresh, b"fresh plaintext db").expect("fresh");
+        // Push the stale snapshot's mtime two days back; `fresh` keeps now.
+        let two_days_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86400);
+        fs::File::options()
+            .write(true)
+            .open(&stale)
+            .expect("open stale")
+            .set_modified(two_days_ago)
+            .expect("mtime");
+        sweep_stale_import_temps(&dir);
+        assert!(!stale.exists(), "the two-day-old snapshot is swept");
+        assert!(fresh.exists(), "the fresh snapshot survives the sweep");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Audit fix (M15): a header declaring an absurd scrypt N (2^31 here)
+    /// must be rejected up-front. The pre-fix code trusted
+    /// trailing_zeros(N) and let the crafted value reach scrypt, forcing
+    /// a multi-GB memory allocation — local DoS — before the passphrase
+    /// was ever checked.
+    #[test]
+    fn audit_m15_rejects_out_of_range_header_scrypt_n() {
+        let dir = temp_dir("m15");
+        let conn = Connection::open_in_memory().expect("memory db");
+        let bundle = craft_bundle_with_plaintext(&dir, "passphrase-ok", b"x", 1 << 31);
+        let result = verify_bundle(&conn, &dir, &bundle, "passphrase-ok");
+        assert_eq!(result["ok"], json!(false));
+        let msg = result["message"].as_str().unwrap();
+        assert!(
+            msg.contains("scrypt work factor"),
+            "must reject the work factor honestly, got: {msg}"
+        );
+        // The rejection happens before any plaintext temp is written.
+        assert!(import_temps(&dir).is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -74,6 +74,25 @@ pub fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()>
     Ok(())
 }
 
+/// Audit fix (M12): restrict `path` to owner-only (0600 on unix; no-op
+/// elsewhere). Backup copies, plaintext snapshots/temps and JSON/CSV
+/// exports used to inherit the umask (0644 on default systems) and were
+/// world-readable on multi-user machines — only `secrets.key` was created
+/// with restrictive permissions. Best-effort: a failed chmod is swallowed,
+/// because losing an already-written artifact over a permission oddity
+/// (e.g. a foreign filesystem) would be worse than the exposure.
+pub fn restrict_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
 /// Encrypts `plaintext` under `key` with a freshly generated nonce.
 /// Returns `(nonce, ciphertext)` — the caller stores both in its envelope.
 pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<([u8; NONCE_LEN], Vec<u8>)> {

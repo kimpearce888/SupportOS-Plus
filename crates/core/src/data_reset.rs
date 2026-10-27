@@ -109,6 +109,23 @@ pub fn reset_workspace_data(conn: &mut Connection, data_dir: Option<&Path>) -> R
     conn.pragma_update(None, "foreign_keys", "ON")?;
     let mut report = report?;
 
+    // Audit fix (M14): with secure_delete the freed pages were already
+    // zeroed in place; a VACUUM after the reset additionally compacts the
+    // file (drops the free pages entirely and truncates WAL residue), so
+    // nothing recoverable remains at all. The reset is an explicit
+    // destructive action, so the one-off rewrite cost is acceptable; a
+    // failure (tight disk, a concurrent reader) must never fail an
+    // already-successful reset, so it is logged and swallowed.
+    if report.rows_deleted > 0
+        && let Err(e) = conn.execute_batch("VACUUM")
+    {
+        tracing::warn!(
+            error = %e,
+            "post-reset VACUUM failed; free pages keep their (zeroed) \
+             space until the next VACUUM"
+        );
+    }
+
     if let Some(dir) = data_dir {
         match crate::vectorstore_sqlitevec::SqliteVecStore::purge_all(dir) {
             Ok(dropped) => report.vectors_dropped = dropped,
@@ -154,6 +171,29 @@ fn purge_attachment_files(attachments_dir: &Path) -> u64 {
 }
 
 fn purge_in_transaction(conn: &mut Connection) -> Result<ResetReport> {
+    // Audit fix (M14): the reset is the app's "wipe customer data"
+    // control, but plain DELETEs leave the purged rows recoverable in the
+    // file's free pages and WAL. secure_delete = ON makes SQLite zero
+    // every freed cell/page at delete time, on this connection's deletes
+    // below. Best-effort by design: if the pragma errors, the reset must
+    // still proceed (warned) — a wipe must not be blockable by a pragma.
+    if let Err(e) = conn.pragma_update(None, "secure_delete", "ON") {
+        tracing::warn!(
+            error = %e,
+            "secure_delete could not be enabled; purged rows may remain \
+             recoverable until the next VACUUM"
+        );
+    }
+    let result = purge_tables(conn);
+    // Restore normal (cheap) delete behavior for the rest of the session,
+    // whatever the purge outcome was.
+    if let Err(e) = conn.pragma_update(None, "secure_delete", "OFF") {
+        tracing::warn!(error = %e, "secure_delete could not be restored to OFF");
+    }
+    result
+}
+
+fn purge_tables(conn: &mut Connection) -> Result<ResetReport> {
     let mut report = ResetReport::default();
     let tx = conn.transaction()?;
 

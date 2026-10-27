@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::crypto;
 use crate::error::{Error, Result};
 
 #[derive(Serialize)]
@@ -75,8 +76,19 @@ fn try_backup(conn: &Connection, backups_dir: &Path) -> Result<BackupResult> {
     let target = backups_dir.join(format!("supportos-backup-{stamp}.db"));
     let escaped = target.to_string_lossy().replace('\'', "''");
     conn.execute_batch(&format!("VACUUM INTO '{escaped}'"))?;
+    // Audit fix (M12): the backup is the full mirror database in plaintext
+    // (customer PII included). VACUUM INTO inherits the umask (0644);
+    // force owner-only like secrets.key.
+    crypto::restrict_permissions(&target);
 
-    let settings_target = target.to_string_lossy().replace(".db", ".settings.json");
+    // Audit fix (M18): only the file EXTENSION may change here. The
+    // pre-fix `to_string_lossy().replace(".db", ".settings.json")`
+    // rewrote EVERY ".db" occurrence, so a data directory containing
+    // ".db" anywhere in its path (e.g. …/my.db.d/backups) produced a
+    // sidecar path inside a nonexistent directory and failed the whole
+    // backup. with_extension touches the final component only (and
+    // appends honestly if the name carried no extension at all).
+    let settings_target = target.with_extension("settings.json");
     let mut safe_rows: Vec<Value> = Vec::new();
     {
         let mut stmt = conn.prepare("SELECT key, value FROM application_settings")?;
@@ -98,6 +110,9 @@ fn try_backup(conn: &Connection, backups_dir: &Path) -> Result<BackupResult> {
             "settings": safe_rows,
         }))?,
     )?;
+    // Audit fix (M12): the sidecar is secret-redacted but still carries
+    // application settings; keep it owner-only alongside the .db.
+    crypto::restrict_permissions(&settings_target);
 
     let size = fs::metadata(&target)?.len();
     let verified = verify_backup(&target);
@@ -369,6 +384,9 @@ fn try_export_json(conn: &Connection, backups_dir: &Path) -> Result<Value> {
             "data": data,
         }))?,
     )?;
+    // Audit fix (M12): JSON exports contain full customer records (PII);
+    // owner-only instead of the umask's 0644.
+    crypto::restrict_permissions(&target);
     Ok(json!({
         "ok": true,
         "message": "JSON export created. Note: this export contains customer data - handle it carefully.",
@@ -474,6 +492,8 @@ fn try_export_csv(conn: &Connection, backups_dir: &Path) -> Result<Value> {
         lines.push(values.iter().map(esc).collect::<Vec<_>>().join(","));
     }
     fs::write(&target, lines.join("\n"))?;
+    // Audit fix (M12): the CSV export carries customer names/emails (PII).
+    crypto::restrict_permissions(&target);
     Ok(json!({
         "ok": true,
         "message": "CSV export created. Note: this export contains customer data.",
@@ -551,6 +571,36 @@ mod tests {
         fs::write(&junk, b"this is not a sqlite database at all").expect("write junk");
         assert!(!verify_backup(&junk));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Audit fix (M18): the settings sidecar path must be derived from the
+    /// file extension only. The pre-fix code did
+    /// `path.replace(".db", ".settings.json")`, which rewrote EVERY
+    /// ".db" occurrence — a backups directory whose own path contained
+    /// ".db" pointed the sidecar at a nonexistent directory and failed
+    /// the whole backup.
+    #[test]
+    fn audit_m18_sidecar_path_survives_a_directory_named_with_db() {
+        let root = temp_dir("m18");
+        let dir = root.join("my.db.d");
+        fs::create_dir_all(&dir).expect("backups dir containing '.db'");
+        let conn = conn_with_settings();
+
+        let result = backup(&conn, &dir);
+        assert!(
+            result.ok,
+            "a '.db' in the directory name must not break the backup: {}",
+            result.message
+        );
+        let db_path = PathBuf::from(result.path.expect("backup path"));
+        assert!(db_path.exists());
+        // The sidecar sits beside the .db with exactly the extension swapped.
+        let sidecar = db_path.with_extension("settings.json");
+        assert!(
+            sidecar.exists(),
+            "the .settings.json sidecar must be written next to the .db"
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
