@@ -197,11 +197,18 @@ pub fn set_endpoint_api_key(conn: &Connection, id: &str, key: &str) -> Result<()
 }
 
 pub fn get_endpoint_api_key(conn: &Connection, id: &str) -> Option<String> {
-    settings::get_secret(conn, &EndpointConfig::secret_key(id))
-        .ok()
-        .flatten()
-        .and_then(|b| String::from_utf8(b).ok())
-        .filter(|k| !k.is_empty())
+    // Audit (low): a corrupt/undecryptable envelope used to read as "no
+    // key" with no trace. The caller-visible behavior is unchanged
+    // (Option::None ⇒ "unset"), but the root cause now warns.
+    match settings::get_secret(conn, &EndpointConfig::secret_key(id)) {
+        Ok(bytes) => bytes
+            .and_then(|b| String::from_utf8(b).ok())
+            .filter(|k| !k.is_empty()),
+        Err(error) => {
+            tracing::warn!(endpoint = id, error = %error, "endpoint api-key envelope unreadable; treating as unset");
+            None
+        }
+    }
 }
 
 pub fn endpoint_has_key(conn: &Connection, id: &str) -> bool {

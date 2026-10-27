@@ -315,12 +315,23 @@ fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| {
             ctx.db.with_read(|conn| {
-                crate::settings::get_secret(conn, "webhook_secret")
-                    .ok()
-                    .flatten()
-                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_default()
+                // Audit (low): a corrupt/undecryptable envelope used to
+                // collapse to "no secret" silently — which then hard-rejects
+                // every delivery. That rejection is the designed safe-fail,
+                // but the root cause now warns instead of vanishing.
+                match crate::settings::get_secret(conn, "webhook_secret") {
+                    Ok(bytes) => bytes
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_default(),
+                    Err(error) => {
+                        tracing::warn!(
+                            error = %error,
+                            "webhook secret envelope unreadable; deliveries will be rejected until it is repaired"
+                        );
+                        String::new()
+                    }
+                }
             })
         });
 

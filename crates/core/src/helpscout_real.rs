@@ -372,7 +372,7 @@ pub fn has_stored_tokens(conn: &Connection) -> Result<bool> {
     Ok(token_row(conn).is_some_and(|r| r.access_token.is_some_and(|t| !t.is_empty())))
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct HsCredentials {
     pub client_id: String,
     pub client_secret: String,
@@ -381,6 +381,31 @@ pub struct HsCredentials {
     pub webhook_secret: String,
     pub docs_api_key: String,
     pub docs_api_base: String,
+}
+
+// Audit (low): the derived `Debug` carried every credential verbatim.
+// Same masking contract as `EnvHelpScout`: presence and length only.
+impl core::fmt::Debug for HsCredentials {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HsCredentials")
+            .field("client_id", &self.client_id)
+            .field(
+                "client_secret",
+                &crate::config::debug_redact(&self.client_secret),
+            )
+            .field("redirect_uri", &self.redirect_uri)
+            .field("api_base", &self.api_base)
+            .field(
+                "webhook_secret",
+                &crate::config::debug_redact(&self.webhook_secret),
+            )
+            .field(
+                "docs_api_key",
+                &crate::config::debug_redact(&self.docs_api_key),
+            )
+            .field("docs_api_base", &self.docs_api_base)
+            .finish()
+    }
 }
 
 /// Envelope keys for the credentials stored by the in-app settings form
@@ -468,12 +493,17 @@ impl HsCredentials {
     /// master key degrades to empty values (reads are best-effort).
     #[must_use]
     pub fn from_envelope(conn: &Connection) -> Self {
-        let read = |key: &str| {
-            crate::settings::get_secret(conn, key)
-                .ok()
-                .flatten()
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-                .unwrap_or_default()
+        // Audit (low): a corrupt/undecryptable envelope used to read as
+        // "not set" with no trace in the logs. The best-effort empty-value
+        // degradation is intentional (reads must not fail boot), but the
+        // reason now lands in the log instead of vanishing.
+        let read = |key: &str| match crate::settings::get_secret(conn, key) {
+            Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
+            Ok(None) => String::new(),
+            Err(error) => {
+                tracing::warn!(key, error = %error, "secrets envelope unreadable; treating as unset");
+                String::new()
+            }
         };
         Self {
             client_id: read(SECRET_CLIENT_ID),
@@ -3343,6 +3373,28 @@ mod credentials_tests {
         assert_eq!(s4.client_id, CredentialSource::NotSet);
         assert_eq!(s4.client_secret, CredentialSource::NotSet);
         assert_eq!(s4.webhook_secret, CredentialSource::NotSet);
+    }
+
+    /// Audit (low): `HsCredentials` used to derive `Debug` with every
+    /// credential in the clear. Presence and length stay diagnosable;
+    /// the values themselves must never reach a formatter.
+    #[test]
+    fn debug_output_never_contains_credential_values() {
+        let creds = HsCredentials {
+            client_id: "client-id-abc".into(),
+            client_secret: "TOPSECRETVALUE1".into(),
+            redirect_uri: "http://localhost:3000/oauth/callback".into(),
+            api_base: "https://api.helpscout.net".into(),
+            webhook_secret: "WHSECVALUE1".into(),
+            docs_api_key: "DOCSKEYVALUE1".into(),
+            docs_api_base: "https://docsapi.helpscout.net".into(),
+        };
+        let rendered = format!("{creds:?}");
+        assert!(!rendered.contains("TOPSECRETVALUE1"), "{rendered}");
+        assert!(!rendered.contains("WHSECVALUE1"), "{rendered}");
+        assert!(!rendered.contains("DOCSKEYVALUE1"), "{rendered}");
+        assert!(rendered.contains("<redacted 15 chars>"), "{rendered}");
+        assert!(rendered.contains("client-id-abc"), "{rendered}");
     }
 }
 

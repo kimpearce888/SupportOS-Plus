@@ -166,7 +166,7 @@ pub struct EnvConfig {
     pub sync: EnvSync,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct EnvHelpScout {
     pub client_id: String,
     pub client_secret: String,
@@ -175,6 +175,35 @@ pub struct EnvHelpScout {
     pub webhook_secret: String,
     pub docs_api_key: String,
     pub docs_api_base: String,
+}
+
+// Audit (low): the derived `Debug` printed `client_secret`,
+// `webhook_secret` and `docs_api_key` verbatim — one `debug!(?env)` away
+// from leaking them into logs and support bundles. Lengths only; the
+// values themselves never reach a formatter.
+impl core::fmt::Debug for EnvHelpScout {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EnvHelpScout")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &debug_redact(&self.client_secret))
+            .field("redirect_uri", &self.redirect_uri)
+            .field("api_base", &self.api_base)
+            .field("webhook_secret", &debug_redact(&self.webhook_secret))
+            .field("docs_api_key", &debug_redact(&self.docs_api_key))
+            .field("docs_api_base", &self.docs_api_base)
+            .finish()
+    }
+}
+
+/// Debug-only secret masker: shows whether a value is set and how long
+/// it is, never the value itself. Shared by every secret-bearing struct
+/// that used to derive `Debug`.
+pub(crate) fn debug_redact(v: &str) -> String {
+    if v.is_empty() {
+        "<unset>".to_string()
+    } else {
+        format!("<redacted {} chars>", v.chars().count())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -353,6 +382,40 @@ mod migrate_tests {
         root.join(LEGACY_DATA_DIR_NAME)
             .join(LEGACY_DB_FILE_NAME)
             .is_file()
+    }
+}
+
+#[cfg(test)]
+mod debug_redaction_tests {
+    use super::*;
+
+    /// Audit (low): secret-bearing structs must never render their
+    /// secrets through `Debug` — one `debug!(?env)` in a log path is all
+    /// it would take to leak them.
+    #[test]
+    fn env_helpscout_debug_never_contains_secret_values() {
+        let env = EnvHelpScout {
+            client_id: "client-id-abc".into(),
+            client_secret: "SUPERSECRETVALUE1".into(),
+            redirect_uri: "http://localhost:3000/oauth/callback".into(),
+            api_base: "https://api.helpscout.net".into(),
+            webhook_secret: "WEBHOOKSECRET1".into(),
+            docs_api_key: "DOCSAPIKEY1".into(),
+            docs_api_base: "https://docsapi.helpscout.net".into(),
+        };
+        let rendered = format!("{env:?}");
+        assert!(!rendered.contains("SUPERSECRETVALUE1"), "{rendered}");
+        assert!(!rendered.contains("WEBHOOKSECRET1"), "{rendered}");
+        assert!(!rendered.contains("DOCSAPIKEY1"), "{rendered}");
+        // Presence and length remain diagnosable; the value does not.
+        assert!(rendered.contains("<redacted 17 chars>"), "{rendered}");
+        assert!(rendered.contains("client-id-abc"), "{rendered}");
+    }
+
+    #[test]
+    fn debug_redact_masks_set_values_and_admits_unset_ones() {
+        assert_eq!(debug_redact(""), "<unset>");
+        assert_eq!(debug_redact("hunter2"), "<redacted 7 chars>");
     }
 }
 

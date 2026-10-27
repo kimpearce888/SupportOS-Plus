@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# Hygiene (audit §4): serialize release runs for the same ref. Never
+# cancel in progress — a half-published release is worse than a queue.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   DEBIAN_FRONTEND: noninteractive
   CARGO_TERM_COLOR: always
@@ -21,6 +27,7 @@ jobs:
   build:
     name: build + test + package (ubuntu:22.04, glibc 2.35 baseline)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     container: ubuntu:22.04
     steps:
       - name: Install build essentials
@@ -36,6 +43,10 @@ jobs:
           # no-simulation gate (the minimal container ships no Python).
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Hygiene (audit §4): the token never needs to sit in
+          # .git/config; the job only reads history and packages.
+          persist-credentials: false
 
       # 1.4.0 R7 (D14): the release build enforces the same no-simulation
       # gate as CI — a tagged release must not carry fabricated-data markers.
@@ -121,6 +132,7 @@ jobs:
     name: "verify .deb on ${{ matrix.container }}"
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -244,6 +256,7 @@ jobs:
     name: verify AppImage (ubuntu-latest, glibc newer)
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -279,10 +292,13 @@ jobs:
     name: publish the GitHub Release
     needs: [verify-deb, verify-appimage]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

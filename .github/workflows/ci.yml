@@ -11,12 +11,24 @@ env:
 permissions:
   contents: read
 
+# Hygiene (audit §4): a new push to the same ref supersedes the run that
+# is still going — the fresh one reuses the warm cache and the cancelled
+# run's result is moot.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: fmt, clippy, test, deny
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Hygiene (audit §4): the default persists the API token into
+          # .git/config for the rest of the job; nothing here needs it.
+          persist-credentials: false
 
       # 1.4.0 R7 (D14): production code must never reintroduce simulated/
       # fake/demo data markers. Runs before anything expensive.
@@ -79,8 +91,11 @@ jobs:
   packages:
     name: AppImage + .deb build, smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust toolchain
         # rust-toolchain.toml is the single source of truth for the exact
