@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SupportOS+ User Handbook&nbsp;— The Plain-English Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============ SupportOS+ User Handbook&nbsp;— book design ============ */
+@page { size: 720px 1020px; margin: 0; }
+
+:root {
+  --paper:  #f6f1e7;   /* warm paper */
+  --ink:    #26221c;   /* warm near-black */
+  --accent: #a8542f;   /* terracotta */
+  --muted:  #6f665a;   /* warm gray */
+  --card:   #fdfaf3;   /* card surface */
+  --line:   #e0d6c3;   /* hairline */
+  --chip:   #efe7d6;   /* mono chip bg */
+}
+
+html, body {
+  margin: 0; padding: 0;
+  width: 720px;
+  background: #f6f1e7;
+  color: var(--ink);
+  font-family: 'Lora', 'DejaVu Serif', Georgia, serif;
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+@media screen {
+  html { height: auto; display: flex; justify-content: center; background: #f6f1e7; }
+  body { transform-origin: top center; margin: 20px auto; box-shadow: 0 8px 40px rgba(38,34,28,.25); }
+}
+
+p, td, li, .body-text { overflow-wrap: break-word; word-break: normal; }
+p { margin: 0 0 10px 0; text-align: justify; hyphens: auto; }
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+/* ---------- cover ---------- */
+.cover {
+  width: 720px; height: 1020px; box-sizing: border-box;
+  break-after: page; overflow: hidden; position: relative;
+  padding: 96px 88px 96px 88px; display: flex; flex-direction: column; justify-content: center;
+  background:
+    radial-gradient(circle at 85% 12%, rgba(168,84,47,.10), transparent 42%),
+    radial-gradient(circle at 10% 90%, rgba(168,84,47,.08), transparent 40%),
+    var(--paper);
+}
+.cover-frame { position: absolute; inset: 26px; border: 1px solid var(--line); pointer-events: none; }
+.cover-frame::after { content: ''; position: absolute; inset: 6px; border: 1px solid var(--line); }
+.cover-kicker {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: var(--accent);
+  margin-bottom: 30px;
+  display: flex; align-items: center; gap: 12px;
+}
+.cover-kicker::before { content: ''; width: 11px; height: 11px; background: var(--accent); display: inline-block; }
+.cover-title { font-size: 92px; line-height: 1.02; font-weight: 700; letter-spacing: -1px; margin: 0 0 6px 0; }
+.cover-title::after { content: '+'; color: var(--accent); }
+.cover-sub {
+  font-size: 21px; line-height: 1.45; color: var(--ink); font-style: italic;
+  max-width: 500px; margin-top: 18px;
+}
+.cover-points { display: flex; flex-wrap: wrap; gap: 10px; max-width: 560px; margin-top: 34px; }
+.cover-points span {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 10.5px;
+  letter-spacing: .5px; color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); padding: 6px 10px; border-radius: 999px;
+}
+.cover-bottom {
+  position: absolute; left: 88px; right: 88px; bottom: 96px;
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted);
+}
+
+/* ---------- front matter ---------- */
+.front { padding: 74px 64px 46px 64px; }
+.front-title { font-size: 27px; font-weight: 600; margin: 4px 0 6px 0; }
+.front .divider { margin-bottom: 18px; }
+.toc-block { break-after: page; }
+.toc-list { columns: 2; column-gap: 30px; margin-top: 14px; }
+.toc-part {
+  break-inside: avoid; margin: 14px 0 6px 0;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--accent);
+}
+.toc-row { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4.5px; break-inside: avoid; }
+.toc-n { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 11px; color: var(--accent); min-width: 20px; }
+.toc-t { font-size: 13.2px; }
+.toc-dots {
+  flex: 1; min-width: 14px; color: #b9ad97; font-size: 10px; letter-spacing: 3px;
+  overflow: hidden; white-space: nowrap; transform: translateY(-2.5px);
+}
+.toc-dots::before {
+  content: '.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0';
+}
+.toc-pg { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 11px; color: var(--muted); min-width: 20px; text-align: right; }
+
+/* ---------- flowing body ---------- */
+.main-content { padding: 66px 64px 48px 64px; }
+
+.chapter-header { break-after: avoid; break-inside: avoid; margin-top: 28px; }
+.chapter-header.first { margin-top: 0; }
+.kicker {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent);
+  margin-bottom: 8px;
+}
+.ch-title { font-size: 29px; line-height: 1.15; font-weight: 600; margin: 0 0 10px 0; letter-spacing: -.3px; }
+.ch-title::after { content: ''; display: block; width: 46px; height: 3px; background: var(--accent); margin-top: 12px; }
+.front-title::after { content: ''; display: block; width: 46px; height: 3px; background: var(--accent); margin-top: 10px; }
+.divider { width: 46px; height: 3px; background: var(--accent); margin: 0 0 14px 0; }
+.ch-lede { font-size: 15.5px; font-style: italic; color: var(--muted); margin-bottom: 14px; text-align: left; }
+
+h3.sec {
+  font-size: 17.5px; font-weight: 600; margin: 20px 0 8px 0;
+  break-after: avoid; letter-spacing: -.2px;
+}
+h3.sec .no { color: var(--accent); font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 12.5px; margin-right: 7px; font-weight: 500; }
+h4.sub { font-size: 15px; font-weight: 600; margin: 14px 0 6px 0; break-after: avoid; }
+
+ul.b, ol.b { margin: 4px 0 12px 0; padding-left: 20px; }
+ul.b li, ol.b li { margin-bottom: 5px; break-inside: avoid; }
+ol.b li::marker { color: var(--accent); font-weight: 600; }
+
+/* UI strings */
+.ui {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: .80em; background: var(--chip); border-radius: 4px;
+  padding: 1.5px 6px; white-space: nowrap; color: #3f3427;
+}
+.uiw { white-space: normal; }
+.path { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: .82em; color: var(--accent); }
+
+/* boxes */
+.box { break-inside: avoid; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 0 0 13px 0; }
+.box .box-title { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.box p:last-child, .box ul:last-child, .box ol:last-child { margin-bottom: 0; }
+.tip { border-left: 4px solid var(--accent); }
+.plain { background: transparent; border: 1px dashed var(--line); }
+
+/* tables */
+table.t { width: 100%; border-collapse: collapse; margin: 6px 0 14px 0; font-size: 12.6px; table-layout: fixed; }
+table.t thead { display: table-header-group; }
+table.t tr { break-inside: avoid; }
+table.t th {
+  text-align: left; font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
+  border-bottom: 2px solid var(--ink); padding: 5px 8px 5px 0;
+}
+table.t td { vertical-align: top; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: break-word; }
+table.t td .ui { white-space: normal; }
+td.k { font-weight: 600; }
+
+/* steps */
+ol.steps { counter-reset: step; list-style: none; padding-left: 0; margin: 8px 0 12px 0; }
+ol.steps li { counter-increment: step; position: relative; padding-left: 34px; margin-bottom: 9px; break-inside: avoid; }
+ol.steps li::before {
+  content: counter(step); position: absolute; left: 0; top: 1px;
+  width: 21px; height: 21px; border-radius: 50%; background: var(--accent); color: #fdfaf3;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* glossary */
+.gloss { break-inside: avoid; margin-bottom: 9px; padding-left: 12px; border-left: 3px solid var(--line); }
+.gloss b { font-weight: 600; }
+
+/* metric chips */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px 0; }
+.chips span {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 10.5px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px;
+}
+
+/* ---------- ending ---------- */
+.ending {
+  width: 720px; height: 1020px; box-sizing: border-box;
+  break-before: page; overflow: hidden; position: relative;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  text-align: center; padding: 80px;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(168,84,47,.10), transparent 40%),
+    radial-gradient(circle at 85% 85%, rgba(168,84,47,.08), transparent 42%),
+    var(--paper);
+}
+.ending .end-frame { position: absolute; inset: 26px; border: 1px solid var(--line); }
+.ending .end-frame::after { content: ''; position: absolute; inset: 6px; border: 1px solid var(--line); }
+.end-mark { width: 12px; height: 12px; background: var(--accent); margin: 30px auto; transform: rotate(45deg); }
+.end-big { font-size: 34px; font-weight: 600; line-height: 1.3; max-width: 480px; }
+.end-sub { font-style: italic; color: var(--muted); margin-top: 16px; font-size: 15.5px; }
+.end-meta {
+  position: absolute; bottom: 96px; left: 0; right: 0;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted);
+}
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="cover-frame"></div>
+  <div class="cover-kicker">User Handbook &middot; Plain-English Edition</div>
+  <h1 class="cover-title">SupportOS</h1>
+  <div class="cover-sub">The complete, plain-English guide to every screen, every setting and every message&nbsp;— written so that anyone can follow it, with no technical background needed.</div>
+  <div class="cover-points">
+    <span>26 CHAPTERS</span><span>EVERY PAGE EXPLAINED</span><span>EVERY FIELD &middot; WHERE THE VALUE COMES FROM</span><span>TROUBLESHOOTING &amp; FAQ</span>
+  </div>
+  <div class="cover-bottom">
+    <span>Version 1.8.0</span>
+    <span>Your support desk &middot; on your own computer</span>
+  </div>
+</div>
+
+<!-- ================= FRONT MATTER ================= -->
+<div class="main-content front">
+  <div class="kicker">About this book</div>
+  <h2 class="front-title">How to use this handbook</h2>
+
+  <p>This handbook describes <strong>SupportOS+</strong>, version 1.8.0&nbsp;— a desktop program for customer-support teams. It explains what the program does, how to use every one of its pages, what to type into every field, and where each value you need actually comes from. Nothing in this book assumes prior technical knowledge: every term is explained the first time it appears, and every instruction is written as a numbered step you can follow on screen.</p>
+  <p>Everything in these pages was taken directly from the program itself&nbsp;— its screens, its buttons, its settings and its on-screen messages. If this book quotes a label, that is exactly the wording you will see in the application. Where the book says <span class="ui">save credentials</span>, you will find a button with precisely that text.</p>
+  <p>The chapters are arranged in the order you will naturally need them: getting the program installed (Chapters 1–4), connecting it to Help Scout and your first data sync (Chapters 5–6), the everyday work of answering customers (Chapters 7–15), measuring and improving your support (Chapters 16–19), automation and AI (Chapters 20–22), and finally the system pages, your data files, and a troubleshooting guide (Chapters 23–26).</p>
+  <p><strong>If you read only one chapter</strong>, read Chapter 5, <em>Connecting Help Scout</em>&nbsp;— it is the one step that turns an empty application into a working help desk. Chapter 2, <em>Words this app uses</em>, is a dictionary of the terms used everywhere else; return to it whenever a word is unfamiliar.</p>
+
+  <div class="box tip">
+    <div class="box-title">Conventions used in this book</div>
+    <ul class="b">
+      <li>Words shown like <span class="ui">Sync now</span> are <strong>exact button and field labels</strong> as they appear on screen.</li>
+      <li>Numbered step lists are meant to be followed in order, from top to bottom.</li>
+      <li>Tables titled <em>What to enter / Where it comes from</em> tell you, field by field, what value belongs in each box&nbsp;— and which website or menu that value comes from.</li>
+      <li>Boxes marked <em>Good to know</em> contain background explanations; boxes marked <em>Watch out</em> warn about actions that cannot be undone.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ================= TABLE OF CONTENTS ================= -->
+<div class="main-content toc-block">
+  <div class="kicker">Contents</div>
+  <h2 class="front-title">Table of contents</h2>
+  <div class="toc-list">
+    <div class="toc-part">Part I&nbsp;— Getting started</div>
+    <div class="toc-row"><span class="toc-n">1</span><span class="toc-t">What is SupportOS+?</span><span class="toc-dots"></span><span class="toc-pg" id="pg-1">1</span></div>
+    <div class="toc-row"><span class="toc-n">2</span><span class="toc-t">Words this app uses</span><span class="toc-dots"></span><span class="toc-pg" id="pg-2">2</span></div>
+    <div class="toc-row"><span class="toc-n">3</span><span class="toc-t">Installing &amp; starting the app</span><span class="toc-dots"></span><span class="toc-pg" id="pg-3">4</span></div>
+    <div class="toc-row"><span class="toc-n">4</span><span class="toc-t">The screen at a glance</span><span class="toc-dots"></span><span class="toc-pg" id="pg-4">6</span></div>
+    <div class="toc-row"><span class="toc-n">5</span><span class="toc-t">Connecting Help Scout</span><span class="toc-dots"></span><span class="toc-pg" id="pg-5">8</span></div>
+    <div class="toc-row"><span class="toc-n">6</span><span class="toc-t">Your first sync &amp; Sync Health</span><span class="toc-dots"></span><span class="toc-pg" id="pg-6">12</span></div>
+    <div class="toc-part">Part II&nbsp;— Everyday work</div>
+    <div class="toc-row"><span class="toc-n">7</span><span class="toc-t">Inbox: finding conversations</span><span class="toc-dots"></span><span class="toc-pg" id="pg-7">14</span></div>
+    <div class="toc-row"><span class="toc-n">8</span><span class="toc-t">Inbox: reading &amp; acting</span><span class="toc-dots"></span><span class="toc-pg" id="pg-8">15</span></div>
+    <div class="toc-row"><span class="toc-n">9</span><span class="toc-t">Inbox: replies &amp; notes</span><span class="toc-dots"></span><span class="toc-pg" id="pg-9">17</span></div>
+    <div class="toc-row"><span class="toc-n">10</span><span class="toc-t">The AI helpers</span><span class="toc-dots"></span><span class="toc-pg" id="pg-10">19</span></div>
+    <div class="toc-row"><span class="toc-n">11</span><span class="toc-t">Live chats</span><span class="toc-dots"></span><span class="toc-pg" id="pg-11">21</span></div>
+    <div class="toc-row"><span class="toc-n">12</span><span class="toc-t">Operations Center</span><span class="toc-dots"></span><span class="toc-pg" id="pg-12">22</span></div>
+    <div class="toc-row"><span class="toc-n">13</span><span class="toc-t">Customers &amp; Organizations</span><span class="toc-dots"></span><span class="toc-pg" id="pg-13">24</span></div>
+    <div class="toc-row"><span class="toc-n">14</span><span class="toc-t">Knowledge</span><span class="toc-dots"></span><span class="toc-pg" id="pg-14">25</span></div>
+    <div class="toc-row"><span class="toc-n">15</span><span class="toc-t">Search &amp; Support Graph</span><span class="toc-dots"></span><span class="toc-pg" id="pg-15">27</span></div>
+    <div class="toc-part">Part III&nbsp;— Insights</div>
+    <div class="toc-row"><span class="toc-n">16</span><span class="toc-t">Dashboard</span><span class="toc-dots"></span><span class="toc-pg" id="pg-16">28</span></div>
+    <div class="toc-row"><span class="toc-n">17</span><span class="toc-t">Reports</span><span class="toc-dots"></span><span class="toc-pg" id="pg-17">29</span></div>
+    <div class="toc-row"><span class="toc-n">18</span><span class="toc-t">Issue Radar</span><span class="toc-dots"></span><span class="toc-pg" id="pg-18">31</span></div>
+    <div class="toc-row"><span class="toc-n">19</span><span class="toc-t">Incidents</span><span class="toc-dots"></span><span class="toc-pg" id="pg-19">32</span></div>
+    <div class="toc-part">Part IV&nbsp;— Automation, AI &amp; outreach</div>
+    <div class="toc-row"><span class="toc-n">20</span><span class="toc-t">Automation</span><span class="toc-dots"></span><span class="toc-pg" id="pg-20">33</span></div>
+    <div class="toc-row"><span class="toc-n">21</span><span class="toc-t">AI Center &amp; LM Studio</span><span class="toc-dots"></span><span class="toc-pg" id="pg-21">34</span></div>
+    <div class="toc-row"><span class="toc-n">22</span><span class="toc-t">Outreach: campaigns &amp; segments</span><span class="toc-dots"></span><span class="toc-pg" id="pg-22">36</span></div>
+    <div class="toc-part">Part V&nbsp;— System &amp; data</div>
+    <div class="toc-row"><span class="toc-n">23</span><span class="toc-t">Notifications, Custom Objects &amp; Connectors</span><span class="toc-dots"></span><span class="toc-pg" id="pg-23">38</span></div>
+    <div class="toc-row"><span class="toc-n">24</span><span class="toc-t">Settings: the complete reference</span><span class="toc-dots"></span><span class="toc-pg" id="pg-24">39</span></div>
+    <div class="toc-row"><span class="toc-n">25</span><span class="toc-t">Your data &amp; privacy</span><span class="toc-dots"></span><span class="toc-pg" id="pg-25">41</span></div>
+    <div class="toc-row"><span class="toc-n">26</span><span class="toc-t">Troubleshooting &amp; FAQ</span><span class="toc-dots"></span><span class="toc-pg" id="pg-26">43</span></div>
+  </div>
+</div>
+
+<!-- ================= BODY ================= -->
+<div class="main-content">
+
+  <!-- ============ CHAPTER 1 ============ -->
+  <div class="chapter-header first">
+    <div class="kicker">Chapter 1</div>
+    <h2 class="ch-title">What is SupportOS+?</h2>
+    <p class="ch-lede">A short answer, then a slightly longer one&nbsp;— and a ten-minute quick start.</p>
+  </div>
+
+  <p><strong>The short answer.</strong> SupportOS+ is a program that runs on your own computer and brings your company's Help Scout help desk onto your desk. It copies your conversations, customers and help articles into a private database stored on your machine, lets you read and answer everything from one clean window, and adds helpful extras: searching, reports, a knowledge base, automation rules and optional AI assistance that also runs on your own computer.</p>
+  <p><strong>The longer answer.</strong> Most help desks live on a website: you log in through a browser, the company that sells the help desk keeps the data, and you see whatever that website shows you. SupportOS+ takes a different approach. Once you connect it to your Help Scout account, it pulls a complete copy of your support history into a database file on your own computer. From then on, reading, searching and reporting are instant, because everything is local. When you write a reply, it is delivered to Help Scout so your customers receive it exactly as before&nbsp;— SupportOS+ simply gives you a faster, calmer place to work. It never deletes anything on Help Scout by itself, it shows honest status messages for everything it does, and it does not send any telemetry anywhere.</p>
+  <p>Two ideas are worth remembering throughout this book. First, <strong>nothing is simulated</strong>: the app starts completely empty, and everything you see after that comes from your real Help Scout account. Second, <strong>your data stays yours</strong>: the database, the backups and the AI all live on your machine unless you deliberately connect an online AI service of your own choosing.</p>
+
+  <h3 class="sec"><span class="no">1.1</span>What you need before you start</h3>
+  <ul class="b">
+    <li><strong>A computer running Linux</strong>&nbsp;— SupportOS+ is a desktop program for Linux. Installing it takes one command or one double-click (Chapter 3).</li>
+    <li><strong>A Help Scout account with API access</strong>&nbsp;— the Free plan of Help Scout does not include API access; any paid plan does. If you are unsure, ask whoever manages your Help Scout billing. You will also need permission to create a "custom app" in Help Scout (Chapter 5 shows exactly where).</li>
+    <li><strong>Optional: LM Studio</strong>&nbsp;— a free program that runs AI models on your own computer. Without it, SupportOS+ still does everything except the AI helpers, and it will remind you politely. Chapter 21 walks through it step by step.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">1.2</span>Quick start in ten minutes</h3>
+  <p>Here is the whole journey in miniature. Each step points to the chapter that explains it fully.</p>
+  <ol class="steps">
+    <li>Install SupportOS+ and start it (Chapter 3). You will see an empty Dashboard&nbsp;— that is normal and honest: there is no sample data.</li>
+    <li>Open <span class="ui">Settings</span> in the left sidebar, choose the <span class="ui">Help Scout</span> tab, and paste your <strong>client ID</strong> and <strong>client secret</strong> from your Help Scout custom app (Chapter 5 shows where to create one).</li>
+    <li>Press <span class="ui">save credentials</span>. The app connects immediately, runs five automatic connection checks, and starts pulling your history by itself.</li>
+    <li>Wait for the first sync to finish&nbsp;— on large accounts this can take an hour or more; the <span class="ui">Sync Health</span> page shows live progress (Chapter 6).</li>
+    <li>Open the <span class="ui">Inbox</span> and start answering. Replies you send are delivered to Help Scout automatically (Chapters 7–9).</li>
+    <li>Optional but recommended: set up a small "webhook relay" so live chats and customer ratings arrive in real time (Chapter 5.5), and switch on the AI helpers with LM Studio (Chapter 21).</li>
+  </ol>
+
+  <div class="box tip">
+    <div class="box-title">Good to know</div>
+    <p>SupportOS+ shows its version number in the bottom-left corner of the window, next to the name. This handbook matches version <strong>1.8.0</strong>. The app can check for newer versions whenever you press <span class="ui">check for updates</span> in Settings&nbsp;— it looks at the public release list once, only when you click, and sends nothing about you.</p>
+  </div>
+
+  <!-- ============ CHAPTER 2 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 2</div>
+    <h2 class="ch-title">Words this app uses</h2>
+    <p class="ch-lede">A plain-English dictionary. Every term below is used throughout the app and throughout this book.</p>
+  </div>
+
+  <p>Support desk software has its own vocabulary, and SupportOS+ uses the same words as Help Scout so nothing is confusingly renamed. Here are the terms you will meet, in the order they matter.</p>
+
+  <div class="gloss"><b>Help Scout</b>&nbsp;— the online help desk service your company already uses. Customers write to your support email address, and Help Scout turns each message into a conversation. SupportOS+ connects to it and mirrors your data locally.</div>
+  <div class="gloss"><b>Conversation (or ticket)</b>&nbsp;— one exchange with one customer about one topic. It has a number (like <span class="ui">#778</span>), a subject, a status, and a thread of messages.</div>
+  <div class="gloss"><b>Thread / thread entry</b>&nbsp;— one individual message inside a conversation: a customer's email, an agent's reply, an internal note, a phone-log entry, and so on.</div>
+  <div class="gloss"><b>Mailbox</b>&nbsp;— a folder in Help Scout for a stream of conversations, typically one per support address (for example <em>support@</em> and <em>billing@</em>). A conversation always lives in exactly one mailbox.</div>
+  <div class="gloss"><b>Status</b>&nbsp;— where a conversation stands: <span class="ui">active</span> (being worked on), <span class="ui">pending</span> (waiting for the customer), <span class="ui">closed</span> (finished) or <span class="ui">spam</span>.</div>
+  <div class="gloss"><b>Tag</b>&nbsp;— a short label attached to a conversation, such as <em>refund</em> or <em>bug</em>. Tags are used for filtering, reports and automation.</div>
+  <div class="gloss"><b>Customer</b>&nbsp;— a person in your address book: name, email addresses, phone numbers, organization, and the history of their conversations.</div>
+  <div class="gloss"><b>Organization</b>&nbsp;— a company that one or more customers belong to, recognized by its website domains (like <em>acme.com</em>).</div>
+  <div class="gloss"><b>Mirror / local mirror</b>&nbsp;— the private copy of your Help Scout data that SupportOS+ keeps in a database file on your computer. "The mirror" is what the app reads when you browse, search and run reports.</div>
+  <div class="gloss"><b>Sync</b>&nbsp;— the process of updating the mirror: pulling new and changed conversations, customers, and everything else from Help Scout. The first sync copies your whole history; after that, small frequent syncs keep it current.</div>
+  <div class="gloss"><b>Webhook</b>&nbsp;— a small automatic notification that Help Scout sends to the app the moment something happens (a new message, a rating, a chat). Webhooks make updates arrive in near real time. They need the optional "relay" described in Chapter 5.5.</div>
+  <div class="gloss"><b>Credentials</b>&nbsp;— the pair of secret codes (a client ID and a client secret) that identifies SupportOS+ to Help Scout, plus an optional webhook secret and Docs API key. Chapter 5 explains each one and where to get it.</div>
+  <div class="gloss"><b>OAuth</b>&nbsp;— the standard sign-in handshake between two programs. You normally do not need to think about it: the recommended "client credentials" path signs in without opening a browser.</div>
+  <div class="gloss"><b>Docs API / Help Center</b>&nbsp;— the part of Help Scout that stores your public help articles, organized in collections. With a Docs API key, SupportOS+ can mirror those articles and even publish approved drafts to them.</div>
+  <div class="gloss"><b>AI model / LM Studio</b>&nbsp;— an AI text engine. LM Studio is a free desktop program that runs such models on your own computer; SupportOS+ can use it for summaries, suggested replies, translation and more. No model, no problem&nbsp;— the app works without it.</div>
+  <div class="gloss"><b>Embedding / vector index</b>&nbsp;— the technology that lets search also find things by <em>meaning</em>, not just by matching words. It runs quietly in the background once an embedding model is set up (Chapter 21).</div>
+  <div class="gloss"><b>SLA</b>&nbsp;— "service level agreement": the target time for first response and for resolution, measured in business hours for each mailbox.</div>
+  <div class="gloss"><b>Data directory</b>&nbsp;— the folder on your computer where SupportOS+ keeps its database, backups and settings: <span class="path">~/.local/share/supportos-plus</span> by default. Chapter 25 lists every file in it.</div>
+
+  <div class="box tip">
+    <div class="box-title">Good to know</div>
+    <p>When this book says <em>locally</em> or <em>local</em>, it always means "on your computer, inside the data directory". When it says <em>remote</em> or <em>on the platform</em>, it means "on Help Scout's servers". The app is careful to always tell you which side an action happened on (for example, a successful reply reports <span class="ui">Reply delivered to Help Scout</span>).</p>
+  </div>
+
+  <!-- ============ CHAPTER 3 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 3</div>
+    <h2 class="ch-title">Installing &amp; starting the app</h2>
+    <p class="ch-lede">Two ways to install, what you see on first launch, and how updating works.</p>
+  </div>
+
+  <p>SupportOS+ is distributed for Linux in two formats, and both contain the same program&nbsp;— pick whichever is easier for you. Your company may already have downloaded one of them for you; the names to look for end in <span class="path">.deb</span> or <span class="path">.AppImage</span>.</p>
+
+  <h3 class="sec"><span class="no">3.1</span>Choosing an installation method</h3>
+  <table class="t">
+    <colgroup><col style="width:22%"><col style="width:40%"><col style="width:38%"></colgroup>
+    <thead><tr><th>Format</th><th>Best for</th><th>How to use it</th></tr></thead>
+    <tbody>
+      <tr><td class="k">.deb file</td><td>Ubuntu, Debian, Linux Mint and similar systems. Installs like a normal program, with a menu entry and an icon.</td><td>Double-click the file and press Install, or in a terminal run <span class="uiw path">sudo apt install ./supportos-plus_1.8.0_amd64.deb</span>. After installing, find "SupportOS+" in your applications menu.</td></tr>
+      <tr><td class="k">.AppImage file</td><td>Any Linux system, no installation at all. One file that is the whole program.</td><td>Right-click the file &rarr; Properties &rarr; allow "executing as a program", then double-click it. Nothing is installed; the file is the app.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec"><span class="no">3.2</span>What happens on first launch</h3>
+  <ol class="steps">
+    <li>A window opens, titled <span class="ui">SupportOS+</span>, about 1180 by 760 pixels in size (you can resize it freely).</li>
+    <li>The app quietly creates its data folder&nbsp;— <span class="path">~/.local/share/supportos-plus</span>&nbsp;— with the database, a key file for stored secrets, and empty folders for backups and attachments. Chapter 25 explains every file.</li>
+    <li>You land on the <span class="ui">Dashboard</span>, which is honestly empty. The subtitle on many pages will remind you: the app shows only your real data, never samples.</li>
+    <li>The <span class="ui">Onboarding</span> page (bottom of the sidebar, in the System group) shows a short checklist of what is left to do. It is a helpful home base while you set things up.</li>
+  </ol>
+
+  <h3 class="sec"><span class="no">3.3</span>One copy at a time</h3>
+  <p>SupportOS+ keeps all its information in one database, so only one copy of the program may use it at a time. If you accidentally start a second copy while one is already running, the second copy shows a message saying that <span class="uiw">another SupportOS+ instance is already running</span> and then closes itself. Nothing is harmed&nbsp;— just switch to the window that is already open.</p>
+
+  <h3 class="sec"><span class="no">3.4</span>Checking for updates</h3>
+  <p>Open <span class="ui">Settings</span> &rarr; <span class="ui">Sync &amp; AI</span> tab and find the card <strong>About &amp; updates</strong>. It shows the line <span class="uiw">Running version: v1.8.0</span> and a <span class="ui">check for updates</span> button. Pressing it asks the public SupportOS+ release list once whether a newer version exists, and answers with one of three phrases: <span class="ui">up to date</span>, <span class="ui">an update is available</span>, or <span class="ui">running ahead of the latest published release</span>. The app never checks by itself and never sends any information about you or your data.</p>
+
+  <div class="box tip">
+    <div class="box-title">Good to know</div>
+    <p>To close the app, simply close the window&nbsp;— everything is saved continuously as you work. If the program ever fails to start (for example, because another program is using the network port it needs), it shows a desktop pop-up titled <span class="ui">SupportOS+ failed to start</span> with the reason, and writes the technical details to a file called <span class="path">logs/fatal.log</span> inside the data directory. Chapter 26 explains what to do with it.</p>
+  </div>
+
+  <!-- ============ CHAPTER 4 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 4</div>
+    <h2 class="ch-title">The screen at a glance</h2>
+    <p class="ch-lede">The sidebar, the header, the command palette, toasts and confirmations&nbsp;— the furniture used by every page.</p>
+  </div>
+
+  <p>Every page of SupportOS+ shares the same frame, so once you know the furniture you know it everywhere. On the left is a single sidebar; along the top is a slim header; and the rest of the window is whichever page you have open.</p>
+
+  <h3 class="sec"><span class="no">4.1</span>The sidebar</h3>
+  <p>The sidebar lists everything the app can do, grouped into five sections. Clicking a name opens that page. At the very top you will see the logo tile <span class="ui">S+</span>, the name <span class="ui">SupportOS+</span>, and the version line <span class="ui">v1.8.0</span>.</p>
+  <table class="t">
+    <colgroup><col style="width:26%"><col style="width:74%"></colgroup>
+    <thead><tr><th>Group</th><th>Pages in it (in order)</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Workspace</td><td>Dashboard &middot; Inbox &middot; Live chats &middot; Operations</td></tr>
+      <tr><td class="k">Customers &amp; knowledge</td><td>Customers &middot; Organizations &middot; Knowledge</td></tr>
+      <tr><td class="k">Insights</td><td>Reports &middot; Issue Radar &middot; Incidents</td></tr>
+      <tr><td class="k">Automation &amp; AI</td><td>Custom Objects &middot; Automation &middot; AI Center &middot; Outreach</td></tr>
+      <tr><td class="k">System</td><td>Notifications &middot; Search &middot; Support Graph &middot; Connectors &middot; Diagnostics &middot; Sync Health &middot; Settings &middot; Onboarding &middot; Shell</td></tr>
+    </tbody>
+  </table>
+  <p>At the bottom of the sidebar there are two more elements: a wide <span class="ui">Search&hellip;</span> row with a <span class="ui">Ctrl+K</span> badge (that is the command palette, below), and a sun/moon row labelled <span class="ui">switch to dark theme</span> or <span class="ui">switch to light theme</span>. The theme you choose is remembered and restored the next time you start the app.</p>
+
+  <h3 class="sec"><span class="no">4.2</span>The header</h3>
+  <p>The strip at the top of every page carries three things, right-aligned:</p>
+  <ul class="b">
+    <li><strong>The theme toggle</strong>&nbsp;— the same sun/moon switch as in the sidebar.</li>
+    <li><strong>The search button</strong> labelled <span class="ui">Search&nbsp;&nbsp;Ctrl+K</span>&nbsp;— opens the command palette.</li>
+    <li><strong>The freshness pill</strong>&nbsp;— a small rounded badge telling you how current your local copy is. It reads <span class="ui">syncing&hellip;</span> during a sync, <span class="ui">never synced</span> before the first one, or <span class="ui">synced 12s ago</span> style messages. It is green when the last sync was under two minutes ago, amber up to thirty minutes, and red beyond that. Clicking it opens the Sync Health page.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">4.3</span>The command palette</h3>
+  <p>Press <strong>Ctrl+K</strong> (or <strong>Cmd+K</strong> on a Mac keyboard)&nbsp;— or click either search button&nbsp;— and a small window appears in the middle of the screen with a placeholder reading <span class="ui">search tickets, customers, knowledge, issues&hellip;</span>. Type a few words and the palette instantly lists up to twelve matches from across your workspace, each labelled with its type. Use the <strong>up and down arrow keys</strong> to move, <strong>Enter</strong> to open a result (it takes you to the right page, with the right conversation or article selected), and <strong>Esc</strong> to close. If nothing matches, the palette says so and suggests trying a shorter query.</p>
+
+  <h3 class="sec"><span class="no">4.4</span>Keyboard shortcuts</h3>
+  <table class="t">
+    <colgroup><col style="width:34%"><col style="width:66%"></colgroup>
+    <thead><tr><th>Keys</th><th>What they do</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Ctrl / Cmd + K</td><td>Open or close the command palette.</td></tr>
+      <tr><td class="k">Esc</td><td>Close the palette; cancel a confirmation dialog.</td></tr>
+      <tr><td class="k">Ctrl / Cmd + Enter</td><td>Send the reply or note you are typing in the Inbox.</td></tr>
+      <tr><td class="k">&uarr; / &darr; arrows</td><td>Move through palette results or through the @-mention suggestions.</td></tr>
+      <tr><td class="k">Enter or Tab</td><td>Complete a highlighted @-mention while typing a note.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec"><span class="no">4.5</span>Toasts&nbsp;— the little reports in the corner</h3>
+  <p>Whenever something finishes&nbsp;— a sync, a sent reply, a deleted rule&nbsp;— a small card appears in the bottom-right corner announcing the result, and then dismisses itself. Successful notices stay about four seconds, warnings six, errors ten. Two examples of the exact wording: after a manual sync you will see <span class="uiw">Sync finished: 14 record(s) updated</span>, and if a reply could not be delivered you will see the reason spelled out. If several things happen at once, the toasts stack up and disappear one by one.</p>
+
+  <h3 class="sec"><span class="no">4.6</span>Confirmation dialogs</h3>
+  <p>A dozen actions in SupportOS+ are irreversible&nbsp;— deleting an automation rule, clearing the event log, restoring a backup, and so on. None of them happens on a single click. Every one first opens a small dialog in the center of the screen with the title, an honest description of exactly what will be destroyed, and two buttons: <span class="ui">Cancel</span> and a clearly labelled confirm button (in red when the action is destructive). Pressing <strong>Esc</strong> always counts as Cancel. The dialog for restoring a backup, for example, is titled <span class="uiw">Restore supportos-backup-2026-01-15&hellip;db?</span> and states plainly that the current database will be replaced.</p>
+
+  <div class="box tip">
+    <div class="box-title">Good to know</div>
+    <p>The <span class="ui">Shell</span> page at the bottom of the System group is a small diagnostics window meant for support engineers: it shows the database location, the internal schema version and the background event count. You will never need it in daily work, but if someone from support asks "what does your Shell page say?", this is where to look.</p>
+  </div>
+
+  <!-- ============ CHAPTER 5 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 5</div>
+    <h2 class="ch-title">Connecting Help Scout</h2>
+    <p class="ch-lede">The most important chapter in this book: where each secret comes from, how the connection is verified, and how live updates reach the app.</p>
+  </div>
+
+  <p>To pull your data, SupportOS+ needs permission to talk to your Help Scout account. That permission comes from four values, entered once on the <span class="ui">Settings</span> page &rarr; <span class="ui">Help Scout</span> tab. Two are mandatory (the client ID and client secret), and two are optional extras (the webhook secret and the Docs API key). This chapter shows where to obtain each one, what the app does with them, and how to verify that everything works.</p>
+
+  <h3 class="sec"><span class="no">5.1</span>Creating the custom app in Help Scout</h3>
+  <p>The client ID and client secret live in a "custom app" that you create once inside Help Scout. Think of it as issuing a staff badge for SupportOS+: it identifies the program and grants it access, and you can revoke it any time.</p>
+  <ol class="steps">
+    <li>Open <strong>helpscout.com</strong> in your browser and sign in to your account.</li>
+    <li>Click <strong>your profile picture</strong> in the bottom-left corner of Help Scout.</li>
+    <li>Choose <span class="path">Apps &amp; Integrations</span> from the menu.</li>
+    <li>Create a <strong>custom app</strong> (the page offers this when you add a new app). Help Scout will generate two long strings: the <strong>Client ID</strong> and the <strong>Client Secret</strong>.</li>
+    <li>Leave the Help Scout browser tab open&nbsp;— you will paste both strings into SupportOS+ in a moment.</li>
+  </ol>
+
+  <div class="box tip">
+    <div class="box-title">Good to know&nbsp;— plans and permissions</div>
+    <p>Help Scout's Free plan does not include API access, so the connection will be refused on it; any paid plan works. The user whose credentials you enter must be a full user (not a "Light User") and must be able to see the mailboxes you want to sync. If the Connection Doctor later reports a mailbox problem, this is the first thing to check in Help Scout.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">5.2</span>The four values, and where each comes from</h3>
+  <p>On the <span class="ui">Help Scout</span> tab in Settings, scroll to the card <strong>Help Scout credentials</strong>. Each field masks what you type (there is a <span class="ui">show secrets</span> checkbox if you want to verify). Here is the full field reference:</p>
+  <table class="t">
+    <colgroup><col style="width:20%"><col style="width:42%"><col style="width:38%"></colgroup>
+    <thead><tr><th>Field</th><th>What to enter</th><th>Where the value comes from</th></tr></thead>
+    <tbody>
+      <tr><td class="k">client id</td><td>The Client ID string from your Help Scout custom app. Shown in plain text.</td><td>Help Scout &rarr; profile &rarr; <em>Apps &amp; Integrations</em> &rarr; your custom app (Section 5.1).</td></tr>
+      <tr><td class="k">client secret</td><td>The Client Secret string from the same app. Typed masked; <strong>leave blank to keep the stored value</strong> when editing later.</td><td>Same place as the client ID.</td></tr>
+      <tr><td class="k">webhook secret</td><td>A password <em>you invent</em> and will also type into Help Scout's webhook settings. Only the first 40 characters are used (Help Scout's own limit&nbsp;— the app warns you if yours is longer).</td><td>You choose it. It must be the identical value in Help Scout's webhook configuration and here, so the app can verify that webhook messages really come from Help Scout.</td></tr>
+      <tr><td class="k">docs api key</td><td>A separate key for the Help Center (Docs). Optional&nbsp;— only needed for mirroring and publishing help articles.</td><td>Help Scout &rarr; profile &rarr; <em>Security &amp; Access</em> &rarr; <em>Docs API</em>.</td></tr>
+    </tbody>
+  </table>
+  <p>Press <span class="ui">save credentials</span> when done. The values are stored <strong>encrypted</strong> on this computer (Chapter 25 explains how), and the connection activates immediately&nbsp;— no restart needed. Right after saving, the app runs its Connection Doctor (Section 5.4) and the first sync starts by itself. If anything is wrong, a red toast names the failing step. The three secret fields are emptied again after saving as a safety habit; the client ID stays visible. Each field also shows a small badge telling you where the current value came from: <span class="ui">not set</span>, <span class="ui">environment</span> (set by a technically-minded colleague on this computer) or <span class="ui">app settings</span> (entered here). Press <span class="ui">clear stored</span> if you ever want to remove the saved values&nbsp;— the existing connection tokens are untouched until you disconnect.</p>
+
+  <h3 class="sec"><span class="no">5.3</span>Connecting&nbsp;— the easy way and the advanced way</h3>
+  <p>With the client ID and secret saved, press the primary button <span class="ui">connect with client credentials (recommended)</span>. This signs the app in directly&nbsp;— no browser, no extra steps. On success you will see <span class="uiw">connected with client credentials&nbsp;— tokens stored. The sync pulls your account automatically.</span> The status badge at the top of the card changes to <span class="ui">connected</span> (green).</p>
+  <p>There is also an advanced, rarely-needed path hidden behind <span class="ui">advanced: browser authorization flow</span>: it opens the Help Scout sign-in page in your browser and redirects back to the app when you approve. It only works if the exact callback address shown as <span class="ui">redirect uri:</span> is registered on your Help Scout custom app, and it depends on the local listener (next section) being reachable. The app itself recommends the simple path if the browser flow fails. After approving in the browser you will see a page reading <span class="uiw">Connected to Help Scout&nbsp;— You can close this tab and return to SupportOS.</span></p>
+  <p>To sign out completely, press <span class="ui">disconnect</span>. It drops the stored sign-in tokens after a confirmation; <strong>all local data is fully preserved</strong>, and you can reconnect later.</p>
+
+  <h3 class="sec"><span class="no">5.4</span>The Connection Doctor&nbsp;— five automatic checks</h3>
+  <p>The card <strong>Connection Doctor</strong> verifies the whole chain from your computer to Help Scout. It runs automatically after saving credentials, and you can re-run it any time with <span class="ui">run the checks</span> while a connection is active. Each step appears as a line marked <span class="ui">&#10003; ok</span>, <span class="ui">! warning</span> or <span class="ui">&#10007; failed</span>, with a remedy written in plain language when something is wrong:</p>
+  <ol class="steps">
+    <li><strong>Reach the Help Scout API</strong>&nbsp;— can this computer reach Help Scout's servers at all? Failure remedies mention your internet connection, VPN or firewall.</li>
+    <li><strong>Sign in with client credentials</strong>&nbsp;— are the client ID and secret correct? The remedy reminds you to check for stray spaces and that the app is enabled (and that Free plans cannot connect).</li>
+    <li><strong>Read the connected user</strong>&nbsp;— confirms the signed-in account is a full user with API access.</li>
+    <li><strong>List mailboxes</strong>&nbsp;— counts how many mailboxes the connection can see, and warns honestly if the account has none visible.</li>
+    <li><strong>Rate-limit budget</strong>&nbsp;— reports how many requests per minute Help Scout allows and how many remain.</li>
+  </ol>
+  <p>The doctor stops at the first hard failure, so the remedy you see always belongs to the step that actually broke&nbsp;— follow it from top to bottom.</p>
+
+  <h3 class="sec"><span class="no">5.5</span>Webhooks and the relay&nbsp;— real-time updates</h3>
+  <p>Syncing by polling (the app asking Help Scout "anything new?") runs automatically and is enough for reading and replying. Three kinds of updates, however, can <em>only</em> arrive by push notification: <strong>live chats</strong>, <strong>customer satisfaction ratings</strong>, and instant per-conversation updates the moment something changes. To receive them, Help Scout must be able to send messages <em>to your computer</em>&nbsp;— and a desktop app sitting behind normal home or office internet is not directly reachable from outside.</p>
+  <p>The solution is a small helper called a <strong>relay</strong> (a tunnel) that bridges the two. The app documents this directly on the Settings page, in the card <strong>Webhook relay &amp; health</strong>:</p>
+  <ol class="steps">
+    <li>Run a tunnel on this computer that forwards a public web address to the app's private listener. The app names three common tools: <span class="path">cloudflared tunnel --url http://127.0.0.1:PORT</span>, <span class="path">ngrok http 127.0.0.1:PORT</span>, or <span class="path">ssh -N -R 80:127.0.0.1:PORT serveo.net</span>. Whoever manages your computers can set this up in minutes; the app's own listener runs on port <strong>3000</strong> by default (the Settings page shows the actual port in its line <span class="uiw">loopback listener answering on :3000&hellip;</span>).</li>
+    <li>Register a webhook in your Help Scout custom app pointing at that public address, ending in <span class="path">/webhook</span>, and paste the same <strong>webhook secret</strong> you stored in Section 5.2.</li>
+    <li>Paste the public address into the field <span class="ui">public relay URL:</span> in Settings and press <span class="ui">save relay URL</span>.</li>
+    <li>Press <span class="ui">check now</span> (or wait&nbsp;— the app re-checks about every six hours by itself). The verdict appears with a coloured badge: <span class="ui">healthy</span> (green), <span class="ui">reregistered</span> (amber&nbsp;— the app noticed Help Scout had dropped the registration and fixed it), or <span class="ui">failed</span> (red).</li>
+  </ol>
+  <div class="box tip">
+    <div class="box-title">Good to know&nbsp;— the 401 trick</div>
+    <p>The Settings page includes a neat self-test: a properly wired relay answers any test knock on the door with a rejection&nbsp;— <span class="ui">401 (signature check)</span>&nbsp;— because the knocker did not present the secret. In other words, <em>"access denied" is the sound of success here</em>: it proves the public address reaches the app. If you get anything else, the relay is not reaching the app yet.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">5.6</span>When something goes wrong</h3>
+  <ul class="b">
+    <li><strong>"loopback listener NOT running"</strong>&nbsp;— the app's internal receiver did not start; webhooks and the browser sign-in are unavailable. Restart SupportOS+ and check for a port conflict (Chapter 26).</li>
+    <li><strong>"Help Scout rejected the login credentials"</strong>&nbsp;— the client ID/secret pair is wrong, has a stray space, or the app is disabled. Re-check Section 5.1.</li>
+    <li><strong>Connection works, but no mailboxes</strong>&nbsp;— the Help Scout user cannot see any mailbox; check mailbox assignments in Help Scout.</li>
+    <li><strong>Help Center sync idle</strong>&nbsp;— the Docs API key is missing; the warning names exactly where to get one (Section 5.2).</li>
+  </ul>
+
+  <!-- ============ CHAPTER 6 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 6</div>
+    <h2 class="ch-title">Your first sync &amp; Sync Health</h2>
+    <p class="ch-lede">What happens during the big first pull, how the app keeps itself up to date, and how to read the Sync Health page.</p>
+  </div>
+
+  <p>As soon as the connection is active, SupportOS+ begins copying your Help Scout history. This chapter explains what that feels like, how long it takes, and where to watch progress.</p>
+
+  <h3 class="sec"><span class="no">6.1</span>The first sync</h3>
+  <p>The first run copies everything, in a fixed order: account settings, users, teams, mailboxes, folders, tags, mailbox fields, organizations, customers, saved replies, workflows, conversations with all their messages, and (with a Docs API key) your Help Center collections and articles. Progress is shown on the <span class="ui">Sync Health</span> page as lines like <span class="uiw">progress: customers &middot; resource 12/19 &middot; 4812 record(s) so far</span>.</p>
+  <p><strong>How long will it take?</strong> The app itself says it best: large accounts can take <em>"an hour or more"</em>. Leave the app running until it finishes&nbsp;— closing it just pauses the work, and the app will resume safely next time. When it finishes, Diagnostics records <span class="uiw">Initial sync finished: 12,481 records processed, 0 resource(s) failed</span>.</p>
+
+  <h3 class="sec"><span class="no">6.2</span>After the first sync&nbsp;— automatic freshness</h3>
+  <p>Once the mirror is complete, the app keeps it current with no effort on your part:</p>
+  <ul class="b">
+    <li><strong>While the account is busy</strong>, the app checks for changes roughly every 30 seconds.</li>
+    <li><strong>When things are quiet</strong>, it gradually slows down to save effort, at most once per the interval set in Settings (default: one minute).</li>
+    <li><strong>The moment you send something</strong>&nbsp;— a reply, a note, a status change&nbsp;— the app immediately checks for updates, so your sent message and any answer appear quickly.</li>
+    <li><strong>Webhooks</strong> (if you set up the relay) deliver individual changes in near real time, on top of the regular checking.</li>
+  </ul>
+  <p>You can also nudge it manually: the <span class="ui">Sync now</span> button appears on the Dashboard, Inbox, Customers, Organizations and Reports pages. When it finishes, a toast reports the outcome, including the honest case <span class="uiw">Up to date&nbsp;— nothing new from Help Scout</span>.</p>
+
+  <h3 class="sec"><span class="no">6.3</span>Reading the Sync Health page</h3>
+  <p>Open <span class="ui">Sync Health</span> from the System group. The page shows:</p>
+  <ul class="b">
+    <li><strong>Manual run buttons</strong> at the top: <span class="ui">Run initial sync</span> (the full pull), <span class="ui">Run incremental sync</span> (a normal catch-up), <span class="ui">Run reconcile</span> (a careful comparison that also notices conversations deleted or merged on Help Scout), and <span class="ui">Cancel running sync</span> (stops a run mid-flight; it resumes cleanly later). Guards prevent accidents: starting a second run reports <span class="ui">A sync is already running.</span></li>
+    <li><strong>The Engine card</strong>&nbsp;— the app's one-word summary of where syncing stands: <span class="ui">NEW</span> (never synced), <span class="ui">INITIALIZING</span> (the big first pull), <span class="ui">LIVE</span> (healthy and current), or <span class="ui">CATCHING_UP</span> (some resources failed and are being retried). It also shows the webhook queue counters and the latest webhook health verdict.</li>
+    <li><strong>Checkpoints</strong>&nbsp;— one row per data type showing when it was last synced successfully and whether anything failed.</li>
+    <li><strong>Recent runs</strong>&nbsp;— a table of past runs with their type, state, and record counts.</li>
+  </ul>
+  <div class="box tip">
+    <div class="box-title">Good to know&nbsp;— Onboarding status</div>
+    <p>The <span class="ui">Onboarding</span> page shows a compact version of the same information: whether credentials exist, how many conversations are mirrored, and the sync state in three friendly words: <span class="ui">new</span> (never synced) &rarr; <span class="ui">registered</span> (a sync has run) &rarr; <span class="ui">receiving</span> (live webhook events are arriving). Its <span class="ui">Run initial sync</span> button is the same one as on Sync Health, and <span class="ui">Mark complete</span> simply checks off the welcome list.</p>
+  </div>
+
+  <!-- ============ CHAPTER 7 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 7</div>
+    <h2 class="ch-title">Inbox: finding conversations</h2>
+    <p class="ch-lede">Filters, saved status views, search and drill-downs&nbsp;— how to put the right conversation in front of you.</p>
+  </div>
+
+  <p>The <span class="ui">Inbox</span> is where you will spend your day. It is split in two: a list of conversations on the left, and the full detail of the selected conversation on the right. This chapter covers the list side; Chapters 8 and 9 cover the detail side.</p>
+
+  <h3 class="sec"><span class="no">7.1</span>The view chips and filters</h3>
+  <p>At the top of the page sit four one-click views: <span class="ui">All</span>, <span class="ui">Active</span>, <span class="ui">Pending</span> and <span class="ui">Closed</span>&nbsp;— the four conversation statuses. Below them, three dropdowns narrow the list further:</p>
+  <ul class="b">
+    <li><strong>Mailbox</strong>&nbsp;— default <span class="ui">All mailboxes</span>; pick one to focus on a single support address.</li>
+    <li><strong>Channel</strong>&nbsp;— <span class="ui">All channels</span>, <span class="ui">Email</span> or <span class="ui">Chat</span>.</li>
+    <li><strong>Tag</strong>&nbsp;— <span class="ui">Any tag</span> or one specific tag.</li>
+  </ul>
+  <p>Press <span class="ui">apply</span> to use the dropdown picks, or <span class="ui">reset filters</span> to clear everything at once. The subtitle under the page title always tells you how many conversations match&nbsp;— for example <span class="uiw">1–50 of 214 conversations</span>&nbsp;— and the <span class="ui">&lsaquo; prev</span> / <span class="ui">next &rsaquo;</span> buttons page through the list, 50 rows at a time.</p>
+
+  <h3 class="sec"><span class="no">7.2</span>Searching for one conversation</h3>
+  <p>To the right of the filters is a search box with the placeholder <span class="ui">search conversations&hellip;</span> plus a small number field marked <span class="ui">#</span>. The number field jumps straight to a conversation by its number&nbsp;— type <span class="ui">778</span> or <span class="ui">#778</span>, press the <span class="ui">search</span> button, and conversation 778 appears. The text box searches subjects and message contents; results respect the filters you have set. Pressing <strong>Enter</strong> in either field runs the search.</p>
+
+  <h3 class="sec"><span class="no">7.3</span>Reading a list row</h3>
+  <p>Each row in the list shows, top to bottom: the conversation number and subject (like <span class="uiw">#778&nbsp;&nbsp;Refund not received</span>) with a coloured status badge; the customer's name and the mailbox it belongs to; and a short preview of the newest message with its date and time. Rows whose conversation could not be loaded show an honest error instead of silence.</p>
+
+  <h3 class="sec"><span class="no">7.4</span>Arriving from Operations</h3>
+  <p>When you click a workload tile on the Operations page (Chapter 12), the Inbox opens with a coloured banner at the top reading <span class="uiw">Operations drill-down: Customer waiting</span> and the list pre-filtered to exactly those conversations. An <span class="ui">&times;</span> on the banner clears the drill-down and returns you to your normal filters.</p>
+
+  <div class="box tip">
+    <div class="box-title">If the list is empty</div>
+    <p>With no connection configured, the Inbox explains itself: <em>"Help Scout is not connected&nbsp;— nothing can sync yet. Add your app credentials in Settings (Help Scout tab), press connect, and this inbox fills automatically."</em> If you are connected and still see nothing, check that the filters are not hiding your conversations&nbsp;— <span class="ui">reset filters</span> is the quickest test.</p>
+  </div>
+
+  <!-- ============ CHAPTER 8 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 8</div>
+    <h2 class="ch-title">Inbox: reading &amp; acting</h2>
+    <p class="ch-lede">The thread, the action card, triage chips and the conversation's AI briefing&nbsp;— everything around the message you selected.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">8.1</span>The thread</h3>
+  <p>Select a conversation on the left and its full history appears in the <strong>Thread</strong> card on the right: every message in order, each marked with a coloured badge identifying its kind&nbsp;— <span class="ui">Customer</span> for customer messages, <span class="ui">Agent</span> for sent replies, <span class="ui">Note</span> for internal notes, plus <span class="ui">Chat</span>, <span class="ui">Phone</span> and <span class="ui">AI</span> where applicable. Above the thread, the conversation's title line shows the number, subject, status badge, the customer's name and email, the mailbox, and the priority if one is set.</p>
+
+  <h3 class="sec"><span class="no">8.2</span>The action card&nbsp;— status and assignment</h3>
+  <p>Near the composer sits the action card, the steering wheel of the conversation:</p>
+  <ul class="b">
+    <li><span class="ui">status:</span> four chips&nbsp;— <span class="ui">active</span>, <span class="ui">pending</span>, <span class="ui">closed</span>, <span class="ui">spam</span>. Clicking one changes the status locally and sends the change to Help Scout.</li>
+    <li><span class="ui">assign:</span> a dropdown of teammates (showing the current assignee, or <span class="ui">unassigned</span>) with an <span class="ui">assign</span> button next to it.</li>
+  </ul>
+  <p>Every action shows its outcome on the spot, in green or red: <span class="uiw">Reply accepted&nbsp;— delivering to Help Scout (watch the status line).</span> or, for failures, the exact reason. A small live status line then tracks the delivery: queued &rarr; sending &rarr; <span class="uiw">delivered to Help Scout &#10003;</span>&nbsp;— or <span class="uiw">failed:</span> with the reason.</p>
+  <p>Next to the title there are two icon buttons: a sparkle icon that opens the Copilot briefing (Chapter 10), and a refresh icon with the hint <span class="ui">refresh this conversation from Help Scout</span> for when you want the very latest version of this one conversation immediately.</p>
+
+  <h3 class="sec"><span class="no">8.3</span>Triage chips&nbsp;— small facts above the thread</h3>
+  <p>Some conversations carry small chips like <span class="uiw">Urgency: high &middot; 0.82</span> between the title and the thread. These are quick classifications (topic, urgency, sentiment and similar) attached to the conversation, each with a confidence number. Chips marked with a check were confirmed by a human; the rest were derived automatically. Hovering explains the source, and clicking a chip lets you correct it: a small row appears with the valid values plus <span class="ui">unknown (clear)</span> and <span class="ui">cancel</span>. Corrections are recorded as human decisions&nbsp;— the machine suggestion is never the final word.</p>
+
+  <h3 class="sec"><span class="no">8.4</span>"Know before you reply"</h3>
+  <p>Just above the action card you may see a card titled <strong>Know before you reply</strong> carrying an <span class="ui">AI</span> badge. It lists durable facts remembered about this customer from earlier conversations&nbsp;— for example their product, their timezone or their preferred contact style. Its purpose is exactly what the title says: you do not re-ask things the customer has already told you. (Where these facts come from, and how to control them, is Chapter 10.5 and 21.)</p>
+
+  <h3 class="sec"><span class="no">8.5</span>Guards&nbsp;— messages that protect you</h3>
+  <p>Before certain actions run, the app checks a short list of safety conditions, and if one fails, the action is politely refused with a precise message. You will see these only rarely, but each is worth understanding:</p>
+  <table class="t">
+    <colgroup><col style="width:44%"><col style="width:56%"></colgroup>
+    <thead><tr><th>Message you may see</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td><span class="uiw">Composer is empty.</span></td><td>You pressed send without typing anything.</td></tr>
+      <tr><td><span class="uiw">No conversation selected.</span></td><td>Pick a conversation on the left first.</td></tr>
+      <tr><td><span class="uiw">Help Scout is not connected. Remote actions are disabled&hellip;</span></td><td>Sending needs an active connection&nbsp;— finish Chapter 5.</td></tr>
+      <tr><td><span class="uiw">This exact reply was already sent (duplicate-send protection).</span></td><td>The app recognised you pressing send twice on the same text and stopped the second copy.</td></tr>
+      <tr><td><span class="uiw">AI evaluation mode is ON: no notes, replies or status changes are sent.</span></td><td>Someone turned on evaluation mode, which deliberately freezes all sending so AI behaviour can be tested safely. It is switched off in the AI Center.</td></tr>
+      <tr><td><span class="uiw">Help Scout is unreachable. Local data remains fully browsable&hellip;</span></td><td>The internet connection dropped. You can keep reading and writing&nbsp;— deliveries resume when the connection returns.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec"><span class="no">8.6</span>Post-resolution QA</h3>
+  <p>For closed conversations, a card titled <strong>Post-resolution QA</strong> appears under the thread. It computes simple quality facts from the exchange&nbsp;— how many back-and-forth messages it took, whether information was repeated, whether messages arrived after the close, how many agents were involved, and the first-response and resolution times. A button <span class="ui">Run AI review</span> (when a Classify AI role is configured) asks the local model to judge whether the reply truly resolved the issue and whether the answer was supported by evidence; its verdict lines appear beneath. This is the same information shown in aggregate on the Reports &rarr; Quality tab.</p>
+
+  <!-- ============ CHAPTER 9 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 9</div>
+    <h2 class="ch-title">Inbox: replies &amp; notes</h2>
+    <p class="ch-lede">The composer&nbsp;— where you write. Reply or internal note, mentions, the status you leave behind, and how delivery works.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">9.1</span>Choosing reply or note</h3>
+  <p>At the bottom of the conversation view sits the composer, titled <span class="ui">Reply to customer</span> or <span class="ui">Internal note</span> depending on the mode. Two chips switch modes: <span class="ui">Reply</span> (the customer will receive it by email) and <span class="ui">Internal note</span> (visible only to your team). The typing area's placeholder mirrors the mode&nbsp;— for notes it reminds you that <span class="uiw">@ to mention</span> is available. Replies add two extra one-line fields: <span class="ui">Cc (comma-separated emails)</span> and <span class="ui">Bcc (comma-separated emails)</span>.</p>
+  <p>Send with the <span class="ui">send</span> button or <strong>Ctrl+Enter</strong>. After sending, the conversation's status automatically becomes what you chose in Settings (<span class="ui">status after reply</span>, Section 9.4).</p>
+
+  <h3 class="sec"><span class="no">9.2</span>@-mentions</h3>
+  <p>While typing a note (or a reply), type <span class="ui">@</span> followed by a name and a small popup lists matching people and teams&nbsp;— people as <span class="uiw">Maria (@maria)</span>, teams as <span class="uiw">Billing (team)</span>. The arrow keys move the highlight, and <strong>Enter</strong> or <strong>Tab</strong> completes it (a click works too). Mentioned teammates receive a notification like <span class="uiw">Maria mentioned you on #778</span> in the Notifications page.</p>
+
+  <h3 class="sec"><span class="no">9.3</span>How delivery works</h3>
+  <p>Pressing send does not block you: the message is handed to a fast background queue&nbsp;— user sends always go first&nbsp;— and delivered to Help Scout within seconds. The status line under the composer narrates each step (<span class="uiw">queued for delivery&hellip;</span> &rarr; <span class="uiw">sending to Help Scout&hellip;</span> &rarr; <span class="uiw">delivered &#10003;</span>), and a toast confirms it. If delivery fails (connection down, session expired), the app retries with growing pauses, tells you the reason, and <strong>keeps your text safe</strong>. Two deliberate protections are worth knowing: a reply that could not be confirmed as delivered is <em>never</em> blindly re-sent (you are asked to check on Help Scout first, so the customer can never receive it twice), and identical duplicate sends are refused by the duplicate-send protection from Chapter 8.5.</p>
+
+  <h3 class="sec"><span class="no">9.4</span>One setting every agent should know</h3>
+  <p>In <span class="ui">Settings</span> &rarr; <span class="ui">Sync &amp; AI</span>, the field <span class="ui">status after reply:</span> decides what happens to a conversation the moment you reply. Three choices, shown exactly like this:</p>
+  <ul class="b">
+    <li><span class="ui">pending (await customer)</span>&nbsp;— the default: after you answer, the ball is in the customer's court.</li>
+    <li><span class="ui">open (await agent)</span>&nbsp;— keep it on your side of the desk after replying.</li>
+    <li><span class="ui">keep current status</span>&nbsp;— replies never move the status at all.</li>
+  </ul>
+
+  <div class="box tip">
+    <div class="box-title">Good to know&nbsp;— rich formatting</div>
+    <p>Replies and notes accept normal text formatting, and messages that arrive with formatting (bold, links, lists) are cleaned automatically before display: anything unsafe is reduced to plain text, so the thread is always safe to read. Links in customer emails always open in a new tab.</p>
+  </div>
+
+  <!-- ============ CHAPTER 10 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 10</div>
+    <h2 class="ch-title">The AI helpers</h2>
+    <p class="ch-lede">A briefing panel, a suggested reply, a coach, a translator&nbsp;— and a firm promise: AI never sends anything by itself.</p>
+  </div>
+
+  <p>SupportOS+ includes a family of AI assistants that work on your own computer. Two things are true at once: they arrive with sensible defaults (summarising and analysing <em>on</em>, anything that writes <em>off</em>), and none of them can take an action&nbsp;— every message that reaches a customer is one you sent yourself. If no AI model is installed at all, a fully local "always-on" assistant still provides simple summaries and suggestions with zero configuration; the richer features activate when you connect LM Studio (Chapter 21).</p>
+
+  <h3 class="sec"><span class="no">10.1</span>The Copilot briefing</h3>
+  <p>Press the sparkle icon beside a conversation's title and a panel titled <strong>Copilot</strong> opens, subtitled <span class="ui">local &middot; no configuration needed</span>. It reads the whole conversation and any past history, then shows:</p>
+  <ul class="b">
+    <li><strong>Signal badges</strong>&nbsp;— the detected intent, <span class="ui">urgency:</span> and <span class="ui">sentiment:</span> with a colour for severity, and an <span class="ui">escalation risk</span> flag when the conversation shows signs of going wrong.</li>
+    <li><strong>"What the customer needs"</strong>&nbsp;— a short bullet list, and <strong>"Open questions"</strong> listing what is still unclear and worth asking.</li>
+    <li><strong>History</strong>&nbsp;— how many conversations this customer has on file and when you last spoke.</li>
+    <li><strong>"Similar past issues"</strong>&nbsp;— earlier conversations that resembled this one, each with a similarity percentage, what resolved it, and why it matched.</li>
+    <li><strong>"Relevant help articles"</strong>&nbsp;— knowledge-base and Help Center articles worth quoting.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">10.2</span>Suggested replies</h3>
+  <p>At the bottom of the Copilot panel is <strong>Suggested reply</strong>&nbsp;— a draft answer built from your own past resolutions and help articles, ending with the honest label <span class="uiw">[Drafted by SupportOS Copilot from past resolutions and help articles&nbsp;— review before sending.]</span>. Press <span class="ui">Insert into reply</span> to drop it into the composer for editing. If LM Studio is connected, a second button <span class="ui">Draft with LM Studio</span> produces a richer generative draft grounded in the same evidence, which lands in the composer as <span class="uiw">LM Studio draft (model-name)</span> with its own insert and discard buttons&nbsp;— discarding one records polite feedback that drafts of this kind were not wanted.</p>
+
+  <h3 class="sec"><span class="no">10.3</span>Ask the assistant</h3>
+  <p>Below the draft section is <strong>Ask the assistant</strong>: a small chat about the conversation you have open. Type a question (the hint suggests <span class="ui">ask about this conversation&hellip;</span>) and the assistant answers, citing what it used. It can also answer general questions about your workspace&nbsp;— it runs a fixed set of 22 read-only lookup tools (searching conversations, knowledge, known issues, customer history and so on) and can change nothing. Starter-question chips like <span class="uiw">What is this customer asking?</span> and <span class="uiw">Have we seen this issue before?</span> offer one-click beginnings. The same assistant, in a free-standing form with saved chat sessions, lives in the AI Center (Chapter 21.5).</p>
+
+  <h3 class="sec"><span class="no">10.4</span>The AI chips in the composer</h3>
+  <p>Above the typing area sits a row of one-click helpers:</p>
+  <ul class="b">
+    <li><span class="ui">Review draft</span>&nbsp;— runs the "Draft coaching" checks (next section) on what you have written.</li>
+    <li><span class="ui">Shorten</span>, <span class="ui">Expand</span>, <span class="ui">Warmer</span>&nbsp;— rewrites your draft at three different dials, using the Draft AI role when one is routed. If you edit the text while a rewrite is running, the app notices and keeps <em>your</em> version, telling you so.</li>
+    <li><strong>Translate</strong>&nbsp;— a language dropdown (18 languages, from Spanish to Swedish) plus a <span class="ui">Translate</span> chip that rewrites the draft in the chosen language, translated locally and cached.</li>
+  </ul>
+  <p>While any of these runs, the chip shows <span class="ui">AI working&hellip;</span>; results are reported in the line beneath, including the honest failure <span class="uiw">The AI transform produced no result&nbsp;— the feature is off or no Draft role endpoint is routed.</span></p>
+
+  <h3 class="sec"><span class="no">10.5</span>Draft coaching&nbsp;— ten gentle checks</h3>
+  <p>Pressing <span class="ui">Review draft</span> opens the <strong>Draft coaching</strong> card. Its subtitle sets the tone: <em>"advisory&nbsp;— never blocks sending"</em>. It runs up to ten checks over your draft and flags anything worth a second look; each finding carries advice and the evidence it is based on:</p>
+  <ul class="b">
+    <li><strong>Unanswered customer questions</strong>&nbsp;— questions in the thread your draft does not appear to answer.</li>
+    <li><strong>Duplicated questions</strong>&nbsp;— you asking the customer something they already answered.</li>
+    <li><strong>Unsupported claims</strong>&nbsp;— statements the AI layer cannot trace to evidence (needs a routed AI role).</li>
+    <li><strong>Unsupported timeframe</strong>&nbsp;— promising "by tomorrow" when no known issue supports that.</li>
+    <li><strong>Missing acknowledgment</strong>&nbsp;— diving straight in without acknowledging what the customer said.</li>
+    <li><strong>Excessive wording</strong> and <strong>Insufficient detail</strong>&nbsp;— two dials on length, compared against the customer's own style.</li>
+    <li><strong>Internal information leakage</strong>&nbsp;— wording that reads like it slipped from an internal note.</li>
+    <li><strong>Wrong customer context</strong>&nbsp;— mentioning a different customer's details.</li>
+    <li><strong>Communication preference mismatch</strong>&nbsp;— e.g. a very technical answer to a non-technical customer.</li>
+  </ul>
+  <p>The card summarises the result as badges like <span class="uiw">2 flagged</span> and <span class="uiw">9 checks ran</span>, and every check reports <span class="ui">pass</span> or <span class="ui">flagged</span>&nbsp;— nothing is ever hidden, and nothing is ever changed without you.</p>
+
+  <!-- ============ CHAPTER 11 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 11</div>
+    <h2 class="ch-title">Live chats</h2>
+    <p class="ch-lede">Answering website chat visitors in real time&nbsp;— and the quirky rules of the chat platform, explained.</p>
+  </div>
+
+  <p>The <span class="ui">Live chats</span> page shows the chat conversations started through your website's Beacon chat widget. A counter under the title keeps score: <span class="uiw">3 open &middot; 12 ended</span>, and two chips switch between <span class="ui">open chats</span> and <span class="ui">show ended chats</span>.</p>
+  <p>One honest technical fact shapes this page, and the app says so plainly: Help Scout offers no list of chats&nbsp;— <em>chats arrive only as push notifications (webhooks)</em>. That means live chats require the webhook relay from Chapter 5.5 to be set up. Until it is, the page shows a friendly empty state inviting you to connect the relay, and chats will begin appearing the moment it is working&nbsp;— nothing is lost, chats simply cannot be pulled after the fact.</p>
+
+  <h3 class="sec"><span class="no">11.1</span>Reading and answering a chat</h3>
+  <p>The page is again a list-plus-detail split. Each chat row shows the visitor's name (or <span class="ui">visitor</span>), the time of the last event and a preview. Opening one shows the card <span class="uiw">Chat with {name}</span>, its state badge, the messages exchanged so far (each marked <span class="ui">agent</span> or <span class="ui">customer</span> with the sender's name), and a typing box with the placeholder <span class="ui">reply to the visitor&hellip;</span> and a <span class="ui">send</span> button. Sends are protected against double-delivery by a built-in receipt system: the app generates each message's id itself, so a retry can never send the same text twice.</p>
+
+  <h3 class="sec"><span class="no">11.2</span>The rules of the platform, in plain words</h3>
+  <p>Chat sending follows Help Scout's own rules, and the app renders them as honest hints on every chat:</p>
+  <ul class="b">
+    <li><strong>If a teammate holds the chat</strong>, only they can write&nbsp;— the app explains: <span class="uiw">held by {name}&nbsp;— only the assigned agent can message; Help Scout answers 400</span>.</li>
+    <li><strong>If nobody is assigned</strong>, your first message accepts the chat: <span class="uiw">no agent is assigned&nbsp;— sending accepts this chat automatically</span>.</li>
+    <li><strong>When a chat ends</strong>, it graduates into a normal conversation, and the page tells you which: <span class="uiw">this chat ended&nbsp;— it became conversation #778</span> (or notes that the new conversation has not arrived in the mirror yet).</li>
+  </ul>
+
+  <!-- ============ CHAPTER 12 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 12</div>
+    <h2 class="ch-title">Operations Center</h2>
+    <p class="ch-lede">Sixteen tiles that answer "what needs attention right now?", plus team workload and the saved-reply library.</p>
+  </div>
+
+  <p>The <span class="ui">Operations</span> page&nbsp;— full title <span class="ui">Operations Center</span>&nbsp;— is the team leader's cockpit. It has three tabs: <span class="ui">Tiles</span>, <span class="ui">Workload</span> and <span class="ui">Library</span>.</p>
+
+  <h3 class="sec"><span class="no">12.1</span>The sixteen tiles</h3>
+  <p>The Tiles tab groups sixteen cards under the headings <strong>Critical</strong>, <strong>Warning</strong> and <strong>Info</strong>. Each tile shows a count of conversations currently in that situation, with a plain-language description on hover. Tiles marked with <span class="ui">open in inbox &rarr;</span> are clickable and jump straight into a filtered Inbox view (Chapter 7.4).</p>
+  <table class="t">
+    <colgroup><col style="width:28%"><col style="width:72%"></colgroup>
+    <thead><tr><th>Tile</th><th>What it counts</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Unassigned</td><td>Active conversations with no agent assigned.</td></tr>
+      <tr><td class="k">Needs first response</td><td>Conversations where no agent has replied yet.</td></tr>
+      <tr><td class="k">Customer waiting</td><td>Conversations where the customer sent the last message.</td></tr>
+      <tr><td class="k">Waiting over threshold</td><td>Customer-waiting conversations older than the threshold setting (default: 240 minutes, adjustable by your administrator).</td></tr>
+      <tr><td class="k">Urgent</td><td>Conversations marked as urgent priority.</td></tr>
+      <tr><td class="k">SLA at risk / SLA breached</td><td>Conversations approaching or past their response-time targets (Chapter 17.3 explains SLA).</td></tr>
+      <tr><td class="k">High effort</td><td>Conversations with elevated customer-effort signals.</td></tr>
+      <tr><td class="k">Repeated issue / Known issue</td><td>Conversations linked to recurring or already-documented problems.</td></tr>
+      <tr><td class="k">AI escalation / Issue spike</td><td>Conversations escalated by the AI, or clustered around a spiking issue.</td></tr>
+      <tr><td class="k">Automation approvals</td><td>Automation actions waiting for a human yes/no (Chapter 20).</td></tr>
+      <tr><td class="k">Failed jobs</td><td>Background tasks that ran out of retries.</td></tr>
+      <tr><td class="k">Sync problems</td><td>Sync runs that ended in failure.</td></tr>
+      <tr><td class="k">Campaign activity</td><td>Currently active outreach campaigns.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec"><span class="no">12.2</span>Workload</h3>
+  <p>The <span class="ui">Workload</span> tab shows the <strong>Team Workload</strong> table: one row per agent with their open and waiting conversations, their <strong>capacity</strong>, their <strong>load</strong> and a <strong>pressure</strong> value (load as a share of capacity). Small <span class="ui">+</span> and <span class="ui">&minus;</span> buttons on each row raise or lower that person's capacity&nbsp;— for instance after a holiday or a role change. Below it, <strong>Suggested Assignees</strong> lists unassigned conversations with a proposed teammate chosen for having the lightest load, with the reason spelled out. It is a recommendation only: <em>the app never reassigns anything automatically</em> unless you explicitly enable an approved automation rule.</p>
+
+  <h3 class="sec"><span class="no">12.3</span>Library&nbsp;— saved replies and workflows</h3>
+  <p>The <span class="ui">Library</span> tab manages two per-mailbox assets that are mirrored from Help Scout:</p>
+  <ul class="b">
+    <li><strong>Saved replies</strong>&nbsp;— ready-made answer templates. <span class="ui">new saved reply</span> opens a small form with a <strong>name</strong> (required) and the <strong>text</strong>, and writes them straight to Help Scout; rows offer <span class="ui">edit</span> and <span class="ui">delete</span> (with the usual confirmation).</li>
+    <li><strong>Workflows</strong>&nbsp;— automated multi-step actions defined in Help Scout itself. The page lists the mirrored workflows and lets you run one on a conversation by typing its number in the <span class="ui">conversation #:</span> field and pressing <span class="ui">run</span>. (Help Scout only allows workflows on conversations in the same mailbox, and only when run by hand&nbsp;— the app surfaces the platform's refusal if either rule is broken.)</li>
+  </ul>
+
+  <!-- ============ CHAPTER 13 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 13</div>
+    <h2 class="ch-title">Customers &amp; Organizations</h2>
+    <p class="ch-lede">The people you help: profiles, timelines and support health&nbsp;— and the companies they belong to.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">13.1</span>Finding a customer</h3>
+  <p>The <span class="ui">Customers</span> page opens with one search box, placeholder <span class="ui">Search customers by name or email&hellip;</span>, and a <span class="ui">search</span> button (Enter works too). Results appear as a table with the columns <span class="ui">name, email, conversations, last contact</span> and an <span class="ui">open</span> button per row, 50 per page.</p>
+
+  <h3 class="sec"><span class="no">13.2</span>The customer profile</h3>
+  <p>Opening a customer turns the page into a profile with a <span class="ui">&larr; back to search</span> button. Across the top: name, email, phone, company and last activity. Then, in two columns:</p>
+  <ul class="b">
+    <li><strong>Support health</strong>&nbsp;— open conversations, not-good ratings in the last 90 days, and any SLA breaches, plus an <strong>Event mix</strong> bar showing what kinds of things happened over time (signups, conversations, ratings, campaigns&hellip;).</li>
+    <li><strong>Interaction profile</strong>&nbsp;— a short description of how this customer communicates (tone, technical level, preferred answer style) with a badge showing whether it was derived heuristically or by the AI layer.</li>
+    <li><strong>Timeline</strong>&nbsp;— a chronological list of everything on record: conversations started and closed, ratings left, incidents affecting them, campaigns received.</li>
+    <li><strong>Support milestones</strong>&nbsp;— notable events worth remembering: SLA breaches and "high-friction" flags, each with its date.</li>
+    <li><strong>Conversations</strong>&nbsp;— the table of their tickets with number, subject, status and last update.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">13.3</span>Organizations</h3>
+  <p>The <span class="ui">Organizations</span> page groups customers by company. The left column lists organizations as chips reading <span class="uiw">Acme Corp &middot; 14 customers &middot; 92 conversations</span>, filterable by name; selecting one shows its website domains and its member list with roles. At the bottom of the list, the card <strong>New organization</strong> creates a local one: a <strong>Name</strong> field and a domains field accepting comma-separated domains (placeholder <span class="ui">acme.com, acme.io</span>), with a <span class="ui">create organization</span> button. Organizations matter because a customer's profile rolls up health for their whole organization&nbsp;— useful when one broken release angers an entire company at once.</p>
+
+  <!-- ============ CHAPTER 14 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 14</div>
+    <h2 class="ch-title">Knowledge</h2>
+    <p class="ch-lede">Your private knowledge base, the mirrored Help Center, and the AI article-drafting queue with its human gatekeeper: you.</p>
+  </div>
+
+  <p>The <span class="ui">Knowledge</span> page has five tabs: <span class="ui">Documents</span>, <span class="ui">Sources</span>, <span class="ui">Freshness</span>, <span class="ui">Help center</span> and <span class="ui">Article drafts</span>. Everything here feeds two consumers: search and the AI answers, which quote these documents when helping you reply.</p>
+
+  <h3 class="sec"><span class="no">14.1</span>Documents&nbsp;— your private knowledge</h3>
+  <p>The Documents tab holds internal documentation. Two ways to add documents:</p>
+  <ul class="b">
+    <li><strong>Import from the import folder</strong>&nbsp;— open the collapsing header <span class="ui">Import documents</span> and read its own instructions: copy files into the folder <span class="path">knowledge-import</span> inside the app's data directory (supported types: .md, .txt, .csv, .json, .html, .pdf, .docx&nbsp;— files up to 64&nbsp;MB), press <span class="ui">Refresh</span>, and press <span class="ui">Import</span> on each file listed. This folder-only rule is a safety feature: the app never reads files from anywhere else on your computer.</li>
+    <li><strong>Paste a document</strong>&nbsp;— the same header offers a form: <strong>Title</strong>, <strong>Visibility</strong> (two chips: <span class="ui">internal-only (never in customer drafts)</span>&nbsp;— the default&nbsp;— and <span class="ui">customer-safe (may support customer drafts)</span>), an optional <strong>Source name</strong> (defaults to <span class="ui">Manual import</span>), and the <strong>Content (Markdown)</strong> box. Press <span class="ui">Import document</span>.</li>
+  </ul>
+  <p>The documents table lists what you have, with columns <span class="ui">title, source, visibility, chunks</span> and per-row buttons <span class="ui">reviewed</span> and <span class="ui">verify</span>&nbsp;— human quality marks&nbsp;— plus <span class="ui">delete</span> with its confirmation dialog explaining that search and AI answers lose the document immediately.</p>
+
+  <h3 class="sec"><span class="no">14.2</span>Sources and Freshness</h3>
+  <p><span class="ui">Sources</span> groups documents by where they came from. <span class="ui">Freshness</span> is the page's gentle nag: it sorts documents into four buckets&nbsp;— <strong>stale</strong>, <strong>unreviewed (long)</strong>, <strong>unverified</strong> and <strong>low usage</strong>&nbsp;— so an article that has quietly rotted for a year gets a second look before it misleads anyone.</p>
+
+  <h3 class="sec"><span class="no">14.3</span>Help center&nbsp;— the public mirror</h3>
+  <p>This tab mirrors your public Help Scout Help Center. The <span class="ui">Sync Help Center now</span> button pulls collections and articles (it needs the Docs API key from Chapter 5; a banner explains this if the key is missing). You get metric cards for <span class="ui">collections</span>, <span class="ui">articles</span> (with published/draft/internal counts) and <span class="ui">views</span>; filters by collection and status; and a full-text search. Two extra features make this tab clever:</p>
+  <ul class="b">
+    <li><strong>Knowledge gaps</strong>&nbsp;— every Help Center search that returns zero hits is recorded, with a count. The card <span class="ui">Knowledge gaps (tracked)</span> lists them like <span class="uiw">export invoices &times;4</span>: real questions your documentation fails to answer.</li>
+    <li><strong>Article reader</strong>&nbsp;— the <span class="ui">read</span> button opens any article in place.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">14.4</span>Article drafts&nbsp;— AI proposes, you decide</h3>
+  <p>The <span class="ui">Article drafts</span> tab is a small factory with one strict rule, printed in its subtitle: <em>a human review is the only path to publishing</em>. The workflow:</p>
+  <ol class="steps">
+    <li>Pick a knowledge gap from the dropdown in the card <span class="ui">Draft an article from a gap</span> and press <span class="ui">Draft article</span>. The AI studies the real conversations behind that gap&nbsp;— the best resolutions&nbsp;— and writes a draft with numbered citations to the conversations it learned from.</li>
+    <li>The draft waits in the queue with the status <span class="ui">awaiting review</span>. Press <span class="ui">Open</span> to read it, citations included.</li>
+    <li>Decide: <span class="ui">Approve</span> unlocks publishing (it never publishes by itself&nbsp;— the app says so), or <span class="ui">Reject</span> sends it away. Statuses read <span class="ui">approved</span> or <span class="ui">rejected</span>.</li>
+    <li>On an approved draft, choose a Help Center collection and press <span class="ui">Publish to Help Scout (Docs API)</span>. The app uploads, publishes, and then re-syncs the article to verify&nbsp;— the status marches through <span class="ui">published</span> to <span class="ui">published + verified</span>.</li>
+  </ol>
+
+  <!-- ============ CHAPTER 15 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 15</div>
+    <h2 class="ch-title">Search &amp; Support Graph</h2>
+    <p class="ch-lede">One box that finds anything, and a map of how your support world connects.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">15.1</span>The Search page</h3>
+  <p>The <span class="ui">Search</span> page is the everything-search: conversations, knowledge documents and customers in one query. Type into the box with placeholder <span class="ui">Search&hellip;</span>, optionally narrow with the <span class="ui">scope:</span> chips (<span class="ui">All</span>, <span class="ui">Tickets</span>, <span class="ui">Knowledge</span>, <span class="ui">Customers</span>), and press <span class="ui">search</span> or Enter. Results are grouped cards with a type badge, a title, and a snippet showing your words in context. A line above the results tells you the mode: results may be purely word-matched, or blended with meaning-based matches when the AI vector index is active&nbsp;— and the page always says which, with messages like <span class="uiw">FTS only&nbsp;— no embedding model routed (AI Center &gt; Model-role routing, Embed role).</span> For daily use, remember only this: <strong>type a few words, get everything related</strong>.</p>
+
+  <h3 class="sec"><span class="no">15.2</span>The Support Graph</h3>
+  <p>The <span class="ui">Support Graph</span> answers "what is connected to what?". Search by name, subject or number and the page lists matching <em>nodes</em>&nbsp;— customers, conversations, organizations, known issues, incidents, agents, campaigns, knowledge documents and more. Selecting one shows its <strong>Neighborhood</strong>: every link to it, labelled with the relationship (<span class="ui">related_to</span>, <span class="ui">depends_on</span>, <span class="ui">blocks</span>, <span class="ui">mentions</span>, <span class="ui">duplicate_of</span>) and where the link came from&nbsp;— automatically derived from your data, or drawn by hand. Hand-drawn links between any two things can be added from the Reports &rarr; Insights tab (Chapter 17.8), which is how teams record things like "this incident blocks that customer's project".</p>
+
+  <div class="box tip">
+    <div class="box-title">Good to know</div>
+    <p>The command palette (Ctrl+K) from Chapter 4.3 searches the same index, so for quick jumps you rarely need either page&nbsp;— the palette wins for speed, the Search page wins for browsing results with snippets and scopes.</p>
+  </div>
+
+  <!-- ============ CHAPTER 16 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 16</div>
+    <h2 class="ch-title">Dashboard</h2>
+    <p class="ch-lede">Your numbers on one screen&nbsp;— and an honest label on every figure telling you where it came from.</p>
+  </div>
+
+  <p>The <span class="ui">Dashboard</span> opens by default and answers the daily questions: how busy are we, how fast are we, and how happy are customers? A <span class="ui">Sync now</span> button sits beside the title, and the whole page refreshes itself after every sync.</p>
+
+  <h3 class="sec"><span class="no">16.1</span>Choosing what you look at</h3>
+  <p>Three filter rows shape everything below: <span class="ui">Range</span> (chips for <span class="ui">7 days</span>, <span class="ui">30 days</span>, <span class="ui">90 days</span>, <span class="ui">1 year</span>&nbsp;— 30 by default), <span class="ui">Channel</span> (<span class="ui">All channels</span>, <span class="ui">Email</span>, <span class="ui">Chat (Beacon)</span>) and <span class="ui">Mailboxes</span> (an <span class="ui">All</span> chip plus one chip per mailbox&nbsp;— several can be selected at once).</p>
+
+  <h3 class="sec"><span class="no">16.2</span>The twelve metric cards</h3>
+  <div class="chips">
+    <span>New</span><span>Active</span><span>Pending</span><span>Closed</span><span>Unassigned</span><span>Backlog (7d stale)</span><span>Replies sent</span><span>First response avg (min)</span><span>Great ratings</span><span>Okay ratings</span><span>Not-good ratings</span><span>Resolution avg (min)</span>
+  </div>
+  <p>The average cards show minutes; the rating cards count the customer satisfaction ratings received via webhook (the page notes this openly&nbsp;— ratings cannot be pulled from Help Scout, only pushed). Below the cards, a line chart titled <span class="ui">New conversations per day</span> shows the period at a glance, with the exact date range printed above it.</p>
+
+  <h3 class="sec"><span class="no">16.3</span>Breakdowns and the mailbox comparison</h3>
+  <p>Six breakdown cards answer "of what, exactly?": <span class="ui">By mailbox</span>, <span class="ui">By tag</span> (top twelve), <span class="ui">By channel</span>, <span class="ui">By agent</span>, <span class="ui">By team</span>, and a <span class="ui">Channel metrics</span> table with per-channel first-response and resolution averages. The scrollable <span class="ui">Mailbox comparison</span> card lines your mailboxes up side by side&nbsp;— new, active, closed, backlog, response times and ratings in one table&nbsp;— which is usually the fastest way to spot that one inbox is drowning while another is quiet.</p>
+
+  <h3 class="sec"><span class="no">16.4</span>The Issue radar card</h3>
+  <p>At the bottom, a card titled <span class="ui">Issue radar</span> lists the same AI-derived alerts explained fully in Chapter 18&nbsp;— clusters of similar conversations worth knowing about, each with a severity badge and the number of conversations involved.</p>
+
+  <!-- ============ CHAPTER 17 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 17</div>
+    <h2 class="ch-title">Reports</h2>
+    <p class="ch-lede">Eleven tabs of answers&nbsp;— from "how fast are we?" to "what should we write down next?". Everything is computed from your own data.</p>
+  </div>
+
+  <p>The <span class="ui">Reports</span> page opens with the same range chips as the Dashboard (7/30/90/365 days) and a <span class="ui">Sync now</span> button. Its eleven tabs are: <span class="ui uiw">Overview, SLA, Why contacting, Top questions, Quality, Issue radar, Digest, Happiness, Help Scout, Builder, Insights</span>. A note repeated across the page keeps the ground truth visible: every number is computed locally from your mirrored data, and the page tells you when something is <em>not</em> measured rather than guessing.</p>
+
+  <h3 class="sec"><span class="no">17.1</span>Overview, Why contacting, Top questions</h3>
+  <p><strong>Overview</strong> repeats the Dashboard's core cards over the selected range. <strong>Why contacting</strong> and <strong>Top questions</strong> rank what customers actually write about&nbsp;— derived from the AI's reading of each conversation when ticket analysis is on (Chapter 21), each row showing the question or category with a count badge.</p>
+
+  <h3 class="sec"><span class="no">17.2</span>Quality</h3>
+  <p>The <span class="ui">Quality</span> tab aggregates the post-resolution QA from Chapter 8.6: how many closed conversations were checked, and the 25 most recent closures with their per-conversation facts (back-and-forth count, handoffs, resolution minutes, whether the AI layer reviewed it). It is the fastest way to see whether replies are genuinely resolving things&nbsp;— or merely closing them.</p>
+
+  <h3 class="sec"><span class="no">17.3</span>SLA&nbsp;— promises and clocks</h3>
+  <p>The <span class="ui">SLA</span> tab measures response times against your targets, in <strong>business minutes</strong> (nights and weekends excluded&nbsp;— Chapter 24.5 sets each mailbox's business hours). Its table shows, per mailbox: conversations in range, first-response met/missed with the average, the same for resolution, and the oldest current wait. Below it, the card <span class="ui">Persisted breach tracking</span> keeps the plain-hours fallback thresholds for mailboxes without business-hours configuration (defaults: 24 hours to first response, 72 to resolution; both editable here per mailbox). Every breach is recorded once per conversation and kind, and lands on the affected customer's milestone timeline&nbsp;— so the same repeated breach cannot hide.</p>
+
+  <h3 class="sec"><span class="no">17.4</span>Digest&nbsp;— the weekly story</h3>
+  <p>The <span class="ui">Digest</span> tab writes the week's story. Press <span class="ui">Generate digest now</span>, and the app first computes the facts with ordinary SQL&nbsp;— volume, anomalies, top topics, sentiment, workload, happiness, and what changed since the last digest&nbsp;— and then, if a Summarize AI role is routed, asks the model to write the narrative. The result is archived and searchable, and the numbers in it are explicitly labelled as SQL facts, never model output. If no model was routed, you still get the full fact sheet with a note saying exactly that. A scheduled digest is generated automatically once a week.</p>
+
+  <h3 class="sec"><span class="no">17.5</span>Happiness</h3>
+  <p>Four cards&nbsp;— <span class="ui">Great</span>, <span class="ui">Okay</span>, <span class="ui">Not good</span> and <span class="ui">CSAT</span> (the overall percentage)&nbsp;— plus a table of recent ratings with their comments. The tab's honesty note is worth quoting: an empty table means <em>none arrived</em>, not that customers are silent&nbsp;— ratings reach the app only through the satisfaction webhook, so this tab comes alive once the relay from Chapter 5.5 is running.</p>
+
+  <h3 class="sec"><span class="no">17.6</span>Help Scout&nbsp;— the official reports</h3>
+  <p>For accounts whose plan includes Help Scout's own Reports API (Plus and Pro plans), this tab offers all 32 official reports in a dropdown. Choose one, set the range, press <span class="ui">Fetch from Help Scout</span>, and the result is fetched once and cached with its date range. If your plan does not include it, the tab says so in one clear sentence and points you back to the local reports.</p>
+
+  <h3 class="sec"><span class="no">17.7</span>Builder&nbsp;— your own reports</h3>
+  <p>The <span class="ui">Builder</span> tab assembles custom reports from 21 metrics and 14 groupings. Pick a <span class="ui">metric:</span> (conversations, closures, first-response averages, SLA breaches, campaign numbers&hellip;), a <span class="ui">grouped by:</span> (day, week, month, mailbox, channel, tag, assignee, team, status, priority&hellip;), optional <span class="ui">compare with previous period</span> and a sort order, then a date range and row limit. A filters section narrows by channel, statuses, tags, priority, mailbox ids or assignee ids (all optional&nbsp;— blank means unfiltered). Press <span class="ui">Run report</span> to see the table; press <span class="ui">Save</span> with a name to keep it for reuse in the <span class="ui">Saved reports</span> list below, where <span class="ui">load</span> and <span class="ui">delete</span> live.</p>
+
+  <h3 class="sec"><span class="no">17.8</span>Insights&nbsp;— the long view</h3>
+  <p>The <span class="ui">Insights</span> tab steps back and looks at the whole mirror: health facts (SLA-breach rate, high-friction share, average first response, resolution rate), the effectiveness of post-resolution QA (average QA score and its distribution), and the customer-effort table listing the most laborious conversations with what made them hard (reopens, escalations, repeated explanations). It ends with the graph tools from Chapter 15.2: the <span class="ui">Graph nodes</span> card, where hand-made nodes and <span class="ui">inspect</span> links are added.</p>
+
+  <!-- ============ CHAPTER 18 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 18</div>
+    <h2 class="ch-title">Issue Radar</h2>
+    <p class="ch-lede">The app noticing things for you: rising problems, documentation gaps, and the issues worth tracking formally.</p>
+  </div>
+
+  <p>The <span class="ui">Issue Radar</span> watches your conversations for patterns no single ticket can show. Its four tabs&nbsp;— <span class="ui">Alerts</span>, <span class="ui">Clusters</span>, <span class="ui">Gaps</span>, <span class="ui">Known issues</span>&nbsp;— build on each other.</p>
+
+  <h3 class="sec"><span class="no">18.1</span>Alerts</h3>
+  <p>Alerts are short headlines with a severity badge, each backed by a list of the conversations involved&nbsp;— for example <span class="uiw">Rising volume: Export failures</span> (warning) or <span class="uiw">New issue cluster: Mobile login loop</span> (critical when five or more conversations). A second card lists SLA alerts: which conversations have breached or are at risk of breaching their targets. Alerts derive from patterns in your own data&nbsp;— volume compared to the previous two weeks, repeated questions, clusters correlated with poor ratings&nbsp;— and the app is careful to label even these as observations, not causes.</p>
+
+  <h3 class="sec"><span class="no">18.2</span>Clusters and Gaps</h3>
+  <p><strong>Clusters</strong> group the last 14 days of conversations into themes ("conversations that look like each other"), each with a trend badge (<span class="ui">rising</span>, <span class="ui">new</span>) and a one-line summary. Press <span class="ui">Cluster now</span> to recompute (this one needs the Classify AI role); <span class="ui">Reload clusters</span> refreshes the view. <strong>Gaps</strong> are the documentation holes: questions asked repeatedly that no document answers, each with its count, example conversations, and a status (<span class="ui">open</span> by default). Two buttons feed it: <span class="ui">Detect gaps now</span> (deterministic&nbsp;— no model needed) and the approve/reject buttons on each candidate, which record your decision permanently&nbsp;— decisions survive later rebuilds. Approved gaps are exactly what the Knowledge page's article drafting consumes (Chapter 14.4).</p>
+
+  <h3 class="sec"><span class="no">18.3</span>Known issues</h3>
+  <p>When a problem is confirmed and worth tracking formally, press <span class="ui">New known issue</span> and fill the form: <span class="ui">title:</span> (required, up to 300 characters), <span class="ui">status:</span> (<span class="ui">investigating</span> / <span class="ui">identified</span> / <span class="ui">fix_in_progress</span> / <span class="ui">resolved</span>), <span class="ui">symptoms:</span>, <span class="ui">workaround:</span>, and optionally the conversation numbers to link. Known issues appear in the Copilot's advice when a customer hits the same problem again, and in the Support Graph.</p>
+
+  <!-- ============ CHAPTER 19 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 19</div>
+    <h2 class="ch-title">Incidents</h2>
+    <p class="ch-lede">When many customers hit one problem at once: one record, all affected customers, and the full story in one place.</p>
+  </div>
+
+  <p>An incident is a fire drill with paperwork: one outage or bug affecting many conversations at once. The <span class="ui">Incidents</span> page lists existing incidents as chips like <span class="uiw">INC-004 Payment webhook delays</span> with severity and status badges. Filters on top narrow by <span class="ui">status:</span> (investigating / identified / fix_in_progress / monitoring / resolved), <span class="ui">severity:</span> (<span class="ui">sev1</span> through <span class="ui">sev4</span>), an <span class="ui">open only</span> checkbox, and a text search.</p>
+
+  <h3 class="sec"><span class="no">19.1</span>Creating and working an incident</h3>
+  <ol class="steps">
+    <li>Press <span class="ui">New Incident</span>. Fill <span class="ui">title:</span> (required), <span class="ui">status:</span> (starts at <span class="ui">investigating</span>), <span class="ui">severity:</span> (starts at <span class="ui">sev3</span>), <span class="ui">description:</span> ("what is happening"), and optionally the conversation numbers to link. Press <span class="ui">create incident</span>.</li>
+    <li>The app assigns the next code automatically&nbsp;— INC-001, INC-002, and so on&nbsp;— and confirms how many conversations were linked, honestly reporting any numbers it did not recognise.</li>
+    <li>In the detail view, keep the record alive: link more conversations with the <span class="ui">link conversation #:</span> field, write progress into <span class="ui">write an incident note&hellip;</span>, and use the dedicated fields for the internal explanation, the customer-safe explanation, the workaround and the resolution as each becomes known.</li>
+  </ol>
+  <p>The detail view also shows <strong>Affected customers</strong> (everyone linked to the incident's conversations) and <strong>Releases</strong> (software versions associated with the incident, when recorded). Every affected customer's own profile timeline shows the incident too, so "you were affected by INC-004" is never a guess.</p>
+
+  <!-- ============ CHAPTER 20 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 20</div>
+    <h2 class="ch-title">Automation</h2>
+    <p class="ch-lede">Rules that act while you sleep&nbsp;— with a conscience: anything risky waits for a human yes.</p>
+  </div>
+
+  <p>The <span class="ui">Automation</span> page holds rules of the form "when X happens, do Y". It ships switched <em>off</em>; the master switch is <span class="ui">Automation rules</span> in Settings &rarr; Sync &amp; AI (Chapter 24.2), and the page itself warns: <em>"enabled rules act on conversations automatically&nbsp;— actions that need review park in the approvals queue."</em></p>
+
+  <h3 class="sec"><span class="no">20.1</span>Writing a rule</h3>
+  <p>Press <span class="ui">New Rule</span>. The form asks for a <span class="ui">name:</span>, then a trigger and an action:</p>
+  <table class="t">
+    <colgroup><col style="width:26%"><col style="width:74%"></colgroup>
+    <thead><tr><th>Trigger (when)</th><th>Meaning and its field</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Status changed</td><td>Fires when a conversation's status changes. Two optional fields, <span class="ui">from status</span> and <span class="ui">to status</span>&nbsp;— leave a field blank to match any.</td></tr>
+      <tr><td class="k">Tag added</td><td>Fires when a specific tag appears. One required field, <span class="ui">tag:</span>.</td></tr>
+      <tr><td class="k">SLA at risk</td><td>Fires when a conversation approaches its response-time target.</td></tr>
+    </tbody>
+  </table>
+  <table class="t">
+    <colgroup><col style="width:26%"><col style="width:74%"></colgroup>
+    <thead><tr><th>Action (then)</th><th>Meaning and its field</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Assign</td><td>Give the conversation to someone: <span class="ui">assignee id:</span> (the person's numeric user id&nbsp;— shown in the workload table's context).</td></tr>
+      <tr><td class="k">Add tag</td><td>Attach a tag: <span class="ui">tag:</span>.</td></tr>
+      <tr><td class="k">Send note</td><td>Post an internal note: <span class="ui">note body:</span>.</td></tr>
+      <tr><td class="k">Change status</td><td>Move the conversation: <span class="ui">status:</span> (new status).</td></tr>
+      <tr><td class="k">Set priority</td><td>Set urgency: <span class="ui">priority:</span> (new priority).</td></tr>
+    </tbody>
+  </table>
+  <p>Press <span class="ui">Create Rule</span>. The rules table lists everything with its <span class="ui">when</span> and <span class="ui">then</span> in plain words (for example <span class="uiw">status changed from any to spam</span> &rarr; <span class="uiw">change status to closed</span>), an enabled/disabled chip you click to toggle, and <span class="ui">delete</span> with its confirmation dialog. Actions that will wait for review carry the note <span class="ui">(needs approval)</span>.</p>
+
+  <h3 class="sec"><span class="no">20.2</span>The approvals queue</h3>
+  <p>Sensitive actions never run unattended. Assigning and changing status always wait for a human decision, and setting priority waits when the priority is <em>urgent</em>; adding tags and posting notes run by themselves. Waiting items collect in the card <span class="ui">Pending approvals</span> (and in the Operations tile), each showing the rule, the conversation and the action, with <span class="ui">approve</span> and <span class="ui">reject</span> buttons. Rejected actions simply do nothing; every run of every rule is recorded with its outcome.</p>
+
+  <!-- ============ CHAPTER 21 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 21</div>
+    <h2 class="ch-title">AI Center &amp; LM Studio</h2>
+    <p class="ch-lede">Setting up local AI in plain steps, the six tabs of the AI Center, and the switches that keep it polite.</p>
+  </div>
+
+  <p>The <span class="ui">AI Center</span> is where AI is configured, observed and&nbsp;— when needed&nbsp;— switched off. It assumes nothing: every feature degrades gracefully without a model, and a single global switch disables all AI at once.</p>
+
+  <h3 class="sec"><span class="no">21.1</span>Installing LM Studio&nbsp;— the plain-English version</h3>
+  <p>LM Studio is a free desktop program (from lmstudio.ai) that runs AI models on your own computer. SupportOS+ talks to it over your machine's local network&nbsp;— nothing leaves your computer. The whole setup:</p>
+  <ol class="steps">
+    <li>Install LM Studio on the same computer as SupportOS+ and open it.</li>
+    <li>In LM Studio, download a <strong>chat model</strong> (for example Qwen2.5-7B-Instruct) and an <strong>embedding model</strong> (for example bge-m3) from its model catalogue, and load them.</li>
+    <li>In LM Studio's <strong>Local Server</strong> tab, press Start. The default address it serves is <span class="path">http://127.0.0.1:1234</span>.</li>
+    <li>In SupportOS+, open <span class="ui">Settings</span> &rarr; <span class="ui">LM Studio</span> and fill three fields: <span class="ui">base url:</span> (hint shows <span class="path">http://localhost:1234/v1</span>), <span class="ui">chat model:</span> and <span class="ui">embedding model:</span>&nbsp;— the names exactly as LM Studio lists them. Press <span class="ui">save</span>.</li>
+    <li>Verify in AI Center &rarr; <span class="ui">Health</span>: press <span class="ui">test connection</span> and look for <span class="uiw">connected &middot; N model(s)</span> in green.</li>
+  </ol>
+
+  <h3 class="sec"><span class="no">21.2</span>Health&nbsp;— endpoints, keys and roles</h3>
+  <p>The <span class="ui">Health</span> tab is the control room. Its cards, in order:</p>
+  <ul class="b">
+    <li><strong>LM Studio settings</strong>&nbsp;— a read-only summary of the current setup, with the <span class="ui">test connection</span> button and its three possible answers: connected with the model count, connected but no models loaded, or offline with the reason.</li>
+    <li><strong>Provider hub&nbsp;— endpoints</strong>&nbsp;— the list of AI services the app knows: the built-in <span class="uiw">LM Studio (local)</span>, an optional <span class="uiw">Ollama (local)</span>, and any cloud services you add yourself. Each endpoint has a <span class="ui">probe</span> button (checks it is reachable and counts its models), a <span class="ui">set key</span> button for cloud services (the key is stored in the app's encrypted secret store, never in plain text), and a <span class="ui">remove</span> button. The collapsing <span class="ui">add endpoint (cloud BYOK)</span> form adds a cloud service with its name, web address, API key and the prices per million tokens it charges (used only for the cost estimates below).</li>
+    <li><strong>Model-role routing</strong>&nbsp;— the cleverest card. Instead of one model for everything, the app thinks in five <em>roles</em>, and you route each role to any endpoint and model:</li>
+  </ul>
+  <table class="t">
+    <colgroup><col style="width:18%"><col style="width:44%"><col style="width:38%"></colgroup>
+    <thead><tr><th>Role</th><th>What it does</th><th>Used by</th></tr></thead>
+    <tbody>
+      <tr><td class="k">embed</td><td>Meaning-based search indices.</td><td>Semantic search, similar-conversation finding.</td></tr>
+      <tr><td class="k">classify</td><td>Fast reading and labelling.</td><td>Ticket analysis, triage chips, clustering, QA reviews, the golden-set test.</td></tr>
+      <tr><td class="k">summarize</td><td>Condensing and memory.</td><td>Weekly digest narratives, memory extraction.</td></tr>
+      <tr><td class="k">draft</td><td>Writing help.</td><td>Suggested-reply rewrites, LM Studio drafts, translation.</td></tr>
+      <tr><td class="k">agent</td><td>Question answering with tools.</td><td>"Ask the assistant", the Copilot chat in AI Center.</td></tr>
+    </tbody>
+  </table>
+  <ul class="b">
+    <li><strong>Features &amp; kill switches</strong>&nbsp;— sixteen checkboxes, one per AI feature (automatic analysis, drafting, translation, clustering, copilot, coaching&hellip;), plus the big one: a global switch reading <span class="uiw">global kill switch: AI is ON&nbsp;— click to disable all AI</span>, protected by the <span class="ui">Disable all AI?</span> confirmation. Off is off everywhere, instantly.</li>
+    <li><strong>Cost ledger&nbsp;— last 7 days</strong>&nbsp;— a per-feature, per-day table of runs, tokens and estimated cost (cloud prices only; local models cost electricity).</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">21.3</span>Analytics and Attributes</h3>
+  <p><span class="ui">Analytics</span> shows how good the AI has been at its job: how many tickets were analysed, the success rate, how often drafts were accepted versus rejected, and how many AI claims were unsupported. <span class="ui">Attributes</span> shows the vocabulary the AI has learned to attach to conversations&nbsp;— intent, urgency, frustration, technical familiarity and ten more&nbsp;— with the distribution of values and a grounding rule printed in the card: a missing attribute reads as <em>unknown</em> and is never invented. Attributes are local-only and never written back to Help Scout.</p>
+
+  <h3 class="sec"><span class="no">21.4</span>Usage and Jobs</h3>
+  <p><span class="ui">Usage</span> keeps the receipts: every AI run of the last 30 days with its model, token counts, duration and estimated cost; the draft feedback statistics (accepted, rejected, how much people edited before sending); and the <strong>golden set</strong>&nbsp;— nine built-in test cases that the app runs through the analysis model at the press of <span class="ui">Run golden set now</span>, scoring whether the AI still passes its own exam. <span class="ui">Jobs</span> lists the raw run log: type, status, conversation, model, when.</p>
+
+  <h3 class="sec"><span class="no">21.5</span>Copilot&nbsp;— the standing chat</h3>
+  <p>The <span class="ui">Copilot</span> tab is the free-standing version of "Ask the assistant": saved chat sessions, a message log with citations, and the same 22 read-only tools. Ask things like <span class="uiw">Summarize the last three conversations</span> or <span class="uiw">What documentation applies?</span>&nbsp;— the agent searches your mirror, quotes what it used, and says plainly when it found nothing. It cannot send, change or delete anything.</p>
+
+  <div class="box tip">
+    <div class="box-title">Good to know&nbsp;— the off switch philosophy</div>
+    <p>Every AI feature is designed to fail soft: disable a model, the endpoint, the feature, or all of AI, and the app keeps working&nbsp;— search falls back to plain matching, drafts fall back to the built-in assistant, digests keep their facts without the narrative. Nothing breaks; the app simply tells you which mode it is in.</p>
+  </div>
+
+  <!-- ============ CHAPTER 22 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 22</div>
+    <h2 class="ch-title">Outreach: campaigns &amp; segments</h2>
+    <p class="ch-lede">Polite bulk email to people who already talk to you&nbsp;— with guard rails where it matters.</p>
+  </div>
+
+  <p>The <span class="ui">Outreach</span> page sends email campaigns to groups of existing customers, with three tabs: <span class="ui">Campaigns</span>, <span class="ui">Segments</span> and <span class="ui">Do not contact</span>.</p>
+
+  <h3 class="sec"><span class="no">22.1</span>Segments&nbsp;— defining "who"</h3>
+  <p>A segment is a saved definition of a group of customers. Press <span class="ui">New Segment</span>, give it a <span class="ui">name:</span>, and describe the group in the <span class="ui">criteria (JSON):</span> box&nbsp;— a short structured sentence in the form <span class="uiw">{ "combinator": "all", "conditions": [ &hellip; ], "exclude": [ &hellip; ] }</span>. In practice: give this form to whoever maintains your filters; the app validates it on save and refuses malformed definitions with a precise error. Conditions can express things like "has an email address", "total tickets is at least 2", "was contacted within the last 90 days", or membership in an organization. A segment is required before any campaign can be created&nbsp;— campaigns can never target "everyone" by accident.</p>
+
+  <h3 class="sec"><span class="no">22.2</span>Campaigns&nbsp;— the lifecycle</h3>
+  <p>Press <span class="ui">New Campaign</span> and fill the form: <span class="ui">name:</span>, <span class="ui">subject:</span>, the <span class="ui">body:</span> (which may use personalisation placeholders&nbsp;— see below), a <span class="ui">mailbox id:</span> (the numeric id of the mailbox the sends go from) and a <span class="ui">segment id:</span> (shown in the saved-segments hint on the same card). After <span class="ui">create campaign</span>, the campaign card offers the five lifecycle buttons, each state-checked:</p>
+  <ul class="b">
+    <li><span class="ui">queue</span>&nbsp;— from draft or paused: one conversation per recipient is prepared and sending begins.</li>
+    <li><span class="ui">pause</span> / <span class="ui">resume</span>&nbsp;— stop and continue; already-sent recipients are never touched twice.</li>
+    <li><span class="ui">cancel remaining</span>&nbsp;— discards the not-yet-sent sends (with its confirmation dialog); sent ones stay sent.</li>
+    <li><span class="ui">retry failed</span>&nbsp;— re-queues only the failed recipients (each recipient gets at most three attempts in total).</li>
+  </ul>
+  <p>Six personalisation placeholders work in the body: <span class="uiw">{{first_name}}</span>, <span class="uiw">{{last_name}}</span>, <span class="uiw">{{company}}</span>, <span class="uiw">{{organization}}</span>, <span class="uiw">{{last_ticket_number}}</span> and <span class="uiw">{{last_ticket_subject}}</span>&nbsp;— anything a recipient has no value for renders as empty, and the validation report warns you about it. The <strong>Campaign report</strong> card totals everything: sent, failed, skipped, replied.</p>
+
+  <h3 class="sec"><span class="no">22.3</span>Do not contact</h3>
+  <p>The <span class="ui">Do not contact</span> tab is the permanent unsubscribe list. Add a customer by their numeric <span class="ui">customer id:</span> with an optional <span class="ui">reason:</span>; every campaign automatically skips everyone on this list, and the campaign report shows how many were skipped for it. Removing someone requires the confirmation dialog, whose wording makes the consequence plain: the customer becomes contactable by every campaign again.</p>
+
+  <!-- ============ CHAPTER 23 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 23</div>
+    <h2 class="ch-title">Notifications, Custom Objects &amp; Connectors</h2>
+    <p class="ch-lede">Three quieter pages: what pings you, your own record types, and read-only views of outside data.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">23.1</span>Notifications</h3>
+  <p>The <span class="ui">Notifications</span> page collects everything that concerns you personally: customer replies, assignments, @-mentions, SLA warnings, automation approvals, AI escalations, sync failures and more&nbsp;— fifteen kinds in all, all enabled by default. Three tabs sort them: <span class="ui">All</span>, <span class="ui">Mentions</span> and <span class="ui">Unread</span>; a counter in the title shows <span class="uiw">24 total &middot; 3 unread</span>; and <span class="ui">mark all read</span> clears the board. Each card can be toggled individually between read and unread with its small button. Unread items carry a coloured dot matching their severity&nbsp;— red for failures, blue for the rest.</p>
+
+  <h3 class="sec"><span class="no">23.2</span>Custom Objects</h3>
+  <p>Custom Objects are the app's built-in "build your own list" tool: define a <em>type</em> (say, <em>Refund request</em> or <em>Returned device</em>), give it fields, then store records under it and link them to your work.</p>
+  <ol class="steps">
+    <li>Press <span class="ui">New Type</span>. Fill <span class="ui">name:</span> and <span class="ui">description:</span>, then add fields with <span class="ui">+ add field</span>. Each field has a <span class="ui">key:</span>, a <span class="ui">label:</span>, a <span class="ui">type:</span> chosen from six chips&nbsp;— <span class="ui">text</span>, <span class="ui">long_text</span>, <span class="ui">number</span>, <span class="ui">date</span>, <span class="ui">select</span>, <span class="ui">boolean</span>&nbsp;— an optional <span class="ui">required</span> checkbox, and for <span class="ui">select</span> types a comma-separated options list. Press <span class="ui">create type</span>.</li>
+    <li>Select the type on the left. On the right, the card <span class="ui">New object</span> asks for an <span class="ui">object title</span> and then one input per field you defined (numbers and true/false values are validated on the spot). Press <span class="ui">create object</span>.</li>
+    <li>Objects appear as cards with their field values; <span class="ui">search objects&hellip;</span> finds them, <span class="ui">delete</span> removes one (with confirmation).</li>
+  </ol>
+  <p>Deleting a <em>type</em> warns that every record stored under it goes too&nbsp;— the dialog says exactly that.</p>
+
+  <h3 class="sec"><span class="no">23.3</span>Connectors</h3>
+  <p>Connectors attach outside data as read-only tables the app (and, if you allow it, the AI tools) can look at: an <span class="ui">http</span> endpoint or a <span class="ui">csv</span> file placed inside the app's data directory. Press <span class="ui">New Connector</span>, pick the kind, give a <span class="ui">name:</span>, and either a <span class="ui">url:</span> or a <span class="ui">file (data dir):</span> like <span class="path">billing.csv</span>. Set <span class="ui">refresh seconds:</span> (between 60 and 86,400&nbsp;— one minute to one day) and tick <span class="ui">AI tools may query</span> only if the data is fit for the assistant to read. The table shows each connector's health (<span class="ui">ok</span>, <span class="ui">stale</span>, <span class="ui">error</span>), and rows have <span class="ui">rows</span>, <span class="ui">refresh</span> and <span class="ui">delete</span> buttons.</p>
+
+  <!-- ============ CHAPTER 24 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 24</div>
+    <h2 class="ch-title">Settings: the complete reference</h2>
+    <p class="ch-lede">Every tab, every field, every default&nbsp;— and where each value comes from. The page this book quotes most.</p>
+  </div>
+
+  <p>The <span class="ui">Settings</span> page has six tabs: <span class="ui">Sync &amp; AI</span>, <span class="ui">Help Scout</span>, <span class="ui">LM Studio</span>, <span class="ui">Vector index</span>, <span class="ui">Business hours</span> and <span class="ui">Backups &amp; export</span>. Changes in the first tab take effect when you press <span class="ui">save settings</span> (confirmed by <span class="ui">settings saved</span>); the other tabs save immediately.</p>
+
+  <h3 class="sec"><span class="no">24.1</span>Sync &amp; AI&nbsp;— the daily knobs</h3>
+  <table class="t">
+    <colgroup><col style="width:30%"><col style="width:14%"><col style="width:56%"></colgroup>
+    <thead><tr><th>Field</th><th>Default</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td class="k">max quiet sync interval (minutes)</td><td>1</td><td>How slowly the automatic check-for-updates may ever get on a quiet day (1 to 1440). The app checks every 30 seconds while the account is busy, then backs off toward this ceiling.</td></tr>
+      <tr><td class="k">api concurrency</td><td>2</td><td>How many parallel lanes the app uses when talking to Help Scout (1–8). Higher is faster but uses more of the shared rate budget.</td></tr>
+      <tr><td class="k">log level</td><td>info</td><td>How chatty the app's internal logging is: debug, info, warn or error.</td></tr>
+      <tr><td class="k">agent language</td><td>en</td><td>The language your team answers in; used by the translation helpers.</td></tr>
+      <tr><td class="k">status after reply</td><td>pending (await customer)</td><td>What happens to a conversation when you send a reply&nbsp;— see Chapter 9.4.</td></tr>
+    </tbody>
+  </table>
+  <p>Below the sync fields, the card <strong>AI behaviour</strong> holds eight checkboxes with honest defaults: <span class="ui">AI enabled</span> (on), <span class="ui">Automatic analysis</span> (on), <span class="ui">Automatic internal notes</span> (off), <span class="ui">Automatic draft replies</span> (off), <span class="ui">Automatic reply sending</span> (off), <span class="ui">Automation rules</span> (off), <span class="ui">Automation write actions</span> (off), <span class="ui">Attachment auto download</span> (on). The subtitle sets the policy: <em>"safe defaults&nbsp;— review before enabling write actions."</em> Finally, the <strong>About &amp; updates</strong> card holds the version check (Chapter 3.4).</p>
+
+  <h3 class="sec"><span class="no">24.2</span>Help Scout&nbsp;— the connection</h3>
+  <p>Everything from Chapter 5 lives here: the credentials card, the connect buttons, the Connection Doctor and the webhook relay card. One more card deserves its own paragraph&nbsp;— <strong>Workspace data</strong>. Its <span class="ui">delete all workspace data</span> button is the app's "start over": a two-step, red-lettered confirmation that erases every conversation, customer, thread, rating, knowledge document, incident, report and AI record from <em>your local mirror only</em>&nbsp;— and then arms a fresh first sync. It deliberately <strong>keeps</strong> your credentials, settings, business hours, automation rules, saved views and replies, and custom object types. When it finishes, the report counts exactly what was removed and asks you to restart the app.</p>
+
+  <h3 class="sec"><span class="no">24.3</span>LM Studio and Vector index</h3>
+  <p>The <span class="ui">LM Studio</span> tab holds the three fields described in Chapter 21.1. The <span class="ui">Vector index</span> tab has a single checkbox, <span class="ui">vector index enabled</span> (on by default), controlling the meaning-based search index stored next to the database; the page notes that it applies on the next start, and that with it off, searches fall back to plain word matching&nbsp;— nothing else changes.</p>
+
+  <h3 class="sec"><span class="no">24.4</span>Business hours</h3>
+  <p>The <span class="ui">Business hours</span> tab defines, per mailbox, when your team is actually working&nbsp;— so SLA clocks skip nights and weekends. Each mailbox row shows either <span class="ui">configured</span> with a summary (like <span class="uiw">Europe/Berlin &middot; Mon–Fri &middot; 09:00–17:00 &middot; first response 240m &middot; resolution 1440m</span>) or <span class="ui">not configured</span>. Pressing <span class="ui">edit</span> opens five fields: a <span class="ui">timezone:</span> (a real IANA name&nbsp;— the app rejects invented ones like "Mars/Olympus_Mons"), the working <span class="ui">days</span> as numbers 0=Sunday through 6=Saturday, the <span class="ui">start</span> and <span class="ui">end</span> times, and the <span class="ui">first response target (min)</span> and <span class="ui">resolution target (min)</span>. Unconfigured mailboxes fall back to UTC Monday–Friday 09:00–17:00 with 4-hour/24-hour targets, and the SLA tab always lists which mailboxes are unconfigured rather than pretending.</p>
+
+  <h3 class="sec"><span class="no">24.5</span>Backups &amp; export</h3>
+  <p>The <span class="ui">Backups &amp; export</span> tab is your safety net (the full story is Chapter 25). Its buttons: <span class="ui">create backup</span> (reports the file it wrote), <span class="ui">export JSON</span> and <span class="ui">export conversations CSV</span>. The backup list below shows every existing backup with its size and date, and a two-step <span class="ui">restore</span> button whose red warning says precisely what will happen: the current database will be <em>replaced</em> by the backup (after an integrity check), and the app must be restarted afterwards. A backup is also taken automatically about once a day (adjustable; see Chapter 25.3).</p>
+
+  <!-- ============ CHAPTER 25 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 25</div>
+    <h2 class="ch-title">Your data &amp; privacy</h2>
+    <p class="ch-lede">Where everything lives, what is protected, what leaves your machine&nbsp;— and how to move or wipe it.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">25.1</span>One folder holds everything</h3>
+  <p>SupportOS+ keeps 100% of its data in a single folder&nbsp;— by default <span class="path">~/.local/share/supportos-plus</span> (a different location can be chosen with the <span class="ui">SPP_DATA_DIR</span> setting by whoever manages your computers). Copy that one folder and you have copied the entire workspace. Its contents:</p>
+  <table class="t">
+    <colgroup><col style="width:30%"><col style="width:70%"></colgroup>
+    <thead><tr><th>File or folder</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td class="k">supportos-plus.db</td><td>The entire workspace: every conversation, customer, article, report and setting (plus its two quiet helpers, the <span class="path">-wal</span> and <span class="path">-shm</span> files). Copy all three together, with the app closed.</td></tr>
+      <tr><td class="k">secrets.key</td><td>The encryption key for stored passwords and tokens (Help Scout credentials, sign-in tokens, connector keys). Private and protected&nbsp;— treat it like a house key.</td></tr>
+      <tr><td class="k">backups/</td><td>Automatic and manual backups, plus the JSON/CSV exports and the move-to-another-computer bundles.</td></tr>
+      <tr><td class="k">vectors/</td><td>The AI search index (rebuildable; removed by the workspace reset).</td></tr>
+      <tr><td class="k">attachments/</td><td>Downloaded email attachments from conversations.</td></tr>
+      <tr><td class="k">logs/fatal.log</td><td>A crash log written only if the app ever fails to start or panics. The file to send someone helping you (Chapter 26).</td></tr>
+      <tr><td class="k">knowledge-import/</td><td>The in-box for knowledge documents (Chapter 14.1)&nbsp;— the only folder the app reads imports from.</td></tr>
+      <tr><td class="k">instance.lock</td><td>The "one copy at a time" marker. Harmless if left behind after a crash.</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec"><span class="no">25.2</span>What is protected, and how</h3>
+  <p>Your Help Scout credentials, sign-in tokens, connector keys and webhook secret are stored <strong>encrypted</strong> (industry-standard AES-256-GCM) under the <span class="path">secrets.key</span> file, which itself is locked to your user account (permission 0600&nbsp;— readable only by you). The rest of the database&nbsp;— conversations, customer details, documents&nbsp;— is stored in ordinary readable form, protected by the same file permissions; that is precisely why backups and exports are also locked to 0600, and why the folder deserves normal computer care (disk encryption if your machine travels, for instance).</p>
+
+  <h3 class="sec"><span class="no">25.3</span>Backups&nbsp;— automatic and manual</h3>
+  <ul class="b">
+    <li><strong>Automatic</strong>&nbsp;— about once a day (every 24 hours by default, adjustable from 1 hour upward; 0 turns it off), the app writes a full backup named like <span class="path">supportos-backup-2026-10-24T12-34-56-789Z.db</span> into <span class="path">backups/</span>, plus a small sidecar file with the settings (passwords removed). Only the newest twenty backups are kept; older ones are pruned automatically.</li>
+    <li><strong>Manual</strong>&nbsp;— the <span class="ui">create backup</span> button writes one immediately and tells you where.</li>
+    <li><strong>Restore</strong>&nbsp;— the two-step restore (Chapter 24.5) verifies the backup file's integrity <em>before</em> touching anything, and refuses clearly if a file is not a genuine SupportOS backup. Your current data is moved aside and replaced only after the check passes; the app restarts fresh from the restored copy.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">25.4</span>Exports and moving to another computer</h3>
+  <ul class="b">
+    <li><span class="ui">export JSON</span>&nbsp;— a readable snapshot of conversations, customers, organizations, knowledge and AI drafts. The app warns that it contains customer data and should be handled carefully.</li>
+    <li><span class="ui">export conversations CSV</span>&nbsp;— a spreadsheet of every conversation: number, subject, status, mailbox, customer, dates.</li>
+    <li><strong>Encrypted bundle</strong>&nbsp;— for moving the whole mirror to another machine: a password-protected file (minimum eight characters; the password is used to derive the key, so <em>there is no recovery without it</em>). The wrong password changes nothing, and the app verifies the bundle's contents before importing&nbsp;— writing a safety backup of the previous data first.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">25.5</span>What leaves your computer</h3>
+  <ul class="b">
+    <li><strong>To Help Scout:</strong> your replies, notes, status and assignment changes&nbsp;— the work you do&nbsp;— plus the normal reading of your account during sync. Nothing else.</li>
+    <li><strong>To AI:</strong> by default, nothing (everything runs locally). If <em>you</em> add a cloud AI endpoint, the texts of the features you route to it go to that service, under your account.</li>
+    <li><strong>To anyone else:</strong> nothing. No telemetry, no analytics, no automatic update checks&nbsp;— the update check runs only when you click it, against the public release list.</li>
+    <li><strong>Deletion, done properly:</strong> the workspace reset (Chapter 24.2) does not merely delete&nbsp;— it tells the database to zero the freed space and then compacts the file, so deleted records are not recoverable from it afterwards.</li>
+  </ul>
+
+  <!-- ============ CHAPTER 26 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 26</div>
+    <h2 class="ch-title">Troubleshooting &amp; FAQ</h2>
+    <p class="ch-lede">Symptoms, messages and honest answers&nbsp;— plus where to look when this book ends.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">26.1</span>First aid: the three places to look</h3>
+  <ol class="steps">
+    <li><strong>The toast or status line</strong>&nbsp;— the app announces every failure in the corner, with the reason. Reading it usually answers the question.</li>
+    <li><strong>The Diagnostics page</strong>&nbsp;— the full history: every error and warning, the outcome of every sync run, and any delivery that failed, all filterable. The <span class="ui">clear log</span> button empties it (with confirmation) when it gets long.</li>
+    <li><strong>The logs folder</strong>&nbsp;— if the app will not even start, the file <span class="path">~/.local/share/supportos-plus/logs/fatal.log</span> records what happened; send it to whoever helps you.</li>
+  </ol>
+
+  <h3 class="sec"><span class="no">26.2</span>Symptom &rarr; meaning &rarr; what to do</h3>
+  <table class="t">
+    <colgroup><col style="width:34%"><col style="width:66%"></colgroup>
+    <thead><tr><th>You see</th><th>What it means and what to do</th></tr></thead>
+    <tbody>
+      <tr><td class="k">"another SupportOS+ instance is already running"</td><td>A second copy was started. Switch to the open window; nothing is wrong.</td></tr>
+      <tr><td class="k">"loopback listener NOT running&hellip;" or a failed-to-start dialog</td><td>Another program is using the app's network port (3000 by default). Close that program, or ask your administrator to free the port or set a different one&nbsp;— then restart the app.</td></tr>
+      <tr><td class="k">"Help Scout rejected the login credentials"</td><td>Wrong or disabled credentials. Re-check client ID/secret for stray spaces and that the custom app is enabled (Chapter 5.1).</td></tr>
+      <tr><td class="k">Sync finishes with "errors" in the toast</td><td>Some parts could not be fetched; the rest is fine. Open Diagnostics &rarr; <em>Sync reports</em> to see which resource failed; the app retries on its own.</td></tr>
+      <tr><td class="k">"Up to date&nbsp;— nothing new from Help Scout"</td><td>Not an error&nbsp;— a healthy quiet account. The last check found no changes.</td></tr>
+      <tr><td class="k">Live chats or ratings never appear</td><td>They arrive only via webhooks&nbsp;— set up the relay (Chapter 5.5) and use the 401 test to prove the chain.</td></tr>
+      <tr><td class="k">"This exact reply was already sent"</td><td>Duplicate-send protection. It stopped a second identical copy; your first send went through.</td></tr>
+      <tr><td class="k">"Delivery could not be confirmed&hellip;"</td><td>The connection dropped mid-send. The app did <em>not</em> re-send automatically (so the customer cannot get two copies). Check the conversation on Help Scout before sending again.</td></tr>
+      <tr><td class="k">"Help Scout rate limit reached&hellip;"</td><td>Too many requests this minute (shared with other tools). The app waits for the reset and retries&nbsp;— no action needed.</td></tr>
+      <tr><td class="k">"This conversation was merged into another&hellip;"</td><td>Someone merged the ticket on Help Scout. Open the target conversation instead&nbsp;— the message names it.</td></tr>
+      <tr><td class="k">"AI is disabled in Settings&hellip;" / features greyed out</td><td>AI is off&nbsp;— re-enable it in AI Center &rarr; <em>Features &amp; kill switches</em>, or check the LM Studio steps in Chapter 21.1.</td></tr>
+      <tr><td class="k">"offline&nbsp;— {reason}" on test connection</td><td>LM Studio is not serving. Start its Local Server and confirm the address and model names match (Chapter 21.1).</td></tr>
+      <tr><td class="k">"Your Help Scout plan does not include the Reports API"</td><td>The official reports need Plus/Pro. Everything local keeps working.</td></tr>
+      <tr><td class="k">"release check failed: HTTP 404&hellip;"</td><td>The update check could not see a public release list (private repo or no releases). Harmless&nbsp;— nothing else is affected.</td></tr>
+      <tr><td class="k">"Restore refused: the backup file failed its integrity check"</td><td>The chosen backup file is damaged. Nothing was changed&nbsp;— pick an older backup.</td></tr>
+      <tr><td class="k">"Wrong passphrase (or the bundle was modified). Nothing was changed."</td><td>The encrypted bundle's password did not match. Try again; without the password the bundle cannot be opened&nbsp;— by design.</td></tr>
+      <tr><td class="k">A webhook delivery "was rejected"</td><td>Help Scout sent an event that failed the secret check&nbsp;— usually the webhook secret in Help Scout does not match the app's (Chapter 5.2), or the relay is miswired (run the 401 test).</td></tr>
+    </tbody>
+  </table>
+
+  <h3 class="sec"><span class="no">26.3</span>Frequently asked questions</h3>
+  <div class="box plain">
+    <p><strong>Do I need the internet?</strong> For pulling from and sending to Help Scout, yes. For everything else&nbsp;— reading your history, searching, reports, knowledge, the local AI&nbsp;— no: the app works fully offline and tells you when remote actions are unavailable.</p>
+    <p><strong>Can two people share one database?</strong> Not simultaneously&nbsp;— the app enforces one instance per data folder. Use the encrypted bundle (Chapter 25.4) to move a copy to another machine.</p>
+    <p><strong>Where did my data go after I deleted a rule/article/object?</strong> Confirmation dialogs promised it: those deletions are permanent, locally and (for saved replies) on Help Scout too. Backups from before the deletion are the only way back.</p>
+    <p><strong>How do I start completely over?</strong> Settings &rarr; Help Scout &rarr; <em>Workspace data</em> (Chapter 24.2): it wipes the local mirror, keeps your setup, and re-pulls the account fresh on the next start.</p>
+    <p><strong>Which Help Scout plan do I need?</strong> Any paid plan for the connection itself; Plus or Pro for the official Reports API tab; the Docs API key for Help Center features.</p>
+    <p><strong>Does the AI send anything to customers?</strong> Never. It drafts, reviews and rewrites&nbsp;— every send is a human press of the button (and the app protects even that with duplicate protection).</p>
+    <p><strong>How do I change the look?</strong> The sun/moon switch in the sidebar or header. Light and dark are both first-class and remembered.</p>
+    <p><strong>Something behaves oddly and this book does not cover it.</strong> Open Diagnostics, note the exact message, and check the Sync Health page&nbsp;— between those two, the app almost always tells you precisely what it needs.</p>
+  </div>
+
+</div>
+
+<!-- ================= ENDING ================= -->
+<div class="ending">
+  <div class="end-frame"></div>
+  <div class="end-big">Answer calmly.<br>Everything else is already on your desk.</div>
+  <div class="end-mark"></div>
+  <div class="end-sub">SupportOS+&nbsp;— your support desk, on your own computer.<br>Nothing simulated. Nothing hidden. Nothing sent without you.</div>
+  <div class="end-meta">SupportOS+ v1.8.0 &middot; User Handbook &middot; First Edition</div>
+</div>
+
+</body>
+</html>
