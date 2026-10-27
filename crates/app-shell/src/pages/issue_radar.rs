@@ -254,7 +254,7 @@ impl IssueRadarPage {
         // Audit fix (M21): reload at most once per second while a read
         // keeps failing (a None `sla` used to trigger the full radar
         // reload every rendered frame).
-        if self.sla.is_none() && self.reload_at.map_or(true, |t| t.elapsed().as_secs() >= 1) {
+        if self.sla.is_none() && self.reload_at.is_none_or(|t| t.elapsed().as_secs() >= 1) {
             self.reload_at = Some(std::time::Instant::now());
             self.reload(db);
         }

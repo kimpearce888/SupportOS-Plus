@@ -2565,7 +2565,11 @@ impl SyncEngine {
             // "Cancel running sync" was only consulted between resources,
             // so it looked dead exactly during the long conversation walk.
             if self.cancelled() {
-                tracing::info!(resource = "conversations", processed, "conversation sync cancelled");
+                tracing::info!(
+                    resource = "conversations",
+                    processed,
+                    "conversation sync cancelled"
+                );
                 break;
             }
             let page = self

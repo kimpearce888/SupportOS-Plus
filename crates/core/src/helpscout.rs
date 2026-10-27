@@ -792,7 +792,12 @@ pub trait HelpScoutProvider: Send + Sync {
     }
 
     /// K3: publish the article with its final text (PUT /v1/articles/{id}).
-    async fn publish_doc_article(&self, _remote_id: String, _name: &str, _text: &str) -> Result<()> {
+    async fn publish_doc_article(
+        &self,
+        _remote_id: String,
+        _name: &str,
+        _text: &str,
+    ) -> Result<()> {
         Err(Error::Config(
             "Docs API publishing is unavailable on this connection - no Docs API key is \
              configured."

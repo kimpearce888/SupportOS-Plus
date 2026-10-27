@@ -273,78 +273,73 @@ impl CustomersPage {
             conversations,
             milestones,
             recommendation,
-        ) = db
-            .with_read(|conn| {
-                let profile = spp_core::people_store::get_customer_detail(conn, customer_id)
-                    .ok()
-                    .flatten();
-                let interaction = spp_core::interaction_engine::build_profile(conn, customer_id)
-                    .ok()
-                    .flatten()
-                    .and_then(|p| serde_json::to_value(&p).ok());
-                let health = spp_core::people_store::customer_support_health(conn, customer_id)
-                    .ok()
-                    .flatten();
-                let timeline = match spp_core::customer_events::list_for_customer(
-                    conn,
-                    customer_id,
-                    None,
-                    100,
-                    0,
-                ) {
+        ) = db.with_read(|conn| {
+            let profile = spp_core::people_store::get_customer_detail(conn, customer_id)
+                .ok()
+                .flatten();
+            let interaction = spp_core::interaction_engine::build_profile(conn, customer_id)
+                .ok()
+                .flatten()
+                .and_then(|p| serde_json::to_value(&p).ok());
+            let health = spp_core::people_store::customer_support_health(conn, customer_id)
+                .ok()
+                .flatten();
+            let timeline =
+                match spp_core::customer_events::list_for_customer(conn, customer_id, None, 100, 0)
+                {
                     Ok((events, _)) => events.iter().map(event_row).collect(),
                     Err(_) => Vec::new(),
                 };
-                let kind_counts = match spp_core::customer_events::kind_counts(conn, customer_id) {
-                    Ok(counts) => counts
-                        .iter()
-                        .map(|c| (str_field(c, "kind"), i64_field(c, "count")))
-                        .collect(),
-                    Err(_) => Vec::new(),
-                };
-                let conversations = conversations_for(conn, customer_id).unwrap_or_default();
-                let milestones =
-                    spp_core::reports::get_timeline(conn, customer_id, 50).unwrap_or_default();
-                // Audit fix (M21): the profile's AI-stage recommendation is
-                // fetched once per profile load, not once per frame.
-                let recommendation: Option<serde_json::Value> = conn
-                    .query_row(
-                        "SELECT s.recommendation_json, s.sources
+            let kind_counts = match spp_core::customer_events::kind_counts(conn, customer_id) {
+                Ok(counts) => counts
+                    .iter()
+                    .map(|c| (str_field(c, "kind"), i64_field(c, "count")))
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            let conversations = conversations_for(conn, customer_id).unwrap_or_default();
+            let milestones =
+                spp_core::reports::get_timeline(conn, customer_id, 50).unwrap_or_default();
+            // Audit fix (M21): the profile's AI-stage recommendation is
+            // fetched once per profile load, not once per frame.
+            let recommendation: Option<serde_json::Value> = conn
+                .query_row(
+                    "SELECT s.recommendation_json, s.sources
                            FROM client_current_signals s
                           WHERE s.customer_id = ?1 AND s.recommendation_json IS NOT NULL
                           ORDER BY s.generated_at DESC LIMIT 1",
-                        rusqlite::params![customer_id],
-                        |r| {
-                            let raw: Option<String> = r.get(0)?;
-                            let sources: Option<String> = r.get(1)?;
-                            Ok(
-                                serde_json::from_str::<serde_json::Value>(&raw.unwrap_or_default())
-                                    .ok()
-                                    .map(|mut v| {
-                                        if let Some(obj) = v.as_object_mut() {
-                                            obj.insert(
-                                                "sources".into(),
-                                                serde_json::json!(sources.unwrap_or_default()),
-                                            );
-                                        }
-                                        v
-                                    }),
-                            )
-                        },
-                    )
-                    .ok()
-                    .flatten();
-                (
-                    profile,
-                    interaction,
-                    health,
-                    timeline,
-                    kind_counts,
-                    conversations,
-                    milestones,
-                    recommendation,
+                    rusqlite::params![customer_id],
+                    |r| {
+                        let raw: Option<String> = r.get(0)?;
+                        let sources: Option<String> = r.get(1)?;
+                        Ok(
+                            serde_json::from_str::<serde_json::Value>(&raw.unwrap_or_default())
+                                .ok()
+                                .map(|mut v| {
+                                    if let Some(obj) = v.as_object_mut() {
+                                        obj.insert(
+                                            "sources".into(),
+                                            serde_json::json!(sources.unwrap_or_default()),
+                                        );
+                                    }
+                                    v
+                                }),
+                        )
+                    },
                 )
-            });
+                .ok()
+                .flatten();
+            (
+                profile,
+                interaction,
+                health,
+                timeline,
+                kind_counts,
+                conversations,
+                milestones,
+                recommendation,
+            )
+        });
         self.profile = profile;
         self.interaction = interaction;
         self.health = health;

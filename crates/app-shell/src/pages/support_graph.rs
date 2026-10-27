@@ -186,7 +186,7 @@ impl SupportGraphPage {
         // Audit fix (M21): when the stats query fails, `stats` stays None
         // and this re-ran the aggregate query every rendered frame —
         // throttle reload attempts to at most one per second.
-        if self.stats.is_none() && self.stats_at.map_or(true, |t| t.elapsed().as_secs() >= 1) {
+        if self.stats.is_none() && self.stats_at.is_none_or(|t| t.elapsed().as_secs() >= 1) {
             self.stats_at = Some(std::time::Instant::now());
             self.reload_stats(db);
         }

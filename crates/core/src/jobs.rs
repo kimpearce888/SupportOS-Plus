@@ -446,10 +446,9 @@ pub fn requeue_stale_running_jobs(
               WHERE status = 'running'
                 AND started_at < datetime('now', ?1)",
         )?;
-        let rows = stmt.query_map(
-            params![format!("-{threshold_minutes} minutes")],
-            |r| r.get::<_, i64>(0),
-        )?;
+        let rows = stmt.query_map(params![format!("-{threshold_minutes} minutes")], |r| {
+            r.get::<_, i64>(0)
+        })?;
         rows.filter_map(|r| r.ok())
             .filter(|id| !executing.contains(id))
             .collect()

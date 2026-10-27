@@ -352,18 +352,13 @@ impl IncidentsPage {
         } else {
             format!("{} incident(s)", self.total)
         };
-        design::page_header(
-            ui,
-            "Incidents",
-            Some(&subtitle),
-            |ui| {
-                if design::button_with_icon(ui, Icon::Plus, "New Incident", ButtonVariant::Primary)
-                    .clicked()
-                {
-                    self.show_new = !self.show_new;
-                }
-            },
-        );
+        design::page_header(ui, "Incidents", Some(&subtitle), |ui| {
+            if design::button_with_icon(ui, Icon::Plus, "New Incident", ButtonVariant::Primary)
+                .clicked()
+            {
+                self.show_new = !self.show_new;
+            }
+        });
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
         }

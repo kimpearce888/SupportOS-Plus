@@ -1453,7 +1453,8 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
     // Audit fix (H5): the real API never produces a 'reply' thread type —
     // agent replies are 'message' (user-authored chat/phone too). Carry
     // from_type through so authorship is decidable for every type.
-    let rows: Vec<(String, Option<String>, Option<String>, Option<String>)> = stmt
+    type ThreadRow = (String, Option<String>, Option<String>, Option<String>);
+    let rows: Vec<ThreadRow> = stmt
         .query_map(params![conversation_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -1475,8 +1476,7 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
     let is_agent_reply = |t: &str, author: Option<&str>| -> bool {
         t == "reply"
             || t == "message"
-            || (matches!(t, "chat" | "phone")
-                && matches!(author, Some("user") | Some("agent")))
+            || (matches!(t, "chat" | "phone") && matches!(author, Some("user") | Some("agent")))
     };
     let customer_msgs: Vec<String> = rows
         .iter()

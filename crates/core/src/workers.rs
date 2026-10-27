@@ -460,7 +460,7 @@ impl WorkerManager {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .insert(job.id);
-            let exec_result = if AssertUnwindSafe(self.execute_job(job.id, &job.kind, &job.payload))
+            if AssertUnwindSafe(self.execute_job(job.id, &job.kind, &job.payload))
                 .catch_unwind()
                 .await
                 .is_err()
@@ -499,7 +499,6 @@ impl WorkerManager {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .remove(&job.id);
-            let _ = exec_result;
         }
     }
 
@@ -4292,7 +4291,10 @@ mod batch14_tests {
                         }
                     }),
                 ),
-                ("PUT", p) if p == "/v1/articles/abc909abc909abc909abc909" || p == "/v1/articles/abc909abc909abc909abc909/drafts" => {
+                ("PUT", p)
+                    if p == "/v1/articles/abc909abc909abc909abc909"
+                        || p == "/v1/articles/abc909abc909abc909abc909/drafts" =>
+                {
                     MockResponse::json(
                         200,
                         serde_json::json!({"article": {"id": "abc909abc909abc909abc909", "status": "published"}}),
@@ -4411,8 +4413,14 @@ mod batch14_tests {
             })
         };
         assert!(saw("POST", "/v1/articles"), "create must run first");
-        assert!(saw("PUT", "/v1/articles/abc909abc909abc909abc909"), "publish");
-        assert!(saw("GET", "/v1/articles/abc909abc909abc909abc909"), "verify re-sync");
+        assert!(
+            saw("PUT", "/v1/articles/abc909abc909abc909abc909"),
+            "publish"
+        );
+        assert!(
+            saw("GET", "/v1/articles/abc909abc909abc909abc909"),
+            "verify re-sync"
+        );
 
         // Re-publishing the now-linked draft takes the update path:
         // PUT /v1/articles/{id}/drafts upserts the draft copy of the

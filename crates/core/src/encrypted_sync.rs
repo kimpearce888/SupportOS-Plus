@@ -496,9 +496,7 @@ fn decrypt_to_temp(
     // misleading "wrong passphrase". (r and p stay pinned to the writer's
     // 8/1 by the check above, well inside their sane [8, 64] / [1, 16]
     // ranges.)
-    if header.kdf.n < SCRYPT_N_MIN
-        || header.kdf.n > SCRYPT_N_MAX
-        || !header.kdf.n.is_power_of_two()
+    if header.kdf.n < SCRYPT_N_MIN || header.kdf.n > SCRYPT_N_MAX || !header.kdf.n.is_power_of_two()
     {
         return Err(format!(
             "Bundle declares an out-of-range scrypt work factor (N = {}).",
@@ -550,8 +548,7 @@ fn sweep_stale_import_temps(bundles_dir: &Path) {
         return;
     };
     let cutoff = chrono::Utc::now().timestamp_millis() - STALE_AFTER_MS;
-    let snapshot_cutoff =
-        chrono::Utc::now().timestamp_millis() - SNAPSHOT_STALE_AFTER_MS;
+    let snapshot_cutoff = chrono::Utc::now().timestamp_millis() - SNAPSHOT_STALE_AFTER_MS;
     for entry in entries.flatten() {
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
@@ -1039,12 +1036,7 @@ mod tests {
     /// Hand-craft a valid bundle whose decrypted payload is arbitrary
     /// bytes — decryption succeeds, but snapshot_info fails on it, which
     /// is exactly the error path that used to leak the plaintext temp.
-    fn craft_bundle_with_plaintext(
-        dir: &Path,
-        passphrase: &str,
-        plain: &[u8],
-        n: u32,
-    ) -> PathBuf {
+    fn craft_bundle_with_plaintext(dir: &Path, passphrase: &str, plain: &[u8], n: u32) -> PathBuf {
         let salt = crypto::random_salt();
         let key = derive_key(passphrase, &salt).expect("key");
         let (iv, ciphertext) = crypto::encrypt(&key, plain).expect("encrypt");

@@ -324,8 +324,9 @@ fn create_conversation_and_thread_roundtrips() {
             // body and the new id in the Resource-Id header. The old mock
             // fed a JSON body with "id"/"number"/"threads", which encoded
             // a contract that does not exist and kept live creates broken.
-            ("POST", "/v2/conversations") => MockResponse::empty(201)
-                .with_header("Resource-Id", "101"),
+            ("POST", "/v2/conversations") => {
+                MockResponse::empty(201).with_header("Resource-Id", "101")
+            }
             ("POST", "/v2/conversations/101/reply") => MockResponse::json(201, json!({"id": 503})),
             ("POST", "/v2/conversations/101/notes") => MockResponse::json(201, json!({"id": 504})),
             ("PATCH", "/v2/conversations/101") => MockResponse::empty(204),

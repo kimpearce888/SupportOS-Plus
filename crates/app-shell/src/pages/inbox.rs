@@ -2117,7 +2117,11 @@ impl InboxPage {
         // the <email> part is now only rendered when an email exists.
         let who = match detail.customer_email.as_deref() {
             Some(email) if !email.trim().is_empty() => {
-                format!("{} <{}>", detail.customer_name.as_deref().unwrap_or("-"), email)
+                format!(
+                    "{} <{}>",
+                    detail.customer_name.as_deref().unwrap_or("-"),
+                    email
+                )
             }
             _ => detail.customer_name.as_deref().unwrap_or("-").to_string(),
         };

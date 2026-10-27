@@ -921,7 +921,10 @@ impl RealHelpScoutProvider {
         HsDocArticle {
             remote_id,
             // Audit fix (C2, live): Docs ids are hex ObjectIds — read as strings.
-            collection_id: article["collectionId"].as_str().unwrap_or_default().to_string(),
+            collection_id: article["collectionId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
             category_id: article["categories"]
                 .as_array()
                 .and_then(|a| a.first())
@@ -2296,7 +2299,11 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         let mut page_no: u32 = 1;
         loop {
             let v = self
-                .request(&format!("/v2/customer-properties?page={page_no}"), "GET", None)
+                .request(
+                    &format!("/v2/customer-properties?page={page_no}"),
+                    "GET",
+                    None,
+                )
                 .await?;
             let embedded = v["_embedded"]["customerProperties"]
                 .as_array()
@@ -2669,7 +2676,10 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 break;
             }
             for art in &items {
-                let Some(id) = art["id"].as_str().map(|s| s.to_string()).filter(|s| !s.is_empty())
+                let Some(id) = art["id"]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty())
                 else {
                     continue;
                 };
@@ -2700,7 +2710,8 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                         |row| row.get(0),
                     )
                     .ok();
-                let unchanged = matches!((remote_mod, stored.as_deref()), (Some(a), Some(b)) if a == b);
+                let unchanged =
+                    matches!((remote_mod, stored.as_deref()), (Some(a), Some(b)) if a == b);
                 if unchanged {
                     unchanged_count += 1;
                 } else {
