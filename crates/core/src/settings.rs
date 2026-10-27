@@ -185,7 +185,19 @@ pub fn set_bool(conn: &Connection, key: &str, value: bool) -> Result<()> {
 pub fn get_int(conn: &Connection, key: &str, default: i64) -> Result<i64> {
     Ok(match get_string(conn, key)? {
         None => default,
-        Some(s) => s.parse().unwrap_or(default),
+        Some(s) => match s.trim().parse::<i64>() {
+            Ok(v) => v,
+            Err(err) => {
+                // Audit (low): this used to be a silent `unwrap_or(default)`;
+                // a typo'd value ("50o") invisibly reverted to the default.
+                // Same fallback, honest now.
+                tracing::warn!(
+                    "settings: key {key:?} holds non-integer value {s:?} ({err}); \
+                     falling back to default {default}"
+                );
+                default
+            }
+        },
     })
 }
 

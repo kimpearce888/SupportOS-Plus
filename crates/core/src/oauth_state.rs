@@ -47,21 +47,23 @@ pub fn issue_state(conn: &Connection, redirect_uri: &str, scope: Option<&str>) -
 /// "it may have expired" message was a promise nothing enforced).
 pub fn consume_state(conn: &Connection, state: &str) -> Result<()> {
     ensure_oauth_states_table(conn)?;
-    let exists_fresh_unconsumed: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM oauth_states
-           WHERE state = ?1
-             AND consumed_at IS NULL
-             AND (julianday('now') - julianday(created_at)) * 86400.0 < ?2)",
+    // Audit (low): this used to be SELECT-then-UPDATE — a second callback
+    // racing the first could pass the EXISTS check before either consumed
+    // the row (TOCTOU; bounded in practice by Help Scout single-use codes,
+    // but the fix is one statement). The UPDATE now carries the full
+    // unconsumed+fresh predicate and `changes()` is the verdict, so
+    // exactly one caller can ever consume a state.
+    let consumed = conn.execute(
+        "UPDATE oauth_states
+         SET consumed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE state = ?1
+           AND consumed_at IS NULL
+           AND (julianday('now') - julianday(created_at)) * 86400.0 < ?2",
         params![state, STATE_TTL_SECONDS as f64],
-        |r| r.get(0),
     )?;
-    if !exists_fresh_unconsumed {
+    if consumed == 0 {
         return Err(Error::OauthStateInvalid);
     }
-    conn.execute(
-        "UPDATE oauth_states SET consumed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE state = ?1",
-        params![state],
-    )?;
     Ok(())
 }
 

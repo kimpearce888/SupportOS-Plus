@@ -1373,7 +1373,11 @@ impl RealHelpScoutProvider {
         }
 
         if status == 429 {
-            let retry_after = retry_after_hdr.filter(|s| *s > 0).unwrap_or(30).min(60);
+            // Audit (low): the ceiling used to be 60s — a genuine
+            // `Retry-After: 240` was ignored and the request retried early
+            // (then 429'd again). Honor the header up to a still-bounded
+            // 5 minutes.
+            let retry_after = retry_after_hdr.filter(|s| *s > 0).unwrap_or(30).min(300);
             self.limiter.record_error_429(Some(retry_after));
             if retries_left > 0 {
                 tokio::time::sleep(

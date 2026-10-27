@@ -5,22 +5,13 @@ use crate::error::Result;
 
 pub const CAPACITY_WINDOW_DAYS: i64 = 7;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentWorkload {
-    pub agent_remote_id: i64,
-    pub assigned: u32,
-    pub active: u32,
-    pub resolved_today: u32,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TeamWorkload {
-    pub team_remote_id: i64,
-    pub agent_count: u32,
-    pub assigned: u32,
-    pub active: u32,
-    pub resolved_today: u32,
-}
+// Audit (low): `AgentWorkload`/`TeamWorkload` + `agent_workload`/`team_workload`
+// used to live here — dead since introduction (zero call sites) and carrying a
+// latent id-domain bug (`assignee_local_id = ?1` fed a *remote* id). Removed
+// rather than fixed so the latent trap can't be picked up by future callers;
+// the live per-agent numbers the Operations page shows come from
+// `snapshot()` + `suggested_assignees()`, which join users on local ids
+// correctly.
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapacityMetrics {
@@ -29,59 +20,6 @@ pub struct CapacityMetrics {
     pub window_days: i64,
     pub incoming_rate_per_day: f64,
     pub closing_rate_per_day: f64,
-}
-
-pub fn agent_workload(conn: &Connection, agent_remote_id: i64) -> Result<AgentWorkload> {
-    let assigned: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM conversations
-         WHERE assignee_local_id = ?1 AND status != 'closed'",
-        params![agent_remote_id],
-        |r| r.get(0),
-    )?;
-
-    let active: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM conversations
-         WHERE assignee_local_id = ?1 AND status = 'active'",
-        params![agent_remote_id],
-        |r| r.get(0),
-    )?;
-
-    let resolved_today: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM conversations
-         WHERE assignee_local_id = ?1
-           AND status = 'closed'
-           AND closed_at IS NOT NULL
-           AND julianday(closed_at) >= julianday('now', 'start of day')
-           AND julianday(closed_at) < julianday('now', '+1 day', 'start of day')",
-        params![agent_remote_id],
-        |r| r.get(0),
-    )?;
-
-    Ok(AgentWorkload {
-        agent_remote_id,
-        assigned: u32::try_from(assigned).unwrap_or(0),
-        active: u32::try_from(active).unwrap_or(0),
-        resolved_today: u32::try_from(resolved_today).unwrap_or(0),
-    })
-}
-
-pub fn team_workload(
-    conn: &Connection,
-    team_remote_id: i64,
-    member_remote_ids: &[i64],
-) -> Result<TeamWorkload> {
-    let mut rollup = TeamWorkload {
-        team_remote_id,
-        agent_count: u32::try_from(member_remote_ids.len()).unwrap_or(0),
-        ..Default::default()
-    };
-    for &agent_remote_id in member_remote_ids {
-        let w = agent_workload(conn, agent_remote_id)?;
-        rollup.assigned += w.assigned;
-        rollup.active += w.active;
-        rollup.resolved_today += w.resolved_today;
-    }
-    Ok(rollup)
 }
 
 pub fn capacity_metrics(conn: &Connection) -> Result<CapacityMetrics> {
