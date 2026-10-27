@@ -21,6 +21,13 @@
 //!   clean error. Filters stack but can never be replaced, so the
 //!   allow-list cannot be loosened afterwards.
 //!
+//!   Descriptor hygiene (audit fix M13): Landlock cannot govern
+//!   already-open descriptors, so the filter pins `read` to the process's
+//!   own stdio, permits `mmap` only for anonymous (file-less) mappings,
+//!   and denies `close` outright — an exploited parser must not be able
+//!   to read, map, or close out from under the host the descriptors it
+//!   inherited (the mirror DB, `secrets.key`, the listener sockets).
+//!
 //! The filters are per-thread (`prctl` semantics), so they affect only
 //! the sandbox thread and nothing it never spawns. If the thread dies
 //! (blocked syscall, panic), the caller gets an error instead of a hang
@@ -145,16 +152,18 @@ fn apply_seccomp() -> std::result::Result<(), String> {
     use std::convert::TryInto;
 
     // Unconditional allow-rules: syscall number -> always allowed.
+    // Audit fix (M13): `read`, `close` and plain `mmap` are deliberately
+    // NOT unconditional — see the conditional rules below. Landlock cannot
+    // police already-open descriptors, so an exploited parser must not get
+    // blanket read/mmap/close over the host's fd table (mirror DB,
+    // secrets.key, listener sockets all live in that table).
     let allowed: &[i64] = &[
-        libc::SYS_read,
-        libc::SYS_close,
         libc::SYS_brk,
-        libc::SYS_mmap,
         libc::SYS_munmap,
         libc::SYS_mprotect,
         libc::SYS_madvise,
-        libc::SYS_mremap,
-        libc::SYS_futex, // mpsc channels, mutexes, JoinHandle packets
+        libc::SYS_mremap, // only touches mappings this thread made (anonymous once mmap is gated)
+        libc::SYS_futex,  // mpsc channels, mutexes, JoinHandle packets
         libc::SYS_clock_gettime,
         libc::SYS_clock_getres,
         libc::SYS_gettimeofday,
@@ -184,6 +193,40 @@ fn apply_seccomp() -> std::result::Result<(), String> {
         .expect("valid rule")
     };
     rules.insert(libc::SYS_write, vec![fd_rule(1), fd_rule(2)]);
+    // Audit fix (M13): read(2) only on the process's own stdio. Every
+    // sensitive descriptor — the mirror DB, secrets.key, the listener
+    // sockets — sits at fd >= 3; stdio at 0..=2 is the app's own console
+    // and carries no secret. `open` is not allowed anyway, so the parser
+    // can never grow this set; all its input arrives as moved-in bytes.
+    rules.insert(libc::SYS_read, vec![fd_rule(0), fd_rule(1), fd_rule(2)]);
+    // Audit fix (M13): mmap(2) may only create ANONYMOUS mappings — the
+    // allocator, thread stacks and guard pages all pass MAP_ANONYMOUS —
+    // while a file-backed mmap would let the parser read an open file
+    // (the DB, the key store) straight through its inherited fd.
+    // MAP_ANONYMOUS is 0x20 on every architecture this crate targets
+    // (x86_64, aarch64); the MaskedEq below asserts the flag is set.
+    rules.insert(
+        libc::SYS_mmap,
+        vec![
+            SeccompRule::new(vec![
+                SeccompCondition::new(
+                    3, // flags argument
+                    SeccompCmpArgLen::Qword,
+                    SeccompCmpOp::MaskedEq(libc::MAP_ANONYMOUS as u64),
+                    libc::MAP_ANONYMOUS as u64,
+                )
+                .expect("valid condition"),
+            ])
+            .expect("valid rule"),
+        ],
+    );
+    // Audit fix (M13): close(2) is denied outright (it stays out of the
+    // map, so it hits the EPERM default). The sandbox cannot open
+    // descriptors — `open` is not in the allow-list — so every close it
+    // could attempt targets a host fd, and dropping one out from under
+    // the running app is corruption the filter must prevent. Rust and
+    // glibc both tolerate close() failures; no legitimate close exists
+    // on a pure-compute thread that owns no descriptors.
     let arch: TargetArch = std::env::consts::ARCH
         .try_into()
         .map_err(|e| format!("seccompiler: unsupported arch {e}"))?;
@@ -201,6 +244,11 @@ fn apply_seccomp() -> std::result::Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    // The M13 regression tests below must issue the raw syscalls they gate
+    // (read/close/mmap through libc) to prove the filter intercepts them;
+    // the crate-wide `unsafe_code` deny is lifted for this test scope only.
+    #![allow(unsafe_code)]
+
     use super::*;
 
     #[test]
@@ -249,5 +297,81 @@ mod tests {
             blocked,
             "socket(2) must fail with EPERM under the seccomp allow-list"
         );
+    }
+
+    // --- Audit fix (M13) regression tests: descriptor hygiene ------------
+
+    #[test]
+    fn sandbox_m13_blocks_reads_beyond_stdio() {
+        // fd 999 is not a stdio fd; whether or not it is open, the filter
+        // must intercept the read. Asserting EPERM (filter) — not EBADF
+        // (fd-table miss) — proves the seccomp rule fired before the fd
+        // lookup, i.e. no fd >= 3 is readable from inside the sandbox.
+        let errno = run_sandboxed("m13-read", || {
+            let mut buf = [0u8; 16];
+            unsafe { libc::read(999, buf.as_mut_ptr().cast(), buf.len()) };
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+        })
+        .expect("the sandboxed task itself must complete");
+        assert_eq!(errno, libc::EPERM, "read(2) beyond stdio must EPERM");
+    }
+
+    #[test]
+    fn sandbox_m13_blocks_close_of_host_fds() {
+        // close(2) must be denied outright: the sandbox cannot open
+        // descriptors, so any close it attempts targets a host fd.
+        let errno = run_sandboxed("m13-close", || {
+            unsafe { libc::close(999) };
+            std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+        })
+        .expect("the sandboxed task itself must complete");
+        assert_eq!(errno, libc::EPERM, "close(2) must be denied outright");
+    }
+
+    #[test]
+    fn sandbox_m13_blocks_file_backed_mmap_but_allows_anonymous() {
+        // A real, open fd for the file-backed attempt (opened by the TEST
+        // thread — the sandbox itself never opens anything).
+        let path = std::env::temp_dir().join(format!("spp-sandbox-m13-{}.tmp", std::process::id()));
+        std::fs::write(&path, b"probe").expect("temp file");
+        let file = std::fs::File::open(&path).expect("open temp file");
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&file);
+
+        let errno = run_sandboxed("m13-mmap", move || {
+            let m = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    4096,
+                    libc::PROT_READ,
+                    libc::MAP_PRIVATE, // no MAP_ANONYMOUS -> must EPERM
+                    fd,
+                    0,
+                )
+            };
+            if m == libc::MAP_FAILED {
+                std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+            } else {
+                0
+            }
+        })
+        .expect("the sandboxed task itself must complete");
+        assert_eq!(
+            errno,
+            libc::EPERM,
+            "file-backed mmap must EPERM under the filter"
+        );
+
+        // Anonymous mapping (the allocator's own path) must keep working.
+        let ok = run_sandboxed("m13-anon", || {
+            // 8 MB forces the mmap path in glibc malloc (threshold 128 KiB).
+            let mut v: Vec<u8> = vec![0u8; 8 * 1024 * 1024];
+            v[7] = 0xAB;
+            v.iter().fold(0u64, |acc, &b| acc + u64::from(b)) == u64::from(0xAB_u8)
+        })
+        .expect("anonymous mmap must keep working under the filter");
+        assert!(ok);
+
+        drop(file);
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -230,16 +230,31 @@ impl CommandPalette {
         if !self.open {
             return None;
         }
-        // FIND-011: dismiss on any click OUTSIDE the palette window rect.
-        // The previous full-screen Area catcher (clean-audit item 133)
-        // claimed "the catcher takes everything else", but the runtime
-        // click matrix proved the opposite at most positions — clicks
-        // fell through to the UI underneath while the overlay stayed open
-        // (one even spawned a real sync action). A pointer-position check
-        // against the remembered window rect is layer-independent by
-        // construction. The overlay stays non-modal (that is what runtime
-        // actually did); the mouse triggers now `toggle()` so they dismiss
-        // it too.
+        // FIND-011 + audit fix M19: outside clicks dismiss the palette AND
+        // must not leak to the UI underneath. The original clean-audit-133
+        // catcher failed at runtime (its layer never actually covered the
+        // pointer), so FIND-011 replaced it with a pointer-position check —
+        // which dismisses reliably but still lets the same click activate
+        // the widget underneath (the fall-through consequence M19 records).
+        // The egui 0.37 hit-test stops at the top-most layer that fully
+        // covers the pointer's interact radius, so a full-screen catcher in
+        // the Foreground order — registered just BELOW the palette window,
+        // which is now Foreground too — genuinely absorbs every click the
+        // window itself does not take. The pointer-position check stays as
+        // a layer-independent backstop (e.g. for the one frame before the
+        // catcher's layer has entered the hit-test order).
+        let screen = ctx.input(|i| i.viewport_rect());
+        let catcher = egui::Area::new(egui::Id::unique("spp_command_palette_catcher"))
+            .order(egui::Order::Foreground)
+            .movable(false)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                ui.allocate_response(screen.size(), egui::Sense::click())
+            })
+            .inner;
+        if !self.just_opened && catcher.clicked() {
+            self.close();
+        }
         if !self.just_opened
             && ctx.input(|i| i.pointer.any_click())
             && ctx
@@ -259,6 +274,11 @@ impl CommandPalette {
         let frame_border = frame_tokens.border;
         let icon_muted = frame_tokens.muted_foreground;
         let win = egui::Window::new("Command Palette")
+            // M19: same Foreground order as the catcher, but shown after
+            // it — within one order egui ranks layers by registration, so
+            // the window sits directly above the catcher and keeps its
+            // own clicks.
+            .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 80.0))
             .fixed_size([560.0, 360.0])
             .collapsible(false)
@@ -754,14 +774,37 @@ mod tests {
         assert!(palette.is_open(), "a dry Enter keeps the palette open");
     }
 
-    /// Clean-audit item 133: clicking outside the palette window closes
-    /// it (the web overlay's backdrop), and the click does not leak to
-    /// the UI underneath.
+    /// Clean-audit item 133 + audit fix M19: clicking outside the palette
+    /// window closes it (the web overlay's backdrop), and — since M19's
+    /// full-screen Foreground catcher — the dismissing click is genuinely
+    /// absorbed: a clickable widget underneath (order Middle) never
+    /// receives it, instead of being pressed through the overlay.
     #[test]
     fn audit133_clicking_outside_the_palette_closes_it() {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
+        // The "page UI underneath": a clickable victim widget on a Middle
+        // layer at the exact position we will click (bottom-left, far from
+        // the center-top anchored palette window). Pre-M19 the dismissing
+        // click fell through and pressed it.
+        let victim_pos = egui::pos2(10.0, 300.0);
+        let victim_clicked = std::rc::Rc::new(std::cell::Cell::new(false));
+        let render_victim = |ctx: &egui::Context, flag: &std::cell::Cell<bool>| {
+            let clicked = egui::Area::new(egui::Id::unique("m19_victim"))
+                .fixed_pos(victim_pos)
+                .show(ctx, |ui| {
+                    ui.allocate_exact_size(egui::vec2(80.0, 30.0), egui::Sense::click())
+                })
+                .inner
+                .1
+                .clicked();
+            if clicked {
+                flag.set(true);
+            }
+        };
+
         ctx.run_pass(egui::RawInput::default(), |ctx| {
+            render_victim(ctx, &victim_clicked);
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
@@ -774,20 +817,22 @@ mod tests {
         let mut move_pointer = egui::RawInput::default();
         move_pointer
             .events
-            .push(egui::Event::PointerMoved(egui::pos2(10.0, 300.0)));
+            .push(egui::Event::PointerMoved(victim_pos));
         ctx.run_pass(move_pointer, |ctx| {
+            render_victim(ctx, &victim_clicked);
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
 
         let mut press = egui::RawInput::default();
         press.events.push(egui::Event::PointerButton {
-            pos: egui::pos2(10.0, 300.0),
+            pos: victim_pos,
             button: egui::PointerButton::Primary,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         });
         ctx.run_pass(press, |ctx| {
+            render_victim(ctx, &victim_clicked);
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
@@ -795,16 +840,22 @@ mod tests {
 
         let mut release = egui::RawInput::default();
         release.events.push(egui::Event::PointerButton {
-            pos: egui::pos2(10.0, 300.0),
+            pos: victim_pos,
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         });
         ctx.run_pass(release, |ctx| {
+            render_victim(ctx, &victim_clicked);
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
         assert!(!palette.is_open(), "an outside click closes the palette");
+        assert!(
+            !victim_clicked.get(),
+            "M19: the dismissing click must be absorbed by the catcher, \
+             not pressed through onto the widget underneath"
+        );
     }
 
     /// Clean-audit item 72: Enter with ZERO hits must not strand the
