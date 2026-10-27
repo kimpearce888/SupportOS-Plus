@@ -185,6 +185,10 @@ pub struct CustomersPage {
     profile: Option<Value>,
     interaction: Option<Value>,
     health: Option<Value>,
+    /// Audit fix (M21): the AI-stage recommendation for the profile's
+    /// latest analyzed conversation — loaded with the rest of the
+    /// profile instead of re-queried on the UI thread every frame.
+    recommendation: Option<Value>,
     timeline: Vec<TimelineEvent>,
     kind_counts: Vec<(String, i64)>,
     conversations: Vec<spp_core::inbox::ConversationListItem>,
@@ -211,6 +215,7 @@ impl CustomersPage {
             profile: None,
             interaction: None,
             health: None,
+            recommendation: None,
             timeline: Vec::new(),
             kind_counts: Vec::new(),
             conversations: Vec::new(),
@@ -259,7 +264,16 @@ impl CustomersPage {
     }
 
     fn load_profile(&mut self, db: &DbHandle, customer_id: i64) {
-        let (profile, interaction, health, timeline, kind_counts, conversations, milestones) = db
+        let (
+            profile,
+            interaction,
+            health,
+            timeline,
+            kind_counts,
+            conversations,
+            milestones,
+            recommendation,
+        ) = db
             .with_read(|conn| {
                 let profile = spp_core::people_store::get_customer_detail(conn, customer_id)
                     .ok()
@@ -291,6 +305,35 @@ impl CustomersPage {
                 let conversations = conversations_for(conn, customer_id).unwrap_or_default();
                 let milestones =
                     spp_core::reports::get_timeline(conn, customer_id, 50).unwrap_or_default();
+                // Audit fix (M21): the profile's AI-stage recommendation is
+                // fetched once per profile load, not once per frame.
+                let recommendation: Option<serde_json::Value> = conn
+                    .query_row(
+                        "SELECT s.recommendation_json, s.sources
+                           FROM client_current_signals s
+                          WHERE s.customer_id = ?1 AND s.recommendation_json IS NOT NULL
+                          ORDER BY s.generated_at DESC LIMIT 1",
+                        rusqlite::params![customer_id],
+                        |r| {
+                            let raw: Option<String> = r.get(0)?;
+                            let sources: Option<String> = r.get(1)?;
+                            Ok(
+                                serde_json::from_str::<serde_json::Value>(&raw.unwrap_or_default())
+                                    .ok()
+                                    .map(|mut v| {
+                                        if let Some(obj) = v.as_object_mut() {
+                                            obj.insert(
+                                                "sources".into(),
+                                                serde_json::json!(sources.unwrap_or_default()),
+                                            );
+                                        }
+                                        v
+                                    }),
+                            )
+                        },
+                    )
+                    .ok()
+                    .flatten();
                 (
                     profile,
                     interaction,
@@ -299,6 +342,7 @@ impl CustomersPage {
                     kind_counts,
                     conversations,
                     milestones,
+                    recommendation,
                 )
             });
         self.profile = profile;
@@ -308,6 +352,7 @@ impl CustomersPage {
         self.kind_counts = kind_counts;
         self.conversations = conversations;
         self.milestones = milestones;
+        self.recommendation = recommendation;
     }
 
     /// Render the page.
@@ -532,35 +577,9 @@ impl CustomersPage {
             health_and_counts(&mut cols[0], &self.health, &self.kind_counts);
             // A3.4: the AI-stage recommendation (heuristic+ai merge) for the
             // customer's latest analyzed conversation rides the interaction
-            // profile card.
-            let recommendation: Option<serde_json::Value> = db.with_read(|conn| {
-                conn.query_row(
-                    "SELECT s.recommendation_json, s.sources
-                       FROM client_current_signals s
-                      WHERE s.customer_id = ?1 AND s.recommendation_json IS NOT NULL
-                      ORDER BY s.generated_at DESC LIMIT 1",
-                    rusqlite::params![customer_id],
-                    |r| {
-                        let raw: Option<String> = r.get(0)?;
-                        let sources: Option<String> = r.get(1)?;
-                        Ok(
-                            serde_json::from_str::<serde_json::Value>(&raw.unwrap_or_default())
-                                .ok()
-                                .map(|mut v| {
-                                    if let Some(obj) = v.as_object_mut() {
-                                        obj.insert(
-                                            "sources".into(),
-                                            serde_json::json!(sources.unwrap_or_default()),
-                                        );
-                                    }
-                                    v
-                                }),
-                        )
-                    },
-                )
-                .ok()
-                .flatten()
-            });
+            // profile card. Audit fix (M21): cached from `load_profile` —
+            // this used to re-query `client_current_signals` every frame.
+            let recommendation = self.recommendation.clone();
             interaction_summary(
                 &mut cols[1],
                 self.interaction.as_ref(),

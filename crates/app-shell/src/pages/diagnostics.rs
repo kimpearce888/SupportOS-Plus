@@ -283,7 +283,13 @@ impl DiagnosticsPage {
                 );
                 return;
             }
+            // Audit fix (M24): the two Diagnostics ScrollAreas derived the
+            // SAME auto id (both live in an unnamed card frame under the
+            // same page scope), painting egui's "First use of ScrollArea
+            // ID …" debug overlay across the event log. Give each a
+            // unique, stable salt.
             egui::ScrollArea::vertical()
+                .id_salt("diagnostics-event-log")
                 .max_height(360.0)
                 .auto_shrink([false, false])
                 .show_rows(ui, 26.0, events.len(), |ui, range| {
@@ -373,7 +379,9 @@ impl DiagnosticsPage {
                 },
             );
             // The recorded states and remote outcomes (compact, muted).
+            // Audit fix (M24): unique stable id — see the event-log note.
             egui::ScrollArea::vertical()
+                .id_salt("diagnostics-audit-detail")
                 .max_height(140.0)
                 .auto_shrink([false, false])
                 .show_rows(ui, 20.0, audit.len(), |ui, range| {

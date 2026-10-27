@@ -94,6 +94,9 @@ pub struct SupportGraphPage {
     /// frame so the search survives sync events instead of blanking
     /// until the user re-submits it.
     results_stale: bool,
+    /// Audit fix (M21): when the stats query errors, `stats` stays None —
+    /// without a backoff stamp the aggregate query re-ran every frame.
+    stats_at: Option<std::time::Instant>,
 }
 
 impl SupportGraphPage {
@@ -108,12 +111,17 @@ impl SupportGraphPage {
             neighborhood: None,
             error: None,
             results_stale: false,
+            // Audit fix (M21): last stats-reload attempt — a failing
+            // stats query used to re-run on the UI thread every frame.
+            stats_at: None,
         }
     }
 
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.stats = None;
+        // Audit fix (M21): an explicit invalidation reloads next frame.
+        self.stats_at = None;
         if self.query.is_empty() {
             return;
         }
@@ -175,7 +183,11 @@ impl SupportGraphPage {
 
     /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        if self.stats.is_none() {
+        // Audit fix (M21): when the stats query fails, `stats` stays None
+        // and this re-ran the aggregate query every rendered frame —
+        // throttle reload attempts to at most one per second.
+        if self.stats.is_none() && self.stats_at.map_or(true, |t| t.elapsed().as_secs() >= 1) {
+            self.stats_at = Some(std::time::Instant::now());
             self.reload_stats(db);
         }
         self.refetch_if_stale(db);

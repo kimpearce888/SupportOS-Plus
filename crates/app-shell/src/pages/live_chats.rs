@@ -41,7 +41,24 @@ pub struct LiveChatsPage {
     show_ended: bool,
     draft: String,
     notice: Option<String>,
+    /// Audit fix (M21): cached detail-pane data — the send rule and the
+    /// whole message history used to be re-read from the mirror on every
+    /// rendered frame.
+    detail_cache: Option<ChatDetailCache>,
 }
+
+/// Audit fix (M21): one detail pane's mirror reads, keyed by chat and
+/// timestamped so the pane re-queries at most once per second (plus
+/// immediately on selection, send and invalidation).
+struct ChatDetailCache {
+    chat_id: String,
+    at: std::time::Instant,
+    guard: SendBlock,
+    messages: Vec<MirrorMessage>,
+}
+
+/// How long a detail-pane cache entry is reused before the next read.
+const DETAIL_TTL: std::time::Duration = std::time::Duration::from_secs(1);
 
 impl LiveChatsPage {
     #[must_use]
@@ -52,6 +69,7 @@ impl LiveChatsPage {
             show_ended: false,
             draft: String::new(),
             notice: None,
+            detail_cache: None,
         }
     }
 
@@ -59,6 +77,8 @@ impl LiveChatsPage {
     /// through `pages::invalidated_pages`).
     pub fn invalidate(&mut self) {
         self.model = None;
+        // Audit fix (M21): fresh mirror data may change the send rule.
+        self.detail_cache = None;
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -198,22 +218,45 @@ impl LiveChatsPage {
     }
 
     fn chat_detail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, chat: MirrorChat) {
-        let guard = db.with_read(|conn| chats::send_block(conn, &chat.chat_id, None));
-        // The rule resolves against the connected user, not a guess.
-        let guard = match (guard, self.model.as_ref().and_then(|m| m.me_remote_id)) {
-            (Ok(g), me) => {
-                if g.held_by_other && me.is_some() {
-                    db.with_read(|conn| chats::send_block(conn, &chat.chat_id, me).unwrap_or(g))
-                } else {
-                    g
+        // Audit fix (M21): serve the send rule + message history from the
+        // timestamped cache when it is fresh; re-read the mirror at most
+        // once per second (and on selection/send/invalidation, which
+        // drop the cache) instead of on every rendered frame.
+        let (guard, messages) = if self
+            .detail_cache
+            .as_ref()
+            .is_some_and(|c| c.chat_id == chat.chat_id && c.at.elapsed() < DETAIL_TTL)
+        {
+            let cache = self.detail_cache.as_ref().expect("checked above");
+            (cache.guard.clone(), cache.messages.clone())
+        } else {
+            let guard = db.with_read(|conn| chats::send_block(conn, &chat.chat_id, None));
+            // The rule resolves against the connected user, not a guess.
+            let guard = match (guard, self.model.as_ref().and_then(|m| m.me_remote_id)) {
+                (Ok(g), me) => {
+                    if g.held_by_other && me.is_some() {
+                        db.with_read(|conn| chats::send_block(conn, &chat.chat_id, me).unwrap_or(g))
+                    } else {
+                        g
+                    }
                 }
-            }
-            (Err(_), _) => SendBlock {
-                can_send: false,
-                chat_open: chat.is_open(),
-                held_by_other: false,
-                hint: "the send rule could not be read from the mirror".to_string(),
-            },
+                (Err(_), _) => SendBlock {
+                    can_send: false,
+                    chat_open: chat.is_open(),
+                    held_by_other: false,
+                    hint: "the send rule could not be read from the mirror".to_string(),
+                },
+            };
+            let messages = db
+                .with_read(|conn| chats::messages_for(conn, &chat.chat_id))
+                .unwrap_or_default();
+            self.detail_cache = Some(ChatDetailCache {
+                chat_id: chat.chat_id.clone(),
+                at: std::time::Instant::now(),
+                guard: guard.clone(),
+                messages: messages.clone(),
+            });
+            (guard, messages)
         };
 
         design::card_titled(
@@ -229,9 +272,9 @@ impl LiveChatsPage {
                 chat.last_event_at.as_deref().unwrap_or("—")
             )),
             |ui| {
-                let messages = db
-                    .with_read(|conn| chats::messages_for(conn, &chat.chat_id))
-                    .unwrap_or_default();
+                // Audit fix (M21): the message history comes from the
+                // timestamped cache resolved above — re-reading the mirror
+                // here on every rendered frame was the hot path.
                 if messages.is_empty() {
                     design::hint_text(ui, "no messages stored for this chat yet");
                 } else {
@@ -302,6 +345,10 @@ impl LiveChatsPage {
         }) {
             Ok(_) => {
                 self.draft.clear();
+                // Audit fix (M21): the sent message reaches the mirror via
+                // the platform echo — drop the cache so the pane re-reads
+                // instead of showing the stale history for a second.
+                self.detail_cache = None;
                 self.notice = Some(format!(
                     "message queued for delivery (id {message_id}) — the platform's \
                      agent.replied echo lands it in the mirror"

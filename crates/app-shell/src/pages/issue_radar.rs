@@ -183,6 +183,10 @@ pub struct IssueRadarPage {
     /// FIND-008: failed `ai` jobs used to land only in the jobs table with
     /// no signal on this page; the header badges the count instead.
     failed_ai_jobs: i64,
+    /// Audit fix (M21): stamp of the last full reload attempt — if any
+    /// read errors, `sla` stays None and the whole radar (five analytics
+    /// queries) used to re-run on the UI thread every rendered frame.
+    reload_at: Option<std::time::Instant>,
 }
 
 impl IssueRadarPage {
@@ -204,6 +208,7 @@ impl IssueRadarPage {
             error: None,
             notice: None,
             failed_ai_jobs: 0,
+            reload_at: None,
         }
     }
 
@@ -214,6 +219,8 @@ impl IssueRadarPage {
         self.clusters.clear();
         self.known.clear();
         self.gaps = serde_json::Value::Null;
+        // Audit fix (M21): an explicit invalidation reloads next frame.
+        self.reload_at = None;
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -244,7 +251,11 @@ impl IssueRadarPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.sla.is_none() {
+        // Audit fix (M21): reload at most once per second while a read
+        // keeps failing (a None `sla` used to trigger the full radar
+        // reload every rendered frame).
+        if self.sla.is_none() && self.reload_at.map_or(true, |t| t.elapsed().as_secs() >= 1) {
+            self.reload_at = Some(std::time::Instant::now());
             self.reload(db);
         }
     }

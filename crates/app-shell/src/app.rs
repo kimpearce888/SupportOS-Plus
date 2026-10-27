@@ -496,6 +496,26 @@ impl ShellApp {
                 egui::ScrollArea::vertical()
                     .id_salt("spp-nav-scroll")
                     .show(ui, |ui| {
+                        // Audit fix (M23): the wheel did nothing over the nav
+                        // rows (only dragging the thin scrollbar moved them) —
+                        // egui's hover-path wheel handling never fires for this
+                        // ScrollArea (it lives in a CentralPanel nested inside
+                        // the sidebar Panel). While the pointer is over the
+                        // nav, feed the raw wheel delta to this area explicitly
+                        // and burn the frame's smooth delta so the same tick
+                        // cannot scroll twice.
+                        if ui.rect_contains_pointer(ui.max_rect()) {
+                            // Audit fix (M23): egui 0.37 exposes the wheel
+                            // delta as `smooth_scroll_delta` (the raw wheel
+                            // state is private); reading + zeroing it here
+                            // consumes the tick so the manual scroll below
+                            // cannot double-apply.
+                            let wheel_y = ui.input(|i| i.smooth_scroll_delta.y);
+                            if wheel_y != 0.0 {
+                                ui.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+                                ui.scroll_with_delta(egui::vec2(0.0, wheel_y));
+                            }
+                        }
                         for (group, keys) in NAV_GROUPS {
                             ui.label(
                                 egui::RichText::new(*group)

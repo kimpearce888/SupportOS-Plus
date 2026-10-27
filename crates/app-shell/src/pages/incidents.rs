@@ -340,10 +340,22 @@ impl IncidentsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
+        // Audit fix (M20): the list caps at 100 rows with no pager — say
+        // so instead of implying the full set is shown.
+        let subtitle = if (self.rows.len() as i64) < self.total {
+            format!(
+                "{} incident(s) — showing first {} of {}",
+                self.total,
+                self.rows.len(),
+                self.total
+            )
+        } else {
+            format!("{} incident(s)", self.total)
+        };
         design::page_header(
             ui,
             "Incidents",
-            Some(&format!("{} incident(s)", self.total)),
+            Some(&subtitle),
             |ui| {
                 if design::button_with_icon(ui, Icon::Plus, "New Incident", ButtonVariant::Primary)
                     .clicked()

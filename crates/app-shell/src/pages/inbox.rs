@@ -320,6 +320,12 @@ pub struct InboxPage {
     outbound_note: Option<(String, bool)>,
     status_message: Option<String>,
     status_is_error: bool,
+    /// Audit fix (M22): wall-clock stamp captured whenever a transient
+    /// status line is set, so a stale line (e.g. "Refreshing from Help
+    /// Scout…" after the refresh finished, or an old validation error)
+    /// expires on its own instead of sitting on screen until the user's
+    /// next action replaces it.
+    status_message_at: Option<std::time::Instant>,
     /// Copilot side panel (1.3.0): local analysis + similar issues +
     /// suggested reply + related articles + customer history.
     copilot_open: bool,
@@ -446,6 +452,7 @@ impl InboxPage {
             outbound_note: None,
             status_message: None,
             status_is_error: false,
+            status_message_at: None,
             copilot_open: false,
             copilot: None,
             copilot_error: None,
@@ -849,6 +856,7 @@ impl InboxPage {
             }
         }
         self.status_message = None;
+        self.status_message_at = None;
         // A3/A6: per-conversation AI state resets with the selection —
         // pending jobs and cards belong to the previous conversation,
         // never the new one.
@@ -938,8 +946,7 @@ impl InboxPage {
                         tracing::warn!(error = %e, "draft feedback recording failed (non-fatal)");
                     }
                 }
-                self.status_message = Some(msg.clone());
-                self.status_is_error = false;
+                self.set_status_message(msg, false);
                 self.composer_body.clear();
                 self.composer_cc.clear();
                 self.composer_bcc.clear();
@@ -954,13 +961,33 @@ impl InboxPage {
             // Rejections keep the typed text (the user fixes the problem
             // and re-sends; wiping the composer destroyed their work).
             ActionOutcome::Rejected(msg) => {
-                self.status_message = Some(msg.clone());
-                self.status_is_error = true;
+                self.set_status_message(msg, true);
             }
         }
         self.reload_detail(db);
         self.reload_list(db);
         outcome
+    }
+
+    /// Audit fix (M22): every transient status line carries its set-time
+    /// so rendering can expire it (see [`Self::expire_status_message`]).
+    fn set_status_message(&mut self, message: impl Into<String>, is_error: bool) {
+        self.status_message = Some(message.into());
+        self.status_is_error = is_error;
+        self.status_message_at = Some(std::time::Instant::now());
+    }
+
+    /// Audit fix (M22): a status line older than the TTL is dropped
+    /// before rendering — completed one-shot notes never outlive their
+    /// moment.
+    fn expire_status_message(&mut self) {
+        const STATUS_MESSAGE_TTL: std::time::Duration = std::time::Duration::from_secs(45);
+        if let Some(set_at) = self.status_message_at
+            && set_at.elapsed() > STATUS_MESSAGE_TTL
+        {
+            self.status_message = None;
+            self.status_message_at = None;
+        }
     }
 
     /// Change the conversation status (local write + queued remote job).
@@ -981,8 +1008,7 @@ impl InboxPage {
             "update_status",
             &json!({ "conversationId": detail.id, "status": status }),
         );
-        self.status_message = Some(outcome.message().to_string());
-        self.status_is_error = outcome.is_rejected();
+        self.set_status_message(outcome.message(), outcome.is_rejected());
         self.reload_detail(db);
         self.reload_list(db);
         outcome
@@ -1006,8 +1032,7 @@ impl InboxPage {
             "assign",
             &json!({ "conversationId": detail.id, "userId": user_id }),
         );
-        self.status_message = Some(outcome.message().to_string());
-        self.status_is_error = outcome.is_rejected();
+        self.set_status_message(outcome.message(), outcome.is_rejected());
         self.reload_detail(db);
         self.reload_list(db);
         outcome
@@ -1089,10 +1114,12 @@ impl InboxPage {
                     engine,
                     crate::pages::sync_health::SyncAction::Incremental,
                 ) {
-                    self.status_message =
-                        Some("A sync is already running — watch the ring in the header.".into());
+                    self.set_status_message(
+                        "A sync is already running — watch the ring in the header.",
+                        false,
+                    );
                 } else {
-                    self.status_message = Some("Syncing…".into());
+                    self.set_status_message("Syncing…", false);
                 }
             }
         });
@@ -1580,6 +1607,11 @@ impl InboxPage {
 
                 // Suggested reply (evidence-grounded, editable in composer).
                 design::field_label(ui, "Suggested reply");
+                // Audit fix (M22): the queued-draft status line goes through
+                // the TTL'd status mechanism — set via a flag AFTER the
+                // closure because `report` borrows `self.copilot` across it
+                // (a `&mut self` method call inside would conflict).
+                let mut lm_draft_queued = false;
                 ui.push_id("copilot-suggested", |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("copilot-suggested-scroll")
@@ -1632,9 +1664,7 @@ impl InboxPage {
                                 2,
                             );
                         });
-                        self.status_message =
-                            Some("LM Studio draft generation queued…".into());
-                        self.status_is_error = false;
+                        lm_draft_queued = true;
                     }
                 } else {
                     ui.label(
@@ -1653,6 +1683,9 @@ impl InboxPage {
                     );
                 }
             });
+                if lm_draft_queued {
+                    self.set_status_message("LM Studio draft generation queued…", false);
+                }
                 // Surface the latest LM Studio draft (if any) below the local one.
                 if let Some((draft_id, draft, model)) =
                     db.with_read(|conn| spp_core::ai_local::latest_ai_draft_row(conn, detail.id))
@@ -1699,13 +1732,13 @@ impl InboxPage {
                             });
                             match rejected {
                                 Ok(()) => {
-                                    self.status_message =
-                                        Some("Draft marked rejected — feedback recorded.".into());
-                                    self.status_is_error = false;
+                                    self.set_status_message(
+                                        "Draft marked rejected — feedback recorded.",
+                                        false,
+                                    );
                                 }
                                 Err(e) => {
-                                    self.status_message = Some(format!("Reject failed: {e}"));
-                                    self.status_is_error = true;
+                                    self.set_status_message(format!("Reject failed: {e}"), true);
                                 }
                             }
                         }
@@ -1872,14 +1905,13 @@ impl InboxPage {
                     // the user typed nothing since.
                     origin_body: self.composer_body.clone(),
                 });
-                self.status_message = Some(format!(
-                    "{kind} queued — the result lands here when it finishes."
-                ));
-                self.status_is_error = false;
+                self.set_status_message(
+                    format!("{kind} queued — the result lands here when it finishes."),
+                    false,
+                );
             }
             Err(e) => {
-                self.status_message = Some(format!("Could not queue {kind}: {e}"));
-                self.status_is_error = true;
+                self.set_status_message(format!("Could not queue {kind}: {e}"), true);
             }
         }
     }
@@ -1921,26 +1953,26 @@ impl InboxPage {
                         // the text still equals what the transform was
                         // queued from.
                         if self.composer_body != p.origin_body {
-                            self.status_message = Some(
+                            self.set_status_message(
                                 "Transform finished, but you edited the draft while it ran — \
-                                 your text was kept."
-                                    .into(),
+                                 your text was kept.",
+                                false,
                             );
-                            self.status_is_error = false;
                             return;
                         }
                         match result {
                             Some(text) if !text.trim().is_empty() => {
                                 self.composer_body = text;
-                                self.status_message =
-                                    Some("Composer updated by the AI transform.".into());
-                                self.status_is_error = false;
+                                self.set_status_message(
+                                    "Composer updated by the AI transform.",
+                                    false,
+                                );
                             }
                             _ => {
-                                self.status_message = Some(
-                                    "The AI transform produced no result — the feature is off or no Draft role endpoint is routed.".into(),
+                                self.set_status_message(
+                                    "The AI transform produced no result — the feature is off or no Draft role endpoint is routed.",
+                                    true,
                                 );
-                                self.status_is_error = true;
                             }
                         }
                     }
@@ -1950,27 +1982,29 @@ impl InboxPage {
                                 .ok()
                                 .flatten()
                         });
-                        self.status_message =
-                            Some("Draft review finished — see the coaching card.".into());
-                        self.status_is_error = false;
+                        self.set_status_message(
+                            "Draft review finished — see the coaching card.",
+                            false,
+                        );
                     }
                     "qa_ai_layer" => {
                         self.qa_review = db.with_read(|conn| {
                             spp_core::quality::get_qa(conn, p.conversation_id, true)
                         });
-                        self.status_message = Some("Post-resolution QA AI review finished.".into());
-                        self.status_is_error = false;
+                        self.set_status_message("Post-resolution QA AI review finished.", false);
                     }
                     _ => {}
                 }
             }
             _ => {
                 self.pending_ai = None;
-                self.status_message = Some(format!(
-                    "AI job failed: {}",
-                    error.unwrap_or_else(|| "unknown error".into())
-                ));
-                self.status_is_error = true;
+                self.set_status_message(
+                    format!(
+                        "AI job failed: {}",
+                        error.unwrap_or_else(|| "unknown error".into())
+                    ),
+                    true,
+                );
             }
         }
     }
@@ -2074,17 +2108,24 @@ impl InboxPage {
                             &json!({ "remoteId": detail.remote_id }).to_string(),
                         );
                     });
-                    self.status_message = Some("Refreshing from Help Scout…".into());
-                    self.status_is_error = false;
+                    self.set_status_message("Refreshing from Help Scout…", false);
                 }
             });
         });
+        // Audit fix (M25): with no customer email the old format printed
+        // a stray "<>" after the name ("Priya Sharma <> · mailbox: …");
+        // the <email> part is now only rendered when an email exists.
+        let who = match detail.customer_email.as_deref() {
+            Some(email) if !email.trim().is_empty() => {
+                format!("{} <{}>", detail.customer_name.as_deref().unwrap_or("-"), email)
+            }
+            _ => detail.customer_name.as_deref().unwrap_or("-").to_string(),
+        };
         design::hint_text(
             ui,
             &format!(
-                "{} <{}> · mailbox: {} · priority: {}",
-                detail.customer_name.as_deref().unwrap_or("-"),
-                detail.customer_email.as_deref().unwrap_or("-"),
+                "{} · mailbox: {} · priority: {}",
+                who,
                 detail.mailbox_name.as_deref().unwrap_or("-"),
                 detail.priority.as_deref().unwrap_or("none"),
             ),
@@ -2230,6 +2271,9 @@ impl InboxPage {
             // real delivery state from the outbound queue (sending →
             // delivered / failed) — never a green "queued" that goes
             // nowhere (the 1.2.0 lie).
+            // Audit fix (M22): drop a status line past its TTL before
+            // rendering so finished notes don't stick around forever.
+            self.expire_status_message();
             if let Some(msg) = &self.status_message {
                 if self.status_is_error {
                     design::error_text(ui, msg);
@@ -2813,11 +2857,19 @@ fn thread_entry_ui(ui: &mut egui::Ui, entry: &spp_core::inbox::ThreadEntry) {
         .actor_name
         .clone()
         .unwrap_or_else(|| entry.actor_type.clone());
+    // Audit fix (H6): real Help Scout threads carry `customer` (customer
+    // message), `message` (agent reply), `note`, `chat`, `phone` and
+    // `lineitem` (meta) — the old mock-era mapping only knew `reply` and
+    // `customer_message`, so every real entry rendered as "Other".
+    // Legacy mock types (`reply`, `customer_message`) keep their chips.
     let (tone, label) = match entry.thread_type.as_str() {
-        "reply" => (BadgeTone::Info, "Reply"),
+        "customer" | "customer_message" => (BadgeTone::Success, "Customer"),
+        "message" | "reply" => (BadgeTone::Info, "Agent"),
         "note" => (BadgeTone::Warning, "Note"),
-        "customer_message" => (BadgeTone::Success, "Customer"),
+        "chat" => (BadgeTone::Info, "Chat"),
+        "phone" => (BadgeTone::Info, "Phone"),
         kind if kind.starts_with("ai") => (BadgeTone::Info, "AI"),
+        // `lineitem` and anything unknown stay neutral/meta.
         _ => (BadgeTone::Neutral, "Other"),
     };
     ui.horizontal(|ui| {
@@ -2829,8 +2881,10 @@ fn thread_entry_ui(ui: &mut egui::Ui, entry: &spp_core::inbox::ThreadEntry) {
                 .color(t.foreground),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // Audit fix (M25): the thread rows printed the raw ISO stamp
+            // ("2026-10-26T16:24:26Z"); reuse the list-row compact helper.
             ui.label(
-                egui::RichText::new(entry.created_at.as_str())
+                egui::RichText::new(compact_time(&entry.created_at))
                     .small()
                     .color(t.muted_foreground),
             );

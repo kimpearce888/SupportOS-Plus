@@ -62,6 +62,12 @@ pub struct OutreachPage {
     new_dnc_reason: String,
     message: Option<String>,
     error: Option<String>,
+    /// Audit fix (M22): wall-clock stamps for the transient status
+    /// lines — a finished note ("status: …") or a stale validation
+    /// error expires on its own instead of sitting on screen until the
+    /// next action replaces it.
+    message_at: Option<std::time::Instant>,
+    error_at: Option<std::time::Instant>,
     /// FIND-005: armed shell-confirm request for a destructive action —
     /// raised by [`Self::ui`] at the end of the frame.
     pending_confirm: Option<ConfirmRequest>,
@@ -95,6 +101,8 @@ impl OutreachPage {
             new_dnc_reason: String::new(),
             message: None,
             error: None,
+            message_at: None,
+            error_at: None,
             pending_confirm: None,
         }
     }
@@ -129,6 +137,43 @@ impl OutreachPage {
         self.report = Some(db.with_read(|conn| spp_core::outreach::campaign_report(conn, id)));
     }
 
+    /// Audit fix (M22): transient status lines carry their set-time so
+    /// rendering can expire them (see [`Self::expire_status_lines`]); a
+    /// success also supersedes a stale error (and vice versa) so an old
+    /// line never survives a later, opposite outcome.
+    fn set_message(&mut self, message: impl Into<String>) {
+        self.message = Some(message.into());
+        self.message_at = Some(std::time::Instant::now());
+        self.error = None;
+        self.error_at = None;
+    }
+
+    /// Audit fix (M22): see [`Self::set_message`].
+    fn set_error(&mut self, error: impl Into<String>) {
+        self.error = Some(error.into());
+        self.error_at = Some(std::time::Instant::now());
+        self.message = None;
+        self.message_at = None;
+    }
+
+    /// Audit fix (M22): drop status lines past their TTL before
+    /// rendering.
+    fn expire_status_lines(&mut self) {
+        const STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(45);
+        if let Some(set_at) = self.message_at
+            && set_at.elapsed() > STATUS_TTL
+        {
+            self.message = None;
+            self.message_at = None;
+        }
+        if let Some(set_at) = self.error_at
+            && set_at.elapsed() > STATUS_TTL
+        {
+            self.error = None;
+            self.error_at = None;
+        }
+    }
+
     fn ensure_loaded(&mut self, db: &DbHandle) {
         if !self.loaded {
             self.reload(db);
@@ -138,21 +183,21 @@ impl OutreachPage {
     fn create_campaign(&mut self, db: &DbHandle) {
         let name = self.new_name.trim().to_string();
         if name.is_empty() || name.len() > 200 {
-            self.error = Some("name must be 1-200 characters.".into());
+            self.set_error("name must be 1-200 characters.");
             return;
         }
         let subject = self.new_subject.trim().to_string();
         if subject.is_empty() || subject.len() > 500 {
-            self.error = Some("subject must be 1-500 characters.".into());
+            self.set_error("subject must be 1-500 characters.");
             return;
         }
         let body = self.new_body.clone();
         if body.is_empty() || body.len() > 200_000 {
-            self.error = Some("body must be 1-200000 characters.".into());
+            self.set_error("body must be 1-200000 characters.");
             return;
         }
         let Ok(mailbox_local_id) = self.new_mailbox.trim().parse::<i64>() else {
-            self.error = Some("A valid sending mailbox is required.".into());
+            self.set_error("A valid sending mailbox is required.");
             return;
         };
         let mailbox_ok: bool = db.with_read(|conn| {
@@ -164,7 +209,7 @@ impl OutreachPage {
             .unwrap_or(false)
         });
         if !mailbox_ok {
-            self.error = Some("A valid sending mailbox is required.".into());
+            self.set_error("A valid sending mailbox is required.");
             return;
         }
         // A saved segment id or a raw definition must be present (the
@@ -191,10 +236,9 @@ impl OutreachPage {
             }
         });
         let Some(tree) = tree else {
-            self.error = Some(
+            self.set_error(
                 "A saved segment id is required (campaigns never target the whole address \
-                 book by accident)."
-                    .into(),
+                 book by accident).",
             );
             return;
         };
@@ -219,7 +263,7 @@ impl OutreachPage {
         });
         let (matched, rows) = engine_result;
         if rows.is_empty() {
-            self.error = Some("No recipients selected.".into());
+            self.set_error("No recipients selected.");
             return;
         }
         debug_assert_eq!(
@@ -250,24 +294,23 @@ impl OutreachPage {
                 self.new_body.clear();
                 self.new_segment_json.clear();
                 self.selected = Some(id);
-                self.message = Some(format!(
+                self.set_message(format!(
                     "campaign created with {} recipient(s)",
                     recipients.len()
                 ));
                 self.reload(db);
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.set_error(e.to_string()),
         }
     }
 
     fn campaign_action(&mut self, db: &DbHandle, id: i64, action: CampaignAction) {
         let result = db.with_write(|conn| action.run(conn, id));
-        self.message = Some(
+        self.set_message(
             result
                 .get("message")
                 .and_then(|m| m.as_str())
-                .unwrap_or("(no message)")
-                .to_string(),
+                .unwrap_or("(no message)"),
         );
         self.reload(db);
     }
@@ -275,7 +318,7 @@ impl OutreachPage {
     fn create_segment(&mut self, db: &DbHandle) {
         let name = self.new_segment_name.trim().to_string();
         if name.is_empty() {
-            self.error = Some("segment name required".into());
+            self.set_error("segment name required");
             return;
         }
         let criteria = self.new_segment_criteria.trim().to_string();
@@ -285,8 +328,7 @@ impl OutreachPage {
         )
         .is_err()
         {
-            self.error =
-                Some("criteria must be { combinator, conditions[], exclude[] } JSON".into());
+            self.set_error("criteria must be { combinator, conditions[], exclude[] } JSON");
             return;
         }
         let result = db.with_write(|conn| {
@@ -299,7 +341,7 @@ impl OutreachPage {
                 self.new_segment_criteria.clear();
                 self.reload(db);
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.set_error(e.to_string()),
         }
     }
 
@@ -308,7 +350,7 @@ impl OutreachPage {
     pub fn delete_segment(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::delete_segment(conn, id));
         if let Err(e) = &result {
-            self.error = Some(e.to_string());
+            self.set_error(e.to_string());
         }
         self.reload(db);
         result.map(|_| ())
@@ -322,7 +364,7 @@ impl OutreachPage {
             .ok()
             .filter(|v| *v > 0)
         else {
-            self.error = Some("customer id must be a positive integer".into());
+            self.set_error("customer id must be a positive integer");
             return;
         };
         let reason = if self.new_dnc_reason.trim().is_empty() {
@@ -338,7 +380,7 @@ impl OutreachPage {
                 self.new_dnc_reason.clear();
                 self.reload(db);
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.set_error(e.to_string()),
         }
     }
 
@@ -346,7 +388,7 @@ impl OutreachPage {
     pub fn remove_dnc(&mut self, db: &DbHandle, customer_id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::remove_from_dnc(conn, customer_id));
         if let Err(e) = &result {
-            self.error = Some(e.to_string());
+            self.set_error(e.to_string());
         }
         self.reload(db);
         result.map(|_| ())
@@ -360,12 +402,11 @@ impl OutreachPage {
         id: i64,
     ) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::campaign_cancel_remaining(conn, id));
-        self.message = Some(
+        self.set_message(
             result
                 .get("message")
                 .and_then(|m| m.as_str())
-                .unwrap_or("(no message)")
-                .to_string(),
+                .unwrap_or("(no message)"),
         );
         self.reload(db);
         Ok(())
@@ -385,6 +426,8 @@ impl OutreachPage {
                 }
             }
         });
+        // Audit fix (M22): expire stale status lines before rendering.
+        self.expire_status_lines();
         if let Some(message) = &self.message {
             design::success_text(ui, &format!("status: {message}"));
         }

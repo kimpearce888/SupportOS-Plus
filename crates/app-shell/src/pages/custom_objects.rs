@@ -463,7 +463,19 @@ impl CustomObjectsPage {
             return None;
         };
         let t = self.types.iter().find(|t| t.id == type_id)?;
-        design::section_title(ui, &format!("{} objects ({})", t.name, self.objects_total));
+        // Audit fix (M20): the object list caps at 50 rows with no pager —
+        // say so instead of implying the full set is shown.
+        let title = if (self.objects.len() as i64) < self.objects_total {
+            format!(
+                "{} objects — showing first {} of {}",
+                t.name,
+                self.objects.len(),
+                self.objects_total
+            )
+        } else {
+            format!("{} objects ({})", t.name, self.objects_total)
+        };
+        design::section_title(ui, &title);
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             let mut q = self.object_query.clone();
