@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SupportOS+ The Handover Book&nbsp;— Why the code is the way it is</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============ SupportOS+ Developer Handover Book — book design ============ */
+@page { size: 720px 1020px; margin: 0; }
+
+:root {
+  --paper:  #f6f1e7;   /* warm paper */
+  --ink:    #26221c;   /* warm near-black */
+  --accent: #a8542f;   /* terracotta */
+  --muted:  #6f665a;   /* warm gray */
+  --card:   #fdfaf3;   /* card surface */
+  --line:   #e0d6c3;   /* hairline */
+  --chip:   #efe7d6;   /* mono chip bg */
+}
+
+html, body {
+  margin: 0; padding: 0;
+  width: 720px;
+  background: #f6f1e7;
+  color: var(--ink);
+  font-family: 'Lora', 'DejaVu Serif', Georgia, serif;
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+
+@media screen {
+  html { height: auto; display: flex; justify-content: center; background: #f6f1e7; }
+  body { transform-origin: top center; margin: 20px auto; box-shadow: 0 8px 40px rgba(38,34,28,.25); }
+}
+
+p, td, li, .body-text { overflow-wrap: break-word; word-break: normal; }
+p { margin: 0 0 10px 0; text-align: justify; hyphens: auto; }
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+/* ---------- cover ---------- */
+.cover {
+  width: 720px; height: 1020px; box-sizing: border-box;
+  break-after: page; overflow: hidden; position: relative;
+  padding: 96px 88px 96px 88px; display: flex; flex-direction: column; justify-content: center;
+  background:
+    radial-gradient(circle at 85% 12%, rgba(168,84,47,.10), transparent 42%),
+    radial-gradient(circle at 10% 90%, rgba(168,84,47,.08), transparent 40%),
+    var(--paper);
+}
+.cover-frame { position: absolute; inset: 26px; border: 1px solid var(--line); pointer-events: none; }
+.cover-frame::after { content: ''; position: absolute; inset: 6px; border: 1px solid var(--line); }
+.cover-kicker {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: var(--accent);
+  margin-bottom: 30px;
+  display: flex; align-items: center; gap: 12px;
+}
+.cover-kicker::before { content: ''; width: 11px; height: 11px; background: var(--accent); display: inline-block; }
+.cover-title { font-size: 88px; line-height: 1.02; font-weight: 700; letter-spacing: -1px; margin: 0 0 6px 0; }
+.cover-title::after { content: '+'; color: var(--accent); }
+.cover-sub {
+  font-size: 21px; line-height: 1.45; color: var(--ink); font-style: italic;
+  max-width: 520px; margin-top: 18px;
+}
+.cover-points { display: flex; flex-wrap: wrap; gap: 10px; max-width: 580px; margin-top: 34px; }
+.cover-points span {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 10.5px;
+  letter-spacing: .5px; color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); padding: 6px 10px; border-radius: 999px;
+}
+.cover-bottom {
+  position: absolute; left: 88px; right: 88px; bottom: 96px;
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10.5px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted);
+}
+
+/* ---------- front matter ---------- */
+.front { padding: 74px 64px 46px 64px; }
+.front-title { font-size: 27px; font-weight: 600; margin: 4px 0 6px 0; }
+.front .divider { margin-bottom: 18px; }
+.toc-block { break-before: page; break-after: page; }
+.toc-list { columns: 2; column-gap: 30px; margin-top: 14px; }
+.toc-part {
+  break-inside: avoid; margin: 14px 0 6px 0;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase; color: var(--accent);
+}
+.toc-row { display: flex; align-items: baseline; gap: 7px; margin-bottom: 4.5px; break-inside: avoid; }
+.toc-n { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 11px; color: var(--accent); min-width: 20px; }
+.toc-t { font-size: 13.2px; }
+.toc-dots {
+  flex: 1; min-width: 14px; color: #b9ad97; font-size: 10px; letter-spacing: 3px;
+  overflow: hidden; white-space: nowrap; transform: translateY(-2.5px);
+}
+.toc-dots::before {
+  content: '.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0.\00A0';
+}
+.toc-pg { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 11px; color: var(--muted); min-width: 20px; text-align: right; }
+
+/* ---------- flowing body ---------- */
+.main-content { padding: 66px 64px 48px 64px; }
+
+.chapter-header { break-after: avoid; break-inside: avoid; margin-top: 28px; }
+.chapter-header.first { margin-top: 0; }
+.kicker {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent);
+  margin-bottom: 8px;
+}
+.ch-title { font-size: 29px; line-height: 1.15; font-weight: 600; margin: 0 0 10px 0; letter-spacing: -.3px; }
+.ch-title::after { content: ''; display: block; width: 46px; height: 3px; background: var(--accent); margin-top: 12px; }
+.front-title::after { content: ''; display: block; width: 46px; height: 3px; background: var(--accent); margin-top: 10px; }
+.divider { width: 46px; height: 3px; background: var(--accent); margin: 0 0 14px 0; }
+.ch-lede { font-size: 15.5px; font-style: italic; color: var(--muted); margin-bottom: 14px; text-align: left; }
+
+h3.sec {
+  font-size: 17.5px; font-weight: 600; margin: 20px 0 8px 0;
+  break-after: avoid; letter-spacing: -.2px;
+}
+h3.sec .no { color: var(--accent); font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 12.5px; margin-right: 7px; font-weight: 500; }
+h4.sub { font-size: 15px; font-weight: 600; margin: 14px 0 6px 0; break-after: avoid; }
+
+ul.b, ol.b { margin: 4px 0 12px 0; padding-left: 20px; }
+ul.b li, ol.b li { margin-bottom: 5px; break-inside: avoid; }
+ol.b li::marker { color: var(--accent); font-weight: 600; }
+
+/* UI strings */
+.ui {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: .80em; background: var(--chip); border-radius: 4px;
+  padding: 1.5px 6px; white-space: nowrap; color: #3f3427;
+}
+.uiw { white-space: normal; }
+.path { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: .82em; color: var(--accent); }
+
+/* boxes */
+.box { break-inside: avoid; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 0 0 13px 0; }
+.box .box-title { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.box p:last-child, .box ul:last-child, .box ol:last-child { margin-bottom: 0; }
+.tip { border-left: 4px solid var(--accent); }
+.plain { background: transparent; border: 1px dashed var(--line); }
+
+/* tables */
+table.t { width: 100%; border-collapse: collapse; margin: 6px 0 14px 0; font-size: 12.6px; table-layout: fixed; }
+table.t thead { display: table-header-group; }
+table.t tr { break-inside: avoid; }
+table.t th {
+  text-align: left; font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
+  border-bottom: 2px solid var(--ink); padding: 5px 8px 5px 0;
+}
+table.t td { vertical-align: top; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: break-word; }
+table.t td .ui { white-space: normal; }
+td.k { font-weight: 600; }
+
+/* steps */
+ol.steps { counter-reset: step; list-style: none; padding-left: 0; margin: 8px 0 12px 0; }
+ol.steps li { counter-increment: step; position: relative; padding-left: 34px; margin-bottom: 9px; break-inside: avoid; }
+ol.steps li::before {
+  content: counter(step); position: absolute; left: 0; top: 1px;
+  width: 21px; height: 21px; border-radius: 50%; background: var(--accent); color: #fdfaf3;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 11px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* glossary / law entries */
+.gloss { break-inside: avoid; margin-bottom: 9px; padding-left: 12px; border-left: 3px solid var(--line); }
+.gloss b { font-weight: 600; }
+
+/* metric chips */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px 0; }
+.chips span {
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 10.5px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px;
+}
+
+/* ---------- ending ---------- */
+.ending {
+  width: 720px; height: 1020px; box-sizing: border-box;
+  break-before: page; overflow: hidden; position: relative;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  text-align: center; padding: 80px;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(168,84,47,.10), transparent 40%),
+    radial-gradient(circle at 85% 85%, rgba(168,84,47,.08), transparent 42%),
+    var(--paper);
+}
+.ending .end-frame { position: absolute; inset: 26px; border: 1px solid var(--line); }
+.ending .end-frame::after { content: ''; position: absolute; inset: 6px; border: 1px solid var(--line); }
+.end-mark { width: 12px; height: 12px; background: var(--accent); margin: 30px auto; transform: rotate(45deg); }
+.end-big { font-size: 34px; font-weight: 600; line-height: 1.3; max-width: 500px; }
+.end-sub { font-style: italic; color: var(--muted); margin-top: 16px; font-size: 15.5px; }
+.end-meta {
+  position: absolute; bottom: 96px; left: 0; right: 0;
+  font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace;
+  font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted);
+}
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="cover-frame"></div>
+  <div class="cover-kicker">Developer Handover &middot; Builder's Edition</div>
+  <h1 class="cover-title">SupportOS</h1>
+  <div class="cover-sub">The Handover Book&nbsp;— why the code is the way it is. Every architectural decision, every rejected alternative, every sharp edge, written for the programmer who inherits this project.</div>
+  <div class="cover-points">
+    <span>32 CHAPTERS</span><span>7 PARTS</span><span>WHY&nbsp;· WHY NOT&nbsp;· WHAT BREAKS</span><span>THE LAWS OF THE CODEBASE</span><span>SHARP EDGES A–Z</span>
+  </div>
+  <div class="cover-bottom">
+    <span>Version 1.8.0</span>
+    <span>For the next maintainer</span>
+  </div>
+</div>
+
+<!-- ================= FRONT MATTER ================= -->
+<div class="main-content front">
+  <div class="kicker">About this book</div>
+  <h2 class="front-title">How to use the Handover Book</h2>
+
+  <p>This book exists because at some point, every project changes hands. The programmer who takes over SupportOS+ will read the code and, within a week, start asking questions that the code alone cannot answer: <em>why is the UI hand-drawn in egui instead of a web stack? Why is there no ORM? Why does the sandbox kill syscalls with EPERM instead of killing the thread? Why are prompts hard-coded? Why is there no CSV export? Why was the git history rewritten?</em> Those questions have answers. Most of them were conscious decisions, made under real constraints, often after a specific bug. This book records them.</p>
+
+  <p><strong>How it was written.</strong> Four research passes went through every crate of the workspace&nbsp;— <span class="path">crates/catalog</span>, <span class="path">crates/core</span>, <span class="path">crates/app-shell</span>, <span class="path">crates/xtask</span>&nbsp;— plus the build scripts, CI workflows, and the in-repo decision ledgers. Every claim carries a file-and-line reference, and where a rationale exists as a source comment, the comment is quoted. The repo's own decision documents (<span class="path">ai/decisions.md</span>, <span class="path">ai/plan.md</span>, <span class="path">ai/completed.md</span>, <span class="path">repo-audit-2026-10-24/</span>) are cited where they explain more than the code does. Nothing here is guessed: where the code is silent, the book says so.</p>
+
+  <div class="box tip">
+    <div class="box-title">The notation you will meet everywhere</div>
+    <p style="margin-bottom:6px">Source comments are full of markers like <span class="ui">Clean-audit item 74</span>, <span class="ui">Audit fix (M12)</span>, <span class="ui">A1</span> or <span class="ui">D4</span>. These are <strong>historical decision records</strong>: numbered findings from the 2026 audit and clean-audit passes, each of which changed the code. They are not noise&nbsp;— they are the <em>reasons</em>. When this book says <em>item 74</em>, it means: look for the comment, read the war story behind it. The full ledgers live in <span class="path">ai/completed.md</span> and <span class="path">ai/plan.md</span>.</p>
+  </div>
+
+  <p><strong>How the chapters are organized.</strong> Each decision is presented in the same rhythm: <em>the decision</em>, <em>the evidence</em> (where in the code), <em>why this way</em> (the engineering rationale, including the constraints that forced it), <em>the rejected alternative</em> (what a newcomer would assume is "the normal way", and why it was not taken), and <em>sharp edges</em> (what breaks if you change it without reading first). Part VII compresses all of it into a law list, an A–Z sharp-edge index, and a register of known trade-offs and dormant paths.</p>
+
+  <p><strong>If you read only three chapters</strong> before touching anything: Chapter 7 (<em>Migrations and schema law</em>&nbsp;— the one rule that has already caused an outage when broken), Chapter 30 (<em>The laws of the codebase</em>) and Chapter 31 (<em>Sharp edges A–Z</em>). Then read the rest at leisure&nbsp;— preferably with the repo open beside you.</p>
+</div>
+
+<!-- ================= TABLE OF CONTENTS ================= -->
+<div class="main-content toc-block">
+  <div class="kicker">Contents</div>
+  <h2 class="front-title">Table of contents</h2>
+  <div class="toc-list">
+    <div class="toc-part">Part I&nbsp;— Read me first</div>
+    <div class="toc-row"><span class="toc-n">1</span><span class="toc-t">What this book is</span><span class="toc-dots"></span><span class="toc-pg" id="pg-1">1</span></div>
+    <div class="toc-row"><span class="toc-n">2</span><span class="toc-t">The project in one sitting</span><span class="toc-dots"></span><span class="toc-pg" id="pg-2">2</span></div>
+    <div class="toc-row"><span class="toc-n">3</span><span class="toc-t">Four crates, one-way ladder</span><span class="toc-dots"></span><span class="toc-pg" id="pg-3">4</span></div>
+    <div class="toc-part">Part II&nbsp;— The machine room</div>
+    <div class="toc-row"><span class="toc-n">4</span><span class="toc-t">The boot sequence</span><span class="toc-dots"></span><span class="toc-pg" id="pg-4">6</span></div>
+    <div class="toc-row"><span class="toc-n">5</span><span class="toc-t">Threads and the event bus</span><span class="toc-dots"></span><span class="toc-pg" id="pg-5">8</span></div>
+    <div class="toc-row"><span class="toc-n">6</span><span class="toc-t">The database layer</span><span class="toc-dots"></span><span class="toc-pg" id="pg-6">10</span></div>
+    <div class="toc-row"><span class="toc-n">7</span><span class="toc-t">Migrations and schema law</span><span class="toc-dots"></span><span class="toc-pg" id="pg-7">12</span></div>
+    <div class="toc-row"><span class="toc-n">8</span><span class="toc-t">Errors, panics and toasts</span><span class="toc-dots"></span><span class="toc-pg" id="pg-8">14</span></div>
+    <div class="toc-row"><span class="toc-n">9</span><span class="toc-t">Storage, config, single instance</span><span class="toc-dots"></span><span class="toc-pg" id="pg-9">16</span></div>
+    <div class="toc-part">Part III&nbsp;— Security &amp; data safety</div>
+    <div class="toc-row"><span class="toc-n">10</span><span class="toc-t">The sandbox</span><span class="toc-dots"></span><span class="toc-pg" id="pg-10">18</span></div>
+    <div class="toc-row"><span class="toc-n">11</span><span class="toc-t">Secrets and the envelope</span><span class="toc-dots"></span><span class="toc-pg" id="pg-11">20</span></div>
+    <div class="toc-row"><span class="toc-n">12</span><span class="toc-t">Backups and restore</span><span class="toc-dots"></span><span class="toc-pg" id="pg-12">21</span></div>
+    <div class="toc-row"><span class="toc-n">13</span><span class="toc-t">Bundles, resets, secure delete</span><span class="toc-dots"></span><span class="toc-pg" id="pg-13">23</span></div>
+    <div class="toc-row"><span class="toc-n">14</span><span class="toc-t">Webhooks and OAuth</span><span class="toc-dots"></span><span class="toc-pg" id="pg-14">25</span></div>
+    <div class="toc-row"><span class="toc-n">15</span><span class="toc-t">Untrusted content</span><span class="toc-dots"></span><span class="toc-pg" id="pg-15">27</span></div>
+    <div class="toc-part">Part IV&nbsp;— The AI stack</div>
+    <div class="toc-row"><span class="toc-n">16</span><span class="toc-t">Local-first AI</span><span class="toc-dots"></span><span class="toc-pg" id="pg-16">29</span></div>
+    <div class="toc-row"><span class="toc-n">17</span><span class="toc-t">Five roles and the golden set</span><span class="toc-dots"></span><span class="toc-pg" id="pg-17">31</span></div>
+    <div class="toc-row"><span class="toc-n">18</span><span class="toc-t">Guardrails</span><span class="toc-dots"></span><span class="toc-pg" id="pg-18">33</span></div>
+    <div class="toc-row"><span class="toc-n">19</span><span class="toc-t">The read-only agent</span><span class="toc-dots"></span><span class="toc-pg" id="pg-19">35</span></div>
+    <div class="toc-row"><span class="toc-n">20</span><span class="toc-t">Vectors and hybrid search</span><span class="toc-dots"></span><span class="toc-pg" id="pg-20">36</span></div>
+    <div class="toc-row"><span class="toc-n">21</span><span class="toc-t">The ledger and the prompts</span><span class="toc-dots"></span><span class="toc-pg" id="pg-21">38</span></div>
+    <div class="toc-part">Part V&nbsp;— Product logic</div>
+    <div class="toc-row"><span class="toc-n">22</span><span class="toc-t">Automation</span><span class="toc-dots"></span><span class="toc-pg" id="pg-22">40</span></div>
+    <div class="toc-row"><span class="toc-n">23</span><span class="toc-t">SLA and workload</span><span class="toc-dots"></span><span class="toc-pg" id="pg-23">41</span></div>
+    <div class="toc-row"><span class="toc-n">24</span><span class="toc-t">Reports and segments</span><span class="toc-dots"></span><span class="toc-pg" id="pg-24">43</span></div>
+    <div class="toc-row"><span class="toc-n">25</span><span class="toc-t">Outreach and incidents</span><span class="toc-dots"></span><span class="toc-pg" id="pg-25">44</span></div>
+    <div class="toc-part">Part VI&nbsp;— Build, release &amp; repo law</div>
+    <div class="toc-row"><span class="toc-n">26</span><span class="toc-t">The daily build</span><span class="toc-dots"></span><span class="toc-pg" id="pg-26">46</span></div>
+    <div class="toc-row"><span class="toc-n">27</span><span class="toc-t">Packaging</span><span class="toc-dots"></span><span class="toc-pg" id="pg-27">48</span></div>
+    <div class="toc-row"><span class="toc-n">28</span><span class="toc-t">The release pipeline</span><span class="toc-dots"></span><span class="toc-pg" id="pg-28">50</span></div>
+    <div class="toc-row"><span class="toc-n">29</span><span class="toc-t">The history rewrite</span><span class="toc-dots"></span><span class="toc-pg" id="pg-29">52</span></div>
+    <div class="toc-part">Part VII&nbsp;— Living in the code</div>
+    <div class="toc-row"><span class="toc-n">30</span><span class="toc-t">The laws of the codebase</span><span class="toc-dots"></span><span class="toc-pg" id="pg-30">53</span></div>
+    <div class="toc-row"><span class="toc-n">31</span><span class="toc-t">Sharp edges A–Z</span><span class="toc-dots"></span><span class="toc-pg" id="pg-31">55</span></div>
+    <div class="toc-row"><span class="toc-n">32</span><span class="toc-t">Known trade-offs, open ends</span><span class="toc-dots"></span><span class="toc-pg" id="pg-32">57</span></div>
+  </div>
+</div>
+
+<!-- ================= BODY ================= -->
+<div class="main-content">
+  <!-- ============ CHAPTER 1 ============ -->
+  <div class="chapter-header first">
+    <div class="kicker">Chapter 1 · Part I</div>
+    <h2 class="ch-title">What this book is</h2>
+    <p class="ch-lede">The contract between the outgoing and the incoming maintainer, and the rules this book follows.</p>
+  </div>
+
+  <p>A handover document usually fails in one of two ways: it is a fanfare ("world-class architecture, best practices everywhere") that tells the newcomer nothing, or it is a dump of tribal lore with no evidence. This book tries for a third thing: <strong>every architectural decision, paired with its evidence, its rationale, the alternative that was rejected, and the damage you can do by ignoring it</strong>. Where the honest answer is "this is a trade-off that could have gone the other way", the book says that too. You are a programmer; you deserve arguments, not slogans.</p>
+
+  <h3 class="sec"><span class="no">1.1</span>The sources, and only the sources</h3>
+  <p>Everything in this book was extracted from exactly three layers of the repository, in this order of authority:</p>
+  <ol class="b">
+    <li><strong>The code itself</strong>&nbsp;— the four crates under <span class="path">crates/</span>, the CI workflows, <span class="path">scripts/</span>, <span class="path">deny.toml</span>, <span class="path">rust-toolchain.toml</span>. Constants, pragmas, limits, fallback chains: these are facts.</li>
+    <li><strong>Source comments as decision records</strong>&nbsp;— comments marked <span class="ui">Clean-audit item N</span>, <span class="ui">Audit fix (MN)</span>, <span class="ui">Item N</span>, <span class="ui">A1/A2</span>, <span class="ui">R5/R7</span>, <span class="ui">D1–D5</span>. These record <em>why</em> a line looks the way it does, usually by describing the bug it once was.</li>
+    <li><strong>The in-repo ledgers</strong>&nbsp;— <span class="path">ai/decisions.md</span> (the port's decision ledger), <span class="path">ai/plan.md</span> and <span class="path">ai/completed.md</span> (the clean-audit ledgers), and <span class="path">repo-audit-2026-10-24/</span> (the external audit, including the history-rewrite record).</li>
+  </ol>
+  <p>Where the book could not find a written rationale, it reconstructs one from the constraint set (solo maintainer, always-green main, offline-first, 4&nbsp;GB-class build machines) and marks it as reconstruction. Two popular rumors were checked against the source and <em>corrected</em>: there is no <span class="ui">-j2</span> build flag and no thin/fat LTO split anywhere in the repo (Chapter 26), and the release smoke is <span class="ui">SPP_SMOKE=1</span> with the container's own <span class="path">HOME</span>, not a scratch <span class="path">XDG_DATA_HOME</span> (Chapter 28). When lore and code disagree, the code wins&nbsp;— that discipline is the whole spirit of this project.</p>
+
+  <h3 class="sec"><span class="no">1.2</span>What this book is not</h3>
+  <p>It is not a user manual&nbsp;— that exists already, also in this repository (<span class="path">manual/</span>), written for non-technical users. It is not a line-by-line code tour; it deliberately skips anything that is obvious from the source. And it is not a roadmap: Chapter 32 lists open ends and dormant paths, but the decisions about what to build next are yours.</p>
+
+  <h3 class="sec"><span class="no">1.3</span>Conventions</h3>
+  <ul class="b">
+    <li>File references like <span class="path">crates/core/src/db.rs:80</span> are exact at the time of writing (v1.8.0 line). Line numbers drift; file names and comment markers do not.</li>
+    <li>Identifiers, settings keys and syscalls appear in mono type: <span class="ui">with_write</span>, <span class="ui">secure_delete</span>, <span class="ui">PRAGMA foreign_keys</span>.</li>
+    <li>Boxes titled <em>Sharp edges</em> are warnings: changes that broke something once before, or that will break something specific and predictable.</li>
+    <li>Boxes titled <em>Rejected</em> record the alternative that was considered and refused&nbsp;— read these before proposing the same idea again.</li>
+  </ul>
+
+  <!-- ============ CHAPTER 2 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 2 · Part I</div>
+    <h2 class="ch-title">The project in one sitting</h2>
+    <p class="ch-lede">What SupportOS+ is, where it came from, and the two sentences that explain almost every odd decision.</p>
+  </div>
+
+  <p><strong>The product.</strong> SupportOS+ is a Linux desktop application that mirrors a company's Help Scout help desk into a local SQLite database and works on that mirror: 23 pages of inbox, customers, knowledge, reports, automation and optional AI, all instant and offline because the data is local. Writes go out to Help Scout (or wait as explicit, visible outbound jobs); reads never leave the machine. There is no server component, no account system, no telemetry, no auto-update. One binary, one data directory.</p>
+
+  <h3 class="sec"><span class="no">2.1</span>The origin story you must know first</h3>
+  <p>This repository is a <strong>port</strong>. The original program (pre-1.0.0, called SupportOS++) was a web-technology desktop app: Tauri&nbsp;2 for the window, Leptos/WASM for the UI, and an axum HTTP server on loopback glueing the two to a pure-Rust business core. The port&nbsp;— documented decision by decision in <span class="path">ai/decisions.md</span>&nbsp;— replaced the entire presentation and transport stack with a native <strong>egui</strong> shell while <em>keeping and hardening the roughly 90,000-line pure-Rust core</em>. The scale of the cutover is quantified in the ledger: about 33,600 lines of Leptos UI and 21,000 lines of axum handlers were deleted; roughly 245 of 345 database lock sites died with the router. The old stack's scar tissue is all over the codebase in comments that begin "the web route did X…".</p>
+  <p>Two consequences follow, and they explain half of this book. First, <strong>the core predates the shell</strong>: its synchronous <span class="ui">&amp;Connection</span> API shape was kept, and the async world is confined to small, documented seams (Chapter 5). Second, <strong>every oddity that looks like nostalgia is usually a migration-map row</strong>: a bug in the old stack that the port explicitly fixed, listed in <span class="path">ai/decisions.md</span> §3 (rows 1–16) and cited in code comments.</p>
+
+  <h3 class="sec"><span class="no">2.2</span>The goal stack, verbatim</h3>
+  <p><span class="path">ai/decisions.md</span> states the project goals in strict priority order: <strong>Stable → Easily maintainable → Full feature parity → Future development friendly</strong>, with the declared non-goals: cloud sync, telemetry, cross-platform packaging (Linux AppImage/.deb only), and mobile. This ordering is not decoration. It is the tie-breaker for every trade-off in the book: stability beats maintainability, which beats feature parity, which beats extensibility. When you are tempted to restructure something "properly", ask which goal you are buying and which you are selling. Most refactoring temptations sell <em>Stable</em> to buy <em>Future development friendly</em>&nbsp;— the project has consistently ruled against that trade, on purpose.</p>
+
+  <h3 class="sec"><span class="no">2.3</span>The two founding honesty laws</h3>
+  <p>Everything else in the culture reduces to two laws, both enforced by CI:</p>
+  <ul class="b">
+    <li><strong>Nothing is simulated.</strong> The app boots into exactly two states&nbsp;— <span class="ui">Real</span> (credentials resolved) or <span class="ui">Empty</span> (an inert provider serving nothing). The pre-1.2.0 simulated demo account was deleted so thoroughly that migration m050 drops its settings rows "for good", and <span class="path">scripts/gate_no_simulation.py</span> runs <em>first</em> in CI, grepping production code for the markers <span class="ui">simulated</span>, <span class="ui">fake</span>, <span class="ui">demo</span>. A support tool that shows invented tickets trains its users to distrust everything it shows.</li>
+    <li><strong>Nothing is silent.</strong> Errors surface three ways at once (toast, durable diagnostics table, fatal log&nbsp;— Chapter 8); degraded features print <em>why</em> they degraded (search mode notes, capability banners); toasts report honest outcomes of destructive actions. The audit's recurring theme is converting "silently synced 0 collections" into "a labeled error".</li>
+  </ul>
+
+  <div class="box tip">
+    <div class="box-title">Why this matters to you specifically</div>
+    <p>You will be tempted, in your first month, by at least three of the rejected alternatives in this book&nbsp;— they are all reasonable ideas that this project refuses for reasons that were expensive to learn. The cheapest way to inherit the project is to assume every weird thing is weird <em>on purpose</em>, find its chapter here, and only then decide.</p>
+  </div>
+
+  <!-- ============ CHAPTER 3 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 3 · Part I</div>
+    <h2 class="ch-title">Four crates, one-way ladder</h2>
+    <p class="ch-lede">Why the workspace is shaped like catalog ← core ← app-shell, plus xtask&nbsp;— and what each boundary buys.</p>
+  </div>
+
+  <p>The workspace (<span class="path">Cargo.toml:3-8</span>) has exactly four members, and their dependency direction is a one-way ladder: <strong>catalog</strong> depends on nothing but serde; <strong>core</strong> depends on catalog; <strong>app-shell</strong> depends on core; <strong>xtask</strong> depends on core and is depended on by nobody. A new developer's first question is usually "why is <em>catalog</em> a separate crate? It's just enums."</p>
+
+  <h3 class="sec"><span class="no">3.1</span>Catalog is a closed vocabulary, not a library</h3>
+  <p><span class="path">crates/catalog</span> holds every user-visible domain <em>vocabulary</em>: the 21 report metrics and 14 dimensions, the 12 graph node kinds, incident statuses and severities, custom-field types, operations tiles, copilot tools. Each is a closed enum with a <span class="ui">pub const ALL</span> array and lookup functions. Its crate description states the contract: <em>"single source of truth for DB, validation, UI&nbsp;— WASM-safe (no I/O deps)"</em>, and its <span class="path">lib.rs:1</span> begins with <span class="ui">#![forbid(unsafe_code)]</span>.</p>
+  <p>The payoff is mechanical: adding one variant to a catalog enum produces <strong>compile errors in every database query and every UI page that forgot the new kind</strong>. The compiler, not a runtime test, enforces the closed-world assumption&nbsp;— a page cannot invent a metric name that no query implements, because the page iterates <span class="ui">ReportMetricKey::ALL</span>. This is why the Reports builder and the metric catalog can never drift apart.</p>
+
+  <h3 class="sec"><span class="no">3.2</span>Why core is UI-free, and why it must stay that way</h3>
+  <p><span class="path">crates/core</span> (~90K lines) is the business logic, SQL, sync engine, AI stack and vector store. It knows nothing about egui. This is what made the port survivable: the Tauri shell and the egui shell coexisted on the same <span class="ui">main</span> during the side-by-side cutover period, because the core never imported either. It is also what makes the 700+ unit tests fast and windowless: <span class="ui">cargo test --workspace</span> never links a GUI stack. The rejected alternative&nbsp;— the newcomer's default "core + api + web" split&nbsp;— was exactly the old architecture, and the port deleted it.</p>
+
+  <h3 class="sec"><span class="no">3.3</span>Where code belongs</h3>
+  <table class="t">
+    <thead><tr><th style="width:22%">You are adding…</th><th>It belongs in…</th><th>Never in…</th></tr></thead>
+    <tbody>
+      <tr><td class="k">A domain word (status, kind, metric)</td><td><span class="path">catalog</span>, as an enum + ALL array + label</td><td><span class="path">core</span> as a string constant&nbsp;— that drift</td></tr>
+      <tr><td class="k">SQL, sync, AI, storage logic</td><td><span class="path">core</span>, in the module owning the tables</td><td><span class="path">app-shell</span>&nbsp;— the shell is glue only</td></tr>
+      <tr><td class="k">A page, widget, toast, dialog</td><td><span class="path">app-shell</span>, calling core write APIs</td><td>direct SQL in the shell (bypasses <span class="ui">with_write</span> law)</td></tr>
+      <tr><td class="k">Build/package/CI helper</td><td><span class="path">xtask</span>&nbsp;— the developer entry point</td><td>anything shipped to users</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box tip">
+    <div class="box-title">Sharp edges</div>
+    <ul class="b">
+      <li>Never add an I/O or GUI dependency to <span class="path">catalog</span>&nbsp;— its no-I/O contract is what lets it be reused by future tools untouched.</li>
+      <li>Never introduce a dependency cycle through dev-dependencies; the ladder is load-bearing for the test setup.</li>
+      <li><span class="path">xtask</span> is invoked via the <span class="ui">cargo xtask</span> alias (<span class="path">.cargo/config.toml</span>) and is <strong>not shipped</strong> in either package.</li>
+    </ul>
+  </div>
+
+  <!-- ============ CHAPTER 4 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 4 · Part II</div>
+    <h2 class="ch-title">The boot sequence</h2>
+    <p class="ch-lede">A 190-line main, a strict boot order, a fatal path designed for windowless failures, and the smoke mode that renders every page.</p>
+  </div>
+
+  <p><span class="path">crates/app-shell/src/main.rs</span> is about 190 lines and its doc comment lists the exact boot order: logging → single-instance lock → database with all boot migrations → core event bus → boot services (sync engine + provider, real or empty, hot-swappable since 1.4.0) → background worker host → minimal loopback listener → eframe window. The comment that follows is the design law: <em>"Everything heavy lives in the library so it stays unit-testable without a window."</em></p>
+
+  <h3 class="sec"><span class="no">4.1</span>Why main is thin (decision D5's practical form)</h3>
+  <p>The binary is a boot script; every subsystem is a <span class="path">lib.rs</span> item. This is what allows the smoke harness (below) and the 300+ page tests to construct the <em>real</em> shell against a bare <span class="ui">egui::Context</span>. It also gives the codebase exactly one legitimate home for <span class="ui">process::exit(1)</span>: the fatal boot paths. A fat <span class="ui">main</span> would make all of that impossible; the Tauri-era equivalent was 118 lines of untestable glue, and nobody missed it. If you are about to add anything to <span class="ui">main</span> beyond the listed duties (init logging, migrate legacy data dir, install panic hook, acquire lock, open DB, apply log level, build boot services, start workers, bind loopback, run smoke-or-window), it belongs in <span class="path">lib.rs</span> instead.</p>
+
+  <h3 class="sec"><span class="no">4.2</span>The fatal path: failures that happen before a window exists</h3>
+  <p><span class="path">crates/app-shell/src/fatal.rs:1-9</span> explains itself: <em>"The desktop entry discards stderr, so on a GUI launch every failure in that window-less phase used to vanish without a trace ('opened it, nothing appeared')."</em> Boot-phase failures and panics now land in <span class="path">logs/fatal.log</span> (with version, OS, session type, and the resolved <span class="ui">SPP_RENDERER</span>) and, best-effort, in a <span class="ui">zenity</span>/<span class="ui">notify-send</span> dialog. The log writer is best-effort by law&nbsp;— <em>"diagnostics must never crash the crash path"</em>&nbsp;— and a test pins that it survives an unwritable data dir. The panic hook (installed in <span class="ui">main</span>, v1.1.1) routes renderer and context panics into the same file.</p>
+
+  <h3 class="sec"><span class="no">4.3</span>SPP_SMOKE: the binary proves itself (clean-audit item 71)</h3>
+  <p>Set <span class="ui">SPP_SMOKE=1</span> and, after the full boot chain, the binary constructs the real <span class="ui">ShellApp</span> against a plain <span class="ui">egui::Context</span> and renders one full pass of every <span class="ui">PageKey</span>, asserting each frame painted non-zero shapes, then exits 0. The comment records why: the smoke <em>"used to return after the boot chain … and BEFORE the shell/renderer existed — a renderer regression could not fail CI because the binary under test never rendered a frame."</em> This is the tool that makes GUI CI possible at all: no display server, no GPU, seconds of runtime, exercising the actual shipped artifact&nbsp;— which is why the release pipeline runs it inside the built .deb payload and the extracted AppImage (Chapter 28). Note the app has <strong>zero CLI arguments by design</strong>; <span class="ui">SPP_*</span> environment variables are the only runtime switches, and the smoke check is strictly <span class="ui">== Ok("1")</span> so it can never activate accidentally.</p>
+
+  <div class="box tip">
+    <div class="box-title">Sharp edges</div>
+    <ul class="b">
+      <li>A new page is automatically smoke-covered (the harness iterates <span class="ui">PageKey::all()</span>)&nbsp;— but a page that can legitimately paint zero shapes would fail the smoke. Keep the paint contract.</li>
+      <li>The smoke shares <span class="ui">ShellOptions</span>; anything it starts (workers) must shut down on return.</li>
+      <li>Do not add a <span class="ui">--smoke</span> CLI flag: CLI args would be a second config surface; env vars are the contract.</li>
+    </ul>
+  </div>
+
+  <!-- ============ CHAPTER 5 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 5 · Part II</div>
+    <h2 class="ch-title">Threads and the event bus</h2>
+    <p class="ch-lede">One worker thread hosting a two-slot tokio runtime, a bridge that turns broadcasts into repaints, and the deadlock essay every new hire should read.</p>
+  </div>
+
+  <p>The concurrency model has three pieces: a <strong>worker host</strong> that owns all background timers, an <strong>event bus</strong> that carries every engine's progress to the UI, and a set of <strong>documented seams</strong> where the synchronous core touches async HTTP. Each piece exists because a specific alternative was tried or seriously considered and rejected&nbsp;— usually with the failure mode written down.</p>
+
+  <h3 class="sec"><span class="no">5.1</span>The worker host: one thread, two workers, owned by main</h3>
+  <p><span class="path">crates/app-shell/src/workers_host.rs</span> spawns a plain OS thread that builds a tokio multi-thread runtime with exactly <span class="ui">WORKER_THREADS = 2</span>. The comment justifies the number: two worker threads "cover the overlapping long-poll timers (sync + connector refresh) while keeping the idle footprint minimal on desktop machines." Nothing in this app is CPU-bound; it is network + SQLite. The host is owned by <span class="ui">main</span>, <em>not</em> by <span class="ui">ShellApp</span>&nbsp;— deliberately, so that page tests construct the shell with <span class="ui">workers: None</span> and never see a background timer fire mid-test. A startup handshake (mpsc readiness + 30-second timeout + oneshot shutdown) and a RAII <span class="ui">Drop</span> make shutdown deterministic. When the user changes the sync interval, the settings page calls <span class="ui">WorkersHost::restart()</span>, which re-spawns onto the worker runtime's handle&nbsp;— because <span class="ui">WorkerManager::start</span> uses <span class="ui">tokio::spawn</span> and "the settings page runs on the UI thread".</p>
+
+  <h3 class="sec"><span class="no">5.2</span>The bridge: push before repaint</h3>
+  <p>Immediate-mode egui paints no frames without input, so a UI that polls a channel inside <span class="ui">App::ui</span> would starve. The design (<span class="path">crates/app-shell/src/bridge.rs:1-15</span>) instead runs a dedicated OS thread blocked on the core <span class="ui">EventBus</span> broadcast channel (capacity 256, <span class="path">eventing.rs</span>); every arriving <span class="ui">ServerEvent</span> is queued into a <span class="ui">Mutex&lt;VecDeque&gt;</span> <em>and then</em> <span class="ui">request_repaint()</span> is called. The ordering is the correctness argument: "the queue is pushed before the repaint fires, so a woken frame is guaranteed to observe the event that triggered it." A lagged subscriber is logged and bridged past (the bus is bounded by design); a poisoned queue mutex is recovered, not propagated. Because repaints only happen on input plus these wake-ups, <span class="path">app.rs</span> also runs a 1.5-second repaint heartbeat&nbsp;— added after live "sending…" status lines were observed never refreshing. Which pages a given event refreshes is decided by <span class="path">pages::invalidated_pages(event)</span>; adding an event type without registering it there means pages silently stop refreshing.</p>
+
+  <h3 class="sec"><span class="no">5.3</span>The seams: where async meets the synchronous core</h3>
+  <p>The core's ~345 legacy call sites take <span class="ui">&amp;Connection</span> and are synchronous. The port's rule (<span class="path">ai/decisions.md</span> D3) was: closures over connections are short and sync; futures are driven to completion on runtimes spawned <em>per job</em>; results flow back through the event bus. Three concrete patterns:</p>
+  <ul class="b">
+    <li><strong>Manual sync actions</strong> run on detached, named <span class="ui">std::thread</span>s with their own single-thread tokio runtime; terminal state arrives via <span class="ui">SyncCompleted</span> on the bus, never via the dropped thread result (<span class="path">sync_health.rs:188-197</span>).</li>
+    <li><strong>AI pipelines</strong> drive their futures inside <span class="path">core/src/workers.rs:26-52</span>'s <span class="ui">block_ai_pipeline</span>, on a <em>private current-thread runtime</em>. The comment is a small essay titled, in effect, "why not <span class="ui">Handle::current().block_on</span>": every AI runner holds the DB write guard for the whole pipeline call, and parking the only thread of a current-thread runtime against that same write mutex "is a guaranteed deadlock for the integration tests … and a production stall: every DB write in the app would freeze for the whole LLM round-trip."</li>
+    <li><strong>Long LLM work</strong> takes the DB through <span class="ui">DbHandle::long_op_guard()</span> (<span class="path">db.rs:214-229</span>), which opens a fresh tuned connection instead of pinning the exclusive writer lane across network round-trips.</li>
+  </ul>
+
+  <div class="box plain">
+    <div class="box-title">Rejected: async everywhere</div>
+    <p>The "normal way" would be tokio end-to-end with <span class="ui">spawn_blocking</span> and an async DB layer. That would have forced rewriting every sync module during the port and multiplied deadlock surfaces&nbsp;— the <span class="ui">block_ai_pipeline</span> comment documents what partial async adoption without thinking already cost. The full-async rewrite remains available to you; the book's only demand is that you read the essay first.</p>
+  </div>
+
+  <div class="box tip">
+    <div class="box-title">Sharp edges</div>
+    <ul class="b">
+      <li>Never call <span class="ui">Handle::current().block_on</span> from a thread that holds any DB guard.</li>
+      <li>Never hold <span class="ui">write_guard()</span> across an <span class="ui">.await</span> or a network call&nbsp;— use <span class="ui">long_op_guard()</span>.</li>
+      <li>Page code never blocks; spawn and report via the bus. Push events <em>before</em> repainting.</li>
+      <li>Every new <span class="ui">ServerEvent</span> must be added to <span class="path">pages::invalidated_pages</span>.</li>
+    </ul>
+  </div>
+  <!-- ============ CHAPTER 6 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 6 · Part II</div>
+    <h2 class="ch-title">The database layer</h2>
+    <p class="ch-lede">One writer, two WAL readers, four pragmas, zero ORM&nbsp;— the shape of every data access in the app.</p>
+  </div>
+
+  <p>All code&nbsp;— UI and background&nbsp;— holds a cloneable <span class="ui">DbHandle</span>, never a raw connection. For file-backed databases it wraps one exclusive writer connection (guarded by a mutex) plus two dedicated reader connections; in-memory databases degrade to a single shared lane. The constant is documented at <span class="path">db.rs:80-101</span>: SQLite WAL permits exactly one writer at a time, so "serializing it with its own mutex is the same contract an OS writer thread would enforce, without forcing every write closure to be <span class="ui">'static'</span>". The two readers serve concurrent page reads while a write is in flight; acquisition <span class="ui">try_lock</span>s across the pool and falls back to a blocking lock on reader[0] "because the pool only has to absorb bursts".</p>
+
+  <h3 class="sec"><span class="no">6.1</span>Why a facade, and why the pool came late</h3>
+  <p>The facade is a deliberate seam from the port plan (decision D3): the shell "binds to a <span class="ui">DbHandle</span> facade wrapping the current <span class="ui">Arc&lt;Mutex&lt;Connection&gt;&gt;</span>", so the pool could be introduced <em>after</em> cutover without touching the roughly 100 surviving call sites, and the strategy can change again behind the same type. The pre-pool behavior&nbsp;— every read queuing behind every write&nbsp;— was real and measurable. Poisoned mutexes are recovered, not propagated (a panic inside one closure must not kill the app), and if no readers can be opened the handle degrades gracefully to the old single-connection behavior.</p>
+
+  <h3 class="sec"><span class="no">6.2</span>The pragma contract</h3>
+  <p>Every connection path goes through <span class="path">db.rs</span> <span class="ui">open()</span>, which sets exactly four things: <span class="ui">journal_mode=WAL</span>, <span class="ui">synchronous=NORMAL</span>, <span class="ui">foreign_keys=ON</span>, <span class="ui">busy_timeout(5s)</span>. Each is load-bearing: WAL is the read-concurrency story; <span class="ui">synchronous=NORMAL</span> is the durability/speed trade appropriate to a desktop app whose backup story is explicit export files; <span class="ui">foreign_keys=ON</span> matters because SQLite defaults it <em>off</em>&nbsp;— a raw <span class="ui">Connection::open</span> somewhere else silently drops referential integrity; the 5-second busy timeout absorbs writer contention between the UI lane, worker lanes and long-op connections instead of erroring. <span class="ui">rusqlite</span> is used with the <span class="ui">bundled</span> feature: zero system SQLite packages at build or run time, one self-contained AppImage, and pinned SQLite behavior everywhere&nbsp;— the same reason FTS5 and the sqlite-vec virtual tables are first-class citizens here and would be second-class under an ORM.</p>
+
+  <div class="box plain">
+    <div class="box-title">Rejected: diesel / sea-orm / sqlx</div>
+    <p>sea-orm and sqlx want async runtimes and bring their own migration tooling&nbsp;— a second migration source of truth that would collide with the Rust registry (Chapter 7). Diesel pulls a macro stack whose schema DSL would have to be kept in lockstep with dozens of hand-audited migration steps written by one person who reads SQL directly. Hand-written SQL keeps ~80 domain modules readable, diffable, and friendly to FTS5 and vec0 virtual tables, which ORMs fight.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">6.3</span>The three lanes</h3>
+  <ul class="b">
+    <li><span class="ui">with_read</span>&nbsp;— pooled reader lane; page rendering, queries, search.</li>
+    <li><span class="ui">with_write</span> / <span class="ui">write_guard()</span>&nbsp;— the exclusive writer; short transactions opened <em>inside</em> the closure.</li>
+    <li><span class="ui">long_op_guard()</span>&nbsp;— "for background work that spans network round-trips (LLM pipelines), so the exclusive UI writer lane is never pinned across them" (<span class="path">db.rs:214-229</span>); it opens a fresh tuned connection on the same file whose writes serialize against the writer lane inside the shared busy timeout (audit A2).</li>
+  </ul>
+  <p>Tests using <span class="ui">:memory:</span> silently run single-lane mode&nbsp;— never port a file-backed assumption into them. Reader connections are opened at <span class="ui">DbHandle::new</span> time and assume the schema is already migrated: wrap connections only after migrations run.</p>
+
+  <!-- ============ CHAPTER 7 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 7 · Part II</div>
+    <h2 class="ch-title">Migrations and schema law</h2>
+    <p class="ch-lede">No SQL files, no ORM tool: a two-layer Rust registry, one transaction per step&nbsp;— and the one rule that has already caused an outage when broken.</p>
+  </div>
+
+  <p>There are no <span class="ui">.sql</span> migration files. Versions 1–2 live in <span class="path">core::migrations::MIGRATIONS</span> as inline SQL constants; versions 3–53 live in <span class="path">core::bootstrap::BOOT_STEPS</span> as <span class="ui">fn(&amp;Connection)</span> entries <strong>owned by the module whose tables they create</strong>. Each applied step is recorded in the <span class="ui">_migrations</span> table (version, label, applied_at)&nbsp;— chosen over <span class="ui">PRAGMA user_version</span> because labels and timestamps are for humans auditing an install. A step runs in its own transaction: a failed migration leaves the database at the previous version, never half-migrated.</p>
+
+  <h3 class="sec"><span class="no">7.1</span>Why migrations are Rust functions next to their modules</h3>
+  <p>A feature PR adds its tables in the same file as its queries; the compiler links the two, and the audit history (the comments) is the documentation. The rejected alternative&nbsp;— sqlx/diesel migration folders&nbsp;— would create a second source of truth that drifts from module code, plus async tooling dependencies. Runtime DDL is banned outright: the webhook-events schema "used to be re-ensured on every insert; it now lives here, in its own numbered step (migration-map row 6)" (<span class="path">bootstrap.rs:209-215</span>)&nbsp;— runtime <span class="ui">CREATE TABLE</span> incl. DROP was a confirmed pre-port defect.</p>
+
+  <h3 class="sec"><span class="no">7.2</span>The foreign-key dance</h3>
+  <p>FK enforcement is suspended while a step runs, and <span class="path">bootstrap.rs:346-356</span> explains why in full: several steps rebuild tables by dropping and renaming them, and "SQLite's live enforcement cannot survive that dance: immediate cascade actions fire against rows that are about to come back under the rebuilt table, and the deferred-violation counter never forgets a violation that the rename has long since repaired (the 1.1.x 'migration 36 failed' boot failures on real 0.2.x data)." Integrity is instead enforced by an explicit <span class="ui">PRAGMA foreign_key_check</span> sweep inside the same transaction: a step that would commit dangling references rolls back whole.</p>
+
+  <h3 class="sec"><span class="no">7.3</span>The war story that defines the law</h3>
+  <div class="box tip">
+    <div class="box-title">Never edit an applied migration</div>
+    <p><span class="path">bootstrap.rs:320-332</span>, verbatim in spirit: <em>"customer_chats was originally delivered by editing the already-applied m039 in place. Databases that had run the released 1.7.3 recorded version 52, so every later boot skipped m039 and the customer chat-channel mirror never existed on upgraded installs — the first chat-channel sync failed with 'no such table'. m062 re-issues the same idempotent CREATE: a no-op where the current m039 already made the table (fresh installs), the only creator where it did not (1.7.3 → 1.8.0 upgrades)."</em> This is the law's proof: <strong>_migrations already recorded the old step on user machines; editing it silently skips the change on every upgrade.</strong></p>
+  </div>
+
+  <h3 class="sec"><span class="no">7.4</span>The exact recipe for migration N+1</h3>
+  <ol class="b">
+    <li>Append a new <span class="ui">BootStep { version: 54, label: "m063_…", apply: your_module::apply_m063 }</span> to <span class="ui">BOOT_STEPS</span>.</li>
+    <li>Implement <span class="ui">apply_m063(conn: &amp;Connection) -&gt; Result&lt;()&gt;</span> next to the module's other schema code, using idempotent SQL (<span class="ui">CREATE TABLE IF NOT EXISTS</span>); if you are patching what an older release's step produced, mirror the m062 pattern.</li>
+    <li>Never modify an existing step's SQL, label, or version; never reorder; bump nothing else.</li>
+    <li>Remember the boot-order detail: the secrets master key is initialized <em>before</em> steps run, because m049-sealed envelopes must be openable (<span class="path">bootstrap.rs:399-416</span>).</li>
+  </ol>
+
+  <!-- ============ CHAPTER 8 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 8 · Part II</div>
+    <h2 class="ch-title">Errors, panics and toasts</h2>
+    <p class="ch-lede">One error enum, three surfacing channels, and a panic philosophy: contain, log, keep the lane alive.</p>
+  </div>
+
+  <p><span class="path">core::error::Error</span> is a single <span class="ui">thiserror</span> enum with a <span class="ui">Result&lt;T&gt;</span> alias&nbsp;— <span class="ui">Sqlite</span>, <span class="ui">Migration</span>, <span class="ui">Config</span>, <span class="ui">Io</span>, <span class="ui">SecretNotFound</span>, <span class="ui">WebhookSignature</span>, <span class="ui">WebhookDuplicate</span>, <span class="ui">OauthStateInvalid</span>, <span class="ui">Json</span>, <span class="ui">Validation</span>, <span class="ui">Other</span>. One enum keeps <span class="ui">?</span> working across 90K lines and gives the UI matchable variants. <span class="ui">anyhow</span> exists in the workspace but lives only in xtask, where context-free bubbling is fine.</p>
+
+  <h3 class="sec"><span class="no">8.1</span>Three channels for one failure</h3>
+  <p>Background failures surface simultaneously to three audiences (<span class="path">app.rs:694-706</span>): a <strong>toast</strong> for the operator sitting at the window (non-outbound <span class="ui">ErrorOccurred</span> events become warning/error toasts); the <strong><span class="ui">application_errors</span></strong> table&nbsp;— capped at 500 rows, rendered by the Diagnostics page&nbsp;— for the operator diagnosing later (<span class="path">audit.rs:204-244</span>; levels are normalized so "anything else is stored as <span class="ui">error</span>, so a typo can never hide a failure"); and <strong><span class="path">logs/fatal.log</span></strong> plus a desktop notification for the pre-window boot phase (Chapter 4). One outbound-failure toast is singled out in the source as "the single most important toast in the app: 'it did not go through' must never be silent again."</p>
+
+  <h3 class="sec"><span class="no">8.2</span>Toast policy is deliberate&nbsp;— do not "fix" it</h3>
+  <p>Two audit items define behavior. Item 69: toast lifetime burns only across <em>rendered</em> passes (with a <span class="ui">MAX_PASS_GAP</span> of 1600&nbsp;ms), because "a wall-clock deadline would expire toasts the user never saw: an error raised while the window was hidden vanished silently the moment it was shown again." Item 23: <span class="ui">None</span> means "say nothing"&nbsp;— background auto-syncs invalidate pages silently; only manual runs produce toasts. Reverting either looks like a cleanup and reintroduces a fixed bug.</p>
+
+  <h3 class="sec"><span class="no">8.3</span>Panic discipline</h3>
+  <p>A long-running desktop process cannot treat a panic as process death (the user loses their window and their in-flight reply) nor as a free pass. Hence: every worker task runs inside <span class="ui">contained(name, fut)</span>, which logs a panic to <span class="ui">application_errors</span> under the task's name and keeps the lane alive; every timer tick is guarded by a RAII <span class="ui">TickGuard</span>; DB/queue mutex poisoning is recovered at the lock helper. The TickGuard exists because of bug A1: "a mid-tick stop … or a contained panic stranded the flag in the set state forever — every future tick of that timer then returned instantly and the job queue (or the sweep) silently died until process restart." Similarly, the stale-job sweep consults <span class="ui">executing_jobs</span> + <span class="ui">boot_unix</span> (audit M16) so a long-but-alive job "can never be re-queued mid-run — the old sweep double-executed anything running past 30 minutes, duplicating sends." <span class="ui">panic = "abort"</span> was rejected for exactly the window-loss reason; <span class="ui">.unwrap()</span> in prod paths is reserved for provable invariants or poison-recovering lock helpers&nbsp;— treat every other one as a bug.</p>
+
+  <!-- ============ CHAPTER 9 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 9 · Part II</div>
+    <h2 class="ch-title">Storage, config, single instance</h2>
+    <p class="ch-lede">One directory owns everything; environment variables are the only configuration; a flock keeps the second instance out.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">9.1</span>The data directory</h3>
+  <p>Default location: <span class="ui">$XDG_DATA_HOME/supportos-plus</span> (falling back to <span class="ui">$HOME/.local/share/supportos-plus</span>), overridable by <span class="ui">SPP_DATA_DIR</span>. The layout (<span class="path">config.rs</span>): <span class="path">supportos-plus.db</span> (+ WAL/SHM), <span class="path">secrets.key</span> (0600), <span class="path">vectors/vectors.db</span>, <span class="path">backups/</span>, <span class="path">attachments/</span>, <span class="path">logs/fatal.log</span>, <span class="path">instance.lock</span>. One directory is what makes "backup = copy one folder", atomic restore, and the 0.2.x legacy move simple. That move (<span class="path">config.rs:43-67</span>) is a model of data-safety prose: "prefers an atomic same-filesystem <span class="ui">rename(2)</span> of the entire directory … never overwrites anything that already exists in the new directory, and never deletes from the legacy directory". XDG is also a packaging contract: "user data under XDG_DATA_HOME is never package-owned" — uninstall/purge must not delete user data, and release CI verifies exactly that.</p>
+
+  <h3 class="sec"><span class="no">9.2</span>Configuration: env vars only, no CLI</h3>
+  <p>There are no command-line arguments anywhere (verified by enumerating every <span class="ui">env::var</span> read); precedence is <span class="ui">SPP_*</span> overrides → the settings table (read at boot; <span class="ui">log_level</span> is live-reloaded through a tracing reload layer, clean-audit item 138) → defaults in <span class="path">config.rs</span>. The old <span class="ui">AppConfig</span> struct "carried four fields nothing consumed; only <span class="ui">data_dir</span> was ever read" (clean-audit item 153)&nbsp;— dead config surfaces are deleted, not maintained. Credential resolution order: environment first (CI, power users), then the encrypted envelope written by the in-app settings form, "so the app connects without any environment variables."</p>
+
+  <h3 class="sec"><span class="no">9.3</span>Single instance: flock, not pidfiles</h3>
+  <p><span class="ui">main</span> acquires an exclusive non-blocking <span class="ui">flock(2)</span> on <span class="path">instance.lock</span> <em>before</em> the DB opens; a second instance prints a clear message, logs, and exits 1 (<span class="path">single_instance.rs</span>). Two processes writing one SQLite file is the disaster this prevents. The Tauri plugin's "focus the existing window" behavior was consciously <em>not</em> reimplemented: doing it right needs IPC between two native processes, which does not exist yet&nbsp;— the comment says exactly that, making it a recorded scope cut rather than an oversight. The crate's only <span class="ui">unsafe</span> is the two <span class="ui">libc::flock</span> FFI calls; the kernel releases the lock on crash, which is why there is no staleness problem to solve.</p>
+
+  <h3 class="sec"><span class="no">9.4</span>The no-simulation law, enforced</h3>
+  <p>Since 1.2.0 there are exactly two boot modes, and <em>"nothing is ever faked"</em>: the pre-1.2.0 simulated demo account "produced bug reports about tickets that didn't exist and trained users to distrust the mirror", so it was deleted&nbsp;— dataset, boot path, and settings rows (m050). Two guards keep it dead: <span class="path">scripts/gate_no_simulation.py</span> runs first in CI and in the release build, and the watermark-poisoning repair (v1.4.0, R2/R3) forces <span class="ui">sync_state</span> back to <span class="ui">NEW</span> when real credentials appear after an empty session&nbsp;— otherwise a stale watermark from an empty run would skip every future sync. Any new boot-time provider state must respect that transition policy.</p>
+
+  <!-- ============ CHAPTER 10 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 10 · Part III</div>
+    <h2 class="ch-title">The sandbox</h2>
+    <p class="ch-lede">Landlock plus seccomp around untrusted document parsing&nbsp;— and why EPERM, not a kill.</p>
+  </div>
+
+  <p>The only code that touches fully attacker-controlled bytes is PDF/DOCX/ZIP parsing in the Knowledge importer. The module doc (<span class="path">core/src/sandbox.rs:1-9</span>) states the threat model in one sentence: "A memory-safety bug that turns into code execution must not be able to read user data, reach the network, or persist anything." The answer is a per-thread sandbox: <strong>Landlock</strong> restricts filesystem access to nothing (a ruleset handling all path rights with zero rules), and a <strong>seccomp</strong> filter allows only the compute/syscall baseline, returning <span class="ui">EPERM</span> for everything else&nbsp;— socket, open, execve, clone, ptrace stay blocked.</p>
+
+  <h3 class="sec"><span class="no">10.1</span>Why EPERM instead of killing the thread</h3>
+  <p>Filters stack but can never be replaced, so the allow-list cannot be loosened afterwards; and the denial action is deliberate: "a killed thread cannot notify its channel (the caller would hang until the timeout), while EPERM still denies every escape path with a clean error" (<span class="path">sandbox.rs:16-22</span>). A 120-second task timeout bounds a wedged parse, with the note that "input sizes are already capped upstream … so a parse that exceeds this is either wedged or the caps need revisiting."</p>
+
+  <h3 class="sec"><span class="no">10.2</span>Descriptor hygiene (audit fix M13) and the TOCTOU answer</h3>
+  <p>Landlock cannot govern already-open descriptors, and the exploited parser inherits the host's fd table&nbsp;— the mirror DB, <span class="path">secrets.key</span>, the listener sockets. Hence three rules: <span class="ui">read</span> is pinned to the process's own stdio (every sensitive descriptor sits at fd&nbsp;≥&nbsp;3, and <span class="ui">open</span> is not allowed anyway, so the parser can never grow the set); <span class="ui">mmap</span> is permitted only for anonymous (file-less) mappings; and <span class="ui">close</span> is denied outright&nbsp;— the sandbox owns no descriptors, so "every close it could attempt targets a host fd". The time-of-check-to-time-of-use problem is avoided <em>structurally</em>: the closure receives already-buffered bytes ("everything it needs has to be moved in"), so the sandboxed code never resolves a path at all. Outside the sandbox, the knowledge-import jail closes the path race the ordinary way&nbsp;— lexical <span class="ui">..</span>-collapse, then <span class="ui">canonicalize</span>, then prefix re-check against <span class="path">data_dir/knowledge-import</span>&nbsp;— with size caps applied <em>before</em> allocation and ZIP entries bounded by <span class="ui">take()</span> "because zip declarations can lie".</p>
+
+  <h3 class="sec"><span class="no">10.3</span>Why a Cargo feature, and why packaging forces it</h3>
+  <p>The <span class="ui">sandbox</span> feature is off by default so <span class="ui">cargo test</span>/<span class="ui">cargo run</span> work unchanged on any OS, and on because shipped artifacts must carry it: <span class="path">package.rs:161-181</span> passes <span class="ui">--features supportos-plus-core/sandbox</span> explicitly (audit item 40). If <span class="ui">apply_restrictions</span> errors, "the parse refuses to run unsandboxed rather than silently losing the hardening"; on kernels without Landlock, that layer degrades with a logged note while seccomp still applies. Containerization was rejected as the alternative: the product is an end-user desktop app, and per-parse thread lockdown is strictly finer-grained&nbsp;— the parser cannot see the DB even though the process legitimately can.</p>
+
+  <div class="box tip">
+    <div class="box-title">Sharp edges</div>
+    <ul class="b">
+      <li>Build with plain <span class="ui">cargo build --release</span> and you ship <strong>without</strong> the sandbox&nbsp;— always package via <span class="ui">cargo xtask package</span>.</li>
+      <li>Route any new attacker-controlled parse (e.g. <span class="ui">.eml</span>) through <span class="ui">run_sandboxed</span> too.</li>
+      <li>The regression tests assert <span class="ui">EPERM</span>, not <span class="ui">EBADF</span>, to prove the filter fires before the fd lookup&nbsp;— do not "fix" them.</li>
+    </ul>
+  </div>
+  <!-- ============ CHAPTER 11 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 11 · Part III</div>
+    <h2 class="ch-title">Secrets and the envelope</h2>
+    <p class="ch-lede">One AES-256-GCM envelope, one master key, and the rule that plaintext never enters the database.</p>
+  </div>
+
+  <p>Every secret class in the app&nbsp;— the Help Scout webhook secret, the OAuth access/refresh tokens, the Docs API key, every BYOK cloud AI key&nbsp;— is stored the same way. <span class="path">settings.rs:8-16</span>: <em>"<span class="ui">secrets.value</span> stores <span class="ui">0x01 || nonce(12) || AES-256-GCM ciphertext</span> sealed under a per-installation master key (<span class="path">secrets.key</span>, created with 0600 permissions on first boot). Plaintext never enters the table. This replaces the previous fiction of a 'secrets' table that nothing ever wrote and that the schema comment claimed was encrypted."</em> The crypto lives once in <span class="path">crypto.rs</span> because "only the envelope layout differs between formats, so the primitives live here."</p>
+
+  <h3 class="sec"><span class="no">11.1</span>Why not the OS keyring</h3>
+  <p>The envelope must survive headless CI smoke boots, in-memory test databases, <span class="ui">SPP_DATA_DIR</span> relocation, and the one-time legacy data-dir migration that moves the DB and the key together. No keyring daemon is guaranteed on minimal Linux desktops, and keyring rotation would silently destroy the mirror's credentials. The threat being addressed is honest and limited: other local users and casual file copying&nbsp;— the right level for a single-user desktop app.</p>
+
+  <h3 class="sec"><span class="no">11.2</span>Key lifecycle rules</h3>
+  <ul class="b">
+    <li><span class="ui">write_key_file</span> <strong>refuses to clobber</strong> an existing key: "keys are created once and must never silently rotate, or every stored secret would become undecryptable."</li>
+    <li>Losing <span class="path">secrets.key</span> makes every stored secret unrecoverable <em>by design</em>; a malformed key file is refused, not replaced.</li>
+    <li>A corrupt envelope or a ciphertext failing GCM authentication "surfaces as an error rather than being silently treated as 'missing'"&nbsp;— the audit repeatedly converted silent emptiness into honest errors.</li>
+    <li>The migrations m049 (webhook secret) and m053 (OAuth tokens out of plaintext columns; the row "keeps metadata only&nbsp;— its token columns are permanently empty") moved existing secrets into the envelope.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">11.3</span>Secrets never appear in logs, Debug impls, or the repo</h3>
+  <p>Credential structs carry manually redacted <span class="ui">Debug</span> impls ("the derived <span class="ui">Debug</span> carried every credential verbatim" was the fixed bug); redaction is char-boundary safe after audit item 107 (a byte-offset slice once panicked on multi-byte client ids). A repo-wide hygiene test in xtask fails CI if any file named <span class="path">secrets.key</span> reappears&nbsp;— the forward guard from the history rewrite (Chapter 29). One residual risk is recorded in <span class="path">repo-audit-2026-10-24/FINDINGS.md</span> (FIND-003): QA evidence directories once contained captured key files; the history was rewritten and the finding kept as a record&nbsp;— know it, do not repeat it.</p>
+
+  <!-- ============ CHAPTER 12 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 12 · Part III</div>
+    <h2 class="ch-title">Backups and restore</h2>
+    <p class="ch-lede">VACUUM INTO, 0600 everywhere, verify before swap, and the atomic move-aside that closes the stale-WAL window.</p>
+  </div>
+
+  <p>Backups are pull-based export files: <span class="ui">VACUUM INTO</span> produces a crash-consistent snapshot (including WAL content) in one call, immediately chmod'd 0600 by <span class="ui">crypto::restrict_permissions</span>&nbsp;— audit fix M12, because "backup copies, plaintext snapshots/temps and JSON/CSV exports used to inherit the umask (0644 on default systems) and were world-readable on multi-user machines". The chmod is best-effort by design: an export that dies because chmod failed on a foreign filesystem is worse than a 0644 file the user just exported. A redacted settings sidecar (<span class="ui">.settings.json</span>) accompanies each backup; audit fix M18 narrows how its path is derived&nbsp;— <em>"only the file EXTENSION may change here"</em>, after a <span class="ui">replace(".db", …)</span> once rewrote every ".db" occurrence in a data dir path and produced sidecars inside nonexistent directories.</p>
+
+  <h3 class="sec"><span class="no">12.1</span>Verify first, touch nothing before</h3>
+  <p><span class="path">backup_service.rs:216-219</span> (audit item 11): <em>"never swap an unverified file over the live database. The integrity check catches truncated copies and non-databases; the structural probe catches foreign SQLite files. Both run BEFORE anything on disk is modified."</em> The structural probe exists because a foreign-but-valid SQLite file "would pass a bare integrity check yet brick the app once swapped in"&nbsp;— a SupportOS database always carries the base-schema <span class="ui">app_state</span> table. Refusal messages promise the invariant: "The live database was not touched."</p>
+
+  <h3 class="sec"><span class="no">12.2</span>The swap, and the window it closes</h3>
+  <p>The restore ordering is the reference implementation for every DB swap in the codebase (the <span class="ui">.sosync</span> importer cites it, audit fix H7): stage the verified copy and fsync it; <strong>move the live database and its WAL/SHM aside as one unit</strong>; rename the new file in; fsync the file and the directory entry. The comment explains the stakes: the previous code renamed the new database into place first and only then deleted the old <span class="ui">-wal</span>, "so a crash in between would have paired the fresh file with the old WAL and replayed foreign pages onto it. With the live side moved first, between the renames the db path simply does not exist&nbsp;— SQLite treats that as 'open fresh', never as a cross-generation pair." Crash-window consequences are documented: mid-swap death leaves the previous generation on disk as <span class="ui">&lt;db&gt;.restore-prev</span> for manual recovery&nbsp;— "fresh-empty beats foreign-WAL replay". Restart-to-activate is part of the contract, because open connections keep pointing at the old inode.</p>
+
+  <h3 class="sec"><span class="no">12.3</span>Replace, never merge</h3>
+  <p>Restore replaces the whole database. The mirror is a <em>derived copy</em> of Help Scout state; a merge would need per-table conflict rules, could resurrect deleted rows, and could pair new rows with a stale sync cursor. Schema compatibility is a fingerprint comparison that deliberately excludes <span class="ui">_migrations</span> and FTS shadow tables; a compatible ancestor schema is accepted and migrated up on restart; anything else is refused before disk mutation, after writing a <span class="ui">.pre-import-*.db</span> safety backup. The workspace reset complements this: it "walks the live schema instead of a hand-maintained delete list: every table not on the KEEP allowlist is emptied. A test pins the allowlist against the migrated schema, so a name typo fails the build, and a table added by a future migration lands in the purge set by default&nbsp;— its author must make a conscious KEEP decision" (<span class="path">data_reset.rs:8-13</span>).</p>
+
+  <div class="box plain">
+    <div class="box-title">Rejected: continuous WAL archiving</div>
+    <p>Point-in-time replay machinery would add an archiver process, a recovery tool, and three new failure modes&nbsp;— for data a re-sync from Help Scout can mostly regenerate anyway. The user-facing message keeps the PII risk visible: "this export contains customer data - handle it carefully."</p>
+  </div>
+
+  <!-- ============ CHAPTER 13 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 13 · Part III</div>
+    <h2 class="ch-title">Bundles, resets, secure delete</h2>
+    <p class="ch-lede">The encrypted cross-device channel, and what "delete all workspace data" actually promises.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">13.1</span>The .sosync bundle</h3>
+  <p>The cross-device/offsite channel is a scrypt(N=2¹⁵)+AES-256-GCM bundle whose passphrase check <em>is</em> the integrity check: AES-GCM authentication makes wrong-passphrase and tampered-bundle indistinguishable, and both are refusals before anything touches the DB. Three hardening layers carry audit markers: M15 bounds the header-declared scrypt N to [2¹⁴, 2²⁵], power-of-two only&nbsp;— "a crafted bundle with N = 2³¹ forced a multi-GB scrypt allocation (local DoS) before the passphrase was ever tested"; clamping was rejected because "clamping would silently derive a wrong key and surface as a misleading 'wrong passphrase'". M11 is a scope guard for the plaintext export snapshot: "the pre-fix code only removed it on the happy path, so any error after VACUUM INTO&nbsp;— or a panic&nbsp;— leaked plaintext customer data into the bundles dir". Clean-audit item 48 sweeps stale <span class="ui">.import-*.tmp</span> files (which hold decrypted plaintext) with age thresholds&nbsp;— never "delete all temps", or you kill concurrent operations.</p>
+
+  <h3 class="sec"><span class="no">13.2</span>What secure delete means here</h3>
+  <p>The reset (Settings → two-step "delete all workspace data") turns <span class="ui">secure_delete = ON</span> for the purge, then runs a separate <span class="ui">VACUUM</span> (audit fix M14): "plain DELETEs leave the purged rows recoverable in the file's free pages and WAL. secure_delete = ON makes SQLite zero every freed cell/page at delete time … Best-effort by design: if the pragma errors, the reset must still proceed (warned) — a wipe must not be blockable by a pragma." The VACUUM is separate so a failed compact cannot un-report a successful delete. The pragma is toggled per-operation, not globally, "because zeroing every delete forever would tax the hot write path for a benefit only the reset needs." The code acknowledges its own limits honestly: this is page/WAL zeroing, not media-level erasure&nbsp;— and a 64-pass dangling-row convergence loop inside the FK-suspended bulk delete makes "the commit either fully consistent or the whole reset rolls back."</p>
+
+  <!-- ============ CHAPTER 14 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 14 · Part III</div>
+    <h2 class="ch-title">Webhooks and OAuth</h2>
+    <p class="ch-lede">The loopback listener's two routes, HMAC discipline, dedup with leases, and why there is no PKCE.</p>
+  </div>
+
+  <p>The only inbound HTTP is a <span class="ui">127.0.0.1</span>-only listener serving exactly two routes: <span class="ui">POST /webhook</span> (Help Scout event ingress) and <span class="ui">GET /oauth/callback</span>. It speaks just enough HTTP/1.1 with strict caps (16&nbsp;KiB headers, 1&nbsp;MiB body, 10-second read timeout) "so a stray local process cannot balloon memory". If port 3000 is taken, the app degrades to log-only warning plus a UI badge (external audit FIND-001) and continues&nbsp;— webhooks are load-bearing only for Beacon chats.</p>
+
+  <h3 class="sec"><span class="no">14.1</span>Webhook discipline</h3>
+  <ul class="b">
+    <li><strong>Unsigned = hard 403, always</strong> (migration-map row 1): "accepting them would let anyone with loopback access inject fake Help Scout events." HMAC-SHA1/base64 with constant-time tag comparison.</li>
+    <li><strong>One secret-resolution function</strong> (audit item 32): registration once capped secrets at 40 chars while verification used the full value&nbsp;— "every delivery failed the check, ten discards deactivated the hook, and the health check re-registered it into the same trap. Both sides now resolve through this one function."</li>
+    <li><strong>Dedup by content hash</strong> (<span class="ui">event_hash UNIQUE</span>) because Help Scout retries on non-2xx; audit fix M8: a duplicate "stamped the ORIGINAL row 'duplicate'&nbsp;— overwriting 'pending' … and declaring the event handled while Help Scout was still retrying it. The original's processing state is left untouched; the delivery simply answers as a duplicate" (200 with <span class="ui">duplicate: true</span>, so the platform stops retrying without double-processing).</li>
+    <li><strong>Lease recovery + state-aware prune</strong>: rows stuck in 'processing' past a 15-minute lease return to pending (5-attempt budget); the prune (clean-audit item 94) only removes terminally-done rows&nbsp;— the pre-fix prune "kept the newest rows REGARDLESS of state … so the prune deleted work that was never processed" during a backlog.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">14.2</span>OAuth: authorization code, no PKCE, and why</h3>
+  <p>The browser flow is plain authorization-code with a single-use state: 10-minute TTL (clean-audit item 93&nbsp;— "an unconsumed state issued weeks ago must not remain redeemable"), consumed by a <strong>single UPDATE whose predicate carries the full unconsumed+fresh condition</strong> (the audit note records that SELECT-then-UPDATE was a TOCTOU), and bound to the exact loopback port recorded at issue time&nbsp;— "a state recorded for a different port … is rejected before the code is exchanged". PKCE was deliberately <em>not</em> implemented: its protection targets authorization-code interception on an untrusted channel, while here the browser and the app share one host and the client secret lives in the envelope; the Settings UI recommends client credentials anyway ("no browser, no redirect URL"). The tokens never touch plaintext columns (m053); revocation "must not leave readable material behind". The listener even fingerprints itself so "a foreign program squatting on the port (a dev server on 3000 is the classic case) is caught too."</p>
+
+  <!-- ============ CHAPTER 15 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 15 · Part III</div>
+    <h2 class="ch-title">Untrusted content</h2>
+    <p class="ch-lede">Customer HTML, user-configured URLs, imported files&nbsp;— the three ways the outside world reaches the render path.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">15.1</span>HTML: allowlist plus CSS-obfuscation decoding</h3>
+  <p>Conversation bodies arrive as arbitrary HTML. <span class="ui">sanitize_thread_html</span> enforces a fixed tag/attribute allowlist (schemes: http, https, mailto, tel, data, cid; <span class="ui">rel="noopener noreferrer nofollow"</span>; protocol-relative URLs denied; <span class="ui">data:text/html</span> images stripped twice). The interesting part is clean-audit item 50: "the blocklist must see through CSS-level obfuscation. It used to run on the raw attribute value, so a comment inside a keyword (<span class="ui">ur/*x*/l(</span>) or a backslash escape (<span class="ui">\75 rl(</span>) sailed past it while the CSS engine still read <span class="ui">url(</span>. The list now runs on the decoded form"&nbsp;— decoded to a fixpoint, with a 64-pass bound and a 2000-char clip that are a matched pair (change one without the other and layered-escape bypasses reopen; tests pin the deep-layering rejection). The richtext renderer's <span class="ui">rm_tags</span> guard (item 63) pins an ammonia API subtlety: it removes tags <em>from the allowlist</em>, not adds.</p>
+
+  <h3 class="sec"><span class="no">15.2</span>URLs: the SSRF guard, sync and async twins</h3>
+  <p>Connectors fetch arbitrary user-entered URLs on a machine holding the DB and the master key. <span class="path">security.rs</span> rejects the full private/loopback/link-local set with named reasons (including 169.254.0.0/16 "&nbsp;— cloud metadata"), numeric/hex address tricks, and <span class="ui">.localhost/.local/.internal</span> names; then every DNS-resolved address is re-run through the same check, closing the DNS-rebinding-shaped gap where a public name points inside. Clean-audit item 51 exists because the sync guard "blocks the thread on getaddrinfo&nbsp;— correct on worker threads, catastrophic on an async executor (a slow resolver stalls every task on that worker): async callers must use this variant." Redirects are <span class="ui">Policy::none()</span> here and in the Help Scout clients&nbsp;— see 15.3. The accepted residual risk is recorded: the guard resolves DNS once; a rebinding server can rotate between check and fetch.</p>
+
+  <h3 class="sec"><span class="no">15.3</span>Redirects are data, not transport (M5)</h3>
+  <p>The Help Scout client does not follow redirects, for two independent reasons. Correctness: Help Scout's 301 "conversation merged" answer carries the target id&nbsp;— "the client used to follow redirects, which turned that into a silent 200 for the TARGET conversation — merged originals were re-ingested as their target and stayed stale forever." Security: never surfacing a 3xx removes the token-leak class entirely. The 301 handler converts the Location header into a typed "Conversation merged into {id}" outcome that the sync engine marks honestly. Related platform quirks are recorded in the same module: 201 replies carry the new id in the <span class="ui">Resource-Id</span> header ("callers do not read a phantom 0"), and the Docs API wraps every list response in a keyed envelope&nbsp;— the pre-fix code "read the top-level items, matched nothing and every pass silently synced 0 collections" (audit C2).</p>
+
+  <div class="box tip">
+    <div class="box-title">Sharp edges</div>
+    <ul class="b">
+      <li>Any new HTTP client must set its redirect policy explicitly and run the SSRF guard (async variant on async paths).</li>
+      <li>Any new write of customer data calls <span class="ui">crypto::restrict_permissions</span> immediately.</li>
+      <li>POSTs are never auto-retried after ambiguous failures&nbsp;— or a customer receives the same reply twice.</li>
+    </ul>
+  </div>
+  <!-- ============ CHAPTER 16 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 16 · Part IV</div>
+    <h2 class="ch-title">Local-first AI</h2>
+    <p class="ch-lede">One built-in provider (LM Studio), a default of None, BYOK cloud as generic rows&nbsp;— and the kill-switch hierarchy.</p>
+  </div>
+
+  <p>The provider-kind enum has exactly two values: <span class="ui">None</span> ("None (no AI provider)") and <span class="ui">LmStudio</span>. Fresh installs ship with no AI at all, and <span class="ui">ai_features_enabled</span> requires <em>both</em> an explicit provider and a chat model. The rationale is the product's privacy spine: support transcripts never leave the machine, everything works offline, marginal cost is zero, and&nbsp;— the subtle one&nbsp;— <strong>the AI is the only non-deterministic component, so everything around it (evidence packs, guards, prompts, evals) can be deterministic</strong>. The module <span class="path">ai_local.rs</span> records the problem the default solves: "with nothing configured the AI features looked completely dead."</p>
+
+  <h3 class="sec"><span class="no">16.1</span>Endpoints, not providers</h3>
+  <p>There is no per-vendor SDK. The endpoint list (<span class="path">ai_hub.rs</span>) is seeded on first use with two rows&nbsp;— LM Studio (local, enabled, inheriting any pre-hub base URL) and Ollama (local, optional)&nbsp;— plus any number of user-added OpenAI-compatible cloud rows. "Provider" reduces to <em>endpoint row + optional key + per-Mtok prices</em>. BYOK (bring your own key) is decision D-a: opt-in per feature, keys stored only in the encrypted envelope, the stored JSON referencing them by key name. Probes authenticate "exactly like chat/embed&nbsp;— keyed (BYOK cloud) endpoints 401 the unauthenticated GET and showed 'offline' while the same endpoint served real calls." The demo <span class="ui">FakeAiProvider</span>/<span class="ui">NoopAiProvider</span> doubles were purged in 1.4.0 (R7/D14): "their fake-response strings were exactly the simulated-data residue this purge removes."</p>
+
+  <h3 class="sec"><span class="no">16.2</span>Two-level gating: kill switch + 16 features</h3>
+  <p>A global <span class="ui">ai_enabled</span> switch dominates 16 named feature gates (<span class="ui">AI_FEATURES</span>). The default policy is stated where the list lives: "every new AI surface is registered so the kill switch and the AI Center toggle grid cover it. <strong>On-demand surfaces default ON (copilot precedent); automatic generative ones stay OFF.</strong>" The mapping encodes risk: automatic generation writes content the user did not ask for; on-demand surfaces have a human trigger per run. Gates are evaluated at <em>execution</em> time&nbsp;— a queued job whose feature was toggled off meanwhile is "skipped honestly". The kill-switch click is arm-confirmed (FIND-005: "the write used to run on the click&nbsp;— arm the shell confirm instead, one click disabled all AI behavior"). Unknown features fail closed (<span class="ui">ai_feature_enabled</span> returns false), never open.</p>
+
+  <div class="box plain">
+    <div class="box-title">Rejected</div>
+    <p>First-class OpenAI/Anthropic provider kinds (vendor SDKs to maintain, telemetry pressure, bundled keys); a dedicated <span class="ui">ProviderKind::Ollama</span> (Ollama speaks the same OpenAI-compatible protocol&nbsp;— a second code path buys nothing); keys in plain settings rows (the envelope exists); per-feature toggles without a master switch (no single emergency off).</p>
+  </div>
+
+  <div class="box tip">
+    <div class="box-title">Sharp edge</div>
+    <p>Two config layers coexist by design: the role hub (preferred) and the legacy <span class="ui">ai_settings</span>/<span class="ui">lmstudio_*</span> row (the pre-hub fallback the AI Center provider panel writes, item 151). <span class="ui">backend_for_role</span> wins when a role is assigned; don't "simplify" one layer away without tracing both precedence orders.</p>
+  </div>
+
+  <!-- ============ CHAPTER 17 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 17 · Part IV</div>
+    <h2 class="ch-title">Five roles and the golden set</h2>
+    <p class="ch-lede">Why every inference is tagged Embed/Classify/Summarize/Draft/Agent, and why changing the map re-runs nine canned cases.</p>
+  </div>
+
+  <p>Every model call carries one of five roles (<span class="path">ai_hub.rs:29-31</span>). The design point is that a local GPU runs a <em>portfolio</em>: Classify ("triage, sentiment, topic, urgency&nbsp;— high volume, low stakes") wants a tiny fast model; Draft ("customer-facing drafts&nbsp;— the only role where cloud is recommended, still opt-in") wants the biggest one; Embed, Summarize and Agent have their own economics. Per-role mapping also scopes blast radius: a bad Draft model degrades drafts, not triage. The rejected alternative&nbsp;— one global chat model&nbsp;— survives only as the documented legacy fallback for pre-hub installs.</p>
+
+  <h3 class="sec"><span class="no">17.1</span>Commit semantics: once per edit, never per keystroke (item 74)</h3>
+  <p><span class="ui">commit_role_map</span> persists a role-map edit and re-runs the golden set <strong>once per committed edit</strong>, on field blur, and only when the live map differs from the last saved snapshot. The comment explains the failure it fixed: "typing no longer persists and enqueues a golden_eval per character." <span class="ui">RoleMap</span>'s <span class="ui">PartialEq</span> exists precisely "to power the AI Center's persisted-vs-live comparison."</p>
+
+  <h3 class="sec"><span class="no">17.2</span>The golden eval: a scoreboard, not a gate</h3>
+  <p>Nine seeded cases (<span class="path">ai_eval.rs</span>, defined in <span class="path">ai_pipeline.rs:315-326</span>) exercise the real analysis prompt end to end: trivial, compound, ambiguous ("It does not work"), known-issue (DST), history follow-up, timezone (Santiago), integration (Slack), billing (declined card), and urgent escalation. A case passes when the model returns a parseable analysis with at least one non-empty core field (summary/intent/customer_goal). Triggers: on demand, on role-map commit, and via a SHA-256 fingerprint over (prompt versions + role map) that the daily maintenance pass checks for drift. Deliberate choices to preserve: <strong>eval failure never blocks saving</strong> the role change&nbsp;— the routing change stands and an honest failed row is recorded ("a disabled backend still writes an honest run row — passed=0, failed=N"); and the evals live as runtime jobs, not <span class="ui">cargo test</span>, because they need a live model. Know the limit: the eval measures <em>parseability + core-field presence</em>, not factual accuracy&nbsp;— a model can pass while being wrong.</p>
+
+  <!-- ============ CHAPTER 18 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 18 · Part IV</div>
+    <h2 class="ch-title">Guardrails</h2>
+    <p class="ch-lede">Evidence packs, VERIFIED ANSWER MODE, a second verification pass, and the memory quarantine&nbsp;— the defense-in-depth around a model you cannot trust.</p>
+  </div>
+
+  <p>The stack's premise: a local model <em>will</em> hallucinate; the defense is architectural, not prompt-politeness. Five layers:</p>
+  <ol class="b">
+    <li><strong>The model only sees a bounded pack.</strong> <span class="ui">build_evidence</span> assembles threads (1500-char excerpts), last-5 customer history, similar cases (FTS + semantic), 3 known issues, 4 knowledge hits, 3 saved replies, and quarantined-filtered memory facts. Every section carries visibility and maps to persisted source rows.</li>
+    <li><strong>Internal-only material is stripped in code, not asked away.</strong> The draft renderer enforces <span class="ui">retain(visibility == "customer_safe")</span> on similar cases and knowledge&nbsp;— the prompt says it too, but code is the mechanism.</li>
+    <li><strong>The draft prompt is VERIFIED ANSWER MODE:</strong> "NEVER invent: timeframes, feature availability, bug-fix status, release dates … If the evidence does not support an answer, say that verification with the team is needed." The draft's contract is a JSON envelope (<span class="ui">{"draft": …, "used_evidence": […]}</span>)&nbsp;— item 39 records what happened when a prose answer broke it: the customer-facing draft <em>became the raw envelope</em>; now "a parsed envelope without a usable draft fails loudly."</li>
+    <li><strong>A second, differently-prompted pass verifies.</strong> "You verify AI-drafted customer replies against evidence. You are strict and skeptical." Parse failure of the verifier itself yields <span class="ui">verified: false</span>&nbsp;— fail-closed, "treat as unverified", never silently blessed.</li>
+    <li><strong>Provenance persists.</strong> Every draft stores run id, prompt version, and its source rows; the UI shows verification outcome next to drafts.</li>
+  </ol>
+
+  <h3 class="sec"><span class="no">18.1</span>The memory quarantine: deterministic by design</h3>
+  <p><span class="path">ai_memory_guard.rs</span> quarantines personality/mental-health vocabulary (16 words + 8 prefixes + case-sensitive whole-word IQ/EQ) from every prompt and tool result by pure string logic. Why not a classifier model? Non-deterministic, slow, itself jail-breakable&nbsp;— and the threat is the AI drifting into psychoanalysis of customers ("difficult personality", "anxiety" labels that poison every future interaction). Why not block memory extraction? It would kill a useful feature. The accepted misses are recorded: paraphrases outside the vocabulary, non-English equivalents. This is a <em>memory-content</em> policy, not a prompt-injection defense; PII crossing the model boundary is a different layer (<span class="ui">redact_text</span>, item 97&nbsp;— "the rewrite lanes carry agent-typed draft text — quotes of customer-supplied card numbers, secrets and keys included — across the model boundary").</p>
+
+  <!-- ============ CHAPTER 19 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 19 · Part IV</div>
+    <h2 class="ch-title">The read-only agent</h2>
+    <p class="ch-lede">22 tools, zero writes, a hard budget&nbsp;— and why "write tools with approvals" was refused.</p>
+  </div>
+
+  <p>The copilot's tool surface is <span class="ui">CopilotTool::ALL</span>: 22 read-only query tools over the local mirror. Enforcement is <strong>structural</strong>: <span class="path">ai_tools::execute</span> is a <span class="ui">match</span> over read queries only, and the fallthrough is the policy statement: <em>"Unknown tool {name} - allowed tools are read-only search tools."</em> There is no INSERT/UPDATE/DELETE in the executor; output is redacted on the way out. The system prompt binds the rest: "You have READ-ONLY tools … ANSWER WITH EVIDENCE … Never fabricate ticket numbers, dates, resolutions or quotes … You do not send anything, change any ticket, or write to Help Scout. You only read and explain."</p>
+
+  <h3 class="sec"><span class="no">19.1</span>The budget, and the protocol bug it survived</h3>
+  <p>Five tool rounds, eight calls, 4000-character results&nbsp;— caps on prompt bloat and runaway loops. Clean-audit item 44 explains why every over-budget call still needs a response: "every assistant tool_call must carry a matching tool response&nbsp;— strict OpenAI-compatible servers reject the follow-up request with a 400 when a tool_call id dangles. The un-executed calls now get an explicit budget-refusal result instead of silence," followed by a forced final answer: "Answer now from the evidence you already have, and say plainly which parts you could not verify."</p>
+
+  <div class="box plain">
+    <div class="box-title">Rejected: write tools behind approval prompts</div>
+    <p>The approval UX already exists (Automation); duplicating it for an agent "invites automation-of-destruction." The worst case of a hallucinated read call is a wrong answer; the worst case of a hallucinated write is a mutated ticket or a sent email. If you ever add a tool, it must remain a SELECT over the mirror, clamped and redacted, added to <span class="ui">CopilotTool::ALL</span> and the AI-visibility rules&nbsp;— never a write path.</p>
+  </div>
+
+  <!-- ============ CHAPTER 20 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 20 · Part IV</div>
+    <h2 class="ch-title">Vectors and hybrid search</h2>
+    <p class="ch-lede">sqlite-vec behind a reversible trait, RRF fusion with honest fallbacks, and why you never change chunk geometry casually.</p>
+  </div>
+
+  <p>Dense vectors live in a sidecar SQLite file (<span class="path">vectors/vectors.db</span>) as a single <span class="ui">vec0</span> virtual table with cosine distance. The decision (D4) was made by a <em>gate</em>, not a preference: "Gate: <span class="ui">xtask vector-count</span> on the live DB. &lt;100k chunks → GO (dense vec0, sparse FTS5, RRF untouched, exact pin). ≥100k → qdrant-edge stays … <span class="ui">VectorStore</span> trait keeps it reversible." The embedded qdrant engine was removed when the count passed the gate&nbsp;— one less engine, backups/restore/reset unchanged&nbsp;— but the trait seam means the store can be swapped back without touching call sites.</p>
+
+  <h3 class="sec"><span class="no">20.1</span>Dimension is destiny</h3>
+  <p><span class="ui">vec0</span> tables need the dimension fixed at <span class="ui">CREATE VIRTUAL TABLE</span> time; the collection is rebuilt when it changes ("Dimension change = model change: rebuild the collection&nbsp;— chunks re-embed through the normal pending pipeline"), and a mismatched upsert fails loudly. Two facts a newcomer must internalize: <strong>embeddings are NOT normalized</strong> by this codebase (correct under cosine, which is scale-invariant; score = 1&nbsp;−&nbsp;distance; any dot-product math you add must normalize first), and the only <span class="ui">unsafe</span> in core is the sqlite-vec FFI registration.</p>
+
+  <h3 class="sec"><span class="no">20.2</span>Point ids, orphans, and batch integrity</h3>
+  <p>Clean-audit item 21 is the war story that explains <span class="ui">POINT_ID_STRIDE</span>: "knowledge chunk 7 and conversation chunk 7 used to land on the same <span class="ui">point_id</span>, so the upsert's DELETE+INSERT silently overwrote whichever family had written first." Point ids are now family-banded, and a cross-family overwrite "fails loudly instead of colliding." Item 60's orphan sweep removes points whose chunks were deleted or re-chunked ("a re-chunk hands every chunk a NEW id, so the old points kept matching with their stale text snapshots forever"). Item 46 partitioned embed batches: "One empty vector poisoned the batch: a zero-dim point landed in the store and its chunk was marked done, never retried. The batch is now partitioned per chunk."</p>
+
+  <h3 class="sec"><span class="no">20.3</span>Hybrid retrieval: RRF with printed excuses</h3>
+  <p>Search is BM25/FTS5 first; when the retrieval feature is on, an Embed role is routed, and the index is available, the query is embedded and dense hits are fused per lane via Reciprocal Rank Fusion, k=60&nbsp;— "the classic RRF rank constant, pinned by the search tests." Rank-based fusion means the two lanes' incompatible score scales never need calibrating (a dead fusion stack once got deleted precisely because it fused unjoinable id spaces, item 154). Lane caps (tickets 40, knowledge 10) mirror page caps; FTS-only lanes are rescaled onto the RRF scale when fusion ran, "so the cross-lane ordering is meaningful." Every degradation prints <em>why</em>&nbsp;— the four mode notes are verbatim in <span class="path">search.rs:819-844</span> ("FTS only — the vector index is off (Settings &gt; Vector index)." etc.)&nbsp;— and <span class="ui">used_semantic</span> is set only when vector hits actually made the list.</p>
+
+  <h3 class="sec"><span class="no">20.4</span>Chunking economics</h3>
+  <p>1200 UTF-16 units with 150 overlap, preferring sentence boundaries; thread bodies pre-truncated to 4000 chars each; resolved conversations get one labeled <span class="ui">resolution</span> chunk&nbsp;— "the last published reply before closure, labeled so retrieval can prefer it for 'how was this solved' queries. Nothing fabricated — an unresolved or empty thread simply gets no resolution chunk." Each embed pass takes at most <span class="ui">EMBED_PASS_LIMIT = 60</span> pending chunks per family (keep worker ticks short; a large backfill drains 60 at a time), and failures retry under an attempts cap of 5 (item 100: "a failing chunk was retried on every pass without ever approaching a cap").</p>
+
+  <div class="box tip">
+    <div class="box-title">Sharp edges</div>
+    <ul class="b">
+      <li><strong>Never change 1200/150 casually</strong>&nbsp;— there is no chunk_version column anymore; a geometry change with old vectors in the store silently mixes embeddings. Plan a full re-embed.</li>
+      <li>Never upsert vectors with raw per-table ids; use the family-band namespacing.</li>
+      <li>New embedding model ⇒ <span class="ui">ensure_collection(new_dim)</span> rebuild + pending-pipeline re-embed, never an in-place dimension edit.</li>
+    </ul>
+  </div>
+
+  <!-- ============ CHAPTER 21 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 21 · Part IV</div>
+    <h2 class="ch-title">The ledger and the prompts</h2>
+    <p class="ch-lede">Every run is a row; every prompt is a versioned constant; every parameter is fixed in source.</p>
+  </div>
+
+  <p>Every inference writes an <span class="ui">ai_runs</span> row: tokens, latency, model, endpoint, estimated cost, prompt version, and the response body. The table was "born as a cache, grown into the ledger" (m008 indexed <span class="ui">(input_hash, prompt_version, model)</span>)&nbsp;— with BYOK cloud in the picture, cost is user money and spend must be observable per feature per day before it hurts. The contract: every <span class="ui">start_run</span> ends in <span class="ui">complete_run_with_usage</span> or <span class="ui">fail_run</span>&nbsp;— "the ai_runs row stayed 'running' forever and the AI Center rendered it with a green badge" was the fixed bug. Clean-audit item 43 extended the same honesty to the copilot: "every copilot chat was invisible to the cost ledger." Requests are hashed, never stored; responses are stored (that is the replay/debug story). Retention defaults to <strong>off</strong>&nbsp;— know that <span class="ui">ai_runs</span> grows unbounded unless the user sets a retention window.</p>
+
+  <h3 class="sec"><span class="no">21.1</span>Prompts are code, and version bumps are load-bearing</h3>
+  <p>All system prompts are versioned constants in <span class="path">ai_prompts.rs</span> (13 of them). They are code-adjacent contracts: the draft renderer's visibility filter, the JSON shapes the parsers expect, the [^N] citation markers the UI renders. DB-editable templates were removed, not built&nbsp;— item 149 deleted the dead prompt surfaces: "an edit would silently break parsers, void eval comparability, and bypass review." Bumping a version does three things: misses every cached analysis (new prompt_version ⇒ cache miss ⇒ honest re-analysis), flips the golden fingerprint (the maintenance pass re-runs the nine cases), and keeps the ledger attributable per day. Old <span class="ui">ai_runs</span> rows keep their version strings&nbsp;— never "clean up" old versions; the cache index needs them.</p>
+
+  <h3 class="sec"><span class="no">21.2</span>Generation parameters are fixed per lane</h3>
+  <table class="t">
+    <thead><tr><th style="width:30%">Lane</th><th style="width:22%">Temp / max tokens</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Analysis, drafts, verification, memory, attributes, golden eval</td><td>0.15 / 2048 (draft 1600), json_mode</td><td>Near-greedy + parseable; JSON is the downstream contract</td></tr>
+      <tr><td class="k">Copilot tool chat</td><td>0.2 / 1600, no json</td><td>Conversational but must quote evidence</td></tr>
+      <tr><td class="k">Rewrites (Shorten/Expand/Warmer)</td><td>0.3 / 1600, no json</td><td>Style freedom; prompt forbids new facts; human reviews before send</td></tr>
+      <tr><td class="k">Translation, QA, coaching AI</td><td>0.1 / 2048·800·700, json where parsed</td><td>Strictest lanes; fabrication-intolerant</td></tr>
+    </tbody>
+  </table>
+  <p>Fixed in source, not user-editable, "because params are load-bearing for the golden eval and cache identity&nbsp;— a user-tweakable temperature would make eval scores incomparable." The 120-second HTTP timeout absorbs cold model load + long prompts; <span class="ui">stream: false</span> always (SSE was dropped with the old stack; non-streaming makes token accounting exact). Item 101's parse strictness is the ledger's last line of defense: "a well-formed JSON 200 whose choices are empty … used to surface as a SUCCESSFUL completion whose content was the literal string 'Unknown'&nbsp;— a response with no readable content is a labeled error, never fabricated text."</p>
+  <!-- ============ CHAPTER 22 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 22 · Part V</div>
+    <h2 class="ch-title">Automation</h2>
+    <p class="ch-lede">Two kill switches, an approval matrix sized by blast radius, and a once-guard with a memory.</p>
+  </div>
+
+  <p>Automation is off. Twice. The engine gates on <span class="ui">automation_enabled</span> (default <span class="ui">false</span>) and the write path gates again on <span class="ui">automation_write_actions_enabled</span> (also default <span class="ui">false</span>). The philosophy is stated in the workload module's user-facing note: "Suggested assignee is a read-only recommendation. SupportOS never reassigns automatically unless you explicitly enable an approved automation." The failure mode being avoided is not hypothetical&nbsp;— the once-guard story below is an auto-ack storm that actually happened.</p>
+
+  <h3 class="sec"><span class="no">22.1</span>The approval matrix is a blast-radius table</h3>
+  <p><span class="path">automation.rs:83-92</span>: Assign and ChangeStatus always require approval; SetPriority requires it only when the new priority is <span class="ui">"urgent"</span>; AddTag and SendNote never do. The mapping asks two questions&nbsp;— how much state can the action corrupt, and how visible is the mistake in a busy inbox. The idea scales to the 9-action engine as risk tiers (<span class="ui">read</span> / <span class="ui">non_destructive</span> / <span class="ui">higher_risk</span>), where every higher-risk action goes to approval unconditionally, "with the log string 'Action {kind} is a write action and requires explicit approval'". Per-rule free-form risk settings were rejected: "a solo maintainer cannot audit per-rule choices; the tiering is code-owned and uniform." Sharp edge: <span class="ui">SetPriority { "high" }</span> does <em>not</em> require approval&nbsp;— the string compare is exactly <span class="ui">"urgent"</span>.</p>
+
+  <h3 class="sec"><span class="no">22.2</span>The once-guard (m060, clean-audit item 57)</h3>
+  <p>The only event source is the sync mirror, which re-delivers "conversation changed" on every pull. The pre-fix code "fired BOTH the <span class="ui">new_conversation</span> and <span class="ui">customer_reply</span> triggers on every customer-latest sync (a reply re-sent the 'new conversation' auto-ack)". The fix gave <span class="path">conversations</span> a memory column&nbsp;— the newest customer thread id whose triggers the conversation has already consumed&nbsp;— with a decision table: first customer thread ever → <span class="ui">new_conversation</span>; a later thread → <span class="ui">customer_reply</span>; no new thread (tag change, status flip, re-sync) → neither. "Record the thread as consumed only when the rules actually ran; a failed firing … stays unrecorded so the next change retries it." This converts an at-least-once event stream into exactly-once-per-thread semantics without a queue. Any new fire path must replicate the consumption discipline.</p>
+
+  <h3 class="sec"><span class="no">22.3</span>Outcomes are facts; there is exactly one retry</h3>
+  <p>Every run inserts an <span class="ui">automation_runs</span> row (<span class="ui">completed</span>/<span class="ui">failed</span>/<span class="ui">awaiting_approval</span>/<span class="ui">skipped</span> with human-readable detail). The one retry that exists is deliberate and loud (audit item 19): "an approved write action must reach Help Scout. The typed local write alone was silently reverted by the next sync&nbsp;— the manual inbox path queues an outbound push after the same local write, and this is that queue entry … A failed enqueue propagates so the approval job retries instead of reporting a silent half-action." In a mirror-synced app, "local write succeeded, platform reverted it" is the deadliest bug class; at-least-a-record plus visible retries is the answer. Blind in-engine retries were rejected because automation mutates Help Scout&nbsp;— the outreach module's "infinite retry storm" (Chapter 25) independently proves the danger. No cron triggers exist either: a timer layer would need wake-the-app semantics and catch-up machinery, and every useful scheduled concept is computed at sync/sweep time against fresh mirror data. Sharp edge: the <span class="ui">Trigger::SlaRisk</span> variant is selectable in the rule form but nothing currently emits the event&nbsp;— it is a dormant path (Chapter 32), not a working trigger.</p>
+
+  <!-- ============ CHAPTER 23 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 23 · Part V</div>
+    <h2 class="ch-title">SLA and workload</h2>
+    <p class="ch-lede">Determinism as a feature: numbers a human can audit, notes that travel with the number.</p>
+  </div>
+
+  <p>SLA defaults (24&nbsp;h first response, 72&nbsp;h resolution) are schema-level; per-mailbox overrides win; "mailboxes without business hours or targets are listed as unconfigured&nbsp;— nothing is guessed" (<span class="ui">ALERTS_NOTE</span>, rendered verbatim in the UI). At-risk is <span class="ui">AT_RISK_RATIO = 0.8</span>: one warning beat before breach "without crying wolf at 50%". Business minutes are used because wall-clock SLA lies across nights/weekends; the alerts cap of 50 truncates worst-first after true totals are counted&nbsp;— "the 50 most actionable rows" for a desktop table. Three audit markers define the honest clock: item 13 (the waiting clock is "the newest published customer thread", not <span class="ui">updated_at</span>, "which flips on every status change, tag edit, assignment or sync touch, which silently reset the waiting clock"), item 53 (at-risk "judges each conversation against the target it can actually miss"&nbsp;— replied ⇒ resolution, else first-response), and item 141 (a bad business-hours <span class="ui">days</span> list "passed the raw is_empty check and then filtered to nothing downstream&nbsp;— the window silently DISABLED"; it now degrades to the default schedule, never disables).</p>
+
+  <h3 class="sec"><span class="no">23.1</span>Workload: a formula you can defend in a standup</h3>
+  <p>The workload model is deliberately linear: pressure = weighted open load / capacity, with weights urgent&nbsp;3.0, sla&nbsp;2.0, waiting&nbsp;1.5, open&nbsp;1.0 and a default capacity of 25 clamped to 1–500. ML was rejected for reasons the module writes down implicitly: training data does not exist on a single-machine product, and "deterministic, explainable, testable" is the entire point&nbsp;— a manager must be able to ask why the suggestion was made and get an answer made of arithmetic. The module also documents its own epistemic honesty: "assignment changes mid-conversation are not historically reconstructable"; availability is "shown as unknown, never guessed." Dead code was removed with a tombstone: <span class="ui">AgentWorkload</span>/<span class="ui">TeamWorkload</span> "used to live here — dead since introduction (zero call sites) and carrying a latent id-domain bug (<span class="ui">assignee_local_id = ?1</span> fed a <em>remote</em> id). Removed rather than fixed so the latent trap can't be picked up by future callers." The local-vs-remote id trap is the single most recurring bug class in the codebase&nbsp;— grep before you assume.</p>
+
+  <!-- ============ CHAPTER 24 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 24 · Part V</div>
+    <h2 class="ch-title">Reports and segments</h2>
+    <p class="ch-lede">A closed registry with printed excuses, a builder that cannot fabricate, and segments that are trees&nbsp;— never SQL.</p>
+  </div>
+
+  <p>Reports is a fixed registry of 32 Help Scout Reports API endpoints (a test enforces unique keys/paths; the count is reconciled in-code from the docs' 33) plus a local metric×dimension builder over the mirror. The registry's module doc is the design contract: "capability detection so Standard plans get one honest sentence instead of empty charts … <strong>Nothing here fabricates report data: the cache is written only from real provider responses, and the capability verdict drives every UI claim.</strong>" Only 403 and 2xx are verdicts; 401/network stay Unknown; the verdict resets when credentials change. The builder's 21 metrics each carry <span class="ui">definition</span> and <span class="ui">limitations</span> strings that the run echoes back as notes&nbsp;— survivorship bias, unmeasured pre-sync history&nbsp;— "the honesty layer." Everything is computed in Rust over the mirror, which is what makes reports work offline and on plans without the Reports API. Free-form SQL and CSV export were both rejected: the first "breaks the nothing-is-fabricated contract, invites full-table scans on a desktop SQLite file, and has no capability story"; the second because drill-down happens via <span class="ui">sample_conversation_ids</span> in-app instead. The only CSV in the product is the Settings conversations export, which carries its own formula-injection guard (clean-audit item 106: a subject like <span class="ui">=HYPERLINK(…)</span> "became a live formula").</p>
+
+  <h3 class="sec"><span class="no">24.1</span>Segments: the tree is the contract</h3>
+  <p>Segments are typed condition trees&nbsp;— 13 node kinds, <span class="ui">MAX_TREE_DEPTH 10</span>, <span class="ui">MAX_NODE_COUNT 200</span>, 50 conditions per list&nbsp;— evaluated to customer-id sets in Rust, never string-built SQL. The tree buys four things: save-time validation, a form UI (each kind maps to concrete fields), safety (parameterized id-set evaluation, no injection surface, bounded worst-case), and campaign safety&nbsp;— "the preview subtracts exclusions <strong>and the DNC list automatically</strong>, reporting it: '{n} customer(s) removed by the Do-Not-Contact list.'" Unknown kinds parse into a degenerate node that matches nothing (they do not crash). Item 114 is the cautionary tale for why free-form matching lost: "the operator was ignored and the match was unanchored at the tail — every op ran the same <span class="ui">LIKE %@{domain}%</span>, so <span class="ui">user@example.com.au</span> matched an <span class="ui">example.com</span> filter, and <span class="ui">not_equals</span>/<span class="ui">ends_with</span> returned the same rows as <span class="ui">equals</span>." Sharp edge: evaluate-side nesting stops at depth 16 with a note, looser than the parse-side 10&nbsp;— don't "fix" one without the other.</p>
+
+  <!-- ============ CHAPTER 25 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 25 · Part V</div>
+    <h2 class="ch-title">Outreach and incidents</h2>
+    <p class="ch-lede">The only feature that emails customers en masse, and the coordination objects that hang off it.</p>
+  </div>
+
+  <p>Outreach writes to a real shared Help Scout account, which is why it is the most defensively-built feature. <span class="ui">MAX_ATTEMPTS = 3</span> exists because of audit item 16: "every recorded outcome is a spent attempt … without this increment it stayed 0 forever, so 429/5xx answers were retryable without limit and the same stuck recipients filled every batch (infinite retry storm + head-of-line block)." The status machine (draft/queued/sending/paused/completed/cancelled) has guard-per-transition; cancel "zeroes only the future: '{cancelled} remaining recipient(s) cancelled. Sent recipients are untouched.'"; manual retry resets the budget visibly. The DNC list is a legal-safety feature&nbsp;— removing someone from it deserves the scariest confirm dialog in the app ("Customer {id} becomes contactable by every campaign again."). And because a desktop app <em>will</em> crash mid-send, the mirror (not the local row) is the truth of "did it actually go out": <span class="ui">campaign_reconcile</span> resolves stranded rows against the platform&nbsp;— "Pure state repair: no continuation job is enqueued here," so it can never multiply sends. Sharp edge: reconcile <em>also</em> completes a campaign when nothing remains; it is not a dry run.</p>
+
+  <h3 class="sec"><span class="no">25.1</span>Incidents: coordination objects, not tickets</h3>
+  <p>Incident codes are <span class="ui">INC-{:03}</span> from MAX+1 inside the create transaction&nbsp;— stable and gap-tolerant, "what humans quote in notes, known-issue articles and customer-safe explanations." The UI is deliberately create/annotate/link only: an incident is a <em>coordination object</em> (which customers, which conversations, what workaround), its lifecycle mostly ends in a known issue, and "a full edit UI invites rewriting history that the timeline (<span class="ui">incident_events</span>, every mutation recorded with a dedup key) is supposed to preserve." Cluster/known-issue linkage is what lets the Issue Radar auto-create incidents from spikes. <span class="ui">patch_incident</span> and <span class="ui">update_incident_status</span> exist in core with no UI caller&nbsp;— if you want resolve buttons, the plumbing is already there and records events.</p>
+
+  <h3 class="sec"><span class="no">25.2</span>Why poll-based sync, not webhook-first</h3>
+  <p>The mirror is the product: search, reports, SLA, segments, AI evidence all run over local SQLite, instantly and offline. Polling with <span class="ui">modifiedSince</span> + a 10-minute overlap window gives idempotent, resumable, rate-limit-friendly sync (the client honors <span class="ui">x-ratelimit-*-minute</span>) with no tunnel and no public endpoint; missed webhook events self-heal on the next poll. Webhook ingress is accepted only where the platform gives no alternative&nbsp;— Beacon chats, whose module doc explains: "There is <strong>no list endpoint</strong> — chats arrive through the five <span class="ui">beacon.chat.*</span> webhook events … The local mirror therefore keeps ended chats (the webhook's last word)." Resources with no list endpoint were removed from the sweep on principle (R6, "honest stubs") rather than faked.</p>
+
+  <!-- ============ CHAPTER 26 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 26 · Part VI</div>
+    <h2 class="ch-title">The daily build</h2>
+    <p class="ch-lede">A pinned compiler, a size-first release profile, locked dependency graphs, and gates that run before anything expensive.</p>
+  </div>
+
+  <p><span class="path">rust-toolchain.toml</span> pins channel <span class="ui">1.99.1</span> exactly ("Exact pin (D1/D5: stability first). Upgrade deliberately, never silently."), and the workspace's <span class="ui">rust-version = "1.99"</span> comes with an honesty note: "Older compilers are never tested, so claiming 1.85 would be dishonest." Every cargo call in CI and on the release path carries <span class="ui">--locked</span>; the <span class="ui">cargo xtask</span> alias injects it too. The release profile is <span class="ui">codegen-units = 1, lto = true, opt-level = "s", strip = true</span>&nbsp;— "Small release binaries. LTO + opt-level s + stripped symbols" for the AppImage download use-case. The dev profile sets <span class="ui">debug = 0</span>: "keeps memory/disk footprint low when compiling&nbsp;… in constrained environments" (4&nbsp;GB-class machines were the real build target).</p>
+
+  <div class="box plain">
+    <div class="box-title">Lore correction, for the record</div>
+    <p>Outside documents sometimes claim a <span class="ui">-j2</span> build flag or a thin/fat LTO split between local and CI. The repo contains neither&nbsp;— no <span class="ui">-j</span> flag, no thin-LTO override, anywhere (grep-verified). Fat LTO applies to every release build. The documented memory levers are <span class="ui">debug = 0</span>, the slim tokio/reqwest feature sets, and&nbsp;— added by the 2026-10 audit&nbsp;— <span class="ui">CARGO_INCREMENTAL=0</span> on constrained machines. If a build box struggles, adjust its environment; do not add repo flags that fork the build story.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">26.1</span>The gates, in the order CI runs them</h3>
+  <ol class="b">
+    <li><span class="path">scripts/gate_no_simulation.py</span>&nbsp;— the no-simulation law, enforced on source (test regions stripped by a brace-counting parser with an allowlist that carries written justifications).</li>
+    <li><span class="ui">cargo fmt</span> and clippy twice (with and without the sandbox feature).</li>
+    <li><span class="ui">cargo test --workspace</span> twice (same feature matrix).</li>
+    <li><span class="ui">cargo deny check advisories licenses bans</span>&nbsp;— and note the audit item 161 lesson: "bans were configured once but never evaluated anywhere." The check must not merely exist; it must run. Duplicate crate versions fail the build until deduped or given a <em>reasoned</em> skip line in <span class="path">deny.toml</span> ("a maintainer either dedupes (preferred) or adds a documented skip line here").</li>
+    <li><span class="ui">cargo xtask verify-icons</span>&nbsp;— "the check had no automation caller before" (item 164); now icon corruption fails before any expensive lane.</li>
+  </ol>
+  <p>Behind all of it sits a process gate: <span class="path">ai/rule.md</span> governs the plan→progress→completed workflow the maintainer used (ten items at a time, no silent skips)&nbsp;— the reason the codebase is full of item numbers you can trace.</p>
+
+  <!-- ============ CHAPTER 27 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 27 · Part VI</div>
+    <h2 class="ch-title">Packaging</h2>
+    <p class="ch-lede">A hand-rolled packager, a dependency list ldd cannot see, and a checksum-pinned tool that builds the AppImage.</p>
+  </div>
+
+  <p><span class="path">crates/xtask/src/package.rs</span> produces exactly two artifacts from one release binary: a type-2 AppImage ("self-contained, runs without installation") and a standard .deb ("declares the GUI toolkit's runtime library set so APT installs everything a desktop session needs"). Packaging "stays in testable halves: <span class="ui">stage_appdir</span>/<span class="ui">stage_deb</span> build the staging trees on disk; unit-tested directly."&nbsp;— determinism you can unit-test was worth more than a bundler's convenience. cargo-deb and the Tauri bundler were rejected: neither expresses the dlopen dependency set for APT nor the SHA-pinned toolchain-of-tools this pipeline needs. Naming is a fixed trio because three registries reject different spellings: <span class="ui">SupportOS+</span> (display), <span class="ui">SupportOS-Plus</span> (identifier), <span class="ui">supportos-plus</span> (Debian&nbsp;— "Cargo names cannot carry +").</p>
+
+  <h3 class="sec"><span class="no">27.1</span>The dlopen problem, and the crash that proved it</h3>
+  <p><span class="path">package.rs:122-132</span>: "The GUI stack loads its windowing and graphics libraries at runtime (winit's X11 backends, xkbcommon, glutin/glow, wgpu's GLES fallback and the Wayland client all <span class="ui">dlopen</span> their system libraries), so <strong>ldd cannot see them</strong>. The .deb therefore declares the client-library set explicitly and APT pulls it in on minimal systems; the GL driver itself stays host-provided (Mesa software rendering works on GPU-less machines)." This is not theoretical: the 2026-10 external audit crashed exactly this way twice&nbsp;— <em>"crash — xkbcommon-dl panic: libxkbcommon-x11.so could not be loaded"</em>&nbsp;— before the remediation. Hence the xkb trio bundled into the AppImage: "winit loads the X11 keyboard stack via dlopen at window creation (xkbcommon-dl), and not every Linux host ships the X11 flavor … The trio is MIT/X11-licensed, glibc-free and a few hundred KiB." If the tool cannot bundle xkb, the build fails with an apt-oriented hint&nbsp;— "shipping an AppImage that cannot open a window would be worse than failing the build."</p>
+
+  <h3 class="sec"><span class="no">27.2</span>Supply-chain discipline</h3>
+  <p>The appimagetool binary executed on the release path is version+SHA-256 pinned (clean-audit item 158): "The URL used to point at the moving <span class="ui">continuous</span> build with no integrity check&nbsp;— whatever GitHub served that day was executed in the release path. The version tag and SHA-256 are pinned instead: a mismatched tool (tampered download, corrupted cache, upstream re-upload) refuses to run." The download itself is bounded and atomic (item 160): timeouts, a <span class="ui">.part</span> sibling, fsync, rename&nbsp;— "a crash mid-download used to leave a truncated file at the cached path itself." Payload ownership is stamped <span class="ui">root:root</span> and mode-normalized "because the build user's umask (e.g. 002 in CI containers) must not leak into the installed package"; there are <em>no</em> maintainer scripts&nbsp;— "the desktop-file and hicolor caches are maintained by their system trigger providers … and user data lives under XDG_DATA_HOME where the package never owns it." Upgrading appimagetool means changing the URL <em>and</em> the SHA constant, together, deliberately.</p>
+
+  <!-- ============ CHAPTER 28 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 28 · Part VI</div>
+    <h2 class="ch-title">The release pipeline</h2>
+    <p class="ch-lede">Tag in, verified artifacts out: a clean container, a three-distro matrix, and a publish step that re-downloads its own assets.</p>
+  </div>
+
+  <p><span class="path">.github/workflows/release.yml</span> triggers on <span class="ui">v*</span> tags. Its shape is worth walking once, top to bottom:</p>
+  <ol class="b">
+    <li><strong>Queue, never cancel.</strong> Release runs serialize for the same ref with <span class="ui">cancel-in-progress: false</span>&nbsp;— "a half-published release is worse than a queue." (CI cancels; release queues. Both are correct.)</li>
+    <li><strong>Clean container = compatibility contract.</strong> The build runs in <span class="ui">ubuntu:22.04</span> "because the glibc the binary links becomes the floor for every user; building on the oldest supported distro guarantees the artifacts run on 22.04+, Debian 12+, and newer." Building on <span class="ui">ubuntu-latest</span> would silently raise the floor.</li>
+    <li><strong>Gates first</strong>&nbsp;— the no-simulation gate ("a tagged release must not carry fabricated-data markers"), fmt, clippy ×2, tests ×2, all <span class="ui">--locked</span>. The toolchain action reads <span class="path">rust-toolchain.toml</span> as "single source of truth".</li>
+    <li><strong>Build once, package twice.</strong> One release build with the sandbox feature; then <span class="ui">package --skip-build</span> and <span class="ui">deb --skip-build</span> ("Skips the cargo build — already built, e.g. CI re-runs"). Both artifacts come from the same bytes that were tested.</li>
+    <li><strong>Provenance files.</strong> <span class="ui">SHA256SUMS.txt</span> plus <span class="ui">BUILD-INFO.txt</span> (product/version/commit/built-on/built-at)&nbsp;— the link between artifact and commit, enforced later by a literal grep: <span class="ui">grep -q "commit: $SHA" dist/BUILD-INFO.txt || exit 1</span>.</li>
+    <li><strong>Verify matrix, three distros</strong> (ubuntu 22.04/24.04, debian 12): checksum re-verify; <span class="ui">apt-get install ./….deb</span>&nbsp;— "must resolve and fetch every declared dependency from the distribution repository — no manual dependency handling"; metadata + desktop-file validation; <span class="ui">SPP_SMOKE=1</span> boot smoke ("verifies logging, single-instance lock, all boot migrations, boot services, background workers and the loopback listener, then exits 0 without opening a window"); a scripted 0.2.x→1.x data-directory migration; a GUI launch under Xvfb where "every client library must come from the .deb's own Depends set" (the net that catches a missing dlopen lib); reinstall, uninstall-keeps-user-data, purge. The AppImage job verifies via <span class="ui">APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1</span>, which "validates paths/icons/AppRun without FUSE."</li>
+    <li><strong>Publish, last, gated, then re-verified.</strong> Release notes are composed and the CHANGELOG section is extracted by an awk contract that expects Keep-a-Changelog headings <span class="ui">## [X.Y.Z]</span>&nbsp;— "Missing section ⇒ notes stay as before (no-op)" (so breaking the heading format fails silently&nbsp;— don't). Uploads clobber on re-runs because "re-built artifacts carry fresh tar timestamps; the notes' checksum table must always match the uploaded bytes." Then the pipeline <strong>re-downloads every asset and re-checks its SHA-256</strong>. Nothing is published unless every step passed.</li>
+  </ol>
+
+  <div class="box plain">
+    <div class="box-title">Lore correction #2</div>
+    <p>The smoke step is <span class="ui">SPP_SMOKE=1 ./…</span> with the container's own <span class="ui">HOME</span>&nbsp;— fresh containers make the data dir clean anyway; the 0.2.x-upgrade step <em>constructs</em> a legacy dir deliberately. Scratch <span class="ui">XDG_DATA_HOME</span> workarounds belong to audit-era local runs, not the checked-in workflow. The workflow file is the source of truth.</p>
+  </div>
+
+  <!-- ============ CHAPTER 29 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 29 · Part VI</div>
+    <h2 class="ch-title">The history rewrite</h2>
+    <p class="ch-lede">The one piece of repo lore you cannot learn from the code, because the code's history was deliberately changed.</p>
+  </div>
+
+  <p><span class="path">repo-audit-2026-10-24/HISTORY-REWRITE.md</span> records that, with the maintainer's authorization (FIND-003), eight QA-fixture <span class="path">secrets.key</span> files were purged "from <strong>every commit of every ref</strong>". Because "git tag --contains proved <strong>all 11 release tags</strong> descend from the secret-introducing commits," the tags were rewritten together with main (git filter-repo; the old→new SHA map ships as <span class="path">HISTORY-REWRITE-ref-map.txt</span> and <span class="path">commit-map.txt</span>). Four consequences for you:</p>
+  <ul class="b">
+    <li><strong>Old SHAs will not resolve.</strong> Any hash quoted in commit messages, audit docs, or release notes is pre-rewrite; translate it through the ref map. Commit <em>messages</em> were intentionally left with historical values ("messages are historical narrative and were not rewritten").</li>
+    <li><strong>Pre-rewrite backup bundles still contain the purged material</strong> and must stay local-only, forever.</li>
+    <li><strong>Never force-push casually again.</strong> The tags are the only release identity; the history is now clean by design.</li>
+    <li><strong>The forward guards are load-bearing:</strong> a <span class="path">.gitignore</span> rule plus two xtask hygiene tests ("no file named secrets.key anywhere in the tree"; "the .gitignore rule must stay in place") make re-tracking a secrets file a CI failure. Do not remove them.</li>
+  </ul>
+  <!-- ============ CHAPTER 30 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 30 · Part VII</div>
+    <h2 class="ch-title">The laws of the codebase</h2>
+    <p class="ch-lede">Every invariant from Parts I–VI, compressed into one list. If a change violates a law here, the change is wrong until the law is consciously amended.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">30.1</span>Platform and data</h3>
+  <ul class="b">
+    <li>Never edit an applied migration. New schema = new <span class="ui">BootStep</span> version 54+ with an idempotent apply function (the m039/m062 outage is the proof).</li>
+    <li>Every connection opens via <span class="path">db::open</span>&nbsp;— the four pragmas are the contract; a raw <span class="ui">Connection::open</span> silently drops FK enforcement.</li>
+    <li>Reads via <span class="ui">with_read</span>, short writes via <span class="ui">with_write</span>, network-spanning work via <span class="ui">long_op_guard</span>. Never hold a DB guard across an <span class="ui">.await</span> or a network call.</li>
+    <li>Mutex poisoning is recovered, never propagated; every timer gets a <span class="ui">TickGuard</span> and runs inside <span class="ui">contained()</span>.</li>
+    <li>The UI thread never blocks. Spawn; report via the bus; push events <em>before</em> repainting; register every new <span class="ui">ServerEvent</span> in <span class="path">pages::invalidated_pages</span>.</li>
+    <li>Everything heavy lives in the library; <span class="ui">main</span> only boots. The smoke constructs the real shell from a bare <span class="ui">egui::Context</span>.</li>
+    <li>No simulated/demo/fake data, ever&nbsp;— the CI gate runs first; boot is <span class="ui">Real</span> or <span class="ui">Empty</span>; empty→real transitions reset the sync watermark.</li>
+    <li><span class="path">catalog</span> stays I/O-free and unsafe-free; <span class="path">core</span> stays UI-free; the ladder never gains a cycle.</li>
+    <li><span class="ui">unsafe</span> exists in exactly two places: the two flock FFI calls, and the sqlite-vec FFI registration. Nowhere else.</li>
+    <li>Env vars are the only configuration surface (no CLI args). Toast lifetimes burn on rendered passes; only manual syncs toast.</li>
+    <li>The flock is acquired before the DB opens and held for process lifetime; a second instance exits 1.</li>
+    <li>User data is never package-owned; uninstall/purge must not touch the data dir.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">30.2</span>Security and data safety</h3>
+  <ul class="b">
+    <li>Never store a credential in plaintext; every secret goes through <span class="ui">set_secret</span> (the envelope). The OAuth token columns stay permanently empty.</li>
+    <li>Never log, Debug-print, or toast a secret value; log key names and presence only.</li>
+    <li>Every write of customer data is chmod'd 0600 immediately (<span class="ui">crypto::restrict_permissions</span>).</li>
+    <li>Never touch <span class="path">secrets.key</span>; it is created once and refuses to be clobbered.</li>
+    <li>Never swap a file over the live DB without verify-first, and move live db+wal+shm aside <em>as one unit</em>. Restore replaces; it never merges.</li>
+    <li>Never accept an unsigned webhook; registration and verification resolve the secret through one function; duplicates never mutate the original row.</li>
+    <li>Never run an untrusted-document parse outside the sandbox in release builds; sandbox closures take moved-in bytes only&nbsp;— no paths, no sockets.</li>
+    <li>Never render remote HTML without <span class="ui">sanitize_thread_html</span>; never run the CSS blocklist on undecoded values.</li>
+    <li>Every new user-configured URL fetch runs the SSRF guard (async variant on async paths) and uses <span class="ui">Policy::none()</span>.</li>
+    <li>POSTs are never auto-retried after ambiguous failures. No background/periodic network calls&nbsp;— the version check is user-initiated, full stop.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">30.3</span>The AI stack</h3>
+  <ul class="b">
+    <li>Never make an agent tool write. New tools are SELECTs over the mirror, redacted and clamped.</li>
+    <li>Never send a draft without its evidence pack and its verification pass; verification parse failure means <span class="ui">verified = false</span>.</li>
+    <li>Never strip the code-enforced customer-safe filter from the draft renderer; never feed quarantined memory into a prompt.</li>
+    <li>Never cross the redaction boundary with raw customer text.</li>
+    <li>Never cache or persist an analysis that fails the core-field gate; never record a run without completing or failing it.</li>
+    <li>Never enqueue a golden eval per keystroke; never make eval failure block a role-map save.</li>
+    <li>Never change chunk geometry (1200/150) without planning a full re-embed; never upsert vectors with raw per-table ids; never assume embeddings are normalized.</li>
+    <li>Never remove the honest-fallback semantics of retrieval&nbsp;— degraded lanes print their mode note.</li>
+    <li>Every new AI surface gets an <span class="ui">AI_FEATURES</span> row (on-demand ⇒ ON, automatic generative ⇒ OFF) and the kill switch covers it.</li>
+    <li>Prompt edits are version bumps&nbsp;— the cache index and the golden fingerprint depend on it.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">30.4</span>Product and release</h3>
+  <ul class="b">
+    <li>Destructive actions are two-phase (confirm dialog → armed → execute → honest outcome toast); a cancel leaves the world untouched.</li>
+    <li>Every new table needs a conscious KEEP decision in <span class="path">data_reset.rs</span> (the pinned test makes forgetting it a build failure).</li>
+    <li>Nothing fabricates report data; capability banners drive every UI claim; segments are trees, never SQL.</li>
+    <li>Every cargo call on the release path is <span class="ui">--locked</span>; the toolchain pin upgrades as deliberate commits; duplicate crate versions need dedupe or a reasoned skip.</li>
+    <li>Both packages carry the sandbox feature; both artifacts come from the same release binary; the appimagetool URL and SHA change together or not at all.</li>
+    <li>Build releases in the ubuntu 22.04 container&nbsp;— the glibc floor is the compatibility contract. Never cancel in-progress release runs.</li>
+    <li>CHANGELOG headings stay <span class="ui">## [X.Y.Z] — date</span>&nbsp;— the release-notes extractor depends on the bracketed heading.</li>
+    <li><span class="path">secrets.key</span> is never tracked again; the hygiene tests stay; old SHAs go through the ref map.</li>
+  </ul>
+
+  <!-- ============ CHAPTER 31 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 31 · Part VII</div>
+    <h2 class="ch-title">Sharp edges A–Z</h2>
+    <p class="ch-lede">"If you are about to&nbsp;…, read this first." The quick-reference table of changes that have bitten before, or will bite predictably.</p>
+  </div>
+
+  <table class="t">
+    <thead><tr><th style="width:38%">If you are about to…</th><th>Stop and read this</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Add a database table or column</td><td>New <span class="ui">BootStep</span> v54+; idempotent SQL; KEEP decision in <span class="path">data_reset.rs</span>; never edit v≤53 (Ch. 7, 12).</td></tr>
+      <tr><td class="k">Add a UI page</td><td>It is automatically smoke-covered&nbsp;— it must paint non-zero shapes; register its confirm dialogs via <span class="ui">NavRequest::Confirm</span> (Ch. 4, 30).</td></tr>
+      <tr><td class="k">Add a background event or timer</td><td><span class="path">invalidated_pages</span> map; TickGuard + contained(); workers: None in tests (Ch. 5, 8).</td></tr>
+      <tr><td class="k">Add an AI surface</td><td><span class="ui">AI_FEATURES</span> row; on-demand ON, automatic generative OFF; execution-time gate; kill switch covers it (Ch. 16).</td></tr>
+      <tr><td class="k">Swap the embedding model</td><td><span class="ui">ensure_collection(new_dim)</span> rebuild + pending re-embed; dimension mismatch fails loudly by design (Ch. 20).</td></tr>
+      <tr><td class="k">Change chunk size or embed batching</td><td>Full re-embed required; no chunk_version exists; partition per chunk, attempts cap 5 (Ch. 20).</td></tr>
+      <tr><td class="k">Edit a prompt</td><td>Bump its version constant; cache + golden fingerprint depend on it; never clean old <span class="ui">ai_runs</span> versions (Ch. 21).</td></tr>
+      <tr><td class="k">Add an agent tool</td><td>Read-only SELECT only; redact output; clamp limits; add to <span class="ui">CopilotTool::ALL</span> (Ch. 19).</td></tr>
+      <tr><td class="k">Add any outbound HTTP client</td><td>Explicit redirect policy (<span class="ui">Policy::none()</span>), SSRF guard (async twin on async paths), timeout; five egress points exist today (Ch. 15, 16).</td></tr>
+      <tr><td class="k">Add a dependency</td><td>Duplicate crate versions fail <span class="ui">cargo deny</span> until deduped or reasoned-skip; licenses into the allowlist; <span class="ui">--locked</span> everywhere (Ch. 26).</td></tr>
+      <tr><td class="k">Upgrade eframe/egui</td><td>Exact pin <span class="ui">=0.37</span> is deliberate; renderer fallback chain and fatal.log context are load-bearing; charts stay on the painter until egui_plot catches up (Ch. 3, 26 of the platform dossiers).</td></tr>
+      <tr><td class="k">Upgrade appimagetool</td><td>URL + SHA-256 constants change together; cached tools re-verify (Ch. 27).</td></tr>
+      <tr><td class="k">Add a destructive action</td><td>Two-phase confirm via the shell dialog; honest outcome toast; cancel touches nothing (Ch. 30).</td></tr>
+      <tr><td class="k">Add an export artifact</td><td><span class="ui">restrict_permissions</span> immediately; sidecar paths change extension only (M18); redact secret-shaped keys (Ch. 12).</td></tr>
+      <tr><td class="k">Parse a new untrusted format</td><td>Route through <span class="ui">run_sandboxed</span>; moved-in bytes only; caps before allocation (Ch. 10, 15).</td></tr>
+      <tr><td class="k">Touch restore or import</td><td>Verify-first; move db+wal+shm as one unit; replace, never merge; copy the ordering from <span class="path">backup_service.rs</span> verbatim (Ch. 12).</td></tr>
+      <tr><td class="k">Add an OAuth/loopback path</td><td>Single-UPDATE state consume; 10-min TTL; port-bound redirect; tokens only into the envelope (Ch. 14).</td></tr>
+      <tr><td class="k">Add an automation trigger or fire path</td><td>Replicate the once-guard consumption discipline; respect the double kill switch; approved writes need the outbound push (Ch. 22).</td></tr>
+      <tr><td class="k">Change the CHANGELOG format</td><td>Keep-a-Changelog <span class="ui">## [X.Y.Z]</span> headings or the release-notes awk extraction silently no-ops (Ch. 28).</td></tr>
+      <tr><td class="k">Add a non-Linux package target</td><td>The sandbox feature is Linux-only and forced by <span class="ui">cfg!(target_os = "linux")</span>&nbsp;— a non-Linux artifact would ship sandboxless (Ch. 10, 27).</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ CHAPTER 32 ============ -->
+  <div class="chapter-header">
+    <div class="kicker">Chapter 32 · Part VII</div>
+    <h2 class="ch-title">Known trade-offs, open ends</h2>
+    <p class="ch-lede">The honest register: accepted risks, dormant paths, deferred features&nbsp;— so the next maintainer inherits knowledge, not surprises.</p>
+  </div>
+
+  <h3 class="sec"><span class="no">32.1</span>Accepted risks (documented, deliberate)</h3>
+  <ul class="b">
+    <li><strong>SSRF re-binding window.</strong> The guard resolves DNS once; a rebinding server can rotate between check and fetch. Accepted for a local desktop tool.</li>
+    <li><strong>secure_delete ≠ media erasure.</strong> Pages and WAL are zeroed; SSD wear-leveling remnants are not addressed. Attachments are removed, not overwritten.</li>
+    <li><strong>Unbounded growth by default.</strong> <span class="ui">ai_runs</span> retention is off unless the user sets it; <span class="ui">audit_log</span> (action history) is uncapped by design&nbsp;— only the noisy diagnostics ring is capped at 500.</li>
+    <li><strong>Verifier quality.</strong> Draft verification is itself a model call; a weak verifier can rubber-stamp. Mitigations: fail-closed parse handling, visible verification outcome, human send gate.</li>
+    <li><strong>Eval ceiling.</strong> Golden evals measure parseability and core-field presence, not factual accuracy.</li>
+    <li><strong>Chunk tails.</strong> Thread bodies are pre-truncated to 4000 chars before vector-space embedding, though FTS sees the full text.</li>
+    <li><strong>English-only quarantine.</strong> The memory guard's vocabulary is English; paraphrases and other languages pass by design.</li>
+    <li><strong>Loopback port collision.</strong> If port 3000 is taken, webhook ingress degrades with a log warning plus a UI badge (FIND-001); conversations sync by polling regardless.</li>
+    <li><strong>Pre-rewrite bundles.</strong> Old local backup bundles still contain purged key material; they stay local-only (Ch. 29).</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">32.2</span>Dormant paths (exist, but nothing calls them)</h3>
+  <ul class="b">
+    <li><span class="ui">Trigger::SlaRisk</span> is selectable in the automation rule form; no code currently emits the event.</li>
+    <li><span class="ui">patch_incident</span> / <span class="ui">update_incident_status</span> exist in core with no UI caller&nbsp;— resolve buttons are plumbing-complete.</li>
+    <li><span class="ui">COACHING_MAX_DRAFT_CHARS</span> (20k) is declared but unreferenced; the effective caps are the prompt slices (6000 chars into the AI, 240-char excerpts stored).</li>
+    <li>A stale comment mentions an "embedded qdrant engine"; sqlite-vec replaced it (D4) and the <span class="ui">VectorStore</span> trait keeps the swap reversible.</li>
+    <li>egui_plot does not target egui 0.37 yet; charts ride the shell's own painter (<span class="path">chart.rs</span>) until then&nbsp;— re-pin when upstream catches up.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">32.3</span>Deferred by design (recorded scope cuts)</h3>
+  <ul class="b">
+    <li><strong>Second-instance forwarding.</strong> The flock refuses and exits; "focus the existing window" needs IPC that does not exist yet&nbsp;— the comment says exactly this.</li>
+    <li><strong>PKCE.</strong> State + loopback + envelope-stored secret cover the local threat model; adding PKCE is additive if you ever want it.</li>
+    <li><strong>Cross-platform packaging and mobile.</strong> Declared non-goals; the aarch64 mapping exists in the packager but release stages x86_64 names only.</li>
+    <li><strong>Scheduled triggers / cron automation.</strong> Every scheduled concept is computed at sync/sweep time; a timer layer would need wake-the-app and catch-up semantics.</li>
+  </ul>
+
+  <h3 class="sec"><span class="no">32.4</span>Where the ledgers live</h3>
+  <p>When this book and the code disagree, re-read the code; when the code is silent, the ledgers are the next stop: <span class="path">ai/decisions.md</span> (the port's decision ledger and migration map), <span class="path">ai/plan.md</span> and <span class="path">ai/completed.md</span> (the clean-audit item ledgers), <span class="path">ai/rule.md</span> (the working process), and <span class="path">repo-audit-2026-10-24/</span> (the external audit, its findings, and the history-rewrite record). The item-numbered comments in the source are the crosswalk between them.</p>
+  <p>One last thing. The most important habit you can inherit is not in any chapter: <strong>when you fix a bug, leave a comment that explains what it used to do wrong</strong>. That is why this book exists&nbsp;— the previous maintainer wrote the first draft of it, one <span class="ui">Audit fix (M…)</span> comment at a time. Keep writing it.</p>
+</div>
+
+<!-- ================= ENDING ================= -->
+<div class="ending">
+  <div class="end-frame"></div>
+  <div class="end-mark"></div>
+  <div class="end-big">The code is the documentation.<br>The comments are the history.<br>This book is the map.</div>
+  <div class="end-sub">SupportOS+ Developer Handover Book&nbsp;— written from the source, for the next maintainer.</div>
+  <div class="end-meta">Version 1.8.0 &middot; kimpearce888/SupportOS-Plus</div>
+</div>
+
+</body>
+</html>
