@@ -1434,7 +1434,11 @@ impl RealHelpScoutProvider {
         }
 
         let body_text = res.text().await.unwrap_or_default();
-        let detail: String = body_text.chars().take(400).collect();
+        // 4,000 chars: webhook-registration rejections carry the whole
+        // accepted-events catalogue (~900 chars) and the health check
+        // reads it back out of `message` to self-heal the subscription.
+        // The user-facing `friendly` stays at 300.
+        let detail: String = body_text.chars().take(4_000).collect();
         Err(HsApiError {
             status_code: status,
             message: format!("Help Scout {method} {path} -> {status}: {detail}"),

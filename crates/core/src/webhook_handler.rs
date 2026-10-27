@@ -159,12 +159,15 @@ pub fn process_event(conn: &Connection, row_id: i64, event_type: &str, raw: &str
         "user.status.changed" => {
             enqueued = Some(("sync_user_statuses", serde_json::json!({})));
         }
-        // P2: the five beacon.chat.* events are the only push path for
-        // live chats — Help Scout exposes no chat list endpoint — so
-        // they ingest the chat payload straight into the mirror (m059).
-        // A chat is not a conversation: the mirror keeps even ended
-        // chats, because the platform stops serving them once they
-        // collapse into a conversation.
+        // P2: the beacon.chat.* events are the only push path for live
+        // chats — Help Scout exposes no chat list endpoint — so they
+        // ingest the chat payload straight into the mirror (m059). A chat
+        // is not a conversation: the mirror keeps even ended chats,
+        // because the platform stops serving them once they collapse into
+        // a conversation. Since 2026-10 the platform only delivers
+        // created and customer.replied (agent.replied / assigned / ended
+        // were retired from the enum); the arms stay so a manual
+        // subscription still ingests.
         "beacon.chat.created"
         | "beacon.chat.customer.replied"
         | "beacon.chat.agent.replied"

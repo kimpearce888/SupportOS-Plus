@@ -23,19 +23,31 @@ use rusqlite::Connection;
 use crate::error::Result;
 use crate::helpscout::{HelpScoutProvider, HsWebhookConfig};
 
-/// Events registered on the platform hook. Audit fix (M7): the list used
-/// to contain 6 names absent from HelpScout's documented Mailbox-API
-/// webhook catalogue (`convo.custom-fields`, `convo.ai-answers.created`,
-/// `user.status.changed`, `tag.created`, `tag.updated`, `tag.deleted`) —
-/// if the platform ever starts rejecting unknown names the registration
-/// would 400 forever and health would be stuck "failed". Only documented
-/// events are registered now; the handler keeps tolerating the extras
-/// should the user subscribe to them manually.
+/// Events registered on the platform hook. Help Scout validates the whole
+/// array on registration — a single retired name rejects the POST with a
+/// 400 that lists every value the platform still accepts — and the enum
+/// has churned under this app twice now:
+///
+/// - the earlier audit (M7) removed six names the catalogue did not list
+///   back then; `convo.tags` and `convo.custom-fields` are documented
+///   valid again today, so they are back in;
+/// - 2026-10-27, live account: `convo.updated`, `beacon.chat.agent.replied`,
+///   `beacon.chat.assigned` and `beacon.chat.ended` were retired — the
+///   registration 400'd ("Expected array of values from this list:
+///   'beacon.chat.created', …") and health was stuck "failed".
+///
+/// The list below matches the platform's 2026-10 catalogue, and
+/// [`run_check`] self-heals on top of it: if the platform ever rejects
+/// the array again, the accepted values are parsed straight out of the
+/// 400 body and the registration retries with the intersection — no
+/// release needed. The handler keeps tolerating every name ever seen
+/// should the user subscribe to one manually.
 pub const REQUIRED_EVENTS: &[&str] = &[
     "convo.created",
-    "convo.updated",
     "convo.assigned",
     "convo.status",
+    "convo.tags",
+    "convo.custom-fields",
     "convo.moved",
     "convo.customer.reply.created",
     "convo.agent.reply.created",
@@ -51,9 +63,6 @@ pub const REQUIRED_EVENTS: &[&str] = &[
     "satisfaction.ratings",
     "beacon.chat.created",
     "beacon.chat.customer.replied",
-    "beacon.chat.agent.replied",
-    "beacon.chat.assigned",
-    "beacon.chat.ended",
 ];
 
 /// The label the registered hook carries on the platform.
@@ -220,6 +229,114 @@ fn classify(our_url: &str, hooks: &[HsWebhookConfig]) -> Classification {
     }
 }
 
+/// TLS-terminating relays (Tailscale Funnel, cloudflared, ngrok) serve
+/// the webhook over HTTPS and redirect plain HTTP; a hook registered with
+/// an `http://` URL would 301 on every delivery until Help Scout disables
+/// it for ten discards. Loopback URLs (the app's own listener tests and
+/// local relays) are exempt.
+#[must_use]
+fn upgraded_relay_url(url: &str) -> String {
+    let loopback = url.contains("://localhost") || url.contains("://127.0.0.1");
+    if !loopback && let Some(rest) = url.strip_prefix("http://") {
+        return format!("https://{rest}");
+    }
+    url.to_string()
+}
+
+/// One registration attempt with the platform's own error as the escape
+/// hatch: when the POST answers 400 "Expected array of values from this
+/// list", the accepted values are parsed out of that body and the
+/// registration retries once with the intersection. The event enum has
+/// churned under this app twice; a static list must never wedge the
+/// health check in "failed" until the next release again.
+///
+/// Returns the created hook id, the event set actually registered, and
+/// the names the platform retired (empty on the happy path).
+async fn register_hook(
+    provider: &dyn HelpScoutProvider,
+    our_url: &str,
+    events: &[String],
+    secret: &str,
+) -> Result<(i64, Vec<String>, Vec<String>)> {
+    let secret = capped_secret(secret);
+    match provider
+        .create_webhook(our_url, events, &secret, HOOK_LABEL)
+        .await
+    {
+        Ok(id) => Ok((id, events.to_vec(), Vec::new())),
+        Err(first) => {
+            let Some(accepted) = accepted_events_from_error(&transport_message(&first)) else {
+                return Err(first);
+            };
+            let usable: Vec<String> = events
+                .iter()
+                .filter(|e| accepted.iter().any(|a| a == *e))
+                .cloned()
+                .collect();
+            if usable.is_empty() || usable.len() == events.len() {
+                return Err(first);
+            }
+            let dropped: Vec<String> = events
+                .iter()
+                .filter(|e| !usable.contains(e))
+                .cloned()
+                .collect();
+            tracing::warn!(
+                dropped = %dropped.join(", "),
+                "Help Scout retired some webhook events — registering the accepted intersection"
+            );
+            let id = provider
+                .create_webhook(our_url, &usable, &secret, HOOK_LABEL)
+                .await?;
+            Ok((id, usable, dropped))
+        }
+    }
+}
+
+/// The transport layer keeps the raw response text (up to 4,000 chars) in
+/// [`crate::helpscout_real::HsApiError::message`]; `Display` only carries
+/// the 300-character friendly sentence, so downcast to reach the body.
+fn transport_message(e: &crate::error::Error) -> String {
+    if let crate::error::Error::Other(boxed) = e
+        && let Some(api) = boxed.downcast_ref::<crate::helpscout_real::HsApiError>()
+    {
+        return api.message.clone();
+    }
+    e.to_string()
+}
+
+/// Pull every Help Scout event name out of a 400 body carrying the
+/// platform's "Expected array of values from this list: 'a', 'b', …"
+/// validation error. Single-quoted dotted lowercase tokens only —
+/// anything else in the body is ignored. `None` when the marker or any
+/// name is missing (the caller then keeps the original error).
+fn accepted_events_from_error(text: &str) -> Option<Vec<String>> {
+    const MARKER: &str = "Expected array of values from this list";
+    let tail = &text[text.find(MARKER)? + MARKER.len()..];
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = tail;
+    while let Some(start) = rest.find('\'') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('\'') else {
+            break;
+        };
+        let token = &after[..end];
+        if is_event_name(token) && !out.iter().any(|e| e == token) {
+            out.push(token.to_string());
+        }
+        rest = &after[end + 1..];
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+#[must_use]
+fn is_event_name(s: &str) -> bool {
+    s.len() > 3
+        && s.contains('.')
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
+}
+
 /// Run the check against the live provider: list the account's hooks,
 /// classify, re-register when the platform dropped, disabled or pruned
 /// ours, then remove the stale twin(s). Never invents a hook state — a
@@ -232,8 +349,17 @@ pub async fn run_check(
     our_url: &str,
     secret: &str,
 ) -> Result<WebhookHealthOutcome> {
+    let relay = upgraded_relay_url(our_url);
+    let upgrade_note = (relay != our_url).then(|| {
+        " — relay URL upgraded to https:// (a plain-http hook is redirected \
+         on every delivery and disabled after ten discards)"
+            .to_string()
+    });
     let hooks = provider.list_webhooks().await?;
-    match classify(our_url, &hooks) {
+    // Classify against the upgraded relay: registration always uses it,
+    // so an http://-saved URL must not keep hunting for a hook that will
+    // never exist under that scheme (that would re-register every run).
+    match classify(&relay, &hooks) {
         Classification::Healthy {
             hook_id,
             extra_twins,
@@ -242,6 +368,9 @@ pub async fn run_check(
                 "hook #{hook_id} is registered, enabled and subscribed to all {} events we process",
                 REQUIRED_EVENTS.len()
             );
+            if let Some(note) = &upgrade_note {
+                detail.push_str(note);
+            }
             if extra_twins > 0 {
                 detail.push_str(&format!(
                     " (note: {extra_twins} older hook(s) share this URL)"
@@ -251,9 +380,8 @@ pub async fn run_check(
         }
         Classification::ReRegister { reason, stale_ids } => {
             let events: Vec<String> = REQUIRED_EVENTS.iter().map(|e| (*e).to_string()).collect();
-            let created_id = provider
-                .create_webhook(our_url, &events, &capped_secret(secret), HOOK_LABEL)
-                .await?;
+            let (created_id, registered, dropped) =
+                register_hook(provider, &relay, &events, secret).await?;
             let mut removed: Vec<i64> = Vec::new();
             for id in &stale_ids {
                 if provider.delete_webhook(*id).await.unwrap_or(false) {
@@ -262,8 +390,17 @@ pub async fn run_check(
             }
             let mut detail = format!(
                 "{reason} — re-registered as hook #{created_id} ({} events)",
-                REQUIRED_EVENTS.len()
+                registered.len()
             );
+            if !dropped.is_empty() {
+                detail.push_str(&format!(
+                    "; the platform no longer accepts {} — dropped from the subscription",
+                    dropped.join(", ")
+                ));
+            }
+            if let Some(note) = &upgrade_note {
+                detail.push_str(note);
+            }
             if !removed.is_empty() {
                 detail.push_str(&format!(
                     "; removed stale twin(s) {}",
@@ -363,10 +500,32 @@ mod tests {
     }
 
     /// A recording provider: enough of the trait to drive `run_check`.
+    /// `reject` lists event names the platform has "retired" — a create
+    /// requesting any of them answers the real 400 rejection body.
     struct FakeHooks {
         hooks: std::sync::Mutex<Vec<HsWebhookConfig>>,
         created: std::sync::Mutex<Vec<(String, String)>>,
         deleted: std::sync::Mutex<Vec<i64>>,
+        reject: Vec<String>,
+    }
+
+    /// The platform's real rejection shape: the whole array is refused and
+    /// the body lists every value it still accepts.
+    fn platform_rejection(keep: &[&str]) -> crate::error::Error {
+        let list = keep
+            .iter()
+            .map(|e| format!("'{e}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let body = format!(
+            "{{\"message\":\"Bad request\",\"_embedded\":{{\"errors\":[{{\"path\":\"events\",\"message\":\" Expected array of values from this list: {list}\"}}]}}}}"
+        );
+        crate::error::Error::Other(Box::new(crate::helpscout_real::HsApiError {
+            status_code: 400,
+            message: format!("Help Scout POST /v2/webhooks -> 400: {body}"),
+            friendly: "Help Scout rejected the request as invalid".to_string(),
+            retryable: false,
+        }))
     }
 
     #[async_trait::async_trait]
@@ -460,6 +619,27 @@ mod tests {
             secret: &str,
             _label: &str,
         ) -> Result<i64> {
+            if self.reject.iter().any(|r| r == "*") {
+                // A 400 that is not about the events catalogue at all.
+                return Err(crate::error::Error::Other(Box::new(
+                    crate::helpscout_real::HsApiError {
+                        status_code: 400,
+                        message:
+                            "Help Scout POST /v2/webhooks -> 400: {\"message\":\"Bad request\"}"
+                                .to_string(),
+                        friendly: "Help Scout rejected the request as invalid".to_string(),
+                        retryable: false,
+                    },
+                )));
+            }
+            if events.iter().any(|e| self.reject.iter().any(|r| r == e)) {
+                let keep: Vec<&str> = REQUIRED_EVENTS
+                    .iter()
+                    .copied()
+                    .filter(|e| !self.reject.iter().any(|r| r == e))
+                    .collect();
+                return Err(platform_rejection(&keep));
+            }
             self.created
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -499,6 +679,7 @@ mod tests {
             )]),
             created: std::sync::Mutex::new(Vec::new()),
             deleted: std::sync::Mutex::new(Vec::new()),
+            reject: Vec::new(),
         };
         let outcome = rt()
             .block_on(async {
@@ -534,6 +715,7 @@ mod tests {
             )]),
             created: std::sync::Mutex::new(Vec::new()),
             deleted: std::sync::Mutex::new(Vec::new()),
+            reject: Vec::new(),
         };
         let outcome = rt()
             .block_on(async { run_check(&fake, "https://relay.example.com/hook", "secret").await })
@@ -575,6 +757,7 @@ mod tests {
             ]),
             created: std::sync::Mutex::new(Vec::new()),
             deleted: std::sync::Mutex::new(Vec::new()),
+            reject: Vec::new(),
         };
         let outcome = rt()
             .block_on(async { run_check(&fake, "https://relay.example.com/hook", "secret").await })
@@ -593,5 +776,129 @@ mod tests {
                 .unwrap_or_else(|p| p.into_inner())
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn accepted_events_parser_reads_the_real_rejection_body() {
+        // The body Help Scout sent the live account on 2026-10-27 (the
+        // catalogue is the platform's, verbatim).
+        let body = r#"{"_links":{"about":{"href":"http://developer.helpscout.net/mailbox-api/overview/errors"}},"logRef":"71418079-cc3c-4adc-aff0-0e160463f4ad#269758","message":"Bad request","_embedded":{"errors":[{"path":"events","message":" Expected array of values from this list: 'beacon.chat.created', 'beacon.chat.customer.replied', 'convo.agent.reply.created', 'convo.ai-answers-email.reply.created', 'convo.ai-answers-email.resolution', 'convo.assigned', 'convo.created', 'convo.custom-fields', 'convo.customer.reply.created', 'convo.deleted', 'convo.merged', 'convo.moved', 'convo.note.created', 'convo.status', 'convo.tags', 'customer.created', 'customer.deleted', 'customer.updated', 'message.survey.response.received', 'organization.created', 'organization.deleted', 'organization.updated', 'satisfaction.ratings', 'tag.created', 'tag.deleted', 'tag.updated', 'user.status.changed'"}]}}"#;
+        let accepted = accepted_events_from_error(body).expect("the list parses");
+        assert_eq!(accepted.len(), 27, "every catalogue value, deduped");
+        assert!(accepted.contains(&"beacon.chat.customer.replied".to_string()));
+        assert!(!accepted.contains(&"beacon.chat.ended".to_string()));
+        // No marker / no names -> None (the caller keeps the first error).
+        assert!(accepted_events_from_error("{\"message\":\"Bad request\"}").is_none());
+        assert!(accepted_events_from_error("").is_none());
+    }
+
+    #[test]
+    fn run_check_self_heals_when_the_platform_retires_events() {
+        // The app's static list has drifted ahead of the platform's
+        // catalogue again (the exact failure the live account hit on
+        // 2026-10-27): the first registration 400s with the accepted
+        // list, the retry subscribes to the intersection, and the check
+        // still lands "reregistered" — naming what was dropped.
+        let fake = FakeHooks {
+            hooks: std::sync::Mutex::new(Vec::new()),
+            created: std::sync::Mutex::new(Vec::new()),
+            deleted: std::sync::Mutex::new(Vec::new()),
+            reject: vec![
+                "satisfaction.ratings".to_string(),
+                "beacon.chat.customer.replied".to_string(),
+            ],
+        };
+        let outcome = rt()
+            .block_on(async { run_check(&fake, "https://relay.example.com/hook", "secret").await })
+            .expect("run_check must self-heal instead of staying failed");
+
+        assert!(
+            outcome.is_healed(),
+            "{:?} — {}",
+            outcome.verdict,
+            outcome.detail
+        );
+        assert_eq!(outcome.created_hook_id, Some(99));
+        assert!(
+            outcome.detail.contains("satisfaction.ratings"),
+            "{}",
+            outcome.detail
+        );
+        assert!(
+            outcome.detail.contains("beacon.chat.customer.replied"),
+            "{}",
+            outcome.detail
+        );
+        let created = fake.created.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(created.len(), 1, "exactly one successful registration");
+        let hooks = fake.hooks.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(hooks[0].events.len(), REQUIRED_EVENTS.len() - 2);
+        assert!(
+            !hooks[0]
+                .events
+                .iter()
+                .any(|e| e == "beacon.chat.customer.replied")
+        );
+    }
+
+    #[test]
+    fn run_check_stays_failed_when_the_rejection_is_not_about_events() {
+        // A 400 without the catalogue marker must surface, not retry.
+        let fake = FakeHooks {
+            hooks: std::sync::Mutex::new(Vec::new()),
+            created: std::sync::Mutex::new(Vec::new()),
+            deleted: std::sync::Mutex::new(Vec::new()),
+            reject: vec!["*".to_string()],
+        };
+        let err = rt()
+            .block_on(async { run_check(&fake, "https://relay.example.com/hook", "secret").await })
+            .expect_err("must stay failed");
+        assert!(err.to_string().contains("rejected"), "{err}");
+    }
+
+    #[test]
+    fn plain_http_relays_are_upgraded_and_loopback_is_not() {
+        assert_eq!(
+            upgraded_relay_url("http://pop-os.tail1234.ts.net/webhook"),
+            "https://pop-os.tail1234.ts.net/webhook"
+        );
+        assert_eq!(
+            upgraded_relay_url("https://relay.example.com/hook"),
+            "https://relay.example.com/hook"
+        );
+        assert_eq!(
+            upgraded_relay_url("http://127.0.0.1:3000/webhook"),
+            "http://127.0.0.1:3000/webhook"
+        );
+        assert_eq!(
+            upgraded_relay_url("http://localhost:3000/webhook"),
+            "http://localhost:3000/webhook"
+        );
+    }
+
+    #[test]
+    fn a_rejected_http_relay_still_classifies_and_registers_over_https() {
+        // The user saved an http:// ts.net relay URL: the check must
+        // classify and register under https:// so the same check is not
+        // re-run (and a duplicate hook created) every six hours.
+        let fake = FakeHooks {
+            hooks: std::sync::Mutex::new(Vec::new()),
+            created: std::sync::Mutex::new(Vec::new()),
+            deleted: std::sync::Mutex::new(Vec::new()),
+            reject: Vec::new(),
+        };
+        let outcome = rt()
+            .block_on(async {
+                run_check(&fake, "http://pop-os.tail1234.ts.net/webhook", "secret").await
+            })
+            .expect("run_check");
+        assert!(outcome.is_healed());
+        assert!(
+            outcome.detail.contains("upgraded to https://"),
+            "{}",
+            outcome.detail
+        );
+        let created = fake.created.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(created[0].0, "https://pop-os.tail1234.ts.net/webhook");
     }
 }

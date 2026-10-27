@@ -4,6 +4,26 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.8.1] — 2026-10-28
+
+### Fixed — Help Scout integration
+- **Webhook registration rejected with 400 ("Expected array of values
+  from this list")** — Help Scout retired four event names the app
+  subscribed to (`convo.updated`, `beacon.chat.agent.replied`,
+  `beacon.chat.assigned`, `beacon.chat.ended`), and the platform rejects
+  the whole registration when even one name is stale, leaving the webhook
+  health check stuck "failed" forever. The shipped list now matches the
+  platform's 2026-10 catalogue (and re-subscribes `convo.tags` /
+  `convo.custom-fields`, documented valid again), and registration
+  **self-heals**: if the platform ever retires a name again, the accepted
+  values are read straight out of the 400 body and the subscription
+  retries with the intersection — no release needed. The outcome names
+  what was dropped.
+- **Plain-http relay URLs are upgraded to https:// before registering**
+  — Tailscale Funnel (and every other TLS relay) redirects http, and a
+  hook registered against a redirecting URL would be disabled by Help
+  Scout after ten bounced deliveries. Loopback URLs are exempt.
+
 ## [1.8.0] — 2026-10-27
 
 The complete audit-fix release: every finding from a full source audit plus
