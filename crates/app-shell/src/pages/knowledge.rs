@@ -715,12 +715,20 @@ impl KnowledgePage {
         );
         // Missing Docs API key = the Help Center tab can never fill.
         // Say so, and how to fix it, instead of an unexplained empty tab.
+        // Audit (C2 residue): this used to read the plain `docs_api_key`
+        // setting — a key nothing ever writes (the real one lives in the
+        // encrypted envelope under `helpscout_docs_api_key`, with the
+        // HELPSCOUT_DOCS_API_KEY env var as the provider's fallback) — so
+        // the banner showed even while sync was working. Ask the same
+        // question the provider's resolve() does: envelope first, then env.
         let docs_key_missing = db.with_read(|conn| {
-            spp_core::settings::get_string(conn, "docs_api_key")
+            spp_core::settings::get_secret(conn, spp_core::helpscout_real::SECRET_DOCS_API_KEY)
                 .ok()
                 .flatten()
-                .is_none_or(|k| k.is_empty())
-        });
+                .is_none_or(|v| v.is_empty())
+        }) && std::env::var("HELPSCOUT_DOCS_API_KEY")
+            .map(|v| v.trim().is_empty())
+            .unwrap_or(true);
         if docs_key_missing {
             design::hint_text(
                 ui,
