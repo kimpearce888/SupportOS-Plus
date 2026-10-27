@@ -229,18 +229,98 @@ fn classify(our_url: &str, hooks: &[HsWebhookConfig]) -> Classification {
     }
 }
 
-/// TLS-terminating relays (Tailscale Funnel, cloudflared, ngrok) serve
-/// the webhook over HTTPS and redirect plain HTTP; a hook registered with
-/// an `http://` URL would 301 on every delivery until Help Scout disables
-/// it for ten discards. Loopback URLs (the app's own listener tests and
-/// local relays) are exempt.
-#[must_use]
-fn upgraded_relay_url(url: &str) -> String {
-    let loopback = url.contains("://localhost") || url.contains("://127.0.0.1");
-    if !loopback && let Some(rest) = url.strip_prefix("http://") {
-        return format!("https://{rest}");
+/// The relay URL exactly as it will be registered on the platform.
+///
+/// Help Scout's url validator refuses anything it cannot deliver to with
+/// a bare `path: "url" — must be a valid URL.` 400 (the live account hit
+/// exactly that on 2026-10-27, after the relay field held a value the
+/// platform's validator would not take). Instead of echoing that opaque
+/// body, the check normalizes what it can and refuses what it cannot:
+///
+/// - surrounding whitespace is trimmed and a missing scheme becomes
+///   https — the classic "funnel address pasted without the prefix";
+/// - plain http is upgraded to https: TLS-terminating relays (Tailscale
+///   Funnel, cloudflared, ngrok) redirect http on every delivery and the
+///   platform disables a hook after ten discards;
+/// - loopback, private, link-local and CGNAT hosts (127.0.0.1, 192.168.x,
+///   10.x, 100.64/10 …) are refused outright — the platform cannot
+///   deliver there and its validator answers "must be a valid URL."
+///
+/// The `Err` text is written to be read as-is in the outcome surfaces:
+/// it names the stored value and the exact fix.
+fn normalize_relay_url(raw: &str) -> std::result::Result<String, String> {
+    let trimmed = raw.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    let with_scheme = if lowered.starts_with("http://") || lowered.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let mut parsed = url::Url::parse(&with_scheme).map_err(|_| {
+        format!(
+            "the relay URL '{trimmed}' is not a valid URL — open Settings and set \
+             it to the public https address of your relay, for example \
+             https://your-host.ts.net/webhook"
+        )
+    })?;
+    let host = parsed.host().ok_or_else(|| {
+        "the relay URL has no host — open Settings and set it to the public \
+         https address of your relay, for example https://your-host.ts.net/webhook"
+            .to_string()
+    })?;
+    if is_unroutable_host(host) {
+        return Err(format!(
+            "the relay URL points at {} — Help Scout cannot deliver webhooks to a \
+             loopback or private address. Run a tunnel (Tailscale Funnel, cloudflared, \
+             ngrok) and set its public https URL in Settings, for example \
+             https://your-host.ts.net/webhook",
+            parsed.host_str().unwrap_or("a local address")
+        ));
     }
-    url.to_string()
+    if parsed.scheme() == "http" {
+        parsed
+            .set_scheme("https")
+            .map_err(|_| "the relay URL scheme could not be upgraded to https".to_string())?;
+    }
+    Ok(parsed.to_string())
+}
+
+/// Whether Help Scout's servers can never route to this host: loopback,
+/// RFC1918/private, link-local, unspecified, or the CGNAT range Tailscale
+/// node IPs live in (100.64/10 — reachable only from inside the tailnet).
+fn is_unroutable_host(host: url::Host<&str>) -> bool {
+    match host {
+        url::Host::Ipv4(ip) => {
+            let o = ip.octets();
+            ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+        }
+        url::Host::Ipv6(ip) => ip.is_loopback() || ip.is_unspecified(),
+        url::Host::Domain(d) => {
+            let d = d.to_ascii_lowercase();
+            d == "localhost" || d.ends_with(".localhost")
+        }
+    }
+}
+
+/// Registration failures must stay diagnosable years from now: append the
+/// exact URL the request carried to both the friendly surface text and
+/// the raw body, so a platform rejection like `path: "url" — must be a
+/// valid URL.` can be answered by reading the outcome alone.
+fn with_relay_context(e: crate::error::Error, relay: &str) -> crate::error::Error {
+    let note = format!(" (the url we sent: {relay})");
+    if let crate::error::Error::Other(boxed) = &e
+        && let Some(api) = boxed.downcast_ref::<crate::helpscout_real::HsApiError>()
+    {
+        let mut api = api.clone();
+        api.friendly.push_str(&note);
+        api.message.push_str(&note);
+        return crate::error::Error::Other(Box::new(api));
+    }
+    crate::error::Error::Other(format!("{e}{note}").into())
 }
 
 /// One registration attempt with the platform's own error as the escape
@@ -341,6 +421,9 @@ fn is_event_name(s: &str) -> bool {
 /// classify, re-register when the platform dropped, disabled or pruned
 /// ours, then remove the stale twin(s). Never invents a hook state — a
 /// provider error propagates and the caller records a `failed` outcome.
+/// A relay URL that cannot be sent at all (schemeless, mistyped, loopback
+/// or private) is an honest `failed` outcome naming the fix — no API call
+/// is made.
 ///
 /// # Errors
 /// Propagates provider failures (the caller stores a failed outcome).
@@ -349,10 +432,17 @@ pub async fn run_check(
     our_url: &str,
     secret: &str,
 ) -> Result<WebhookHealthOutcome> {
-    let relay = upgraded_relay_url(our_url);
+    // A URL the platform's validator would refuse (schemeless, mistyped,
+    // loopback/private) is diagnosed here — before any API call — so the
+    // outcome names the fix instead of echoing a bare "must be a valid
+    // URL." 400 (the live account's exact failure on 2026-10-27).
+    let relay = match normalize_relay_url(our_url) {
+        Ok(relay) => relay,
+        Err(msg) => return Ok(failed_outcome(&msg)),
+    };
     let upgrade_note = (relay != our_url).then(|| {
-        " — relay URL upgraded to https:// (a plain-http hook is redirected \
-         on every delivery and disabled after ten discards)"
+        " — normalized to https:// (a plain-http or schemeless hook is \
+         redirected or refused on every delivery and disabled after ten discards)"
             .to_string()
     });
     let hooks = provider.list_webhooks().await?;
@@ -381,7 +471,9 @@ pub async fn run_check(
         Classification::ReRegister { reason, stale_ids } => {
             let events: Vec<String> = REQUIRED_EVENTS.iter().map(|e| (*e).to_string()).collect();
             let (created_id, registered, dropped) =
-                register_hook(provider, &relay, &events, secret).await?;
+                register_hook(provider, &relay, &events, secret)
+                    .await
+                    .map_err(|e| with_relay_context(e, &relay))?;
             let mut removed: Vec<i64> = Vec::new();
             for id in &stale_ids {
                 if provider.delete_webhook(*id).await.unwrap_or(false) {
@@ -857,23 +949,101 @@ mod tests {
     }
 
     #[test]
-    fn plain_http_relays_are_upgraded_and_loopback_is_not() {
+    fn relay_urls_are_normalized_before_registration() {
+        // Schemeless (the classic funnel-address-without-the-prefix paste)
+        // and whitespace-padded values are cleaned up…
         assert_eq!(
-            upgraded_relay_url("http://pop-os.tail1234.ts.net/webhook"),
+            normalize_relay_url("  pop-os.tail1234.ts.net/webhook ").unwrap_or_default(),
+            "https://pop-os.tail1234.ts.net/webhook"
+        );
+        // …plain http is upgraded (redirect-bounce protection)…
+        assert_eq!(
+            normalize_relay_url("http://pop-os.tail1234.ts.net/webhook").unwrap_or_default(),
             "https://pop-os.tail1234.ts.net/webhook"
         );
         assert_eq!(
-            upgraded_relay_url("https://relay.example.com/hook"),
+            normalize_relay_url("https://relay.example.com/hook").unwrap_or_default(),
             "https://relay.example.com/hook"
         );
-        assert_eq!(
-            upgraded_relay_url("http://127.0.0.1:3000/webhook"),
-            "http://127.0.0.1:3000/webhook"
+        // …but a URL the platform could never deliver to is refused with
+        // the fix spelled out, not passed through to a bare "must be a
+        // valid URL." 400.
+        for bad in [
+            "http://127.0.0.1:3000/webhook",
+            "http://localhost:3000/webhook",
+            "http://192.168.1.10:3000/webhook",
+            "http://10.0.0.5/webhook",
+            "http://100.101.102.103/webhook", // CGNAT — a tailscale node IP
+            "not a url at all",
+        ] {
+            let msg = normalize_relay_url(bad).expect_err(bad);
+            assert!(msg.contains("Settings"), "{bad} -> {msg}");
+        }
+    }
+
+    #[test]
+    fn run_check_refuses_an_undeliverable_relay_without_touching_the_api() {
+        let fake = FakeHooks {
+            hooks: std::sync::Mutex::new(Vec::new()),
+            created: std::sync::Mutex::new(Vec::new()),
+            deleted: std::sync::Mutex::new(Vec::new()),
+            reject: Vec::new(),
+        };
+        let outcome = rt()
+            .block_on(async { run_check(&fake, "http://127.0.0.1:3000/webhook", "secret").await })
+            .expect("a misconfigured relay is an honest failed outcome, not an error");
+        assert_eq!(outcome.verdict, "failed");
+        assert!(
+            outcome.detail.contains("loopback or private"),
+            "{}",
+            outcome.detail
         );
-        assert_eq!(
-            upgraded_relay_url("http://localhost:3000/webhook"),
-            "http://localhost:3000/webhook"
+        assert!(
+            fake.created
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_empty(),
+            "no registration may be attempted"
         );
+    }
+
+    #[test]
+    fn a_schemeless_relay_is_registered_over_https_on_the_first_try() {
+        // The user pasted the funnel address without the scheme — exactly
+        // the shape Help Scout answers with 400 "must be a valid URL.".
+        // The check registers the normalized https form straight away.
+        let fake = FakeHooks {
+            hooks: std::sync::Mutex::new(Vec::new()),
+            created: std::sync::Mutex::new(Vec::new()),
+            deleted: std::sync::Mutex::new(Vec::new()),
+            reject: Vec::new(),
+        };
+        let outcome = rt()
+            .block_on(async { run_check(&fake, "pop-os.tail1234.ts.net/webhook", "secret").await })
+            .expect("run_check");
+        assert!(outcome.is_healed(), "{}", outcome.detail);
+        let created = fake.created.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(created[0].0, "https://pop-os.tail1234.ts.net/webhook");
+    }
+
+    #[test]
+    fn a_registration_failure_names_the_url_we_sent() {
+        // When the platform still rejects the registration, the error must
+        // carry the exact URL, so "must be a valid URL." can be answered
+        // by reading the outcome alone.
+        let fake = FakeHooks {
+            hooks: std::sync::Mutex::new(Vec::new()),
+            created: std::sync::Mutex::new(Vec::new()),
+            deleted: std::sync::Mutex::new(Vec::new()),
+            reject: vec!["*".to_string()],
+        };
+        let err = rt()
+            .block_on(async { run_check(&fake, "https://relay.example.com/hook", "secret").await })
+            .expect_err("must stay failed");
+        let text = err.to_string();
+        assert!(text.contains("rejected"), "{text}");
+        assert!(text.contains("the url we sent"), "{text}");
+        assert!(text.contains("https://relay.example.com/hook"), "{text}");
     }
 
     #[test]
@@ -894,7 +1064,7 @@ mod tests {
             .expect("run_check");
         assert!(outcome.is_healed());
         assert!(
-            outcome.detail.contains("upgraded to https://"),
+            outcome.detail.contains("normalized to https://"),
             "{}",
             outcome.detail
         );

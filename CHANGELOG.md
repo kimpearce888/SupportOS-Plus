@@ -4,6 +4,27 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.8.2] — 2026-10-28
+
+### Fixed — Help Scout integration
+- **Webhook registration rejected with 400 (`path: "url" — must be a
+  valid URL.`)** — the platform's url validator refused the relay URL the
+  health check sent (the live account hit this on 2026-10-27). The check
+  now **normalizes the relay URL before anything is sent**: surrounding
+  whitespace is trimmed, a missing scheme becomes https (the classic
+  "funnel address pasted without the prefix"), and plain http is upgraded
+  to https as in 1.8.1.
+- **Undeliverable relay URLs are refused with the fix, not echoed as an
+  opaque 400** — loopback, private, link-local and CGNAT hosts (127.0.0.1,
+  192.168.x, 10.x, 100.64/10 — including Tailscale node IPs) never reach
+  the API; the outcome instead names the stored value and says exactly
+  what to set in Settings (a public https relay address such as
+  `https://your-host.ts.net/webhook`).
+- **Registration failures name the url they sent** — if the platform
+  still rejects a registration, the error now carries `(the url we sent:
+  …)` so any future rejection can be diagnosed from the Sync Health
+  outcome alone.
+
 ## [1.8.1] — 2026-10-28
 
 ### Fixed — Help Scout integration
