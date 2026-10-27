@@ -4,6 +4,96 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-10-27
+
+The complete audit-fix release: every finding from a full source audit plus
+live end-to-end testing against a real Help Scout account — 4 Critical,
+8 High and 25 Medium issues — fixed and re-verified against the live API.
+
+### Fixed — Help Scout integration
+- **Conversation creation never worked against the real API** — the wrong
+  API version was used (`/v3` instead of `/v2`), the new conversation's id
+  is actually delivered in the `Resource-Id` response header (the app read
+  a body field that does not exist), and Help Scout requires top-level
+  `type` and `status` fields. Outreach campaigns and every other outbound
+  create now deliver end to end.
+- **Help-Center sync silently synced nothing** — the Docs API wraps every
+  list response in a resource-named envelope (`collections` /
+  `categories` / `articles`) the app did not unwrap, and ids are hex
+  strings. Collections, categories and articles now sync, and the
+  Knowledge page no longer shows a false "Docs API key missing" banner
+  while sync works.
+- **Customer contact channels were never fetched** — emails, phones,
+  websites, chats and social profiles live behind per-customer
+  sub-resources. The Customers page and Outreach recipient lists now
+  populate from real data.
+- **Upgrading from 1.7.3 now delivers the customer chat-channel mirror** —
+  the table had been introduced by editing an already-applied migration in
+  place, so upgraded databases (recorded version 52) never received it and
+  the first chat-channel sync would fail. A new idempotent migration
+  (version 53) creates it on upgrade and is a no-op on fresh installs.
+- **Search was permanently empty** — nothing ever enqueued the index
+  rebuild. The full-text index is now built at ingest and refreshed after
+  every sync pass.
+- The incremental-sync date filter used a timestamp format the real API
+  rejects.
+- Thread authorship is parsed from Help Scout's polymorphic `createdBy`
+  object — attribution, automations and SLA reporting see the real author
+  — and thread recipients accept the real plain-string `to`/`cc` arrays.
+- SLA first-response math keys on real thread types and excludes customer
+  replies, so "first response" measures agent responses only.
+- Sync robustness: one poisoned record can no longer abort a whole sync
+  stage; every crawl has page caps and in-loop cancel checks; the Docs
+  fetch frontier rotates past the 500-article cap; Docs requests retry
+  429/5xx with backoff; rate-limit `Retry-After` is honored up to 300 s;
+  merged-conversation 301s are surfaced instead of silently followed;
+  the webhook relay refuses to register with an empty secret; duplicate
+  webhook events no longer overwrite the original event's state.
+
+### Fixed — data safety
+- Encrypted-bundle restore now stages and fsyncs the imported database and
+  moves the live DB + WAL aside as one unit — a crash can no longer pair
+  the fresh database with a stale WAL.
+- Plaintext export snapshots, import temps, backups and PII exports are
+  created with 0600 permissions, and stale temp files are swept.
+- Workspace reset uses `secure_delete` + VACUUM — freed pages no longer
+  carry recoverable customer data.
+- Crafted `.sosync` bundles cannot force out-of-range scrypt work factors;
+  requeuing stale running jobs is executor-aware (no double sends); the
+  maintenance pass no longer holds the writer lane across `VACUUM INTO`;
+  the backup settings sidecar survives data directories containing
+  ".db" in the path.
+
+### Security
+- The parser sandbox is tightened: `read(2)` is pinned to stdio file
+  descriptors, `mmap(2)` is anonymous-only, and `close(2)` is denied.
+- OAuth failure pages answer HTTP 400 (previously 200); OAuth state
+  consumption is a single atomic UPDATE (TOCTOU removed).
+- Credential-bearing configuration structs redact their secrets in `Debug`
+  output, and corrupt secrets-envelope reads warn instead of silently
+  reading as "not set".
+
+### Fixed — UI
+- The "check for updates" result now actually displays.
+- Search hit cards and palette deep links open the record they point to.
+- The Search button no longer disappears while its field has focus.
+- Legitimately-empty lists no longer re-query SQLite every rendered frame.
+- The sidebar responds to mouse-wheel scrolling; the stray ScrollArea
+  overlay on Diagnostics is gone; timestamps render in a human form;
+  stale status messages clear when the condition clears; list caps are
+  honest; the Help Scout credential form validates before claiming
+  success; live-chat threads render their real messages instead of
+  "Other".
+
+### Packaging / docs / CI
+- The `.deb` ships a machine-readable copyright file (Debian policy).
+- CI hardening: concurrency groups, per-job timeouts, no persisted GitHub
+  tokens on checkout; the release pipeline stays serialized.
+- README corrected to 23 pages with every environment knob documented;
+  the documented `cargo xtask` invocation now actually works; xtask
+  database-operation defaults match the app's real data directory;
+  orphaned one-shot scripts archived; an unused dependency dropped.
+
 ## [1.7.3] — 2026-10-26
 
 ### Added

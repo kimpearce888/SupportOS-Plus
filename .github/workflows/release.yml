@@ -394,6 +394,17 @@ jobs:
             echo "- SHA-256 checksums in \`SHA256SUMS.txt\`; every download link checked live"
           } > body.md
 
+          # Prepend the tagged version's CHANGELOG section (when present)
+          # so the release page also documents what changed, not just how
+          # to install. Missing section ⇒ notes stay as before (no-op).
+          awk -v ver="$VERSION" \
+            '/^## / { insec = ($0 ~ ("^## \\[" ver "\\]")) ? 1 : 0 }
+             insec  { print }' CHANGELOG.md > changes.md
+          if [ -s changes.md ]; then
+            { cat changes.md; printf '\n---\n\n'; cat body.md; } > body-with-changes.md
+            mv body-with-changes.md body.md
+          fi
+
       - name: Create the release + upload assets
         env:
           GH_TOKEN: ${{ github.token }}
