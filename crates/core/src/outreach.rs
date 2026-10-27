@@ -2162,7 +2162,11 @@ pub async fn send_batch(
             subject: r_subject,
             body: r_body,
             tags: tags.clone(),
-            status: Some("active".to_string()),
+            // Audit fix (C1): the live API only accepts open|pending|closed|spam
+            // for a created conversation — "active" is a folder label, not a
+            // status, and would 400. None = the provider's "open" default.
+            status: None,
+            channel: None,
         };
         let result = provider.create_conversation(input).await;
 

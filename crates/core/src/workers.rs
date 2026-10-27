@@ -99,6 +99,16 @@ pub struct WorkerManager {
     /// sends anything").
     sync_nudge: std::sync::Arc<tokio::sync::Notify>,
     handles: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Audit fix (M16): the set of job ids CURRENTLY executing inside this
+    /// process. The stale-job sweep consults it so a long-but-alive job
+    /// (outreach batch, LLM pass) can never be re-queued mid-run — the old
+    /// sweep double-executed anything running past 30 minutes, duplicating
+    /// sends.
+    executing_jobs: Mutex<std::collections::HashSet<i64>>,
+    /// Unix timestamp of this manager's boot. Jobs with started_at before
+    /// the boot belong to a dead process and are safe for the sweep to
+    /// re-queue; everything newer has a live executor in this process.
+    boot_unix: i64,
 }
 
 impl WorkerManager {
@@ -127,6 +137,8 @@ impl WorkerManager {
             refreshing_connectors: AtomicBool::new(false),
             sync_nudge: std::sync::Arc::new(tokio::sync::Notify::new()),
             handles: Mutex::new(Vec::new()),
+            executing_jobs: Mutex::new(std::collections::HashSet::new()),
+            boot_unix: chrono::Utc::now().timestamp(),
         }
     }
 
@@ -300,12 +312,30 @@ impl WorkerManager {
                 loop {
                     interval.tick().await;
                     Self::contained("stale_job_sweep", async {
+                        // Audit fix (M16): the sweep used to re-queue ANY job
+                        // running longer than 30 minutes — including ones
+                        // actively executing right here (outreach batches,
+                        // LLM passes), which double-executed them and
+                        // duplicated sends. Now it only re-queues jobs whose
+                        // executor is provably gone: not in this process's
+                        // executing set AND started before this process
+                        // booted (i.e., orphaned by a previous process).
+                        let executing = this
+                            .executing_jobs
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .clone();
                         let conn = this.lock();
-                        match jobs::requeue_stale_running_jobs(&conn, 30) {
+                        match jobs::requeue_stale_running_jobs(
+                            &conn,
+                            30,
+                            &executing,
+                            this.boot_unix,
+                        ) {
                             Ok(n) if n > 0 => tracing::warn!(
                                 count = n,
                                 operation = "stale_job_sweep",
-                                "Re-queued stale running job(s) (running longer than 30 minutes)"
+                                "Re-queued stale running job(s) orphaned by a previous process"
                             ),
                             Ok(_) => {}
                             Err(_) => {}
@@ -424,7 +454,13 @@ impl WorkerManager {
                 jobs::claim_next(&mut conn, None).unwrap_or(None)
             };
             let Some(job) = claimed else { break };
-            if AssertUnwindSafe(self.execute_job(job.id, &job.kind, &job.payload))
+            // Audit fix (M16): register the job as actively executing so the
+            // stale-job sweep can never re-queue it mid-run.
+            self.executing_jobs
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(job.id);
+            let exec_result = if AssertUnwindSafe(self.execute_job(job.id, &job.kind, &job.payload))
                 .catch_unwind()
                 .await
                 .is_err()
@@ -458,7 +494,12 @@ impl WorkerManager {
                     "jobs",
                     None,
                 );
-            }
+            };
+            self.executing_jobs
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&job.id);
+            let _ = exec_result;
         }
     }
 
@@ -1130,13 +1171,20 @@ impl WorkerManager {
                 let _ = crate::jobs::enqueue_on(&conn, "sync", "webhook_health_check", "{}", 3, 2);
             }
             let _ = crate::notification_sweep::sweep(&conn, Some(&bus));
+            // Audit fix (M17): the backup decision is made on the writer
+            // guard, but the backup itself (VACUUM INTO — a full DB copy)
+            // used to run while still holding the exclusive UI writer lane,
+            // stalling every write for the whole copy on large accounts.
+            // The guard is dropped first; the backup runs on its own
+            // long-op connection.
             let backup_hours =
                 crate::settings::get_i64(&conn, "backup_interval_hours", 24).unwrap_or(24);
+            let mut backup_due = false;
             if backup_hours > 0 {
                 let backups_dir = data_dir.join("backups");
                 let backups = crate::backup_service::list_backups(&backups_dir);
                 let newest = backups.first();
-                let due = match newest {
+                backup_due = match newest {
                     None => true,
                     Some(b) => {
                         let created = b
@@ -1152,11 +1200,14 @@ impl WorkerManager {
                         }
                     }
                 };
-                if due {
-                    let result = crate::backup_service::backup(&conn, &backups_dir);
-                    if result.ok {
-                        tracing::info!(operation = "backup", "Automatic backup created");
-                    }
+            }
+            drop(conn);
+            if backup_due {
+                let backups_dir = data_dir.join("backups");
+                let long_conn = db_handle.long_op_guard();
+                let result = crate::backup_service::backup(&long_conn, &backups_dir);
+                if result.ok {
+                    tracing::info!(operation = "backup", "Automatic backup created");
                 }
             }
             let backups_dir = data_dir.join("backups");
@@ -1164,6 +1215,7 @@ impl WorkerManager {
             if pruned > 0 {
                 tracing::info!(operation = "backup", pruned, "Pruned old backups");
             }
+            let conn = db_handle.write_guard();
             let retention_days = crate::settings::get_i64(&conn, "retention_days", 0).unwrap_or(0);
             let removed = crate::maintenance::enforce_retention(&conn, retention_days)?;
             if removed > 0 {
@@ -1457,8 +1509,16 @@ impl WorkerManager {
                         .await?;
                     }
                 }
+                // Audit fix (H8): the three embed arms used self.lock() — the
+                // EXCLUSIVE UI writer lane — across the whole embedding pass,
+                // which makes LM-Studio/cloud HTTP calls chunk by chunk (up
+                // to 60 per pass, 120s+ total). Every user write (save
+                // draft, queue reply) stalled behind them for minutes. All
+                // other LLM lanes already use long_op_guard() — a dedicated
+                // connection that never pins the writer lane — so these
+                // three arms now do the same.
                 "embed_knowledge_chunks" => {
-                    let conn = self.lock();
+                    let conn = self.db.long_op_guard();
                     let n = crate::embeddings::embed_pending_knowledge(
                         &conn,
                         self.qdrant.as_deref(),
@@ -1467,7 +1527,7 @@ impl WorkerManager {
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
                 }
                 "embed_docs_chunks" => {
-                    let conn = self.lock();
+                    let conn = self.db.long_op_guard();
                     let n = crate::embeddings::embed_pending_docs(
                         &conn,
                         self.qdrant.as_deref(),
@@ -1476,7 +1536,7 @@ impl WorkerManager {
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
                 }
                 "embed_conversation_chunks" => {
-                    let conn = self.lock();
+                    let conn = self.db.long_op_guard();
                     let n = crate::embeddings::embed_pending_conversation_chunks(
                         &conn,
                         self.qdrant.as_deref(),
@@ -3092,14 +3152,15 @@ impl WorkerManager {
                 )?;
                 return Ok(());
             }
-            let collection_remote = draft
+            // Audit fix (C2, live): docs collection ids are hex ObjectIds (TEXT).
+            let collection_remote: Option<String> = draft
                 .collection_local_id
                 .or_else(|| payload.get("collectionLocalId").and_then(|v| v.as_i64()))
                 .and_then(|local| {
                     conn.query_row(
                         "SELECT remote_id FROM docs_collections WHERE id = ?1",
                         rusqlite::params![local],
-                        |r| r.get::<_, i64>(0),
+                        |r| r.get::<_, String>(0),
                     )
                     .ok()
                 });
@@ -3126,7 +3187,7 @@ impl WorkerManager {
 
         // Step 1: upsert the Docs API draft.
         let input = crate::helpscout::DocArticleDraftInput {
-            collection_id: collection_remote,
+            collection_id: collection_remote.clone(),
             name: draft.title.clone(),
             text: draft.body.clone(),
             remote_id: draft.remote_article_id,
@@ -3154,7 +3215,7 @@ impl WorkerManager {
                 &conn,
                 draft_id,
                 "draft_upserted",
-                Some(remote_id),
+                Some(remote_id.clone()),
                 None,
                 None,
             )?;
@@ -3163,7 +3224,7 @@ impl WorkerManager {
         // Step 2: publish the final approved text.
         if let Err(e) = self
             .provider
-            .publish_doc_article(remote_id, &draft.title, &draft.body)
+            .publish_doc_article(remote_id.clone(), &draft.title, &draft.body)
             .await
         {
             let msg = e.to_string();
@@ -3184,7 +3245,7 @@ impl WorkerManager {
                 &conn,
                 draft_id,
                 "published",
-                Some(remote_id),
+                Some(remote_id.clone()),
                 None,
                 None,
             )?;
@@ -3192,11 +3253,11 @@ impl WorkerManager {
 
         // Step 3: verify by re-syncing the article into the local mirror
         // (FTS + chunks re-index ride the same upsert path).
-        match self.provider.get_doc_article(remote_id).await {
+        match self.provider.get_doc_article(remote_id.clone()).await {
             Ok(Some(article)) => {
                 let collection_local = {
                     let conn = self.lock();
-                    crate::sync_engine::local_id(&conn, "docs_collections", collection_remote)
+                    crate::sync_engine::local_id_str(&conn, "docs_collections", &collection_remote)
                 };
                 if let Some(col_local) = collection_local {
                     let mut conn = self.lock();
@@ -3207,7 +3268,7 @@ impl WorkerManager {
                     &conn,
                     draft_id,
                     "verified",
-                    Some(remote_id),
+                    Some(remote_id.clone()),
                     None,
                     None,
                 )?;
@@ -3229,7 +3290,7 @@ impl WorkerManager {
                     &conn,
                     draft_id,
                     "published",
-                    Some(remote_id),
+                    Some(remote_id.clone()),
                     None,
                     Some(&msg),
                 )?;
@@ -3238,7 +3299,7 @@ impl WorkerManager {
         tracing::info!(
             operation = "publish_article_draft",
             draft_id,
-            remote_id,
+            remote_id = %remote_id,
             "article published and verified"
         );
         use crate::events::ServerEvent;
@@ -3726,6 +3787,31 @@ impl WorkerManager {
             )?;
             return Ok(());
         }
+        // Audit fix (M6): the guard used to register a hook with an EMPTY
+        // secret when the relay URL was set but the stored secret was
+        // blank. Every delivery then failed signature verification (403),
+        // Help Scout discarded the event 10 times and deactivated the
+        // hook — and this very job re-registered the same doomed hook
+        // every 6 hours, forever. Refuse to register without a secret and
+        // surface the misconfiguration instead.
+        if secret.trim().is_empty() {
+            let conn = self.lock();
+            crate::webhook_health::store_outcome(
+                &conn,
+                &crate::webhook_health::failed_outcome(
+                    "relay URL is configured but the webhook secret is empty — \
+                     refusing to register a hook that would fail signature \
+                     verification on every delivery. Set the webhook secret in \
+                     Settings (same secret you register on the Help Scout \
+                     webhook) and run the check again.",
+                ),
+            )?;
+            tracing::warn!(
+                operation = "webhook_health_check",
+                "webhook relay misconfigured: URL set but secret empty — registration skipped"
+            );
+            return Ok(());
+        }
         match crate::webhook_health::run_check(self.provider.as_ref(), &url, &secret).await {
             Ok(outcome) => {
                 let healed = outcome.is_healed();
@@ -4200,23 +4286,23 @@ mod batch14_tests {
                     200,
                     serde_json::json!({
                         "article": {
-                            "id": 909, "status": "notpublished",
+                            "id": "abc909abc909abc909abc909", "status": "notpublished",
                             "name": "Fix the export timeout",
                             "collectionId": 55
                         }
                     }),
                 ),
-                ("PUT", p) if p == "/v1/articles/909" || p == "/v1/articles/909/drafts" => {
+                ("PUT", p) if p == "/v1/articles/abc909abc909abc909abc909" || p == "/v1/articles/abc909abc909abc909abc909/drafts" => {
                     MockResponse::json(
                         200,
-                        serde_json::json!({"article": {"id": 909, "status": "published"}}),
+                        serde_json::json!({"article": {"id": "abc909abc909abc909abc909", "status": "published"}}),
                     )
                 }
-                ("GET", "/v1/articles/909") => MockResponse::json(
+                ("GET", "/v1/articles/abc909abc909abc909abc909") => MockResponse::json(
                     200,
                     serde_json::json!({
                         "article": {
-                            "id": 909, "status": "published",
+                            "id": "abc909abc909abc909abc909", "status": "published",
                             "name": "Fix the export timeout",
                             "text": "Clear the export cache and re-run.",
                             "collectionId": 55,
@@ -4238,7 +4324,7 @@ mod batch14_tests {
     fn seed_approved_draft(db: &crate::db::DbHandle) -> (i64, i64) {
         db.with_write(|conn| {
             conn.execute(
-                "INSERT INTO docs_collections (remote_id, name) VALUES (55, 'Troubleshooting')",
+                "INSERT INTO docs_collections (remote_id, name) VALUES ('col55abc55abc55abc55abc', 'Troubleshooting')",
                 [],
             )
             .expect("collection");
@@ -4292,11 +4378,12 @@ mod batch14_tests {
             .expect("runtime");
         rt.block_on(async { manager.tick().await });
 
-        let (state, remote, mirrored): (String, Option<i64>, Option<String>) =
+        // Audit fix (C2, live): the remote article id is a hex ObjectId string.
+        let (state, remote, mirrored): (String, Option<String>, Option<String>) =
             db.with_read(|conn| {
                 conn.query_row(
                     "SELECT publish_state, remote_article_id,
-                        (SELECT text FROM docs_articles WHERE remote_id = 909)
+                        (SELECT text FROM docs_articles WHERE remote_id = 'abc909abc909abc909abc909')
                  FROM article_drafts WHERE id = ?1",
                     rusqlite::params![draft_id],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -4304,7 +4391,7 @@ mod batch14_tests {
                 .unwrap_or(("missing".into(), None, None))
             });
         assert_eq!(state, "verified", "the chain must reach verified");
-        assert_eq!(remote, Some(909));
+        assert_eq!(remote.as_deref(), Some("abc909abc909abc909abc909"));
         assert!(
             mirrored
                 .as_deref()
@@ -4324,8 +4411,8 @@ mod batch14_tests {
             })
         };
         assert!(saw("POST", "/v1/articles"), "create must run first");
-        assert!(saw("PUT", "/v1/articles/909"), "publish");
-        assert!(saw("GET", "/v1/articles/909"), "verify re-sync");
+        assert!(saw("PUT", "/v1/articles/abc909abc909abc909abc909"), "publish");
+        assert!(saw("GET", "/v1/articles/abc909abc909abc909abc909"), "verify re-sync");
 
         // Re-publishing the now-linked draft takes the update path:
         // PUT /v1/articles/{id}/drafts upserts the draft copy of the
@@ -4350,7 +4437,7 @@ mod batch14_tests {
             })
         };
         assert!(
-            saw("PUT", "/v1/articles/909/drafts"),
+            saw("PUT", "/v1/articles/abc909abc909abc909abc909/drafts"),
             "the linked-article update upserts the draft copy"
         );
         let state: String = db.with_read(|conn| {

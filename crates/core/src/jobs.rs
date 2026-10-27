@@ -426,15 +426,56 @@ pub fn recover_stale_jobs(conn: &Connection) -> Result<usize> {
     Ok(rows)
 }
 
-pub fn requeue_stale_running_jobs(conn: &Connection, threshold_minutes: i64) -> Result<usize> {
-    let rows = conn.execute(
-        "UPDATE jobs SET status = 'queued',
-             error = 'Re-queued by maintenance sweep: running longer than threshold'
-          WHERE status = 'running'
-            AND started_at < datetime('now', ?1)",
-        params![format!("-{threshold_minutes} minutes")],
-    )?;
-    Ok(rows)
+pub fn requeue_stale_running_jobs(
+    conn: &Connection,
+    threshold_minutes: i64,
+    executing: &std::collections::HashSet<i64>,
+    boot_unix: i64,
+) -> Result<usize> {
+    // Audit fix (M16): the sweep used to re-queue every job running past
+    // the threshold — including jobs actively executing in THIS process
+    // (long outreach batches, LLM notes), double-executing them and
+    // duplicating sends. Two guards now:
+    //   1. jobs in the live executing set are skipped outright;
+    //   2. jobs started after THIS process booted have a live executor
+    //      (tick() runs them inline) — only pre-boot rows, orphaned by a
+    //      dead process, are safe to re-queue.
+    let stale: Vec<i64> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM jobs
+              WHERE status = 'running'
+                AND started_at < datetime('now', ?1)",
+        )?;
+        let rows = stmt.query_map(
+            params![format!("-{threshold_minutes} minutes")],
+            |r| r.get::<_, i64>(0),
+        )?;
+        rows.filter_map(|r| r.ok())
+            .filter(|id| !executing.contains(id))
+            .collect()
+    };
+    let mut requeued = 0usize;
+    for id in stale {
+        let started_unix: i64 = conn
+            .query_row(
+                "SELECT CAST(strftime('%s', started_at) AS INTEGER) FROM jobs WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap_or(i64::MAX);
+        if started_unix >= boot_unix {
+            // Started by this process: its executor is alive — leave it.
+            continue;
+        }
+        let n = conn.execute(
+            "UPDATE jobs SET status = 'queued',
+                 error = 'Re-queued by maintenance sweep: orphaned by a previous process'
+              WHERE id = ?1 AND status = 'running'",
+            params![id],
+        )?;
+        requeued += n;
+    }
+    Ok(requeued)
 }
 
 pub fn list_outbound_jobs(

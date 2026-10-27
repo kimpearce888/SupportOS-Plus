@@ -194,6 +194,7 @@ fn sample_customer(i: usize) -> HsCustomer {
             kind: Some("home".into()),
         }],
         phones: Vec::new(),
+        chats: Vec::new(),
         websites: Vec::new(),
         social_profiles: Vec::new(),
         address: None,

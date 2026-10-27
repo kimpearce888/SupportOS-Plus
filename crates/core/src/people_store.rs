@@ -998,7 +998,10 @@ pub fn get_customer_detail(conn: &Connection, customer_id: i64) -> Result<Option
     let mut stmt = conn.prepare(
         "SELECT cv.number, cv.subject,
                 (SELECT t.body_text FROM conversation_threads t
-                  WHERE t.conversation_id = cv.id AND t.type = 'reply'
+                  WHERE t.conversation_id = cv.id
+                    AND (t.type = 'reply'
+                         OR (t.type IN ('message','chat','phone')
+                             AND t.from_type IN ('user','agent')))
                     AND t.state = 'published' AND t.deleted_at IS NULL
                   ORDER BY COALESCE(t.remote_created_at, t.created_at) DESC LIMIT 1) AS resolution,
                 cv.closed_at

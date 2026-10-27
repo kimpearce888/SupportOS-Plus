@@ -93,6 +93,16 @@ pub fn apply_m039(conn: &Connection) -> Result<()> {
             type        TEXT
         );
 
+        -- Audit fix (C4): customer chat handles (GET /v2/customers/{id}/chats)
+        -- had no local mirror at all — they were silently dropped on sync.
+        CREATE TABLE IF NOT EXISTS customer_chats (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            remote_id   INTEGER UNIQUE,
+            customer_id INTEGER NOT NULL REFERENCES customers (id) ON DELETE CASCADE,
+            value       TEXT,
+            type        TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS customer_addresses (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             remote_id   INTEGER UNIQUE,

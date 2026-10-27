@@ -77,6 +77,8 @@ pub struct HsCustomer {
     #[serde(default)]
     pub phones: Vec<HsCustomerPhone>,
     #[serde(default)]
+    pub chats: Vec<HsCustomerChat>,
+    #[serde(default)]
     pub websites: Vec<HsCustomerWebsite>,
     #[serde(default)]
     pub social_profiles: Vec<HsCustomerSocialProfile>,
@@ -84,6 +86,53 @@ pub struct HsCustomer {
     pub address: Option<HsCustomerAddress>,
     #[serde(default)]
     pub properties: Vec<HsCustomerPropertyValue>,
+}
+
+impl HsCustomer {
+    /// An all-empty customer shell — every field unset. Used to assemble
+    /// channel-only results (see `get_customer_channels`) without repeating
+    /// twenty `None`s.
+    #[must_use]
+    pub fn placeholder() -> Self {
+        Self {
+            remote_id: 0,
+            first_name: None,
+            last_name: None,
+            email: None,
+            organization: None,
+            job_title: None,
+            phone: None,
+            created_at: None,
+            updated_at: None,
+            photo_url: None,
+            organization_id: None,
+            background: None,
+            age: None,
+            gender: None,
+            location: None,
+            emails: Vec::new(),
+            phones: Vec::new(),
+            chats: Vec::new(),
+            websites: Vec::new(),
+            social_profiles: Vec::new(),
+            address: None,
+            properties: Vec::new(),
+        }
+    }
+
+    /// True when no contact channels are embedded in the payload. The real
+    /// Help Scout API NEVER embeds them (they live behind per-customer
+    /// sub-resources — see `HelpScoutProvider::get_customer_channels`), so
+    /// an all-empty result on a freshly fetched customer means the channels
+    /// must be fetched separately, not that the customer has none.
+    #[must_use]
+    pub fn channels_all_empty(&self) -> bool {
+        self.emails.is_empty()
+            && self.phones.is_empty()
+            && self.chats.is_empty()
+            && self.websites.is_empty()
+            && self.social_profiles.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -96,6 +145,16 @@ pub struct HsCustomerEmail {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsCustomerPhone {
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(rename = "type", default)]
+    pub kind: Option<String>,
+}
+
+/// Live-API audit fix (C4): Help Scout stores customer chat handles behind
+/// the `/v2/customers/{id}/chats` sub-resource; they never appear embedded.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HsCustomerChat {
     #[serde(default)]
     pub value: Option<String>,
     #[serde(rename = "type", default)]
@@ -290,10 +349,14 @@ pub struct HsChatEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsDocArticle {
-    pub remote_id: i64,
-    pub collection_id: i64,
+    /// Audit fix (C2, live): Docs API ids are 24-char hex ObjectIds
+    /// ("6adf725b922c92c2dd6ce7d7") — the old i64 parsing turned every id
+    /// into 0, so category/article URLs hit `/0/` and the API answered
+    /// 400 "ECMA 262 regex does not match 0".
+    pub remote_id: String,
+    pub collection_id: String,
     #[serde(default)]
-    pub category_id: Option<i64>,
+    pub category_id: Option<String>,
     #[serde(default)]
     pub number: Option<i64>,
     pub slug: Option<String>,
@@ -331,14 +394,14 @@ pub struct HsReportRow {
 /// K3: the article draft the review queue publishes through the Docs API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DocArticleDraftInput {
-    /// The Docs API collection the article belongs to.
-    pub collection_id: i64,
+    /// The Docs API collection the article belongs to (24-char hex ObjectId).
+    pub collection_id: String,
     pub name: String,
     /// Markdown body (published as the article `text`).
     pub text: String,
     /// When set, the linked article is updated (PUT /v1/articles/{id}/drafts);
     /// when absent a new `notpublished` article is created (POST /v1/articles).
-    pub remote_id: Option<i64>,
+    pub remote_id: Option<String>,
     pub slug: Option<String>,
 }
 
@@ -474,7 +537,8 @@ pub struct HsUserStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsDocCollection {
-    pub remote_id: i64,
+    /// Audit fix (C2, live): 24-char hex ObjectId, see HsDocArticle.
+    pub remote_id: String,
     pub slug: Option<String>,
     pub name: String,
     #[serde(default)]
@@ -487,8 +551,9 @@ pub struct HsDocCollection {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsDocCategory {
-    pub remote_id: i64,
-    pub collection_id: i64,
+    /// Audit fix (C2, live): 24-char hex ObjectId, see HsDocArticle.
+    pub remote_id: String,
+    pub collection_id: String,
     pub slug: Option<String>,
     pub name: String,
     #[serde(default)]
@@ -675,6 +740,16 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(None)
     }
 
+    /// Live-API audit fix (C4): Help Scout NEVER embeds customer contact
+    /// channels in the customer payload — emails/phones/chats/websites/social
+    /// profiles live behind per-customer sub-resources
+    /// (`GET /v2/customers/{id}/emails|phones|chats|websites|social-profiles`).
+    /// Returns the fetched channels; the default (mock providers without the
+    /// endpoints) reports none so callers keep their existing behavior.
+    async fn get_customer_channels(&self, _customer_id: i64) -> Result<Option<HsCustomer>> {
+        Ok(None)
+    }
+
     async fn get_user_status(&self, _user_id: i64) -> Result<Option<HsUserStatus>> {
         Ok(None)
     }
@@ -687,11 +762,11 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(Vec::new())
     }
 
-    async fn list_doc_categories(&self, _collection_id: i64) -> Result<Vec<HsDocCategory>> {
+    async fn list_doc_categories(&self, _collection_id: String) -> Result<Vec<HsDocCategory>> {
         Ok(Vec::new())
     }
 
-    async fn list_doc_articles(&self, _collection_id: i64) -> Result<Vec<HsDocArticle>> {
+    async fn list_doc_articles(&self, _collection_id: String) -> Result<Vec<HsDocArticle>> {
         Ok(Vec::new())
     }
 
@@ -699,7 +774,7 @@ pub trait HelpScoutProvider: Send + Sync {
     /// when the article is unreachable (the caller decides whether that is
     /// an error); the default covers every connection without Docs write
     /// access.
-    async fn get_doc_article(&self, _remote_id: i64) -> Result<Option<HsDocArticle>> {
+    async fn get_doc_article(&self, _remote_id: String) -> Result<Option<HsDocArticle>> {
         Ok(None)
     }
 
@@ -708,7 +783,7 @@ pub trait HelpScoutProvider: Send + Sync {
     /// article's draft copy (PUT /v1/articles/{id}/drafts). Returns the
     /// remote article id. The default rejects: a connection without the
     /// Docs API never pretends to publish.
-    async fn upsert_doc_article_draft(&self, _input: &DocArticleDraftInput) -> Result<i64> {
+    async fn upsert_doc_article_draft(&self, _input: &DocArticleDraftInput) -> Result<String> {
         Err(Error::Config(
             "Docs API publishing is unavailable on this connection - no Docs API key is \
              configured."
@@ -717,7 +792,7 @@ pub trait HelpScoutProvider: Send + Sync {
     }
 
     /// K3: publish the article with its final text (PUT /v1/articles/{id}).
-    async fn publish_doc_article(&self, _remote_id: i64, _name: &str, _text: &str) -> Result<()> {
+    async fn publish_doc_article(&self, _remote_id: String, _name: &str, _text: &str) -> Result<()> {
         Err(Error::Config(
             "Docs API publishing is unavailable on this connection - no Docs API key is \
              configured."
@@ -891,6 +966,11 @@ pub struct CreateConversationInput {
     pub body: String,
     pub tags: Vec<String>,
     pub status: Option<String>,
+    /// Live-API audit fix (C1): the real POST /v2/conversations REQUIRES a
+    /// top-level `type` (the channel: email|chat|phone) — it answers
+    /// `400 {"path":"type","message":"must not be null"}` without one.
+    /// `None` means the default channel, email.
+    pub channel: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1245,7 +1325,7 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
         Ok(world.doc_collections.clone())
     }
 
-    async fn list_doc_categories(&self, collection_id: i64) -> Result<Vec<HsDocCategory>> {
+    async fn list_doc_categories(&self, collection_id: String) -> Result<Vec<HsDocCategory>> {
         let world = self.lock_world();
         Ok(world
             .doc_categories
@@ -1255,7 +1335,7 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
             .collect())
     }
 
-    async fn list_doc_articles(&self, collection_id: i64) -> Result<Vec<HsDocArticle>> {
+    async fn list_doc_articles(&self, collection_id: String) -> Result<Vec<HsDocArticle>> {
         let world = self.lock_world();
         Ok(world
             .doc_articles

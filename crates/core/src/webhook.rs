@@ -148,6 +148,55 @@ pub fn set_webhook_event_state(
     Ok(())
 }
 
+/// Audit fix (M8): a crash between marking an event 'processing' and its
+/// terminal write used to strand the row forever — nothing ever looked at
+/// 'processing' rows again. Runs on every webhook receipt: rows stuck in
+/// 'processing' past the lease return to 'pending' (a later delivery or
+/// the next event re-drives them); past the retry budget they fail
+/// honestly instead of looping forever.
+pub fn recover_stale_webhook_events(conn: &Connection) -> Result<usize> {
+    const LEASE_MINUTES: i64 = 15;
+    const MAX_STALE_ATTEMPTS: i64 = 5;
+    let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(LEASE_MINUTES))
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+    let stranded: Vec<i64> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM webhook_events
+              WHERE processing_state = 'processing' AND received_at < ?1",
+        )?;
+        let rows = stmt.query_map(params![cutoff], |r| r.get::<_, i64>(0))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+    let mut recovered = 0usize;
+    for id in stranded {
+        let attempts: i64 = conn
+            .query_row(
+                "SELECT attempts FROM webhook_events WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if attempts + 1 >= MAX_STALE_ATTEMPTS {
+            set_webhook_event_state(
+                conn,
+                id,
+                "failed",
+                Some("processing lease expired repeatedly — giving up"),
+            )?;
+        } else {
+            set_webhook_event_state(
+                conn,
+                id,
+                "pending",
+                Some("processing lease expired — requeued"),
+            )?;
+        }
+        recovered += 1;
+    }
+    Ok(recovered)
+}
+
 pub fn prune_webhook_events(conn: &Connection, keep: u32) -> Result<()> {
     // Clean-audit item 94: the pre-fix prune kept the newest `keep` rows
     // REGARDLESS of state — under a backlog (an offline weekend, a burst

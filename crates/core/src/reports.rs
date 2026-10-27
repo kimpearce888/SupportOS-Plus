@@ -582,7 +582,11 @@ fn metric_spec(metric: ReportMetricKey) -> MetricSpec {
             date_expr: "t.created_at",
             value_expr: "COUNT(*)",
             extra_where: &[
-                "t.type = 'reply'",
+                // Audit fix (H5): the real API has no 'reply' thread type —
+                // agent replies are 'message' (chat/phone too) authored by a
+                // user. Legacy mock-seeded 'reply' rows count as agent
+                // replies unconditionally (they never occur live).
+                "(t.type = 'reply' OR (t.type IN ('message','chat','phone') AND t.from_type IN ('user','agent')))",
                 "t.deleted_at IS NULL",
                 "t.state = 'published'",
             ],

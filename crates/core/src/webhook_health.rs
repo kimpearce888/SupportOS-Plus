@@ -23,21 +23,23 @@ use rusqlite::Connection;
 use crate::error::Result;
 use crate::helpscout::{HelpScoutProvider, HsWebhookConfig};
 
-/// Every event the app actually processes (the match arms of
-/// `webhook_handler::process_event`) — the health check re-registers a
-/// hook that is subscribed to anything less.
+/// Events registered on the platform hook. Audit fix (M7): the list used
+/// to contain 6 names absent from HelpScout's documented Mailbox-API
+/// webhook catalogue (`convo.custom-fields`, `convo.ai-answers.created`,
+/// `user.status.changed`, `tag.created`, `tag.updated`, `tag.deleted`) —
+/// if the platform ever starts rejecting unknown names the registration
+/// would 400 forever and health would be stuck "failed". Only documented
+/// events are registered now; the handler keeps tolerating the extras
+/// should the user subscribe to them manually.
 pub const REQUIRED_EVENTS: &[&str] = &[
     "convo.created",
     "convo.updated",
     "convo.assigned",
     "convo.status",
-    "convo.tags",
-    "convo.custom-fields",
     "convo.moved",
     "convo.customer.reply.created",
     "convo.agent.reply.created",
     "convo.note.created",
-    "convo.ai-answers.created",
     "convo.merged",
     "convo.deleted",
     "customer.created",
@@ -47,10 +49,6 @@ pub const REQUIRED_EVENTS: &[&str] = &[
     "organization.updated",
     "organization.deleted",
     "satisfaction.ratings",
-    "tag.created",
-    "tag.updated",
-    "tag.deleted",
-    "user.status.changed",
     "beacon.chat.created",
     "beacon.chat.customer.replied",
     "beacon.chat.agent.replied",

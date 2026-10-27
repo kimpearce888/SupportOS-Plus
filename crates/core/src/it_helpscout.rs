@@ -319,10 +319,13 @@ fn create_conversation_and_thread_roundtrips() {
     let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         match (req.method.as_str(), req.path.as_str()) {
-            ("POST", "/v3/conversations") => MockResponse::json(
-                201,
-                json!({"id": 101, "number": 779, "threads": [{"id": 502}]}),
-            ),
+            // Audit fix (C1): re-pinned to the REAL create contract —
+            // POST /v2/conversations (not /v3) answers 201 with an EMPTY
+            // body and the new id in the Resource-Id header. The old mock
+            // fed a JSON body with "id"/"number"/"threads", which encoded
+            // a contract that does not exist and kept live creates broken.
+            ("POST", "/v2/conversations") => MockResponse::empty(201)
+                .with_header("Resource-Id", "101"),
             ("POST", "/v2/conversations/101/reply") => MockResponse::json(201, json!({"id": 503})),
             ("POST", "/v2/conversations/101/notes") => MockResponse::json(201, json!({"id": 504})),
             ("PATCH", "/v2/conversations/101") => MockResponse::empty(204),
@@ -345,18 +348,27 @@ fn create_conversation_and_thread_roundtrips() {
                 subject: "New issue".into(),
                 body: "Something broke".into(),
                 tags: vec!["bug".into()],
-                status: Some("active".into()),
+                // Audit fix (C1): None must default the status to "open"
+                // and the channel to "email" (the live API 400s without
+                // both top-level fields).
+                status: None,
+                channel: None,
             })
             .await
         })
         .expect("create_conversation");
+    // The real contract: id arrives via the Resource-Id header; number and
+    // thread id are unknown at create time (empty 201 body).
     assert_eq!(created.conversation_id, 101);
-    assert_eq!(created.number, 779);
-    assert_eq!(created.thread_id, 502);
+    assert_eq!(created.number, 0);
+    assert_eq!(created.thread_id, 0);
     let body: Value = serde_json::from_str(&mock.hits()[0].body).expect("request body json");
     assert_eq!(body["subject"], "New issue");
     assert_eq!(body["mailboxId"], 1);
     assert_eq!(body["threads"][0]["customer"]["id"], 900);
+    // Audit fix (C1): required top-level fields must be present.
+    assert_eq!(body["type"], "email");
+    assert_eq!(body["status"], "open");
 
     let reply = rt
         .block_on(async {
@@ -1124,12 +1136,15 @@ fn docs_api_skipped_entirely_without_key() {
 #[test]
 fn docs_api_uses_basic_auth_on_its_own_base() {
     let _secrets = secrets_guard();
-    // 1.3.0 ground truth: the Docs API is v1-only with an {items} envelope
-    // (the pre-1.3.0 /v2/ paths 404'd on the real service).
+    // Audit fix (C2): re-pinned to the REAL Docs API contract — every v1
+    // list response wraps page/pages/items in a keyed envelope
+    // ({"collections":{...}}). The old mock fed a top-level {"items":...},
+    // encoding a shape the real service never returns and keeping the
+    // Help-Center sync at 0 records against production.
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
-        json!({"page": 1, "pages": 1, "count": 1,
-               "items": [{"id": 3, "name": "Docs", "slug": "docs", "articleCount": 2}]}),
+        json!({"collections": {"page": 1, "pages": 1, "count": 1,
+               "items": [{"id": "6adf725b922c92c2dd6ce7d7", "name": "Docs", "slug": "docs", "articleCount": 2}]}}),
     )))
     .expect("mock server");
     let db = fixture_db();
@@ -1142,6 +1157,9 @@ fn docs_api_uses_basic_auth_on_its_own_base() {
         .expect("collections");
     assert_eq!(cols.len(), 1);
     assert_eq!(cols[0].name, "Docs");
+    // Audit fix (C2, live): the Docs API's ids are 24-char hex ObjectIds —
+    // the mirror must carry them verbatim (the old i64 parse zeroed them).
+    assert_eq!(cols[0].remote_id, "6adf725b922c92c2dd6ce7d7");
 
     let token_req = {
         let hits = mock.hits();

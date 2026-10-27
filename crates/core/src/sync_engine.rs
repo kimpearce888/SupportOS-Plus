@@ -80,7 +80,10 @@ pub struct ReconciliationResult {
 }
 
 fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339()
+    // Help Scout's list endpoints reject RFC 3339 with sub-second precision
+    // or a +00:00 offset ("Invalid date - expected ISO 8601 format
+    // (yyyy-MM-dd'T'HH:mm:ss'Z')"). Format exactly as the API demands.
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 /// Clears the engine's `running` flag when dropped — panic-safe, unlike
@@ -326,7 +329,8 @@ pub fn get_incremental_since(
         .flatten()?;
     let t = chrono::DateTime::parse_from_rfc3339(last.as_deref().unwrap_or_default()).ok()?;
     let shifted = t - chrono::Duration::minutes(overlap_minutes);
-    Some(shifted.to_rfc3339())
+    // Same format contract as now_iso(): seconds precision, literal Z.
+    Some(shifted.format("%Y-%m-%dT%H:%M:%SZ").to_string())
 }
 
 pub fn last_successful_sync(conn: &Connection) -> Option<String> {
@@ -366,6 +370,18 @@ pub fn set_cursor(conn: &Connection, resource: &str, cursor: Option<&str>) {
          ON CONFLICT(resource) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
         params![resource, cursor, now_iso()],
     );
+}
+
+/// Audit fix (C2, live): Docs API ids are 24-char hex ObjectIds — the
+/// docs mirror's `remote_id` columns store them as TEXT (SQLite is
+/// dynamically typed; the INTEGER affinity keeps legacy integer rows too).
+pub fn local_id_str(conn: &Connection, table: &str, remote_id: &str) -> Option<i64> {
+    conn.query_row(
+        &format!("SELECT id FROM {table} WHERE remote_id = ?1"),
+        params![remote_id],
+        |r| r.get(0),
+    )
+    .ok()
 }
 
 pub fn local_id(conn: &Connection, table: &str, remote_id: i64) -> Option<i64> {
@@ -549,7 +565,7 @@ fn upsert_doc_collection(conn: &Connection, c: &crate::helpscout::HsDocCollectio
             c.article_count
         ],
     )?;
-    local_id(conn, "docs_collections", c.remote_id)
+    local_id_str(conn, "docs_collections", &c.remote_id)
         .ok_or_else(|| Error::Other("docs_collections upsert lost its row".into()))
 }
 
@@ -577,7 +593,8 @@ pub(crate) fn upsert_doc_article(
 ) -> Result<()> {
     let category_local = a
         .category_id
-        .and_then(|cid| local_id(conn, "docs_categories", cid));
+        .as_deref()
+        .and_then(|cid| local_id_str(conn, "docs_categories", cid));
     let preview = a.text.as_deref().filter(|t| !t.is_empty()).map(|t| {
         let collapsed = t.split_whitespace().collect::<Vec<_>>().join(" ");
         crate::embeddings::utf16_slice(&collapsed, 0, 220)
@@ -633,7 +650,7 @@ pub(crate) fn upsert_doc_article(
     if content_changed {
         let id = match existing {
             Some((id, _)) => id,
-            None => local_id(conn, "docs_articles", a.remote_id)
+            None => local_id_str(conn, "docs_articles", &a.remote_id)
                 .ok_or_else(|| Error::Other("docs article upsert lost its row".into()))?,
         };
         reindex_doc_fts(conn, id, &a.name, a.text.as_deref())?;
@@ -1458,6 +1475,31 @@ impl SyncEngine {
                 if n > 0 {
                     tracing::debug!(conversations = n, "interaction snapshots built");
                 }
+                // Audit fix (C3): the FTS corpus was NEVER built in production
+                // — a `rebuild_search_index` handler existed but nothing ever
+                // enqueued it, so Search stayed at 0 hits forever against a
+                // real account (fts_conversations = 0 rows after 2h of live
+                // syncing). Queue the rebuild after every initial pass.
+                if !cancelled {
+                    let already: bool = conn
+                        .query_row(
+                            "SELECT 1 FROM jobs WHERE type = 'rebuild_search_index'
+                              AND status = 'queued' LIMIT 1",
+                            [],
+                            |_| Ok(true),
+                        )
+                        .unwrap_or(false);
+                    if !already {
+                        let _ = crate::jobs::enqueue_on(
+                            &conn,
+                            "sync",
+                            "rebuild_search_index",
+                            "{}",
+                            3,
+                            2,
+                        );
+                    }
+                }
                 let _ = crate::audit::log_event(
                     &conn,
                     if cancelled || failed > 0 { "warn" } else { "info" },
@@ -1615,6 +1657,28 @@ impl SyncEngine {
             let processed: i64 = results.iter().map(|r| r.processed).sum();
             {
                 let conn = self.lock();
+                // Audit fix (C3): incremental passes change conversations and
+                // threads too — keep the FTS corpus fresh after every pass
+                // (the per-conversation index-at-ingest below covers most of
+                // it; this sweep is the safety net for gap-filling).
+                let already: bool = conn
+                    .query_row(
+                        "SELECT 1 FROM jobs WHERE type = 'rebuild_search_index'
+                          AND status = 'queued' LIMIT 1",
+                        [],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
+                if !already {
+                    let _ = crate::jobs::enqueue_on(
+                        &conn,
+                        "sync",
+                        "rebuild_search_index",
+                        "{}",
+                        3,
+                        2,
+                    );
+                }
                 let _ = crate::audit::log_event(
                     &conn,
                     if failed == 0 { "info" } else { "warn" },
@@ -2197,7 +2261,10 @@ impl SyncEngine {
                 let collections = self.provider.list_doc_collections().await?;
                 let mut processed = 0;
                 for col in &collections {
-                    let categories = self.provider.list_doc_categories(col.remote_id).await?;
+                    let categories = self
+                        .provider
+                        .list_doc_categories(col.remote_id.clone())
+                        .await?;
                     let conn = self.lock();
                     let local = upsert_doc_collection(&conn, col)?;
                     upsert_doc_categories(&conn, local, &categories)?;
@@ -2212,16 +2279,17 @@ impl SyncEngine {
             }
             "docs_articles" => {
                 let mut processed = 0;
-                let collections: Vec<i64> = {
+                // Audit fix (C2, live): collection remote ids are hex ObjectIds (TEXT).
+                let collections: Vec<String> = {
                     let conn = self.lock();
                     let mut stmt = conn.prepare("SELECT remote_id FROM docs_collections")?;
-                    let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+                    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
                     rows.filter_map(|r| r.ok()).collect()
                 };
                 for col_remote in collections {
-                    let articles = self.provider.list_doc_articles(col_remote).await?;
+                    let articles = self.provider.list_doc_articles(col_remote.clone()).await?;
                     let mut conn = self.lock();
-                    if let Some(col_local) = local_id(&conn, "docs_collections", col_remote) {
+                    if let Some(col_local) = local_id_str(&conn, "docs_collections", &col_remote) {
                         for a in &articles {
                             upsert_doc_article(&mut conn, a, col_local)?;
                             processed += 1;
@@ -2293,6 +2361,7 @@ impl SyncEngine {
     ) -> Result<ResourceSyncResult> {
         let resource = "customers".to_string();
         let mut processed = 0;
+        let mut failed = 0i64;
         let mut cursor = if initial {
             let conn = self.lock();
             get_cursor(&conn, "customers")
@@ -2301,7 +2370,17 @@ impl SyncEngine {
         };
         let mut pages = 0i64;
         let mut heartbeat = -1i64;
+        // Audit fix (C4): bound the per-pass channel backfill so a huge
+        // initial crawl cannot monopolize the rate budget — customers
+        // beyond the cap simply stay in the "no local rows" bucket and are
+        // backfilled on a later pass.
+        let mut channel_fetches = 0usize;
+        const CHANNEL_FETCH_BUDGET: usize = 400;
         loop {
+            if self.cancelled() {
+                tracing::info!(resource = "customers", processed, "customer sync cancelled");
+                break;
+            }
             let page = self
                 .provider
                 .list_customers(&CustomerQuery {
@@ -2310,11 +2389,105 @@ impl SyncEngine {
                     ..Default::default()
                 })
                 .await?;
+
+            // Audit fix (C4): the real Help Scout API NEVER embeds contact
+            // channels in the customer payload (they live behind
+            // /v2/customers/{id}/emails|phones|chats|websites|social-profiles).
+            // Syncing a bare payload used to leave customer_emails empty —
+            // every customer showed "—" and Outreach refused to send.
+            //
+            // Decide which customers need a channel fetch WITHOUT holding
+            // the writer lock (the fetches below await network I/O):
+            //   - embedded channels (mock / future API): use them as-is;
+            //   - no local channel rows yet: fetch the sub-resources;
+            //   - rows exist and the payload is bare: preserve them —
+            //     re-upserting a bare payload used to DELETE the stored
+            //     emails (the customers-page "—" bug's second half).
+            let mut to_fetch: Vec<i64> = Vec::new();
+            let mut bare_payload_ids: std::collections::HashSet<i64> =
+                std::collections::HashSet::new();
             {
                 let conn = self.lock();
                 for c in &page.items {
-                    mirror::upsert_customer(&conn, c)?;
-                    processed += 1;
+                    if !c.channels_all_empty() {
+                        continue; // embedded channels — full replace is correct
+                    }
+                    bare_payload_ids.insert(c.remote_id);
+                    match local_id(&conn, "customers", c.remote_id) {
+                        None => to_fetch.push(c.remote_id),
+                        Some(local) => {
+                            let has_rows: i64 = conn
+                                .query_row(
+                                    "SELECT
+                                        (SELECT COUNT(*) FROM customer_emails WHERE customer_id = ?1)
+                                      + (SELECT COUNT(*) FROM customer_phones WHERE customer_id = ?1)
+                                      + (SELECT COUNT(*) FROM customer_chats WHERE customer_id = ?1)
+                                      + (SELECT COUNT(*) FROM customer_websites WHERE customer_id = ?1)
+                                      + (SELECT COUNT(*) FROM customer_social_profiles WHERE customer_id = ?1)",
+                                    params![local],
+                                    |r| r.get(0),
+                                )
+                                .unwrap_or(0);
+                            if has_rows == 0 && channel_fetches < CHANNEL_FETCH_BUDGET {
+                                to_fetch.push(c.remote_id);
+                            }
+                        }
+                    }
+                }
+            }
+            // Fetch the sub-resources with NO lock held (5 GETs each; the
+            // provider's rate limiter spaces them out). A failed fetch
+            // degrades to the bare payload with stored rows preserved.
+            let mut fetched: std::collections::HashMap<i64, crate::helpscout::HsCustomer> =
+                std::collections::HashMap::new();
+            for rid in &to_fetch {
+                match self.provider.get_customer_channels(*rid).await {
+                    Ok(Some(ch)) => {
+                        channel_fetches += 1;
+                        fetched.insert(*rid, ch);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        // One unreachable customer must not sink the page.
+                        tracing::warn!(
+                            customer = rid,
+                            error = %e,
+                            "customer channel fetch failed — syncing the bare profile"
+                        );
+                        failed += 1;
+                    }
+                }
+            }
+            {
+                let conn = self.lock();
+                // Audit fix (M1): one poisoned row used to abort the whole
+                // customers stage (and every later pass re-failed at the
+                // same row). Isolate per-row failures, count them, keep going.
+                for c in &page.items {
+                    let outcome = if let Some(ch) = fetched.get(&c.remote_id) {
+                        let mut full = c.clone();
+                        full.emails = ch.emails.clone();
+                        full.phones = ch.phones.clone();
+                        full.chats = ch.chats.clone();
+                        full.websites = ch.websites.clone();
+                        full.social_profiles = ch.social_profiles.clone();
+                        mirror::upsert_customer(&conn, &full)
+                    } else if bare_payload_ids.contains(&c.remote_id) {
+                        mirror::upsert_customer_basic(&conn, c)
+                    } else {
+                        mirror::upsert_customer(&conn, c)
+                    };
+                    match outcome {
+                        Ok(()) => processed += 1,
+                        Err(e) => {
+                            failed += 1;
+                            let _ = crate::jobs::log_error(
+                                &conn,
+                                "sync",
+                                &format!("customer {} failed to upsert: {e}", c.remote_id),
+                            );
+                        }
+                    }
                 }
             }
             pages += 1;
@@ -2361,7 +2534,7 @@ impl SyncEngine {
         Ok(ResourceSyncResult {
             resource,
             processed,
-            failed: 0,
+            failed,
             error: None,
         })
     }
@@ -2386,7 +2559,15 @@ impl SyncEngine {
         }
         let mut pages = 0i64;
         let mut heartbeat = -1i64;
+        let mut failed = 0i64;
         loop {
+            // Audit fix (M2): the incremental loop had no cancel checks —
+            // "Cancel running sync" was only consulted between resources,
+            // so it looked dead exactly during the long conversation walk.
+            if self.cancelled() {
+                tracing::info!(resource = "conversations", processed, "conversation sync cancelled");
+                break;
+            }
             let page = self
                 .provider
                 .list_conversations(&ConversationQuery {
@@ -2405,7 +2586,24 @@ impl SyncEngine {
                 } else {
                     Vec::new()
                 };
-                self.ingest_conversation(c, &threads, !initial).await?;
+                // Audit fix (M1): one poisoned conversation used to abort
+                // the whole stage — and every later pass re-failed at the
+                // same row forever. Isolate the failure, log it, keep going.
+                if let Err(e) = self.ingest_conversation(c, &threads, !initial).await {
+                    failed += 1;
+                    tracing::warn!(
+                        conversation = c.remote_id,
+                        error = %e,
+                        "conversation ingest failed — isolated"
+                    );
+                    let conn = self.lock();
+                    let _ = crate::jobs::log_error(
+                        &conn,
+                        "sync",
+                        &format!("conversation {} failed to ingest: {e}", c.remote_id),
+                    );
+                    continue;
+                }
                 processed += 1;
                 // Real-time feel: each ingested conversation notifies the
                 // UI immediately, so the inbox fills while the sync runs
@@ -2486,7 +2684,7 @@ impl SyncEngine {
         Ok(ResourceSyncResult {
             resource,
             processed,
-            failed: 0,
+            failed,
             error: None,
         })
     }
@@ -2592,6 +2790,29 @@ impl SyncEngine {
                     }
                     tx.commit()?;
                 }
+            }
+            // Audit fix (C3): index THIS conversation into the FTS corpus at
+            // ingest. Before, `index_conversation_fts` was only reachable
+            // from the bulk rebuild — which nothing ever enqueued — so
+            // fts_conversations stayed at 0 rows and Search returned
+            // "0 hits" on a real account no matter how much data synced.
+            // Indexing per conversation is O(this conversation), keeps the
+            // corpus fresh for both the initial crawl and incremental passes
+            // (webhook ingests share this path), and marks the threads' book
+            // flag so diagnostics stop showing fts_indexed = 0.
+            if let Err(e) = crate::search::index_conversation_fts(&conn, local_id) {
+                let _ = crate::jobs::log_error(
+                    &conn,
+                    "sync",
+                    &format!("FTS index failed for conversation {}: {e}", c.remote_id),
+                );
+            } else {
+                let _ = conn.execute(
+                    "UPDATE conversation_threads SET fts_indexed = 1
+                      WHERE conversation_id = ?1 AND deleted_at IS NULL
+                        AND body_text IS NOT NULL AND LENGTH(body_text) > 0",
+                    params![local_id],
+                );
             }
         }
         // A4 retrieval spine: every ingested conversation is re-chunked

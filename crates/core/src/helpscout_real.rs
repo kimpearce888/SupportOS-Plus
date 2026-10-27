@@ -667,9 +667,24 @@ impl RealHelpScoutProvider {
         // starts at the configured width.
         let concurrency = stored_api_concurrency(&db);
         let queue = ApiQueue::new(Arc::clone(&limiter), concurrency);
-        let docs_queue = ApiQueue::new(Arc::new(HsRateLimiter::new(Some(db.clone()))), concurrency);
+        // Audit fix (M9): both the Mailbox and the Docs limiter used to
+        // persist to the SAME hs_rate_limit row (id = 1), so Connection
+        // Doctor / Settings displayed whichever limiter happened to write
+        // last. The Docs API has no separately surfaced state anywhere in
+        // the UI — keep its limiter in-memory only (send-side enforcement
+        // is unaffected) so the shared row carries only the Mailbox API's
+        // last-reported budget.
+        let docs_queue = ApiQueue::new(Arc::new(HsRateLimiter::new(None)), concurrency);
         Self {
             client: reqwest::Client::builder()
+                // Audit fix (M5): the client used to follow redirects, which
+                // turned Help Scout's 301 "conversation merged" answer into
+                // a silent 200 for the TARGET conversation — merged originals
+                // were re-ingested as their target and stayed stale forever,
+                // and the 301 handler in request_inner was dead code. With
+                // redirects surfaced, sync_engine's merged_or_gone branch
+                // (301) finally runs and the mirror marks them honestly.
+                .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(60))
                 .build()
                 .unwrap_or_default(),
@@ -750,8 +765,35 @@ impl RealHelpScoutProvider {
             return Ok(Value::Null);
         }
         let path = path.to_string();
-        let fut = self.docs_request_inner(&path);
-        self.docs_queue.enqueue(PRIORITY_SYNC, false, fut).await
+        // Audit fix (M4): Docs GETs never retried 429/503 and never backed
+        // off — a single rate-limit blip failed the whole docs pass. Retry
+        // the same throttled lane a bounded number of times with escalating
+        // waits before giving up.
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let fut = self.docs_request_inner(&path);
+            let res = self.docs_queue.enqueue(PRIORITY_SYNC, false, fut).await;
+            match res {
+                Err(e) if attempt < 3 => {
+                    let status = hs_status(&e);
+                    if matches!(status, Some(429) | Some(503)) {
+                        let wait = (5u64 * u64::from(attempt)).min(60);
+                        tracing::warn!(
+                            operation = "docs",
+                            path = %path,
+                            status = ?status,
+                            wait_secs = wait,
+                            "Docs API throttled — retrying"
+                        );
+                        tokio::time::sleep(Duration::from_secs(wait)).await;
+                        continue;
+                    }
+                    return Err(e);
+                }
+                other => return other,
+            }
+        }
     }
 
     async fn docs_request_inner(&self, path: &str) -> Result<Value> {
@@ -875,14 +917,15 @@ impl RealHelpScoutProvider {
 
     /// Map a Docs API article value onto the mirror struct (shared by the
     /// K3 verify fetch; the list path keeps its ref-merge mapping).
-    fn doc_article_from_value(remote_id: i64, article: &Value) -> HsDocArticle {
+    fn doc_article_from_value(remote_id: String, article: &Value) -> HsDocArticle {
         HsDocArticle {
             remote_id,
-            collection_id: article["collectionId"].as_i64().unwrap_or(0),
+            // Audit fix (C2, live): Docs ids are hex ObjectIds — read as strings.
+            collection_id: article["collectionId"].as_str().unwrap_or_default().to_string(),
             category_id: article["categories"]
                 .as_array()
                 .and_then(|a| a.first())
-                .and_then(|c| c["id"].as_i64()),
+                .and_then(|c| c["id"].as_str().map(|s| s.to_string())),
             number: article["number"].as_i64(),
             slug: article["slug"].as_str().map(|s| s.to_string()),
             name: article["name"].as_str().unwrap_or_default().to_string(),
@@ -1555,6 +1598,21 @@ impl RealHelpScoutProvider {
             location: v["location"].as_str().map(|s| s.to_string()),
             emails,
             phones,
+            // Audit fix (C4): chat handles ride the same embed-or-subresource
+            // contract as emails/phones (mock embeds `chatHandles`, the real
+            // API serves GET /v2/customers/{id}/chats).
+            chats: v["chatHandles"]
+                .as_array()
+                .or_else(|| v["chats"].as_array())
+                .map(|a| {
+                    a.iter()
+                        .map(|ch| crate::helpscout::HsCustomerChat {
+                            value: ch["value"].as_str().map(|s| s.to_string()),
+                            kind: ch["type"].as_str().map(|s| s.to_string()),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             websites: v["websites"]
                 .as_array()
                 .map(|a| {
@@ -1597,13 +1655,24 @@ impl RealHelpScoutProvider {
 
     fn map_thread(v: &Value, conversation_id: i64) -> HsThread {
         let recipients = |key: &str| -> Vec<crate::helpscout::HsThreadRecipient> {
+            // Real payloads carry plain email strings in `to`/`cc`; the mock
+            // (and older shape) used {id, email} objects. Accept both.
             v[key]
                 .as_array()
                 .map(|a| {
                     a.iter()
-                        .map(|r| crate::helpscout::HsThreadRecipient {
-                            id: r["id"].as_i64(),
-                            email: r["email"].as_str().map(|s| s.to_string()),
+                        .map(|r| {
+                            if r.is_string() {
+                                crate::helpscout::HsThreadRecipient {
+                                    id: None,
+                                    email: r.as_str().map(|s| s.to_string()),
+                                }
+                            } else {
+                                crate::helpscout::HsThreadRecipient {
+                                    id: r["id"].as_i64(),
+                                    email: r["email"].as_str().map(|s| s.to_string()),
+                                }
+                            }
                         })
                         .collect()
                 })
@@ -1629,8 +1698,20 @@ impl RealHelpScoutProvider {
             status: v["status"].as_str().map(|s| s.to_string()),
             state: v["state"].as_str().map(|s| s.to_string()),
             body: v["body"].as_str().map(|s| s.to_string()),
-            created_by_customer_id: v["createdByCustomer"]["id"].as_i64(),
-            created_by_user_id: v["createdByUser"]["id"].as_i64(),
+            // Live API (v2 + v3) carries a single polymorphic `createdBy`
+            // object: {id, type: "customer"|"user", ...}. The historical
+            // `createdByCustomer`/`createdByUser` keys never appear in real
+            // payloads, which marked every thread `system_user`.
+            created_by_customer_id: if v["createdBy"]["type"].as_str() == Some("customer") {
+                v["createdBy"]["id"].as_i64()
+            } else {
+                v["createdByCustomer"]["id"].as_i64()
+            },
+            created_by_user_id: if v["createdBy"]["type"].as_str() == Some("user") {
+                v["createdBy"]["id"].as_i64()
+            } else {
+                v["createdByUser"]["id"].as_i64()
+            },
             assigned_to_id: v["assignedTo"]["id"].as_i64(),
             created_at: v["createdAt"].as_str().map(|s| s.to_string()),
             to: recipients("to"),
@@ -1676,11 +1757,11 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_mailboxes(&self) -> Result<Vec<HsMailbox>> {
-        let v = self.request("/v2/mailboxes", "GET", None).await?;
-        Ok(v["_embedded"]["mailboxes"]
-            .as_array()
-            .map(|a| a.iter().map(Self::map_mailbox).collect())
-            .unwrap_or_default())
+        // Audit fix (M10): was a single-page read — mailboxes beyond page 1
+        // (51+) were silently invisible. The generic HAL paginator caps at
+        // 1,000 pages like every other v2 list.
+        self.list_all_v2("/v2/mailboxes", "mailboxes", Self::map_mailbox)
+            .await
     }
 
     async fn list_users(&self) -> Result<Vec<HsUser>> {
@@ -1896,7 +1977,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
 
     /// K3: one full article by remote id (Docs API GET /v1/articles/{id})
     /// for the publish-verify re-sync.
-    async fn get_doc_article(&self, remote_id: i64) -> Result<Option<HsDocArticle>> {
+    async fn get_doc_article(&self, remote_id: String) -> Result<Option<HsDocArticle>> {
         if self.credentials.docs_api_key.is_empty() {
             return Ok(None);
         }
@@ -1917,7 +1998,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     async fn upsert_doc_article_draft(
         &self,
         input: &crate::helpscout::DocArticleDraftInput,
-    ) -> Result<i64> {
+    ) -> Result<String> {
         if self.credentials.docs_api_key.is_empty() {
             return Err(Error::Config(
                 "Docs API publishing is unavailable on this connection - no Docs API key is \
@@ -1925,14 +2006,14 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                     .into(),
             ));
         }
-        if let Some(remote_id) = input.remote_id {
+        if let Some(remote_id) = &input.remote_id {
             self.docs_request_send(
                 "PUT",
                 &format!("/v1/articles/{remote_id}/drafts"),
                 Some(serde_json::json!({ "text": input.text })),
             )
             .await?;
-            return Ok(remote_id);
+            return Ok(remote_id.clone());
         }
         let mut body = serde_json::json!({
             "collectionId": input.collection_id,
@@ -1946,9 +2027,12 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         let v = self
             .docs_request_send("POST", "/v1/articles?reload=true", Some(body))
             .await?;
+        // Audit fix (C2, live): the created article's id is a hex ObjectId string.
         let id = v["article"]["id"]
-            .as_i64()
-            .or_else(|| v["id"].as_i64())
+            .as_str()
+            .or_else(|| v["id"].as_str())
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
             .ok_or_else::<crate::error::Error, _>(|| {
                 HsApiError {
                     status_code: 200,
@@ -1965,7 +2049,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
 
     /// K3: publish the article with its final, human-approved text
     /// (PUT /v1/articles/{id}; status published makes it live).
-    async fn publish_doc_article(&self, remote_id: i64, name: &str, text: &str) -> Result<()> {
+    async fn publish_doc_article(&self, remote_id: String, name: &str, text: &str) -> Result<()> {
         if self.credentials.docs_api_key.is_empty() {
             return Err(Error::Config(
                 "Docs API publishing is unavailable on this connection - no Docs API key is \
@@ -2081,27 +2165,45 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_webhooks(&self) -> Result<Vec<HsWebhookConfig>> {
-        let v = self.request("/v2/webhooks", "GET", None).await?;
-        Ok(v["_embedded"]["webhooks"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|w| HsWebhookConfig {
-                        remote_id: w["id"].as_i64().unwrap_or(0),
-                        url: w["url"].as_str().unwrap_or_default().to_string(),
-                        events: w["events"]
-                            .as_array()
-                            .map(|e| {
-                                e.iter()
-                                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        status: w["status"].as_str().unwrap_or("enabled").to_string(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        // Audit fix (M10): paginate — a single GET hid hooks on page 2+
+        // from both health classification and manual management.
+        let mut out: Vec<HsWebhookConfig> = Vec::new();
+        let mut page_no: u32 = 1;
+        loop {
+            let v = self
+                .request(&format!("/v2/webhooks?page={page_no}"), "GET", None)
+                .await?;
+            let embedded = v["_embedded"]["webhooks"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let n = embedded.len();
+            for w in &embedded {
+                out.push(HsWebhookConfig {
+                    remote_id: w["id"].as_i64().unwrap_or(0),
+                    url: w["url"].as_str().unwrap_or_default().to_string(),
+                    events: w["events"]
+                        .as_array()
+                        .map(|e| {
+                            e.iter()
+                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    status: w["status"].as_str().unwrap_or("enabled").to_string(),
+                });
+            }
+            let total_pages = v["page"]["totalPages"].as_u64().unwrap_or(1);
+            let number = v["page"]["number"].as_u64().unwrap_or(1);
+            if n == 0 || number >= total_pages {
+                break;
+            }
+            page_no += 1;
+            if page_no > 1_000 {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     async fn create_webhook(
@@ -2188,12 +2290,32 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_customer_property_definitions(&self) -> Result<Vec<HsPropertyDef>> {
-        let v = self.request("/v2/customer-properties", "GET", None).await?;
-        Ok(v["_embedded"]["customerProperties"]
-            .as_array()
-            .or_else(|| v["_embedded"]["properties"].as_array())
-            .map(|a| a.iter().map(Self::map_property_def).collect())
-            .unwrap_or_default())
+        // Audit fix (M10): paginate — the single read hid definitions on
+        // page 2+ and left the matching custom fields unmapped forever.
+        let mut out: Vec<HsPropertyDef> = Vec::new();
+        let mut page_no: u32 = 1;
+        loop {
+            let v = self
+                .request(&format!("/v2/customer-properties?page={page_no}"), "GET", None)
+                .await?;
+            let embedded = v["_embedded"]["customerProperties"]
+                .as_array()
+                .or_else(|| v["_embedded"]["properties"].as_array())
+                .cloned()
+                .unwrap_or_default();
+            let n = embedded.len();
+            out.extend(embedded.iter().map(Self::map_property_def));
+            let total_pages = v["page"]["totalPages"].as_u64().unwrap_or(1);
+            let number = v["page"]["number"].as_u64().unwrap_or(1);
+            if n == 0 || number >= total_pages {
+                break;
+            }
+            page_no += 1;
+            if page_no > 1_000 {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     async fn list_organization_property_definitions(&self) -> Result<Vec<HsPropertyDef>> {
@@ -2291,7 +2413,23 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             .request(&format!("/v2/customers/{customer_id}"), "GET", None)
             .await;
         match res {
-            Ok(v) => Ok(Some(Self::map_customer(&v))),
+            Ok(v) => {
+                let mut c = Self::map_customer(&v);
+                // Audit fix (C4): the real API never embeds contact channels;
+                // a customer fetched here would look email-less and block
+                // Outreach ("No usable email address on file"). Fetch the
+                // sub-resources whenever the payload carries none.
+                if c.channels_all_empty()
+                    && let Some(ch) = self.get_customer_channels(customer_id).await?
+                {
+                    c.emails = ch.emails;
+                    c.phones = ch.phones;
+                    c.chats = ch.chats;
+                    c.websites = ch.websites;
+                    c.social_profiles = ch.social_profiles;
+                }
+                Ok(Some(c))
+            }
             Err(e) => {
                 if is_not_found(&e) {
                     return Ok(None);
@@ -2299,6 +2437,88 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 Err(e)
             }
         }
+    }
+
+    async fn get_customer_channels(&self, customer_id: i64) -> Result<Option<HsCustomer>> {
+        // Audit fix (C4): Help Scout stores contact channels behind
+        // per-customer sub-resources the old code never called:
+        //   GET /v2/customers/{id}/emails|phones|chats|websites|social-profiles
+        // each answering HAL {"_embedded":{"emails":[...]}} (404 when the
+        // customer has none of that kind — degrade to empty, not an error).
+        let mut emails: Vec<Value> = Vec::new();
+        let mut phones: Vec<Value> = Vec::new();
+        let mut chats: Vec<Value> = Vec::new();
+        let mut websites: Vec<Value> = Vec::new();
+        let mut social: Vec<Value> = Vec::new();
+        for (sub, slot) in [
+            ("emails", 0usize),
+            ("phones", 1),
+            ("chats", 2),
+            ("websites", 3),
+            ("social-profiles", 4),
+        ] {
+            let res = self
+                .request(&format!("/v2/customers/{customer_id}/{sub}"), "GET", None)
+                .await;
+            match res {
+                Ok(v) => {
+                    let arr = v["_embedded"][sub.replace('-', "_").as_str()]
+                        .as_array()
+                        .or_else(|| v["_embedded"][sub].as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    match slot {
+                        0 => emails = arr,
+                        1 => phones = arr,
+                        2 => chats = arr,
+                        3 => websites = arr,
+                        _ => social = arr,
+                    }
+                }
+                // A customer without any of this sub-resource answers 404 —
+                // that is "none", not a failure.
+                Err(e) if is_not_found(&e) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(Some(HsCustomer {
+            remote_id: customer_id,
+            emails: emails
+                .iter()
+                .map(|e| crate::helpscout::HsCustomerEmail {
+                    value: e["value"].as_str().map(|s| s.to_string()),
+                    kind: e["type"].as_str().map(|s| s.to_string()),
+                })
+                .collect(),
+            phones: phones
+                .iter()
+                .map(|p| crate::helpscout::HsCustomerPhone {
+                    value: p["value"].as_str().map(|s| s.to_string()),
+                    kind: p["type"].as_str().map(|s| s.to_string()),
+                })
+                .collect(),
+            chats: chats
+                .iter()
+                .map(|c| crate::helpscout::HsCustomerChat {
+                    value: c["value"].as_str().map(|s| s.to_string()),
+                    kind: c["type"].as_str().map(|s| s.to_string()),
+                })
+                .collect(),
+            websites: websites
+                .iter()
+                .map(|w| crate::helpscout::HsCustomerWebsite {
+                    value: w["value"].as_str().map(|s| s.to_string()),
+                })
+                .collect(),
+            social_profiles: social
+                .iter()
+                .map(|s| crate::helpscout::HsCustomerSocialProfile {
+                    value: s["value"].as_str().map(|x| x.to_string()),
+                    kind: s["type"].as_str().map(|x| x.to_string()),
+                })
+                .collect(),
+            ..HsCustomer::placeholder()
+        }))
     }
 
     async fn get_user_status(&self, user_id: i64) -> Result<Option<HsUserStatus>> {
@@ -2365,13 +2585,17 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             let v = self
                 .docs_request(&format!("/v1/collections?page={page}"))
                 .await?;
-            let items = v["items"].as_array().cloned().unwrap_or_default();
+            // Audit fix (C2): the real Docs API wraps every list response
+            // in a keyed envelope — {"collections":{"page":..,"pages":..,
+            // "items":[..]}} — reading the top-level "items" matched
+            // nothing and every pass silently synced 0 collections.
+            let (items, pages) = docs_list(&v, "collections");
             if items.is_empty() {
                 break;
             }
             for c in &items {
                 out.push(HsDocCollection {
-                    remote_id: c["id"].as_i64().unwrap_or(0),
+                    remote_id: c["id"].as_str().unwrap_or_default().to_string(),
                     slug: c["slug"].as_str().map(|s| s.to_string()),
                     name: c["name"].as_str().unwrap_or_default().to_string(),
                     description: c["description"].as_str().map(|s| s.to_string()),
@@ -2379,8 +2603,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                     article_count: c["articleCount"].as_i64(),
                 });
             }
-            let pages = v["pages"].as_u64().unwrap_or(1) as u32;
-            if page >= pages {
+            if page as u64 >= pages {
                 break;
             }
             page += 1;
@@ -2388,7 +2611,7 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         Ok(out)
     }
 
-    async fn list_doc_categories(&self, collection_id: i64) -> Result<Vec<HsDocCategory>> {
+    async fn list_doc_categories(&self, collection_id: String) -> Result<Vec<HsDocCategory>> {
         if self.credentials.docs_api_key.is_empty() {
             self.log_missing_docs_key();
             return Ok(Vec::new());
@@ -2401,21 +2624,23 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                     "/v1/collections/{collection_id}/categories?page={page}"
                 ))
                 .await?;
-            let items = v["items"].as_array().cloned().unwrap_or_default();
+            // Audit fix (C2): same keyed envelope as collections —
+            // {"categories":{...items:[...]}}. Top-level reads matched
+            // nothing and categories never synced.
+            let (items, pages) = docs_list(&v, "categories");
             if items.is_empty() {
                 break;
             }
             for c in &items {
                 out.push(HsDocCategory {
-                    remote_id: c["id"].as_i64().unwrap_or(0),
-                    collection_id,
+                    remote_id: c["id"].as_str().unwrap_or_default().to_string(),
+                    collection_id: collection_id.clone(),
                     slug: c["slug"].as_str().map(|s| s.to_string()),
                     name: c["name"].as_str().unwrap_or_default().to_string(),
                     sort_order: c["order"].as_i64(),
                 });
             }
-            let pages = v["pages"].as_u64().unwrap_or(1) as u32;
-            if page >= pages {
+            if page as u64 >= pages {
                 break;
             }
             page += 1;
@@ -2423,13 +2648,15 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         Ok(out)
     }
 
-    async fn list_doc_articles(&self, collection_id: i64) -> Result<Vec<HsDocArticle>> {
+    async fn list_doc_articles(&self, collection_id: String) -> Result<Vec<HsDocArticle>> {
         if self.credentials.docs_api_key.is_empty() {
             self.log_missing_docs_key();
             return Ok(Vec::new());
         }
-        // v1 list: {"page","pages","count","items":[refs without text]}.
-        let mut refs: Vec<(i64, Value)> = Vec::new();
+        // v1 list: {"articles":{"page","pages","count","items":[refs without
+        // text]}} — the audit-fix (C2) envelope unwrap; the legacy mock's
+        // top-level shape still parses via docs_list's fallback.
+        let mut refs: Vec<(String, Value)> = Vec::new();
         let mut page = 1u32;
         loop {
             let v = self
@@ -2437,28 +2664,65 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                     "/v1/collections/{collection_id}/articles?page={page}&pageSize=100&status=all"
                 ))
                 .await?;
-            let items = v["items"].as_array().cloned().unwrap_or_default();
+            let (items, pages) = docs_list(&v, "articles");
             if items.is_empty() {
                 break;
             }
             for art in &items {
-                let id = art["id"].as_i64().unwrap_or(0);
-                if id > 0 {
-                    refs.push((id, art.clone()));
-                }
+                let Some(id) = art["id"].as_str().map(|s| s.to_string()).filter(|s| !s.is_empty())
+                else {
+                    continue;
+                };
+                refs.push((id, art.clone()));
             }
-            let pages = v["pages"].as_u64().unwrap_or(1) as u32;
-            if page >= pages {
+            if page as u64 >= pages {
                 break;
             }
             page += 1;
         }
+        // Audit fix (M3): the cap always kept the same FIRST 500 refs —
+        // articles 501+ never synced once, and the "the remainder syncs
+        // next pass" log line was false. Now unchanged articles (the stored
+        // row's remote_updated_at matches the list ref's modifiedDate) are
+        // skipped without consuming the cap, and the cap is spent on
+        // not-yet-synced / changed articles FIRST, so every pass advances
+        // the frontier instead of re-fetching the same head of the list.
+        let mut changed: Vec<(String, Value)> = Vec::new();
+        let mut unchanged_count = 0usize;
+        {
+            let conn = self.conn_lock();
+            for (id, r) in refs {
+                let remote_mod = r["modifiedDate"].as_str();
+                let stored: Option<String> = conn
+                    .query_row(
+                        "SELECT remote_updated_at FROM docs_articles WHERE remote_id = ?1",
+                        rusqlite::params![id],
+                        |row| row.get(0),
+                    )
+                    .ok();
+                let unchanged = matches!((remote_mod, stored.as_deref()), (Some(a), Some(b)) if a == b);
+                if unchanged {
+                    unchanged_count += 1;
+                } else {
+                    changed.push((id, r));
+                }
+            }
+        }
+        if unchanged_count > 0 {
+            tracing::debug!(
+                operation = "docs_articles",
+                unchanged = unchanged_count,
+                to_fetch = changed.len(),
+                "Docs articles: skipping already-synced unchanged articles"
+            );
+        }
+        let mut refs = changed;
         if refs.len() > DOC_ARTICLE_FETCH_CAP {
             tracing::warn!(
                 count = refs.len(),
                 cap = DOC_ARTICLE_FETCH_CAP,
                 operation = "docs_articles",
-                "Article count exceeds the per-pass fetch cap; the remainder syncs next pass"
+                "New/changed article count exceeds the per-pass fetch cap; the remainder syncs next pass (frontier advances each pass)"
             );
             refs.truncate(DOC_ARTICLE_FETCH_CAP);
         }
@@ -2474,12 +2738,12 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 }
             };
             out.push(HsDocArticle {
-                remote_id: *id,
-                collection_id,
+                remote_id: id.clone(),
+                collection_id: collection_id.clone(),
                 category_id: full["categories"]
                     .as_array()
                     .and_then(|a| a.first())
-                    .and_then(|c| c["id"].as_i64()),
+                    .and_then(|c| c["id"].as_str().map(|s| s.to_string())),
                 number: full["number"].as_i64().or_else(|| r["number"].as_i64()),
                 slug: full["slug"].as_str().map(|s| s.to_string()),
                 name: full["name"]
@@ -2619,22 +2883,33 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         if !input.tags.is_empty() {
             threads[0]["tags"] = json!(input.tags);
         }
+        // Audit fix (C1): the real API rejects creates without a top-level
+        // `type` (channel) and `status` — live it answers
+        // 400 {"path":"type","message":"must not be null"},{"path":"status",...}.
+        // Channel defaults to email, status to open; both are configurable.
         let mut body = json!({
+            "type": input.channel.as_deref().unwrap_or("email"),
+            "status": input.status.as_deref().unwrap_or("open"),
             "subject": input.subject,
             "mailboxId": input.mailbox_id,
             "customer": { "id": input.customer_id },
             "threads": threads,
         });
-        if let Some(status) = &input.status {
-            body["status"] = json!(status);
-        }
         if !input.tags.is_empty() {
             body["tags"] = json!(input.tags);
         }
+        // Live-API check (2026-10): POST is only served on /v2/conversations —
+        // /v3/conversations answers "does not support HTTP method POST [GET]".
+        // Creates answer 201 with an EMPTY body and the new id in the
+        // Resource-Id header; request_inner surfaces that header as
+        // `resourceId`, so read it there (res["id"] is always absent).
         let res = self
-            .request_pri("/v3/conversations", "POST", Some(body), PRIORITY_USER_SEND)
+            .request_pri("/v2/conversations", "POST", Some(body), PRIORITY_USER_SEND)
             .await?;
-        let conversation_id = res["id"].as_i64().unwrap_or(0);
+        let conversation_id = res["resourceId"]
+            .as_i64()
+            .or_else(|| res["id"].as_i64())
+            .unwrap_or(0);
         let number = res["number"].as_i64().unwrap_or(0);
         let thread_id = res["threads"]
             .as_array()
@@ -2888,6 +3163,19 @@ impl RealHelpScoutProvider {
         }
         Ok(out)
     }
+}
+
+/// Audit fix (C2): unwrap the real Docs API list envelope.
+/// The Docs API answers {"<key>":{"page":..,"pages":..,"items":[..]}} for
+/// every list endpoint (collections / categories / articles); the app used
+/// to read a top-level "items" that never exists, so every Docs pass
+/// silently synced 0 records. Falls back to the legacy top-level shape so
+/// the historical mock contract keeps working.
+fn docs_list(v: &Value, key: &str) -> (Vec<Value>, u64) {
+    let scope = v.get(key).filter(|s| s.is_object()).unwrap_or(v);
+    let items = scope["items"].as_array().cloned().unwrap_or_default();
+    let pages = scope["pages"].as_u64().unwrap_or(1);
+    (items, pages)
 }
 
 fn hal_next_path(v: &Value) -> Option<String> {

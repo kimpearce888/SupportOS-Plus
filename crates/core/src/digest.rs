@@ -381,14 +381,22 @@ fn sentiment_facts(conn: &Connection, start: &str, end: &str) -> Value {
 fn workload_facts(conn: &Connection, start: &str, end: &str) -> Value {
     let replies_per_user: Vec<Value> = conn
         .prepare(
-            "SELECT COALESCE(u.first_name || ' ' || u.last_name, 'Unknown'),
+            // Audit fix (H5): agent replies are type 'message' authored by a
+            // user on the real API — 'reply' never occurs live. Also: the
+            // join referenced conversation_threads.user_local_id, a column
+            // that does not exist (the query silently prepared-failed and
+            // always rendered an empty leaderboard). Authorship resolves
+            // through from_email instead.
+            "SELECT COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), th.from_name, 'Unknown'),
                     COUNT(*) AS replies
                FROM conversation_threads th
-               LEFT JOIN users u ON u.id = th.user_local_id
-              WHERE th.type = 'reply' AND th.state = 'published'
+               LEFT JOIN users u ON u.email = th.from_email AND th.from_email IS NOT NULL
+              WHERE th.type IN ('message','chat','phone')
+                AND th.from_type IN ('user','agent')
+                AND th.state = 'published'
                 AND th.deleted_at IS NULL
                 AND th.remote_created_at >= ?1 AND th.remote_created_at < ?2
-              GROUP BY u.id ORDER BY replies DESC LIMIT 8",
+              GROUP BY u.id, th.from_name ORDER BY replies DESC LIMIT 8",
         )
         .and_then(|mut stmt| {
             stmt.query_map(params![start, end], |r| {

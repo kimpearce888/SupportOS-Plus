@@ -385,7 +385,9 @@ fn first_response_pairs(
          FROM conversations c
          JOIN (SELECT conversation_id, MIN(created_at) AS first_reply
                FROM conversation_threads
-               WHERE type = 'reply' AND state = 'published' AND deleted_at IS NULL
+               WHERE type IN ('message','chat','phone')
+                 AND from_type IN ('user','agent')
+                 AND state = 'published' AND deleted_at IS NULL
                GROUP BY conversation_id) fr
            ON fr.conversation_id = c.id
          WHERE c.mailbox_local_id = ?1 AND c.deleted_at IS NULL AND c.created_at >= ?2 AND c.created_at <= ?3",
@@ -539,7 +541,8 @@ fn waiting_stats(
              c.created_at) AS since,
             EXISTS (SELECT 1 FROM conversation_threads rt
                      WHERE rt.conversation_id = c.id
-                       AND rt.type = 'reply'
+                       AND rt.type IN ('message','chat','phone')
+                       AND rt.from_type IN ('user','agent')
                        AND rt.state = 'published'
                        AND rt.deleted_at IS NULL) AS replied
          FROM conversations c
@@ -650,8 +653,11 @@ pub fn sla_alerts(conn: &Connection) -> Result<SlaAlerts> {
                 "SELECT c.id, c.number, c.subject, c.status, c.assignee_local_id,
                         COALESCE(c.updated_at, c.created_at) AS since,
                         EXISTS (SELECT 1 FROM conversation_threads t
-                                WHERE t.conversation_id = c.id AND t.type = 'reply'
-                                  AND t.state = 'published' AND t.deleted_at IS NULL) AS replied,
+                                WHERE t.conversation_id = c.id
+                                  AND t.type IN ('message','chat','phone')
+                                  AND t.from_type IN ('user','agent')
+                                  AND t.state = 'published'
+                                  AND t.deleted_at IS NULL) AS replied,
                         (SELECT COUNT(*) FROM conversation_threads t
                          WHERE t.conversation_id = c.id AND t.type = 'customer'
                            AND t.deleted_at IS NULL) AS customer_threads
@@ -927,10 +933,13 @@ mod batch24_audit53_tests {
             .expect("customer thread");
             if remote == 702 {
                 // Y has been answered — its first response is long done.
+                // (Audit fix H5: the real Help Scout API never produces a
+                // 'reply' thread type — agent replies are type 'message'
+                // authored by a user. The mock fixture now matches reality.)
                 conn.execute(
                     "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
-                                                       remote_created_at)
-                     VALUES (?1, 'reply', 'published', 'we are on it', ?2)",
+                                                       from_type, remote_created_at)
+                     VALUES (?1, 'message', 'published', 'we are on it', 'user', ?2)",
                     params![conv, OLD],
                 )
                 .expect("reply thread");

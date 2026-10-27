@@ -1396,7 +1396,7 @@ pub struct ArticleDraftRow {
     pub created_at: String,
     pub decided_at: Option<String>,
     pub publish_state: String,
-    pub remote_article_id: Option<i64>,
+    pub remote_article_id: Option<String>,
     pub collection_local_id: Option<i64>,
     pub published_at: Option<String>,
     pub publish_error: Option<String>,
@@ -1509,7 +1509,7 @@ pub fn set_article_draft_publish_state(
     conn: &Connection,
     id: i64,
     publish_state: &str,
-    remote_article_id: Option<i64>,
+    remote_article_id: Option<String>,
     collection_local_id: Option<i64>,
     publish_error: Option<&str>,
 ) -> Result<()> {

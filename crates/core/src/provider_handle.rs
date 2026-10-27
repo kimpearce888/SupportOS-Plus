@@ -304,6 +304,13 @@ impl HelpScoutProvider for ProviderHandle {
         self.provider().get_customer(customer_id).await
     }
 
+    // Audit fix (C4): delegate the channel sub-resource fetch — without
+    // this the trait default answered Ok(None) and no customer ever got
+    // their emails/phones backfilled.
+    async fn get_customer_channels(&self, customer_id: i64) -> Result<Option<HsCustomer>> {
+        self.provider().get_customer_channels(customer_id).await
+    }
+
     async fn get_user_status(&self, user_id: i64) -> Result<Option<HsUserStatus>> {
         self.provider().get_user_status(user_id).await
     }
@@ -316,26 +323,26 @@ impl HelpScoutProvider for ProviderHandle {
         self.provider().list_doc_collections().await
     }
 
-    async fn list_doc_categories(&self, collection_id: i64) -> Result<Vec<HsDocCategory>> {
+    async fn list_doc_categories(&self, collection_id: String) -> Result<Vec<HsDocCategory>> {
         self.provider().list_doc_categories(collection_id).await
     }
 
-    async fn list_doc_articles(&self, collection_id: i64) -> Result<Vec<HsDocArticle>> {
+    async fn list_doc_articles(&self, collection_id: String) -> Result<Vec<HsDocArticle>> {
         self.provider().list_doc_articles(collection_id).await
     }
 
-    async fn get_doc_article(&self, remote_id: i64) -> Result<Option<HsDocArticle>> {
+    async fn get_doc_article(&self, remote_id: String) -> Result<Option<HsDocArticle>> {
         self.provider().get_doc_article(remote_id).await
     }
 
     async fn upsert_doc_article_draft(
         &self,
         input: &crate::helpscout::DocArticleDraftInput,
-    ) -> Result<i64> {
+    ) -> Result<String> {
         self.provider().upsert_doc_article_draft(input).await
     }
 
-    async fn publish_doc_article(&self, remote_id: i64, name: &str, text: &str) -> Result<()> {
+    async fn publish_doc_article(&self, remote_id: String, name: &str, text: &str) -> Result<()> {
         self.provider()
             .publish_doc_article(remote_id, name, text)
             .await

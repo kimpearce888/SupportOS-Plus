@@ -343,6 +343,21 @@ fn normalized_tag_set(tags: &[String]) -> Vec<String> {
 }
 
 pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
+    upsert_customer_with(conn, c, true)
+}
+
+/// Audit fix (C4): upserts a customer WITHOUT touching the contact-channel
+/// tables (emails/phones/chats/websites/social profiles). The real Help
+/// Scout API never embeds channels, so re-upserting a customer from a bare
+/// payload used to DELETE every previously synced email/phone — the data
+/// loss behind the empty Customers page and the Outreach "No usable email
+/// address on file" wall. Use this whenever the payload carries no channel
+/// data and the stored rows are still authoritative.
+pub fn upsert_customer_basic(conn: &Connection, c: &HsCustomer) -> Result<()> {
+    upsert_customer_with(conn, c, false)
+}
+
+fn upsert_customer_with(conn: &Connection, c: &HsCustomer, replace_channels: bool) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
         "INSERT INTO customers (remote_id, first_name, last_name, email, organization, job_title,
@@ -376,6 +391,11 @@ pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
     )?;
     let replace_set =
         |delete_sql: &str, insert_sql: &str, rows: Vec<Vec<Box<dyn rusqlite::ToSql>>>| {
+            if !replace_channels {
+                // Preserve the stored channel rows — the incoming payload
+                // carries no authoritative channel data.
+                return crate::error::Result::Ok(());
+            }
             tx.execute(delete_sql, params![local])?;
             for row in rows {
                 let mut bind: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(row.len() + 1);
@@ -409,6 +429,24 @@ pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
         "DELETE FROM customer_phones WHERE customer_id = ?1",
         "INSERT INTO customer_phones (customer_id, value, type) VALUES (?1, ?2, ?3)",
         c.phones
+            .iter()
+            .filter_map(|p| {
+                p.value
+                    .as_deref()
+                    .filter(|v| !v.trim().is_empty())
+                    .map(|v| {
+                        vec![
+                            Box::new(v.trim().to_string()) as Box<dyn rusqlite::ToSql>,
+                            Box::new(p.kind.clone()),
+                        ]
+                    })
+            })
+            .collect(),
+    )?;
+    replace_set(
+        "DELETE FROM customer_chats WHERE customer_id = ?1",
+        "INSERT INTO customer_chats (customer_id, value, type) VALUES (?1, ?2, ?3)",
+        c.chats
             .iter()
             .filter_map(|p| {
                 p.value

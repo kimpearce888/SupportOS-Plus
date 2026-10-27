@@ -1445,17 +1445,21 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
     // writer, so the bare ORDER BY sorted on a constant NULL — the same
     // defect and the same COALESCE convention as interaction_current.rs.
     let mut stmt = conn.prepare(
-        "SELECT type, body_html, body_text, created_at
+        "SELECT type, body_html, body_text, from_type, created_at
            FROM conversation_threads
           WHERE conversation_id = ?1 AND deleted_at IS NULL AND state = 'published'
           ORDER BY COALESCE(remote_created_at, created_at) ASC",
     )?;
-    let rows: Vec<(String, Option<String>, Option<String>)> = stmt
+    // Audit fix (H5): the real API never produces a 'reply' thread type —
+    // agent replies are 'message' (user-authored chat/phone too). Carry
+    // from_type through so authorship is decidable for every type.
+    let rows: Vec<(String, Option<String>, Option<String>, Option<String>)> = stmt
         .query_map(params![conversation_id], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, Option<String>>(1)?,
                 r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?,
             ))
         })?
         .filter_map(|r| r.ok())
@@ -1468,26 +1472,32 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
             .unwrap_or("");
         crate::textutil::html_to_text(raw).to_lowercase()
     };
+    let is_agent_reply = |t: &str, author: Option<&str>| -> bool {
+        t == "reply"
+            || t == "message"
+            || (matches!(t, "chat" | "phone")
+                && matches!(author, Some("user") | Some("agent")))
+    };
     let customer_msgs: Vec<String> = rows
         .iter()
-        .filter(|(t, _, _)| t == "customer")
-        .map(|(_t, h, b)| text(h, b))
+        .filter(|(t, _, _, _)| t == "customer")
+        .map(|(_t, h, b, _a)| text(h, b))
         .collect();
     let reply_msgs: Vec<String> = rows
         .iter()
-        .filter(|(t, _, _)| t == "reply")
-        .map(|(_t, h, b)| text(h, b))
+        .filter(|(t, _, _, a)| is_agent_reply(t, a.as_deref()))
+        .map(|(_t, h, b, _a)| text(h, b))
         .collect();
     let note_msgs: Vec<String> = rows
         .iter()
-        .filter(|(t, _, _)| t == "note")
-        .map(|(_t, h, b)| text(h, b))
+        .filter(|(t, _, _, _)| t == "note")
+        .map(|(_t, h, b, _a)| text(h, b))
         .collect();
 
     let mut follow_up_count: i64 = 0;
     let mut saw_reply = false;
-    for (t, h, b) in &rows {
-        if t == "reply" {
+    for (t, h, b, a) in &rows {
+        if is_agent_reply(t, a.as_deref()) {
             saw_reply = true;
         } else if t == "customer" && saw_reply {
             let plain = {

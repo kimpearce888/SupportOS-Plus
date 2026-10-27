@@ -1456,7 +1456,9 @@ pub fn sweep_unmonitored_sla(conn: &Connection) -> Result<usize> {
         let mut stmt = conn.prepare(
             "SELECT c.id,
                     EXISTS (SELECT 1 FROM conversation_threads t
-                             WHERE t.conversation_id = c.id AND t.type = 'reply'
+                             WHERE t.conversation_id = c.id
+                               AND t.type IN ('message','chat','phone')
+                               AND t.from_type IN ('user','agent')
                                AND t.state = 'published' AND t.deleted_at IS NULL) AS replied,
                     (julianday('now') - julianday(COALESCE(
                         (SELECT t.created_at FROM conversation_threads t

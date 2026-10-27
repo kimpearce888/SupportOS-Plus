@@ -45,6 +45,12 @@ pub fn process_webhook(
     }
 
     let raw = String::from_utf8_lossy(body).into_owned();
+    // Audit fix (M8): heal rows stranded in 'processing' by a crash
+    // between the processing mark and the terminal write, before inserting
+    // the new event.
+    if let Err(e) = webhook::recover_stale_webhook_events(conn) {
+        tracing::warn!(error = %e, "failed to recover stale webhook events");
+    }
     let (row_id, duplicate) = match webhook::insert_webhook_event(conn, event_type, &raw, None) {
         Ok(v) => v,
         Err(e) => {
@@ -53,7 +59,11 @@ pub fn process_webhook(
         }
     };
     if duplicate {
-        let _ = webhook::set_webhook_event_state(conn, row_id, "duplicate", None);
+        // Audit fix (M8): the old code stamped the ORIGINAL row
+        // 'duplicate' — overwriting 'pending' or 'failed'-with-retries-left
+        // and declaring the event handled while Help Scout was still
+        // retrying it. The original's processing state is left untouched;
+        // the delivery simply answers as a duplicate.
         return WebhookProcessResult::Duplicate { row_id };
     }
 
