@@ -99,10 +99,10 @@ impl Response {
         }
     }
 
-    fn html(status: u16, body: String) -> Self {
+    fn html(status: u16, reason: &'static str, body: String) -> Self {
         Self {
             status,
-            reason: "OK",
+            reason,
             content_type: "text/html; charset=utf-8",
             body: body.into_bytes(),
         }
@@ -412,8 +412,12 @@ fn page(title: &str, body_inner: &str) -> String {
 }
 
 fn fail_page(message: &str) -> Response {
+    // Audit (low): the failure pages used to return HTTP 200 — a monitor
+    // or browser extension keying on status could not tell a failed
+    // connect from a successful one. The page text is unchanged.
     Response::html(
-        200,
+        400,
+        "Bad Request",
         page(
             "SupportOS - connection not completed",
             &format!(
@@ -533,6 +537,7 @@ fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
                 .unwrap_or_default();
             Response::html(
                 200,
+                "OK",
                 page(
                     "SupportOS - connected",
                     &format!(
@@ -1005,7 +1010,10 @@ mod tests {
             &request("GET", "/oauth/callback?code=1&state=2", &[], b""),
             &c,
         );
-        assert_eq!(r.status, 200);
+        assert_eq!(
+            r.status, 400,
+            "failure pages answer 400, not 200 (audit §4)"
+        );
         let body = body_str(&r);
         assert!(
             body.contains("No Help Scout connection is active"),
@@ -1026,7 +1034,10 @@ mod tests {
             ),
             &c,
         );
-        assert_eq!(r.status, 200);
+        assert_eq!(
+            r.status, 400,
+            "failure pages answer 400, not 200 (audit §4)"
+        );
         assert!(body_str(&r).contains("access_denied"));
         assert!(body_str(&r).contains("nope"));
     }

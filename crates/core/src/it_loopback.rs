@@ -407,10 +407,10 @@ fn oauth_authorization_code_flow_over_tcp() {
     assert!(audits >= 1, "connection must be audited");
 
     // The state is single-use: replaying it fails safely without another
-    // exchange.
+    // exchange. (Audit §4: failure pages answer 400, not 200.)
     let exchanges_before = mock.hit_count("POST", "/v2/oauth2/token");
     let (status, body) = get(port, &target);
-    assert_eq!(status, 200);
+    assert_eq!(status, 400);
     assert!(
         body.contains("did not match"),
         "replayed state must be rejected: {body}"
@@ -466,7 +466,7 @@ fn oauth_callback_reports_token_endpoint_rejection() {
 
     let target = format!("/oauth/callback?code=BAD&state={state}");
     let (status, body) = get(port, &target);
-    assert_eq!(status, 200);
+    assert_eq!(status, 400, "a failed exchange must not answer 200");
     assert!(
         body.contains("not completed"),
         "failure page must explain: {body}"
