@@ -10,24 +10,16 @@ const EVENT_LOG_CAP: i64 = 500;
 /// Migration m050: the diagnostics event log grows a `level` column
 /// (existing rows default to `error`) plus a level-aware index, and the
 /// retired demo-mode settings rows are dropped for good.
+///
+/// The column guarantee is shared with the runtime [`ensure_tables`] on
+/// purpose: a database whose migration history skipped or lost this step
+/// (a renumbered boot step on an upgraded install, a restored backup)
+/// must still end up with the column both [`log_event`] and
+/// [`list_recent_events`] require — without it, every write dies with
+/// "no column named level" (swallowed by the call sites' `let _ =`) and
+/// every read returns an honest-looking, permanently empty log.
 pub fn apply_m050(conn: &Connection) -> Result<()> {
-    let has_level: bool = {
-        let mut stmt = conn.prepare("PRAGMA table_info(application_errors)")?;
-        let names: Vec<String> = stmt
-            .query_map([], |r| r.get::<_, String>(1))?
-            .filter_map(|r| r.ok())
-            .collect();
-        names.iter().any(|n| n == "level")
-    };
-    if !has_level {
-        conn.execute_batch(
-            "ALTER TABLE application_errors ADD COLUMN level TEXT NOT NULL DEFAULT 'error';",
-        )?;
-    }
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_application_errors_level_id
-            ON application_errors(level, id DESC);",
-    )?;
+    ensure_tables(conn)?;
     let retired = conn.execute(
         "DELETE FROM application_settings WHERE key IN ('demo_mode', 'demo_content_purged')",
         [],
@@ -66,8 +58,40 @@ pub fn ensure_tables(conn: &Connection) -> Result<()> {
             service TEXT,
             message TEXT,
             stack TEXT,
-            context TEXT
+            context TEXT,
+            level TEXT NOT NULL DEFAULT 'error'
         );",
+    )?;
+    ensure_event_level_column(conn)
+}
+
+/// The one canonical guarantee behind the diagnostics log: the
+/// `application_errors` table carries the `level` column (`log_event`
+/// writes it, `list_recent_events` filters on it) plus its index. Runs
+/// on every log/read/clear call, so a database that reached the current
+/// version with the pre-m050 table shape — a skipped or renumbered boot
+/// step, a restored backup — self-heals here instead of failing every
+/// future write silently.
+fn ensure_event_level_column(conn: &Connection) -> Result<()> {
+    let has_level: bool = {
+        let mut stmt = conn.prepare("PRAGMA table_info(application_errors)")?;
+        let names: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .collect();
+        names.iter().any(|n| n == "level")
+    };
+    if !has_level {
+        tracing::info!(
+            "application_errors is missing the level column (pre-m050 shape) — adding it"
+        );
+        conn.execute_batch(
+            "ALTER TABLE application_errors ADD COLUMN level TEXT NOT NULL DEFAULT 'error';",
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_application_errors_level_id
+            ON application_errors(level, id DESC);",
     )?;
     Ok(())
 }
@@ -229,11 +253,22 @@ pub fn log_event(
     };
     let msg: String = message.chars().take(2000).collect();
     let stk: Option<String> = stack.map(|s| s.chars().take(8000).collect());
-    conn.execute(
+    let written = conn.execute(
         "INSERT INTO application_errors (timestamp, service, message, stack, context, level)
          VALUES (datetime('now'), ?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![service, msg, stk, context.map(|c| c.to_string()), level],
-    )?;
+    );
+    if let Err(e) = written {
+        // The call sites swallow this error on purpose (diagnostics must
+        // never take the app down) — but a losing log has to be audible
+        // somewhere, or "the event log reports nothing" stays a mystery.
+        tracing::warn!(
+            error = %e,
+            service,
+            "diagnostics event could not be recorded — the event log is losing entries"
+        );
+        return Err(e.into());
+    }
     // Cap the log: newest EVENT_LOG_CAP events survive.
     let _ = conn.execute(
         "DELETE FROM application_errors WHERE id <= \
@@ -272,6 +307,12 @@ pub fn list_recent_events(
             .any(|n| n == "level")
     };
     if !has_level {
+        // ensure_tables just ran and self-heals the column, so this is
+        // unreachable in practice — if it ever fires, say why the log
+        // looks empty instead of returning silence.
+        tracing::warn!(
+            "application_errors still has no level column after ensure_tables — the diagnostics log will read empty"
+        );
         return Ok(out);
     }
     let mut stmt = if level.is_some() {
@@ -485,5 +526,51 @@ mod tests {
         let one = list_audit(&conn, Some(7), 10).expect("list one");
         assert_eq!(one.len(), 1);
         assert_eq!(one[0]["conversation_id"], json!(7));
+    }
+
+    /// The live-account failure behind "the event log reports nothing":
+    /// a database can reach the current version with the pre-m050 table
+    /// shape (a skipped or renumbered boot step, a restored backup).
+    /// ensure_tables must self-heal the column on the next call — before
+    /// the fix, every write died with "no column named level" (swallowed
+    /// by the call sites' `let _ =`) and every read returned empty, in
+    /// perfect silence, forever.
+    #[test]
+    fn a_pre_m050_event_log_self_heals_and_stores_events() {
+        let conn = Connection::open_in_memory().expect("in-memory connection");
+        conn.execute_batch(
+            "CREATE TABLE application_errors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                service TEXT,
+                message TEXT,
+                stack TEXT,
+                context TEXT
+            );",
+        )
+        .expect("old-shape table");
+
+        // Before the fix this INSERT failed ("no column named level") and
+        // the error was swallowed — the test's expect() would have fired.
+        log_event(
+            &conn,
+            "error",
+            "webhook",
+            "Help Scout rejected the registration",
+            None,
+            None,
+        )
+        .expect("log_event must self-heal the old shape and write");
+        log_event(&conn, "info", "sync", "sync finished", None, None).expect("second write");
+
+        let events = list_recent_events(&conn, 10, None).expect("list");
+        assert_eq!(events.len(), 2, "both events readable after the heal");
+        assert_eq!(events[0].message, "sync finished");
+        assert_eq!(events[1].level, "error");
+
+        // The healed shape survives a clear/re-write cycle too.
+        clear_events(&conn).expect("clear");
+        log_event(&conn, "warn", "webhook", "still writable", None, None).expect("post-clear");
+        assert_eq!(list_recent_events(&conn, 10, None).expect("list").len(), 1);
     }
 }

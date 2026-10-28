@@ -132,6 +132,35 @@ pub fn recover_interrupted_state(conn: &Connection) -> bool {
     true
 }
 
+/// Close the `sync_runs` rows the same unclean shutdown strands. A run
+/// killed mid-flight keeps its row in `INITIALIZING`/`BACKFILLING`
+/// forever — one machine collected seventeen of them, so the Sync
+/// reports list read as if nothing ever finished. Called at worker
+/// start only (no sync can be running yet), so every unfinished row is
+/// by definition an orphan from a dead process; the row the *current*
+/// engine is about to create is written afterwards, fresh.
+///
+/// # Errors
+/// Propagates the sqlite write failure (the caller logs it and moves on).
+pub fn cancel_orphaned_runs(conn: &Connection) -> Result<usize> {
+    let n = conn.execute(
+        "UPDATE sync_runs SET state = 'CANCELLED', finished_at = datetime('now') \
+         WHERE state IN ('INITIALIZING', 'BACKFILLING') AND finished_at IS NULL",
+        [],
+    )?;
+    if n > 0 {
+        let _ = crate::audit::log_event(
+            conn,
+            "info",
+            "sync",
+            &format!("{n} interrupted sync run(s) marked cancelled after an unclean shutdown"),
+            None,
+            None,
+        );
+    }
+    Ok(n)
+}
+
 /// R2 (D1): the watermark-integrity policy for a provider transition.
 ///
 /// Called exactly once per boot (and once per in-session activation)
@@ -2896,6 +2925,61 @@ mod tests {
             .enable_all()
             .build()
             .expect("test runtime")
+    }
+
+    #[test]
+    fn orphaned_run_rows_are_cancelled_after_an_unclean_shutdown() {
+        let db = temp_db();
+        db.with_write(|conn| {
+            // Two zombies (a killed initial and a killed incremental) and
+            // one finished run for contrast.
+            let a = start_run(conn, "initial").expect("run a");
+            let _b = start_run(conn, "incremental").expect("run b");
+            let _c = start_run(conn, "incremental").expect("run c");
+            update_run(
+                conn,
+                a,
+                RunUpdate {
+                    state: Some("ERROR"),
+                    resources_done: None,
+                    resources_total: None,
+                    records_processed: Some(10),
+                    errors: Some(1),
+                    detail: None,
+                    finished: true,
+                },
+            )
+            .expect("finish run a");
+
+            let n = cancel_orphaned_runs(conn).expect("sweep");
+            assert_eq!(n, 2, "both unfinished rows are orphans");
+
+            let states: Vec<(i64, String, Option<String>)> = conn
+                .prepare("SELECT id, state, finished_at FROM sync_runs ORDER BY id")
+                .expect("prepare")
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .expect("query")
+                .collect::<rusqlite::Result<_>>()
+                .expect("rows");
+            assert_eq!(states.len(), 3);
+            assert_eq!(states[0].1, "ERROR", "the finished run is untouched");
+            assert!(states[0].2.is_some());
+            assert_eq!(states[1].1, "CANCELLED");
+            assert!(states[1].2.is_some(), "zombies get a finished_at");
+            assert_eq!(states[2].1, "CANCELLED");
+
+            // Idempotent: a second sweep has nothing left to close, and
+            // the closure was announced in the diagnostics event log.
+            assert_eq!(cancel_orphaned_runs(conn).expect("sweep again"), 0);
+            let events = crate::audit::list_recent_events(conn, 10, Some("info")).expect("events");
+            assert!(
+                events
+                    .iter()
+                    .any(|e| e.message.contains("interrupted sync run")),
+                "the sweep is announced: {:?}",
+                events.iter().map(|e| &e.message).collect::<Vec<_>>()
+            );
+        });
     }
 
     #[test]

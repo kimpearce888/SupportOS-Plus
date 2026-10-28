@@ -228,6 +228,13 @@ impl WorkerManager {
                     "Interrupted sync state recovered at worker start"
                 );
             }
+            // The same shutdown also strands the run ROWS in
+            // INITIALIZING forever (17 on one machine); close them out so
+            // Sync reports shows honest states. Safe here — no sync can
+            // be running yet.
+            if let Err(e) = crate::sync_engine::cancel_orphaned_runs(&conn) {
+                tracing::warn!(error = %e, "orphaned sync run cleanup failed");
+            }
             let drained = crate::webhook_handler::drain_pending(&conn);
             if drained > 0 {
                 tracing::info!(
@@ -3823,6 +3830,32 @@ impl WorkerManager {
                     verdict = %outcome.verdict,
                     "webhook health checked"
                 );
+                // 1.8.3: the Diagnostics page promises "webhook
+                // rejections" but the health check only ever wrote its
+                // outcome to the Sync Health snapshot — a failing check
+                // was invisible in the event log. Persist the interesting
+                // verdicts (failed -> error, healed -> info).
+                if outcome.verdict == "failed" {
+                    let conn = self.lock();
+                    let _ = crate::audit::log_event(
+                        &conn,
+                        "error",
+                        "webhook",
+                        &format!("Webhook health check failed — {}", outcome.detail),
+                        None,
+                        None,
+                    );
+                } else if healed {
+                    let conn = self.lock();
+                    let _ = crate::audit::log_event(
+                        &conn,
+                        "info",
+                        "webhook",
+                        &format!("Webhook healed — {}", outcome.detail),
+                        None,
+                        None,
+                    );
+                }
                 use crate::events::ServerEvent;
                 if healed {
                     // A healed hook deserves an honest word: it means the
@@ -3849,6 +3882,14 @@ impl WorkerManager {
                 ));
                 let conn = self.lock();
                 crate::webhook_health::store_outcome(&conn, &outcome)?;
+                let _ = crate::audit::log_event(
+                    &conn,
+                    "error",
+                    "webhook",
+                    &format!("Webhook health check failed — {}", outcome.detail),
+                    None,
+                    None,
+                );
                 Err(e)
             }
         }

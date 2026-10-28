@@ -4,6 +4,31 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.8.3] — 2026-10-28
+
+### Fixed — Diagnostics event log
+- **The event log could be permanently empty in perfect silence** — a
+  database that reached the current version with the pre-m050 table
+  shape (a skipped or renumbered boot step, a restored backup) made
+  every diagnostics write die with "no column named level" — an error
+  every call site swallows — while every read returned an honest-looking
+  empty list. "The event log reports nothing" was the visible result.
+  `ensure_tables` now guarantees the full schema on **every** write,
+  read and clear: new installs get the `level` column from the first
+  CREATE, older shapes are self-healed in place (ALTER), and the m050
+  migration shares the same one canonical guarantee. A write that still
+  fails is now audible in the stdout log instead of vanishing.
+- **Webhook-health failures never reached the event log** — the Diagnostics
+  page promises "webhook rejections", but the health check only ever
+  wrote its outcome to the Sync Health snapshot. Failed checks (error)
+  and healed hooks (info) are now persisted to the event log too.
+- **Seventeen zombie sync runs** — runs killed mid-flight (app closed
+  during a sync) kept their `sync_runs` row in INITIALIZING forever, so
+  Sync reports read as if nothing ever finished. At worker start, before
+  any sync can be running, orphaned INITIALIZING/BACKFILLING rows are
+  closed out as CANCELLED with a finished timestamp, and the cleanup is
+  announced in the event log.
+
 ## [1.8.2] — 2026-10-28
 
 ### Fixed — Help Scout integration
