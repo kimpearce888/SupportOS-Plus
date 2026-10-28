@@ -7,10 +7,21 @@
 //! upsert is a write-on-read side effect of the request path and is
 //! intentionally not reproduced here.
 //!
-//! The view keeps the web page's information architecture: date-range
-//! selector, mailbox chips, channel filter, metric cards, per-day line
-//! chart, breakdown tables, mailbox comparison, and the issue
-//! radar panel (via the promoted `issue_radar_impl`).
+//! RS-17 (wave A) rebuild on **Design Contract v1.0 archetype DS-A-02**
+//! (docs/audit/design-contract-v1.md §4): PageHeader → block stack — the
+//! lab's scope card (three `ds-tool-rows` of DS-C-06 chips), the DS-C-03
+//! statGrid (twelve metric cards), the per-day chart card, the breakdown
+//! cards as DS-C-23 bar rows (the lab's `brk`), the channel-metrics and
+//! mailbox-comparison tables as DS-C-05 data tables, the AI-badged issue
+//! radar, and the closing C-1 quirk on the by-channel data-layer bug. The
+//! conformed lab reference is `mockups/design-lab/pages-ds.js`
+//! (`DS.definePage("dashboard", …)`): no hero (A-4), no tabs, no counter
+//! pill — the twelve stat cards ARE the counts.
+//!
+//! Behavior, queries, and data flow are unchanged (decisions.md D6:
+//! presentation only). Chip clicks still re-run the same scope queries
+//! immediately, invalidation still re-reads on the next frame, and
+//! `Sync now` still routes through the same scoped fetch.
 
 use eframe::egui;
 use rusqlite::Connection;
@@ -525,11 +536,22 @@ impl DashboardPage {
             self.reload(db);
         }
 
+        // DS-C-01 PageHeader: title + subtitle, right cluster = the sync
+        // composite (A-8). egui right_to_left puts the first added widget
+        // rightmost, so the add order below paints [Sync now] [status line]
+        // — the lab's DS.syncControl(). The lab's dashboard meta carries no
+        // counter pill; the twelve DS-C-03 stat cards below are the counts.
         design::page_header(
             ui,
             "Dashboard",
             Some("Local metrics · sources labeled Help Scout / local / AI-derived everywhere"),
             |ui| {
+                if !self.sync_note.is_empty() {
+                    // The in-flight/already-running note: the lab's unclassed
+                    // `.ds-status-line` state (text-2) — the completion tone
+                    // is the global toast's job (R8, D5).
+                    design::hint_text(ui, &self.sync_note);
+                }
                 if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
                     .on_hover_text(
                         "pull fresh data from Help Scout now — the completion toast \
@@ -558,13 +580,6 @@ impl DashboardPage {
                             self.sync_note = "re-read the local mirror (no engine)".into();
                         }
                     }
-                }
-                if !self.sync_note.is_empty() {
-                    ui.label(
-                        egui::RichText::new(&self.sync_note)
-                            .small()
-                            .color(ui.visuals().weak_text_color()),
-                    );
                 }
             },
         );
@@ -629,7 +644,9 @@ impl DashboardPage {
             }
         };
 
-        // Metric cards — responsive column count.
+        // DS-C-03 statGrid — the lab's twelve stat cards; the responsive
+        // column count is egui's equivalent of the lab's `auto-fill
+        // minmax(150px, 1fr)` grid.
         let width = ui.available_width();
         let cols = if width < 640.0 {
             2
@@ -696,23 +713,30 @@ impl DashboardPage {
         });
         ui.add_space(10.0);
 
-        // Breakdown panels — two columns, one on narrow windows.
+        // Breakdowns — the lab's two-col pairs of `brk` cards: DS-C-23 slim
+        // bar rows scaled to the card's max; the by-channel card carries the
+        // lab's `note` (the data-layer bug, also footnoted by the closing
+        // quirk). The channel-metrics DS-C-05 table pairs with "By team".
         let breakdown_cols = if width < 760.0 { 1 } else { 2 };
         egui::Grid::new("dashboard-breakdowns")
             .num_columns(breakdown_cols)
             .spacing(egui::vec2(10.0, 10.0))
             .show(ui, |ui| {
                 for row in [
-                    ("By mailbox", &data.by_mailbox, false),
-                    ("By tag", &data.by_tag, false),
-                    ("By channel", &data.by_channel, false),
-                    ("By agent", &data.by_agent, false),
-                    ("By team", &data.by_team, false),
+                    ("By mailbox", &data.by_mailbox, ""),
+                    ("By tag", &data.by_tag, ""),
+                    (
+                        "By channel",
+                        &data.by_channel,
+                        "ignores the channel chip by design (dashboard.rs:337-345)",
+                    ),
+                    ("By agent", &data.by_agent, ""),
+                    ("By team", &data.by_team, ""),
                 ]
                 .chunks(breakdown_cols)
                 {
-                    for (title, rows, _) in row {
-                        breakdown(ui, title, rows);
+                    for (title, rows, note) in row {
+                        breakdown(ui, title, note, rows);
                     }
                     ui.end_row();
                 }
@@ -730,6 +754,16 @@ impl DashboardPage {
         ui.add_space(10.0);
 
         radar_panel(ui, &self.radar);
+
+        // The lab's closing quirk (DC C-1): the by-channel distribution
+        // ignores the channel chip — receipt cited, kept honest.
+        ui.add_space(10.0);
+        design::quirk(
+            ui,
+            "Data-layer quirk kept honest: 'By channel' ignores the channel chip \
+             (dashboard.rs:337-345) — presentation cannot fix SQL, so it is \
+             labeled here instead of hidden.",
+        );
     }
 }
 
@@ -747,34 +781,24 @@ fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-fn breakdown(ui: &mut egui::Ui, title: &str, rows: &[NameCount]) {
-    design::card_titled(ui, title, None, |ui| {
-        if rows.is_empty() {
-            design::hint_text(ui, "(none)");
-            return;
-        }
-        egui::Grid::new(egui::IdSalt::new(format!("breakdown-{title}")))
-            .num_columns(2)
-            .striped(true)
-            .spacing(egui::vec2(12.0, 2.0))
-            .min_row_height(20.0)
-            .show(ui, |ui| {
-                let t = design::tokens(ui);
-                for row in rows {
-                    ui.label(
-                        egui::RichText::new(row.name.as_str())
-                            .size(13.0)
-                            .color(t.foreground),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.monospace(
-                            egui::RichText::new(row.count.to_string()).color(t.foreground),
-                        );
-                    });
-                    ui.end_row();
-                }
-            });
-    });
+/// One breakdown card — the lab's `brk`: title + optional note over a body
+/// of DS-C-23 slim bar rows scaled to the card's max count.
+fn breakdown(ui: &mut egui::Ui, title: &str, note: &str, rows: &[NameCount]) {
+    design::card_titled(
+        ui,
+        title,
+        if note.is_empty() { None } else { Some(note) },
+        |ui| {
+            if rows.is_empty() {
+                design::hint_text(ui, "(none)");
+                return;
+            }
+            let max = rows.iter().map(|r| r.count).max().unwrap_or(1).max(1);
+            for row in rows {
+                design::bar_row(ui, &row.name, row.count, max, true);
+            }
+        },
+    );
 }
 
 fn channel_metrics_table(ui: &mut egui::Ui, rows: &[ChannelMetric]) {
@@ -783,34 +807,33 @@ fn channel_metrics_table(ui: &mut egui::Ui, rows: &[ChannelMetric]) {
             design::hint_text(ui, "(none)");
             return;
         }
-        design::table(
+        design::data_table(
             ui,
             "channel-metrics",
             &["channel", "count", "first resp (min)", "resolution (min)"],
+            rows.len(),
             26.0,
-            |ui| {
-                let t = design::tokens(ui);
-                for row in rows {
-                    ui.label(
-                        egui::RichText::new(row.channel.as_str())
-                            .size(13.0)
-                            .color(t.foreground),
-                    );
-                    design::td_num(ui, &row.count.to_string());
-                    design::td_num(
-                        ui,
-                        &row.first_response_avg_min
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into()),
-                    );
-                    design::td_num(
-                        ui,
-                        &row.resolution_avg_min
-                            .map(|v| v.to_string())
-                            .unwrap_or_else(|| "—".into()),
-                    );
-                    ui.end_row();
-                }
+            |ui, i| {
+                let row = &rows[i];
+                ui.label(
+                    egui::RichText::new(row.channel.as_str())
+                        .size(13.0)
+                        .strong()
+                        .color(design::tokens(ui).foreground),
+                );
+                design::td_num(ui, &row.count.to_string());
+                design::td_num(
+                    ui,
+                    &row.first_response_avg_min
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "—".into()),
+                );
+                design::td_num(
+                    ui,
+                    &row.resolution_avg_min
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "—".into()),
+                );
             },
         );
     });
@@ -821,57 +844,50 @@ fn comparison_table(ui: &mut egui::Ui, rows: &[MailboxComparison]) {
         return;
     }
     design::card_titled(ui, "Mailbox comparison", None, |ui| {
-        egui::ScrollArea::vertical()
-            .id_salt("mailbox-comparison-scroll")
-            .max_height(320.0)
-            .show(ui, |ui| {
-                design::table(
-                    ui,
-                    "mailbox-comparison",
-                    &[
-                        "mailbox",
-                        "new",
-                        "active",
-                        "closed",
-                        "backlog",
-                        "first resp (min)",
-                        "resolution (min)",
-                        "great",
-                        "ratings",
-                    ],
-                    26.0,
-                    |ui| {
-                        let t = design::tokens(ui);
-                        for row in rows {
-                            ui.label(
-                                egui::RichText::new(row.name.as_str())
-                                    .size(13.0)
-                                    .strong()
-                                    .color(t.foreground),
-                            );
-                            design::td_num(ui, &row.new_conversations.to_string());
-                            design::td_num(ui, &row.active_conversations.to_string());
-                            design::td_num(ui, &row.closed_conversations.to_string());
-                            design::td_num(ui, &row.backlog.to_string());
-                            design::td_num(
-                                ui,
-                                &row.first_response_avg_min
-                                    .map(|v| v.to_string())
-                                    .unwrap_or_else(|| "—".into()),
-                            );
-                            design::td_num(
-                                ui,
-                                &row.resolution_avg_min
-                                    .map(|v| v.to_string())
-                                    .unwrap_or_else(|| "—".into()),
-                            );
-                            design::td_num(ui, &row.great_ratings.to_string());
-                            design::td_num(ui, &row.total_ratings.to_string());
-                            ui.end_row();
-                        }
-                    },
+        design::data_table(
+            ui,
+            "mailbox-comparison",
+            &[
+                "mailbox",
+                "new",
+                "active",
+                "closed",
+                "backlog",
+                "first resp (min)",
+                "resolution (min)",
+                "great",
+                "ratings",
+            ],
+            rows.len(),
+            26.0,
+            |ui, i| {
+                let row = &rows[i];
+                ui.label(
+                    egui::RichText::new(row.name.as_str())
+                        .size(13.0)
+                        .strong()
+                        .color(design::tokens(ui).foreground),
                 );
-            });
+                design::td_num(ui, &row.new_conversations.to_string());
+                design::td_num(ui, &row.active_conversations.to_string());
+                design::td_num(ui, &row.closed_conversations.to_string());
+                design::td_num(ui, &row.backlog.to_string());
+                design::td_num(
+                    ui,
+                    &row.first_response_avg_min
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "—".into()),
+                );
+                design::td_num(
+                    ui,
+                    &row.resolution_avg_min
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "—".into()),
+                );
+                design::td_num(ui, &row.great_ratings.to_string());
+                design::td_num(ui, &row.total_ratings.to_string());
+            },
+        );
     });
 }
 
@@ -890,35 +906,30 @@ fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value]) {
                 );
                 return;
             }
-            egui::ScrollArea::vertical()
-                .id_salt("dashboard-radar-scroll")
-                .show(ui, |ui| {
-                    for alert in alerts {
-                        let title = super::str_field(alert, "title");
-                        let severity = super::str_field(alert, "severity");
-                        let conversations = alert
-                            .get("conversation_ids")
-                            .and_then(|v| v.as_array())
-                            .map(|a| a.len())
-                            .unwrap_or(0);
-                        let tone = if severity == "high" {
-                            (BadgeTone::Destructive, "high")
-                        } else {
-                            (BadgeTone::Warning, "medium")
-                        };
-                        ui.horizontal(|ui| {
-                            design::badge(ui, tone.1, tone.0);
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "{title} · {conversations} conversations",
-                                ))
-                                .size(13.0)
-                                .color(design::tokens(ui).foreground),
-                            );
-                        });
-                        ui.add_space(2.0);
-                    }
+            for (i, alert) in alerts.iter().enumerate() {
+                if i > 0 {
+                    // The lab's `.ds-row + .ds-row` hairline separators.
+                    design::divider(ui);
+                }
+                let title = super::str_field(alert, "title");
+                let severity = super::str_field(alert, "severity");
+                let conversations = alert
+                    .get("conversation_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                ui.horizontal(|ui| {
+                    // The lab's radar rows carry the AI badge (G-2: AI-
+                    // derived content is always violet) with the raw
+                    // severity token as its text.
+                    design::badge(ui, &severity, BadgeTone::Ai);
+                    ui.label(
+                        egui::RichText::new(format!("{title} · {conversations} conversations",))
+                            .size(13.0)
+                            .color(design::tokens(ui).foreground),
+                    );
                 });
+            }
         },
     );
 }

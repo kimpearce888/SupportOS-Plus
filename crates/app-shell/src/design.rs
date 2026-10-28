@@ -1440,6 +1440,54 @@ pub fn metric_tile(
     resp
 }
 
+/// DC: DS-C-23 bar row (folded helper) — the lab's `.ds-bar-row`: a fixed
+/// label column (140px, 120px `slim`), a 14px rounded track on the neutral
+/// fill, the value right; the fill draws in the chart accent (`--ds-ai`)
+/// at 0.8 opacity, floored at 3% so near-zero values stay visible (the
+/// lab's `Math.max(3, v / max * 100)`). Static rows — label and value are
+/// real labels so the numbers stay in the accessibility tree.
+pub fn bar_row(ui: &mut egui::Ui, label: &str, value: i64, max: i64, slim: bool) {
+    let t = tokens(ui);
+    let label_w = if slim { 120.0 } else { 140.0 };
+    let value_w = 56.0;
+    let gap = 10.0;
+    let track_h = 14.0;
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(label_w, track_h),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(label_w);
+                ui.label(
+                    egui::RichText::new(label)
+                        .size(scale::text::SMALL_HALF)
+                        .color(t.foreground),
+                );
+            },
+        );
+        let track_w = (ui.available_width() - value_w - gap).max(40.0);
+        let (track, _) = ui.allocate_exact_size(egui::vec2(track_w, track_h), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(track, egui::CornerRadius::same(7), t.muted);
+        let frac = ((value as f64 / max.max(1) as f64) * 100.0).clamp(3.0, 100.0) / 100.0;
+        let fill_w = (track.width() as f64 * frac) as f32;
+        if fill_w > 0.5 {
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(track.min, egui::pos2(track.min.x + fill_w, track.max.y)),
+                egui::CornerRadius::same(7),
+                t.chart_accent.gamma_multiply(0.8),
+            );
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(value.to_string())
+                    .size(scale::text::SMALL_HALF)
+                    .color(t.foreground),
+            );
+        });
+    });
+}
+
 /// Aligned two-column form grid (labels left, controls right).
 pub fn form_grid<R>(
     ui: &mut egui::Ui,
