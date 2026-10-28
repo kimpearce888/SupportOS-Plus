@@ -198,6 +198,156 @@ sweep marks stale docs); the ai_settings write API wired to an AI Center
 provider panel over the pre-hub fallback layer the pipeline consumes —
 verified and recorded in `completed.md`.
 
+## Items — Design-System Reskin program (RS-01..RS-21, opened 2026-10-28)
+
+Source: **owner-approved UX reskin** ("everything is working fine, we need to reskin
+only according to the new design system"). Design source of truth: **Design System
+v1.0** (commit `f6c88b3`: `mockups/design-lab/ds.css` + `ds.js` + `ds.html` +
+`mismatch-register.md` — 17 canonical DS-C components, 6 DS-A archetypes, the DS.TONE
+status map, and the DS-0 mismatch register: 8 Class-A + 3 Class-B findings, 2 Class-C
+contractual keeps).
+
+Scope contract (decisions.md **D6**): presentation only. No feature, data, workflow,
+shortcut or page-set change. HTML/CSS/JS exists only in `mockups/design-lab/` as the
+spec/preview artifact — it is never shipped; the program reskin is pure Rust/egui.
+Every on-screen element must trace to the Design System or be a registered exception.
+
+Batch mapping under `rule.md` (ten at a time):
+
+- **Batch RS-1** = RS-01..RS-10 — Stage 1: design-lab conformance rebuild (lab files
+  only, zero Rust). Ends at **Gate G1**: owner reviews the conformed lab; explicit
+  approval freezes the design before any Rust change (rule.md STOP).
+- **Batch RS-2** = RS-11..RS-20 — Stage 2: egui reskin R1–R3 (F0 contract, token port,
+  widget sets, page waves). Gate evidence packs (G2 tokens, G3 Inbox pilot) are
+  presented at the batch STOP; the owner may split this batch at either gate on request.
+- **Batch RS-3** = RS-21 — Stage 2 close: R4 final acceptance + release (Gate G4).
+
+### Stage 1 — design-lab conformance, DS-4 (touches only `mockups/design-lab/`)
+
+**RS-01 — DS archetype render engine (foundation).** In `ds.js`, add the six archetype
+page renderers (DS-A-01 list+detail workspace, DS-A-02 dashboard, DS-A-03 detail record,
+DS-A-04 settings, DS-A-05 inbox workspace, DS-A-06 console) plus a page registry, so a
+page = a PAGE_DATA object + one archetype call. Evidence: 17 bespoke per-page renderers
+in `pages-reskin.js` (the a8492d0 build) are the composition drift the register logs
+(mismatch-register.md Class A). Verify: `node --check`; every registry page resolves to
+exactly one archetype; no page markup rendered outside `DS.*` calls.
+
+**RS-02 — Inbox onto DS-A-05 (lab pilot).** Rebuild inbox as data + archetype: view
+rail, list rows, DetailPanel reader (DS-C-17), role-typed message cards + day dividers +
+quoted-history collapse + attachment chips, composer, typed copilot cards, sync
+status-line (register A-8). Verify: golden-path interaction suite unchanged (open
+conversation, reply/note send, saved-reply insert, AI insert, copilot actions); visual
+equals the approved proposal; both themes.
+
+**RS-03 — Dashboard onto DS-A-02.** Stat/metric tiles, chart, breakdowns through DS
+renderers; counts as PageHeader counter pill (A-6); sync-note → status-line (A-8).
+Verify: renderer-only composition; both themes; Reskin-notes drawer intact.
+
+**RS-04 — Customers + Organizations onto DS-A-01/DS-A-03.** Customers abandons the
+full-page profile replace (`pages-reskin.js:207-227`) for row → DetailPanel (A-1); one
+toolbar + FilterBar for both (A-2); one detail record header (A-4); counts as header
+pill (A-6). Verify: identical open/filter/act flow on both pages; blind walkthrough.
+
+**RS-05 — Knowledge + Help Center.** One FilterBar (A-2: removes the stacked duplicate
+search rows, `pages-reskin.js:265-266`); row-action rule (A-5: the reviewed/verify/
+delete triple → ≤2 inline actions, destructive = danger + ConfirmDialog); DS-C-14 empty
+states with why+next-step (A-7); article status via DS.TONE (A-3 site). Verify:
+filter+apply parity; register rows A-5/A-7 closed for these pages.
+
+**RS-06 — Incidents, Issue Radar, Reports (+ Report Builder).** Onto list/dashboard
+archetypes; severity bands and tiles resolve through DS.TONE; approval/when-chip
+composites per B-2. Verify: renderer-only; incident/report detail flows open DetailPanel.
+
+**RS-07 — Operations + AI Center onto DS-A-06 (console).** engine-hero → DS-C-24 (B-2);
+approval-line/when-chip → chip + status-line composition (B-2); gap-candidate and
+endpoint blocks fold into Card + kv rows (B-2); receipt-cited quirks preserved (C-1:
+endpoint name not index, approvals human-first with collapsible raw JSON). Verify:
+console pages composed from DS parts only.
+
+**RS-08 — Settings, Connectors, Notifications onto DS-A-04 (settings).** Tabs,
+FormFields, isolated danger zones; notifications dot-as-state + relative time with
+raw-UTC title kept as receipt (C-1); mark-all-read. Verify: settings tab parity;
+danger-zone isolation visual check; both themes.
+
+**RS-09 — All remaining NAV_GROUPS pages.** LiveChats, Search, SupportGraph, SyncHealth,
+Onboarding, Shell, Outreach, Automation, CustomObjects, Diagnostics — final sweep onto
+archetypes (page set = the 23 PageKeys, `crates/app-shell/src/pages/mod.rs:299-326`,
+grouped per `app.rs:926-971`). Verify: every lab nav entry renders via the registry;
+no stub left.
+
+**RS-10 — Conformance burn-down + Gate G1.** Kill reskin.css one-off classes (the
+235-class layer → DS layer only) and ~30 inline styles; off-scale 5/7/9/11px gaps →
+4pt scale (B-3); five info-text patterns → five fixed roles (B-1). Tone audit: zero
+status colors outside DS.TONE, both themes (A-3). Mismatch register: all A/B rows
+closed; `ds.html` register section updated. Grep gate: pages ≥90% DS-composed, zero
+one-off CSS. Goldens: headless screenshots of all 23 pages × both themes ×
+1440/1024/800 — the reference set for R3. Blind walkthrough of same-type pages.
+Release design-lab-v4 (commit + zip asset). **GATE G1 — owner reviews the conformed
+lab and approves it as the final design; no Rust work before this (rule.md STOP).**
+
+### Stage 2 — egui reskin R1–R4 (Rust; opens only after Gate G1 approval)
+
+**RS-11 — F0: Design Contract v1.0 freeze.** Extract `docs/audit/design-contract-v1.md`
+from the conformed lab: token sheet (--ds-* values, both themes), 17 DS-C component
+sheets (anatomy/variants/do-don't + egui mapping note each), 6 archetype sheets,
+DS.TONE table, exception register, change-control rule (DC bump before code). Verify:
+DC committed; every register A/B row closed in DC; RS-10 goldens referenced as the
+visual baseline.
+
+**RS-12 — R1: token port + style lint.** Rebase on latest origin/main; re-scan stray
+hardcodes (raw `Color32::from_rgb` sites). `crates/app-shell/src/design.rs` LIGHT/DARK
+token tables → DC v1.0 tokens 1:1; spacing/type/radius scales; DS.TONE → one match arm.
+Style lint (CI test): forbid raw Color32 outside design.rs and off-scale spacing.
+Verify: cargo fmt/clippy/test green; SPP_SMOKE per-page paint gate green; page
+structure unchanged (colors/typography now DS — this IS the G2 token sign-off);
+fresh goldens lock the token state against drift; G2 evidence pack (token diff table)
+presented at batch STOP.
+
+**RS-13 — R2a: structure widget set.** Add egui_kittest (pinned to the egui 0.37 line)
+as dev-dependency + harness. Widgets 1:1 with `DC: DS-C-xx` doc-comments: PageHeader
+(counter pill), DataTable (virtualized rows), StatTile/MetricTile, FilterBar, Tabs
+(underline), Badge/Chip/StatusDot via DS.TONE, button set. Verify: kittest snapshots
+per widget/state, light+dark; fmt/clippy/tests green.
+
+**RS-14 — R2b: feedback widget set.** EmptyState (+slim variant), Callout set (five
+fixed roles, B-1), Toast, armed ConfirmDialog, FormField/inputs, DetailPanel,
+Avatar/Assignee. Verify: same harness + snapshots + DC mapping.
+
+**RS-15 — R2c: inbox identity widget set.** Role-typed Message Card
+(agent/customer/note/AI), day divider, quoted-history collapse, attachment chips,
+Composer (Reply|Note, saved-replies, AI insert, draft-saved flag), AI badge set, typed
+copilot cards. Verify: harness snapshots; 5-second AI-identification pre-check on the
+isolated card.
+
+**RS-16 — R3 pilot: Inbox rebuild.** Rebuild the Inbox UI strictly from the widget set
+(list, reader, composer, copilot panel; `crates/app-shell/src/pages/inbox.rs`); zero
+bespoke styling. Functional regression checklist: every existing interaction identical
+(pagination past the 50-row cap, draft retention on row click, sync trigger, triage
+loads). No new per-frame DB re-queries introduced by the rebuild (existing data-path
+issues stay out of scope — data track, decisions.md D6). Verify: checklist recorded;
+kittest goldens at 1440/1024/800 vs the RS-10 lab goldens; G3 evidence pack
+(before/after + checklist) presented at batch STOP.
+
+**RS-17 — R3 wave A: Dashboard, Customers, Organizations, LiveChats.**
+
+**RS-18 — R3 wave B: Knowledge, Incidents, IssueRadar, Reports (+ Report Builder).**
+
+**RS-19 — R3 wave C: Operations, AiCenter, Automation, CustomObjects, Outreach.**
+
+**RS-20 — R3 wave D: Settings, Notifications, Search, SupportGraph, Connectors,
+Diagnostics, SyncHealth, Onboarding, Shell.**
+
+Each wave: rebuild from the widget set only; per-page functional regression checklist;
+kittest goldens vs lab goldens; any egui-cannot-reproduce gap becomes a registered
+exception in the DC — never silently approximated. Verify per wave: checklist +
+goldens + fmt/clippy/tests + SPP_SMOKE green.
+
+**RS-21 — R4: final acceptance + release.** Traceability matrix (screen region → DS-C
+id → DC row); blind test (5-second AI reply identification); SUS questionnaire, target
+≥68; CI snapshot locks every rebuilt page against drift; v1.9.0 tag + release notes;
+acceptance records folded into the printable report series (the deferred PDF task).
+**GATE G4 — owner final acceptance.**
+
 ## Notes
 
 - Severity is the audit's call; the owner may re-order freely before any batch.
@@ -205,3 +355,8 @@ verified and recorded in `completed.md`.
   wire all three) and opened batch 36 in `progress.md`; `plan.md` holds no
   further items — the v1.7.0 clean-audit queue is fully consumed by that batch.
 - Every item keeps its full evidence (excerpt + failure scenario) in the audit report and the worklog; this file is the execution queue only.
+- 2026-10-28 — The v1.7.0 clean-audit queue (items 1–165, incl. 56/150/151) is fully
+  consumed; the queue reopens with the **Design-System Reskin program RS-01..RS-21**
+  (owner-approved, decisions.md D6). Numbering switches to the RS- prefix to keep the
+  new program separate from the historical audit items. Batches: RS-1 = RS-01..10,
+  RS-2 = RS-11..20, RS-3 = RS-21. Gate G1 (conformed-lab approval) blocks all Rust work.

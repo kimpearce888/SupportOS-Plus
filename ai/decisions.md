@@ -241,3 +241,36 @@ tests are the port insurance. Theme/sidebar: no migration (defaults + re-pick).
     first-release upgrade coverage is via reinstall (file-replacement
     mechanics) — a true prior-version upgrade activates from the next
     release onward.
+
+### D6 — Reskin program: the Design System is the single source (2026-10-28)
+
+Owner verdict: UX 0/10 (inbox worst) → Intercom-grade reskin while everything else
+stays frozen ("everything is working fine, we need to reskin only according to the
+new design system").
+
+- **Scope contract: presentation only.** No feature, data, workflow, shortcut or
+  page-set change. The v1.8.x program keeps working exactly as today; every visual
+  element must trace to Design System v1.0 (`mockups/design-lab/ds.css|ds.js`,
+  DS.TONE, DS-C-xx) or be a registered exception — nothing invented during
+  implementation.
+- **HTML/CSS/JS stays in `mockups/design-lab/` only** (spec/preview artifact, never
+  shipped, no webview in the program). The reskin itself is pure Rust/egui —
+  consistent with D1 (no UI DSL, one language).
+- **Mapping is 1:1:** every `--ds-*` token → one design.rs constant; every DS-C-xx →
+  one egui widget; DS.TONE → one match arm. Pages are recomposed from those widgets
+  only.
+- **Fidelity loop** (Task 20 plan, now binding): F0 Design Contract v1.0 freeze →
+  R1 token port + style lint → R2 widget sets (kittest snapshots) → R3 page waves
+  (Inbox pilot first, goldens at 1440/1024/800 vs lab goldens) → R4 traceability +
+  blind test (5s AI identification) + SUS ≥ 68.
+- **Gates:** G1 = owner approves the conformed design lab (blocks all Rust work);
+  G2 = token sign-off; G3 = Inbox pilot acceptance; G4 = final acceptance. Gates
+  align with rule.md batch STOPs (plan.md batches RS-1..RS-3).
+- **Execution queue:** `ai/plan.md` RS-01..RS-21 under `rule.md` (ten at a time).
+  Data-path defects (per-frame re-queries, async track) stay out of the reskin scope
+  and remain separately tracked.
+
+## Change log (appended)
+
+- 2026-10-28 — D6 added: Design-System Reskin program approved; queue reopened in
+  plan.md as RS-01..RS-21 (Stage 1 lab conformance → Gate G1 → Stage 2 egui reskin).
