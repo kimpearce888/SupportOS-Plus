@@ -101,3 +101,29 @@ f84d43c, fbf106c, 8bb994f, b5e613d, 9718cd7 — all pushed to origin/main.
 
 **Next in batch:** RS-16 (Inbox pilot rebuild from the widget set + regression checklist + G3 goldens),
 then RS-17..RS-20 waves, then the G2/G3 evidence packs at the batch STOP.
+
+**RS-16 — R3 pilot, Inbox rebuild (verified 2026-10-28):** `pages/inbox.rs` rebuilt on the
+widget set (4004 lines): views rail via `design::view_item` (DS-A-05, counts beside the view,
+A-6), list rows + reader via `message_card`/`message_card_with` (DS-C-20, rich-body closure —
+`render_rich_spans` plain spans stay at HEAD sizing), composer/copilot panels unchanged in
+behavior; a11y pass — the assign ComboBox now carries a programmatic label
+(`widget_info` "assign: …", repo pattern) so kittest's accessibility check holds ON for the
+real-page suite. Regression checklist all green in the 233: pagination past the 50-row cap
+(page_one_reaches_conversations_past_the_cap, offset_compiles_from_the_page_index,
+a_page_past_the_end_falls_back_to_the_last_page), draft retention on row click
+(row_click_stashes_and_restores_the_typed_draft, reselecting_the_same_row_keeps_the_typing_
+untouched), sync trigger (submit_reply_creates_durable_job_and_blocks_duplicates, r4_d8/r4_d9),
+triage loads (ops_tile_filter_drills…, change_status_writes_locally_and_queues_remote_job,
+invalidation_refreshes_the_filter_refs); no new per-frame DB re-queries (lazy empty-gate
+reloads + event invalidation, same data path as HEAD). Zero bespoke styling — style lint 2/2
+over the rebuilt file. **Page goldens:** new tests/kittest_inbox_page.rs renders the REAL
+InboxPage (seeded in-memory DB, fixed timestamps for determinism) at 1440/1024/800 × 900,
+light+dark = 6 goldens, diff-locked twice; lab reference for the G3 side-by-side is
+mockups/design-lab/goldens/v4/{light,dark}/inbox-*.png (egui render ≠ HTML pixels by design;
+side-by-side review = G3 evidence pack at batch STOP). Verification: fmt clean; clippy -D
+warnings green (app-shell all-targets + core sandbox); cargo test: 233 + 485 + 11 + lint 2
++ core sandbox 493, workspace exit 0; kittest 20/20 (14 widgets + 6 page) with a11y check ON;
+SPP_SMOKE exit 0. **CI note:** pushes since RS-13 (8bb994f..d172cfc) failed in CI — the
+regenerated Cargo.lock (egui_kittest dev-dep tree) had never been committed; fixed by 8490eee,
+both CI jobs fully green on it. **Next in batch:** RS-17 wave A (Dashboard, Customers,
+Organizations, LiveChats).

@@ -1053,6 +1053,54 @@ pub fn page_counter(ui: &mut egui::Ui, text: &str) {
     let _ = id;
 }
 
+/// DC: DS-A-05 views-rail row — one inbox view: full-width label with the
+/// count right; the selected view carries the selection fill. The rail
+/// switcher of the inbox workspace (counts live beside the view, register
+/// A-6: counts never sit in titles).
+pub fn view_item(ui: &mut egui::Ui, label: &str, count: u32, selected: bool) -> egui::Response {
+    let t = tokens(ui);
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::click());
+    let fill = if selected {
+        t.selection
+    } else if resp.hovered() {
+        t.accent
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(8), fill);
+    }
+    ui.painter().text(
+        egui::pos2(rect.min.x + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(scale::text::CONTROL),
+        if selected {
+            t.foreground
+        } else {
+            t.muted_foreground
+        },
+    );
+    ui.painter().text(
+        egui::pos2(rect.max.x - 10.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        count.to_string(),
+        egui::FontId::proportional(scale::text::META),
+        t.muted_foreground,
+    );
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::Role::ListItem,
+            true,
+            selected,
+            format!("{label} ({count})"),
+        )
+    });
+    resp
+}
+
 /// The solid status color for a tone — dots, tile bands, level insets.
 /// Derived from the same DS.TONE table as [`tone_colors_of`] (DC G-2:
 /// one meaning, one color, everywhere).
@@ -1826,6 +1874,9 @@ pub enum MessageRole {
 /// DC: DS-C-20 Message Card (role-typed) — r-xl card, md role avatar +
 /// 13.5px name + 11.5px role label + right time, 14px body, footer actions.
 /// G-2: AI is always violet; notes are always amber.
+///
+/// The plain-text form; [`message_card_with`] carries a rich body closure
+/// and an optional role-label override (same anatomy, same colors).
 pub fn message_card<R>(
     ui: &mut egui::Ui,
     role: MessageRole,
@@ -1834,6 +1885,40 @@ pub fn message_card<R>(
     body: &str,
     actions: impl FnOnce(&mut egui::Ui) -> R,
 ) {
+    let t = tokens(ui);
+    message_card_with(
+        ui,
+        role,
+        name,
+        None,
+        time,
+        |ui| {
+            ui.label(
+                egui::RichText::new(body)
+                    .size(scale::text::LEAD)
+                    .color(t.foreground),
+            );
+        },
+        actions,
+    );
+}
+
+/// DC: DS-C-20 Message Card, rich-body form. `role_label` overrides the
+/// fixed per-role label (the thread types carry Chat/Phone/Other entries
+/// that are not one of the four roles); the surface/hairline/avatar colors
+/// still come ONLY from the role table.
+pub fn message_card_with<B, A, R>(
+    ui: &mut egui::Ui,
+    role: MessageRole,
+    name: &str,
+    role_label: Option<&str>,
+    time: &str,
+    body: B,
+    actions: A,
+) where
+    B: FnOnce(&mut egui::Ui),
+    A: FnOnce(&mut egui::Ui) -> R,
+{
     let t = tokens(ui);
     let (bg, border) = match role {
         MessageRole::Customer => (t.card, t.border),
@@ -1882,12 +1967,12 @@ pub fn message_card<R>(
                         .size(scale::text::BODY + 0.5)
                         .strong(),
                 );
-                let role_label = match role {
+                let role_label = role_label.unwrap_or(match role {
                     MessageRole::Customer => "Customer",
                     MessageRole::Agent => "Agent",
                     MessageRole::Note => "Internal note",
                     MessageRole::Ai => "AI",
-                };
+                });
                 let role_color = match role {
                     MessageRole::Ai => t.ai_foreground,
                     MessageRole::Note => t.warning_foreground,
@@ -1907,11 +1992,7 @@ pub fn message_card<R>(
                 });
             });
             ui.add_space(scale::space::SP2 + 1.0);
-            ui.label(
-                egui::RichText::new(body)
-                    .size(scale::text::LEAD)
-                    .color(t.foreground),
-            );
+            body(ui);
             ui.add_space(scale::space::SP2);
             actions(ui);
         });
@@ -2145,7 +2226,11 @@ pub fn composer(
     } else {
         edit
     };
-    ui.add(edit);
+    // Caret/focus are surfaced for callers that anchor follow-up UI to the
+    // text (the inbox mention popup anchors to the caret).
+    let out = edit.show(ui);
+    state.focused = out.response.has_focus();
+    state.caret = out.cursor_range.map(|range| range.primary.index.0);
 
     // Foot: context + send.
     ui.horizontal(|ui| {
@@ -2204,7 +2289,9 @@ pub fn composer(
     act
 }
 
-/// DC: DS-C-21 composer state (mode + draft + draft-saved flag).
+/// DC: DS-C-21 composer state (mode + draft + draft-saved flag). The
+/// `caret`/`focused` fields are widget OUTPUTS — [`composer`] fills them
+/// every frame so callers can anchor follow-up UI to the text.
 #[derive(Debug, Clone, Default)]
 pub struct ComposerState {
     /// Reply or Note.
@@ -2213,6 +2300,11 @@ pub struct ComposerState {
     pub draft: String,
     /// Whether a draft has been saved (flag fades in per DS-C-21).
     pub draft_saved: bool,
+    /// Output: the text cursor as a CHAR index into `draft` (None when the
+    /// field has no cursor this frame).
+    pub caret: Option<usize>,
+    /// Output: whether the text field held keyboard focus this frame.
+    pub focused: bool,
 }
 
 impl ComposerState {
