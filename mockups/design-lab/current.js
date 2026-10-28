@@ -23,7 +23,9 @@
     selected: null,
     composerMode: "reply",
     draft: "",
+    page: "inbox",
   };
+  const PAGES_LIST = LAB.NAV_GROUPS.flatMap(([, ks]) => ks);
 
   /* ----- icons ------------------------------------------------------------ */
   $("#sb-search-ic").innerHTML = LAB.ICONS.search;
@@ -33,22 +35,49 @@
   document.querySelectorAll(".ic-caret").forEach((el) => (el.innerHTML = LAB.ICONS.chevronDown));
   $("#theme-ic").innerHTML = LAB.ICONS.moon;
 
-  /* ----- sidebar nav ------------------------------------------------------- */
+  /* ----- sidebar nav (all 23 pages, hash router) ---------------------------- */
   const nav = $("#sb-nav");
-  nav.innerHTML = LAB.NAV_GROUPS.map(([group, keys]) => {
-    const items = keys
-      .map((k) => {
-        const label = LAB.NAV_LABELS[k];
-        const active = k === "inbox" ? " active" : "";
-        const disabled = k === "inbox" ? "" : ' data-soon="1"';
-        return `<button class="nav-item${active}"${disabled} type="button" title="${k === "inbox" ? "" : "not part of this replica — Inbox only"}">${LAB.ICONS[k]}<span>${label}</span></button>`;
-      })
-      .join("");
-    return `<div class="nav-group-label">${group}</div>${items}`;
-  }).join("");
+  function renderNav(active) {
+    nav.innerHTML = LAB.NAV_GROUPS.map(([group, keys]) =>
+      `<div class="nav-group-label">${group}</div>` + keys.map((k) =>
+        `<button class="nav-item${k === active ? " active" : ""}" data-page="${k}" type="button">${LAB.ICONS[k]}<span>${LAB.NAV_LABELS[k]}</span></button>`
+      ).join("")
+    ).join("");
+  }
   nav.addEventListener("click", (e) => {
     const b = e.target.closest(".nav-item");
-    if (b && b.dataset.soon) flashStatus("This replica focuses on the Inbox screen.", true);
+    if (b) go(b.dataset.page);
+  });
+  document.querySelectorAll("[data-goto]").forEach((b) =>
+    b.addEventListener("click", () => go(b.dataset.goto)));
+  function go(page) {
+    if (("#" + page) === location.hash) route();
+    else location.hash = "#" + page;
+  }
+  function route() {
+    let p = (location.hash || "#inbox").slice(1);
+    if (!PAGES_LIST.includes(p)) p = "inbox";
+    state.page = p;
+    renderNav(p);
+    const isInbox = p === "inbox";
+    const ip = document.getElementById("inbox-page");
+    const pr = document.getElementById("page-root");
+    if (ip) ip.hidden = !isInbox;
+    if (pr) {
+      pr.hidden = isInbox;
+      if (!isInbox) window.LAB_PAGES.render(p, pr);
+    }
+    if (window.parent !== window) {
+      try { window.parent.postMessage({ type: "lab-nav", page: p }, "*"); } catch (_) {}
+    }
+  }
+  window.addEventListener("hashchange", route);
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (d && d.type === "lab-nav" && d.page && d.page !== state.page) {
+      if (location.hash !== "#" + d.page) location.hash = "#" + d.page;
+      else route();
+    }
   });
 
   /* ----- theme toggle ------------------------------------------------------ */
@@ -339,4 +368,5 @@
   renderTabs();
   renderList();
   renderDetail();
+  route();
 })();

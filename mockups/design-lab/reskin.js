@@ -19,8 +19,11 @@
     composerMode: "reply",
     draft: "",
     notesOn: false,
+    notesPage: "inbox",
     copilotOpen: true,
+    page: "inbox",
   };
+  const PAGES_LIST = LAB.NAV_GROUPS.flatMap(([, ks]) => ks);
 
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -47,20 +50,50 @@
   $("#notes-x").innerHTML = LAB.ICONS.x;
   $("#notes-count").textContent = LAB.NOTES.length;
 
-  /* ----- sidebar nav --------------------------------------------------------- */
-  $("#sb-nav").innerHTML = LAB.NAV_GROUPS.map(([group, keys]) => {
-    const items = keys
-      .map((k) => {
-        const active = k === "inbox" ? " active" : "";
-        const soon = k === "inbox" ? "" : ' data-soon="1"';
-        return `<button class="nav-item${active}"${soon} type="button" title="${k === "inbox" ? "" : "not part of this replica — Inbox only"}">${LAB.ICONS[k]}<span>${LAB.NAV_LABELS[k]}</span></button>`;
-      })
-      .join("");
-    return `<div class="nav-group-label">${group}</div>${items}`;
-  }).join("");
+  /* ----- sidebar nav (all 23 pages, hash router) ------------------------------ */
+  function renderNav(active) {
+    $("#sb-nav").innerHTML = LAB.NAV_GROUPS.map(([group, keys]) => {
+      const items = keys
+        .map((k) => `<button class="nav-item${k === active ? " active" : ""}" data-page="${k}" type="button">${LAB.ICONS[k]}<span>${LAB.NAV_LABELS[k]}</span></button>`)
+        .join("");
+      return `<div class="nav-group-label">${group}</div>${items}`;
+    }).join("");
+  }
   $("#sb-nav").addEventListener("click", (e) => {
     const b = e.target.closest(".nav-item");
-    if (b && b.dataset.soon) toast("This replica focuses on the Inbox screen.");
+    if (b) go(b.dataset.page);
+  });
+  document.querySelectorAll("[data-goto]").forEach((b) =>
+    b.addEventListener("click", () => go(b.dataset.goto)));
+  function go(page) {
+    if (("#" + page) === location.hash) route();
+    else location.hash = "#" + page;
+  }
+  function route() {
+    let p = (location.hash || "#inbox").slice(1);
+    if (!PAGES_LIST.includes(p)) p = "inbox";
+    state.page = p;
+    renderNav(p);
+    const isInbox = p === "inbox";
+    const ip = document.getElementById("inbox-page");
+    const pr = document.getElementById("page-root");
+    if (ip) ip.hidden = !isInbox;
+    if (pr) {
+      pr.hidden = isInbox;
+      if (!isInbox) window.LAB_PAGES.render(p, pr);
+    }
+    if (state.notesPage !== p) closeNotes();
+    if (window.parent !== window) {
+      try { window.parent.postMessage({ type: "lab-nav", page: p }, "*"); } catch (_) {}
+    }
+  }
+  window.addEventListener("hashchange", route);
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (d && d.type === "lab-nav" && d.page && d.page !== state.page) {
+      if (location.hash !== "#" + d.page) location.hash = "#" + d.page;
+      else route();
+    }
   });
 
   /* ----- theme ----------------------------------------------------------------- */
@@ -498,11 +531,19 @@
     );
   }
 
-  /* ----- design notes drawer ------------------------------------------------------------------ */
-  function renderNotes() {
-    $("#nd-list").innerHTML = LAB.NOTES.map(
-      (n) => `<div class="nd-item" id="note-${n.n}">
-        <span class="nd-pin">${n.n}</span>
+  /* ----- design notes drawer (per page) ---------------------------------------- */
+  function renderNotes(page) {
+    const isInbox = page === "inbox";
+    const notes = isInbox ? LAB.NOTES : (LAB.PAGE_NOTES[page] || []);
+    const title = isInbox ? "Design notes — what changed and why" : `Reskin notes — ${LAB.NAV_LABELS[page] || page}`;
+    const sub = isInbox ? "Every pin cites the forensic receipt it fixes." : "Same receipt style as the Inbox notes: FIX / WAS / file:line.";
+    document.querySelector(".nd-title").textContent = title;
+    document.querySelector(".nd-sub").textContent = sub;
+    const countEl = document.getElementById("notes-count");
+    if (countEl) countEl.textContent = notes.length;
+    $("#nd-list").innerHTML = notes.map((n, i) =>
+      `<div class="nd-item" id="note-${isInbox ? n.n : "p" + i}">
+        <span class="nd-pin">${isInbox ? n.n : i + 1}</span>
         <div>
           <div class="nd-title2">${esc(n.title)}</div>
           <div class="nd-fix">${esc(n.fix)}</div>
@@ -512,16 +553,27 @@
       </div>`
     ).join("");
   }
-  $("#notes-toggle").addEventListener("click", () => {
-    state.notesOn = !state.notesOn;
-    document.body.classList.toggle("notes-on", state.notesOn);
-    $("#notes-toggle").setAttribute("aria-pressed", String(state.notesOn));
-  });
-  $("#notes-close").addEventListener("click", () => {
+  function openNotes(page) {
+    state.notesPage = page;
+    renderNotes(page);
+    state.notesOn = true;
+    document.body.classList.add("notes-on");
+    const t = document.getElementById("notes-toggle");
+    if (t) t.setAttribute("aria-pressed", "true");
+  }
+  function closeNotes() {
     state.notesOn = false;
+    state.notesPage = state.page;
     document.body.classList.remove("notes-on");
-    $("#notes-toggle").setAttribute("aria-pressed", "false");
+    const t = document.getElementById("notes-toggle");
+    if (t) t.setAttribute("aria-pressed", "false");
+  }
+  $("#notes-toggle").addEventListener("click", () => {
+    if (state.notesOn) closeNotes();
+    else openNotes(state.page === "inbox" ? "inbox" : state.page);
   });
+  $("#notes-close").addEventListener("click", closeNotes);
+  window.addEventListener("lab-open-notes", (e) => openNotes(e.detail.page));
   document.addEventListener("click", (e) => {
     const pinned = e.target.closest("[data-pin]");
     if (pinned && state.notesOn) {
@@ -535,7 +587,7 @@
     }
   });
 
-  /* ----- keyboard-first: j/k navigate, Enter open, / filter ---------------------------- */
+  /* ----- keyboard-first: j/k navigate, Enter open, / filter (Inbox only) ------ */
   document.addEventListener("keydown", (e) => {
     const tag = (e.target.tagName || "").toLowerCase();
     const typing = tag === "textarea" || tag === "input";
@@ -543,6 +595,7 @@
       if (e.key === "Escape") e.target.blur();
       return;
     }
+    if (state.page !== "inbox") return; // inbox-scoped shortcuts only
     if (e.key === "/") {
       e.preventDefault();
       $("#conv-filter").focus();
@@ -570,5 +623,6 @@
   renderList();
   renderHead();
   renderReader();
-  renderNotes();
+  renderNotes("inbox");
+  route();
 })();

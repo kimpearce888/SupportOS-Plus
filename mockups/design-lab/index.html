@@ -39,23 +39,24 @@
 
   <footer class="lab-footer">
     <span>
-      Static replica built from the forensic receipts of Tasks 15-17 · scope contract: presentation only, zero DB/schema/sync/feature changes ·
-      in the <a href="#" data-goto="after">After</a> view, toggle <strong>Design notes</strong> (bottom of the views rail) for the file:line receipts.
+      All 23 pages · static replica built from the forensic receipts of Tasks 15-19 · scope contract: presentation only, zero DB/schema/sync/feature changes ·
+      in the <a href="#" data-goto="after">After</a> view, every page has receipt-cited <strong>Reskin notes</strong> (button in each page header).
     </span>
-    <span>v1.8.0 baseline → reskin proposal (token v3 + role-typed message cards)</span>
+    <span>v1.8.0 baseline → reskin proposal (token v3 + role-typed message cards + full page system)</span>
   </footer>
 
 <script>
 (() => {
   "use strict";
   const stage = document.getElementById("stage");
-  const frame = document.getElementById("frame");
-  const labelText = document.getElementById("frame-label-text");
+  let labPage = "inbox";
 
   const LABELS = {
-    before: "Replica of the current v1.8.0 shell — click a conversation, type a draft, then switch conversations",
-    after: "Reskin proposal — role-typed cards, AI identity, composer accelerators; toggle Design notes for receipts",
+    before: "Replica of the current v1.8.0 shell — all 23 pages; the Inbox interaction path is fully wired, other pages replicate their real layouts",
+    after: "Reskin proposal — all 23 pages; role-typed cards, AI identity, composer accelerators; per-page Reskin notes cite receipts",
   };
+
+  const srcFor = (mode) => (mode === "before" ? "current.html" : "reskin.html") + "#" + labPage;
 
   function setMode(mode) {
     document.querySelectorAll(".lab-mode").forEach((b) => {
@@ -68,20 +69,30 @@
       stage.classList.add("split");
       stage.innerHTML =
         '<div class="frame-wrap"><div class="frame-label">Before · current shell <span class="tag plain">v1.8.0 replica</span></div>' +
-        '<div class="frame-box"><iframe src="current.html" title="Before: current shell replica"></iframe></div></div>' +
+        '<div class="frame-box"><iframe src="' + srcFor("before") + '" title="Before: current shell replica"></iframe></div></div>' +
         '<div class="frame-wrap"><div class="frame-label">After · reskin proposal <span class="tag">token v3 + message cards</span></div>' +
-        '<div class="frame-box"><iframe src="reskin.html" title="After: reskin proposal"></iframe></div></div>';
+        '<div class="frame-box"><iframe src="' + srcFor("after") + '" title="After: reskin proposal"></iframe></div></div>';
       return;
     }
     stage.classList.add("single");
     stage.classList.remove("split");
     stage.innerHTML =
-      '<div class="frame-wrap"><div class="frame-label" id="frame-label"><span id="frame-label-text">' +
-      LABELS[mode] +
-      '</span></div><div class="frame-box"><iframe id="frame" src="' +
-      (mode === "before" ? "current.html" : "reskin.html") +
+      '<div class="frame-wrap"><div class="frame-label"><span>' + LABELS[mode] + '</span></div><div class="frame-box"><iframe id="frame" src="' +
+      srcFor(mode) +
       '" title="' + (mode === "before" ? "Before: current shell replica" : "After: reskin proposal") + '"></iframe></div></div>';
   }
+
+  /* page sync: a nav click inside one replica moves every replica */
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d || d.type !== "lab-nav" || !d.page) return;
+    labPage = d.page;
+    document.querySelectorAll("iframe").forEach((f) => {
+      try {
+        if (f.contentWindow !== e.source) f.contentWindow.location.hash = "#" + d.page;
+      } catch (_) {}
+    });
+  });
 
   document.querySelector(".lab-modes").addEventListener("click", (e) => {
     const b = e.target.closest("[data-mode]");

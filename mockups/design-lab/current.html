@@ -29,11 +29,13 @@
 
     <div class="main">
       <header class="topbar">
-        <button class="ghost-btn" type="button"><span class="ic-search"></span> Search ⌘K</button>
-        <button class="icon-btn" type="button" aria-label="Notifications"><span class="ic-bell"></span></button>
+        <span class="freshness ok" title="open Sync Health (last sync, checkpoints, runs)">synced 2m ago</span>
+        <button class="ghost-btn" type="button" data-goto="search"><span class="ic-search"></span> Search ⌘K</button>
+        <button class="icon-btn" type="button" aria-label="Notifications" data-goto="notifications"><span class="ic-bell"></span></button>
       </header>
 
       <div class="content">
+        <div id="inbox-page">
         <div class="page-head">
           <div>
             <h1>Inbox</h1>
@@ -67,6 +69,9 @@
           </section>
           <section class="detail-pane" id="detail" aria-label="Conversation"></section>
         </div>
+        </div>
+
+        <main id="page-root" class="page-root" hidden></main>
       </div>
     </div>
   </div>
@@ -74,6 +79,7 @@
   <div class="replica-tag">replica · SupportOS+ v1.8.0 shell · static HTML/CSS/JS, no program code changed</div>
 
   <script src="data.js"></script>
+  <script src="pages-current.js"></script>
   <script src="current.js"></script>
 </body>
 </html>

@@ -3,23 +3,44 @@
 A high-fidelity **HTML/CSS/JS replica** of the SupportOS+ desktop shell, built so the
 before/after of the approved reskin plan can be *seen and clicked* before any Rust code
 changes. The Rust program, its schema, and its sync behaviour are untouched — everything
-here is a static design reference (reskin plan phases R0-R3 made tangible).
+here is a static design reference (reskin plan phases R0-R4 made tangible).
+
+**v2 — ALL 23 pages.** Every page in `app.rs:926-971 NAV_GROUPS` now has a faithful
+Before replica and a token-v3 After proposal, built from forensic specs that cite
+file:line for every label, column, button, empty state, and quirk.
 
 ## Open it
 
-- `index.html` — lab shell: **Before / After / Side-by-side** toggle.
+- `index.html` — lab shell: **Before / After / Side-by-side** toggle. Page navigation is
+  synced across both replicas (click a sidebar entry in one, the other follows).
 - `current.html` — pixel-faithful replica of the **current v1.8.0 shell** (zinc tokens from
-  `design.rs:104-179`, 66px list rows, 300px thread keyhole, flat thread entries).
+  `design.rs:104-179`): 66px list rows, 300px thread keyhole, flat thread entries, and the
+  real layouts of all 22 other pages — including their honest quirks (raw UTC stamps, the
+  Operations Load/Pressure value swap, the seven-zero Outreach report, the empty Freshness
+  tab, `(unset)`/`—` placeholders).
 - `reskin.html` — the **reskin proposal**: token v3 semantic surfaces, role-typed message
-  cards, AI identity, collapsed quoted history, Reply|Note composer with saved replies and
-  AI-draft insert, typed Copilot cards, unread/assignee triage, `j`/`k` keyboard navigation.
-- `data.js` — shared synthetic fixture mirroring `ThreadEntry` semantics
-  (`core/inbox.rs:326-341`) plus the async-track fields (read state, assignee).
+  cards, AI identity (violet), collapsed quoted history, Reply|Note composer with saved
+  replies + AI-draft insert, typed Copilot cards, unread/assignee triage, `j`/`k` keyboard
+  navigation — plus the v3 treatment of all 22 other pages (underline tabs, severity bands,
+  status dots, load bars, isolated danger zones, per-page **Reskin notes**).
+- `data.js` — shared synthetic fixtures mirroring `ThreadEntry` semantics
+  (`core/inbox.rs:326-341`) and every page's real section structure.
+- `pages-current.js` / `pages-reskin.js` — the 22 non-Inbox page renderers for each mode.
+
+## Page coverage (23/23)
+
+| Group | Pages |
+|---|---|
+| Workspace | Dashboard · Inbox (fully interactive) · Live chats · Operations Center |
+| Customers & knowledge | Customers · Organizations · Knowledge |
+| Insights | Reports (11 tabs) · Issue Radar · Incidents |
+| Automation & AI | Custom Objects · Automation · AI Center (6 tabs) · Outreach |
+| System | Notifications · Search · Support Graph · Connectors · Diagnostics · Sync Health · Settings (6 tabs) · Onboarding · Shell |
 
 ## Design notes (the receipt layer)
 
-In the **After** view, toggle **Design notes** at the bottom of the views rail. Every
-change carries a numbered pin and cites the forensic receipt it fixes, e.g.:
+**Inbox:** toggle **Design notes** in the views rail — 10 numbered pins, each citing the
+forensic receipt it fixes:
 
 | # | Change | Was | Receipt |
 |---|--------|-----|---------|
@@ -34,26 +55,32 @@ change carries a numbered pin and cites the forensic receipt it fixes, e.g.:
 | 9 | Unread / assignee / views / keys | no read flag, assignee hardcoded `None` | `inbox.rs:121` |
 | 10 | Scope contract | presentation only; data-track items mocked | UX plan PDF Ch. 7-9 |
 
+**All other pages:** each page header in the After view carries a **Reskin notes** button
+opening the same receipt-style drawer (FIX / WAS / file:line) — 2-3 notes per page, e.g.:
+
+| Page | Sample note | Receipt |
+|---|---|---|
+| Dashboard | "By channel" ignores the channel chip — kept, footnoted | `dashboard.rs:337-345` |
+| Operations | Load/Pressure column swap un-swapped (presentation fix) | `operations.rs:425-426` |
+| Knowledge | Freshness tab reads `report["flags"]` which never exists — void named, not hidden | `knowledge.rs:1249` vs `knowledge_store.rs:516-530` |
+| Reports | radar badge always "medium"/Warning (engine never emits "high") | `reports.rs:1997-2001` |
+| AI Center | routing combo showed endpoint *index*, now shows endpoint *name* | `ai_center.rs:1444-1448` |
+| Outreach | campaign report renders seven zeros (top-level vs `totals` keys) — kept, footnoted | `outreach.rs:568-593` vs `core/outreach.rs:1336` |
+
 ## Scope contract
 
 - No DB/schema/sync/feature changes are proposed by the reskin itself.
 - Items that need the async data track (real unread flags, assignment persistence, draft
-  persistence, attachment rendering) are **mocked here intentionally** and marked as
-  `U2-I1/I2` — see the UX Recovery & Reskin Plan PDF, chapters 8-9.
-- Fixture data is synthetic; any resemblance to real conversations is coincidental.
+  persistence, attachment data) are labelled as mocked (U2-I1/I2), exactly as in the plan.
+- Data-layer bugs are **documented, not fixed**: where presentation cannot repair them
+  (Freshness tab, Outreach report zeros, channel-filter quirk) the reskin adds a visible
+  footnote instead of fake content.
+- Two quirks are presentation-fixable and the After view fixes them with receipts:
+  the Model-role routing combo label (`ai_center.rs:1444-1448`) and the automation
+  approvals raw-JSON-first rows (`automation.rs:492-501`).
 
-## Files
+## Verification
 
-```
-mockup/
-├── index.html    lab shell (mode toggle, side-by-side)
-├── lab.css       lab chrome styles
-├── current.html  before-replica page
-├── current.css   replica tokens + layout (matches design.rs)
-├── current.js    replica behaviour (sync flash, draft loss, badge tones)
-├── reskin.html   after-proposal page
-├── reskin.css    token v3 + message cards + composer + copilot + notes
-├── reskin.js     proposal behaviour (inserts, tabs, notes, j/k)
-├── data.js       shared fixture data
-└── README.md     this file
-```
+Fresh-browser session, all 23 pages walked in both modes (light + dark): zero console
+errors; Inbox golden path intact in both replicas; cross-iframe page sync verified in
+Side-by-side mode; 800px narrow layout stacks to a single column.

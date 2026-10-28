@@ -29,10 +29,12 @@
 
     <div class="main">
       <header class="topbar">
-        <button class="ghost-btn" type="button"><span class="ic-search"></span> Search ⌘K</button>
-        <button class="icon-btn" type="button" aria-label="Notifications"><span class="ic-bell"></span></button>
+        <span class="freshness ok" title="open Sync Health (last sync, checkpoints, runs)">synced 2m ago</span>
+        <button class="ghost-btn" type="button" data-goto="search"><span class="ic-search"></span> Search ⌘K</button>
+        <button class="icon-btn" type="button" aria-label="Notifications" data-goto="notifications"><span class="ic-bell"></span></button>
       </header>
 
+      <div id="inbox-page">
       <div class="inbox-shell">
         <aside class="views" aria-label="Inbox views">
           <div class="views-title">Inbox views</div>
@@ -62,6 +64,9 @@
 
         <aside class="copilot" id="copilot" aria-label="Copilot"></aside>
       </div>
+      </div>
+
+      <main id="page-root" class="page-root" hidden></main>
     </div>
   </div>
 
@@ -80,6 +85,7 @@
   <div class="replica-tag">reskin proposal · static HTML/CSS/JS · presentation only, zero behavior changes · data-track items mocked</div>
 
   <script src="data.js"></script>
+  <script src="pages-reskin.js"></script>
   <script src="reskin.js"></script>
 </body>
 </html>
