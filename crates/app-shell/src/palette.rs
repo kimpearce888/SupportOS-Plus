@@ -295,7 +295,7 @@ impl CommandPalette {
                         offset: [0, 8],
                         blur: 32,
                         spread: 0,
-                        color: egui::Color32::from_black_alpha(60),
+                        color: frame_tokens.shadow, // DC e2 (RS-12 token port)
                     }),
             )
             .show(ctx, |ui| {

@@ -1814,17 +1814,12 @@ impl SettingsPage {
                         .spacing(egui::vec2(16.0, 4.0))
                         .show(ui, |ui| {
                             use spp_core::connection_doctor::DoctorStatus;
+                            let dt = design::tokens(ui);
                             for step in &steps {
                                 let (tone, label) = match step.status {
-                                    DoctorStatus::Pass => {
-                                        (egui::Color32::from_rgb(34, 197, 94), "✓ ok")
-                                    }
-                                    DoctorStatus::Warn => {
-                                        (egui::Color32::from_rgb(234, 179, 8), "! warning")
-                                    }
-                                    DoctorStatus::Fail => {
-                                        (egui::Color32::from_rgb(239, 68, 68), "✗ failed")
-                                    }
+                                    DoctorStatus::Pass => (dt.success, "✓ ok"),
+                                    DoctorStatus::Warn => (dt.warning, "! warning"),
+                                    DoctorStatus::Fail => (dt.destructive, "✗ failed"),
                                 };
                                 ui.label(
                                     egui::RichText::new(format!("{label} — {}", step.name))

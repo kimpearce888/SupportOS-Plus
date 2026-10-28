@@ -1107,7 +1107,7 @@ impl KnowledgePage {
                                     .small()
                                     .color(ui.visuals().weak_text_color()),
                                 );
-                                ui.add_space(3.0);
+                                ui.add_space(4.0); /* DC sp-1 (B-3 normalization, RS-12) */
                             }
                         },
                     );

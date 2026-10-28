@@ -1583,7 +1583,7 @@ impl InboxPage {
                                     .weak(),
                             );
                         }
-                        ui.add_space(3.0);
+                        ui.add_space(4.0); /* DC sp-1 (B-3 normalization, RS-12) */
                     }
                     ui.add_space(4.0);
                 }
@@ -2804,13 +2804,7 @@ fn compact_time(iso: &str) -> String {
 /// painter).
 fn badge_galley(ui: &mut egui::Ui, label: &str, tone: BadgeTone) -> std::sync::Arc<egui::Galley> {
     let t = design::tokens(ui);
-    let fg = match tone {
-        BadgeTone::Neutral => t.secondary_foreground,
-        BadgeTone::Success => t.success_foreground,
-        BadgeTone::Warning => t.warning_foreground,
-        BadgeTone::Destructive => t.destructive_text,
-        BadgeTone::Info => t.info_foreground,
-    };
+    let (_, fg) = design::tone_colors_of(t, tone); // RS-12: DS.TONE is the only map
     egui::WidgetText::from(egui::RichText::new(label).size(11.0).strong().color(fg)).into_galley(
         ui,
         Some(egui::TextWrapMode::Extend),
@@ -2829,20 +2823,7 @@ fn paint_badge(
     pos: egui::Pos2,
 ) {
     let t = design::tokens(ui);
-    let bg = match tone {
-        BadgeTone::Neutral => t.muted,
-        BadgeTone::Success => t.success_soft,
-        BadgeTone::Warning => t.warning_soft,
-        BadgeTone::Destructive => t.destructive_soft,
-        BadgeTone::Info => t.info_soft,
-    };
-    let fg = match tone {
-        BadgeTone::Neutral => t.secondary_foreground,
-        BadgeTone::Success => t.success_foreground,
-        BadgeTone::Warning => t.warning_foreground,
-        BadgeTone::Destructive => t.destructive_text,
-        BadgeTone::Info => t.info_foreground,
-    };
+    let (bg, fg) = design::tone_colors_of(t, tone); // RS-12: DS.TONE is the only map
     let size = egui::vec2(galley.size().x + 18.0, galley.size().y + 6.0);
     let rect = egui::Rect::from_min_size(pos, size);
     ui.painter()

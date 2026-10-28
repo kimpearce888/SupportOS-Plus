@@ -48,6 +48,10 @@ Source: `mockups/design-lab/ds.css` (lines 33–66). Ported 1:1 into
 
 ### 2.2 Text & interaction
 
+Contrast note (DC-frozen, owner-approved via G1): text-2 on the light canvas
+(`--ds-bg`) is 4.11:1 (AA-large; the canvas carries only meta/secondary roles);
+on `--ds-surface` cards — the dominant text-2 surface — it is 4.7:1 (AA).
+
 | Token | Light | Dark | Use |
 |-------|-------|------|-----|
 | `--ds-text` | `#09090b` | `#fafafa` | primary content |

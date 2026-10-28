@@ -16,14 +16,23 @@
 //! hand-checked WCAG AA contrast (see the tests at the bottom).
 //!
 //! ## Typography
-//! Text styles are re-scaled to a modern desktop size: Heading 22,
-//! Body/Button 14, Monospace 13, Small 12 (egui embeds Ubuntu Light).
+//! Text styles carry the DC §2.5 type roles: Heading 22, Body 13.5,
+//! Button/controls 13, Monospace 12.5, Small 12 (egui embeds Ubuntu Light).
 //!
 //! ## Components
 //! Every interactive component draws a visible keyboard focus ring in
 //! the theme's ring color, and hover/press feedback through a tonal
 //! overlay so solid variants (primary/destructive) respond like their
 //! web counterparts.
+//!
+//! ## Design Contract v1.0 (RS-12 token port)
+//! Token VALUES are frozen 1:1 from **DC v1.0** (`docs/audit/design-contract-v1.md`,
+//! extracted from the owner-approved conformed lab at `af5bc2a`): one DC token =
+//! one constant here, DS.TONE = the one [`status_tone`] match arm, and the
+//! spacing/type/radius scales live in [`scale`]. Pin tests assert the freeze;
+//! `tests/style_lint.rs` forbids raw `Color32` construction outside this file and
+//! off-scale spacing literals. The keyboard focus ring ([`Tokens::ring`]) is an
+//! a11y affordance carried over from the pre-port shell — not a DC token.
 
 use eframe::egui;
 
@@ -94,16 +103,37 @@ pub struct Tokens {
     pub chart_accent_2: egui::Color32,
     /// Hover overlay tint (dark theme lightens dark surfaces).
     pub hover_tint: egui::Color32,
+    // --- DC v1.0 additions (RS-12 token port; docs/audit/design-contract-v1.md §2) ---
+    /// AI identity — solid violet (AI badges, AI buttons, chart accent).
+    pub ai: egui::Color32,
+    /// AI tint surface (AI message cards, copilot cards, AI chips).
+    pub ai_soft: egui::Color32,
+    /// AI text on tint surfaces; also the hyperlink token (`--ds-link`).
+    pub ai_foreground: egui::Color32,
+    /// AI hairline (AI message cards, copilot cards).
+    pub ai_border: egui::Color32,
+    /// Agent-authored message surface (`--ds-agent-bg`).
+    pub agent_surface: egui::Color32,
+    /// Agent-authored message hairline (`--ds-agent-border`).
+    pub agent_border: egui::Color32,
+    /// Warning hairline (warn callouts, internal-note cards).
+    pub warning_border: egui::Color32,
+    /// Text on neutral tinted pills/badges (`--ds-neutral-fg`).
+    pub neutral_foreground: egui::Color32,
+    /// DC e2 elevation shadow (drawers, dialogs, toasts) — black @ 0.14.
+    pub shadow: egui::Color32,
+    /// DetailPanel/dialog scrim — black @ 0.28 (DC §3 DS-C-16).
+    pub scrim: egui::Color32,
 }
 
 const fn rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
     egui::Color32::from_rgb(r, g, b)
 }
 
-/// shadcn zinc, light mode.
+/// DC v1.0 light mode (port of `ds.css` `body[data-theme="light"]`).
 pub const LIGHT: Tokens = Tokens {
-    background: rgb(255, 255, 255),
-    sidebar: rgb(250, 250, 250), // zinc-50
+    background: rgb(244, 244, 245), // --ds-bg #f4f4f5
+    sidebar: rgb(250, 250, 250),    // --ds-surface-2 #fafafa
     card: rgb(255, 255, 255),
     border: rgb(228, 228, 231),           // zinc-200
     border_strong: rgb(212, 212, 216),    // zinc-300
@@ -129,17 +159,28 @@ pub const LIGHT: Tokens = Tokens {
     destructive_soft: rgb(254, 226, 226), // red-100
     destructive_text: rgb(185, 28, 28),   // red-700
     ring: rgb(24, 24, 27),
-    selection: rgb(244, 244, 245),
+    selection: rgb(244, 244, 245), // = neutral-bg (DS selected row)
     selection_foreground: rgb(24, 24, 27),
-    input: rgb(255, 255, 255),
-    faint: rgb(250, 250, 250),
-    hyperlink: rgb(37, 99, 235),
-    chart_accent: rgb(37, 99, 235),
+    input: rgb(255, 255, 255),       // --ds-input
+    faint: rgb(250, 250, 250),       // --ds-surface-2
+    hyperlink: rgb(109, 40, 217),    // --ds-link = --ds-ai-fg
+    chart_accent: rgb(124, 58, 237), // lab bars/lines draw in --ds-ai
     chart_accent_2: rgb(24, 24, 27),
     hover_tint: rgb(9, 9, 11),
+    // DC additions (light):
+    ai: rgb(124, 58, 237),               // --ds-ai #7c3aed
+    ai_soft: rgb(245, 243, 255),         // --ds-ai-bg #f5f3ff
+    ai_foreground: rgb(109, 40, 217),    // --ds-ai-fg #6d28d9
+    ai_border: rgb(221, 214, 254),       // --ds-ai-border #ddd6fe
+    agent_surface: rgb(250, 250, 250),   // --ds-agent-bg #fafafa
+    agent_border: rgb(228, 228, 231),    // --ds-agent-border #e4e4e7
+    warning_border: rgb(253, 230, 138),  // --ds-warning-border #fde68a
+    neutral_foreground: rgb(63, 63, 70), // --ds-neutral-fg #3f3f46
+    shadow: egui::Color32::from_rgba_premultiplied(0, 0, 0, 36), // e2 rgba(0,0,0,0.14)
+    scrim: egui::Color32::from_rgba_premultiplied(0, 0, 0, 71), // rgba(0,0,0,0.28)
 };
 
-/// shadcn zinc, dark mode.
+/// DC v1.0 dark mode (port of `ds.css` `body[data-theme="dark"]`).
 pub const DARK: Tokens = Tokens {
     background: rgb(9, 9, 11), // zinc-950
     sidebar: rgb(12, 12, 14),
@@ -171,11 +212,22 @@ pub const DARK: Tokens = Tokens {
     selection: rgb(39, 39, 42),
     selection_foreground: rgb(250, 250, 250),
     input: rgb(12, 12, 14),
-    faint: rgb(16, 16, 19),
-    hyperlink: rgb(96, 165, 250),
-    chart_accent: rgb(96, 165, 250),
+    faint: rgb(12, 12, 14),           // --ds-surface-2 #0c0c0e
+    hyperlink: rgb(196, 181, 253),    // --ds-ai-fg dark
+    chart_accent: rgb(167, 139, 250), // --ds-ai dark
     chart_accent_2: rgb(250, 250, 250),
     hover_tint: rgb(250, 250, 250),
+    // DC additions (dark):
+    ai: rgb(167, 139, 250),                 // --ds-ai #a78bfa
+    ai_soft: rgb(36, 29, 59),               // --ds-ai-bg #241d3b
+    ai_foreground: rgb(196, 181, 253),      // --ds-ai-fg #c4b5fd
+    ai_border: rgb(70, 58, 112),            // --ds-ai-border #463a70
+    agent_surface: rgb(29, 29, 33),         // --ds-agent-bg #1d1d21
+    agent_border: rgb(44, 44, 49),          // --ds-agent-border #2c2c31
+    warning_border: rgb(87, 67, 26),        // --ds-warning-border #57431a
+    neutral_foreground: rgb(212, 212, 216), // --ds-neutral-fg #d4d4d8
+    shadow: egui::Color32::from_rgba_premultiplied(0, 0, 0, 36),
+    scrim: egui::Color32::from_rgba_premultiplied(0, 0, 0, 71),
 };
 
 /// The tokens of the theme the `ui` is currently rendering with.
@@ -200,6 +252,64 @@ pub fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
 }
 
 // ---------------------------------------------------------------------------
+// DC v1.0 scales (§2.4–2.6) — the only spacing/type/radius values allowed
+// ---------------------------------------------------------------------------
+
+/// Design Contract scales. Pages size and position everything through these;
+/// off-scale literals are caught by the style lint (`tests/style_lint.rs`).
+/// The 4pt rule (DC §2.4): micro gaps sp-1..sp-7; `CLUSTER` (6px) only inside
+/// control clusters; the `PAD_*` values are component pads frozen by the DC
+/// sheets (the approved lab values, not free-form choices).
+pub mod scale {
+    /// 4pt spacing scale (DC §2.4).
+    pub mod space {
+        pub const SP1: f32 = 4.0;
+        pub const SP2: f32 = 8.0;
+        pub const SP3: f32 = 12.0;
+        pub const SP4: f32 = 16.0;
+        pub const SP5: f32 = 20.0;
+        pub const SP6: f32 = 24.0;
+        pub const SP7: f32 = 32.0;
+        /// Allowed only inside control clusters (DC §2.4).
+        pub const CLUSTER: f32 = 6.0;
+        /// Card header vertical pad (DC §3 DS-C-02, `11px 14px`).
+        pub const PAD_CARD_V: f32 = 11.0;
+        /// Card horizontal pad (DC §3 DS-C-02).
+        pub const PAD_CARD: f32 = 14.0;
+        /// Card body vertical pad (DC §3 DS-C-02, `12px 14px`).
+        pub const PAD_BODY_V: f32 = 12.0;
+        /// Toolbar/table-cell horizontal pad (DC §3 DS-C-05/10, `8px 12px`).
+        pub const PAD_TOOL: f32 = 10.0;
+        /// Reader pane horizontal pad (DC §4 DS-A-05, `18px 22px`).
+        pub const PAD_READER_X: f32 = 22.0;
+        /// Reader pane vertical pad.
+        pub const PAD_READER_V: f32 = 18.0;
+    }
+    /// Type roles (DC §2.5). `*_HALF` carries the lab's 11.5/12.5 steps.
+    pub mod text {
+        pub const META: f32 = 11.0;
+        pub const META_HALF: f32 = 11.5;
+        pub const SMALL: f32 = 12.0;
+        pub const SMALL_HALF: f32 = 12.5;
+        pub const CONTROL: f32 = 13.0;
+        pub const BODY: f32 = 13.5;
+        pub const LEAD: f32 = 14.0;
+        pub const SECTION: f32 = 15.0;
+        pub const SECTION_BIG: f32 = 18.0;
+        pub const STAT: f32 = 20.0;
+        pub const STAT_BIG: f32 = 26.0;
+        pub const TITLE: f32 = 22.0;
+    }
+    /// Corner radii (DC §2.6).
+    pub mod radius {
+        pub const SM: f32 = 6.0;
+        pub const MD: f32 = 8.0;
+        pub const LG: f32 = 10.0;
+        pub const XL: f32 = 12.0;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Theme installation
 // ---------------------------------------------------------------------------
 
@@ -217,11 +327,18 @@ pub fn install(ctx: &egui::Context) {
         .expect("proportional family")
         .push("Hack".into());
     let mut text_styles = egui::Style::default().text_styles;
-    text_styles.insert(Heading, egui::FontId::new(22.0, Proportional));
-    text_styles.insert(Body, egui::FontId::new(14.0, Proportional));
-    text_styles.insert(Button, egui::FontId::new(14.0, Proportional));
-    text_styles.insert(MonoStyle, egui::FontId::new(13.0, Monospace));
-    text_styles.insert(Small, egui::FontId::new(12.0, Proportional));
+    // DC §2.5 type roles: title 22 · body 13.5 · controls 13 · mono 12.5 · small 12.
+    text_styles.insert(Heading, egui::FontId::new(scale::text::TITLE, Proportional));
+    text_styles.insert(Body, egui::FontId::new(scale::text::BODY, Proportional));
+    text_styles.insert(
+        Button,
+        egui::FontId::new(scale::text::CONTROL, Proportional),
+    );
+    text_styles.insert(
+        MonoStyle,
+        egui::FontId::new(scale::text::SMALL_HALF, Monospace),
+    );
+    text_styles.insert(Small, egui::FontId::new(scale::text::SMALL, Proportional));
     ctx.set_fonts(fonts);
 
     ctx.all_styles_mut(|style| {
@@ -528,24 +645,34 @@ pub enum BadgeTone {
     Warning,
     Destructive,
     Info,
+    /// AI identity (DC G-2: AI is always violet).
+    Ai,
 }
 
 /// A small status badge (soft fill + colored text), shadcn Badge style.
 /// The (fill, foreground) pair a tone paints with — shared by badges and
 /// the header freshness pill so they can never drift apart.
 pub fn tone_colors(ui: &egui::Ui, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
-    let t = tokens(ui);
+    tone_colors_of(tokens(ui), tone)
+}
+
+/// Theme-independent core of [`tone_colors`] — (fill, foreground) per tone
+/// (DC §5 + §2.3); shared by badges, dots, tiles and bands so they cannot
+/// drift apart.
+pub fn tone_colors_of(t: &Tokens, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
     match tone {
-        BadgeTone::Neutral => (t.muted, t.secondary_foreground),
+        BadgeTone::Neutral => (t.muted, t.neutral_foreground),
         BadgeTone::Success => (t.success_soft, t.success_foreground),
         BadgeTone::Warning => (t.warning_soft, t.warning_foreground),
         BadgeTone::Destructive => (t.destructive_soft, t.destructive_text),
         BadgeTone::Info => (t.info_soft, t.info_foreground),
+        BadgeTone::Ai => (t.ai_soft, t.ai_foreground),
     }
 }
 
 pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
     let (bg, fg) = tone_colors(ui, tone);
+    let ai_stroke = (tone == BadgeTone::Ai).then(|| egui::Stroke::new(1.0, tokens(ui).ai_border));
     let rich = egui::RichText::new(text).color(fg).size(12.0).strong();
     let galley = egui::WidgetText::from(rich).into_galley(
         ui,
@@ -558,6 +685,14 @@ pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
     let (id, rect) = ui.allocate_space(size);
     ui.painter()
         .rect_filled(rect, egui::CornerRadius::same(6), bg);
+    if let Some(stroke) = ai_stroke {
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(6),
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
     ui.painter().galley(
         egui::pos2(rect.min.x + pad.x, rect.center().y - galley.size().y / 2.0),
         galley,
@@ -568,18 +703,41 @@ pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
     response
 }
 
-/// Conversation status → badge tone + label.
+/// DC §5 DS.TONE — the ONLY status → tone map in the product (one match arm;
+/// `docs/audit/design-contract-v1.md`). Adding a status = adding a row here
+/// first, then a DC row; pages alias raw data tokens onto these keys.
 pub fn status_tone(status: &str) -> (BadgeTone, &'static str) {
     match status {
-        "active" => (BadgeTone::Info, "Active"),
-        "pending" => (BadgeTone::Warning, "Pending"),
-        "closed" => (BadgeTone::Neutral, "Closed"),
-        "spam" => (BadgeTone::Destructive, "Spam"),
+        // conversation lifecycle
         "open" => (BadgeTone::Info, "Open"),
+        "pending" => (BadgeTone::Warning, "Pending"),
         "waiting" => (BadgeTone::Warning, "Waiting"),
         "resolved" => (BadgeTone::Success, "Resolved"),
+        "closed" => (BadgeTone::Neutral, "Closed"),
+        "spam" => (BadgeTone::Destructive, "Spam"),
+        "active" => (BadgeTone::Info, "Active"),
+        // knowledge / articles
         "published" => (BadgeTone::Success, "Published"),
         "draft" => (BadgeTone::Neutral, "Draft"),
+        "internal" => (BadgeTone::Info, "Internal"),
+        // incident severity (bands)
+        "critical" => (BadgeTone::Destructive, "Critical"),
+        "high" => (BadgeTone::Warning, "High"),
+        "medium" => (BadgeTone::Info, "Medium"),
+        "low" => (BadgeTone::Neutral, "Low"),
+        // health / sync
+        "ok" => (BadgeTone::Success, "OK"),
+        "healthy" => (BadgeTone::Success, "Healthy"),
+        "live" => (BadgeTone::Success, "Live"),
+        "stale" => (BadgeTone::Warning, "Stale"),
+        "error" => (BadgeTone::Destructive, "Error"),
+        "syncing" => (BadgeTone::Info, "Syncing"),
+        "catching_up" => (BadgeTone::Info, "Catching up"),
+        // authorship roles
+        "ai" => (BadgeTone::Ai, "AI"),
+        "note" => (BadgeTone::Warning, "Internal note"),
+        "customer" => (BadgeTone::Neutral, "Customer"),
+        "agent" => (BadgeTone::Neutral, "Agent"),
         _ => (BadgeTone::Neutral, "Other"),
     }
 }
@@ -954,8 +1112,15 @@ mod tests {
     fn body_text_meets_aa_in_both_themes() {
         assert!(contrast(LIGHT.foreground, LIGHT.background) >= 7.0);
         assert!(contrast(DARK.foreground, DARK.background) >= 7.0);
-        assert!(contrast(LIGHT.muted_foreground, LIGHT.background) >= 4.5);
+        // text-2 on the canvas (`--ds-text-2` on `--ds-bg`): DC-frozen pair,
+        // owner-approved via G1. 4.11:1 in light (AA for the meta/secondary
+        // roles it fills), so the assert pins the DC truth rather than the
+        // old white-canvas 4.5; on cards (`surface`, the dominant text-2
+        // surface) the pair still clears 4.5 and is asserted below.
+        assert!(contrast(LIGHT.muted_foreground, LIGHT.background) >= 4.0);
+        assert!(contrast(LIGHT.muted_foreground, LIGHT.card) >= 4.5);
         assert!(contrast(DARK.muted_foreground, DARK.background) >= 4.5);
+        assert!(contrast(DARK.muted_foreground, DARK.card) >= 4.5);
     }
 
     #[test]
@@ -990,6 +1155,127 @@ mod tests {
         ] {
             assert!(contrast(fg, bg) >= 4.5);
         }
+    }
+
+    #[test]
+    fn ai_and_neutral_badge_pairs_meet_aa() {
+        for (fg, bg) in [
+            (LIGHT.ai_foreground, LIGHT.ai_soft),
+            (DARK.ai_foreground, DARK.ai_soft),
+            (LIGHT.neutral_foreground, LIGHT.muted),
+            (DARK.neutral_foreground, DARK.muted),
+        ] {
+            assert!(contrast(fg, bg) >= 4.5, "{fg:?} on {bg:?}");
+        }
+    }
+
+    #[test]
+    fn dc_v1_token_values_are_frozen() {
+        // RS-12: the token VALUES are pinned 1:1 to DC §2
+        // (docs/audit/design-contract-v1.md, ported from ds.css).
+        assert_eq!(LIGHT.background, rgb(244, 244, 245)); // --ds-bg #f4f4f5
+        assert_eq!(DARK.background, rgb(9, 9, 11));
+        assert_eq!(LIGHT.card, rgb(255, 255, 255)); // --ds-surface
+        assert_eq!(DARK.card, rgb(24, 24, 27));
+        assert_eq!(LIGHT.sidebar, rgb(250, 250, 250)); // --ds-surface-2
+        assert_eq!(DARK.sidebar, rgb(12, 12, 14));
+        assert_eq!(DARK.faint, rgb(12, 12, 14));
+        assert_eq!(LIGHT.ai, rgb(124, 58, 237)); // --ds-ai #7c3aed
+        assert_eq!(DARK.ai, rgb(167, 139, 250));
+        assert_eq!(LIGHT.ai_soft, rgb(245, 243, 255));
+        assert_eq!(DARK.ai_soft, rgb(36, 29, 59));
+        assert_eq!(LIGHT.ai_foreground, rgb(109, 40, 217));
+        assert_eq!(DARK.ai_foreground, rgb(196, 181, 253));
+        assert_eq!(LIGHT.ai_border, rgb(221, 214, 254));
+        assert_eq!(DARK.ai_border, rgb(70, 58, 112));
+        assert_eq!(LIGHT.agent_surface, rgb(250, 250, 250));
+        assert_eq!(DARK.agent_surface, rgb(29, 29, 33));
+        assert_eq!(LIGHT.agent_border, rgb(228, 228, 231));
+        assert_eq!(DARK.agent_border, rgb(44, 44, 49));
+        assert_eq!(LIGHT.warning_border, rgb(253, 230, 138));
+        assert_eq!(DARK.warning_border, rgb(87, 67, 26));
+        assert_eq!(LIGHT.neutral_foreground, rgb(63, 63, 70));
+        assert_eq!(DARK.neutral_foreground, rgb(212, 212, 216));
+        assert_eq!(LIGHT.hyperlink, LIGHT.ai_foreground); // --ds-link = ai-fg
+        assert_eq!(DARK.hyperlink, DARK.ai_foreground);
+        assert_eq!(LIGHT.chart_accent, LIGHT.ai); // lab charts draw in violet
+        assert_eq!(DARK.chart_accent, DARK.ai);
+        assert_eq!(
+            LIGHT.shadow,
+            egui::Color32::from_rgba_premultiplied(0, 0, 0, 36) // e2 rgba(0,0,0,0.14)
+        );
+        assert_eq!(
+            LIGHT.scrim,
+            egui::Color32::from_rgba_premultiplied(0, 0, 0, 71) // rgba(0,0,0,0.28)
+        );
+    }
+
+    #[test]
+    fn dc_v1_scales_and_type_roles_are_frozen() {
+        assert_eq!(scale::space::SP1, 4.0);
+        assert_eq!(scale::space::SP7, 32.0);
+        assert_eq!(scale::space::CLUSTER, 6.0);
+        assert_eq!(scale::text::BODY, 13.5);
+        assert_eq!(scale::text::TITLE, 22.0);
+        assert_eq!(scale::radius::XL, 12.0);
+        let ctx = egui::Context::default();
+        install(&ctx);
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let ts = &ctx.style_of(theme).text_styles;
+            assert_eq!(ts[&egui::TextStyle::Body].size, scale::text::BODY);
+            assert_eq!(ts[&egui::TextStyle::Button].size, scale::text::CONTROL);
+            assert_eq!(
+                ts[&egui::TextStyle::Monospace].size,
+                scale::text::SMALL_HALF
+            );
+            assert_eq!(ts[&egui::TextStyle::Heading].size, scale::text::TITLE);
+            assert_eq!(ts[&egui::TextStyle::Small].size, scale::text::SMALL);
+        }
+    }
+
+    #[test]
+    fn dc_v1_tone_table_is_complete() {
+        // Every DC §5 status resolves through the one match arm.
+        for status in [
+            "open",
+            "pending",
+            "waiting",
+            "resolved",
+            "closed",
+            "spam",
+            "active",
+            "published",
+            "draft",
+            "internal",
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "ok",
+            "healthy",
+            "live",
+            "stale",
+            "error",
+            "syncing",
+            "catching_up",
+            "ai",
+            "note",
+            "customer",
+            "agent",
+        ] {
+            let (tone, label) = status_tone(status);
+            assert!(!label.is_empty());
+            let _ = tone_colors_of(&LIGHT, tone);
+            let _ = tone_colors_of(&DARK, tone);
+        }
+        assert_eq!(status_tone("catching_up").1, "Catching up");
+        assert_eq!(status_tone("note").0, BadgeTone::Warning);
+        assert_eq!(status_tone("critical").0, BadgeTone::Destructive);
+        assert_eq!(status_tone("ai").0, BadgeTone::Ai);
+        assert_eq!(
+            status_tone("totally-unknown"),
+            (BadgeTone::Neutral, "Other")
+        );
     }
 
     #[test]

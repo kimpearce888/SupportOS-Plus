@@ -172,7 +172,7 @@ impl Toasts {
                             offset: [0, 4],
                             blur: 16,
                             spread: 0,
-                            color: egui::Color32::from_black_alpha(48),
+                            color: t.shadow, // DC e2 (RS-12 token port)
                         });
                     frame.show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
