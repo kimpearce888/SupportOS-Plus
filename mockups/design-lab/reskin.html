@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SupportOS+ — reskin proposal (design lab)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="reskin.css">
+</head>
+<body data-theme="light">
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sb-head">
+        <div class="logo-badge">S+</div>
+        <div>
+          <div class="sb-app">SupportOS+</div>
+          <div class="sb-ver">v1.8.0 · reskin</div>
+        </div>
+      </div>
+      <button class="sb-search" type="button" id="sb-search">
+        <span id="sb-search-ic"></span> Search… <kbd>⌘K</kbd>
+      </button>
+      <nav class="sb-nav" id="sb-nav" aria-label="Primary"></nav>
+      <button class="sb-theme" id="theme-toggle" type="button">
+        <span id="theme-ic"></span><span id="theme-label">switch to dark theme</span>
+      </button>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="ghost-btn" type="button"><span class="ic-search"></span> Search ⌘K</button>
+        <button class="icon-btn" type="button" aria-label="Notifications"><span class="ic-bell"></span></button>
+      </header>
+
+      <div class="inbox-shell">
+        <aside class="views" aria-label="Inbox views">
+          <div class="views-title">Inbox views</div>
+          <div id="views"></div>
+          <div class="views-foot">
+            <button class="notes-toggle" id="notes-toggle" type="button" aria-pressed="false">
+              <span id="notes-ic"></span> Design notes <span class="count" id="notes-count">10</span>
+            </button>
+            <div class="kbd-hint"><kbd>j</kbd> / <kbd>k</kbd> navigate · <kbd>Enter</kbd> open · <kbd>/</kbd> filter · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> send</div>
+          </div>
+        </aside>
+
+        <section class="conv-col" aria-label="Conversations">
+          <div class="conv-head">
+            <div class="conv-title" id="conv-title">All</div>
+            <div class="conv-sub" id="conv-sub"></div>
+            <input class="conv-filter" id="conv-filter" placeholder="Filter conversations…  ( / )" aria-label="Filter conversations">
+          </div>
+          <div class="conv-list" id="conv-list"></div>
+        </section>
+
+        <section class="reader-col" aria-label="Conversation reader">
+          <div class="reader-head" id="reader-head"></div>
+          <div class="reader-scroll" id="reader-scroll"><div class="reader-inner" id="reader"></div></div>
+          <div class="composer" id="composer"></div>
+        </section>
+
+        <aside class="copilot" id="copilot" aria-label="Copilot"></aside>
+      </div>
+    </div>
+  </div>
+
+  <aside class="notes-drawer" id="notes-drawer" aria-label="Design notes">
+    <div class="nd-head">
+      <div>
+        <div class="nd-title">Design notes — what changed and why</div>
+        <div class="nd-sub">Every pin cites the forensic receipt it fixes.</div>
+      </div>
+      <button class="icon-btn" id="notes-close" type="button" aria-label="Close design notes"><span id="notes-x"></span></button>
+    </div>
+    <div class="nd-list" id="nd-list"></div>
+  </aside>
+
+  <div class="toast" id="toast" role="status"></div>
+  <div class="replica-tag">reskin proposal · static HTML/CSS/JS · presentation only, zero behavior changes · data-track items mocked</div>
+
+  <script src="data.js"></script>
+  <script src="reskin.js"></script>
+</body>
+</html>

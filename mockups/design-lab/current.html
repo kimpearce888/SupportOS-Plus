@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SupportOS+ — current shell (replica)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="current.css">
+</head>
+<body data-theme="light">
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sb-head">
+        <div class="logo-badge">S+</div>
+        <div>
+          <div class="sb-app">SupportOS+</div>
+          <div class="sb-ver">v1.8.0</div>
+        </div>
+      </div>
+      <button class="sb-search" id="sb-search" type="button">
+        <span id="sb-search-ic"></span> Search… <kbd>⌘K</kbd>
+      </button>
+      <nav class="sb-nav" id="sb-nav" aria-label="Primary"></nav>
+      <button class="sb-theme" id="theme-toggle" type="button">
+        <span id="theme-ic"></span><span id="theme-label">switch to dark theme</span>
+      </button>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="ghost-btn" type="button"><span class="ic-search"></span> Search ⌘K</button>
+        <button class="icon-btn" type="button" aria-label="Notifications"><span class="ic-bell"></span></button>
+      </header>
+
+      <div class="content">
+        <div class="page-head">
+          <div>
+            <h1>Inbox</h1>
+            <div class="page-sub" id="page-sub">6 of 6 conversations</div>
+          </div>
+          <button class="text-btn" id="reset-filters" type="button">reset filters</button>
+        </div>
+
+        <div class="seg-tabs" id="seg-tabs" role="tablist" aria-label="Status filter"></div>
+
+        <div class="filter-row">
+          <button class="combo" type="button">All mailboxes <span class="ic-caret"></span></button>
+          <button class="combo" type="button">All channels <span class="ic-caret"></span></button>
+          <button class="combo" type="button">Any tag <span class="ic-caret"></span></button>
+          <button class="apply-btn" type="button">apply</button>
+        </div>
+        <div class="search-row">
+          <input class="text-input search-main" id="q" placeholder="search conversations…" aria-label="Search conversations">
+          <input class="text-input search-tag" id="tag" placeholder="#" aria-label="Tag filter">
+          <button class="primary-btn" type="button"><span class="ic-search2"></span> Search</button>
+        </div>
+
+        <div class="inbox-cols">
+          <section class="list-pane" aria-label="Conversations">
+            <div class="list-card" id="list"></div>
+            <div class="pager">
+              <button type="button" disabled>‹ prev</button>
+              <span>page 1 of 1 · 50 per page</span>
+              <button type="button" disabled>next ›</button>
+            </div>
+          </section>
+          <section class="detail-pane" id="detail" aria-label="Conversation"></section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="replica-tag">replica · SupportOS+ v1.8.0 shell · static HTML/CSS/JS, no program code changed</div>
+
+  <script src="data.js"></script>
+  <script src="current.js"></script>
+</body>
+</html>

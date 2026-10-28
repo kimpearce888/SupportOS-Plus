@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SupportOS+ Design Lab — before / after</title>
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+  <header class="lab-header">
+    <div class="lab-brand">
+      <div class="lab-logo">S+</div>
+      <div>
+        <div class="lab-title">SupportOS+ · UX Design Lab</div>
+        <div class="lab-sub">High-fidelity HTML/CSS/JS replica — the Rust program was not modified</div>
+      </div>
+    </div>
+
+    <div class="lab-modes" role="tablist" aria-label="Lab mode">
+      <button class="lab-mode active" data-mode="before" role="tab" aria-selected="true" type="button"><span class="dot before"></span>Before · current shell</button>
+      <button class="lab-mode" data-mode="after" role="tab" aria-selected="false" type="button"><span class="dot after"></span>After · reskin proposal</button>
+      <button class="lab-mode" data-mode="split" role="tab" aria-selected="false" type="button"><span class="dot split"></span>Side by side</button>
+    </div>
+
+    <div class="lab-links">
+      <a class="lab-link" href="current.html" target="_blank" rel="noopener">Open Before ↗</a>
+      <a class="lab-link" href="reskin.html" target="_blank" rel="noopener">Open After ↗</a>
+    </div>
+  </header>
+
+  <main class="lab-stage single" id="stage">
+    <div class="frame-wrap" id="wrap">
+      <div class="frame-label" id="frame-label">
+        <span id="frame-label-text">Replica of the current v1.8.0 shell — click a conversation, type a draft, switch conversations</span>
+      </div>
+      <div class="frame-box"><iframe id="frame" src="current.html" title="SupportOS+ replica"></iframe></div>
+    </div>
+  </main>
+
+  <footer class="lab-footer">
+    <span>
+      Static replica built from the forensic receipts of Tasks 15-17 · scope contract: presentation only, zero DB/schema/sync/feature changes ·
+      in the <a href="#" data-goto="after">After</a> view, toggle <strong>Design notes</strong> (bottom of the views rail) for the file:line receipts.
+    </span>
+    <span>v1.8.0 baseline → reskin proposal (token v3 + role-typed message cards)</span>
+  </footer>
+
+<script>
+(() => {
+  "use strict";
+  const stage = document.getElementById("stage");
+  const frame = document.getElementById("frame");
+  const labelText = document.getElementById("frame-label-text");
+
+  const LABELS = {
+    before: "Replica of the current v1.8.0 shell — click a conversation, type a draft, then switch conversations",
+    after: "Reskin proposal — role-typed cards, AI identity, composer accelerators; toggle Design notes for receipts",
+  };
+
+  function setMode(mode) {
+    document.querySelectorAll(".lab-mode").forEach((b) => {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", String(on));
+    });
+    if (mode === "split") {
+      stage.classList.remove("single");
+      stage.classList.add("split");
+      stage.innerHTML =
+        '<div class="frame-wrap"><div class="frame-label">Before · current shell <span class="tag plain">v1.8.0 replica</span></div>' +
+        '<div class="frame-box"><iframe src="current.html" title="Before: current shell replica"></iframe></div></div>' +
+        '<div class="frame-wrap"><div class="frame-label">After · reskin proposal <span class="tag">token v3 + message cards</span></div>' +
+        '<div class="frame-box"><iframe src="reskin.html" title="After: reskin proposal"></iframe></div></div>';
+      return;
+    }
+    stage.classList.add("single");
+    stage.classList.remove("split");
+    stage.innerHTML =
+      '<div class="frame-wrap"><div class="frame-label" id="frame-label"><span id="frame-label-text">' +
+      LABELS[mode] +
+      '</span></div><div class="frame-box"><iframe id="frame" src="' +
+      (mode === "before" ? "current.html" : "reskin.html") +
+      '" title="' + (mode === "before" ? "Before: current shell replica" : "After: reskin proposal") + '"></iframe></div></div>';
+  }
+
+  document.querySelector(".lab-modes").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mode]");
+    if (b) setMode(b.dataset.mode);
+  });
+  document.querySelector(".lab-footer").addEventListener("click", (e) => {
+    const a = e.target.closest("[data-goto]");
+    if (a) {
+      e.preventDefault();
+      setMode(a.dataset.goto);
+    }
+  });
+})();
+</script>
+</body>
+</html>
