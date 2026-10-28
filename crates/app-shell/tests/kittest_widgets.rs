@@ -186,3 +186,143 @@ fn structure_tabs_click_moves_underline_dark() {
     h.snapshot("r2a_tabs_pending_dark");
     assert_eq!(h.state().tab, 2, "clicking the Pending tab must move state");
 }
+
+// ---------------------------------------------------------------------------
+// RS-14 — R2b feedback set (DS-C-14/15/16/19)
+// ---------------------------------------------------------------------------
+
+struct Feedback {
+    installed: bool,
+    confirmed: bool,
+}
+
+fn harness_feedback(dark: bool) -> Harness<'static, Feedback> {
+    Harness::builder()
+        .with_size(egui::vec2(760.0, 880.0))
+        .with_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        })
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    spp_shell::design::install(ui.ctx());
+                    s.installed = true;
+                }
+                draw_feedback(ui, s);
+            },
+            Feedback {
+                installed: false,
+                confirmed: false,
+            },
+        )
+}
+
+fn draw_feedback(ui: &mut egui::Ui, s: &mut Feedback) {
+    use spp_shell::design::{self, AvatarSize, BadgeTone, ButtonVariant, CalloutRole};
+
+    // DS-C-14 EmptyState: full + CTA, and the slim variant.
+    if design::empty_state_cta(
+        ui,
+        icons::Icon::Inbox,
+        "Nothing here yet",
+        "Connect a channel to start receiving conversations.",
+        "Connect channel",
+    ) {
+        s.confirmed = true;
+    }
+    design::empty_state_slim(
+        ui,
+        icons::Icon::Clock,
+        "No milestones",
+        "Milestones appear after the first sync.",
+    );
+
+    // DS-C-15 Callout set — the five fixed B-1 roles.
+    design::callout(ui, CalloutRole::Neutral, "In-card context note.");
+    design::callout(
+        ui,
+        CalloutRole::Warn,
+        "This report uses the legacy builder.",
+    );
+    design::callout(ui, CalloutRole::Err, "The last sync failed 3 minutes ago.");
+    design::status_line(ui, true, "Up to date · synced 12:04");
+    design::status_line(ui, false, "Sync failed — retry");
+    design::quirk(
+        ui,
+        "Data-layer quirk: freshness is stale until U2 lands (receipt-cited).",
+    );
+
+    // DS-C-19 Avatar / Assignee.
+    ui.horizontal(|ui| {
+        design::avatar(ui, AvatarSize::Lg, "KP", BadgeTone::Neutral);
+        design::avatar(ui, AvatarSize::Md, "AI", BadgeTone::Ai);
+        design::avatar(ui, AvatarSize::Md, "NT", BadgeTone::Warning);
+        design::assignee(ui, Some("Kim Pearce"));
+        design::assignee(ui, None);
+    });
+
+    // DS-C-16 armed danger button — two-step confirm (A-5).
+    ui.horizontal(|ui| {
+        if design::armed_danger_button(ui, "row-delete", "delete", "confirm delete?") {
+            s.confirmed = true;
+        }
+        let _ = design::button(ui, "Safe action", ButtonVariant::Outline);
+    });
+
+    // DC: DS-C-13 form rows.
+    design::form_row(ui, "Team name", |ui| {
+        let _ = ui.add(
+            egui::TextEdit::singleline(&mut String::from("Support"))
+                .hint_text("team name")
+                .desired_width(160.0),
+        );
+    });
+}
+
+#[test]
+fn feedback_widgets_snapshot_light() {
+    let mut h = harness_feedback(false);
+    h.run_ok();
+    h.snapshot("r2b_feedback_widgets_light");
+}
+
+#[test]
+fn feedback_widgets_snapshot_dark() {
+    let mut h = harness_feedback(true);
+    h.run_ok();
+    h.snapshot("r2b_feedback_widgets_dark");
+}
+
+#[test]
+fn armed_confirm_requires_two_clicks_light() {
+    let mut h = harness_feedback(false);
+    h.run_ok();
+    // First click arms — no confirm.
+    h.get_by_label("delete").click();
+    h.run_ok();
+    h.run_steps(3); // settle past the arm frame; the danger label renders
+    h.snapshot("r2b_armed_confirm_light");
+    assert!(!h.state().confirmed, "first click must only arm");
+    // Second click on the armed label confirms.
+    h.get_by_label("confirm delete?").click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(h.state().confirmed, "second click must confirm");
+}
+
+#[test]
+fn armed_confirm_requires_two_clicks_dark() {
+    let mut h = harness_feedback(true);
+    h.run_ok();
+    h.get_by_label("delete").click();
+    h.run_ok();
+    h.run_steps(3);
+    h.snapshot("r2b_armed_confirm_dark");
+    assert!(!h.state().confirmed);
+    h.get_by_label("confirm delete?").click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(h.state().confirmed);
+}

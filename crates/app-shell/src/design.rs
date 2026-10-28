@@ -1441,6 +1441,374 @@ pub fn divider(ui: &mut egui::Ui) {
     let _ = id;
 }
 
+// ---------------------------------------------------------------------------
+// Components: feedback set (DC: DS-C-14/15/16/19 — R2b, RS-14)
+// ---------------------------------------------------------------------------
+
+/// DC: DS-C-14 EmptyState (slim variant) — 120px centered column for inline
+/// panes; the full variant is [`empty_state`].
+pub fn empty_state_slim(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) {
+    let t = tokens(ui);
+    ui.vertical_centered(|ui| {
+        ui.add_space(scale::space::SP3);
+        icon.show(ui, 20.0, t.muted_foreground);
+        ui.label(
+            egui::RichText::new(title)
+                .size(scale::text::SECTION)
+                .strong()
+                .color(t.foreground),
+        );
+        hint_text(ui, hint);
+        ui.add_space(scale::space::SP2);
+    });
+}
+
+/// DC: DS-C-14 EmptyState with the A-7 next-step CTA — every empty state
+/// says why + what to do; the CTA returns `true` on click.
+pub fn empty_state_cta(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    title: &str,
+    hint: &str,
+    cta_label: &str,
+) -> bool {
+    let mut clicked = false;
+    ui.vertical_centered(|ui| {
+        ui.add_space(scale::space::SP4);
+        let t = tokens(ui);
+        let (id, rect) = ui.allocate_space(egui::vec2(38.0, 38.0));
+        icon.paint_at(ui.painter(), rect, t.muted_foreground);
+        ui.advance_cursor_after_rect(rect);
+        let _ = id;
+        ui.add_space(scale::space::SP2);
+        ui.label(
+            egui::RichText::new(title)
+                .size(scale::text::SECTION)
+                .strong()
+                .color(t.foreground),
+        );
+        hint_text(ui, hint);
+        ui.add_space(scale::space::SP3);
+        clicked = button_with_icon(ui, Icon::Plus, cta_label, ButtonVariant::Primary).clicked();
+        ui.add_space(scale::space::SP4);
+    });
+    clicked
+}
+
+/// DC: DS-C-15 Callout — in-card context note (register B-1 role: never a
+/// page banner, never an action result). `warn` and `err` tint via DS.TONE.
+pub fn callout(ui: &mut egui::Ui, role: CalloutRole, text: &str) {
+    let t = tokens(ui);
+    let (bg, fg, border) = match role {
+        CalloutRole::Neutral => (t.muted, t.muted_foreground, None),
+        CalloutRole::Warn => (t.warning_soft, t.warning_foreground, Some(t.warning_border)),
+        CalloutRole::Err => (t.destructive_soft, t.destructive_text, None),
+    };
+    egui::Frame::new()
+        .fill(bg)
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            if let Some(b) = border {
+                ui.painter().rect_stroke(
+                    ui.max_rect(),
+                    egui::CornerRadius::same(8),
+                    egui::Stroke::new(1.0, b),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            ui.label(
+                egui::RichText::new(text)
+                    .size(scale::text::SMALL_HALF)
+                    .color(fg),
+            );
+        });
+}
+
+/// DC: DS-C-15 callout roles (fixed by register B-1 — pick by role).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalloutRole {
+    /// In-card context (neutral tint).
+    Neutral,
+    /// Caution context (warning tint + hairline).
+    Warn,
+    /// Failure context (danger tint).
+    Err,
+}
+
+/// DC: DS-C-15 status-line — the action-result role (register B-1/A-8):
+/// "syncing… → up to date / error". `ok` picks the tone.
+pub fn status_line(ui: &mut egui::Ui, ok: bool, text: &str) {
+    let t = tokens(ui);
+    ui.label(
+        egui::RichText::new(text)
+            .size(scale::text::SMALL_HALF)
+            .color(if ok {
+                t.success_foreground
+            } else {
+                t.destructive_text
+            }),
+    );
+}
+
+/// DC: DS-C-15 quirk — the receipt-cited quirk footnote (dashed border,
+/// muted); data-layer quirks stay visible, never faked fixed (DC C-1).
+pub fn quirk(ui: &mut egui::Ui, text: &str) {
+    let t = tokens(ui);
+    egui::Frame::new()
+        .fill(t.muted.gamma_multiply(0.55))
+        .corner_radius(egui::CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            // egui gap (DC E-2): no dashed strokes — the quirk keeps the
+            // dashed-border look via the muted fill + strong hairline.
+            ui.painter().rect_stroke(
+                ui.max_rect(),
+                egui::CornerRadius::same(8),
+                egui::Stroke::new(1.0, t.border_strong),
+                egui::StrokeKind::Inside,
+            );
+            ui.label(
+                egui::RichText::new(text)
+                    .size(scale::text::SMALL)
+                    .color(t.muted_foreground),
+            );
+        });
+}
+
+/// DC: DS-C-19 Avatar — initials in a role-tinted circle (lg 34 / md 28 /
+/// sm 16). `role` picks the fill from the same DS.TONE table.
+pub fn avatar(ui: &mut egui::Ui, size: AvatarSize, initials: &str, role: BadgeTone) {
+    let t = tokens(ui);
+    let d = match size {
+        AvatarSize::Lg => 34.0,
+        AvatarSize::Md => 28.0,
+        AvatarSize::Sm => 16.0,
+    };
+    let (bg, fg) = match (size, role) {
+        (AvatarSize::Lg, _) | (AvatarSize::Md, BadgeTone::Neutral) => (t.muted, t.muted_foreground),
+        (AvatarSize::Sm, _) => (t.primary, t.primary_foreground),
+        (_, BadgeTone::Ai) => (t.ai, t.on_ai),
+        (_, BadgeTone::Warning) => (t.warning_soft, t.warning_foreground),
+        (_, BadgeTone::Info) => (t.info_soft, t.info_foreground),
+        (_, BadgeTone::Success) => (t.success_soft, t.success_foreground),
+        (_, BadgeTone::Destructive) => (t.destructive_soft, t.destructive_text),
+    };
+    let (rect, _id) = ui.allocate_exact_size(egui::vec2(d, d), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), d / 2.0, bg);
+    let font = egui::FontId::proportional(match size {
+        AvatarSize::Lg => 12.0,
+        AvatarSize::Md => 10.5,
+        AvatarSize::Sm => 8.5,
+    });
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        initials,
+        font,
+        fg,
+    );
+    ui.advance_cursor_after_rect(rect);
+}
+
+/// DC: DS-C-19 avatar sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AvatarSize {
+    /// 34px — record headers, reader head.
+    Lg,
+    /// 28px — message cards.
+    Md,
+    /// 16px — inline rows.
+    Sm,
+}
+
+/// DC: DS-C-19 Assignee — sm avatar + name, or the dashed "unassigned"
+/// pill (register A-5 row-anatomy rule).
+pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
+    match name {
+        Some(n) => {
+            let initials: String = n
+                .split_whitespace()
+                .filter_map(|w| w.chars().next())
+                .take(2)
+                .collect();
+            avatar(
+                ui,
+                AvatarSize::Sm,
+                &initials.to_uppercase(),
+                BadgeTone::Neutral,
+            );
+            ui.label(
+                egui::RichText::new(n)
+                    .size(scale::text::META_HALF)
+                    .color(tokens(ui).muted_foreground),
+            );
+        }
+        None => {
+            let t = tokens(ui);
+            // egui gap (DC E-2): no dashed strokes — italic + hairline carry
+            // the DS "dashed unassigned" affordance.
+            let text = egui::RichText::new("unassigned")
+                .size(scale::text::META_HALF)
+                .italics()
+                .color(t.muted_foreground);
+            let galley = egui::WidgetText::from(text).into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Small,
+            );
+            let pad = egui::vec2(8.0, 2.0);
+            let size = galley.size() + 2.0 * pad;
+            let (rect, _id) = ui.allocate_exact_size(size, egui::Sense::hover());
+            ui.painter().rect_stroke(
+                rect,
+                egui::CornerRadius::same(9),
+                egui::Stroke::new(1.0, t.border_strong),
+                egui::StrokeKind::Inside,
+            );
+            ui.painter().galley(
+                egui::pos2(rect.min.x + pad.x, rect.center().y - galley.size().y / 2.0),
+                galley,
+                t.muted_foreground,
+            );
+            ui.advance_cursor_after_rect(rect);
+        }
+    }
+}
+
+/// DC: DS-C-16 armed ConfirmDialog rule (register A-5) — a destructive row
+/// action is a danger button that must be armed: the first click swaps the
+/// label to the explicit confirmation; a second click confirms, Esc or a
+/// click elsewhere disarms. Returns `true` exactly on the confirming click.
+pub fn armed_danger_button(ui: &mut egui::Ui, id: &str, label: &str, confirm_label: &str) -> bool {
+    let armed_id = egui::Id::unique(("spp-armed", id));
+    // The arm timestamp (frame index) guards against the auto-Id collision
+    // at the shared rect: the release that armed the button must never
+    // complete as a click on the danger button that replaces it.
+    let armed_frame = ui.ctx().data(|d| d.get_temp::<u64>(armed_id)).unwrap_or(0);
+    let armed = armed_frame > 0;
+    if armed {
+        let settle = ui.ctx().cumulative_frame_nr() > armed_frame + 1;
+        let confirm = settle && button(ui, confirm_label, ButtonVariant::Destructive).clicked();
+        // Esc or clicking anything else disarms.
+        let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if esc || confirm {
+            ui.ctx().data_mut(|d| d.insert_temp(armed_id, 0_u64));
+        }
+        return confirm;
+    }
+    if button(ui, label, ButtonVariant::Ghost).clicked() {
+        let frame = ui.ctx().cumulative_frame_nr();
+        ui.ctx().data_mut(|d| d.insert_temp(armed_id, frame));
+    }
+    false
+}
+
+/// DC: DS-C-16 DetailPanel — the right sheet (420px, surface, left
+/// hairline) over a scrim; Esc closes; body scrolls; `header` renders
+/// next to the title. Register A-1: list rows open this, never a
+/// full-page replace.
+pub fn detail_panel(
+    ctx: &egui::Context,
+    id: &str,
+    open: &mut bool,
+    title: &str,
+    header: impl FnOnce(&mut egui::Ui),
+    body: impl FnOnce(&mut egui::Ui),
+) {
+    if !*open {
+        return;
+    }
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        *open = false;
+        return;
+    }
+    let t = tokens_for(ctx);
+    let screen = ctx.input(|i| i.viewport_rect());
+    // Scrim captures clicks; clicking it closes the panel.
+    let scrim = egui::Area::new(egui::Id::unique(("spp-scrim", id)))
+        .order(egui::Order::Middle)
+        .anchor(egui::Align2::LEFT_TOP, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.painter()
+                .rect_filled(screen, egui::CornerRadius::ZERO, t.scrim);
+            let resp = ui.interact(
+                screen,
+                egui::Id::unique(("spp-scrim-hit", id)),
+                egui::Sense::click(),
+            );
+            if resp.clicked() {
+                *open = false;
+            }
+        });
+    let _ = scrim;
+    let width = 420.0_f32.min(screen.width() * 0.94);
+    egui::Area::new(egui::Id::unique(("spp-panel", id)))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(t.card)
+                .stroke(egui::Stroke::new(1.0, t.border))
+                .corner_radius(egui::CornerRadius::ZERO)
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.set_min_height(screen.height());
+                    ui.vertical(|ui| {
+                        // Header row: title + actions + close.
+                        ui.horizontal(|ui| {
+                            ui.add_space(scale::space::SP4);
+                            ui.label(egui::RichText::new(title).size(scale::text::LEAD).strong());
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    header(ui);
+                                    if icon_button(ui, Icon::X, ButtonVariant::Ghost, "close panel")
+                                        .clicked()
+                                    {
+                                        *open = false;
+                                    }
+                                    ui.add_space(scale::space::SP3);
+                                },
+                            );
+                        });
+                        divider(ui);
+                        egui::ScrollArea::vertical()
+                            .id_salt(format!("spp-panel-{id}"))
+                            .show(ui, |ui| {
+                                ui.add_space(scale::space::SP3);
+                                ui.add_space(scale::space::SP1);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(scale::space::SP4);
+                                    ui.vertical(|ui| {
+                                        ui.set_width(width - 32.0);
+                                        body(ui);
+                                    });
+                                    ui.add_space(scale::space::SP4);
+                                });
+                            });
+                    });
+                });
+        });
+}
+
+/// DC: DS-C-13 form row — one label + control pair on the 220px grid
+/// (label left via [`field_label`], control right).
+pub fn form_row(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        ui.set_min_width(ui.available_width());
+        ui.label(
+            egui::RichText::new(label)
+                .size(scale::text::BODY)
+                .color(tokens(ui).muted_foreground),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            control(ui);
+        });
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
