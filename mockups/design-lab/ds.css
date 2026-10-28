@@ -1,0 +1,441 @@
+/* ==========================================================================
+   SupportOS+ DESIGN SYSTEM v1.0 (DS) — canonical token + component layer
+   --------------------------------------------------------------------------
+   This file is the single source of truth for the reskin. Every value is
+   extracted from the approved reskin proposal (reskin.css, Task 18/19) and
+   renamed to semantic --ds-* tokens. The egui reskin (R1-R4) maps these
+   tokens 1:1 into design.rs; components map 1:1 into typed widgets.
+
+   RULES
+   1. Pages may only compose DS components. No bespoke CSS.
+   2. One meaning = one token. Status → tone ONLY via the TONE map (ds.js).
+   3. Spacing/type/radius come from the scales below. No off-scale values.
+   4. A change here is a versioned DS release (changelog), never a local edit.
+
+   Legacy alias map (reskin.css → DS):            (for the DS-4 migration)
+     --bg → --ds-bg            --card → --ds-surface     --faint → --ds-surface-2
+     --sidebar → --ds-surface-2(--ds-chrome)  --fg → --ds-text
+     --muted-fg → --ds-text-2  --border → --ds-border    --border-strong → --ds-border-strong
+     --primary → --ds-primary  --primary-fg → --ds-on-primary
+     --input → --ds-input      --hover → --ds-hover
+     --info/success/warning/danger(+bg/fg) → --ds-{tone}/{tone}-bg/{tone}-fg
+     --ai(+bg/fg/border) → --ds-ai(+...)       --agent-bg/border → --ds-agent-bg/-border
+   ========================================================================== */
+
+/* ----- DS-T tokens --------------------------------------------------------- */
+body[data-theme="light"] {
+  /* surfaces */
+  --ds-bg: #f4f4f5;              /* app canvas                (alias --bg)        */
+  --ds-surface: #ffffff;         /* cards, raised content     (alias --card)      */
+  --ds-surface-2: #fafafa;       /* chrome rails, faint rows  (alias --faint)     */
+  --ds-input: #ffffff;
+  --ds-border: #e4e4e7;
+  --ds-border-strong: #d4d4d8;
+  /* text */
+  --ds-text: #09090b;
+  --ds-text-2: #71717a;
+  --ds-on-primary: #fafafa;
+  /* interaction */
+  --ds-primary: #18181b;         /* primary actions, active accents */
+  --ds-hover: rgba(9, 9, 11, 0.045);
+  /* status tones (bg = tint, fg = text on tint) */
+  --ds-info: #2563eb;      --ds-info-bg: #eff6ff;      --ds-info-fg: #1d4ed8;
+  --ds-success: #16a34a;   --ds-success-bg: #f0fdf4;   --ds-success-fg: #15803d;
+  --ds-warning: #d97706;   --ds-warning-bg: #fffbeb;   --ds-warning-fg: #b45309;
+  --ds-warning-border: #fde68a;
+  --ds-danger: #dc2626;    --ds-danger-bg: #fee2e2;    --ds-danger-fg: #b91c1c;
+  --ds-neutral-bg: #f4f4f5; --ds-neutral-fg: #3f3f46;
+  /* role surfaces (token v3) */
+  --ds-ai: #7c3aed;        --ds-ai-bg: #f5f3ff;   --ds-ai-fg: #6d28d9;  --ds-ai-border: #ddd6fe;
+  --ds-agent-bg: #fafafa;  --ds-agent-border: #e4e4e7;
+  /* note role reuses warning (see TONE map) */
+}
+body[data-theme="dark"] {
+  --ds-bg: #09090b;
+  --ds-surface: #18181b;
+  --ds-surface-2: #0c0c0e;
+  --ds-input: #0c0c0e;
+  --ds-border: #27272a;
+  --ds-border-strong: #3f3f46;
+  --ds-text: #fafafa;
+  --ds-text-2: #a1a1aa;
+  --ds-on-primary: #18181b;
+  --ds-primary: #fafafa;
+  --ds-hover: rgba(250, 250, 250, 0.06);
+  --ds-info: #3b82f6;      --ds-info-bg: #172554;    --ds-info-fg: #60a5fa;
+  --ds-success: #22c55e;   --ds-success-bg: #0a2c1a; --ds-success-fg: #4ade80;
+  --ds-warning: #f59e0b;   --ds-warning-bg: #2b2205; --ds-warning-fg: #fbbf24;
+  --ds-warning-border: #57431a;
+  --ds-danger: #b91c1c;    --ds-danger-bg: #451a1a;  --ds-danger-fg: #f87171;
+  --ds-neutral-bg: #27272a; --ds-neutral-fg: #d4d4d8;
+  --ds-ai: #a78bfa;        --ds-ai-bg: #241d3b; --ds-ai-fg: #c4b5fd; --ds-ai-border: #463a70;
+  --ds-agent-bg: #1d1d21;  --ds-agent-border: #2c2c31;
+}
+
+/* ----- base ----------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+body.ds-page {
+  margin: 0;
+  font-family: "Ubuntu", -apple-system, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+  font-weight: 300;
+  font-size: 13.5px;
+  color: var(--ds-text);
+  background: var(--ds-bg);
+  -webkit-font-smoothing: antialiased;
+}
+.ds-page strong, .ds-page b { font-weight: 500; }
+.ds-page button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+.ds-page svg { width: 15px; height: 15px; flex: none; }
+.ds-page a { color: var(--ds-ai-fg); }
+:root {
+  --ds-r-sm: 6px; --ds-r-md: 8px; --ds-r-lg: 10px; --ds-r-xl: 12px; --ds-r-pill: 999px;
+  --ds-e1: 0 1px 2px rgba(0,0,0,0.04);
+  --ds-e2: 0 12px 32px rgba(0,0,0,0.14);
+  --ds-t-fast: 120ms ease; --ds-t-slow: 200ms ease;
+}
+
+/* ==========================================================================
+   DS-C-01 PageHeader — the ONLY page header pattern
+   ========================================================================== */
+.ds-page-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.ds-page-head h1 { font-size: 22px; font-weight: 500; letter-spacing: -0.01em; margin: 0; line-height: 1.2; }
+.ds-page-sub { font-size: 12.5px; color: var(--ds-text-2); margin-top: 3px; max-width: 640px; line-height: 1.5; }
+.ds-page-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.ds-counter { font-size: 12.5px; color: var(--ds-text-2); background: var(--ds-neutral-bg); border-radius: var(--ds-r-pill); padding: 3px 10px; white-space: nowrap; }
+
+/* ==========================================================================
+   DS-C-02 Card — the ONLY container pattern (default / flush / danger)
+   ========================================================================== */
+.ds-card { border: 1px solid var(--ds-border); border-radius: var(--ds-r-xl); background: var(--ds-surface); margin-bottom: 10px; overflow: hidden; box-shadow: var(--ds-e1); }
+.ds-card.danger { border-color: var(--ds-danger); padding: 4px; }
+.ds-card.danger .ds-card-b { border: 1px solid transparent; }
+.ds-card-h { display: flex; align-items: baseline; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--ds-border); font-size: 14px; font-weight: 500; flex-wrap: wrap; }
+.ds-card-sub { font-size: 12px; font-weight: 300; color: var(--ds-text-2); }
+.ds-card-b { padding: 12px 14px; }
+.ds-section-title { font-size: 15px; font-weight: 500; margin: 14px 0 7px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ds-section-title.big { font-size: 18px; }
+.ds-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.ds-two-col.wide-left { grid-template-columns: 340px 1fr; }
+@media (max-width: 860px) { .ds-two-col, .ds-two-col.wide-left { grid-template-columns: 1fr; } }
+
+/* ==========================================================================
+   DS-C-03 StatTile · DS-C-04 MetricTile (banded) · DS-C-23 bars
+   ========================================================================== */
+.ds-stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.ds-stat { border: 1px solid var(--ds-border); border-radius: var(--ds-r-xl); background: var(--ds-surface); padding: 12px 14px; box-shadow: var(--ds-e1); }
+.ds-stat .l { font-size: 12px; color: var(--ds-text-2); }
+.ds-stat .v { font-size: 26px; font-weight: 500; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.ds-stat .h { font-size: 12px; color: var(--ds-text-2); margin-top: 1px; }
+.ds-tile-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ds-tile-wrap.band-critical { border-left: 3px solid var(--ds-danger); padding-left: 8px; }
+.ds-tile-wrap.band-warning { border-left: 3px solid var(--ds-warning); padding-left: 8px; }
+.ds-tile-wrap.band-info { border-left: 3px solid var(--ds-info); padding-left: 8px; }
+.ds-tile { display: flex; align-items: center; gap: 10px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); background: var(--ds-surface); padding: 10px 12px; min-width: 196px; box-shadow: var(--ds-e1); }
+.ds-tile .cnt { font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ds-tile.crit .cnt { color: var(--ds-danger-fg); }
+.ds-tile.warning .cnt { color: var(--ds-warning-fg); }
+.ds-tile.info .cnt { color: var(--ds-info-fg); }
+.ds-tile.drill { cursor: pointer; transition: transform var(--ds-t-fast); }
+.ds-tile.drill:hover { border-color: var(--ds-border-strong); transform: translateY(-1px); }
+.ds-tile .lbl { font-size: 13px; }
+.ds-drill-line { display: block; font-size: 11px; color: var(--ds-ai-fg); }
+.ds-bar-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.ds-bar-row.slim { margin: 4px 0; }
+.ds-bar-label { width: 140px; font-size: 12.5px; flex: none; }
+.ds-bar-label.w120 { width: 120px; }
+.ds-bar-track { flex: 1; height: 14px; background: var(--ds-neutral-bg); border-radius: 7px; overflow: hidden; }
+.ds-bar-track i { display: block; height: 100%; background: var(--ds-ai); border-radius: 7px; opacity: 0.8; }
+.ds-bar-val { width: 56px; text-align: right; font-size: 12.5px; flex: none; font-variant-numeric: tabular-nums; }
+.ds-load-bar { width: 70px; height: 10px; background: var(--ds-neutral-bg); border-radius: 5px; overflow: hidden; flex: none; }
+.ds-load-bar i { display: block; height: 100%; background: var(--ds-ai); }
+
+/* ==========================================================================
+   DS-C-05 DataTable — the ONLY table pattern
+   ========================================================================== */
+.ds-tbl-wrap { overflow-x: auto; border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); }
+.ds-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ds-tbl th { text-align: left; font-size: 11px; font-weight: 500; color: var(--ds-text-2); text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 12px; border-bottom: 1px solid var(--ds-border); white-space: nowrap; background: var(--ds-surface-2); }
+.ds-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--ds-surface-2); }
+.ds-tbl tbody tr:last-child td { border-bottom: none; }
+.ds-tbl tbody tr:hover { background: var(--ds-hover); }
+.ds-tbl td.num { text-align: right; font-family: ui-monospace, monospace; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ds-tbl td.strong { font-weight: 500; }
+.ds-mono { font-family: ui-monospace, monospace; font-size: 12.5px; }
+.ds-muted2 { color: var(--ds-text-2); }
+.ds-small { font-size: 12px; }
+.ds-strong { font-weight: 500; }
+
+/* ==========================================================================
+   DS-C-06 Badge + tone system · DS-C-07 Chip · DS-C-08 StatusDot
+   ========================================================================== */
+.ds-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: var(--ds-r-sm); font-size: 11px; white-space: nowrap; }
+.ds-badge.info    { background: var(--ds-info-bg);    color: var(--ds-info-fg); }
+.ds-badge.success { background: var(--ds-success-bg); color: var(--ds-success-fg); }
+.ds-badge.warning { background: var(--ds-warning-bg); color: var(--ds-warning-fg); }
+.ds-badge.danger  { background: var(--ds-danger-bg);  color: var(--ds-danger-fg); }
+.ds-badge.neutral { background: var(--ds-neutral-bg); color: var(--ds-neutral-fg); }
+.ds-badge.ai      { background: var(--ds-ai-bg); color: var(--ds-ai-fg); border: 1px solid var(--ds-ai-border); }
+.ds-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; border-radius: var(--ds-r-pill); border: 1px solid var(--ds-border); font-size: 12.5px; background: var(--ds-surface); color: var(--ds-text); }
+.ds-chip svg { width: 12px; height: 12px; }
+.ds-chip:hover { border-color: var(--ds-border-strong); }
+.ds-chip.on { background: var(--ds-neutral-bg); border-color: var(--ds-border-strong); font-weight: 500; }
+.ds-chip.full { width: 100%; justify-content: flex-start; }
+.ds-chip-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+.ds-state-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ds-border-strong); margin-right: 7px; vertical-align: 1px; }
+.ds-state-dot.ok   { background: var(--ds-success); }
+.ds-state-dot.info { background: var(--ds-info); }
+.ds-state-dot.warn { background: var(--ds-warning); }
+.ds-state-dot.err  { background: var(--ds-danger); }
+.ds-state-dot.ai   { background: var(--ds-ai); }
+.ds-state-dot.big { width: 11px; height: 11px; margin-right: 9px; }
+
+/* ==========================================================================
+   DS-C-09 Tabs (underline; grouped variant)
+   ========================================================================== */
+.ds-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--ds-border); margin: 4px 0 14px; }
+.ds-tab { height: 34px; padding: 0 13px; font-size: 13px; color: var(--ds-text-2); border-radius: 0; position: relative; }
+.ds-tab:hover { color: var(--ds-text); }
+.ds-tab.active { color: var(--ds-text); font-weight: 500; }
+.ds-tab.active::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--ds-primary); border-radius: 2px; }
+.ds-tabgroups { display: flex; gap: 22px; flex-wrap: wrap; margin: 4px 0 14px; }
+.ds-tabgroups .tg-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ds-text-2); margin-bottom: 4px; }
+
+/* ==========================================================================
+   DS-C-10 Toolbar/FilterBar — filter+search left, context+actions right
+   ========================================================================== */
+.ds-tool-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.ds-tool-row.no-margin { margin-top: 0; }
+.ds-tool-row.split { justify-content: space-between; }
+.ds-field-inline { font-size: 12px; color: var(--ds-text-2); margin-right: 4px; }
+
+/* ==========================================================================
+   DS-C-11 Buttons — primary / outline / ghost / danger / text / ai
+   ========================================================================== */
+.ds-btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: var(--ds-r-md); font-size: 13px; }
+.ds-btn svg { width: 13px; height: 13px; }
+.ds-btn.primary { background: var(--ds-primary); color: var(--ds-on-primary); }
+.ds-btn.primary:hover { opacity: 0.88; }
+.ds-btn.outline { border: 1px solid var(--ds-border); background: var(--ds-surface); padding: 0 13px; }
+.ds-btn.outline:hover { border-color: var(--ds-border-strong); background: var(--ds-hover); }
+.ds-btn.outline.ai { color: var(--ds-ai-fg); border-color: var(--ds-ai-border); }
+.ds-btn.outline.ai:hover { background: var(--ds-ai-bg); }
+.ds-btn.danger { background: var(--ds-danger); color: #fff; padding: 0 13px; }
+.ds-btn.danger:hover { opacity: 0.9; }
+.ds-btn.text { font-size: 13px; padding: 5px 8px; border-radius: var(--ds-r-sm); color: var(--ds-text-2); }
+.ds-btn.text:hover { background: var(--ds-hover); color: var(--ds-text); }
+.ds-btn.ai { height: 28px; padding: 0 12px; background: var(--ds-ai); color: #fff; font-weight: 500; }
+.ds-btn.ai:hover { opacity: 0.92; }
+.ds-btn.sm { height: 24px; font-size: 11.5px; padding: 0 10px; }
+
+/* ==========================================================================
+   DS-C-12 Inputs (text / textarea / combo / check) · DS-C-13 Form rows
+   ========================================================================== */
+.ds-text-input { height: 32px; padding: 0 11px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-md); background: var(--ds-input); color: var(--ds-text); font: inherit; font-size: 13px; }
+.ds-text-input::placeholder { color: var(--ds-text-2); }
+.ds-text-input:focus { outline: none; border-color: var(--ds-border-strong); }
+.ds-textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); background: var(--ds-input); color: var(--ds-text); font: inherit; font-size: 13px; padding: 9px 11px; }
+.ds-textarea:focus { outline: none; border-color: var(--ds-ai-border); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-ai-border) 45%, transparent); }
+.ds-combo { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px; padding: 0 11px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-md); background: var(--ds-surface); font-size: 13px; min-width: 132px; }
+.ds-combo:hover { border-color: var(--ds-border-strong); }
+.ds-form-grid { display: grid; grid-template-columns: 220px 1fr; gap: 9px 12px; align-items: center; }
+.ds-form-grid.four { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 700px) { .ds-form-grid, .ds-form-grid.four { grid-template-columns: 1fr; } }
+.ds-fg-label { font-size: 13px; color: var(--ds-text-2); }
+.ds-fg-label.wide { min-width: 170px; }
+.ds-fg-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ds-field-label { font-size: 11.5px; font-weight: 500; color: var(--ds-text-2); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.ds-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+
+/* ==========================================================================
+   DS-C-14 EmptyState · DS-C-15 Callouts (banner/callout/status/quirk)
+   ========================================================================== */
+.ds-empty { height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--ds-text-2); text-align: center; }
+.ds-empty.slim { height: 120px; }
+.ds-empty svg { width: 38px; height: 38px; opacity: 0.7; }
+.ds-empty .t { font-size: 15px; color: var(--ds-text); font-weight: 500; }
+.ds-empty .s { font-size: 12.5px; max-width: 480px; line-height: 1.5; }
+.ds-hint { font-size: 12.5px; color: var(--ds-text-2); margin: 6px 0; line-height: 1.5; }
+.ds-banner { font-size: 12.5px; color: var(--ds-text-2); margin: 10px 0 4px; }
+.ds-callout { font-size: 12.5px; border-radius: var(--ds-r-md); padding: 8px 10px; margin-top: 8px; background: var(--ds-neutral-bg); color: var(--ds-text-2); }
+.ds-callout.err { background: var(--ds-danger-bg); color: var(--ds-danger-fg); }
+.ds-callout.warn { background: var(--ds-warning-bg); color: var(--ds-warning-fg); border: 1px solid var(--ds-warning-border); }
+.ds-status-line { font-size: 12.5px; margin: 8px 0; }
+.ds-status-line.ok { color: var(--ds-success-fg); }
+.ds-status-line.err { color: var(--ds-danger-fg); }
+.ds-quirk { display: flex; align-items: baseline; gap: 7px; font-size: 12px; color: var(--ds-text-2); border: 1px dashed var(--ds-border-strong); border-radius: var(--ds-r-md); padding: 7px 10px; margin: 10px 0; background: color-mix(in srgb, var(--ds-neutral-bg) 55%, transparent); }
+.ds-quirk svg { width: 12px; height: 12px; flex: none; transform: translateY(1px); }
+.ds-stale-tag { font-size: 11px; border: 1px solid var(--ds-warning-border); color: var(--ds-warning-fg); background: var(--ds-warning-bg); border-radius: var(--ds-r-pill); padding: 1px 8px; margin-left: 6px; }
+.ds-link { color: var(--ds-ai-fg); }
+
+/* ==========================================================================
+   DS-C-16 Toast · DS-C-17 DetailPanel
+   ========================================================================== */
+.ds-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(8px); background: var(--ds-primary); color: var(--ds-on-primary); font-size: 12.5px; border-radius: 9px; padding: 8px 15px; opacity: 0; pointer-events: none; transition: all var(--ds-t-slow); z-index: 90; box-shadow: 0 8px 24px rgba(0,0,0,0.22); }
+.ds-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.ds-panel-scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.28); z-index: 60; opacity: 0; pointer-events: none; transition: opacity var(--ds-t-slow); }
+.ds-panel { position: fixed; top: 0; right: 0; bottom: 0; z-index: 70; width: 420px; max-width: 94vw; background: var(--ds-surface); border-left: 1px solid var(--ds-border); box-shadow: -12px 0 32px rgba(0,0,0,0.12); transform: translateX(103%); transition: transform var(--ds-t-slow); display: flex; flex-direction: column; }
+body.panel-open .ds-panel { transform: translateX(0); }
+body.panel-open .ds-panel-scrim { opacity: 1; pointer-events: auto; }
+.ds-panel-h { display: flex; align-items: center; gap: 8px; padding: 13px 16px 11px; border-bottom: 1px solid var(--ds-border); }
+.ds-panel-title { font-size: 14px; font-weight: 500; }
+.ds-panel-b { flex: 1; overflow-y: auto; padding: 14px 16px 20px; }
+
+/* ==========================================================================
+   DS-C-18 KeyValue · Timeline · DS-C-19 Avatar/Assignee
+   ========================================================================== */
+.ds-kv-row { font-size: 13px; margin: 3px 0; }
+.ds-tl-row { display: flex; gap: 10px; font-size: 12.5px; padding: 4px 0; align-items: baseline; flex-wrap: wrap; border-bottom: 1px dashed var(--ds-surface-2); }
+.ds-tl-row:last-child { border-bottom: none; }
+.ds-tl-ts { font-size: 11.5px; color: var(--ds-text-2); font-family: ui-monospace, monospace; flex: none; }
+.ds-tl-kind { font-weight: 500; }
+.ds-av { border-radius: var(--ds-r-pill); font-weight: 500; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.ds-av.lg { width: 34px; height: 34px; font-size: 12px; background: var(--ds-neutral-bg); color: var(--ds-text-2); border: 1px solid var(--ds-border); }
+.ds-av.md { width: 28px; height: 28px; font-size: 10.5px; }
+.ds-av.sm { width: 16px; height: 16px; font-size: 8.5px; background: var(--ds-primary); color: var(--ds-on-primary); }
+.ds-assignee { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--ds-text-2); min-width: 0; }
+.ds-assignee.dashed { border: 1px dashed var(--ds-border-strong); border-radius: var(--ds-r-pill); padding: 2px 8px; font-style: italic; }
+
+/* ==========================================================================
+   DS-C-20 Message Card (role-typed) + day divider + quoted + attachments
+   ========================================================================== */
+.ds-msg { border-radius: var(--ds-r-xl); border: 1px solid var(--ds-border); padding: 12px 16px 13px; margin-bottom: 10px; background: var(--ds-surface); }
+.ds-msg.customer { background: var(--ds-surface); }
+.ds-msg.agent { background: var(--ds-agent-bg); border-color: var(--ds-agent-border); }
+.ds-msg.note { background: var(--ds-warning-bg); border-color: var(--ds-warning-border); }
+.ds-msg.ai { background: var(--ds-ai-bg); border-color: var(--ds-ai-border); }
+.ds-msg-head { display: flex; align-items: center; gap: 9px; }
+.ds-msg .ds-av.md { width: 28px; height: 28px; }
+.ds-msg.customer .ds-av { background: var(--ds-neutral-bg); color: var(--ds-text-2); border: 1px solid var(--ds-border-strong); }
+.ds-msg.agent .ds-av { background: var(--ds-primary); color: var(--ds-on-primary); }
+.ds-msg.note .ds-av { background: var(--ds-warning-bg); color: var(--ds-warning-fg); border: 1px solid var(--ds-warning-border); }
+.ds-msg.ai .ds-av { background: var(--ds-ai); color: #fff; }
+.ds-msg-name { font-size: 13.5px; font-weight: 500; }
+.ds-msg-role { font-size: 11.5px; color: var(--ds-text-2); display: inline-flex; align-items: center; gap: 4px; }
+.ds-msg-role svg { width: 11px; height: 11px; }
+.ds-msg.ai .ds-msg-role, .ds-msg.note .ds-msg-role { color: inherit; opacity: 0.75; }
+.ds-msg-time { margin-left: auto; font-size: 11.5px; color: var(--ds-text-2); flex: none; }
+.ds-msg-body { margin-top: 9px; font-size: 14px; line-height: 1.62; white-space: pre-wrap; }
+.ds-day-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: var(--ds-text-2); font-size: 11.5px; user-select: none; }
+.ds-day-divider::before, .ds-day-divider::after { content: ""; flex: 1; height: 1px; background: var(--ds-border); }
+.ds-attachments { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.ds-file-chip { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 11px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-md); background: var(--ds-surface); font-size: 12.5px; }
+.ds-file-chip svg { width: 13px; height: 13px; color: var(--ds-text-2); }
+.ds-file-chip .size { font-size: 11px; color: var(--ds-text-2); }
+.ds-msg.ai .ds-file-chip, .ds-msg.note .ds-file-chip { background: transparent; }
+.ds-quoted { margin-top: 10px; border-top: 1px dashed var(--ds-border-strong); padding-top: 8px; }
+.ds-quoted summary { cursor: pointer; font-size: 12.5px; color: var(--ds-text-2); list-style: none; display: inline-flex; align-items: center; gap: 6px; border-radius: var(--ds-r-sm); padding: 2px 4px; }
+.ds-quoted summary::-webkit-details-marker { display: none; }
+.ds-quoted summary:hover { color: var(--ds-text); background: var(--ds-hover); }
+.ds-q-item { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--ds-border); }
+.ds-q-from { font-size: 12px; font-weight: 500; color: var(--ds-text-2); }
+.ds-q-body { font-size: 12.5px; color: var(--ds-text-2); margin-top: 2px; white-space: pre-wrap; }
+.ds-msg-actions { display: flex; gap: 7px; margin-top: 11px; }
+.ds-msg.ai .ds-btn.outline { border-color: var(--ds-ai-border); color: var(--ds-ai-fg); }
+.ds-msg.ai .ds-btn.outline:hover { background: color-mix(in srgb, var(--ds-ai-bg) 70%, transparent); }
+
+/* ==========================================================================
+   DS-C-21 Composer · DS-C-22 AI identity set
+   ========================================================================== */
+.ds-cp-tabs { display: flex; gap: 2px; padding-top: 6px; }
+.ds-cp-tab { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; font-size: 13px; color: var(--ds-text-2); border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; }
+.ds-cp-tab svg { width: 13px; height: 13px; }
+.ds-cp-tab:hover { color: var(--ds-text); }
+.ds-cp-tab.active { color: var(--ds-text); border-bottom-color: var(--ds-primary); }
+.ds-cp-tools { display: flex; align-items: center; gap: 6px; margin: 8px 0; position: relative; flex-wrap: wrap; }
+.ds-tool-chip { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 10px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-md); font-size: 12px; background: var(--ds-surface); color: var(--ds-text); }
+.ds-tool-chip svg { width: 12px; height: 12px; color: var(--ds-text-2); }
+.ds-tool-chip:hover { border-color: var(--ds-border-strong); background: var(--ds-hover); }
+.ds-tool-chip.ai { color: var(--ds-ai-fg); border-color: var(--ds-ai-border); }
+.ds-tool-chip.ai svg { color: var(--ds-ai); }
+.ds-send-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 14px; border-radius: var(--ds-r-md); background: var(--ds-primary); color: var(--ds-on-primary); font-size: 13px; }
+.ds-send-btn svg { width: 12.5px; height: 12.5px; }
+.ds-send-btn:hover { opacity: 0.9; }
+.ds-send-btn.note { background: var(--ds-warning); color: #fff; }
+.ds-cop-card { background: var(--ds-surface); border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); padding: 10px 12px; }
+.ds-cop-card.suggest { background: var(--ds-ai-bg); border-color: var(--ds-ai-border); }
+.ds-cop-card-title { font-size: 11.5px; font-weight: 500; color: var(--ds-text-2); margin-bottom: 7px; display: inline-flex; align-items: center; gap: 6px; }
+.ds-cop-card.suggest .ds-cop-card-title { color: var(--ds-ai-fg); }
+.ds-cop-card-title svg { width: 12px; height: 12px; }
+.ds-cop-bullet { font-size: 12.5px; line-height: 1.5; margin: 3px 0; padding-left: 12px; position: relative; }
+.ds-cop-bullet::before { content: ""; position: absolute; left: 2px; top: 8px; width: 4px; height: 4px; border-radius: var(--ds-r-pill); background: var(--ds-border-strong); }
+.ds-cop-sim { padding: 7px 0; border-top: 1px solid var(--ds-border); }
+.ds-cop-sim:first-of-type { border-top: none; padding-top: 0; }
+.ds-cop-sim-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; }
+.ds-cop-sim-res { font-size: 11.5px; color: var(--ds-text-2); margin-top: 3px; line-height: 1.45; }
+.ds-cop-suggest-body { font-size: 12.5px; line-height: 1.55; }
+.ds-cop-msg { display: flex; gap: 10px; margin: 10px 0; align-items: flex-start; }
+.ds-cop-msg.user { flex-direction: row-reverse; }
+.ds-cop-bubble { max-width: 78%; border-radius: var(--ds-r-xl); padding: 9px 12px; font-size: 13px; line-height: 1.5; }
+.ds-cop-msg.assistant .ds-cop-bubble { background: var(--ds-ai-bg); border: 1px solid var(--ds-ai-border); }
+.ds-cop-msg.user .ds-cop-bubble { background: var(--ds-neutral-bg); }
+.ds-cited { margin-top: 7px; font-size: 11.5px; color: var(--ds-text-2); }
+
+/* ==========================================================================
+   DS-C-24 Hero (console/system state) · event rows
+   ========================================================================== */
+.ds-hero { display: flex; align-items: center; gap: 12px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-xl); background: var(--ds-surface); padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--ds-e1); }
+.ds-hero-state { font-size: 17px; font-weight: 500; font-family: ui-monospace, monospace; }
+.ds-ev-row { padding: 5px 0; border-bottom: 1px solid var(--ds-surface-2); }
+.ds-ev-row:last-child { border-bottom: none; }
+.ds-ev-row.lv-error { box-shadow: inset 2px 0 0 var(--ds-danger); padding-left: 6px; }
+.ds-ev-row.lv-warn { box-shadow: inset 2px 0 0 var(--ds-warning); padding-left: 6px; }
+.ds-ev-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* selection list (master-detail left pane) */
+.ds-sel-list { border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); background: var(--ds-surface); padding: 5px; margin-bottom: 8px; }
+.ds-sel-row { padding: 9px 10px; border-radius: var(--ds-r-md); cursor: pointer; }
+.ds-sel-row:hover { background: var(--ds-hover); }
+.ds-sel-row.selected { background: var(--ds-neutral-bg); box-shadow: inset 2px 0 0 var(--ds-primary); }
+.ds-sel-row .lr1 { font-size: 13px; font-weight: 500; }
+.ds-sel-row .lr2 { font-size: 12px; color: var(--ds-text-2); margin-top: 2px; }
+.ds-t-divider { border-top: 1px solid var(--ds-border); margin: 10px 0; }
+.ds-scroll-220 { max-height: 220px; overflow-y: auto; }
+.ds-freshness { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: var(--ds-r-pill); font-size: 11.5px; }
+.ds-freshness::before { content: ""; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: currentColor; }
+.ds-freshness.ok { background: var(--ds-success-bg); color: var(--ds-success-fg); }
+
+/* ==========================================================================
+   ds.html registry chrome (documentation shell, not part of the app DS)
+   ========================================================================== */
+.dsreg { display: flex; min-height: 100vh; }
+.dsreg-nav { width: 218px; flex: none; border-right: 1px solid var(--ds-border); background: var(--ds-surface-2); padding: 14px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.dsreg-nav .grp { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ds-text-2); padding: 14px 8px 4px; }
+.dsreg-nav a { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: var(--ds-r-md); font-size: 13px; color: var(--ds-text-2); text-decoration: none; }
+.dsreg-nav a:hover { background: var(--ds-hover); color: var(--ds-text); }
+.dsreg-nav a.active { background: var(--ds-neutral-bg); color: var(--ds-text); font-weight: 500; }
+.dsreg-nav a .id { font-size: 10px; font-family: ui-monospace, monospace; color: var(--ds-ai-fg); background: var(--ds-ai-bg); border-radius: 4px; padding: 0 4px; }
+.dsreg-main { flex: 1; min-width: 0; padding: 22px 30px 60px; max-width: 1060px; }
+.dsreg-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.dsreg-h { font-size: 20px; font-weight: 500; margin: 26px 0 4px; letter-spacing: -0.01em; scroll-margin-top: 12px; }
+.dsreg-lead { font-size: 13px; color: var(--ds-text-2); line-height: 1.6; margin: 0 0 14px; max-width: 760px; }
+.dsreg-sub { font-size: 12px; color: var(--ds-text-2); margin: 0 0 14px; }
+.dsreg-spec { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 8px 0 14px; }
+.dsreg-spec th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ds-text-2); padding: 5px 10px 5px 0; border-bottom: 1px solid var(--ds-border); font-weight: 500; }
+.dsreg-spec td { padding: 6px 10px 6px 0; border-bottom: 1px dashed var(--ds-surface-2); vertical-align: top; }
+.dsreg-spec td:first-child { white-space: nowrap; font-weight: 500; }
+.ds-swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px; margin: 10px 0 16px; }
+.ds-swatch { border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); background: var(--ds-surface); overflow: hidden; box-shadow: var(--ds-e1); }
+.ds-swatch .sw { height: 44px; border-bottom: 1px solid var(--ds-border); }
+.ds-swatch .meta { padding: 8px 10px; font-size: 11.5px; }
+.ds-swatch .meta b { display: block; font-size: 12px; }
+.ds-swatch .meta .hex { font-family: ui-monospace, monospace; color: var(--ds-text-2); }
+.ds-swatch .meta .use { color: var(--ds-text-2); display: block; margin-top: 2px; line-height: 1.4; }
+.ds-scale { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 16px; }
+.ds-scale .row { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--ds-text-2); }
+.ds-scale .row .box { border: 1px dashed var(--ds-border-strong); background: var(--ds-ai-bg); height: 16px; }
+.ds-scale .row code { font-family: ui-monospace, monospace; color: var(--ds-text); min-width: 88px; }
+.ds-dodont { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0 16px; }
+@media (max-width: 760px) { .ds-dodont { grid-template-columns: 1fr; } }
+.ds-dodont .do, .ds-dodont .dont { border-radius: var(--ds-r-lg); padding: 12px 14px; font-size: 12.5px; line-height: 1.55; }
+.ds-dodont .do { background: var(--ds-success-bg); color: var(--ds-success-fg); border: 1px solid color-mix(in srgb, var(--ds-success) 30%, transparent); }
+.ds-dodont .dont { background: var(--ds-danger-bg); color: var(--ds-danger-fg); border: 1px solid color-mix(in srgb, var(--ds-danger) 30%, transparent); }
+.ds-dodont b { display: block; margin-bottom: 4px; font-size: 13px; }
+.ds-demo-frame { border: 1px dashed var(--ds-border-strong); border-radius: var(--ds-r-lg); padding: 16px; background: var(--ds-bg); margin: 8px 0 6px; }
+.ds-demo-frame.on-surface { background: var(--ds-surface); }
+.ds-comp-id { font-size: 10.5px; font-family: ui-monospace, monospace; color: var(--ds-ai-fg); background: var(--ds-ai-bg); border: 1px solid var(--ds-ai-border); border-radius: 5px; padding: 1px 7px; vertical-align: 2px; margin-left: 8px; }
+.dsreg-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 8px 0 16px; }
+.dsreg-table th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ds-text-2); border-bottom: 1px solid var(--ds-border); padding: 6px 10px 6px 0; font-weight: 500; }
+.dsreg-table td { padding: 7px 10px 7px 0; border-bottom: 1px dashed var(--ds-surface-2); vertical-align: top; }
+.dsreg-table td.mono { font-family: ui-monospace, monospace; font-size: 11.5px; }
+.ds-kbd { font-family: inherit; border: 1px solid var(--ds-border); border-radius: 4px; padding: 0 4px; font-size: 10.5px; background: var(--ds-surface-2); }
+@media (max-width: 900px) { .dsreg-nav { display: none; } .dsreg-main { padding: 16px 16px 48px; } }

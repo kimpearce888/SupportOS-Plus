@@ -84,3 +84,19 @@ opening the same receipt-style drawer (FIX / WAS / file:line) — 2-3 notes per 
 Fresh-browser session, all 23 pages walked in both modes (light + dark): zero console
 errors; Inbox golden path intact in both replicas; cross-iframe page sync verified in
 Side-by-side mode; 800px narrow layout stacks to a single column.
+
+## v3 — Design System v1.0 (the system first, then the rebuild)
+
+The lab pages exposed composition drift: same-role elements looked and flowed
+differently per page (evidence: `mismatch-register.md`). v3 adds the **Design
+System** that fixes the process, before the DS-4 conformance rebuild fixes the pages:
+
+- `ds.html` / `ds.css` / `ds.js` — the living registry: canonical `--ds-*` tokens
+  (both themes, extracted from the approved reskin values), 17 canonical components
+  (DS-C-01…24) with variants/states/do-don't, 6 page archetypes (DS-A-01…06), the
+  single **DS.TONE** status→color map, the 7 governance rules, and the mismatch
+  register rendered live. Every DS-C maps 1:1 to one future egui widget; every
+  token to one `design.rs` constant (R1–R4 track this file).
+- `mismatch-register.md` — the DS-0 audit: 8 Class-A unifications, 3 Class-B
+  rationalizations, 2 Class-C intentional keeps, each with page/file evidence.
+- Entry point: **"Design System v1.0 ↗"** in the lab header (replicas untouched).

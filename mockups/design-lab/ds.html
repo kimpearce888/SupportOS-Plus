@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SupportOS+ — Design System v1.0</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ds.css">
+</head>
+<body class="ds-page" data-theme="light">
+  <div class="dsreg">
+    <nav class="dsreg-nav" id="dsreg-nav" aria-label="Design system sections"></nav>
+    <main class="dsreg-main">
+      <div class="dsreg-topbar">
+        <div class="lab-logo" style="width:30px;height:30px;border-radius:8px;background:var(--ds-primary);color:var(--ds-on-primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700">S+</div>
+        <div>
+          <div style="font-size:14.5px;font-weight:500">SupportOS+ · Design System <span class="ds-comp-id" style="margin-left:4px">v1.0</span></div>
+          <div style="font-size:11.5px;color:var(--ds-text-2)">The contract every reskinned screen must satisfy — tokens, components, archetypes, rules</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button class="ds-btn outline" id="ds-theme" type="button" aria-label="Toggle theme"></button>
+          <a class="ds-btn outline" href="index.html" style="text-decoration:none">← Design Lab</a>
+        </div>
+      </div>
+      <div id="dsreg-root" aria-live="polite"></div>
+    </main>
+  </div>
+  <script src="ds.js"></script>
+</body>
+</html>
