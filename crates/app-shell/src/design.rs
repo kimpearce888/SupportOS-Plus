@@ -1809,6 +1809,558 @@ pub fn form_row(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::
     });
 }
 
+// ---------------------------------------------------------------------------
+// Components: inbox identity set (DC: DS-C-20/21/22 — R2c, RS-15)
+// ---------------------------------------------------------------------------
+
+/// DC: DS-C-20 message authorship roles — the surface, hairline and avatar
+/// fill come from this table; nothing else may color a message card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageRole {
+    Customer,
+    Agent,
+    Note,
+    Ai,
+}
+
+/// DC: DS-C-20 Message Card (role-typed) — r-xl card, md role avatar +
+/// 13.5px name + 11.5px role label + right time, 14px body, footer actions.
+/// G-2: AI is always violet; notes are always amber.
+pub fn message_card<R>(
+    ui: &mut egui::Ui,
+    role: MessageRole,
+    name: &str,
+    time: &str,
+    body: &str,
+    actions: impl FnOnce(&mut egui::Ui) -> R,
+) {
+    let t = tokens(ui);
+    let (bg, border) = match role {
+        MessageRole::Customer => (t.card, t.border),
+        MessageRole::Agent => (t.agent_surface, t.agent_border),
+        MessageRole::Note => (t.warning_soft, t.warning_border),
+        MessageRole::Ai => (t.ai_soft, t.ai_border),
+    };
+    egui::Frame::new()
+        .fill(bg)
+        .stroke(egui::Stroke::new(1.0, border))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin {
+            left: 16,
+            right: 16,
+            top: 12,
+            bottom: 13,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            // Head: avatar + name + role + time.
+            ui.horizontal(|ui| {
+                let (av_role, av_bg, av_fg) = match role {
+                    MessageRole::Customer => (BadgeTone::Neutral, t.muted, t.muted_foreground),
+                    MessageRole::Agent => (BadgeTone::Neutral, t.primary, t.primary_foreground),
+                    MessageRole::Note => (BadgeTone::Warning, t.warning_soft, t.warning_foreground),
+                    MessageRole::Ai => (BadgeTone::Ai, t.ai, t.on_ai),
+                };
+                let _ = av_role;
+                let (rect, _id) =
+                    ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 14.0, av_bg);
+                let initials: String = name
+                    .split_whitespace()
+                    .filter_map(|w| w.chars().next())
+                    .take(2)
+                    .collect();
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    initials.to_uppercase(),
+                    egui::FontId::proportional(10.5),
+                    av_fg,
+                );
+                ui.label(
+                    egui::RichText::new(name)
+                        .size(scale::text::BODY + 0.5)
+                        .strong(),
+                );
+                let role_label = match role {
+                    MessageRole::Customer => "Customer",
+                    MessageRole::Agent => "Agent",
+                    MessageRole::Note => "Internal note",
+                    MessageRole::Ai => "AI",
+                };
+                let role_color = match role {
+                    MessageRole::Ai => t.ai_foreground,
+                    MessageRole::Note => t.warning_foreground,
+                    _ => t.muted_foreground,
+                };
+                ui.label(
+                    egui::RichText::new(role_label)
+                        .size(scale::text::META_HALF)
+                        .color(role_color),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(time)
+                            .size(scale::text::META_HALF)
+                            .color(t.muted_foreground),
+                    );
+                });
+            });
+            ui.add_space(scale::space::SP2 + 1.0);
+            ui.label(
+                egui::RichText::new(body)
+                    .size(scale::text::LEAD)
+                    .color(t.foreground),
+            );
+            ui.add_space(scale::space::SP2);
+            actions(ui);
+        });
+}
+
+/// DC: DS-C-20 day divider — hairlines meeting a centered 11.5px label.
+pub fn day_divider(ui: &mut egui::Ui, label: &str) {
+    let t = tokens(ui);
+    ui.horizontal(|ui| {
+        let w = ui.available_width();
+        let half = (w - 120.0) / 2.0;
+        let (r1, _id) = ui.allocate_exact_size(egui::vec2(half, 1.0), egui::Sense::hover());
+        ui.painter()
+            .line_segment([r1.min, r1.max], egui::Stroke::new(1.0, t.border));
+        ui.label(
+            egui::RichText::new(label)
+                .size(scale::text::META_HALF)
+                .color(t.muted_foreground),
+        );
+        let (r2, _id2) = ui.allocate_exact_size(egui::vec2(half, 1.0), egui::Sense::hover());
+        ui.painter()
+            .line_segment([r2.min, r2.max], egui::Stroke::new(1.0, t.border));
+    });
+}
+
+/// DC: DS-C-20 quoted-history collapse — "N earlier messages" toggle above
+/// the quoted items; `open` is owned by the caller (draft-safe).
+pub fn quoted_history(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    open: &mut bool,
+    count: usize,
+    items: impl FnOnce(&mut egui::Ui),
+) {
+    let t = tokens(ui);
+    let label = format!("{} earlier messages", count);
+    let txt = if *open {
+        format!("hide {}", label)
+    } else {
+        format!("show {}", label)
+    };
+    if button(ui, &txt, ButtonVariant::Text).clicked() {
+        *open = !*open;
+    }
+    if *open {
+        egui::Frame::new().show(ui, |ui| {
+            ui.painter().rect_stroke(
+                ui.max_rect(),
+                egui::CornerRadius::ZERO,
+                egui::Stroke::new(1.0, t.border),
+                egui::StrokeKind::Inside,
+            );
+            ui.vertical(|ui| {
+                ui.add_space(2.0);
+                items(ui);
+            });
+        });
+    }
+    let _ = id_salt;
+}
+
+/// DC: DS-C-20 attachment chip — file icon + name + 11px size inside a
+/// 32px r-md bordered chip; transparent on AI/note surfaces.
+pub fn file_chip(ui: &mut egui::Ui, icon: Icon, name: &str, size: &str) -> egui::Response {
+    let t = tokens(ui);
+    ui.horizontal(|ui| {
+        egui::Frame::new()
+            .fill(t.card)
+            .stroke(egui::Stroke::new(1.0, t.border))
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::symmetric(11, 0))
+            .show(ui, |ui| {
+                ui.set_min_size(egui::vec2(0.0, 32.0));
+                ui.vertical_centered_justified(|ui| {
+                    ui.add_space(4.0);
+                });
+                ui.horizontal(|ui| {
+                    icon.show(ui, 13.0, t.muted_foreground);
+                    ui.label(
+                        egui::RichText::new(name)
+                            .size(scale::text::SMALL_HALF)
+                            .color(t.foreground),
+                    );
+                    ui.label(
+                        egui::RichText::new(size)
+                            .size(scale::text::META)
+                            .color(t.muted_foreground),
+                    );
+                });
+            });
+        ui.interact(
+            ui.min_rect(),
+            egui::Id::unique(("spp-file-chip", name)),
+            egui::Sense::hover(),
+        )
+    })
+    .response
+}
+
+/// DC: DS-C-21 composer modes — Reply (primary surface) | Note (amber).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ComposerMode {
+    #[default]
+    Reply,
+    Note,
+}
+
+/// DC: DS-C-21 composer actions the caller must apply.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComposerAct {
+    /// Send the draft in the given mode (Ctrl+Enter also sends).
+    Send(ComposerMode, String),
+    /// Insert a saved reply by index (menu pick).
+    SavedReply(usize),
+    /// Insert the AI-drafted reply.
+    AiInsert,
+}
+
+/// DC: DS-C-21 Composer — Reply|Note tabs, tool chips (saved replies menu,
+/// AI insert), textarea (note mode = amber surface), context foot + send
+/// (Ctrl+Enter shortcut handled by the caller via [`ComposerAct::Send`]),
+/// draft-saved flag. Pure UI: nothing sends by itself.
+pub fn composer(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    state: &mut ComposerState,
+    saved_replies: &[String],
+) -> Option<ComposerAct> {
+    use egui::RichText as R;
+    let t = tokens(ui);
+    let mut act = None;
+    let note = state.mode == ComposerMode::Note;
+
+    // Mode tabs (DS-C-21 Reply|Note).
+    ui.horizontal(|ui| {
+        for (mode, label) in [(ComposerMode::Reply, "Reply"), (ComposerMode::Note, "Note")] {
+            let on = state.mode == mode;
+            let text = R::new(label).size(scale::text::BODY).color(if on {
+                t.foreground
+            } else {
+                t.muted_foreground
+            });
+            let text = if on { text.strong() } else { text };
+            if ui
+                .add(
+                    egui::Button::new(text)
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::NONE)
+                        .min_size(egui::vec2(0.0, 34.0)),
+                )
+                .clicked()
+            {
+                state.mode = mode;
+            }
+            if on {
+                let rect = ui.max_rect();
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left(), rect.bottom() - 2.0),
+                        egui::pos2(rect.left() + 40.0, rect.bottom()),
+                    ),
+                    egui::CornerRadius::ZERO,
+                    t.primary,
+                );
+            }
+        }
+    });
+
+    // Tool chips row.
+    ui.horizontal(|ui| {
+        let menu_id = egui::Id::unique(("spp-sr-menu", id_salt));
+        if button_with_icon(ui, Icon::Mail, "saved replies", ButtonVariant::Outline).clicked() {
+            let open = ui
+                .ctx()
+                .data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false));
+            ui.ctx().data_mut(|d| d.insert_temp(menu_id, !open));
+        }
+        if ui
+            .ctx()
+            .data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false))
+        {
+            egui::Frame::new()
+                .fill(t.card)
+                .stroke(egui::Stroke::new(1.0, t.border))
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(5))
+                .show(ui, |ui| {
+                    ui.set_min_width(240.0);
+                    for (i, reply) in saved_replies.iter().enumerate() {
+                        if ui
+                            .add(
+                                egui::Button::new(R::new(reply).size(scale::text::SMALL_HALF))
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE),
+                            )
+                            .clicked()
+                        {
+                            act = Some(ComposerAct::SavedReply(i));
+                            ui.ctx().data_mut(|d| d.insert_temp(menu_id, false));
+                        }
+                    }
+                });
+        }
+        if button_with_icon(ui, Icon::Info, "AI draft", ButtonVariant::Outline).clicked() {
+            act = Some(ComposerAct::AiInsert);
+        }
+        if state.draft_saved {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    R::new("draft saved")
+                        .size(scale::text::META)
+                        .color(t.muted_foreground),
+                );
+            });
+        }
+    });
+
+    // Textarea (note mode = amber surface, DS-C-21).
+    let edit = egui::TextEdit::multiline(&mut state.draft)
+        .id_salt(format!("spp-composer-{id_salt}"))
+        .hint_text(if note {
+            "add an internal note…"
+        } else {
+            "write a reply…"
+        })
+        .desired_width(ui.available_width())
+        .min_size(egui::vec2(0.0, 92.0))
+        .font(egui::TextStyle::Body);
+    let edit = if note {
+        edit.background_color(t.warning_soft)
+    } else {
+        edit
+    };
+    ui.add(edit);
+
+    // Foot: context + send.
+    ui.horizontal(|ui| {
+        ui.label(
+            R::new(if note {
+                "note — visible to teammates only"
+            } else {
+                "reply — sent to the customer"
+            })
+            .size(scale::text::META_HALF)
+            .color(t.muted_foreground),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let send_label = if note { "send note" } else { "send" };
+            let send = if note {
+                // DS-C-21: note send = amber.
+
+                {
+                    let g = egui::WidgetText::from(
+                        R::new(send_label).color(t.on_ai).size(scale::text::CONTROL),
+                    )
+                    .into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Extend),
+                        f32::INFINITY,
+                        egui::TextStyle::Button,
+                    );
+                    let size = egui::vec2(g.size().x + 28.0, 30.0);
+                    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                    ui.painter()
+                        .rect_filled(rect, egui::CornerRadius::same(8), t.warning);
+                    ui.painter().galley(
+                        egui::pos2(
+                            rect.center().x - g.size().x / 2.0,
+                            rect.center().y - g.size().y / 2.0,
+                        ),
+                        g,
+                        t.on_ai,
+                    );
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, send_label.to_owned())
+                    });
+                    resp
+                }
+            } else {
+                button_with_icon(ui, Icon::Send, send_label, ButtonVariant::Primary)
+            };
+            let ctrl_enter = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+            if send.clicked() || ctrl_enter {
+                act = Some(ComposerAct::Send(state.mode, state.draft.clone()));
+                state.draft.clear();
+                state.draft_saved = false;
+            }
+        });
+    });
+    act
+}
+
+/// DC: DS-C-21 composer state (mode + draft + draft-saved flag).
+#[derive(Debug, Clone, Default)]
+pub struct ComposerState {
+    /// Reply or Note.
+    pub mode: ComposerMode,
+    /// The editable draft.
+    pub draft: String,
+    /// Whether a draft has been saved (flag fades in per DS-C-21).
+    pub draft_saved: bool,
+}
+
+impl ComposerState {
+    /// A fresh Reply composer.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// DC: DS-C-22 copilot suggest card — AI-violet surface, AI-fg title,
+/// bullet list, action row. The 5-second AI-identification pre-check
+/// target (violet + AI badge alone identify it).
+pub fn cop_suggest(
+    ui: &mut egui::Ui,
+    title: &str,
+    bullets: &[String],
+    actions: &[&str],
+) -> Option<usize> {
+    let t = tokens(ui);
+    let mut clicked = None;
+    egui::Frame::new()
+        .fill(t.ai_soft)
+        .stroke(egui::Stroke::new(1.0, t.ai_border))
+        .corner_radius(egui::CornerRadius::same(10))
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                badge(ui, "AI", BadgeTone::Ai);
+                ui.label(
+                    egui::RichText::new(title)
+                        .size(scale::text::META_HALF)
+                        .strong()
+                        .color(t.ai_foreground),
+                );
+            });
+            ui.add_space(7.0);
+            for bullet in bullets {
+                ui.horizontal(|ui| {
+                    ui.painter().circle_filled(
+                        egui::pos2(ui.min_rect().left() + 4.0, ui.cursor().top() + 8.0),
+                        2.0,
+                        t.border_strong,
+                    );
+                    ui.add_space(12.0);
+                    ui.label(
+                        egui::RichText::new(bullet)
+                            .size(scale::text::SMALL_HALF)
+                            .color(t.foreground),
+                    );
+                });
+            }
+            if !actions.is_empty() {
+                ui.add_space(7.0);
+                ui.horizontal(|ui| {
+                    for (i, a) in actions.iter().enumerate() {
+                        if button(ui, a, ButtonVariant::Outline).clicked() {
+                            clicked = Some(i);
+                        }
+                    }
+                });
+            }
+        });
+    clicked
+}
+
+/// DC: DS-C-22 copilot similar-question row — 12.5px question + 11.5px
+/// resolution preview under a top hairline; click opens it.
+pub fn cop_similar(ui: &mut egui::Ui, question: &str, resolution: &str) -> egui::Response {
+    let t = tokens(ui);
+    ui.add_space(2.0);
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::click());
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left(), rect.top()),
+            egui::pos2(rect.right(), rect.top()),
+        ],
+        egui::Stroke::new(1.0, t.border),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left(), rect.top() + 12.0),
+        egui::Align2::LEFT_TOP,
+        question,
+        egui::FontId::proportional(scale::text::SMALL_HALF),
+        if resp.hovered() {
+            t.foreground
+        } else {
+            t.muted_foreground
+        },
+    );
+    ui.painter().text(
+        egui::pos2(rect.left(), rect.top() + 28.0),
+        egui::Align2::LEFT_TOP,
+        resolution,
+        egui::FontId::proportional(scale::text::META_HALF),
+        t.muted_foreground,
+    );
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, question.to_owned()));
+    ui.advance_cursor_after_rect(rect);
+    resp
+}
+
+/// DC: DS-C-22 copilot chat bubble — assistant = AI-violet surface,
+/// user = neutral, right-aligned row.
+pub fn cop_chat(ui: &mut egui::Ui, assistant: bool, text: &str) {
+    let t = tokens(ui);
+    let (bg, border) = if assistant {
+        (t.ai_soft, t.ai_border)
+    } else {
+        (t.muted, t.border)
+    };
+    let align_right = !assistant;
+    ui.with_layout(
+        if align_right {
+            egui::Layout::right_to_left(egui::Align::TOP)
+        } else {
+            egui::Layout::left_to_right(egui::Align::TOP)
+        },
+        |ui| {
+            let galley = egui::WidgetText::from(egui::RichText::new(text).size(scale::text::BODY))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Wrap),
+                    320.0,
+                    egui::TextStyle::Body,
+                );
+            let size = galley.size() + egui::vec2(24.0, 18.0);
+            let (rect, _id) = ui.allocate_exact_size(size, egui::Sense::hover());
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::same(12), bg);
+            if assistant {
+                ui.painter().rect_stroke(
+                    rect,
+                    egui::CornerRadius::same(12),
+                    egui::Stroke::new(1.0, border),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            ui.painter().galley(
+                egui::pos2(rect.min.x + 12.0, rect.min.y + 9.0),
+                galley,
+                t.foreground,
+            );
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

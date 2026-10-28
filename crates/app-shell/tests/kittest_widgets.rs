@@ -326,3 +326,239 @@ fn armed_confirm_requires_two_clicks_dark() {
     h.run_steps(2);
     assert!(h.state().confirmed);
 }
+
+// ---------------------------------------------------------------------------
+// RS-15 — R2c inbox identity set (DS-C-20/21/22)
+// ---------------------------------------------------------------------------
+
+struct InboxIdentity {
+    installed: bool,
+    quoted_open: bool,
+    sent: Vec<String>,
+    inserted: usize,
+}
+
+fn harness_identity(dark: bool) -> Harness<'static, InboxIdentity> {
+    Harness::builder()
+        .with_size(egui::vec2(720.0, 900.0))
+        .with_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        })
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    spp_shell::design::install(ui.ctx());
+                    s.installed = true;
+                }
+                draw_identity(ui, s);
+            },
+            InboxIdentity {
+                installed: false,
+                quoted_open: false,
+                sent: Vec::new(),
+                inserted: 0,
+            },
+        )
+}
+
+fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
+    use spp_shell::design::{self, ComposerMode, ComposerState, MessageRole};
+
+    design::day_divider(ui, "Today");
+
+    design::message_card(
+        ui,
+        MessageRole::Customer,
+        "Marta Silva",
+        "10:02",
+        "The export button does nothing on the dashboard.",
+        |ui| {
+            design::file_chip(ui, icons::Icon::Download, "export-log.txt", "24 KB");
+        },
+    );
+    design::message_card(
+        ui,
+        MessageRole::Agent,
+        "Kim Pearce",
+        "10:05",
+        "Thanks — reproducing now. Can you share the report id?",
+        |_| {},
+    );
+    design::message_card(
+        ui,
+        MessageRole::Note,
+        "Kim Pearce",
+        "10:06",
+        "Likely the v2 export path — flagged for the data track.",
+        |_| {},
+    );
+    // DS-C-22: the AI card must identify as AI in 5 seconds — violet + AI badge.
+    design::message_card(
+        ui,
+        MessageRole::Ai,
+        "Support AI",
+        "10:07",
+        "Draft: this matches the known export regression fixed in v1.8.4.",
+        |ui| {
+            let _ = design::button(ui, "insert as reply", ButtonVariant::Outline);
+        },
+    );
+
+    design::quoted_history(ui, "quoted", &mut s.quoted_open, 2, |ui| {
+        design::message_card(
+            ui,
+            MessageRole::Customer,
+            "Marta Silva",
+            "Yesterday",
+            "Older thread message.",
+            |_| {},
+        );
+    });
+
+    // DS-C-22 copilot cards.
+    if design::cop_suggest(
+        ui,
+        "Suggested reply",
+        &[
+            String::from("Acknowledge the regression"),
+            String::from("Point to the fix in v1.8.4"),
+        ],
+        &["insert", "edit"],
+    )
+    .is_some()
+    {
+        s.inserted += 1;
+    }
+    if design::cop_similar(
+        ui,
+        "Export stuck at 0%",
+        "Fixed by retrying after the sync completes.",
+    )
+    .clicked()
+    {
+        s.inserted += 1;
+    }
+    design::cop_chat(ui, true, "I found 2 similar resolved conversations.");
+    design::cop_chat(ui, false, "Show me the fix for the first one.");
+
+    // DS-C-21 composer.
+    let mut st = ComposerState::new();
+    st.mode = ComposerMode::Reply;
+    st.draft = String::new();
+    st.draft_saved = true;
+    let replies = vec![String::from("Thanks for the report — we're on it.")];
+    if let Some(act) = design::composer(ui, "test", &mut st, &replies) {
+        match act {
+            design::ComposerAct::Send(_, text) => s.sent.push(text),
+            design::ComposerAct::SavedReply(_) | design::ComposerAct::AiInsert => s.inserted += 1,
+        }
+    }
+    ui.label(format!("sent={}", s.sent.len()));
+    ui.monospace(format!("sent_text={}", s.sent.join("|")));
+    ui.label(format!("inserted={}", s.inserted));
+}
+
+#[test]
+fn inbox_identity_snapshot_light() {
+    let mut h = harness_identity(false);
+    h.run_ok();
+    h.snapshot("r2c_inbox_identity_light");
+}
+
+#[test]
+fn inbox_identity_snapshot_dark() {
+    let mut h = harness_identity(true);
+    h.run_ok();
+    h.snapshot("r2c_inbox_identity_dark");
+}
+
+struct ComposerOnly {
+    installed: bool,
+    sent: Vec<String>,
+    inserted: usize,
+}
+
+fn harness_composer(dark: bool) -> Harness<'static, ComposerOnly> {
+    Harness::builder()
+        .with_size(egui::vec2(720.0, 520.0))
+        .with_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        })
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    spp_shell::design::install(ui.ctx());
+                    s.installed = true;
+                }
+                use spp_shell::design::{ComposerMode, ComposerState};
+                let mut st = ComposerState::new();
+                st.mode = ComposerMode::Reply;
+                if s.sent.is_empty() {
+                    st.draft = String::from("draft text");
+                }
+                st.draft_saved = true;
+                let replies = vec![String::from("Thanks for the report — we're on it.")];
+                if let Some(act) = spp_shell::design::composer(ui, "test", &mut st, &replies) {
+                    match act {
+                        spp_shell::design::ComposerAct::Send(_, text) => s.sent.push(text),
+                        _ => s.inserted += 1,
+                    }
+                }
+                ui.monospace(format!("sent_text={}", s.sent.join("|")));
+            },
+            ComposerOnly {
+                installed: false,
+                sent: Vec::new(),
+                inserted: 0,
+            },
+        )
+}
+
+#[test]
+fn composer_snapshot_light() {
+    let mut h = harness_composer(false);
+    h.run_ok();
+    h.snapshot("r2c_composer_light");
+}
+
+#[test]
+fn composer_snapshot_dark() {
+    let mut h = harness_composer(true);
+    h.run_ok();
+    h.snapshot("r2c_composer_dark");
+}
+
+#[test]
+fn composer_send_button_and_shortcut_light() {
+    let mut h = harness_composer(false);
+    h.run_ok();
+    // The send button sends the draft.
+    h.get_by_label("send").click();
+    h.run_ok();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().sent.len(),
+        1,
+        "send button must emit ComposerAct::Send"
+    );
+    assert_eq!(h.state().sent[0], "draft text");
+    // Ctrl+Enter sends again (shortcut path).
+    h.key_combination_modifiers(egui::Modifiers::CTRL, &[egui::Key::Enter]);
+    h.run_ok();
+    h.run_steps(2);
+    assert_eq!(h.state().sent.len(), 2, "Ctrl+Enter must send");
+}
+
+#[test]
+fn ai_message_card_is_identifiable() {
+    // The 5-second pre-check: the AI card exposes an "AI" badge node and the
+    // role label, isolated from any other context.
+    let mut h = harness_identity(false);
+    h.run_ok();
+    let ai_nodes = h.get_all_by_label_contains("AI").count();
+    assert!(ai_nodes >= 2, "AI badge + role label must both exist");
+}

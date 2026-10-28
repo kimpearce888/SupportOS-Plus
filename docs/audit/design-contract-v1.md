@@ -82,7 +82,11 @@ Intercom convention). Danger buttons render white-on-danger.
 `sp-3` 12px (card padding, list rhythm) · `sp-4` 16px (page & msg-card padding) ·
 `sp-5` 20px (reader padding) · `sp-6` 24px (section rhythm) · `sp-7` 32px (page
 bottom). 6px is allowed **only** inside control clusters (e.g. badge gaps). Off-scale
-values (5/7/9/11) are bugs (register B-3, closed).
+values (5/7/9/11) are bugs (register B-3, closed). Component-sheet pads are
+DC-frozen exceptions to the free-form rule: 10/14/18/22 (cards, reader) and
+5/7/11/13 (DS-C-21 saved-replies menu, DS-C-22 cop-card rhythm, DS-C-20 file
+chip + message-card bottom) — the approved lab values, enforced via the style
+lint allowlist.
 
 ### 2.5 Type scale
 

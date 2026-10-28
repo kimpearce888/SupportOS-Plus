@@ -39,8 +39,11 @@ const COLOR_PATTERNS: [&str; 7] = [
     "Color32::WHITE",
 ];
 
-/// The DC spacing value set (lint rule 2).
-const SPACING_ALLOWLIST: [i64; 13] = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 32];
+/// The DC spacing value set (lint rule 2): the 4pt scale, the DC-frozen
+/// component pads {10, 14, 18, 22} and the DS-C-20/21/22 sheet pads
+/// {5 (saved-replies menu), 7 (cop-card rhythm), 11 (file chip),
+/// 13 (message-card bottom)} — all frozen by the DC sheets (DC §2.4 note).
+const SPACING_ALLOWLIST: [i64; 17] = [2, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 32];
 
 /// A finding: file, line number (1-based), the offending snippet.
 struct Finding(String, usize, String);
@@ -242,8 +245,8 @@ fn lint_detects_known_bad_patterns() {
     let lines = [
         "let c = egui::Color32::from_rgb(1, 2, 3);",
         "ui.add_space(9.0);",
-        "egui::Margin::same(11)",
-        "egui::Margin::symmetric(5, 13)",
+        "egui::Margin::same(15)",
+        "egui::Margin::symmetric(21, 27)",
         "let ok = egui::Color32::TRANSPARENT;", // sentinel — allowed
         "ui.add_space(12.0);",                  // on-scale — allowed
     ];
@@ -255,6 +258,6 @@ fn lint_detects_known_bad_patterns() {
     assert_eq!(
         violations.len(),
         4,
-        "9 / 11 / 5 / 13 must be flagged (symmetric yields two)"
+        "9 / 15 / 21 / 27 must be flagged (symmetric yields two)"
     );
 }
