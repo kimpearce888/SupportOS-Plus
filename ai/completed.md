@@ -4615,3 +4615,37 @@ tests workspace + sandbox, deny advisories/licenses/bans) and
 batch-36 wiring, then both boot-chain smoke tests on the packaged
 artifacts). The v1.7.0 clean-audit queue stands fully consumed and
 runner-verified.
+
+### Batch RS-1 — 2026-10-28 (commit `af5bc2a` `design-lab-v4`, pushed; Gate G1 passed by owner `continue`)
+
+Design-System Reskin Stage 1: design-lab conformance rebuild (RS-01..RS-10), touching
+only `mockups/design-lab/` — zero Rust files (scope contract decisions.md D6).
+
+- **RS-01 — engine:** `node --check` clean on `ds.js`/`pages-ds.js`/`reskin.js`; vm smoke harness: 23/23 registry
+  pages resolve to exactly one archetype (`stack`=DS-A-02/A-04, `console`=A-06, `list`=A-01, `record`=A-03,
+  `inbox`=A-05), every `meta/tabs/blocks/list/detail/hero` renders strings without data errors; zero page markup
+  outside `DS.*` (pages-ds.js: 0 inline styles, 0 non-DS classes — grep evidence).
+- **RS-02 — Inbox:** DS-A-05 workspace live; golden-path suite re-verified in browser: open conversation, view
+  filters (Mine→2/All→6), reply send (agent card + durable-job toast), note tab + send, saved-reply insert,
+  AI message insert, copilot resolution insert, copilot toggle, Ctrl+Enter send, `j`/`k` + `/` shortcuts,
+  notes drawer open/close. Both themes screenshot-verified.
+- **RS-03..RS-09 — pages:** full 23-page × both-theme browser sweep with **zero console errors**; spot-verified
+  interactions: reports grouped tabs (Builder tab), search Enter run, notifications mark-read/mark-all,
+  knowledge help-center single FilterBar (A-2), automation New Rule state, customers/organizations/incidents
+  DetailPanels (DS-C-17) with DS-A-03 record-head composition.
+- **RS-10 — burn-down:** `pages-reskin.js` deleted (receipts at a8492d0); `reskin.css` 756 → ~190 lines,
+  shell-only, consumes `--ds-*` tokens; tone audit clean (all status via DS.TONE; TONE rows added by the
+  map-row-first process: live, catching_up, incident + campaign statuses). Register A-1..A-8 + B-1..B-3
+  **CLOSED** with receipts in `mismatch-register.md` + live on `ds.html#register`. Goldens: 23 pages ×
+  2 themes × 1440/1024/800 = **138 PNGs** in `mockups/design-lab/goldens/v4/` + `audit.json` structural
+  record (one page-head everywhere; filter/detail/header parity).
+
+Verification summary: node --check ×3 clean; vm registry smoke 23/23; browser sweep 23 pages × 2 themes,
+zero console errors; golden set 138 PNGs + audit.json; grep gates (0 inline styles, 0 non-DS classes in
+pages-ds.js); mismatch register A-1..A-8 + B-1..B-3 closed with receipts; diff `af5bc2a` = 150 files,
++1911/−2078, 0 `crates/` paths.
+
+**GATE G1:** owner reviewed the conformed lab and approved it as the final design — approval receipt is the
+owner's `continue` (2026-10-28) following the Batch RS-1 STOP report, per the rule.md STOP→continue protocol
+(same pattern that opened Batch RS-1 after the plan STOP). Stage 2 (Rust) is hereby unblocked; Batch RS-2
+(RS-11..RS-20) opened.
