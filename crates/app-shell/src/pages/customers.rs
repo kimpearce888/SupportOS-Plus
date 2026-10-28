@@ -1,17 +1,33 @@
-//! Customers pages (port of the web `pages/customers.rs`): a search page
-//! and a customer profile page.
+//! Customers page (port of the web `pages/customers.rs`).
 //!
-//! Redesigned with the shadcn-style design system (`crate::design`):
-//! striped result tables, status badges, and card-wrapped profile panels;
-//! the AI-derived interaction profile is marked with a Sparkles icon and
-//! an “AI” badge — presentation only.
+//! RS-17 (wave A) rebuild on **Design Contract v1.0 archetype DS-A-01** —
+//! the list-page recipe (docs/audit/design-contract-v1.md §4): PageHeader
+//! with the counter pill (DS-C-01, register A-6 — the item-82 result count
+//! lives beside the header now) → FilterBar with exactly one primary apply
+//! (DS-C-10, A-2; the Enter-on-the-input trigger is preserved) → DataTable
+//! (DS-C-05, virtualized rows) → the row `open` act opens the DetailPanel
+//! (DS-C-17, A-1) whose content is the DS-A-03 record composition (avatar
+//! record head + contact meta, then the support-health / milestones /
+//! interaction-profile / conversations cards and the timeline). The old
+//! full-page profile mode with its back button was exactly the register
+//! A-1 divergence ("Customers: search→table→open→full-page profile + back
+//! button") the archetype closes; the conformed lab reference is
+//! `mockups/design-lab/pages-ds.js` (`DS.definePage("customers", …)`).
 //!
-//! Data comes straight from the core functions the `/api/customers`
-//! routes call — `people_store::list_customers_summary` /
-//! `get_customer_detail`, `customer_events::list_for_customer` +
-//! `kind_counts`, `people_store::customer_support_health`,
-//! `interaction_engine::build_profile` — plus the conversation list via
-//! `inbox::list_conversations` with a customer filter. No HTTP hop.
+//! Behavior, queries, and data flow are unchanged (decisions.md D6:
+//! presentation only). The list still reads
+//! `spp_core::people_store::list_customers_summary` (the `/api/customers`
+//! SQL, the 50-row page with the item-82 pager and the past-the-end
+//! clamp), and the detail still loads `get_customer_detail`,
+//! `interaction_engine::build_profile`, `customer_support_health`,
+//! `customer_events::list_for_customer` + `kind_counts`, the
+//! customer-filtered `inbox::list_conversations` and
+//! `reports::get_timeline`, plus the M21 `client_current_signals`
+//! recommendation — all in the same one `with_read` per profile load.
+//! The search keeps its edit-vs-applied state (`search_edit` vs
+//! `applied_query`), the pager moves the same 1-based `page`, and
+//! `invalidate` still marks the visible surface stale — the list is
+//! always up now, and the panel's detail reloads while it is open.
 
 use eframe::egui;
 use rusqlite::Connection;
@@ -19,15 +35,16 @@ use serde_json::Value;
 use spp_core::db::DbHandle;
 
 use super::{i64_field, opt_str_field, str_field};
-use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Which surface is showing.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Mode {
-    Search,
-    Profile { customer_id: i64 },
-}
+/// DataTable row height — the 32px button row (DS-C-05 cells ride it).
+const ROW_HEIGHT: f32 = 32.0;
+
+/// Rows per customers page (clean-audit item 82: the search fetched
+/// page 1 only — customer 51+ was unreachable behind the 50-row cap;
+/// the cap is now a page size with prev/next controls under the table).
+const CUSTOMERS_PAGE_SIZE: i64 = 50;
 
 /// One row of the search results (typed view over the summary JSON).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -163,18 +180,12 @@ pub fn conversations_for(
     Ok(spp_core::inbox::list_conversations(conn, &filters)?.0)
 }
 
-/// Rows per customers page (clean-audit item 82: the search fetched
-/// page 1 only — customer 51+ was unreachable behind the 50-row cap;
-/// the cap is now a page size with prev/next controls under the table).
-const CUSTOMERS_PAGE_SIZE: i64 = 50;
-
 /// The interactive customers page state.
 pub struct CustomersPage {
     /// R8 (D5): outcome note for the page's "Sync now" action — the
     /// completion itself is reported by the global sync toast.
     pub sync_note: String,
 
-    mode: Mode,
     search_edit: String,
     applied_query: Option<String>,
     rows: Vec<CustomerRow>,
@@ -199,6 +210,12 @@ pub struct CustomersPage {
     error: Option<String>,
     /// Set by `invalidate`; the next frame reloads the visible surface.
     stale: bool,
+    /// DS-C-17 DetailPanel state (A-1): the row `open` act selects the
+    /// customer and opens the right sheet; Esc, the scrim, or the close
+    /// button close it. The selection survives a filter change — the
+    /// old profile surface stayed loaded until the user left it too.
+    selected: Option<i64>,
+    panel_open: bool,
 }
 
 impl CustomersPage {
@@ -206,7 +223,6 @@ impl CustomersPage {
     pub fn new() -> Self {
         Self {
             sync_note: String::new(),
-            mode: Mode::Search,
             search_edit: String::new(),
             applied_query: None,
             rows: Vec::new(),
@@ -222,11 +238,14 @@ impl CustomersPage {
             milestones: Vec::new(),
             error: None,
             stale: false,
+            selected: None,
+            panel_open: false,
         }
     }
 
     /// Live-update invalidation (rating/sync events refresh customer
-    /// data): mark stale; the next frame reloads.
+    /// data): mark stale; the next frame reloads the visible surface —
+    /// the list is always visible now, the panel detail while it is open.
     pub fn invalidate(&mut self) {
         self.stale = true;
     }
@@ -257,9 +276,12 @@ impl CustomersPage {
         }
     }
 
-    /// Open the profile surface for a customer.
+    /// Open the detail panel for a customer (the row `open` act). The
+    /// same profile loads the old full-page mode ran; the DS-C-17 panel
+    /// is the archetype's master–detail surface (register A-1).
     pub fn open_profile(&mut self, db: &DbHandle, customer_id: i64) {
-        self.mode = Mode::Profile { customer_id };
+        self.selected = Some(customer_id);
+        self.panel_open = true;
         self.load_profile(db, customer_id);
     }
 
@@ -359,16 +381,31 @@ impl CustomersPage {
     ) {
         if self.stale {
             self.stale = false;
-            match self.mode {
-                Mode::Search => self.reload_search(db),
-                Mode::Profile { customer_id } => self.load_profile(db, customer_id),
+            // The visible surface: the list is always up; the detail rides
+            // the DS-C-17 panel, so it reloads only while the panel is open.
+            self.reload_search(db);
+            if self.panel_open
+                && let Some(id) = self.selected
+            {
+                self.load_profile(db, id);
             }
         }
+
+        // DS-C-01 PageHeader: title + right cluster = counter pill (A-6)
+        // + the sync composite (A-8). egui right_to_left puts the first
+        // added widget rightmost, so the add order below paints
+        // [counter] [Sync now] [status line] — the lab's DS-C-01 order.
         design::page_header(ui, "Customers", None, |ui| {
+            if !self.sync_note.is_empty() {
+                // The in-flight/already-running note: the lab's unclassed
+                // `.ds-status-line` state (text-2) — the completion tone
+                // is the global toast's job (R8, D5).
+                design::hint_text(ui, &self.sync_note);
+            }
             if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
                 .on_hover_text(
                     "pull fresh data from Help Scout now — the completion toast \
-                 reports the outcome; the page re-reads on every sync anyway",
+                     reports the outcome; the page re-reads on every sync anyway",
                 )
                 .clicked()
             {
@@ -394,108 +431,126 @@ impl CustomersPage {
                     }
                 }
             }
-            if !self.sync_note.is_empty() {
-                ui.label(
-                    egui::RichText::new(&self.sync_note)
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
-                );
-            }
+            design::page_counter(ui, &self.count_label());
         });
 
+        // DS-C-10 FilterBar (A-2): filters left, exactly one primary apply
+        // right. The edit-vs-applied design is preserved — `search_edit`
+        // is the edit state, `applied_query` the applied one — and so are
+        // both apply triggers: the primary button and Enter while the
+        // input holds focus.
+        let mut enter_apply = false;
+        let apply = design::filter_bar(
+            ui,
+            |ui| {
+                let mut search = self.search_edit.clone();
+                let response = ui.add_sized(
+                    [280.0, 30.0],
+                    egui::TextEdit::singleline(&mut search)
+                        .hint_text("Search customers by name or email…"),
+                );
+                if response.changed() {
+                    self.search_edit = search;
+                }
+                enter_apply =
+                    response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            },
+            "search",
+        );
+        if apply.clicked() || enter_apply {
+            let trimmed = self.search_edit.trim();
+            self.applied_query = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+            self.page = 1;
+            self.reload_search(db);
+        }
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
         }
+        ui.add_space(design::scale::space::SP2);
 
-        match self.mode {
-            Mode::Search => self.search_ui(ui, db),
-            Mode::Profile { customer_id } => self.profile_ui(ui, db, customer_id),
-        }
-    }
-
-    fn search_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        ui.horizontal(|ui| {
-            let mut search = self.search_edit.clone();
-            let response = ui.add_sized(
-                [280.0, 30.0],
-                egui::TextEdit::singleline(&mut search)
-                    .hint_text("Search customers by name or email…"),
-            );
-            if response.changed() {
-                self.search_edit = search;
-            }
-            if design::button_with_icon(ui, Icon::Search, "search", ButtonVariant::Primary)
-                .clicked()
-                || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-            {
-                let trimmed = self.search_edit.trim();
-                self.applied_query = if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                };
-                self.page = 1;
-                self.reload_search(db);
-            }
-        });
-        ui.add_space(10.0);
-
-        if self.rows.is_empty() {
+        // DS-C-05 DataTable — virtualized rows over the same 50-capped
+        // page of the list query; columns per the conformed lab list
+        // (name, email, conversations, last contact, open act). With no
+        // rows the lab engine swaps the table for the empty state (A-7) —
+        // the same "search first" empty state the page has always opened
+        // with.
+        let rows = self.rows.clone();
+        let mut pick: Option<i64> = None;
+        if rows.is_empty() {
             design::empty_state(
                 ui,
                 Icon::Users,
                 "No customers loaded yet",
                 "Search by name or email and press Enter.",
             );
-            return;
-        }
-        let rows = self.rows.clone();
-        let mut clicked: Option<i64> = None;
-        // Clean-audit item 82: the card title reports the visible RANGE
-        // once pagination is in play ("51-100 of 1234"), like the inbox.
-        let title = if self.total > CUSTOMERS_PAGE_SIZE {
-            let from = (self.page - 1) * CUSTOMERS_PAGE_SIZE + 1;
-            let to = from - 1 + self.rows.len() as i64;
-            format!("{from}-{to} of {} customers", self.total)
         } else {
-            format!("{} customers (of {})", rows.len(), self.total)
-        };
-        design::card_titled(ui, &title, None, |ui| {
-            let t = design::tokens(ui);
-            egui::ScrollArea::vertical().show_rows(ui, 28.0, rows.len(), |ui, range| {
-                design::table(
-                    ui,
-                    "customer-results",
-                    &["name", "email", "conversations", "last contact", ""],
-                    26.0,
-                    |ui| {
-                        for row in rows[range].iter().cloned() {
-                            ui.label(
-                                egui::RichText::new(row.display_name.as_str())
-                                    .size(13.0)
-                                    .strong()
-                                    .color(t.foreground),
-                            );
-                            ui.label(
-                                egui::RichText::new(row.email.as_deref().unwrap_or("—"))
-                                    .size(13.0)
-                                    .color(t.foreground),
-                            );
-                            design::td_num(ui, &row.conversation_count.to_string());
-                            ui.label(
-                                egui::RichText::new(row.last_contact.as_deref().unwrap_or("—"))
-                                    .size(13.0)
-                                    .color(t.muted_foreground),
-                            );
-                            if design::button(ui, "open", ButtonVariant::Outline).clicked() {
-                                clicked = Some(row.id);
+            design::data_table(
+                ui,
+                "customers",
+                &["name", "email", "conversations", "last contact", ""],
+                rows.len(),
+                ROW_HEIGHT,
+                |ui, i| {
+                    let row = &rows[i];
+                    let t = design::tokens(ui);
+                    dt_cell(
+                        ui,
+                        190.0,
+                        egui::RichText::new(&row.display_name)
+                            .size(design::scale::text::BODY)
+                            .strong()
+                            .color(t.foreground),
+                        false,
+                    );
+                    dt_cell(
+                        ui,
+                        230.0,
+                        egui::RichText::new(row.email.as_deref().unwrap_or("—"))
+                            .size(design::scale::text::BODY)
+                            .color(t.foreground),
+                        false,
+                    );
+                    dt_cell(
+                        ui,
+                        90.0,
+                        egui::RichText::new(row.conversation_count.to_string())
+                            .size(design::scale::text::SMALL_HALF)
+                            .monospace()
+                            .color(t.foreground),
+                        true,
+                    );
+                    dt_cell(
+                        ui,
+                        140.0,
+                        egui::RichText::new(row.last_contact.as_deref().unwrap_or("—"))
+                            .size(design::scale::text::SMALL_HALF)
+                            .color(t.muted_foreground),
+                        false,
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(70.0, ROW_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            if design::button(ui, "open", ButtonVariant::Outline)
+                                .on_hover_text(format!(
+                                    "open {} — conversations, support health and the AI \
+                                     interaction profile",
+                                    row.display_name
+                                ))
+                                .clicked()
+                            {
+                                pick = Some(row.id);
                             }
-                            ui.end_row();
-                        }
-                    },
-                );
-            });
-        });
+                        },
+                    );
+                },
+            );
+        }
+
         // Clean-audit item 82: prev/next under the table — page 1 used to
         // be the only page the search ever fetched.
         let pages = u32::try_from((self.total + CUSTOMERS_PAGE_SIZE - 1) / CUSTOMERS_PAGE_SIZE)
@@ -513,83 +568,103 @@ impl CustomersPage {
             self.page = next;
             self.reload_search(db);
         }
-        if let Some(id) = clicked {
+
+        // A-1: the row `open` act selects the customer and opens the
+        // DetailPanel (the panel takes the role the old full-page profile
+        // mode played — same loads, same data).
+        if let Some(id) = pick {
             self.open_profile(db, id);
         }
+
+        // DS-C-17 DetailPanel (A-1) over the scrim — content is the DS-A-03
+        // record composition: record-head (avatar + name + contact meta),
+        // then the lab's two-col block cards (support health + milestones |
+        // interaction profile + conversations) and the timeline.
+        let profile = self.profile.clone();
+        let interaction = self.interaction.clone();
+        let health = self.health.clone();
+        let recommendation = self.recommendation.clone();
+        let timeline = self.timeline.clone();
+        let kind_counts = self.kind_counts.clone();
+        let conversations = self.conversations.clone();
+        let milestones = self.milestones.clone();
+        let selected = self.selected;
+        let title = profile
+            .as_ref()
+            .map(|p| contact_from_detail(p).display_name)
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "Customer".to_string());
+        let mut panel_open = self.panel_open;
+        design::detail_panel(
+            ui.ctx(),
+            "customers-detail",
+            &mut panel_open,
+            &title,
+            |_ui| {},
+            |ui| {
+                let Some(profile) = profile else {
+                    match selected {
+                        Some(id) => design::hint_text(ui, &format!("Customer {id} not found.")),
+                        None => design::hint_text(ui, "No customer selected."),
+                    }
+                    return;
+                };
+                let t = design::tokens(ui);
+                let contact = contact_from_detail(&profile);
+
+                // DS-A-03 record-head: avatar + name + the contact meta
+                // line (email · phone · company · last activity — the
+                // page's conditional parts joined the lab's way).
+                ui.horizontal(|ui| {
+                    design::avatar(
+                        ui,
+                        AvatarSize::Md,
+                        &initials(&contact.display_name),
+                        BadgeTone::Neutral,
+                    );
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(&contact.display_name)
+                                .size(design::scale::text::SECTION_BIG)
+                                .strong()
+                                .color(t.foreground),
+                        );
+                        design::hint_text(ui, &record_meta(&contact));
+                    });
+                });
+                design::divider(ui);
+
+                // The lab's two-col detail block: support health +
+                // milestones on the left, interaction profile +
+                // conversations on the right.
+                ui.columns(2, |cols| {
+                    health_and_counts(&mut cols[0], &health, &kind_counts);
+                    milestones_ui(&mut cols[0], &milestones);
+                    interaction_summary(
+                        &mut cols[1],
+                        interaction.as_ref(),
+                        recommendation.as_ref(),
+                    );
+                    conversations_ui(&mut cols[1], &conversations);
+                });
+                ui.add_space(design::scale::space::SP2);
+                timeline_ui(ui, &timeline);
+            },
+        );
+        self.panel_open = panel_open;
     }
 
-    fn profile_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, customer_id: i64) {
-        if design::button(ui, "← back to search", ButtonVariant::Outline).clicked() {
-            self.mode = Mode::Search;
-            self.page = 1;
-            // FIND-010: the results used to be cleared without re-running
-            // the still-applied query, landing the user on the empty state
-            // right after a successful search. Re-issue it instead.
-            if self.applied_query.is_some() {
-                self.reload_search(db);
-            }
-            return;
+    /// The DS-C-01 counter pill text — the item-82 result count the
+    /// results card title used to carry: the visible range once
+    /// pagination is in play ("51-100 of 1234"), like the inbox.
+    fn count_label(&self) -> String {
+        if self.total > CUSTOMERS_PAGE_SIZE {
+            let from = (self.page - 1) * CUSTOMERS_PAGE_SIZE + 1;
+            let to = from - 1 + self.rows.len() as i64;
+            format!("{from}-{to} of {} customers", self.total)
+        } else {
+            format!("{} customers (of {})", self.rows.len(), self.total)
         }
-        let Some(profile) = self.profile.clone() else {
-            design::hint_text(ui, &format!("Customer {customer_id} not found."));
-            return;
-        };
-        let contact = contact_from_detail(&profile);
-        let t = design::tokens(ui);
-
-        design::section_title(ui, contact.display_name.as_str());
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(contact.email.as_deref().unwrap_or("—"))
-                    .size(13.0)
-                    .color(t.foreground),
-            );
-            if let Some(phone) = &contact.phone {
-                ui.label(
-                    egui::RichText::new(phone.as_str())
-                        .size(13.0)
-                        .color(t.foreground),
-                );
-            }
-            if let Some(company) = &contact.company {
-                ui.label(
-                    egui::RichText::new(company.as_str())
-                        .small()
-                        .color(t.muted_foreground),
-                );
-            }
-            if let Some(last_seen) = &contact.created_at {
-                ui.label(
-                    egui::RichText::new(format!("last activity {last_seen}"))
-                        .small()
-                        .color(t.muted_foreground),
-                );
-            }
-        });
-        ui.add_space(10.0);
-
-        ui.columns(2, |cols| {
-            health_and_counts(&mut cols[0], &self.health, &self.kind_counts);
-            // A3.4: the AI-stage recommendation (heuristic+ai merge) for the
-            // customer's latest analyzed conversation rides the interaction
-            // profile card. Audit fix (M21): cached from `load_profile` —
-            // this used to re-query `client_current_signals` every frame.
-            let recommendation = self.recommendation.clone();
-            interaction_summary(
-                &mut cols[1],
-                self.interaction.as_ref(),
-                recommendation.as_ref(),
-            );
-        });
-        ui.add_space(10.0);
-
-        timeline_ui(ui, &self.timeline);
-        ui.add_space(10.0);
-
-        milestones_ui(ui, &self.milestones);
-        ui.add_space(10.0);
-
-        conversations_ui(ui, &self.conversations);
     }
 }
 
@@ -599,10 +674,29 @@ impl Default for CustomersPage {
     }
 }
 
+/// The DS-A-03 record-head meta line: email · phone · company · last
+/// activity (the lab's recordHead join; the page's conditional parts
+/// keep their old presence rules — email always renders, "—" when absent).
+fn record_meta(contact: &ContactCard) -> String {
+    let mut parts = vec![contact.email.as_deref().unwrap_or("—").to_string()];
+    if let Some(phone) = &contact.phone {
+        parts.push(phone.clone());
+    }
+    if let Some(company) = &contact.company {
+        parts.push(company.clone());
+    }
+    if let Some(last_seen) = &contact.created_at {
+        parts.push(format!("last activity {last_seen}"));
+    }
+    parts.join(" · ")
+}
+
+/// The Support health card: the three health form rows, then the event
+/// mix as DS-C-23 bar rows (the lab's `.ds-bar-row` — the kind label
+/// left, the count right, accent fill between).
 fn health_and_counts(ui: &mut egui::Ui, health: &Option<Value>, counts: &[(String, i64)]) {
     let t = design::tokens(ui);
-    design::card(ui, |ui| {
-        design::section_title(ui, "Support health");
+    design::card_titled(ui, "Support health", None, |ui| {
         if let Some(report) = health {
             let h = health_from_report(report);
             design::form_grid(ui, "customer-health", |ui| {
@@ -633,16 +727,16 @@ fn health_and_counts(ui: &mut egui::Ui, health: &Option<Value>, counts: &[(Strin
         }
         let max = counts.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
         for (kind, count) in counts {
-            let ratio = *count as f32 / max as f32;
-            ui.add(
-                egui::ProgressBar::new(ratio.clamp(0.0, 1.0))
-                    .text(format!("{kind}: {count}"))
-                    .desired_width(220.0),
-            );
+            design::bar_row(ui, kind, *count, max, true);
         }
     });
 }
 
+/// The interaction profile card (no card title — the AI badge row is the
+/// head, like the lab): sparkles + section title + the AI mark (DC G-2,
+/// the same violet AI badge the inbox and dashboard AI surfaces carry)
+/// and the stage badge, then the profile's key: value lines and — when a
+/// recommendation is present — the Support approach block.
 fn interaction_summary(
     ui: &mut egui::Ui,
     interaction: Option<&Value>,
@@ -653,7 +747,7 @@ fn interaction_summary(
         ui.horizontal(|ui| {
             Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
             design::section_title(ui, "Interaction profile");
-            design::badge(ui, "AI", BadgeTone::Info);
+            design::badge(ui, "AI", BadgeTone::Ai);
             // A3.4: the stage badge tells the truth about which layers ran.
             if let Some(rec) = recommendation {
                 let sources = rec.get("sources").and_then(Value::as_str).unwrap_or("");
@@ -689,7 +783,7 @@ fn interaction_summary(
                         "{dimension}: {}",
                         value.as_str().unwrap_or(&value.to_string())
                     ))
-                    .size(13.0)
+                    .size(design::scale::text::CONTROL)
                     .color(t.foreground),
                 );
             }
@@ -703,7 +797,7 @@ fn interaction_summary(
                         "{key}: {}",
                         value.as_str().unwrap_or(&value.to_string())
                     ))
-                    .size(13.0)
+                    .size(design::scale::text::CONTROL)
                     .color(t.foreground),
                 );
             }
@@ -730,7 +824,7 @@ fn recommendation_block(ui: &mut egui::Ui, rec: &Value) {
                     "{key}: {}",
                     value.as_str().unwrap_or(&value.to_string())
                 ))
-                .size(13.0)
+                .size(design::scale::text::CONTROL)
                 .color(t.foreground),
             );
         }
@@ -744,7 +838,7 @@ fn recommendation_block(ui: &mut egui::Ui, rec: &Value) {
                     "{key}: {}",
                     value.as_str().unwrap_or(&value.to_string())
                 ))
-                .size(13.0)
+                .size(design::scale::text::CONTROL)
                 .color(t.foreground),
             );
         }
@@ -763,6 +857,9 @@ fn recommendation_block(ui: &mut egui::Ui, rec: &Value) {
     }
 }
 
+/// The Timeline card: the customer-event rows inside the lab's
+/// `ds-scroll-220` inner scroll (the one place the page keeps an egui
+/// ScrollArea — the DS composition specifies it).
 fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
     let t = design::tokens(ui);
     design::card_titled(ui, "Timeline", None, |ui| {
@@ -783,7 +880,7 @@ fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
                         );
                         ui.label(
                             egui::RichText::new(event.kind.as_str())
-                                .size(13.0)
+                                .size(design::scale::text::CONTROL)
                                 .strong()
                                 .color(t.foreground),
                         );
@@ -794,7 +891,7 @@ fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
                         }
                         ui.label(
                             egui::RichText::new(event.summary.as_str())
-                                .size(13.0)
+                                .size(design::scale::text::CONTROL)
                                 .color(t.foreground),
                         );
                     });
@@ -805,7 +902,8 @@ fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
 
 /// Item 56: the support-milestone timeline — SLA breaches persisted by
 /// the intelligence sweep and high-friction recomputes from the Reports
-/// Insights action. Each event's JSON payload carries its context.
+/// Insights action. Each event's JSON payload carries its context. The
+/// empty case is the lab's in-card slim empty state (A-7 why + next step).
 fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent]) {
     let t = design::tokens(ui);
     design::card_titled(
@@ -814,7 +912,13 @@ fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent])
         Some("tracked SLA breaches and high-friction flags from the intelligence sweep"),
         |ui| {
             if events.is_empty() {
-                design::hint_text(ui, "(no milestones recorded)");
+                design::empty_state_slim(
+                    ui,
+                    Icon::Clock,
+                    "No milestones recorded",
+                    "SLA breaches and high-friction flags appear here once the intelligence \
+                     sweep records them.",
+                );
                 return;
             }
             egui::ScrollArea::vertical()
@@ -830,7 +934,7 @@ fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent])
                             );
                             ui.label(
                                 egui::RichText::new(event.event_type.as_str())
-                                    .size(13.0)
+                                    .size(design::scale::text::CONTROL)
                                     .strong()
                                     .color(t.foreground),
                             );
@@ -850,7 +954,9 @@ fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent])
                                 .unwrap_or_default();
                             if !detail.is_empty() {
                                 ui.label(
-                                    egui::RichText::new(detail).size(13.0).color(t.foreground),
+                                    egui::RichText::new(detail)
+                                        .size(design::scale::text::CONTROL)
+                                        .color(t.foreground),
                                 );
                             }
                         });
@@ -860,6 +966,8 @@ fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent])
     );
 }
 
+/// The Conversations card: the customer-filtered inbox page (same query,
+/// same table headers and status badges as before the rebuild).
 fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationListItem]) {
     let t = design::tokens(ui);
     design::card_titled(ui, "Conversations", None, |ui| {
@@ -877,20 +985,43 @@ fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationLis
                     design::td_num(ui, &item.number.to_string());
                     ui.label(
                         egui::RichText::new(item.subject.as_deref().unwrap_or("(no subject)"))
-                            .size(13.0)
+                            .size(design::scale::text::CONTROL)
                             .color(t.foreground),
                     );
                     let (tone, label) = design::status_tone(item.status.as_str());
                     design::badge(ui, label, tone);
                     ui.label(
                         egui::RichText::new(item.updated_at.as_deref().unwrap_or("—"))
-                            .size(13.0)
+                            .size(design::scale::text::CONTROL)
                             .color(t.muted_foreground),
                     );
                     ui.end_row();
                 }
             },
         );
+    });
+}
+
+/// DS-C-19 initials: the first character of up to two words, uppercased.
+fn initials(name: &str) -> String {
+    name.split_whitespace()
+        .filter_map(|w| w.chars().next())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
+}
+
+/// One DataTable cell: fixed width, vertically centered in the 32px row,
+/// truncated (DS-C-05 cell anatomy). `right` right-aligns the text (the
+/// mono numeral cells).
+fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, right: bool) {
+    let layout = if right {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.allocate_ui_with_layout(egui::vec2(width, ROW_HEIGHT), layout, |ui| {
+        ui.add(egui::Label::new(text).truncate());
     });
 }
 
