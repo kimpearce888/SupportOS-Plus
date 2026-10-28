@@ -59,9 +59,11 @@
     /* health / sync */
     ok:        { tone: "success", label: "OK" },
     healthy:   { tone: "success", label: "Healthy" },
+    live:      { tone: "success", label: "Live" },
     stale:     { tone: "warning", label: "Stale" },
     error:     { tone: "danger",  label: "Error" },
     syncing:   { tone: "info",    label: "Syncing" },
+    catching_up: { tone: "info",  label: "Catching up" },
     /* authorship roles */
     ai:        { tone: "ai",      label: "AI" },
     note:      { tone: "warning", label: "Internal note" },
@@ -91,7 +93,7 @@
   const statGrid = (items) => `<div class="ds-stat-grid">${items.map((s) => `<div class="ds-stat"><div class="l">${esc(s.label)}</div><div class="v">${esc(s.value)}</div>${s.hint ? `<div class="h">${esc(s.hint)}</div>` : ""}</div>`).join("")}</div>`;
 
   const metricTile = ({ cnt, lbl, level, drill }) =>
-    `<div class="ds-tile${level ? ` ${level}` : ""}${drill ? " drill" : ""}"><span class="cnt">${esc(cnt)}</span><span class="lbl">${esc(lbl)}</span>${drill ? `<span class="ds-drill-line">open →</span>` : ""}</div>`;
+    `<div class="ds-tile${level ? ` ${level}` : ""}${drill ? " drill" : ""}"${typeof drill === "string" ? ` data-ds-act="${esc(drill)}"` : ""} tabindex="${drill ? "0" : "-1"}"><span class="cnt">${esc(cnt)}</span><span class="lbl">${esc(lbl)}</span>${drill ? `<span class="ds-drill-line">open →</span>` : ""}</div>`;
 
   const dataTable = (headers, rowsHTML) =>
     `<div class="ds-tbl-wrap"><table class="ds-tbl"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rowsHTML}</tbody></table></div>`;
@@ -99,21 +101,23 @@
   const tds = (c) => `<td class="strong">${esc(c)}</td>`;
   const tdn = (c) => `<td class="num">${esc(c)}</td>`;
 
-  const tabs = (items, active, act) =>
-    `<div class="ds-tabs">${items.map((t, i) => `<button class="ds-tab${i === active ? " active" : ""}"${act ? ` data-ds-act="${act}" data-i="${i}"` : ""} role="tab" type="button">${esc(t)}</button>`).join("")}</div>`;
+  const tabs = (items, active, act, off) =>
+    `<div class="ds-tabs">${items.map((t, i) => `<button class="ds-tab${i === active ? " active" : ""}"${act ? ` data-ds-act="${act}" data-i="${(off || 0) + i}"` : ""} role="tab" type="button">${esc(t)}</button>`).join("")}</div>`;
   const tabGroups = (groups) => `<div class="ds-tabgroups">${groups.map((g) => `<div><div class="tg-label">${esc(g.label)}</div>${tabs(g.tabs, g.active)}</div>`).join("")}</div>`;
 
   const toolbar = (left, right, split) => `<div class="ds-tool-row${split ? " split" : ""}"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${left || ""}</div>${right ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${right}</div>` : ""}</div>`;
 
-  const btn = { primary: (t, a) => `<button class="ds-btn primary" type="button">${esc(t)}</button>`, outline: (t) => `<button class="ds-btn outline" type="button">${esc(t)}</button>`, outlineAi: (t) => `<button class="ds-btn outline ai" type="button">${ICONS.sparkles} ${esc(t)}</button>`, danger: (t) => `<button class="ds-btn danger" type="button">${esc(t)}</button>`, text: (t) => `<button class="ds-btn text" type="button">${esc(t)}</button>`, ai: (t) => `<button class="ds-btn ai" type="button">${ICONS.sparkles} ${esc(t)}</button>`, sm: (t) => `<button class="ds-btn outline sm" type="button">${esc(t)}</button>` };
+  /* RS-01: every button variant accepts an optional action key (+index) so pages stay declarative. */
+  const mkBtn = (cls, icon) => (t, act, i) => `<button class="ds-btn ${cls}" type="button"${act ? ` data-ds-act="${esc(act)}"${i != null ? ` data-i="${esc(i)}"` : ""}` : ""}>${icon ? icon + " " : ""}${esc(t)}</button>`;
+  const btn = { primary: mkBtn("primary"), outline: mkBtn("outline"), outlineAi: mkBtn("outline ai", ICONS.sparkles), danger: mkBtn("danger"), text: mkBtn("text"), ai: mkBtn("ai", ICONS.sparkles), sm: (t, act, i) => `<button class="ds-btn outline sm" type="button"${act ? ` data-ds-act="${esc(act)}"${i != null ? ` data-i="${esc(i)}"` : ""}` : ""}>${esc(t)}</button>` };
 
-  const input = (ph, w) => `<input class="ds-text-input"${w ? ` style="width:${w}px"` : ""} placeholder="${esc(ph)}" aria-label="${esc(ph)}">`;
+  const input = (ph, w, id, val) => `<input class="ds-text-input"${id ? ` id="${esc(id)}"` : ""}${w ? ` style="width:${w}px"` : ""} placeholder="${esc(ph)}" aria-label="${esc(ph)}"${val != null && val !== "" ? ` value="${esc(val)}"` : ""}>`;
   const combo = (label) => `<button class="ds-combo" type="button"><span>${esc(label)}</span>${ICONS.chevronD}</button>`;
   const formRow = (label, ctl) => `<div class="ds-fg-label">${esc(label)}</div><div class="ds-fg-ctl">${ctl}</div>`;
   const formGrid = (rows, four) => `<div class="ds-form-grid${four ? " four" : ""}">${rows.map(([l, c]) => formRow(l, c)).join("")}</div>`;
   const fieldLabel = (t) => `<div class="ds-field-label">${esc(t)}</div>`;
 
-  const emptyState = (icon, title, sub, slim) => `<div class="ds-empty${slim ? " slim" : ""}">${icon || ICONS.inbox}<div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`;
+  const emptyState = (icon, title, sub, slim, cta) => `<div class="ds-empty${slim ? " slim" : ""}">${icon || ICONS.inbox}<div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div>${cta ? `<div class="ds-empty-cta">${cta}</div>` : ""}</div>`;
   const hint = (t) => `<div class="ds-hint">${esc(t)}</div>`;
   const banner = (t) => `<div class="ds-banner">${esc(t)}</div>`;
   const callout = (t, kind) => `<div class="ds-callout${kind ? ` ${kind}` : ""}">${esc(t)}</div>`;
@@ -230,17 +234,17 @@
      Mismatch Register (DS-0 evidence → DS-4 worklist)
      ======================================================================== */
   const REGISTER = [
-    ["A-1", "A", "Master–detail flow differs per page", "Customers: search→table→open→full-page profile + back button. Organizations: left sel-list + right column. Others: table only.", "One List-page archetype (DS-A-01): toolbar → table → row action opens DetailPanel (DS-C-17)."],
-    ["A-2", "A", "Search/apply action uses different button styles", "customers: input + primary 'search'. organizations: input + outline 'filter'. knowledge/help-center: combos + outline 'apply' AND a second input + primary 'search' stacked.", "FilterBar (DS-C-10): filters left (input/combo), one primary apply; Ctrl/⌘K global search stays in sidebar."],
-    ["A-3", "A", "Status→color decided in ≥4 parallel systems", "statusTone() map, inline ternaries (knowledge articles), .state-dot classes, .health-dot classes, .tile level classes.", "Single DS.TONE map (this file); badges, dots, tiles, bands all read from it."],
-    ["A-4", "A", "Detail record header invented per page", "customers/orgs: section-title.big + hint line. inbox: reader-head avatar row. diagnostics: engine hero.", "DetailHeader archetype (DS-A-03): avatar + name + meta pills; engine hero only on console pages (DS-C-24)."],
-    ["A-5", "A", "Row-action buttons inconsistent", "knowledge rows: outline+outline+danger triple. customers: outline 'open'. notifications: none (mark-all only).", "Rule: one text/outline row action; destructive always danger + confirm dialog; never >2 actions inline."],
-    ["A-6", "A", "Counts & record labels formatted differently", "'4 customers (of 4)' in card title vs 'N organization(s)' as section title vs inbox view counts.", "DS-C-01 counter pill; card titles never carry counts."],
-    ["A-7", "A", "Empty states ad-hoc", "emptyState() component vs hint '(no milestones recorded)' vs silent gaps.", "DS-C-14 everywhere; slim variant for inline panes; every empty state says why + what to do."],
-    ["A-8", "A", "Sync feedback only on some pages", "sync-note span after Sync now on dashboard/customers/organizations; knowledge sync has no feedback.", "Sync is one component: button + inline status line (syncing… → up to date / error)."],
-    ["B-1", "B", "Five overlapping info-text patterns", "banner, hint, callout, status-line, quirk-note used interchangeably.", "Fixed roles: banner=page context, hint=field help, callout=in-card context, status-line=action result, quirk=receipt-cited quirk (stays)."],
-    ["B-2", "B", "One-off composites", "engine-hero, approval-line/when-chip, gap-cand, ep-block.", "Engine hero → DS-C-24; approval/when-chip → chip + status-line composition; others fold into cards+kv."],
-    ["B-3", "B", "Off-scale spacing", "Micro-gaps of 5/7/9/11px appear across pages (conv rows, tool rows).", "DS-4 normalizes to the 4pt scale; 6px allowed only inside control clusters."],
+    ["A-1", "A", "Master–detail flow differs per page", "Customers: search→table→open→full-page profile + back button. Organizations: left sel-list + right column. Others: table only.", "CLOSED in DS-4 (design-lab-v4): One List-page archetype (DS-A-01): toolbar → table → row action opens DetailPanel (DS-C-17)."],
+    ["A-2", "A", "Search/apply action uses different button styles", "customers: input + primary 'search'. organizations: input + outline 'filter'. knowledge/help-center: combos + outline 'apply' AND a second input + primary 'search' stacked.", "CLOSED in DS-4 (design-lab-v4): FilterBar (DS-C-10): filters left (input/combo), one primary apply; Ctrl/⌘K global search stays in sidebar."],
+    ["A-3", "A", "Status→color decided in ≥4 parallel systems", "statusTone() map, inline ternaries (knowledge articles), .state-dot classes, .health-dot classes, .tile level classes.", "CLOSED in DS-4 (design-lab-v4): Single DS.TONE map (this file); badges, dots, tiles, bands all read from it."],
+    ["A-4", "A", "Detail record header invented per page", "customers/orgs: section-title.big + hint line. inbox: reader-head avatar row. diagnostics: engine hero.", "CLOSED in DS-4 (design-lab-v4): DetailHeader archetype (DS-A-03): avatar + name + meta pills; engine hero only on console pages (DS-C-24)."],
+    ["A-5", "A", "Row-action buttons inconsistent", "knowledge rows: outline+outline+danger triple. customers: outline 'open'. notifications: none (mark-all only).", "CLOSED in DS-4 (design-lab-v4): Rule: one text/outline row action; destructive always danger + confirm dialog; never >2 actions inline."],
+    ["A-6", "A", "Counts & record labels formatted differently", "'4 customers (of 4)' in card title vs 'N organization(s)' as section title vs inbox view counts.", "CLOSED in DS-4 (design-lab-v4): DS-C-01 counter pill; card titles never carry counts."],
+    ["A-7", "A", "Empty states ad-hoc", "emptyState() component vs hint '(no milestones recorded)' vs silent gaps.", "CLOSED in DS-4 (design-lab-v4): DS-C-14 everywhere; slim variant for inline panes; every empty state says why + what to do."],
+    ["A-8", "A", "Sync feedback only on some pages", "sync-note span after Sync now on dashboard/customers/organizations; knowledge sync has no feedback.", "CLOSED in DS-4 (design-lab-v4): Sync is one component: button + inline status line (syncing… → up to date / error)."],
+    ["B-1", "B", "Five overlapping info-text patterns", "banner, hint, callout, status-line, quirk-note used interchangeably.", "CLOSED in DS-4 (design-lab-v4): Fixed roles: banner=page context, hint=field help, callout=in-card context, status-line=action result, quirk=receipt-cited quirk (stays)."],
+    ["B-2", "B", "One-off composites", "engine-hero, approval-line/when-chip, gap-cand, ep-block.", "CLOSED in DS-4 (design-lab-v4): Engine hero → DS-C-24; approval/when-chip → chip + status-line composition; others fold into cards+kv."],
+    ["B-3", "B", "Off-scale spacing", "Micro-gaps of 5/7/9/11px appear across pages (conv rows, tool rows).", "CLOSED in DS-4 (design-lab-v4): DS-4 normalizes to the 4pt scale; 6px allowed only inside control clusters."],
     ["C-1", "C", "Receipt-cited quirk footnotes", "Per-page Reskin notes + quirk notes citing knowledge.rs, inbox.rs, palette.rs etc.", "Intentional — stays. Data-layer bugs are footnoted, never faked fixed."],
     ["C-2", "C", "Data-track items labeled mocked", "unread counts, assignee, draft persistence flagged in replica tags.", "Intentional — stays until the async data track (U2) lands."],
   ];
@@ -417,7 +421,7 @@
 
     /* ---- register ---- */
     B.push(`<div class="dsreg-h" id="register">Mismatch register (DS-0 audit)</div>`);
-    B.push(`<p class="dsreg-sub">The evidence behind this system: what mismatched across the 23 lab pages, and the DS answer. A/B items burn to zero in the DS-4 conformance rebuild; C items stay by contract. Full receipts: <span class="ds-mono">mismatch-register.md</span>.</p>`);
+    B.push(`<p class="dsreg-sub">The evidence behind this system: what mismatched across the 23 lab pages, and the DS answer. STATUS after DS-4 (design-lab-v4): all A/B items CLOSED — the 23 pages compose only DS archetypes + components (pages-ds.js); C items stay by contract. Full receipts: <span class="ds-mono">mismatch-register.md</span>.</p>`);
     B.push(`<table class="dsreg-table"><tr><th>id</th><th>class</th><th>finding</th><th>evidence</th><th>DS resolution</th></tr>${REGISTER.map(([id, cls, f, ev, res]) => `<tr><td class="mono">${id}</td><td>${cls === "A" ? '<span class="ds-badge danger">A</span>' : cls === "B" ? '<span class="ds-badge warning">B</span>' : '<span class="ds-badge success">C · keep</span>'}</td><td class="strong">${esc(f)}</td><td>${esc(ev)}</td><td>${esc(res)}</td></tr>`).join("")}</table>`);
 
     root.innerHTML = B.join("");
@@ -443,6 +447,7 @@
 
   function initShell() {
     const nav = document.getElementById("dsreg-nav");
+    if (!nav) return; /* library-only load (e.g. reskin.html) — the registry shell only exists on ds.html */
     nav.innerHTML = `<div class="grp" style="padding-top:0">Design System v1.0</div>` + NAV.map(([label, id, tag]) =>
       id ? `<a href="#${id}" data-sec="${id}">${tag ? `<span class="id">${tag}</span>` : ""} ${esc(label)}</a>` : `<div class="grp">${esc(label)}</div>`
     ).join("");
@@ -471,4 +476,468 @@
   window.DS = { ICONS, TONE, toneOf, badge, statusBadge, aiBadge, chip, dot, pageHeader, card, sectionTitle, twoCol, statGrid, metricTile, dataTable, td, tds, tdn, tabs, tabGroups, toolbar, btn, input, combo, formRow, formGrid, fieldLabel, emptyState, hint, banner, callout, quirk, kvRow, tlRow, avatar, assignee, messageCard, dayDivider, fileChip, composerDemo, copSuggest, copSummary, copSimilar, copChat, hero, evRow, selList, lineChart, barRow, toast, panel, REGISTER, TOKEN_GROUPS, SCALES };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initShell); else initShell();
+})();
+
+/* ==========================================================================
+   DS v1.0 — DS-4 conformance engine (RS-01)
+   --------------------------------------------------------------------------
+   Adds: a few canonical builders (row, selRow, barCell, textarea, sync
+   control, grouped tabs, icon button, copy icon), the six page archetypes
+   (DS-A-01..06), the page registry (definePage/renderPage) and the
+   interactive inbox workspace. Pages may ONLY compose from here.
+   ========================================================================== */
+(() => {
+  "use strict";
+  const DS = window.DS;
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const initials = (n) => String(n || "?").split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+
+  /* ----- canonical additions ------------------------------------------------ */
+  DS.ICONS.copy = DS.ICONS.copy || `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+  DS.row = (main, side) => `<div class="ds-row"><span>${main}</span>${side ? `<span class="ds-row-side">${side}</span>` : ""}</div>`;
+  DS.selRow = (l1, l2, opts) => {
+    const o = opts || {};
+    return `<div class="ds-sel-row${o.selected ? " selected" : ""}"${o.act ? ` data-ds-act="${o.act}"` : ""}${o.id != null ? ` data-id="${esc(o.id)}"` : ""}${o.i != null ? ` data-i="${o.i}"` : ""} tabindex="0" role="listitem"><div class="lr1">${l1}</div>${l2 ? `<div class="lr2">${l2}</div>` : ""}</div>`;
+  };
+  DS.barCell = (pct, label) => `<span class="ds-bar-cell"><span class="ds-load-bar"><i style="width:${Math.max(3, Math.min(100, pct))}%"></i></span><span class="ds-mono ds-small">${esc(label)}</span></span>`;
+  DS.textarea = (ph, rows) => `<textarea class="ds-textarea" rows="${rows || 3}" placeholder="${esc(ph)}"></textarea>`;
+  DS.iconBtn = (icon, label) => `<button class="ds-icon-btn" type="button" aria-label="${esc(label)}">${icon}</button>`;
+  /* A-8: sync is ONE composite — button + inline status line */
+  DS.syncControl = (label) => `<button class="ds-btn outline" data-ds-sync="1" type="button">${esc(label || "Sync now")}</button><span class="ds-status-line" data-sync-line aria-live="polite"></span>`;
+  DS.groupedTabs = (groups, act) => `<div class="ds-tabgroups">${groups.map((g) => `<div><div class="tg-label">${esc(g.label)}</div>${DS.tabs(g.tabs, g.active, act, g.from || 0)}</div>`).join("")}</div>`;
+
+  /* ----- page registry -------------------------------------------------------- */
+  const PAGES = {};
+  DS.definePage = (id, def) => { def.id = id; if (!def.state) def.state = {}; def.archetype = def.archetype || "stack"; PAGES[id] = def; };
+  DS.pageDefs = PAGES;
+
+  const notesButton = (id) => {
+    const n = ((window.LAB && window.LAB.PAGE_NOTES[id]) || []).length;
+    return n ? `<button class="ds-btn outline" data-notes="1" type="button">${DS.ICONS.pencil} Reskin notes <span class="ds-counter">${n}</span></button>` : "";
+  };
+  const headerHTML = (ctx) => {
+    const m = (ctx.def.meta && ctx.def.meta(ctx.state)) || {};
+    return DS.pageHeader({ title: m.title || "", subtitle: m.subtitle || "", counter: m.counter || "", actions: `${m.actions || ""}${notesButton(ctx.id)}` });
+  };
+  const tabStrip = (ctx) => {
+    const t = ctx.def.tabs && ctx.def.tabs(ctx.state);
+    if (!t) return "";
+    if (t.groups) return DS.groupedTabs(t.groups, "tab");
+    return DS.tabs(t.items, t.active, "tab");
+  };
+  const openDetail = (el, ctx) => {
+    const d = ctx.def.detail(Number(el.dataset.i), ctx.state, ctx);
+    DS.panel.open(d.title, d.body);
+  };
+
+  const ARCH = {
+    /* DS-A-02 dashboard / DS-A-04 settings — header + optional tabs + block stack */
+    stack(root, ctx) {
+      root.innerHTML = headerHTML(ctx) + tabStrip(ctx) + (ctx.def.blocks(ctx.state, ctx) || []).join("");
+    },
+    /* DS-A-06 console — header + optional hero + chips + event/block stack */
+    console(root, ctx) {
+      const hero = ctx.def.hero ? ctx.def.hero(ctx.state) : "";
+      root.innerHTML = headerHTML(ctx) + hero + tabStrip(ctx) + (ctx.def.blocks(ctx.state, ctx) || []).join("");
+    },
+    /* DS-A-01 list — FilterBar → DataTable → row opens DetailPanel (DS-C-17) */
+    list(root, ctx) {
+      const L = ctx.def.list(ctx.state, ctx);
+      const tool = L.toolbar
+        ? DS.toolbar(L.toolbar.left || "", L.toolbar.apply ? `<button class="ds-btn primary" data-ds-act="${L.toolbar.applyAct || "noop"}" type="button">${esc(L.toolbar.apply)}</button>` : "", true)
+        : "";
+      const raw = typeof L.rows === "function" ? L.rows(ctx.state, ctx) : (L.rows || []);
+      const rows = Array.isArray(raw) ? raw : [raw];
+      const body = rows.length ? DS.dataTable(L.headers, rows.join("")) : DS.emptyState((L.empty && L.empty.icon) || DS.ICONS.inbox, (L.empty && L.empty.title) || "Nothing here", (L.empty && L.empty.sub) || "");
+      root.innerHTML = headerHTML(ctx) + tool + body + (ctx.def.blocks ? (ctx.def.blocks(ctx.state, ctx) || []).join("") : "");
+    },
+    /* DS-A-03 detail record — entity header (avatar+name+meta+badges+actions) → two-col blocks */
+    record(root, ctx) {
+      const h = ctx.def.record(ctx.state, ctx) || {};
+      const head = `<div class="ds-record-head">${h.avatar || ""}<div class="ds-record-id"><div class="ds-record-name">${h.name || ""}</div>${h.meta ? `<div class="ds-record-meta">${h.meta}</div>` : ""}</div><div class="ds-record-badges">${h.badges || ""}</div><div class="ds-record-actions">${h.actions || ""}</div></div>`;
+      root.innerHTML = head + (h.left || h.right ? DS.twoCol((h.left || []).join(""), (h.right || []).join(""), h.wideLeft) : "") + (ctx.def.blocks ? (ctx.def.blocks(ctx.state, ctx) || []).join("") : "");
+    },
+    /* DS-A-05 inbox workspace — views rail → list → reader → copilot */
+    inbox(root, ctx) { renderInbox(root); },
+  };
+  DS.archetypes = ARCH;
+
+  /* ----- engine ---------------------------------------------------------------- */
+  const BUILTIN = {
+    tab: (el, ctx) => { ctx.state.tab = Number(el.dataset.i); ctx.rerender(); },
+    "open-detail": openDetail,
+    "panel-close": () => DS.panel.close(),
+    noop: () => {},
+  };
+  function renderPage(id, root) {
+    const def = PAGES[id];
+    if (!def) return;
+    root.dataset.page = id;
+    const ctx = { id, def, state: def.state, root };
+    ctx.rerender = () => renderPage(id, root);
+    ARCH[def.archetype](root, ctx);
+    if (def.after) def.after(root, ctx);
+    if (id === "inbox") document.dispatchEvent(new CustomEvent("ds-inbox-rendered"));
+    /* ONE delegated dispatcher per page render. The inbox archetype exposes a
+       dispatch fn (inboxClick, hoisted) that returns false when it consumed the
+       event; everything else resolves through def.act/BUILTIN. */
+    root.onclick = (e) => {
+      if (def.archetype === "inbox" && inboxClick(e) === false) return;
+      const el = e.target.closest("[data-ds-act],[data-ds-sync],[data-notes]");
+      if (!el) return;
+      if (el.dataset.notes != null) { window.dispatchEvent(new CustomEvent("lab-open-notes", { detail: { page: id } })); return; }
+      if (el.dataset.dsSync != null) { doSync(el); return; }
+      const act = el.dataset.dsAct;
+      const h = (def.act && def.act[act]) || BUILTIN[act];
+      if (h) h(el, ctx, e);
+    };
+  }
+  DS.renderPage = renderPage;
+  function doSync(btn) {
+    const line = btn.parentElement.querySelector("[data-sync-line]") || btn.closest(".ds-page-actions").querySelector("[data-sync-line]");
+    if (!line) return;
+    line.classList.remove("ok", "err");
+    line.textContent = "syncing…";
+    setTimeout(() => { line.textContent = "up to date — nothing new from Help Scout"; line.classList.add("ok"); }, 1200);
+  }
+
+  /* ===== DS-A-05 — the inbox workspace ========================================= */
+  const IB = { view: "All", filter: "", selected: 501, composerMode: "reply", draft: "", copilotOpen: true };
+  DS.inboxState = IB;
+  const convs = () => window.LAB.conversations;
+  const meFirst = () => window.LAB.CURRENT_USER.name.split(" ")[0];
+  const cur = () => convs().find((x) => x.id === IB.selected);
+  const visibleConversations = () => convs().filter((c) => {
+    if (IB.view === "Mine" && c.assignee !== meFirst()) return false;
+    if (IB.view === "Unassigned" && c.assignee) return false;
+    if (["Active", "Pending", "Closed"].includes(IB.view) && c.status !== IB.view.toLowerCase()) return false;
+    if (IB.filter && !((c.subject + " " + c.customer).toLowerCase().includes(IB.filter.toLowerCase()))) return false;
+    return true;
+  });
+  DS.inboxVisible = visibleConversations;
+  const viewCount = (v) => {
+    const cs = convs();
+    if (v === "All") return cs.length;
+    if (v === "Mine") return cs.filter((c) => c.assignee === meFirst()).length;
+    if (v === "Unassigned") return cs.filter((c) => !c.assignee).length;
+    return cs.filter((c) => c.status === v.toLowerCase()).length;
+  };
+
+  const assigneePill = (c) =>
+    `<button class="ds-pill" type="button" title="assignment is data-track (U2-I1) — mocked here">${c.assignee ? DS.assignee(c.assignee) : `<span class="ds-assignee dashed" style="font-style:italic">Assign</span>`}</button>`;
+
+  const viewsHTML = () => window.LAB.VIEWS.map((v) =>
+    `<button class="ds-view-item${IB.view === v ? " active" : ""}" data-ds-act="set-view" data-view="${v}" type="button">${v}<span class="ds-view-count">${viewCount(v)}</span></button>`).join("");
+
+  const convRowHTML = (c) => `<div class="ds-conv-row${IB.selected === c.id ? " selected" : ""}${c.unread ? " unread" : ""}" data-ds-act="open-conv" data-id="${c.id}" role="listitem" tabindex="0" aria-label="${esc(c.subject)}">
+    <div class="ds-conv-l1"><span class="ds-udot"></span><span class="ds-conv-name">${esc(c.customer)}</span><span class="ds-conv-time">${esc(c.rel)}</span></div>
+    <div class="ds-conv-l2">${esc(c.preview)}</div>
+    <div class="ds-conv-l3">${c.assignee ? DS.assignee(c.assignee) : `<span class="ds-assignee dashed">Unassigned</span>`}${DS.statusBadge(c.status)}</div>
+  </div>`;
+
+  const headHTML = () => {
+    const c = cur();
+    if (!c) return "";
+    return `<span class="ds-av">${esc(initials(c.customer))}</span>
+      <div style="min-width:0"><div class="ds-rh-name">${esc(c.customer)}</div><div class="ds-rh-mail">${esc(c.email)} · mailbox: ${esc(c.mailbox)}</div></div>
+      <div class="ds-rh-actions">${assigneePill(c)}${DS.statusBadge(c.status)}
+      <button class="ds-pill${IB.copilotOpen ? " on" : ""}" id="copilot-toggle" type="button" aria-pressed="${IB.copilotOpen}">${DS.ICONS.sparkles} Copilot</button></div>`;
+  };
+
+  const msgCard = (m, idx) => DS.messageCard({
+    role: m.kind,
+    name: m.author,
+    roleLabel: m.kind === "customer" ? "Customer · email" : m.kind === "agent" ? "Agent" : m.kind === "note" ? "Internal note" : "AI · draft",
+    time: m.rel,
+    body: m.body.map((p) => `<p>${esc(p)}</p>`).join(""),
+    quoted: (m.quoted || []).map((q) => ({ from: `${q.from} — ${q.date} UTC`, body: q.body })),
+    attachments: m.attachments,
+    actions: m.kind === "ai"
+      ? `<button class="ds-btn ai" data-ds-act="insert-ai" data-i="${idx}" type="button">${DS.ICONS.pencil} Insert into reply</button><button class="ds-btn outline" data-ds-act="copy-ai" data-i="${idx}" type="button">${DS.ICONS.copy} Copy</button>`
+      : "",
+  });
+
+  const readerHTML = () => {
+    const c = cur();
+    if (!c) return "";
+    let lastDay = null;
+    return c.messages.map((m, idx) => {
+      const div = m.day !== lastDay ? DS.dayDivider(m.day) : "";
+      lastDay = m.day;
+      return div + msgCard(m, idx);
+    }).join("");
+  };
+
+  const composerHTML = () => {
+    const c = cur();
+    const note = IB.composerMode === "note";
+    return `<div class="ds-composer-inner">
+      <div class="ds-cp-tabs" role="tablist">
+        <button class="ds-cp-tab${note ? "" : " active"}" data-ds-act="cp-tab" data-i="reply" role="tab" aria-selected="${!note}" type="button">${DS.ICONS.send} Reply</button>
+        <button class="ds-cp-tab${note ? " active" : ""}" data-ds-act="cp-tab" data-i="note" role="tab" aria-selected="${note}" type="button">${DS.ICONS.pencil} Internal note</button>
+        <span class="ds-draft-flag${IB.draft ? " show" : ""}" id="draft-flag">Draft saved</span>
+      </div>
+      <div class="ds-cp-tools">
+        <button class="ds-tool-chip" id="sr-btn" type="button">${DS.ICONS.chevronD} Saved replies</button>
+        <button class="ds-tool-chip ai" id="ai-btn" type="button" ${c && c.copilot ? "" : "disabled"}>${DS.ICONS.sparkles} Insert AI draft</button>
+        <button class="ds-tool-chip" type="button" title="attachments are data-track (U2-I2) — mocked">${DS.ICONS.paperclip} Attach</button>
+        <div class="ds-sr-menu" id="sr-menu" hidden></div>
+      </div>
+      <div class="ds-cp-box"><textarea id="cp-body" placeholder="${note ? "Add an internal note — visible only to your team. @ to mention teammates." : c ? `Reply to ${esc(c.customer)}…` : "Reply…"}">${esc(IB.draft)}</textarea></div>
+      <div class="ds-cp-foot">
+        <span class="ds-cp-to">${note ? "Note — visible only to your team" : c ? `Reply to ${esc(c.customer)} &lt;${esc(c.email)}&gt;` : ""}</span>
+        <button class="ds-send-btn${note ? " note" : ""}" id="cp-send" type="button">${note ? DS.ICONS.lock + " Add note" : DS.ICONS.send + " Send reply"}</button>
+      </div>
+    </div>`;
+  };
+
+  const copHTML = () => {
+    const c = cur();
+    const head = `<div class="ds-cop-head"><div><div class="ds-cop-title">${DS.ICONS.sparkles} Copilot</div><div class="ds-cop-sub">typed cards · local engine</div></div><button class="ds-icon-btn" id="cop-close" type="button" aria-label="Close copilot">${DS.ICONS.x}</button></div>`;
+    if (!c || !c.copilot) return head + `<div class="ds-cop-body">${DS.card({ body: `<div class="ds-cop-bullet">No copilot analysis for this fixture conversation.</div>` })}</div>`;
+    const cp = c.copilot;
+    return head + `<div class="ds-cop-body">
+      ${DS.card({ body: `<div class="ds-cop-card-title">Signals</div><div class="ds-chip-row">${DS.badge("ai", esc(cp.intent))}${DS.badge(cp.urgency === "high" ? "danger" : cp.urgency === "medium" ? "warning" : "neutral", "urgency: " + esc(cp.urgency))}${DS.badge(cp.sentiment === "negative" ? "warning" : cp.sentiment === "positive" ? "success" : "neutral", "sentiment: " + esc(cp.sentiment))}${cp.escalation ? DS.badge("danger", "escalation risk") : ""}</div>` })}
+      ${DS.card({ body: `<div class="ds-cop-card-title">Summary</div>${cp.summary.map((s) => `<div class="ds-cop-bullet">${esc(s)}</div>`).join("")}${cp.questions.map((q) => `<div class="ds-cop-q">? ${esc(q)}</div>`).join("")}` })}
+      ${DS.card({ body: `<div class="ds-cop-card-title">Similar past issues</div>${cp.similar.map((s, i) => `<div class="ds-cop-sim"><div class="ds-cop-sim-head">#${s.number} ${esc(s.subject)} ${DS.badge("ai", s.score + "%")}</div><div class="ds-cop-sim-res">${esc(s.resolution)}</div><button class="ds-btn outline sm" data-ds-act="insert-res" data-i="${i}" type="button">${DS.ICONS.pencil} Insert resolution</button></div>`).join("")}` })}
+      ${DS.card({ body: `<div class="ds-cop-card-title">${DS.ICONS.sparkles} Suggested reply</div><div class="ds-cop-suggest-body">${esc(cp.suggestedReply)}</div><div class="ds-msg-actions"><button class="ds-btn ai" id="cop-insert" type="button">${DS.ICONS.pencil} Insert into reply</button><button class="ds-btn outline" id="cop-copy" type="button">${DS.ICONS.copy} Copy</button></div>` })}
+      ${DS.card({ body: `<div class="ds-cop-card-title">Customer history</div><div class="ds-cop-q">${esc(cp.history)}</div>` })}
+    </div>`;
+  };
+
+  let ibRoot = null;
+  const q = (sel) => ibRoot && ibRoot.querySelector(sel);
+
+  function renderInbox(root) {
+    ibRoot = root;
+    root.innerHTML = `<div class="ds-inbox-shell">
+      <aside class="ds-views" aria-label="Inbox views">
+        <div class="ds-views-title">Inbox views</div>
+        <div id="views"></div>
+        <div class="ds-views-foot">
+          <button class="notes-toggle" id="notes-toggle" type="button" aria-pressed="false">
+            <span id="notes-ic"></span> Design notes <span class="count" id="notes-count">0</span>
+          </button>
+          <div class="kbd-hint"><kbd>j</kbd> / <kbd>k</kbd> navigate · <kbd>Enter</kbd> open · <kbd>/</kbd> filter · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> send</div>
+        </div>
+      </aside>
+      <section class="ds-conv-col" aria-label="Conversations">
+        <div class="ds-conv-head">
+          <div class="ds-conv-title" id="conv-title">All</div>
+          <div class="ds-conv-sub" id="conv-sub"></div>
+          <input class="ds-conv-filter" id="conv-filter" placeholder="Filter conversations…  ( / )" aria-label="Filter conversations">
+        </div>
+        <div class="ds-conv-list" id="conv-list" role="list"></div>
+      </section>
+      <section class="ds-reader-col" aria-label="Conversation reader">
+        <div class="ds-reader-head" id="reader-head"></div>
+        <div class="ds-reader-scroll" id="reader-scroll"><div class="ds-reader-inner" id="reader"></div></div>
+        <div class="ds-composer" id="composer"></div>
+      </section>
+      <aside class="ds-cop-panel" id="copilot" aria-label="Copilot"></aside>
+    </div>`;
+    const ic = document.getElementById("notes-ic");
+    if (ic) ic.innerHTML = DS.ICONS.pencil;
+    const nc = document.getElementById("notes-count");
+    if (nc) nc.textContent = window.LAB.NOTES.length;
+    renderViews();
+    renderList();
+    renderHead();
+    renderReader();
+    bindInbox();
+  }
+  DS.inboxRender = renderInbox;
+
+  function renderViews() { const el = q("#views"); if (el) el.innerHTML = viewsHTML(); }
+  function renderList() {
+    const rows = visibleConversations();
+    const unread = rows.filter((c) => c.unread).length;
+    const unassigned = rows.filter((c) => !c.assignee).length;
+    const t = q("#conv-title"), s = q("#conv-sub"), l = q("#conv-list");
+    if (t) t.textContent = IB.view;
+    if (s) s.textContent = `${rows.length} conversation${rows.length === 1 ? "" : "s"} · ${unassigned} unassigned · ${unread} unread`;
+    if (l) l.innerHTML = rows.map(convRowHTML).join("");
+  }
+  function renderHead() { const el = q("#reader-head"); if (el) el.innerHTML = headHTML(); }
+  function renderReader() {
+    const el = q("#reader");
+    if (el) el.innerHTML = readerHTML();
+    renderComposer();
+    renderCopilot();
+  }
+  function renderComposer() {
+    const box = q("#composer");
+    if (!box) return;
+    box.classList.toggle("note-mode", IB.composerMode === "note");
+    box.innerHTML = composerHTML();
+    const body = q("#cp-body");
+    if (body) {
+      body.addEventListener("input", () => {
+        IB.draft = body.value;
+        const f = q("#draft-flag");
+        if (f) f.classList.toggle("show", body.value.length > 0);
+      });
+      body.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); const s = q("#cp-send"); if (s) s.click(); } });
+    }
+    box.querySelectorAll("[data-ds-act='cp-tab']").forEach((b) => b.addEventListener("click", () => {
+      IB.composerMode = b.dataset.i;
+      renderComposer();
+      const nb = q("#cp-body");
+      if (nb) nb.focus();
+    }));
+    const srBtn = q("#sr-btn"), srMenu = q("#sr-menu");
+    if (srBtn && srMenu) {
+      srBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (srMenu.hidden) {
+          srMenu.innerHTML = window.LAB.SAVED_REPLIES.map((r, i) =>
+            `<button class="ds-sr-item" data-sr="${i}" type="button"><div class="ds-sr-title">${esc(r.title)}</div><div class="ds-sr-body">${esc(r.body)}</div></button>`).join("");
+          srMenu.hidden = false;
+        } else srMenu.hidden = true;
+      });
+      srMenu.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-sr]");
+        if (!b) return;
+        IB.draft = window.LAB.SAVED_REPLIES[Number(b.dataset.sr)].body;
+        IB.composerMode = "reply";
+        renderComposer();
+        const nb = q("#cp-body");
+        if (nb) nb.focus();
+        DS.toast("Saved reply inserted — edit before sending.");
+      });
+    }
+    const aiBtn = q("#ai-btn");
+    if (aiBtn && !aiBtn.disabled) aiBtn.addEventListener("click", () => {
+      const c = cur();
+      if (!c || !c.copilot) return;
+      insertDraft(c.copilot.suggestedReply);
+      DS.toast("AI draft inserted — edit before sending.");
+    });
+    const send = q("#cp-send");
+    if (send) send.addEventListener("click", () => {
+      const c = cur();
+      if (!c || !IB.draft.trim()) { DS.toast("Nothing to send — the composer is empty."); return; }
+      const kind = IB.composerMode;
+      const last = c.messages[c.messages.length - 1];
+      c.messages.push({
+        kind: kind === "note" ? "note" : "agent",
+        author: window.LAB.CURRENT_USER.name,
+        ts: "2026-10-27 11:20",
+        rel: "Just now",
+        day: last && last.day === "Today" ? "Today" : "Today",
+        body: [IB.draft.trim()],
+        quoted: [],
+        attachments: [],
+      });
+      IB.draft = "";
+      renderReader();
+      const sc = q("#reader-scroll");
+      if (sc) sc.scrollTop = sc.scrollHeight;
+      DS.toast(kind === "note" ? "Internal note added to the thread." : "Reply queued as a durable outbound job — delivered to Help Scout.");
+    });
+  }
+  function renderCopilot() {
+    const panel = q("#copilot");
+    if (!panel) return;
+    panel.hidden = !IB.copilotOpen;
+    if (!IB.copilotOpen) return;
+    panel.innerHTML = copHTML();
+    const close = q("#cop-close");
+    if (close) close.addEventListener("click", () => { IB.copilotOpen = false; renderHead(); renderCopilot(); });
+    const ins = q("#cop-insert");
+    if (ins) ins.addEventListener("click", () => {
+      const c = cur();
+      if (!c || !c.copilot) return;
+      insertDraft(c.copilot.suggestedReply);
+      DS.toast("AI draft inserted — edit before sending.");
+    });
+    const cpy = q("#cop-copy");
+    if (cpy) cpy.addEventListener("click", () => {
+      const c = cur();
+      if (c && c.copilot && navigator.clipboard) navigator.clipboard.writeText(c.copilot.suggestedReply).catch(() => {});
+      DS.toast("AI draft copied to clipboard.");
+    });
+    panel.querySelectorAll("[data-ds-act='insert-res']").forEach((b) => b.addEventListener("click", () => {
+      const c = cur();
+      if (!c || !c.copilot) return;
+      const s = c.copilot.similar[Number(b.dataset.i)];
+      IB.draft = (IB.draft ? IB.draft + "\n\n" : "") + s.resolution;
+      renderComposer();
+      const nb = q("#cp-body");
+      if (nb) nb.focus();
+      DS.toast("Resolution from #" + s.number + " inserted.");
+    }));
+  }
+  function insertDraft(text) {
+    IB.draft = text;
+    IB.composerMode = "reply";
+    renderComposer();
+    const nb = q("#cp-body");
+    if (nb) nb.focus();
+  }
+  function openConversation(id) {
+    IB.selected = id;
+    renderList();
+    renderHead();
+    renderReader();
+    const sc = q("#reader-scroll");
+    if (sc) sc.scrollTop = 0;
+  }
+  DS.inboxOpen = openConversation;
+
+  /* delegated inbox acts — the engine dispatcher calls this first; returning
+     false means the event was consumed here */
+  function inboxClick(e) {
+    const el = e.target.closest("[data-ds-act]");
+    if (!el) return;
+    const act = el.dataset.dsAct;
+    if (act === "set-view") {
+      IB.view = el.dataset.view;
+      renderViews();
+      renderList();
+      const ids = visibleConversations().map((c) => c.id);
+      if (!ids.includes(IB.selected)) {
+        IB.selected = ids[0] != null ? ids[0] : null;
+        renderHead();
+        renderReader();
+      } else { renderHead(); }
+      return false;
+    }
+    if (act === "open-conv") { openConversation(Number(el.dataset.id)); return false; }
+    if (act === "insert-ai") {
+      const c = cur();
+      const m = c && c.messages[Number(el.dataset.i)];
+      if (m) { insertDraft(m.body.join("\n\n")); DS.toast("AI draft inserted — edit before sending."); }
+      return false;
+    }
+    if (act === "copy-ai") {
+      const c = cur();
+      const m = c && c.messages[Number(el.dataset.i)];
+      if (m && navigator.clipboard) navigator.clipboard.writeText(m.body.join("\n\n")).catch(() => {});
+      DS.toast("AI draft copied to clipboard.");
+      return false;
+    }
+    if (act === "cp-tab" || act === "panel-close") return; /* bound directly */
+  }
+
+  function bindInbox() {
+    /* delegated acts live in inboxClick (hoisted, called by the engine dispatcher) */
+    const filter = q("#conv-filter");
+    if (filter) filter.addEventListener("input", () => { IB.filter = filter.value; renderList(); });
+    const list = q("#conv-list");
+    if (list) list.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("ds-conv-row")) {
+        e.preventDefault();
+        openConversation(Number(e.target.dataset.id));
+      }
+    });
+    const head = q("#reader-head");
+    if (head) head.addEventListener("click", (e) => {
+      if (e.target.closest("#copilot-toggle")) {
+        IB.copilotOpen = !IB.copilotOpen;
+        renderHead();
+        renderCopilot();
+      }
+    });
+  }
 })();

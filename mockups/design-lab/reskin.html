@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SupportOS+ — reskin proposal (design lab)</title>
+<title>SupportOS+ — DS-conformed app (design lab v4)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ds.css">
 <link rel="stylesheet" href="reskin.css">
 </head>
 <body data-theme="light">
@@ -15,7 +16,7 @@
         <div class="logo-badge">S+</div>
         <div>
           <div class="sb-app">SupportOS+</div>
-          <div class="sb-ver">v1.8.0 · reskin</div>
+          <div class="sb-ver">v1.8.0 · DS-4</div>
         </div>
       </div>
       <button class="sb-search" type="button" id="sb-search">
@@ -34,37 +35,7 @@
         <button class="icon-btn" type="button" aria-label="Notifications" data-goto="notifications"><span class="ic-bell"></span></button>
       </header>
 
-      <div id="inbox-page">
-      <div class="inbox-shell">
-        <aside class="views" aria-label="Inbox views">
-          <div class="views-title">Inbox views</div>
-          <div id="views"></div>
-          <div class="views-foot">
-            <button class="notes-toggle" id="notes-toggle" type="button" aria-pressed="false">
-              <span id="notes-ic"></span> Design notes <span class="count" id="notes-count">10</span>
-            </button>
-            <div class="kbd-hint"><kbd>j</kbd> / <kbd>k</kbd> navigate · <kbd>Enter</kbd> open · <kbd>/</kbd> filter · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> send</div>
-          </div>
-        </aside>
-
-        <section class="conv-col" aria-label="Conversations">
-          <div class="conv-head">
-            <div class="conv-title" id="conv-title">All</div>
-            <div class="conv-sub" id="conv-sub"></div>
-            <input class="conv-filter" id="conv-filter" placeholder="Filter conversations…  ( / )" aria-label="Filter conversations">
-          </div>
-          <div class="conv-list" id="conv-list"></div>
-        </section>
-
-        <section class="reader-col" aria-label="Conversation reader">
-          <div class="reader-head" id="reader-head"></div>
-          <div class="reader-scroll" id="reader-scroll"><div class="reader-inner" id="reader"></div></div>
-          <div class="composer" id="composer"></div>
-        </section>
-
-        <aside class="copilot" id="copilot" aria-label="Copilot"></aside>
-      </div>
-      </div>
+      <div id="inbox-page" hidden></div>
 
       <main id="page-root" class="page-root" hidden></main>
     </div>
@@ -81,11 +52,11 @@
     <div class="nd-list" id="nd-list"></div>
   </aside>
 
-  <div class="toast" id="toast" role="status"></div>
-  <div class="replica-tag">reskin proposal · static HTML/CSS/JS · presentation only, zero behavior changes · data-track items mocked</div>
+  <div class="replica-tag">design-lab-v4 · DS-4 conformed · every page = PAGE_DATA + one DS archetype · presentation only, zero behavior changes · data-track items mocked</div>
 
   <script src="data.js"></script>
-  <script src="pages-reskin.js"></script>
+  <script src="ds.js"></script>
+  <script src="pages-ds.js"></script>
   <script src="reskin.js"></script>
 </body>
 </html>

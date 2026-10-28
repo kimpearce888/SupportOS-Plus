@@ -439,3 +439,105 @@ body.panel-open .ds-panel-scrim { opacity: 1; pointer-events: auto; }
 .dsreg-table td.mono { font-family: ui-monospace, monospace; font-size: 11.5px; }
 .ds-kbd { font-family: inherit; border: 1px solid var(--ds-border); border-radius: 4px; padding: 0 4px; font-size: 10.5px; background: var(--ds-surface-2); }
 @media (max-width: 900px) { .dsreg-nav { display: none; } .dsreg-main { padding: 16px 16px 48px; } }
+
+/* ==========================================================================
+   DS-A archetype-owned anatomy (DS-4 conformance, Task 24/RS-01)
+   The inbox workspace panes and the shared helpers below are part of the
+   system, not page CSS. Pages may not restyle them.
+   ========================================================================== */
+.ds-inbox-shell { flex: 1; min-height: 0; display: flex; }
+.ds-views { width: 172px; flex: none; border-right: 1px solid var(--ds-border); background: var(--ds-surface-2); display: flex; flex-direction: column; padding: 12px 8px 10px; }
+.ds-views-title { font-size: 11.5px; color: var(--ds-text-2); padding: 0 8px 6px; user-select: none; }
+.ds-view-item { display: flex; align-items: center; justify-content: space-between; width: 100%; height: 30px; padding: 0 10px; border-radius: var(--ds-r-md); font-size: 13px; text-align: left; }
+.ds-view-item:hover { background: var(--ds-hover); }
+.ds-view-item.active { background: var(--ds-neutral-bg); font-weight: 500; }
+.ds-view-count { font-size: 11.5px; color: var(--ds-text-2); }
+.ds-view-item.active .ds-view-count { color: var(--ds-text); }
+.ds-conv-col { width: 330px; flex: none; border-right: 1px solid var(--ds-border); display: flex; flex-direction: column; background: var(--ds-surface-2); }
+.ds-conv-head { padding: 12px 12px 8px; }
+.ds-conv-title { font-size: 14px; font-weight: 500; }
+.ds-conv-sub { font-size: 11.5px; color: var(--ds-text-2); margin-top: 2px; }
+.ds-conv-filter { margin-top: 8px; width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-md); background: var(--ds-input); color: var(--ds-text); font: inherit; font-size: 12.5px; }
+.ds-conv-filter::placeholder { color: var(--ds-text-2); }
+.ds-conv-filter:focus { outline: 2px solid var(--ds-ai-border); border-color: var(--ds-ai-border); }
+.ds-conv-list { flex: 1; overflow-y: auto; padding: 2px 6px 10px; }
+.ds-conv-list::-webkit-scrollbar { width: 8px; }
+.ds-conv-list::-webkit-scrollbar-thumb { background: var(--ds-border); border-radius: 4px; }
+.ds-conv-row { display: flex; flex-direction: column; padding: 9px 11px; border-radius: var(--ds-r-lg); cursor: pointer; margin-bottom: 2px; border: 1px solid transparent; }
+.ds-conv-row:hover { background: var(--ds-hover); }
+.ds-conv-row.selected { background: var(--ds-neutral-bg); border-color: var(--ds-border); }
+.ds-conv-l1 { display: flex; align-items: center; gap: 7px; }
+.ds-udot { width: 7px; height: 7px; border-radius: 999px; background: var(--ds-info); flex: none; visibility: hidden; }
+.ds-conv-row.unread .ds-udot { visibility: visible; }
+.ds-conv-name { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-conv-row.unread .ds-conv-name { font-weight: 500; }
+.ds-conv-time { margin-left: auto; font-size: 11.5px; color: var(--ds-text-2); flex: none; }
+.ds-conv-l2 { font-size: 12.5px; color: var(--ds-text-2); margin: 3px 0 0 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+.ds-conv-row.unread .ds-conv-l2 { color: var(--ds-text); }
+.ds-conv-l3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0 0 14px; }
+.ds-reader-col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--ds-bg); }
+.ds-reader-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--ds-border); background: var(--ds-surface); }
+.ds-reader-head .ds-av { width: 34px; height: 34px; border-radius: 999px; background: var(--ds-neutral-bg); color: var(--ds-neutral-fg); font-size: 12px; font-weight: 500; border: 1px solid var(--ds-border); flex: none; }
+.ds-rh-name { font-size: 15px; font-weight: 500; line-height: 1.2; }
+.ds-rh-mail { font-size: 11.5px; color: var(--ds-text-2); }
+.ds-rh-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.ds-pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid var(--ds-border); border-radius: var(--ds-r-md); background: var(--ds-surface); font-size: 12.5px; }
+.ds-pill svg { width: 12.5px; height: 12.5px; color: var(--ds-text-2); }
+.ds-pill:hover { border-color: var(--ds-border-strong); }
+.ds-pill.on { background: var(--ds-ai-bg); border-color: var(--ds-ai-border); color: var(--ds-ai-fg); }
+.ds-pill.on svg { color: var(--ds-ai); }
+.ds-reader-scroll { flex: 1; overflow-y: auto; padding: 18px 22px 14px; }
+.ds-reader-scroll::-webkit-scrollbar { width: 10px; }
+.ds-reader-scroll::-webkit-scrollbar-thumb { background: var(--ds-border); border-radius: 5px; }
+.ds-reader-inner { max-width: 760px; margin: 0 auto; }
+.ds-composer { flex: none; border-top: 1px solid var(--ds-border); background: var(--ds-surface); padding: 0 22px 12px; }
+.ds-composer-inner { max-width: 760px; margin: 0 auto; }
+.ds-draft-flag { margin-left: auto; align-self: center; font-size: 11px; color: var(--ds-text-2); opacity: 0; transition: opacity var(--ds-t-slow); }
+.ds-draft-flag.show { opacity: 1; }
+.ds-sr-menu { position: absolute; top: 32px; left: 0; z-index: 40; width: 340px; max-height: 260px; overflow-y: auto; background: var(--ds-surface); border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); box-shadow: var(--ds-e3, 0 12px 32px rgba(0,0,0,0.14)); padding: 5px; }
+.ds-sr-item { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: var(--ds-r-md); }
+.ds-sr-item:hover { background: var(--ds-hover); }
+.ds-sr-title { font-size: 12.5px; font-weight: 500; }
+.ds-sr-body { font-size: 11.5px; color: var(--ds-text-2); margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ds-cp-box textarea { width: 100%; min-height: 92px; resize: vertical; border: 1px solid var(--ds-border); border-radius: var(--ds-r-lg); background: var(--ds-input); color: var(--ds-text); font: inherit; font-size: 13.5px; line-height: 1.55; padding: 10px 12px; }
+.ds-cp-box textarea::placeholder { color: var(--ds-text-2); }
+.ds-cp-box textarea:focus { outline: none; border-color: var(--ds-border-strong); }
+.ds-composer.note-mode .ds-cp-box textarea { background: var(--ds-warning-bg); border-color: var(--ds-warning-border); }
+.ds-cp-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.ds-cp-to { font-size: 11.5px; color: var(--ds-text-2); }
+.ds-cop-panel { width: 320px; flex: none; border-left: 1px solid var(--ds-border); background: var(--ds-surface-2); display: flex; flex-direction: column; overflow-y: auto; }
+.ds-cop-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; position: sticky; top: 0; background: var(--ds-surface-2); z-index: 5; }
+.ds-cop-title { font-size: 13.5px; font-weight: 500; display: inline-flex; align-items: center; gap: 7px; }
+.ds-cop-title svg { width: 14px; height: 14px; color: var(--ds-ai); }
+.ds-cop-sub { font-size: 11px; color: var(--ds-text-2); margin-top: 1px; }
+.ds-cop-body { padding: 2px 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+.ds-icon-btn { width: 30px; height: 30px; border-radius: var(--ds-r-md); display: inline-flex; align-items: center; justify-content: center; color: var(--ds-text-2); }
+.ds-icon-btn:hover { background: var(--ds-hover); color: var(--ds-text); }
+/* shared helpers */
+.ds-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; }
+.ds-row + .ds-row { border-top: 1px solid var(--ds-surface-2); }
+.ds-row-side { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
+.ds-bar-cell { display: inline-flex; align-items: center; gap: 8px; }
+.ds-scroll { overflow-y: auto; }
+.ds-collapse summary { cursor: pointer; font-size: 12.5px; color: var(--ds-text-2); user-select: none; }
+.ds-collapse[open] summary { margin-bottom: 6px; }
+.ds-card.unread { border-left: 3px solid var(--ds-info); }
+@media (max-width: 1240px) { .ds-cop-panel { position: fixed; right: 0; top: 0; bottom: 0; z-index: 70; box-shadow: -12px 0 32px rgba(0,0,0,0.18); } }
+@media (max-width: 1080px) { .ds-views { display: none; } .ds-conv-col { width: 280px; } }
+@media (max-width: 860px) { .ds-conv-col { width: 220px; } .ds-reader-head .ds-rh-mail { display: none; } .ds-two-col, .ds-two-col.wide-left { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .ds-form-grid, .ds-form-grid.four { grid-template-columns: 1fr; } }
+.ds-views-foot { margin-top: auto; border-top: 1px solid var(--ds-border); padding-top: 8px; }
+.ds-cop-q { font-size: 12px; color: var(--ds-text-2); margin: 3px 0; }
+
+/* ---- RS-01 (DS-4 conformance engine additions) --------------------------- */
+/* DS-A-03 detail record header — one canonical entity header */
+.ds-record-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.ds-record-id { min-width: 0; }
+.ds-record-name { font-size: 17px; font-weight: 500; }
+.ds-record-meta { font-size: 12.5px; color: var(--ds-text-2); margin-top: 2px; }
+.ds-record-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.ds-record-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ds-empty-cta { margin-top: 12px; }
+/* scroll height variants (same 4pt-scale family as ds-scroll-220) */
+.ds-scroll-140 { max-height: 140px; overflow-y: auto; }
+.ds-scroll-360 { max-height: 360px; overflow-y: auto; }

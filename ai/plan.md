@@ -224,66 +224,9 @@ Batch mapping under `rule.md` (ten at a time):
 
 ### Stage 1 — design-lab conformance, DS-4 (touches only `mockups/design-lab/`)
 
-**RS-01 — DS archetype render engine (foundation).** In `ds.js`, add the six archetype
-page renderers (DS-A-01 list+detail workspace, DS-A-02 dashboard, DS-A-03 detail record,
-DS-A-04 settings, DS-A-05 inbox workspace, DS-A-06 console) plus a page registry, so a
-page = a PAGE_DATA object + one archetype call. Evidence: 17 bespoke per-page renderers
-in `pages-reskin.js` (the a8492d0 build) are the composition drift the register logs
-(mismatch-register.md Class A). Verify: `node --check`; every registry page resolves to
-exactly one archetype; no page markup rendered outside `DS.*` calls.
-
-**RS-02 — Inbox onto DS-A-05 (lab pilot).** Rebuild inbox as data + archetype: view
-rail, list rows, DetailPanel reader (DS-C-17), role-typed message cards + day dividers +
-quoted-history collapse + attachment chips, composer, typed copilot cards, sync
-status-line (register A-8). Verify: golden-path interaction suite unchanged (open
-conversation, reply/note send, saved-reply insert, AI insert, copilot actions); visual
-equals the approved proposal; both themes.
-
-**RS-03 — Dashboard onto DS-A-02.** Stat/metric tiles, chart, breakdowns through DS
-renderers; counts as PageHeader counter pill (A-6); sync-note → status-line (A-8).
-Verify: renderer-only composition; both themes; Reskin-notes drawer intact.
-
-**RS-04 — Customers + Organizations onto DS-A-01/DS-A-03.** Customers abandons the
-full-page profile replace (`pages-reskin.js:207-227`) for row → DetailPanel (A-1); one
-toolbar + FilterBar for both (A-2); one detail record header (A-4); counts as header
-pill (A-6). Verify: identical open/filter/act flow on both pages; blind walkthrough.
-
-**RS-05 — Knowledge + Help Center.** One FilterBar (A-2: removes the stacked duplicate
-search rows, `pages-reskin.js:265-266`); row-action rule (A-5: the reviewed/verify/
-delete triple → ≤2 inline actions, destructive = danger + ConfirmDialog); DS-C-14 empty
-states with why+next-step (A-7); article status via DS.TONE (A-3 site). Verify:
-filter+apply parity; register rows A-5/A-7 closed for these pages.
-
-**RS-06 — Incidents, Issue Radar, Reports (+ Report Builder).** Onto list/dashboard
-archetypes; severity bands and tiles resolve through DS.TONE; approval/when-chip
-composites per B-2. Verify: renderer-only; incident/report detail flows open DetailPanel.
-
-**RS-07 — Operations + AI Center onto DS-A-06 (console).** engine-hero → DS-C-24 (B-2);
-approval-line/when-chip → chip + status-line composition (B-2); gap-candidate and
-endpoint blocks fold into Card + kv rows (B-2); receipt-cited quirks preserved (C-1:
-endpoint name not index, approvals human-first with collapsible raw JSON). Verify:
-console pages composed from DS parts only.
-
-**RS-08 — Settings, Connectors, Notifications onto DS-A-04 (settings).** Tabs,
-FormFields, isolated danger zones; notifications dot-as-state + relative time with
-raw-UTC title kept as receipt (C-1); mark-all-read. Verify: settings tab parity;
-danger-zone isolation visual check; both themes.
-
-**RS-09 — All remaining NAV_GROUPS pages.** LiveChats, Search, SupportGraph, SyncHealth,
-Onboarding, Shell, Outreach, Automation, CustomObjects, Diagnostics — final sweep onto
-archetypes (page set = the 23 PageKeys, `crates/app-shell/src/pages/mod.rs:299-326`,
-grouped per `app.rs:926-971`). Verify: every lab nav entry renders via the registry;
-no stub left.
-
-**RS-10 — Conformance burn-down + Gate G1.** Kill reskin.css one-off classes (the
-235-class layer → DS layer only) and ~30 inline styles; off-scale 5/7/9/11px gaps →
-4pt scale (B-3); five info-text patterns → five fixed roles (B-1). Tone audit: zero
-status colors outside DS.TONE, both themes (A-3). Mismatch register: all A/B rows
-closed; `ds.html` register section updated. Grep gate: pages ≥90% DS-composed, zero
-one-off CSS. Goldens: headless screenshots of all 23 pages × both themes ×
-1440/1024/800 — the reference set for R3. Blind walkthrough of same-type pages.
-Release design-lab-v4 (commit + zip asset). **GATE G1 — owner reviews the conformed
-lab and approves it as the final design; no Rust work before this (rule.md STOP).**
+> **Batch RS-1 (RS-01..RS-10) opened 2026-10-28** — the ten items below were moved to
+> `progress.md` per Rule 2; their full text lives there while the batch is active.
+> Batch RS-2 (Stage 2) follows after Gate G1.
 
 ### Stage 2 — egui reskin R1–R4 (Rust; opens only after Gate G1 approval)
 

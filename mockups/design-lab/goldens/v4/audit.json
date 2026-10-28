@@ -1,0 +1,221 @@
+{
+  "generated": "2026-10-28",
+  "what": "DS-4 conformance audit of the design-lab-v4 app (reskin.html) \u2014 structural blind-walkthrough evidence",
+  "method": "agent-browser sweep, one record per NAV_GROUPS page: .ds-page-head / .ds-tbl-wrap / .ds-tool-row / .ds-btn.primary / .ds-empty / .ds-badge counts inside the page scope",
+  "findings": {
+    "unified_header": "exactly 1 .ds-page-head on all 22 non-inbox pages; inbox (DS-A-05) renders the canonical 4-pane workspace header instead \u2014 by design",
+    "unified_filter": "every list page carries exactly one .ds-tool-row FilterBar with one primary apply (A-2)",
+    "primary_buttons": "counts >1 on organizations/incidents/ai-center/outreach/custom-objects/search are FORM-SUBMIT primaries (create/filter/save/run/try), one per region; FilterBar and header actions each contribute exactly one",
+    "tone": "all status color via DS.TONE (badges/dots/tiles); zero page-level color classes outside ds-* (grep: pages-ds.js has 0 inline styles, 0 non-DS classes)",
+    "register": "A-1..A-8 and B-1..B-3 closed; C-1/C-2 stay by contract (see mismatch-register.md closure receipts)"
+  },
+  "pages": [
+    {
+      "page": "dashboard",
+      "heads": 1,
+      "tbls": 2,
+      "tools": 3,
+      "primary": 0,
+      "empties": 0,
+      "badges": 2
+    },
+    {
+      "page": "inbox",
+      "heads": 0,
+      "tbls": 0,
+      "tools": 0,
+      "primary": 0,
+      "empties": 0,
+      "badges": 13
+    },
+    {
+      "page": "live-chats",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 3,
+      "primary": 1,
+      "empties": 0,
+      "badges": 1
+    },
+    {
+      "page": "operations",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 0,
+      "primary": 0,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "customers",
+      "heads": 1,
+      "tbls": 1,
+      "tools": 1,
+      "primary": 1,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "organizations",
+      "heads": 1,
+      "tbls": 1,
+      "tools": 1,
+      "primary": 2,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "knowledge",
+      "heads": 1,
+      "tbls": 1,
+      "tools": 0,
+      "primary": 0,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "reports",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 0,
+      "primary": 0,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "issue-radar",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 0,
+      "primary": 0,
+      "empties": 0,
+      "badges": 3
+    },
+    {
+      "page": "incidents",
+      "heads": 1,
+      "tbls": 1,
+      "tools": 1,
+      "primary": 2,
+      "empties": 0,
+      "badges": 6
+    },
+    {
+      "page": "custom-objects",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 4,
+      "primary": 3,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "automation",
+      "heads": 1,
+      "tbls": 1,
+      "tools": 2,
+      "primary": 1,
+      "empties": 0,
+      "badges": 6
+    },
+    {
+      "page": "ai-center",
+      "heads": 1,
+      "tbls": 2,
+      "tools": 6,
+      "primary": 3,
+      "empties": 0,
+      "badges": 5
+    },
+    {
+      "page": "outreach",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 5,
+      "primary": 3,
+      "empties": 0,
+      "badges": 2
+    },
+    {
+      "page": "notifications",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 6,
+      "primary": 0,
+      "empties": 0,
+      "badges": 6
+    },
+    {
+      "page": "search",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 2,
+      "primary": 2,
+      "empties": 1,
+      "badges": 0
+    },
+    {
+      "page": "support-graph",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 2,
+      "primary": 1,
+      "empties": 0,
+      "badges": 4
+    },
+    {
+      "page": "connectors",
+      "heads": 1,
+      "tbls": 1,
+      "tools": 1,
+      "primary": 2,
+      "empties": 0,
+      "badges": 3
+    },
+    {
+      "page": "diagnostics",
+      "heads": 1,
+      "tbls": 3,
+      "tools": 1,
+      "primary": 0,
+      "empties": 0,
+      "badges": 20
+    },
+    {
+      "page": "sync-health",
+      "heads": 1,
+      "tbls": 2,
+      "tools": 1,
+      "primary": 1,
+      "empties": 0,
+      "badges": 1
+    },
+    {
+      "page": "settings",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 1,
+      "primary": 1,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "onboarding",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 1,
+      "primary": 1,
+      "empties": 0,
+      "badges": 0
+    },
+    {
+      "page": "shell",
+      "heads": 1,
+      "tbls": 0,
+      "tools": 0,
+      "primary": 0,
+      "empties": 0,
+      "badges": 0
+    }
+  ]
+}

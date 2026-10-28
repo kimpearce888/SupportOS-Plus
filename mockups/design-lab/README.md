@@ -9,6 +9,12 @@ here is a static design reference (reskin plan phases R0-R4 made tangible).
 Before replica and a token-v3 After proposal, built from forensic specs that cite
 file:line for every label, column, button, empty state, and quirk.
 
+**v4 — DS-4 conformance (design-lab-v4).** The After app now composes ONLY the Design
+System v1.0 registry: six archetypes (`DS-A-01..06`), canonical components, and the
+`DS.TONE` status map. All 8 Class-A and 3 Class-B mismatch-register rows are closed;
+C-class receipts stay. Goldens for every page × both themes × 1440/1024/800 live in
+`goldens/` as the reference set for the egui reskin (Stage 2 R3).
+
 ## Open it
 
 - `index.html` — lab shell: **Before / After / Side-by-side** toggle. Page navigation is
@@ -18,14 +24,23 @@ file:line for every label, column, button, empty state, and quirk.
   real layouts of all 22 other pages — including their honest quirks (raw UTC stamps, the
   Operations Load/Pressure value swap, the seven-zero Outreach report, the empty Freshness
   tab, `(unset)`/`—` placeholders).
-- `reskin.html` — the **reskin proposal**: token v3 semantic surfaces, role-typed message
-  cards, AI identity (violet), collapsed quoted history, Reply|Note composer with saved
-  replies + AI-draft insert, typed Copilot cards, unread/assignee triage, `j`/`k` keyboard
-  navigation — plus the v3 treatment of all 22 other pages (underline tabs, severity bands,
-  status dots, load bars, isolated danger zones, per-page **Reskin notes**).
+- `reskin.html` — the **DS-4 conformed app (design-lab-v4)**: every page is a PAGE_DATA
+  object in `pages-ds.js` rendered by exactly one DS archetype via `DS.renderPage` —
+  DS-A-01 list+DetailPanel (customers, organizations, incidents), DS-A-02 dashboard,
+  DS-A-04 settings (stack), DS-A-05 inbox workspace (the engine pilot), DS-A-06 console
+  (operations, AI center, diagnostics, sync health). Status color resolves only through
+  `DS.TONE`; counts live in header counter pills; sync = button + status line; empty
+  states state why + next step; destructive actions arm a danger confirm. The shell
+  (`reskin.js`/`reskin.css`) is chrome only: nav, routing, theme, notes drawer, j/k
+  shortcuts. The old bespoke after-proposal (`pages-reskin.js` + the reskin.css page
+  layer) is deleted; its receipts live at commit a8492d0.
+- `ds.html` — the **living Design System registry** (v1.0 + DS-4 engine): foundations,
+  17 canonical components, 6 archetypes, tone map, rules, and the mismatch register with
+  live closure status.
 - `data.js` — shared synthetic fixtures mirroring `ThreadEntry` semantics
   (`core/inbox.rs:326-341`) and every page's real section structure.
-- `pages-current.js` / `pages-reskin.js` — the 22 non-Inbox page renderers for each mode.
+- `pages-current.js` — the 22 non-Inbox Before renderers. The After side has no bespoke
+  renderers anymore: `pages-ds.js` registers all 23 pages as data against `ds.js`.
 
 ## Page coverage (23/23)
 
