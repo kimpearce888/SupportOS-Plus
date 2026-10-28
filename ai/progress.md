@@ -127,3 +127,25 @@ SPP_SMOKE exit 0. **CI note:** pushes since RS-13 (8bb994f..d172cfc) failed in C
 regenerated Cargo.lock (egui_kittest dev-dep tree) had never been committed; fixed by 8490eee,
 both CI jobs fully green on it. **Next in batch:** RS-17 wave A (Dashboard, Customers,
 Organizations, LiveChats).
+
+**RS-17 — R3 wave A (verified 2026-10-28):** all four pages rebuilt onto their DC archetypes,
+behavior byte-identical everywhere, a11y labels on every interactive control, zero bespoke
+styling. **Organizations → DS-A-01** (1b9f521): page_header + DS-C-01 counter pill (lab's
+"[counter] [Sync now] [status line]" order), hand-rolled filter row → DS-C-10 filter_bar,
+chip list → DS-C-05 data_table (same 200-cap query), row open → DS-C-17 DetailPanel with the
+DS-A-03 record composition; create form stays page-flow card_titled + form_row per the lab.
+**LiveChats → DS-A-04** (632435e): counter pill "n open · m ended", the lab's view toolbar
+(field label + two DS-C-06 chips — the chip pair IS the view switch), DS status-dot rows,
+detail as card_titled record; the inclusive "show ended" filter (show_ended || is_open) kept
+verbatim — original behavior per D6. **Dashboard → DS-A-02** (9aa93fc): the lab's block stack
+(statGrid = DS-C-03 metric_card stats, DS-C-04 banded tiles with unchanged drill callbacks,
+new **DS-C-23 bar_row** added to the design set — the lab's .ds-bar-row with the 3% fill
+floor, real label/value text in the a11y tree); by-channel card keeps its labeled quirk; no
+hero (A-4). **Customers → DS-A-01** (1d48482): counter pill, filter_bar, the 28px show_rows
+list → data_table (same query/row semantics), detail → DS-C-17 + DS-A-03. **Goldens:** 4 new
+real-page suites (kittest_list_pages.rs orgs+customers 14, kittest_live_chats_page.rs 7,
+kittest_dashboard_page.rs 7, kittest_inbox_page.rs 6) — every page at 1440/1024/800 × 900
+light+dark, diff-locked twice, a11y check ON, +4 interaction goldens (org detail open, chats
+tab switch, dashboard scope-chip drill, customers detail open). Verification per commit:
+fmt clean; clippy -D warnings; workspace 234+485+11+lint 2 exit 0; kittest 48/48; SPP_SMOKE
+exit 0. **Next in batch:** RS-18 wave B (Knowledge, Incidents, IssueRadar, Reports+Builder).
