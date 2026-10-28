@@ -66,3 +66,38 @@ Each wave (RS-17..RS-20): rebuild from the widget set only; per-page functional
 regression checklist; kittest goldens vs lab goldens; any egui-cannot-reproduce gap
 becomes a registered exception in the DC — never silently approximated. Verify per
 wave: checklist + goldens + fmt/clippy/tests + SPP_SMOKE green.
+
+### Batch RS-2 status — checkpoint 2026-10-28 (RS-11..RS-15 verified; RS-16..RS-20 next)
+
+- **RS-11 — F0 DC freeze:** `docs/audit/design-contract-v1.md` committed (f84d43c): token sheet both
+  themes (exact hex), 17 DS-C sheets with egui mapping notes, 6 DS-A recipes, DS.TONE 25 rows,
+  register A/B closed + C keeps + E-1, change-control rule, RS-10 goldens as visual baseline.
+- **RS-12 — R1 token port:** design.rs LIGHT/DARK = DC tokens 1:1 (fbf106c): canvas #f4f4f5, ai/agent/
+  warning-border/neutral-fg/on-ai/shadow/scrim added, hyperlink+charts → AI violet, dark faint #0c0c0e;
+  type roles 22/13.5/13/12.5/12 wired into install(); DS.TONE = one 25-row match arm (BadgeTone::Ai,
+  tone_colors_of shared core — inbox row-painter collapsed onto it); design::scale (space/type/radius +
+  DC pads); **style lint CI test** (no raw Color32 outside design.rs, no off-scale spacing, B-3
+  impossible); doctor colors + dialog/toast/palette shadows + scrim → tokens; 3px gaps normalized;
+  DC pin tests. Contrast note: text-2 on canvas = DC-frozen 4.11:1 (4.7:1 on surface).
+- **RS-13 — R2a structure set:** egui_kittest 0.37 dev-dep (kittest-ui feature, like ui-screenshot);
+  page_counter (DS-C-01), status_dot/tone_solid (C-06), tabs/tab_groups underline (C-09),
+  filter_bar one-primary-apply (C-10/A-2), metric_tile banded+drill (C-04), data_table virtualized
+  pinned-header (C-05), metric_card→26px (C-03), ButtonVariant Text/Ai + manual DS-C-11 anatomy
+  (fixes the real-shell icon/text overlap); 4 snapshots diff-locked; headless via Xvfb+lavapipe.
+- **RS-14 — R2b feedback set:** empty_state_slim/cta (C-14/A-7), callout/status_line/quirk
+  (C-15/B-1 roles), avatar/assignee (C-19), armed_danger_button with frame-guard vs auto-Id
+  collision (C-16/A-5), detail_panel right-sheet + scrim + Esc (C-16/A-1), form_row (C-13);
+  dashed strokes unavailable in egui → registered E-2; 8/8 snapshots diff-locked.
+- **RS-15 — R2c inbox identity set:** message_card role-typed customer/agent/note/AI (C-20, G-2),
+  day_divider, quoted_history, file_chip, composer (C-21 pure-UI act enum: send/saved-reply/AI-insert,
+  Ctrl+Enter, draft-saved flag, amber note mode), cop_suggest/cop_similar/cop_chat (C-22); style-lint
+  allowlist extended with DC-frozen sheet pads 5/7/11/13 (DC §2.4 note); 14/14 diff-locked incl. the
+  5-second AI-identification pre-check + send/Ctrl+Enter interaction tests.
+
+**Verification per item:** cargo fmt clean; clippy workspace -D warnings green (both feature configs);
+cargo test: app-shell 233 (incl. DC pin tests) + core 485 + xtask 11 + style lint 2; kittest 14/14
+(diff-locked twice: baseline write + clean diff); SPP_SMOKE exit 0 (fresh binary each time). Commits:
+f84d43c, fbf106c, 8bb994f, b5e613d, 9718cd7 — all pushed to origin/main.
+
+**Next in batch:** RS-16 (Inbox pilot rebuild from the widget set + regression checklist + G3 goldens),
+then RS-17..RS-20 waves, then the G2/G3 evidence packs at the batch STOP.
