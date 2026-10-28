@@ -67,6 +67,8 @@ pub struct Tokens {
     pub primary: egui::Color32,
     /// Text/icons on primary fills.
     pub primary_foreground: egui::Color32,
+    /// Text on AI-solid fills (`#ffffff`, DC DS-C-11 `ai`).
+    pub on_ai: egui::Color32,
     /// Secondary button fill.
     pub secondary: egui::Color32,
     pub secondary_foreground: egui::Color32,
@@ -143,6 +145,7 @@ pub const LIGHT: Tokens = Tokens {
     accent: rgb(244, 244, 245),
     primary: rgb(24, 24, 27), // zinc-900
     primary_foreground: rgb(250, 250, 250),
+    on_ai: rgb(255, 255, 255),
     secondary: rgb(244, 244, 245),
     secondary_foreground: rgb(24, 24, 27),
     destructive: rgb(220, 38, 38), // red-600
@@ -193,6 +196,7 @@ pub const DARK: Tokens = Tokens {
     accent: rgb(39, 39, 42),
     primary: rgb(250, 250, 250),
     primary_foreground: rgb(24, 24, 27),
+    on_ai: rgb(255, 255, 255),
     secondary: rgb(39, 39, 42),
     secondary_foreground: rgb(250, 250, 250),
     destructive: rgb(185, 28, 28), // red-700 (readable on zinc-900)
@@ -465,20 +469,24 @@ fn shadow(blur: u8, alpha: u8) -> egui::Shadow {
 // Components: buttons
 // ---------------------------------------------------------------------------
 
-/// Button variants, mirroring shadcn/ui's Button.
+/// Button variants (DC: DS-C-11 — primary / outline / ghost / danger / text / ai).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ButtonVariant {
-    /// Solid primary (zinc-900 light / zinc-50 dark).
+    /// Solid primary (DS-C-11 `primary`).
     #[default]
     Primary,
-    /// Muted surface fill.
+    /// Muted surface fill (legacy secondary; reads as a quiet outline).
     Secondary,
-    /// Bordered, no fill.
+    /// Bordered, no fill (DS-C-11 `outline`).
     Outline,
-    /// No fill, no border; hover tints.
+    /// No fill, no border; hover tints (DS-C-11 `ghost`).
     Ghost,
-    /// Solid destructive red.
+    /// Solid destructive red (DS-C-11 `danger` — pairs with armed confirm).
     Destructive,
+    /// Muted label, no fill/border (DS-C-11 `text`).
+    Text,
+    /// Solid AI violet (DS-C-11 `ai` — the AI identity action).
+    Ai,
 }
 
 /// A shadcn-style button with hover/press feedback and a focus ring.
@@ -552,23 +560,53 @@ fn button_impl(
 ) -> egui::Response {
     let t = tokens(ui);
     let (fill, fg, stroke) = variant_look(t, variant);
-    let label = egui::RichText::new(text).color(fg).size(14.0);
-    // One consistent 32px control height across every button, chip row
-    // and combo box (shadcn default control height).
-    let button = egui::Button::new(label)
-        .fill(fill)
-        .stroke(stroke)
-        .min_size(egui::vec2(0.0, 32.0));
-    let response = ui.add(button);
+    // DS-C-11 anatomy, drawn manually so the icon zone is exact: 32px
+    // height, r-md corners, 14px side padding, 13px icon + 5px gap, 13px
+    // control text.
+    let galley = egui::WidgetText::from(
+        egui::RichText::new(text)
+            .color(fg)
+            .size(scale::text::CONTROL),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let pad = 14.0;
+    let icon_zone = if icon.is_some() { 13.0 + 5.0 } else { 0.0 };
+    let size = egui::vec2(icon_zone + galley.size().x + 2.0 * pad, 32.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if fill != egui::Color32::TRANSPARENT {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(8), fill);
+    }
+    if stroke != egui::Stroke::NONE {
+        ui.painter().rect_stroke(
+            rect,
+            egui::CornerRadius::same(8),
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    let mut x = rect.min.x + pad;
     if let Some(icon) = icon {
-        // Paint the icon into the leading padding, keeping the label
-        // layout egui computed.
-        let icon_rect = egui::Rect::from_min_max(
-            egui::pos2(response.rect.min.x + 8.0, response.rect.min.y),
-            egui::pos2(response.rect.min.x + 26.0, response.rect.max.y),
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(x + 6.5, rect.center().y),
+            egui::vec2(13.0, 13.0),
         );
         icon.paint_at(ui.painter(), icon_rect, fg);
+        x += icon_zone;
     }
+    ui.painter().galley(
+        egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+        galley,
+        fg,
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), text.to_owned())
+    });
     hover_overlay(ui, &response, t, variant);
     focus_feedback(ui, &response);
     response
@@ -584,6 +622,12 @@ fn variant_look(
         ButtonVariant::Outline => (t.card, t.foreground, egui::Stroke::new(1.0, t.border)),
         ButtonVariant::Ghost => (egui::Color32::TRANSPARENT, t.foreground, egui::Stroke::NONE),
         ButtonVariant::Destructive => (t.destructive, t.destructive_foreground, egui::Stroke::NONE),
+        ButtonVariant::Text => (
+            egui::Color32::TRANSPARENT,
+            t.muted_foreground,
+            egui::Stroke::NONE,
+        ),
+        ButtonVariant::Ai => (t.ai, t.on_ai, egui::Stroke::NONE),
     }
 }
 
@@ -597,6 +641,8 @@ fn hover_overlay(ui: &mut egui::Ui, response: &egui::Response, t: &Tokens, varia
         ButtonVariant::Primary => true,
         ButtonVariant::Secondary | ButtonVariant::Ghost | ButtonVariant::Outline => light_mode,
         ButtonVariant::Destructive => true,
+        ButtonVariant::Text => light_mode,
+        ButtonVariant::Ai => true,
     };
     // The tint darkens a light surface and vice versa; black when the
     // dark theme needs to darken its (light) primary fill.
@@ -951,7 +997,7 @@ pub fn page_header(
     ui.add_space(10.0);
 }
 
-/// A dashboard metric card: muted label, large value, optional hint.
+/// DC: DS-C-03 StatTile — muted 12px label, 26px tabular value, 12px hint.
 pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&str>) {
     card(ui, |ui| {
         ui.set_min_width(150.0);
@@ -963,7 +1009,7 @@ pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&st
             );
             ui.label(
                 egui::RichText::new(value)
-                    .size(24.0)
+                    .size(scale::text::STAT_BIG)
                     .strong()
                     .color(tokens(ui).foreground),
             );
@@ -976,6 +1022,171 @@ pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&st
             }
         });
     });
+}
+
+/// DC: DS-C-01 PageHeader counter pill (`.ds-counter`) — counts live here,
+/// never in card titles (register A-6).
+pub fn page_counter(ui: &mut egui::Ui, text: &str) {
+    let t = tokens(ui);
+    let galley = egui::WidgetText::from(
+        egui::RichText::new(text)
+            .size(scale::text::SMALL_HALF)
+            .color(t.muted_foreground),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Small,
+    );
+    let pad = egui::vec2(10.0, 3.0);
+    let size = galley.size() + 2.0 * pad;
+    let (id, rect) = ui.allocate_space(size);
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(9), t.muted);
+    ui.painter().galley(
+        egui::pos2(rect.min.x + pad.x, rect.center().y - galley.size().y / 2.0),
+        galley,
+        t.muted_foreground,
+    );
+    ui.advance_cursor_after_rect(rect);
+    let _ = id;
+}
+
+/// The solid status color for a tone — dots, tile bands, level insets.
+/// Derived from the same DS.TONE table as [`tone_colors_of`] (DC G-2:
+/// one meaning, one color, everywhere).
+pub fn tone_solid(t: &Tokens, tone: BadgeTone) -> egui::Color32 {
+    match tone {
+        BadgeTone::Neutral => t.border_strong,
+        BadgeTone::Success => t.success,
+        BadgeTone::Warning => t.warning,
+        BadgeTone::Destructive => t.destructive,
+        BadgeTone::Info => t.info,
+        BadgeTone::Ai => t.ai,
+    }
+}
+
+/// DC: DS-C-06 StatusDot — the 8px (11px big) tone dot bound to DS.TONE;
+/// the same tone its badge would render, never a new color.
+pub fn status_dot(ui: &mut egui::Ui, tone: BadgeTone, big: bool) {
+    let t = tokens(ui);
+    let d = if big { 11.0 } else { 8.0 };
+    let (id, rect) = ui.allocate_space(egui::vec2(d, d));
+    ui.painter()
+        .circle_filled(rect.center(), d / 2.0, tone_solid(t, tone));
+    ui.advance_cursor_after_rect(rect);
+    let _ = id;
+}
+
+/// One underline tab row (DS-C-09 anatomy); returns a globally-indexed
+/// click. Used by [`tabs`] and [`tab_groups`].
+fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Option<usize> {
+    let t = tokens(ui);
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        for (i, item) in items.iter().enumerate() {
+            let global = base + i;
+            let on = global == active;
+            let text = egui::RichText::new(*item)
+                .size(scale::text::BODY)
+                .color(if on { t.foreground } else { t.muted_foreground });
+            let text = if on { text.strong() } else { text };
+            let galley = egui::WidgetText::from(text).into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Button,
+            );
+            let size = egui::vec2(galley.size().x + 26.0, 34.0);
+            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+            ui.painter().galley(
+                egui::pos2(
+                    rect.center().x - galley.size().x / 2.0,
+                    rect.center().y - galley.size().y / 2.0,
+                ),
+                galley,
+                if on || resp.hovered() {
+                    t.foreground
+                } else {
+                    t.muted_foreground
+                },
+            );
+            if on {
+                // 2px primary underline, 10px inset, riding the rail below.
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x + 10.0, rect.max.y - 3.0),
+                        egui::pos2(rect.max.x - 10.0, rect.max.y - 1.0),
+                    ),
+                    egui::CornerRadius::ZERO,
+                    t.primary,
+                );
+            }
+            resp.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Tab, true, (*item).to_owned())
+            });
+            if resp.clicked() {
+                clicked = Some(global);
+            }
+        }
+    });
+    clicked
+}
+
+/// DC: DS-C-09 Tabs (underline) — active = 500 text + 2px primary underline
+/// on a full-width hairline rail. Returns the index clicked this frame.
+pub fn tabs(ui: &mut egui::Ui, items: &[&str], active: usize) -> Option<usize> {
+    let clicked = tabs_row(ui, items, active, 0);
+    divider(ui);
+    ui.add_space(scale::space::SP2);
+    clicked
+}
+
+/// DC: DS-C-09 grouped variant — labeled tab groups with a global index
+/// (the reports pattern). One rail at the end.
+pub fn tab_groups(ui: &mut egui::Ui, groups: &[(&str, &[&str])], active: usize) -> Option<usize> {
+    let t = tokens(ui);
+    let mut clicked = None;
+    let mut base = 0;
+    ui.horizontal_wrapped(|ui| {
+        for (label, items) in groups {
+            ui.vertical(|ui| {
+                ui.set_min_width(0.0);
+                ui.label(
+                    egui::RichText::new(*label)
+                        .size(scale::text::META)
+                        .color(t.muted_foreground),
+                );
+                if let Some(c) = tabs_row(ui, items, active, base) {
+                    clicked = Some(c);
+                }
+            });
+            ui.add_space(22.0);
+            base += items.len();
+        }
+    });
+    divider(ui);
+    ui.add_space(scale::space::SP2);
+    clicked
+}
+
+/// DC: DS-C-10 FilterBar — filters left (inputs/combos), context and
+/// exactly ONE primary apply right (register A-2). Returns the apply
+/// response (clicked/pressed this frame).
+pub fn filter_bar<R>(
+    ui: &mut egui::Ui,
+    filters: impl FnOnce(&mut egui::Ui) -> R,
+    apply_label: &str,
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        filters(ui);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            button(ui, apply_label, ButtonVariant::Primary)
+        })
+        .inner
+    })
+    .inner
 }
 
 /// A centered empty state: icon, title, muted hint.
@@ -1033,6 +1244,152 @@ pub fn td_num(ui: &mut egui::Ui, text: &str) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.monospace(egui::RichText::new(text).color(tokens(ui).foreground));
     });
+}
+
+/// DC: DS-C-05 DataTable — bordered r-lg wrap, uppercase muted header on
+/// surface-2, **virtualized**: only visible rows are laid out (egui gap:
+/// header letter-spacing 0.04em is not reproducible — DC exception E-2).
+/// `row` is called once per visible row index per frame.
+pub fn data_table(
+    ui: &mut egui::Ui,
+    id: &str,
+    headers: &[&str],
+    row_count: usize,
+    row_height: f32,
+    row: impl FnMut(&mut egui::Ui, usize),
+) {
+    let t = tokens(ui);
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, t.border))
+        .corner_radius(egui::CornerRadius::same(10))
+        .show(ui, |ui| {
+            // Pinned header: 11px uppercase muted on surface-2.
+            egui::Frame::new()
+                .fill(t.sidebar)
+                .corner_radius(egui::CornerRadius {
+                    nw: 9,
+                    ne: 9,
+                    sw: 0,
+                    se: 0,
+                })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for header in headers {
+                            ui.label(
+                                egui::RichText::new(header.to_uppercase())
+                                    .size(scale::text::META)
+                                    .strong()
+                                    .color(t.muted_foreground),
+                            );
+                            ui.add_space(16.0);
+                        }
+                    });
+                });
+            egui::ScrollArea::vertical()
+                .id_salt(format!("spp-dt-{id}"))
+                .show_rows(ui, row_height, row_count, |ui, range| {
+                    egui::Grid::new(egui::IdSalt::new(format!("spp-dt-{id}-grid")))
+                        .num_columns(headers.len())
+                        .spacing(egui::vec2(16.0, 0.0))
+                        .min_row_height(row_height)
+                        .show(ui, |ui| {
+                            let mut row = row;
+                            for i in range {
+                                row(ui, i);
+                                ui.end_row();
+                            }
+                        });
+                });
+        });
+}
+
+/// DC: DS-C-04 MetricTile — horizontal count + label tile; `band` tints
+/// the count and the 3px left rail via DS.TONE; `drill` makes it a
+/// clickable drill-down (hover border-strong). Returns the response.
+pub fn metric_tile(
+    ui: &mut egui::Ui,
+    count: &str,
+    label: &str,
+    band: Option<BadgeTone>,
+    drill: bool,
+) -> egui::Response {
+    let t = tokens(ui);
+    let count_color = band.map(|b| tone_colors_of(t, b).1).unwrap_or(t.foreground);
+    let count_g = egui::WidgetText::from(
+        egui::RichText::new(count)
+            .size(scale::text::STAT)
+            .strong()
+            .color(count_color),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
+    );
+    let label_g = egui::WidgetText::from(
+        egui::RichText::new(label)
+            .size(scale::text::BODY)
+            .color(t.foreground),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
+    );
+    let width = 196.0f32.max(count_g.size().x + label_g.size().x + 12.0 + 10.0 + 12.0 + 12.0);
+    let size = egui::vec2(width, 40.0);
+    let (id, rect) = ui.allocate_space(size);
+    let sense = if drill {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let resp = ui.interact(rect, id, sense);
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(10), t.card);
+    let edge = if drill && resp.hovered() {
+        t.border_strong
+    } else {
+        t.border
+    };
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(10),
+        egui::Stroke::new(1.0, edge),
+        egui::StrokeKind::Inside,
+    );
+    if let Some(b) = band {
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + 3.0, rect.max.y)),
+            egui::CornerRadius::ZERO,
+            tone_solid(t, b),
+        );
+    }
+    let (cw, ch) = (count_g.size().x, count_g.size().y);
+    let lh = label_g.size().y;
+    let y = rect.center().y;
+    ui.painter().galley(
+        egui::pos2(rect.min.x + 12.0, y - ch / 2.0),
+        count_g,
+        count_color,
+    );
+    ui.painter().galley(
+        egui::pos2(rect.min.x + 12.0 + cw + 10.0, y - lh / 2.0),
+        label_g,
+        t.foreground,
+    );
+    let resp = if drill {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
+    };
+    resp.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{count} {label}"))
+    });
+    ui.advance_cursor_after_rect(rect);
+    resp
 }
 
 /// Aligned two-column form grid (labels left, controls right).
@@ -1182,6 +1539,8 @@ mod tests {
         assert_eq!(DARK.faint, rgb(12, 12, 14));
         assert_eq!(LIGHT.ai, rgb(124, 58, 237)); // --ds-ai #7c3aed
         assert_eq!(DARK.ai, rgb(167, 139, 250));
+        assert_eq!(LIGHT.on_ai, rgb(255, 255, 255));
+        assert_eq!(DARK.on_ai, rgb(255, 255, 255));
         assert_eq!(LIGHT.ai_soft, rgb(245, 243, 255));
         assert_eq!(DARK.ai_soft, rgb(36, 29, 59));
         assert_eq!(LIGHT.ai_foreground, rgb(109, 40, 217));

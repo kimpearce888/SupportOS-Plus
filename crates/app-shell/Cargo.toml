@@ -23,6 +23,9 @@ default = []
 # vars (SPP_SHOT_PAGE / SPP_SHOT_THEME / SPP_SHOT_W / SPP_SHOT_H /
 # SPP_SHOT_SEED / SPP_SHOT_PALETTE / EFRAME_SCREENSHOT_TO).
 ui-screenshot = ["eframe/glow", "eframe/__screenshot"]
+# RS-13 kittest snapshot harness (tests/kittest_widgets.rs) — needs a
+# display (Xvfb); off in every normal/CI build, like ui-screenshot.
+kittest-ui = []
 
 [dependencies]
 eframe.workspace = true
@@ -34,3 +37,6 @@ rusqlite.workspace = true
 serde_json.workspace = true
 sha2 = "0.11"
 hex = "0.4"
+
+[dev-dependencies]
+egui_kittest = { version = "0.37.0", features = ["eframe", "snapshot", "wgpu"] }
