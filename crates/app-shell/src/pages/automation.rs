@@ -16,7 +16,7 @@ use eframe::egui;
 use spp_core::automation::{Action, AutomationRule, Trigger};
 use spp_core::db::DbHandle;
 
-use crate::design::{self, ButtonVariant};
+use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 use crate::pages::{ConfirmRequest, NavRequest};
 
@@ -491,16 +491,30 @@ impl AutomationPage {
                             design::card(ui, |ui| {
                                 ui.label(
                                     egui::RichText::new(format!(
-                                        "rule #{} on conversation #{} · {}",
-                                        approval.rule_id,
-                                        approval.conversation_id,
-                                        approval.proposed_action
+                                        "rule #{} on conversation #{}",
+                                        approval.rule_id, approval.conversation_id
                                     ))
                                     .size(13.0)
+                                    .strong()
                                     .color(t.foreground),
                                 );
+                                // Reskin fix (presentation, the lab's
+                                // quirk): the row led with the raw
+                                // proposed_action_json. The human-readable
+                                // action renders first; the raw JSON is
+                                // collapsible beneath it (raw tokens stay
+                                // available, DC C-1).
+                                let human = serde_json::from_str::<spp_core::automation::Action>(
+                                    &approval.proposed_action,
+                                )
+                                .map(|a| action_description(&a))
+                                .unwrap_or_else(|_| approval.proposed_action.clone());
+                                design::badge(ui, &human, BadgeTone::Neutral);
+                                ui.collapsing("raw proposed action", |ui| {
+                                    ui.monospace(&approval.proposed_action);
+                                });
                                 ui.horizontal(|ui| {
-                                    if design::button(ui, "approve", ButtonVariant::Primary)
+                                    if design::button(ui, "approve", ButtonVariant::Outline)
                                         .clicked()
                                     {
                                         decided = Some((approval.id, true));
@@ -515,6 +529,13 @@ impl AutomationPage {
                         }
                     });
             },
+        );
+        // The lab's quirk receipt for the approvals presentation fix.
+        design::quirk(
+            ui,
+            "Reskin fix (presentation): approval rows led with the raw \
+             proposed_action_json. Human-readable action first, raw JSON \
+             collapsible.",
         );
         if let Some((id, approve)) = decided {
             self.decide(db, id, approve);
