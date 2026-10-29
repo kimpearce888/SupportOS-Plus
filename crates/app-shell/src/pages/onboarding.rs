@@ -1,10 +1,16 @@
 //! Onboarding page.
 //!
-//! Status from the onboarding route logic (first-run flag, conversation
-//! count, Help Scout credential presence, sync state) and the action
-//! buttons: run the initial sync (`/api/sync/initial`, dispatched through
-//! the shared sync engine) and mark onboarding complete
-//! (`/api/onboarding/complete`).
+//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `onboarding` sheet (DS "stack" archetype): the Setup
+//! status card renders the lab's DS.row anatomy — the DS-C-06 state dot
+//! (the lab's okFlag: conversations > 0, "true", "receiving") + the
+//! strong key left, the mono value pushed right — over the same five
+//! status keys; the toolbar (Run initial sync primary + Mark complete
+//! outline) and the conditional hints stay. Status from the onboarding
+//! route logic (first-run flag, conversation count, Help Scout credential
+//! presence, sync state) and the action buttons: run the initial sync
+//! (`/api/sync/initial`, dispatched through the shared sync engine) and
+//! mark onboarding complete (`/api/onboarding/complete`).
 //!
 //! Since 1.2.0 a fresh install is empty until Help Scout is connected:
 //! nothing is pre-seeded, nothing is stand-in content.
@@ -129,28 +135,55 @@ impl OnboardingPage {
 
         let status = self.status.clone().unwrap_or_default();
         design::card_titled(ui, "Setup status", None, |ui| {
-            design::form_grid(ui, "onboarding-status", |ui| {
-                let t = design::tokens(ui);
-                design::field_label(ui, "step:");
-                ui.monospace(egui::RichText::new(status.step.as_str()).color(t.foreground));
-                ui.end_row();
-                design::field_label(ui, "onboarding complete:");
-                ui.monospace(egui::RichText::new(status.completed.to_string()).color(t.foreground));
-                ui.end_row();
-                design::field_label(ui, "conversations:");
-                ui.monospace(
-                    egui::RichText::new(status.conversations.to_string()).color(t.foreground),
-                );
-                ui.end_row();
-                design::field_label(ui, "Help Scout credentials:");
-                ui.monospace(
-                    egui::RichText::new(status.hs_configured.to_string()).color(t.foreground),
-                );
-                ui.end_row();
-                design::field_label(ui, "sync state:");
-                ui.monospace(egui::RichText::new(status.sync_state.as_str()).color(t.foreground));
-                ui.end_row();
-            });
+            let t = design::tokens(ui);
+            // The lab's DS.row anatomy: the DS-C-06 state dot (the lab's
+            // okFlag — conversations > 0, "true", "receiving") + the
+            // strong key left, the mono value pushed right.
+            let rows = [
+                ("step:", status.step.clone(), status.step == "complete"),
+                (
+                    "onboarding complete:",
+                    status.completed.to_string(),
+                    status.completed,
+                ),
+                (
+                    "conversations:",
+                    status.conversations.to_string(),
+                    status.conversations > 0,
+                ),
+                (
+                    "Help Scout credentials:",
+                    status.hs_configured.to_string(),
+                    status.hs_configured,
+                ),
+                (
+                    "sync state:",
+                    status.sync_state.clone(),
+                    status.sync_state == "receiving",
+                ),
+            ];
+            for (key, value, ok) in rows {
+                ui.horizontal(|ui| {
+                    design::status_dot(
+                        ui,
+                        if ok {
+                            crate::design::BadgeTone::Success
+                        } else {
+                            crate::design::BadgeTone::Neutral
+                        },
+                        false,
+                    );
+                    ui.label(
+                        egui::RichText::new(key)
+                            .size(13.5)
+                            .strong()
+                            .color(t.foreground),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.monospace(egui::RichText::new(value).color(t.foreground));
+                    });
+                });
+            }
         });
 
         if let Some(message) = &self.message {
