@@ -356,17 +356,21 @@ impl ShellApp {
     }
 
     fn shell_ui(&mut self, ui: &mut egui::Ui) {
+        // RS-20 reskin (DS "stack"): the header act rides the DS-C-11
+        // outline button (the lab's sh-theme act), the Runtime card keeps
+        // the lab's five kv rows, and the ported-pages hint carries the
+        // lab's stale-checklist tag.
         design::page_header(
             ui,
             "Shell",
             Some("native shell diagnostics (Phase 2 surface)"),
             |ui| {
-                if ui
-                    .add(egui::Button::new(format!(
-                        "switch to {}",
-                        self.theme.toggle().label()
-                    )))
-                    .clicked()
+                if design::button(
+                    ui,
+                    &format!("switch to {}", self.theme.toggle().label()),
+                    ButtonVariant::Outline,
+                )
+                .clicked()
                 {
                     self.theme = self.theme.toggle();
                     if let Err(e) = self.theme.store(&self.db) {
@@ -418,7 +422,8 @@ impl ShellApp {
             ui,
             "all pages ported: dashboard, inbox, operations, customers, organizations, knowledge/docs, \
              reports, issue radar, incidents, custom objects, automation, AI center, outreach, \
-             notifications, search, support graph, connectors, sync health, settings, onboarding",
+             notifications, search, support graph, connectors, sync health, settings, onboarding \
+             — stale checklist — omits live chats",
         );
     }
 
