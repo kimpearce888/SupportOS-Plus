@@ -4,8 +4,8 @@
 //! egui renders will not pixel-match that HTML lab — these goldens lock the
 //! EGUI page state (the real `DiagnosticsPage`: the Event log card with the
 //! DS-chip filter row and the pushed-right refresh/clear acts, the lab's
-//! evRows (small muted timestamp, the DS-C-06 level dot, the service badge
-//! + message), the Audit trail table with the AI-tone actor cells, the
+//! evRows (small muted timestamp, the DS-C-06 level dot, then the service
+//! badge and message), the Audit trail table with the AI-tone actor cells, the
 //! Sync reports with the lab's SYNC-map tones and the Outbound deliveries
 //! table) over a seeded mirror; the side-by-side review against the lab is
 //! the G3 evidence pack.
@@ -87,9 +87,10 @@ fn seeded_page() -> (DiagnosticsPage, DbHandle) {
         [],
     )
     .expect("audit row 2");
-    for (id, kind, state, records, errors) in
-        [(1, "initial", "LIVE", 1204, 0), (2, "incremental", "ERROR", 33, 2)]
-    {
+    for (id, kind, state, records, errors) in [
+        (1, "initial", "LIVE", 1204, 0),
+        (2, "incremental", "ERROR", 33, 2),
+    ] {
         conn.execute(
             "INSERT INTO sync_runs (id, kind, state, started_at, finished_at, records_processed, errors)
              VALUES (?1, ?2, ?3, '2026-10-27 04:30:00', '2026-10-27 04:31:12', ?4, ?5)",
@@ -194,7 +195,10 @@ fn r3_diagnostics_errors_filter_light() {
             },
         );
     h.run_ok();
-    h.get_all_by_label("errors").next().expect("the chip").click();
+    h.get_all_by_label("errors")
+        .next()
+        .expect("the chip")
+        .click();
     h.run_ok();
     h.run_steps(2); // settle the refetch frame
     // StaticText labels are excluded from the default query filter, so

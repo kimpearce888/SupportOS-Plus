@@ -58,7 +58,12 @@ fn seeded_page() -> (ConnectorsPage, DbHandle) {
     };
     mk("Billing export", "csv", "", "billing.csv");
     mk("Status page", "http", "https://status.example.test", "");
-    mk("Changelog feed", "http", "https://changelog.example.test", "");
+    mk(
+        "Changelog feed",
+        "http",
+        "https://changelog.example.test",
+        "",
+    );
     conn.execute(
         "UPDATE connectors SET health = 'ok', last_sync_at = '2026-10-27 05:01:41'
          WHERE name = 'Billing export'",

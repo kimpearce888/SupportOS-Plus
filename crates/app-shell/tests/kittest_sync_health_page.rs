@@ -46,8 +46,22 @@ fn seeded_page() -> (SyncHealthPage, DbHandle) {
     // last_success_at) — seeded below.
     spp_core::sync_engine::set_state(&conn, "LIVE");
     for (resource, status, ok, fail, retries, last) in [
-        ("conversations", "ok", 1204, 0, 0, Some("2026-10-27 04:31:12")),
-        ("customers", "retrying", 210, 3, 2, Some("2026-10-26 22:10:03")),
+        (
+            "conversations",
+            "ok",
+            1204,
+            0,
+            0,
+            Some("2026-10-27 04:31:12"),
+        ),
+        (
+            "customers",
+            "retrying",
+            210,
+            3,
+            2,
+            Some("2026-10-26 22:10:03"),
+        ),
         ("ratings", "failed", 0, 12, 8, None),
     ] {
         conn.execute(
