@@ -1,8 +1,15 @@
 //! Support Graph page (port of the web `pages/support_graph.rs`).
 //!
-//! Presentational pass (shadcn redesign): this page renders through the
-//! shared design system in `crate::design`; the queries, state, and
-//! behavior are unchanged.
+//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `support-graph` sheet (DS "stack" archetype): the
+//! result count rides the header as the DS-C-01 counter pill (A-6 — the
+//! lab's meta counter; the bespoke '{n} node(s)' section title is gone),
+//! the results are the lab's ds-sel-rows (full-width selectable rows with
+//! the selected fill + 2px primary inset — the live-chats chat_row
+//! pattern — kind + label on the head line, the sublabel beneath), and
+//! the Neighborhood edges render as DS.row pairs (relation strong + the
+//! far-side label left, the origin mono-muted right). The queries, state,
+//! and behavior are unchanged.
 //!
 //! Search box → `spp_core::support_graph::graph_search` (the `/api/graph/search`
 //! SQL) listing node references; picking one loads its neighborhood via
@@ -117,6 +124,16 @@ impl SupportGraphPage {
         }
     }
 
+    /// kittest-only seam (the operations freeze precedent): prefills the
+    /// search box and runs the real search so the golden harness renders
+    /// the lab's fixture state without synthesizing keystrokes. Prod
+    /// never calls this.
+    pub fn kittest_seed_search(&mut self, db: &DbHandle, query: &str) {
+        self.query = query.to_string();
+        self.query_edit = query.to_string();
+        self.reload_results(db);
+    }
+
     /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.stats = None;
@@ -202,7 +219,11 @@ impl SupportGraphPage {
         } else {
             "linked customers, conversations, and users".to_string()
         };
-        design::page_header(ui, "Support Graph", Some(subtitle.as_str()), |_| {});
+        design::page_header(ui, "Support Graph", Some(subtitle.as_str()), |ui| {
+            // The lab's meta counter: the result count beside the header
+            // (A-6 — counts never sit in titles).
+            design::page_counter(ui, &format!("{} nodes", self.results.len()));
+        });
         ui.horizontal(|ui| {
             let mut query = self.query_edit.clone();
             let response = ui.add_sized(
@@ -239,7 +260,6 @@ impl SupportGraphPage {
         }
 
         let results = self.results.clone();
-        design::section_title(ui, &format!("{} node(s)", results.len()));
         let mut clicked: Option<(String, i64)> = None;
         egui::ScrollArea::vertical()
             .id_salt("graph-results")
@@ -250,11 +270,12 @@ impl SupportGraphPage {
                     let label = super::str_field(node, "label");
                     let sub = super::opt_str_field(node, "sublabel");
                     let selected = self.selected == Some((kind.clone(), id));
-                    if design::chip(ui, selected, &format!("{kind}: {label}")).clicked() {
+                    // The lab's ds-sel-row: full-width selectable row, kind
+                    // + label on the head line, the sublabel beneath (the
+                    // live-chats chat_row pattern: painted selection fill
+                    // + the 2px primary inset).
+                    if result_row(ui, &kind, &label, sub.as_deref(), selected) {
                         clicked = Some((kind.clone(), id));
-                    }
-                    if let Some(sub) = sub {
-                        design::hint_text(ui, &format!("   {sub}"));
                     }
                 }
             });
@@ -288,22 +309,37 @@ impl SupportGraphPage {
                 } else {
                     egui::ScrollArea::vertical()
                         .id_salt("graph-edges")
-                        .show_rows(ui, 20.0, neighborhood.edges.len(), |ui, range| {
+                        .show(ui, |ui| {
                             let t = design::tokens(ui);
-                            for (relation, origin, target) in &neighborhood.edges[range] {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{relation}{} {}",
-                                        if origin.is_empty() {
-                                            String::new()
-                                        } else {
-                                            format!(" ({origin})")
-                                        },
-                                        Neighborhood::target_label(target)
-                                    ))
-                                    .size(13.0)
-                                    .color(t.foreground),
-                                );
+                            for (relation, origin, target) in &neighborhood.edges {
+                                // The lab's DS.row: the relation + the
+                                // far-side label strong left, the origin
+                                // mono-muted right.
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(relation.as_str())
+                                            .size(13.5)
+                                            .strong()
+                                            .color(t.foreground),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(Neighborhood::target_label(target))
+                                            .size(13.5)
+                                            .color(t.foreground),
+                                    );
+                                    if !origin.is_empty() {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.monospace(
+                                                    egui::RichText::new(origin.as_str())
+                                                        .small()
+                                                        .color(t.muted_foreground),
+                                                );
+                                            },
+                                        );
+                                    }
+                                });
                             }
                         });
                 }
@@ -323,6 +359,95 @@ fn kind_from_str(kind: &str) -> Option<spp_core::catalog::GraphNodeKind> {
     spp_core::catalog::GraphNodeKind::ALL
         .into_iter()
         .find(|k| k.as_str() == kind)
+}
+
+/// The lab's ds-sel-row: a full-width selectable row — kind + label on
+/// the head line, the sublabel beneath, the selected fill + 2px primary
+/// inset (the live-chats chat_row pattern, tokens only). Returns true on
+/// click.
+fn result_row(
+    ui: &mut egui::Ui,
+    kind: &str,
+    label: &str,
+    sub: Option<&str>,
+    selected: bool,
+) -> bool {
+    let t = design::tokens(ui);
+    let a11y = match sub {
+        Some(sub) => format!("graph node {kind}: {label} — {sub}"),
+        None => format!("graph node {kind}: {label}"),
+    };
+    let row_w = ui.available_width();
+    let text_w = (row_w - 2.0 * design::scale::space::PAD_TOOL).max(40.0);
+    let head_galley = egui::WidgetText::from(
+        egui::RichText::new(format!("{kind}: {label}"))
+            .size(design::scale::text::BODY)
+            .strong(),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        text_w,
+        egui::TextStyle::Body,
+    );
+    let sub_galley = sub.map(|sub| {
+        egui::WidgetText::from(
+            egui::RichText::new(sub)
+                .size(design::scale::text::SMALL)
+                .color(t.muted_foreground),
+        )
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            text_w,
+            egui::TextStyle::Small,
+        )
+    });
+    let height = match &sub_galley {
+        Some(g) => head_galley.size().y + 2.0 + g.size().y + 2.0 * 8.0,
+        None => head_galley.size().y + 2.0 * 8.0,
+    };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(row_w, height), egui::Sense::click());
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::Role::ListItem,
+            ui.is_enabled(),
+            selected,
+            a11y.clone(),
+        )
+    });
+
+    if selected {
+        // Neutral fill + the selected-row inset (DC §2.2: --ds-primary).
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(6), t.selection);
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(rect.min, egui::vec2(2.0, rect.height())),
+            egui::CornerRadius::ZERO,
+            t.primary,
+        );
+    } else if resp.hovered() || resp.has_focus() {
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(6), t.accent);
+    }
+
+    let head_top = rect.min.y + 8.0;
+    ui.painter().galley(
+        egui::pos2(rect.min.x + design::scale::space::PAD_TOOL, head_top),
+        head_galley.clone(),
+        t.foreground,
+    );
+    if let Some(g) = &sub_galley {
+        ui.painter().galley(
+            egui::pos2(
+                rect.min.x + design::scale::space::PAD_TOOL,
+                head_top + head_galley.size().y + 2.0,
+            ),
+            g.clone(),
+            t.muted_foreground,
+        );
+    }
+    resp.clicked()
 }
 
 #[cfg(test)]
