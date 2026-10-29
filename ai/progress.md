@@ -150,36 +150,53 @@ tab switch, dashboard scope-chip drill, customers detail open). Verification per
 fmt clean; clippy -D warnings; workspace 234+485+11+lint 2 exit 0; kittest 48/48; SPP_SMOKE
 exit 0. **Next in batch:** RS-18 wave B (Knowledge, Incidents, IssueRadar, Reports+Builder).
 
-**RS-18 — R3 wave B (in progress 2026-10-29; 2 of 4 pages verified):**
-**Incidents → DS-A-01** (4dc7133, pilot): page_header + DS-C-01 counter pill ('[counter]
-[New Incident]', the lab's order), the M20 cap note rides the subtitle ('showing first N of
-M incident(s) — the list has no pager'); the filter card is DS-C-10 filter_bar with the
-item-131 semantics preserved verbatim (combos + checkbox refetch on change, the text query
-keeps its explicit apply); the chip list is DS-C-05 data_table (code strong / title /
-severity + status badges / conversations mono / open act, same 100-capped
-list_incident_rows query); row open opens the DS-C-17 DetailPanel with the DS-A-03
-composition (record head code · title + started/owner meta + badges, description +
-customer-safe cards, the lab's twoCol: linked conversations (+link form) + releases |
-affected customers + notes (+add note)); **store-shape fix** — incident_detail nests the row
-under 'incident' ({incident, impact, …}) and the pre-rebuild page read the top level,
-silently rendering an empty record head (same class of fix as organizations' members in
-RS-17a); both filter ComboBoxes carry widget_info 'status: …'/'severity: …'; selection,
-reload latch (147), create validation + skipped-id notice (131), add-note, link-conversation
-byte-identical. **IssueRadar → DS-A-02** (6aefd55): the chip row is the DS-C-09 tab rail
-(same four labels/state); Alerts keeps its card + badge rows and gains the DS-C-15 quirk
-receipt (raw severity tokens, DC C-1); SLA rows render as DS-C-15 callout roles (breached →
-Err, at-risk → Warn); Clusters/Known titles move into the card head; Gaps keeps totals
-badges + per-kind cards with divider-separated candidates and the lab's single 'examples:'
-line — approve one click (Outline), reject now the lab's armed two-click form via
-armed_danger_button (DS-C-16/A-5; the decide_gap write unchanged); ComboBox widget_info
-'status: …'; queries (issue_radar_impl/sla_alerts/clusters/gap_report/known), the M21
-reload latch, FIND-008 badge and all create paths byte-identical. **Goldens:** 2 new suites
-(kittest_incidents_page.rs 7, kittest_issue_radar_page.rs 7 — 6 real-page goldens each at
-1440/1024/800 × 900 light+dark + the open-detail / Gaps-tab interaction goldens),
-diff-locked twice, a11y check ON; dashboard's 7 goldens re-locked for the sandbox rebuild
-(fontconfig now renders the U+2192 range arrows with a different fallback glyph —
-environment alignment only, zero code change, re-verified twice). Verification per commit:
-fmt clean; clippy -D warnings (workspace + core sandbox); app-shell 234 + core 485 + core
-sandbox 493 + xtask 11 + lint 2 exit 0; kittest 48/48 across all six suites; SPP_SMOKE
-exit 0; CI green on 4dc7133. **Remaining in wave B:** Reports (+ Report Builder) and
-Knowledge — then the wave-B checkpoint commit and progress note.
+**RS-18 — R3 wave B (verified 2026-10-29):** all four pages rebuilt onto their DC
+archetypes, behavior byte-identical everywhere, a11y labels on every interactive
+control, zero bespoke styling. **Incidents → DS-A-01** (4dc7133, pilot): page_header +
+DS-C-01 counter pill ('[counter] [New Incident]', the lab's order), the M20 cap note
+rides the subtitle; the filter card is DS-C-10 filter_bar with the item-131 semantics
+preserved verbatim (combos + checkbox refetch on change, the text query keeps its
+explicit apply); the chip list is DS-C-05 data_table (code strong / title / severity +
+status badges / conversations mono / open act, same 100-capped list_incident_rows
+query); row open opens the DS-C-17 DetailPanel with the DS-A-03 composition; store-
+shape fix — incident_detail nests the row under 'incident' and the pre-rebuild page
+read the top level, silently rendering an empty record head (same class of fix as
+organizations' members in RS-17a). **IssueRadar → DS-A-02** (6aefd55): the chip row is
+the DS-C-09 tab rail (same four labels/state); Alerts keeps its card + badge rows and
+gains the DS-C-15 quirk receipt (raw severity tokens, DC C-1); SLA rows render as
+DS-C-15 callout roles (breached → Err, at-risk → Warn); Gaps keeps totals badges +
+per-kind cards — approve one click (Outline), reject the lab's armed two-click form
+via armed_danger_button (DS-C-16/A-5; the decide_gap write unchanged). **Reports →
+DS-C-09 grouped rail**: the flat eleven-chip row is the DS-C-09 grouped tab rail (the
+lab's three groups over the same eleven labels from Tab::label and the same
+global-index state machine); the SLA first-response card renders the DS-C-23 bar-row
+list (real label/value per mailbox + the 'first response avg · max N' hint) instead
+of the painter chart that kept no per-mailbox text; the radar tab gains the lab's
+DS-C-15 quirk receipt (raw severity token, DC C-1); digest anomalies render through
+section titles + the lab's warning-badge anomaly rows (same strings); Happiness
+recent = the shared striped table with the Great link color + the Not-good danger
+badge; Help Scout picker widget_info 'report: …' + outline fetch; Builder saved rows
+pair outline load with the danger delete (arm stays the shell confirm, FIND-005).
+**Knowledge → DS-C-09 rail**: the chip row is the underline tab rail (same five
+labels, the rail's own divider replaces the hand-drawn one); the Documents table
+keeps the three inline acts (mark reviewed / verify / delete — the lab's A-5 collapse
+would remove the verify workflow step, a D6 feature change, so the triple stays;
+delete rides its shell confirm arm, item 140); Drafts queue rows adopt the lab's
+anatomy (strong id — title, status + publish states as DS.TONE badges with raw tokens
+visible per DC C-1, outline Open, outline Reject — the one-click decide write
+unchanged). **a11y (wave-wide):** every combo carries widget_info 'label: value' and
+every TextInput binds its visible field label via Response::labelled_by —
+design::field_label now returns the label response so inputs are named with zero
+visual change (egui never reads a preceding label on its own). **Goldens:** 4 new
+suites this wave (kittest_incidents_page.rs 7, kittest_issue_radar_page.rs 7,
+kittest_reports_page.rs 7, kittest_knowledge_page.rs 7 — 6 real-page goldens each at
+1440/1024/800 × 900 light+dark + the open-detail / Gaps-tab / Builder-tab /
+Help-center-tab interaction goldens), diff-locked twice, a11y check ON. Verification
+per commit: fmt clean; clippy -D warnings (workspace + core sandbox); app-shell 234 +
+core 485 + core sandbox 493 + xtask 11 + lint 2 exit 0; kittest all suites green
+across the eight files; SPP_SMOKE exit 0 (24 pages, 4168 shapes); CI green on
+4dc7133. **Environment note (this sandbox, not a code event):** the root filesystem
+hit 100% mid-verification, failing 72 filesystem core tests and one kittest link
+(bus error) — freed by pruning target/debug executables + stale rlibs + ~/.cache,
+everything re-ran green. **Next in batch:** RS-19 wave C (Operations, AiCenter,
+Automation, CustomObjects, Outreach).
