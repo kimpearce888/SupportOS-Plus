@@ -1,8 +1,15 @@
 //! Outreach page (port of the web `pages/outreach.rs`).
 //!
-//! Redesigned with the shadcn-style design system (`crate::design`):
-//! chip tabs, status-badge campaign cards with destructive lifecycle
-//! actions, and card-wrapped forms — presentation only.
+//! RS-19e reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `outreach` sheet (DS "stack" archetype): the tab row is
+//! the DS-C-09 underline rail (same three labels, same state machine);
+//! campaign cards keep the lab's chip + raw-status badge head and split
+//! action row (lifecycle acts left, destructive cancel + retry right);
+//! the report card grows the lab's warn-callout receipt for the
+//! totals-read gap; segment rows adopt the lab's card anatomy (strong id —
+//! name with the delete pushed right, the criteria JSON as the mono line
+//! beneath, DC C-1); DNC rows push the reason/ts/remove cluster right.
+//! Presentation only — every query and write is byte-identical.
 //!
 //! Campaigns tab — `list_outreach_campaigns` (`/api/outreach/campaigns`)
 //! with the queue/pause/resume/cancel/retry actions
@@ -18,7 +25,7 @@ use spp_core::db::DbHandle;
 use spp_core::segment::{SegmentDefinition, SegmentEngine};
 
 use super::{ConfirmRequest, NavRequest, i64_field, str_field};
-use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::design::{self, BadgeTone, ButtonVariant, CalloutRole};
 use crate::icons::Icon;
 
 /// Page tabs.
@@ -419,13 +426,20 @@ impl OutreachPage {
         self.ensure_loaded(db);
 
         design::page_header(ui, "Outreach", None, |_| {});
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                }
-            }
-        });
+        // DS-C-09: the chip row is the underline tab rail — same three
+        // labels, same state machine.
+        if let Some(i) = design::tabs(
+            ui,
+            &[
+                Tab::Campaigns.label(),
+                Tab::Segments.label(),
+                Tab::Dnc.label(),
+            ],
+            Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
+        ) && let Some(tab) = Tab::ALL.get(i)
+        {
+            self.tab = *tab;
+        }
         // Audit fix (M22): expire stale status lines before rendering.
         self.expire_status_lines();
         if let Some(message) = &self.message {
@@ -504,22 +518,19 @@ impl OutreachPage {
                                 str_field(campaign, "mailbox_name")
                             ),
                         );
+                        // The lab's split ds-tool-row: the lifecycle acts
+                        // left, the destructive cancel + retry right.
                         ui.horizontal(|ui| {
                             for action in [
                                 CampaignAction::Queue,
                                 CampaignAction::Pause,
                                 CampaignAction::Resume,
-                                CampaignAction::CancelRemaining,
-                                CampaignAction::RetryFailed,
                             ] {
                                 if design::button(
                                     ui,
                                     action.label(),
                                     match action {
                                         CampaignAction::Queue => ButtonVariant::Primary,
-                                        CampaignAction::CancelRemaining => {
-                                            ButtonVariant::Destructive
-                                        }
                                         _ => ButtonVariant::Outline,
                                     },
                                 )
@@ -528,6 +539,33 @@ impl OutreachPage {
                                     acted = Some((id, action));
                                 }
                             }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    // right_to_left paints the first added
+                                    // widget rightmost — retry first so the
+                                    // visual order matches the lab's
+                                    // [cancel remaining] [retry failed].
+                                    if design::button(
+                                        ui,
+                                        CampaignAction::RetryFailed.label(),
+                                        ButtonVariant::Outline,
+                                    )
+                                    .clicked()
+                                    {
+                                        acted = Some((id, CampaignAction::RetryFailed));
+                                    }
+                                    if design::button(
+                                        ui,
+                                        CampaignAction::CancelRemaining.label(),
+                                        ButtonVariant::Destructive,
+                                    )
+                                    .clicked()
+                                    {
+                                        acted = Some((id, CampaignAction::CancelRemaining));
+                                    }
+                                },
+                            );
                         });
                     });
                 }
@@ -589,45 +627,64 @@ impl OutreachPage {
                     ui.end_row();
                 }
             });
+            // The lab's reportNote — the DS-C-15 warn receipt for the
+            // totals-read gap (data-layer, out of reskin scope; the read
+            // stays byte-identical per the lab's own note).
+            ui.add_space(4.0);
+            design::callout(
+                ui,
+                CalloutRole::Warn,
+                "The report panel reads top-level keys while the core nests \
+                 them under totals (outreach.rs:1336) — every row renders \
+                 0. Data-layer bug, out of reskin scope; documented, not \
+                 fixed here.",
+            );
         });
     }
 
     fn new_campaign_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card(ui, |ui| {
             design::section_title(ui, "New Campaign");
+            // Every input binds its visible label (RS-18 wave-wide a11y
+            // rule — egui never reads a preceding label on its own).
             design::form_grid(ui, "outreach-new", |ui| {
-                design::field_label(ui, "name:");
+                let name_label = design::field_label(ui, "name:");
                 ui.add_sized(
                     [240.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("campaign name"),
-                );
+                )
+                .labelled_by(name_label.id);
                 ui.end_row();
-                design::field_label(ui, "subject:");
+                let subject_label = design::field_label(ui, "subject:");
                 ui.add_sized(
                     [280.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_subject).hint_text("email subject"),
-                );
+                )
+                .labelled_by(subject_label.id);
                 ui.end_row();
-                design::field_label(ui, "body:");
+                let body_label = design::field_label(ui, "body:");
                 ui.add_sized(
                     [320.0, 90.0],
                     egui::TextEdit::multiline(&mut self.new_body)
                         .hint_text("email body — {{first_name}} is substituted"),
-                );
+                )
+                .labelled_by(body_label.id);
                 ui.end_row();
-                design::field_label(ui, "mailbox id:");
+                let mailbox_label = design::field_label(ui, "mailbox id:");
                 ui.add_sized(
                     [140.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_mailbox),
                 )
-                .on_hover_text("local mailbox id (see Settings)");
+                .on_hover_text("local mailbox id (see Settings)")
+                .labelled_by(mailbox_label.id);
                 ui.end_row();
-                design::field_label(ui, "segment id:");
+                let segment_label = design::field_label(ui, "segment id:");
                 ui.add_sized(
                     [140.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_segment_json),
                 )
-                .on_hover_text("saved segment id — required guard");
+                .on_hover_text("saved segment id — required guard")
+                .labelled_by(segment_label.id);
                 ui.end_row();
             });
             let segments = self.segments.clone();
@@ -663,20 +720,24 @@ impl OutreachPage {
         if self.show_new_segment {
             design::card(ui, |ui| {
                 design::section_title(ui, "New Segment");
+                // Every input binds its visible label (RS-18 wave-wide
+                // a11y rule — egui never reads a preceding label alone).
                 design::form_grid(ui, "outreach-new-segment", |ui| {
-                    design::field_label(ui, "name:");
+                    let name_label = design::field_label(ui, "name:");
                     ui.add_sized(
                         [220.0, 28.0],
                         egui::TextEdit::singleline(&mut self.new_segment_name)
                             .hint_text("segment name"),
-                    );
+                    )
+                    .labelled_by(name_label.id);
                     ui.end_row();
-                    design::field_label(ui, "criteria (JSON):");
+                    let criteria_label = design::field_label(ui, "criteria (JSON):");
                     ui.add_sized(
                         [320.0, 80.0],
                         egui::TextEdit::multiline(&mut self.new_segment_criteria),
                     )
-                    .on_hover_text("segment definition JSON");
+                    .on_hover_text("segment definition JSON")
+                    .labelled_by(criteria_label.id);
                     ui.end_row();
                 });
                 if design::button(ui, "create segment", ButtonVariant::Primary).clicked() {
@@ -693,20 +754,46 @@ impl OutreachPage {
             .show(ui, |ui| {
                 let t = design::tokens(ui);
                 for segment in &segments {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "#{} {}",
-                                i64_field(segment, "id"),
-                                str_field(segment, "name")
-                            ))
-                            .size(13.5)
-                            .strong()
-                            .color(t.foreground),
+                    // The lab's segment card: strong id — name with the
+                    // danger delete pushed right (DS.row's side cluster),
+                    // the criteria JSON as the mono line beneath (raw
+                    // tokens visible per DC C-1 — the pre-rebuild build
+                    // kept the definition invisible).
+                    design::card(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "#{} {}",
+                                    i64_field(segment, "id"),
+                                    str_field(segment, "name")
+                                ))
+                                .size(13.5)
+                                .strong()
+                                .color(t.foreground),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if design::button(ui, "delete", ButtonVariant::Destructive)
+                                        .clicked()
+                                    {
+                                        deleted = Some((
+                                            i64_field(segment, "id"),
+                                            str_field(segment, "name"),
+                                        ));
+                                    }
+                                },
+                            );
+                        });
+                        let criteria = segment
+                            .get("definition")
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        ui.monospace(
+                            egui::RichText::new(criteria)
+                                .small()
+                                .color(t.muted_foreground),
                         );
-                        if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
-                            deleted = Some((i64_field(segment, "id"), str_field(segment, "name")));
-                        }
                     });
                 }
                 if segments.is_empty() {
@@ -737,19 +824,23 @@ impl OutreachPage {
             Some("Customers on this list are excluded from every campaign."),
             |ui| {
                 design::form_grid(ui, "outreach-dnc-new", |ui| {
-                    design::field_label(ui, "customer id:");
+                    // Every input binds its visible label (RS-18 wave-wide
+                    // a11y rule — egui never reads a preceding label alone).
+                    let customer_label = design::field_label(ui, "customer id:");
                     ui.add_sized(
                         [140.0, 28.0],
                         egui::TextEdit::singleline(&mut self.new_dnc_customer)
                             .hint_text("customer id"),
-                    );
+                    )
+                    .labelled_by(customer_label.id);
                     ui.end_row();
-                    design::field_label(ui, "reason:");
+                    let reason_label = design::field_label(ui, "reason:");
                     ui.add_sized(
                         [220.0, 28.0],
                         egui::TextEdit::singleline(&mut self.new_dnc_reason)
                             .hint_text("why (optional)"),
-                    );
+                    )
+                    .labelled_by(reason_label.id);
                     ui.end_row();
                 });
                 if design::button(ui, "add", ButtonVariant::Primary).clicked() {
@@ -762,29 +853,40 @@ impl OutreachPage {
                     .id_salt("outreach-dnc")
                     .show(ui, |ui| {
                         for (customer_id, reason, created_at) in &dnc {
+                            // The lab's DS.row: the mono id left, the
+                            // reason/ts/remove cluster pushed right.
                             ui.horizontal(|ui| {
                                 ui.monospace(
                                     egui::RichText::new(format!("customer #{customer_id}"))
                                         .color(t.foreground),
                                 );
-                                ui.label(
-                                    egui::RichText::new(reason.as_str())
-                                        .small()
-                                        .color(t.muted_foreground),
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        // right_to_left paints the first
+                                        // added widget rightmost — remove
+                                        // first so the visual order matches
+                                        // the lab's [reason][ts][remove].
+                                        if design::button(ui, "remove", ButtonVariant::Destructive)
+                                            .clicked()
+                                        {
+                                            // FIND-005: the removal used to run on the
+                                            // click — arm the shell confirm instead.
+                                            self.pending_confirm =
+                                                Some(ConfirmRequest::remove_from_dnc(*customer_id));
+                                        }
+                                        ui.label(
+                                            egui::RichText::new(created_at.as_str())
+                                                .small()
+                                                .color(t.muted_foreground),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(reason.as_str())
+                                                .small()
+                                                .color(t.muted_foreground),
+                                        );
+                                    },
                                 );
-                                ui.label(
-                                    egui::RichText::new(created_at.as_str())
-                                        .small()
-                                        .color(t.muted_foreground),
-                                );
-                                if design::button(ui, "remove", ButtonVariant::Destructive)
-                                    .clicked()
-                                {
-                                    // FIND-005: the removal used to run on the
-                                    // click — arm the shell confirm instead.
-                                    self.pending_confirm =
-                                        Some(ConfirmRequest::remove_from_dnc(*customer_id));
-                                }
                             });
                         }
                         if dnc.is_empty() {
@@ -817,14 +919,13 @@ enum CampaignAction {
     RetryFailed,
 }
 
-/// Campaign status → badge tone (redesign of the raw GRAY/LIGHT_BLUE/
-/// YELLOW/GREEN/RED label).
+/// Campaign status → badge tone. The lab's CAMP map rides the raw token
+/// through `statusBadge`: `completed` maps onto the resolved success
+/// badge, every other lifecycle token (queued/running/paused/cancelled)
+/// keeps the neutral badge with the raw token visible (DC C-1).
 fn campaign_status_tone(status: &str) -> BadgeTone {
     match status {
-        "queued" | "running" => BadgeTone::Info,
-        "paused" => BadgeTone::Warning,
         "completed" => BadgeTone::Success,
-        "cancelled" => BadgeTone::Destructive,
         _ => BadgeTone::Neutral,
     }
 }
