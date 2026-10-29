@@ -4,6 +4,44 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-10-29
+
+### Changed — Design-System reskin (the presentation layer, rebuilt on DC v1.0)
+
+The owner-approved reskin (decisions.md D6: "everything is working fine, we need
+to reskin only according to the new design system") ships in full. Every one of
+the app's 23 routes now renders through the Design Contract v1.0 widget set —
+the contract was extracted from the owner-approved design lab (Gate G1, commit
+`af5bc2a`), and the Rust port never leads it. **No feature, data, workflow,
+shortcut or page-set change**: every query, write, dialog and key binding is
+byte-identical to 1.8.x; data-layer defects surfaced during the rebuild are
+footnoted as receipt-cited quirks (DC C-1) and stay visible.
+
+- **R1 — tokens (RS-12):** every `--ds-*` design token ported 1:1 into
+  `design.rs` (LIGHT + DARK); DS.TONE is the single status→color map; the
+  style lint (CI) bans raw color sites and off-scale spacing.
+- **R2 — widget sets (RS-13/14/15):** the 17 canonical DS-C components (cards,
+  tables, tabs, chips, buttons, forms, empty states, callout roles, toasts,
+  detail panel, avatars, role-typed message cards, composer, AI identity set,
+  console hero) as typed egui widgets — one DC sheet, one widget.
+- **R3 — page waves (RS-16..RS-20):** all 23 routes rebuilt onto the six DS-A
+  archetype recipes, with the archetype's presentation fixes applied (counter
+  pills, filter bars, bar lists, danger zones, hero band) and every interactive
+  control carrying its visible label for accessibility (`Response::labelled_by`
+  / `widget_info`) — zero visual change from the lab.
+- **Locked against drift:** 23 kittest suites / 152 tests / 168 goldens lock the
+  real pages (not mocks) at 1440/1024/800 × 900, light + dark, diff-locked
+  twice; CI now runs them on every push (the new `snapshots` job, lavapipe
+  software Vulkan) — a visual regression on any page fails the build.
+- **Traceability gate (RS-21):** the R4 matrix
+  (`docs/audit/acceptance/traceability-matrix.md`, screen region → DS-C id →
+  DC row) is machine-checked in CI against the frozen contract and the route
+  list; the acceptance records are folded into the printable report series
+  (`docs/audit/SupportOS-Plus-Reskin-Acceptance-Report.pdf`).
+- **Acceptance instruments (RS-21):** the 5-second AI-identification blind-test
+  protocol and the SUS questionnaire (target ≥ 68) ship under
+  `docs/audit/acceptance/` for the G4 final-acceptance administration.
+
 ## [1.8.3] — 2026-10-28
 
 ### Fixed — Diagnostics event log
