@@ -29,7 +29,8 @@ footnoted as receipt-cited quirks (DC C-1) and stay visible.
   pills, filter bars, bar lists, danger zones, hero band) and every interactive
   control carrying its visible label for accessibility (`Response::labelled_by`
   / `widget_info`) — zero visual change from the lab.
-- **Locked against drift:** 23 kittest suites / 152 tests / 168 goldens lock the
+- **Locked against drift:** 23 suites / 172 tests (170 kittest + 2 style lint) /
+  168 goldens lock the
   real pages (not mocks) at 1440/1024/800 × 900, light + dark, diff-locked
   twice; CI now runs them on every push (the new `snapshots` job, lavapipe
   software Vulkan) — a visual regression on any page fails the build.

@@ -243,7 +243,7 @@ p("On 28 October 2026 the owner set the program's goal: \x27everything is workin
 callout_row([
     ("23 routes", "every page re-rendered through the DC widget set (R3 complete)"),
     ("17 + 6", "canonical DS-C component sheets + DS-A archetype recipes, all traced"),
-    ("23 / 152 / 168", "kittest suites / tests / goldens diff-locking every page"),
+    ("23 / 172 / 168", "kittest suites / tests (170 kittest + 2 style lint) / goldens diff-locking every page"),
     ("v1.9.0", "the reskin release, tagged from the verified acceptance state"),
 ])
 p("The scope contract never moved: no feature, data, workflow, shortcut or page-set change "
@@ -275,8 +275,8 @@ code("af5bc2a (RS-1 lab) → 8b83daf (G1) → f84d43c (RS-11) → fbf106c (RS-12
      "→ b5e613d (RS-14) → 9718cd7 (RS-15) → d172cfc (RS-15) → 8490eee (CI fix) → 7001cf8..c4b7315\n"
      "(RS-19 waves) → 5ddb782..feee18a (RS-20 waves) → 5c12fd1 (batch record) → this batch (RS-21)")
 p("Batch RS-2 closed 2026-10-29 with: fmt clean; clippy -D warnings 0 (workspace + core sandbox); "
-  "app-shell 236 + core 485 + core sandbox 493 + xtask 11 + style-lint 2, all green; kittest 23 "
-  "suites / 152 tests green (every page golden diff-locked twice, a11y check ON); SPP_SMOKE exit 0 "
+  "app-shell 236 + core 485 + core sandbox 493 + xtask 11 + style-lint 2, all green; kittest 170 "
+  "tests across the 22 suites green (every page golden diff-locked twice, a11y check ON); SPP_SMOKE exit 0 "
   "(24 frames painted on a fresh binary).")
 
 # ================= 3. TRACEABILITY MATRIX =================
@@ -421,8 +421,8 @@ else:
 h1(8, "GATE G4 — Owner Final Acceptance")
 p("Gate G4 is the owner's verdict on the reskin program. The package presented: this report; the "
   "traceability matrix (machine-gated in CI); the blind-test protocol and the SUS instrument "
-  "(results recorded below upon administration); the CI snapshot locks (23 suites / 152 tests / "
-  "168 goldens); and release v1.9.0 tagged and published with checksums.")
+  "(results recorded below upon administration); the CI snapshot locks (23 suites / 172 tests — 170 kittest + 2 "
+  "style lint — over 168 goldens); and release v1.9.0 tagged and published with checksums.")
 table(
     ["Record", "Value"],
     [

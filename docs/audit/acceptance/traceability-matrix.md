@@ -300,7 +300,7 @@ Folded helpers (DC §3 tail — no separate sheet): `pager`, `divider`, `day_div
 - Routes (`PageKey`): 23 — all carry a section above (Shell covered by §0 + the
   Shell route's own row in the kittest exception note).
 - Golden locks: 21 page suites + the widget suite + style lint = the 23-suite /
-  152-test / 168-golden kittest set under `crates/app-shell/tests/`.
+  172-test (170 kittest + 2 style lint) / 168-golden set under `crates/app-shell/tests/`.
 - Exceptions in force: **E-1** (blur shadows → hairline strokes; motion only where
   egui animates — DC §7), **C-1** receipts (footnoted data-layer quirks, never faked
   fixed), **C-2** labels (data-track items marked mocked pending the async track).

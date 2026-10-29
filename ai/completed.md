@@ -5064,3 +5064,23 @@ also rides the release workflow, so a tagged commit cannot regress it.
 traceability matrix, the blind test, the SUS instrument, the acceptance PDF,
 release v1.9.0) is presented with the batch STOP. The owner's verdict, the
 blind-test aggregate and the SUS score fill the record tables at the gate.
+
+### G4 pre-acceptance addendum — 2026-10-29 (owner-directed doc correction)
+
+During the owner's step-by-step verification request, the kittest lock-set count in the
+living documents was found stale: the records above (and the R4 artifacts derived from
+them) said **23 suites / 152 tests / 168 goldens**, while the machine-checkable facts are
+**23 suites (22 kittest + style lint) / 172 tests (170 kittest + 2 style lint) / 168
+goldens** — CI's snapshot-lock log totals 408 passed = 236 lib + 170 kittest + 2 style
+lint, the local re-run matched it suite-by-suite, and `ls crates/app-shell/tests/snapshots`
+= 168. The 152 figure was a mid-wave tally that never caught up with the wave-D/RS-21
+suite growth. Corrected (doc-only, zero code change): `traceability-matrix.md` §Coverage
+reconciliation, the `CHANGELOG.md` [1.9.0] drift-lock bullet, the `ci.yml` snapshots-job
+comment, and `generate_acceptance_report.py` (PDF regenerated, stale-token sweep = NONE);
+the historical batch records above keep their original text per append-only discipline —
+this addendum is their correction. `gate_traceability.py` re-run: OK (23 routes, 27 ids,
+alias declared). The full local re-verification that surfaced this: fmt clean; clippy -D
+warnings 0; core 485 + app-shell 236 green; all 22 kittest suites re-run locally over
+lavapipe+Xvfb — 170/170 green, a11y check ON; SPP_SMOKE exit 0 (24 pages, 4225 shapes);
+no-simulation gate clean. G4 remains open: the owner's verdict, blind-test aggregate and
+SUS score fill the record tables at the gate.

@@ -169,8 +169,9 @@ jobs:
           path: target/deb/supportos-plus_*_amd64.deb
           if-no-files-found: error
 
-  # RS-21 (R4): the reskin's drift lock. The 23 kittest suites (152 tests,
-  # 168 goldens) diff-lock every rebuilt page — the REAL pages over seeded
+  # RS-21 (R4): the reskin's drift lock. The 23 suites (172 tests — 170 kittest
+  # + 2 style lint — over 168 goldens) diff-lock every rebuilt page — the REAL
+  # pages over seeded
   # mirrors, 1440/1024/800 × 900, light + dark, a11y check ON — against the
   # checked-in baselines. The runner has no GPU, so the frames render through
   # Mesa's lavapipe, the same software-rasterizer family the baselines were
