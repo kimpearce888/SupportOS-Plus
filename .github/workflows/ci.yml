@@ -206,9 +206,14 @@ jobs:
 
       - name: Test (kittest suites, snapshots diff-locked)
         env:
-          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
           WGPU_BACKEND: vulkan
         # UPDATE_SNAPSHOTS is deliberately NOT set: the suites diff against
-        # the committed baselines and fail on any drift.
-        run: cargo test --locked -p supportos-plus-app-shell --features kittest-ui
+        # the committed baselines and fail on any drift. The ICD filename
+        # differs across runner images (lvp_icd.json on newer Ubuntu,
+        # lvp_icd.x86_64.json on older ones) — resolve it at runtime.
+        run: |
+          ICD="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)"
+          test -n "$ICD" || { echo "no lavapipe ICD found"; ls /usr/share/vulkan/icd.d/; exit 1; }
+          echo "Using lavapipe ICD: $ICD"
+          export VK_DRIVER_FILES="$ICD" VK_ICD_FILENAMES="$ICD"
+          cargo test --locked -p supportos-plus-app-shell --features kittest-ui
