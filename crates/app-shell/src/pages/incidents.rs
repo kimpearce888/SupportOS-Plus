@@ -1,15 +1,28 @@
 //! Incidents page (port of the web `pages/incidents.rs`).
 //!
-//! Redesigned with the shadcn-style design system (`crate::design`):
-//! severity/status badges, card-wrapped workspace sections and a form-grid
-//! incident creator — presentation only, all actions and filters intact.
+//! RS-18 (wave B) rebuild on **Design Contract v1.0 archetype DS-A-01** —
+//! the list-page recipe (docs/audit/design-contract-v1.md §4): PageHeader
+//! with the counter pill (DS-C-01, register A-6 — the count lives beside
+//! the header) → FilterBar with exactly one primary apply (DS-C-10, A-2) →
+//! DataTable (DS-C-05, virtualized rows) → the row `open` act opens the
+//! DetailPanel (DS-C-17, A-1) whose content is the DS-A-03 record
+//! composition (record head + description / customer-safe cards, then the
+//! linked-conversations / releases / affected-customers / notes blocks in
+//! the lab's two-column arrangement). The conformed lab reference is
+//! `mockups/design-lab/pages-ds.js` (`DS.definePage("incidents", …)`).
 //!
-//! The incident list with status/severity/open/query filters
-//! (`incident_workspace::list_incident_rows` — the `/api/incidents` SQL),
-//! the detail workspace (conversations, affected customers/organizations,
-//! notes, releases — `/api/incidents/{id}` family), the new-incident form
-//! (the create route's validation + `intelligence_features::
-//! create_manual_incident`), add-note, and link-conversation actions.
+//! Behavior, queries, and data flow are unchanged (decisions.md D6:
+//! presentation only). The list still reads
+//! `spp_core::incident_workspace::list_incident_rows` (the `/api/incidents`
+//! SQL) with the same status/severity/open-only/query filters, the detail
+//! still reads the `/api/incidents/{id}` family (conversations, affected
+//! customers, notes, releases), create still runs
+//! `intelligence_features::create_manual_incident` with the same
+//! validation and the skipped-id notice (clean-audit item 131), and the
+//! add-note / link-conversation actions are the same state machine as
+//! before the rebuild. Per the clean-audit item 131 semantics, the combo
+//! and checkbox filters still refetch on change — the text query keeps
+//! its explicit apply (the FilterBar's one primary action).
 
 use eframe::egui;
 use spp_core::db::DbHandle;
@@ -19,6 +32,9 @@ use spp_core::intelligence_features::ManualIncident;
 use super::{i64_field, opt_str_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
+
+/// DataTable row height — the 32px button row (DS-C-05 cells ride it).
+const ROW_HEIGHT: f32 = 32.0;
 
 /// Incident statuses (web: the status select).
 pub const INCIDENT_STATUSES: [&str; 5] = [
@@ -63,6 +79,9 @@ pub struct IncidentsPage {
     /// Post-action feedback (clean-audit item 131): which typed
     /// conversation ids were skipped and why, after a create.
     notice: Option<String>,
+    /// DS-C-17 DetailPanel open flag (A-1): the row `open` act opens the
+    /// right sheet; Esc, the scrim, or the close button close it.
+    panel_open: bool,
 }
 
 /// Incident severity → badge tone (redesign of the raw RED/YELLOW/GRAY).
@@ -112,6 +131,7 @@ impl IncidentsPage {
             link_conversation: String::new(),
             error: None,
             notice: None,
+            panel_open: false,
         }
     }
 
@@ -277,6 +297,9 @@ impl IncidentsPage {
                     ))
                 };
                 self.reload_list(db);
+                // The created incident's detail becomes visible — the panel
+                // takes the role the old right column played.
+                self.panel_open = true;
                 self.select(db, id);
             }
             Err(e) => self.error = Some(format!("Could not create incident: {e}")),
@@ -341,23 +364,32 @@ impl IncidentsPage {
         self.ensure_loaded(db);
 
         // Audit fix (M20): the list caps at 100 rows with no pager — say
-        // so instead of implying the full set is shown.
+        // so instead of implying the full set is shown. The lab's
+        // subtitle is the incident count itself; the cap note rides it.
         let subtitle = if (self.rows.len() as i64) < self.total {
             format!(
-                "{} incident(s) — showing first {} of {}",
-                self.total,
+                "showing first {} of {} incident(s) — the list has no pager",
                 self.rows.len(),
                 self.total
             )
         } else {
             format!("{} incident(s)", self.total)
         };
+
+        // DS-C-01 PageHeader: title + subtitle, right cluster = the New
+        // Incident primary (the lab's actions) + the counter pill (A-6).
+        // egui right_to_left puts the first added widget rightmost, so the
+        // add order below paints [counter] [New Incident] — the lab's
+        // DS-C-01 order. The pill counts the rendered table (the lab's
+        // list.length), while the subtitle carries the workspace total.
         design::page_header(ui, "Incidents", Some(&subtitle), |ui| {
             if design::button_with_icon(ui, Icon::Plus, "New Incident", ButtonVariant::Primary)
+                .on_hover_text("open the new-incident form")
                 .clicked()
             {
                 self.show_new = !self.show_new;
             }
+            design::page_counter(ui, &format!("{} incidents", self.rows.len()));
         });
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
@@ -365,20 +397,19 @@ impl IncidentsPage {
         if let Some(note) = &self.notice {
             design::hint_text(ui, note);
         }
-        design::divider(ui);
 
-        design::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                design::field_label(ui, "status:");
-                // Clean-audit item 131: the selects and the checkbox only
-                // mutated state — the list refetched only when the user
-                // happened to hit "apply". Each control refetches on
-                // change now (the text query keeps its explicit button —
-                // per-keystroke queries would thrash).
+        // DS-C-10 FilterBar (A-2): filters left, exactly one primary apply
+        // right. Behavior preserved (clean-audit item 131): the combos and
+        // the checkbox still refetch on change; the text query keeps its
+        // explicit apply — the FilterBar's one primary action.
+        let apply = design::filter_bar(
+            ui,
+            |ui| {
                 let prev_status = self.filter_status.clone();
+                let status_label = self.filter_status.clone().unwrap_or_else(|| "Any".into());
                 egui::ComboBox::from_id_salt("incident-filter-status")
                     .width(150.0)
-                    .selected_text(self.filter_status.clone().unwrap_or_else(|| "Any".into()))
+                    .selected_text(status_label.clone())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.filter_status, None, "Any");
                         for status in INCIDENT_STATUSES {
@@ -388,15 +419,26 @@ impl IncidentsPage {
                                 status,
                             );
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        // The visible "status:" label is a separate widget,
+                        // so the combo button carries the name itself or
+                        // kittest's a11y check trips on an unlabeled node.
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            ui.is_enabled(),
+                            format!("status: {status_label}"),
+                        )
                     });
                 if self.filter_status != prev_status {
                     self.reload_list(db);
                 }
-                design::field_label(ui, "severity:");
                 let prev_severity = self.filter_severity.clone();
+                let severity_label = self.filter_severity.clone().unwrap_or_else(|| "Any".into());
                 egui::ComboBox::from_id_salt("incident-filter-severity")
                     .width(130.0)
-                    .selected_text(self.filter_severity.clone().unwrap_or_else(|| "Any".into()))
+                    .selected_text(severity_label.clone())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.filter_severity, None, "Any");
                         for severity in INCIDENT_SEVERITIES {
@@ -406,6 +448,14 @@ impl IncidentsPage {
                                 severity,
                             );
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            ui.is_enabled(),
+                            format!("severity: {severity_label}"),
+                        )
                     });
                 if self.filter_severity != prev_severity {
                     self.reload_list(db);
@@ -421,218 +471,323 @@ impl IncidentsPage {
                     egui::TextEdit::singleline(&mut q).hint_text("search incidents…"),
                 );
                 self.filter_query = q;
-                if design::button(ui, "apply", ButtonVariant::Outline).clicked() {
-                    self.applied_query = self.filter_query.trim().to_string();
-                    self.reload_list(db);
-                }
-            });
-        });
-        ui.add_space(10.0);
+            },
+            "apply",
+        );
+        if apply.clicked() {
+            self.applied_query = self.filter_query.trim().to_string();
+            self.reload_list(db);
+        }
+        ui.add_space(design::scale::space::SP2);
 
+        // The lab's create affordance: a page-flow card under the filters
+        // (`card_titled` + DS-C-13 form rows + one primary create action).
+        // Same validation, same write, same skipped-id notice.
         if self.show_new {
             self.new_incident_ui(ui, db);
-            ui.add_space(10.0);
+            ui.add_space(design::scale::space::SP2);
         }
 
-        ui.columns(2, |columns| {
-            let rows = self.rows.clone();
-            let mut picked: Option<i64> = None;
-            egui::ScrollArea::vertical()
-                .id_salt("incident-list")
-                .show(&mut columns[0], |ui| {
-                    for row in &rows {
-                        let id = i64_field(row, "id");
-                        let code = str_field(row, "code");
-                        let title = str_field(row, "title");
-                        let status = str_field(row, "status");
-                        let severity = str_field(row, "severity");
-                        let convs = i64_field(row, "conversation_count");
-                        let selected = self.selected == Some(id);
-                        if design::chip(ui, selected, &format!("{code} {title}")).clicked() {
-                            picked = Some(id);
-                        }
-                        ui.horizontal(|ui| {
-                            design::badge(ui, &severity, severity_tone(&severity));
-                            design::badge(ui, &status, incident_status_tone(&status));
-                            ui.label(
-                                egui::RichText::new(format!("{convs} conversations"))
-                                    .small()
-                                    .color(design::tokens(ui).muted_foreground),
-                            );
-                        });
-                        ui.add_space(4.0);
-                    }
-                    if rows.is_empty() {
-                        // Compact list-side note: the detail pane carries the
-                        // large empty state, so two side-by-side heroes don't
-                        // compete.
-                        ui.add_space(8.0);
-                        ui.horizontal(|ui| {
-                            let (id, rect) = ui.allocate_space(egui::vec2(16.0, 16.0));
-                            Icon::AlertTriangle.paint_at(
-                                ui.painter(),
-                                rect,
-                                design::tokens(ui).muted_foreground,
-                            );
-                            ui.advance_cursor_after_rect(rect);
-                            let _ = id;
-                            design::hint_text(
-                                ui,
-                                "No incidents match — adjust the filters or create a new incident.",
-                            );
-                        });
-                    }
-                });
-            if let Some(id) = picked {
-                self.select(db, id);
-            }
-            self.detail_ui(&mut columns[1], db);
-        });
-    }
-
-    fn detail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        let Some(detail) = self.detail.clone() else {
+        // DS-C-05 DataTable — virtualized rows over the same capped list
+        // query; columns per the conformed lab list (code, title, severity,
+        // status, conversations, open act). With no rows the lab engine
+        // swaps the table for the empty state (A-7).
+        let rows = self.rows.clone();
+        let mut pick: Option<i64> = None;
+        if rows.is_empty() {
             design::empty_state(
                 ui,
                 Icon::AlertTriangle,
-                "Select an incident",
-                "Pick an incident from the list to open its workspace.",
+                "No incidents match",
+                "Adjust the filters or create a new incident.",
             );
-            return;
-        };
-        let _incident_id = i64_field(&detail, "id");
-        let t = design::tokens(ui);
-        design::section_title(
-            ui,
-            &format!(
-                "{} · {}",
-                str_field(&detail, "code"),
-                str_field(&detail, "title")
-            ),
-        );
-        ui.horizontal(|ui| {
-            let status = str_field(&detail, "status");
-            let severity = str_field(&detail, "severity");
-            design::badge(ui, &status, incident_status_tone(&status));
-            design::badge(ui, &severity, severity_tone(&severity));
-            if let Some(started) = opt_str_field(&detail, "started_at") {
-                design::field_label(ui, "started:");
-                ui.monospace(egui::RichText::new(started).color(t.foreground));
-            }
-        });
-        if let Some(owner) = opt_str_field(&detail, "owner_name") {
-            design::hint_text(ui, &format!("owner: {owner}"));
+        } else {
+            design::data_table(
+                ui,
+                "incidents",
+                &["code", "title", "severity", "status", "conversations", ""],
+                rows.len(),
+                ROW_HEIGHT,
+                |ui, i| {
+                    let row = &rows[i];
+                    let id = i64_field(row, "id");
+                    let code = str_field(row, "code");
+                    let title = str_field(row, "title");
+                    let status = str_field(row, "status");
+                    let severity = str_field(row, "severity");
+                    let convs = i64_field(row, "conversation_count");
+                    let t = design::tokens(ui);
+                    dt_cell(
+                        ui,
+                        90.0,
+                        egui::RichText::new(&code)
+                            .size(design::scale::text::BODY)
+                            .strong()
+                            .color(t.foreground),
+                        false,
+                    );
+                    dt_cell(
+                        ui,
+                        240.0,
+                        egui::RichText::new(&title)
+                            .size(design::scale::text::BODY)
+                            .color(t.foreground),
+                        false,
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(110.0, ROW_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            design::badge(ui, &severity, severity_tone(&severity));
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(120.0, ROW_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            design::badge(ui, &status, incident_status_tone(&status));
+                        },
+                    );
+                    dt_cell(
+                        ui,
+                        110.0,
+                        egui::RichText::new(convs.to_string())
+                            .size(design::scale::text::SMALL_HALF)
+                            .monospace()
+                            .color(t.foreground),
+                        true,
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(70.0, ROW_HEIGHT),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            if design::button(ui, "open", ButtonVariant::Outline)
+                                .on_hover_text(format!(
+                                    "open {code} — linked conversations, notes, releases"
+                                ))
+                                .clicked()
+                            {
+                                pick = Some(id);
+                            }
+                        },
+                    );
+                },
+            );
         }
-        for (label, key) in [
-            ("description", "description"),
-            ("customer-safe", "customer_safe_explanation"),
-            ("workaround", "workaround"),
-            ("resolution", "resolution"),
-        ] {
-            if let Some(text) = opt_str_field(&detail, key) {
-                design::section_title(ui, label);
-                ui.label(egui::RichText::new(text).size(13.0).color(t.foreground));
-            }
-        }
-        ui.add_space(6.0);
 
-        let conversations = self.conversations.clone();
-        let link_conversation = self.link_conversation.clone();
-        design::card_titled(
-            ui,
-            &format!("Linked conversations ({})", conversations.len()),
-            None,
+        // A-1: the row `open` act selects the incident and opens the
+        // DetailPanel.
+        if let Some(id) = pick {
+            self.panel_open = true;
+            self.select(db, id);
+        }
+
+        // DS-C-17 DetailPanel (A-1) over the scrim — content is the DS-A-03
+        // record composition: record head (name = code · title, meta =
+        // started + owner, badges = status + severity), the description and
+        // customer-safe cards, then the lab's two-column block (linked
+        // conversations + releases | affected customers + notes).
+        let detail = self.detail.clone();
+        let title = detail
+            .as_ref()
+            .map(|d| format!("{} · {}", str_field(d, "code"), str_field(d, "title")))
+            .filter(|t| !t.is_empty() && t != " · ")
+            .unwrap_or_else(|| "Incident".to_string());
+        let mut panel_open = self.panel_open;
+        design::detail_panel(
+            ui.ctx(),
+            "incidents-detail",
+            &mut panel_open,
+            &title,
+            |_ui| {},
             |ui| {
-                for conv in &conversations {
+                let Some(detail) = detail else {
+                    design::empty_state_slim(
+                        ui,
+                        Icon::AlertTriangle,
+                        "Select an incident",
+                        "Pick an incident from the list to open its workspace.",
+                    );
+                    return;
+                };
+                // The store nests the incident row under `incident`
+                // (incident_workspace::incident_detail returns
+                // {incident, impact, conversations, …}) — the pre-rebuild
+                // page read the top level and silently rendered an empty
+                // record head.
+                let incident = detail
+                    .get("incident")
+                    .cloned()
+                    .unwrap_or_else(|| detail.clone());
+                let t = design::tokens(ui);
+                let status = str_field(&incident, "status");
+                let severity = str_field(&incident, "severity");
+
+                // DS-A-03 record head: name + meta line + the status /
+                // severity badges (the lab's recordHead with no avatar —
+                // incidents carry codes, not faces).
+                let code = str_field(&incident, "code");
+                let incident_title = str_field(&incident, "title");
+                ui.vertical(|ui| {
                     ui.label(
-                        egui::RichText::new(format!(
-                            "#{} · {}",
-                            i64_field(conv, "number"),
-                            str_field(conv, "subject")
-                        ))
-                        .size(13.0)
-                        .color(t.foreground),
+                        egui::RichText::new(format!("{code} · {incident_title}"))
+                            .size(design::scale::text::LEAD)
+                            .strong()
+                            .color(t.foreground),
                     );
-                }
-                ui.horizontal(|ui| {
-                    let mut link = link_conversation;
-                    design::field_label(ui, "link conversation #:");
-                    ui.add_sized(
-                        [140.0, 28.0],
-                        egui::TextEdit::singleline(&mut link).hint_text("id"),
-                    );
-                    self.link_conversation = link;
-                    if design::button(ui, "link", ButtonVariant::Primary).clicked() {
-                        self.link(db);
+                    let started = opt_str_field(&incident, "started_at")
+                        .map(|s| format!("started: {s}"))
+                        .unwrap_or_else(|| "not started".into());
+                    let owner = opt_str_field(&incident, "owner_name")
+                        .map(|o| format!(" · owner: {o}"))
+                        .unwrap_or_default();
+                    design::hint_text(ui, &format!("{started}{owner}"));
+                    ui.horizontal(|ui| {
+                        design::badge(ui, &status, incident_status_tone(&status));
+                        design::badge(ui, &severity, severity_tone(&severity));
+                    });
+                });
+                design::divider(ui);
+
+                for (label, key) in [
+                    ("description", "description"),
+                    ("customer-safe", "customer_safe_explanation"),
+                    ("workaround", "workaround"),
+                    ("resolution", "resolution"),
+                ] {
+                    if let Some(text) = opt_str_field(&incident, key) {
+                        design::card_titled(ui, label, None, |ui| {
+                            ui.label(
+                                egui::RichText::new(text)
+                                    .size(design::scale::text::BODY)
+                                    .color(t.foreground),
+                            );
+                        });
+                        ui.add_space(design::scale::space::SP2);
                     }
+                }
+
+                // The lab's twoCol: left = Linked conversations + Releases,
+                // right = Affected customers + Notes.
+                ui.columns(2, |columns| {
+                    let conversations = self.conversations.clone();
+                    let releases = self.releases.clone();
+                    let link_conversation = self.link_conversation.clone();
+                    let customers = self.customers.clone();
+                    let notes = self.notes.clone();
+
+                    // Left column: Linked conversations (+ link form) and
+                    // Releases.
+                    design::card_titled(
+                        &mut columns[0],
+                        &format!("Linked conversations ({})", conversations.len()),
+                        None,
+                        |ui| {
+                            for conv in &conversations {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "#{} · {}",
+                                        i64_field(conv, "number"),
+                                        str_field(conv, "subject")
+                                    ))
+                                    .size(design::scale::text::SMALL)
+                                    .color(t.foreground),
+                                );
+                            }
+                            ui.add_space(design::scale::space::SP1);
+                            design::form_row(ui, "link #", |ui| {
+                                let mut link = link_conversation;
+                                let response = ui.add_sized(
+                                    [90.0, 28.0],
+                                    egui::TextEdit::singleline(&mut link).hint_text("id"),
+                                );
+                                if response.changed() {
+                                    self.link_conversation = link;
+                                }
+                            });
+                            if design::button(ui, "link", ButtonVariant::Primary).clicked() {
+                                self.link(db);
+                            }
+                        },
+                    );
+                    columns[0].add_space(design::scale::space::SP2);
+                    if !releases.is_empty() {
+                        design::card_titled(
+                            &mut columns[0],
+                            &format!("Releases ({})", releases.len()),
+                            None,
+                            |ui| {
+                                for release in &releases {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{} · {}",
+                                            str_field(release, "version"),
+                                            str_field(release, "status")
+                                        ))
+                                        .size(design::scale::text::SMALL)
+                                        .color(t.foreground),
+                                    );
+                                }
+                            },
+                        );
+                        columns[0].add_space(design::scale::space::SP2);
+                    }
+
+                    // Right column: Affected customers and Notes (+ add
+                    // note form).
+                    design::card_titled(
+                        &mut columns[1],
+                        &format!("Affected customers ({})", customers.len()),
+                        None,
+                        |ui| {
+                            for customer in &customers {
+                                ui.label(
+                                    egui::RichText::new(str_field(customer, "name"))
+                                        .size(design::scale::text::SMALL)
+                                        .color(t.foreground),
+                                );
+                            }
+                        },
+                    );
+                    columns[1].add_space(design::scale::space::SP2);
+                    design::card_titled(
+                        &mut columns[1],
+                        &format!("Notes ({})", notes.len()),
+                        None,
+                        |ui| {
+                            for note in &notes {
+                                design::card(ui, |ui| {
+                                    ui.label(
+                                        egui::RichText::new(str_field(note, "created_at"))
+                                            .size(design::scale::text::META)
+                                            .color(t.muted_foreground),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(str_field(note, "body"))
+                                            .size(design::scale::text::SMALL)
+                                            .color(t.foreground),
+                                    );
+                                });
+                            }
+                            ui.add_space(design::scale::space::SP1);
+                            ui.add_sized(
+                                [ui.available_width(), 70.0],
+                                egui::TextEdit::multiline(&mut self.new_note)
+                                    .hint_text("write an incident note…"),
+                            );
+                            if design::button(ui, "add note", ButtonVariant::Primary).clicked() {
+                                self.add_note(db);
+                            }
+                        },
+                    );
                 });
             },
         );
-        ui.add_space(10.0);
-
-        let customers = self.customers.clone();
-        design::card_titled(
-            ui,
-            &format!("Affected customers ({})", customers.len()),
-            None,
-            |ui| {
-                for customer in &customers {
-                    ui.label(
-                        egui::RichText::new(str_field(customer, "name"))
-                            .size(13.0)
-                            .color(t.foreground),
-                    );
-                }
-            },
-        );
-        ui.add_space(10.0);
-
-        let notes = self.notes.clone();
-        let releases = self.releases.clone();
-        design::card_titled(ui, &format!("Notes ({})", notes.len()), None, |ui| {
-            for note in &notes {
-                design::card(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(str_field(note, "created_at"))
-                            .small()
-                            .color(t.muted_foreground),
-                    );
-                    ui.label(
-                        egui::RichText::new(str_field(note, "body"))
-                            .size(13.0)
-                            .color(t.foreground),
-                    );
-                });
-            }
-            ui.add_sized(
-                [ui.available_width(), 70.0],
-                egui::TextEdit::multiline(&mut self.new_note).hint_text("write an incident note…"),
-            );
-            if design::button(ui, "add note", ButtonVariant::Primary).clicked() {
-                self.add_note(db);
-            }
-        });
-        if !releases.is_empty() {
-            ui.add_space(10.0);
-            design::card_titled(ui, &format!("Releases ({})", releases.len()), None, |ui| {
-                for release in &releases {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} · {}",
-                            str_field(release, "version"),
-                            str_field(release, "status")
-                        ))
-                        .size(13.0)
-                        .color(t.foreground),
-                    );
-                }
-            });
-        }
+        self.panel_open = panel_open;
     }
 
     fn new_incident_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        design::card(ui, |ui| {
-            design::section_title(ui, "New Incident");
+        design::card_titled(ui, "New Incident", None, |ui| {
             design::form_grid(ui, "incident-new", |ui| {
                 design::field_label(ui, "title:");
                 ui.add_sized(
@@ -676,7 +831,11 @@ impl IncidentsPage {
                 .on_hover_text("comma-separated local conversation ids");
                 ui.end_row();
             });
-            if design::button(ui, "create incident", ButtonVariant::Primary).clicked() {
+            ui.add_space(design::scale::space::SP1);
+            if design::button(ui, "create incident", ButtonVariant::Primary)
+                .on_hover_text("create with the fields above")
+                .clicked()
+            {
                 self.create(db);
             }
         });
@@ -687,6 +846,20 @@ impl Default for IncidentsPage {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// One DataTable cell: fixed width, vertically centered in the 32px row,
+/// truncated (DS-C-05 cell anatomy). `right` right-aligns the text (the
+/// mono numeral cells).
+fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, right: bool) {
+    let layout = if right {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.allocate_ui_with_layout(egui::vec2(width, ROW_HEIGHT), layout, |ui| {
+        ui.add(egui::Label::new(text).truncate());
+    });
 }
 
 #[cfg(test)]
@@ -725,6 +898,7 @@ mod tests {
         assert_eq!(str_field(&row, "severity"), "sev2");
         assert_eq!(i64_field(&row, "conversation_count"), 1, "id 999 skipped");
         assert!(page.detail.is_some(), "creation selects the incident");
+        assert!(page.panel_open, "creation opens the detail panel");
         assert_eq!(page.conversations.len(), 1);
     }
 
