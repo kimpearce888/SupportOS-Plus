@@ -21,6 +21,7 @@
 
 use eframe::egui;
 use egui_kittest::Harness;
+use egui_kittest::SnapshotOptions;
 use egui_kittest::kittest::Queryable;
 use spp_core::db::DbHandle;
 use spp_shell::design;
@@ -85,7 +86,21 @@ fn render_settings_page(dark: bool, width: f32, name: &str) {
             },
         );
     h.run_ok();
-    h.snapshot(name);
+    // Registered tolerance (RS-21, G4 package): the runner's lavapipe
+    // (mesa 26.0.8) anti-aliases a handful of pixels differently from the
+    // baseline rasterizer — measured at 28 px out of ~1.3M on the General
+    // tab, the page with the only Drag widgets and the densest input grid;
+    // every other suite (22/23, 145 tests) is byte-exact on the same
+    // runner, and this suite is byte-exact under the baseline (the
+    // diff-locked-twice rule). max_failed_pixels is kittest's documented
+    // last-resort budget — the guidance is the smallest value that passes
+    // and a re-check on every snapshot update; 32 sits just above the
+    // observed 28 px and remains far below what any real regression on
+    // this page could produce (a moved border, a reflowed row or a
+    // re-rendered glyph is hundreds of pixels). Scoped to the page
+    // goldens only — the Help-Scout interaction golden keeps the default
+    // zero-tolerance lock (it is byte-exact on the runner).
+    h.snapshot_options(name, &SnapshotOptions::new().max_failed_pixels(32));
 }
 
 #[test]

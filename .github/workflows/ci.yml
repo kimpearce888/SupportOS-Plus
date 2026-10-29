@@ -217,3 +217,14 @@ jobs:
           echo "Using lavapipe ICD: $ICD"
           export VK_DRIVER_FILES="$ICD" VK_ICD_FILENAMES="$ICD"
           cargo test --locked -p supportos-plus-app-shell --features kittest-ui
+
+      - name: Upload diff images (diagnosis, on failure)
+        # A failing golden leaves its *.diff.png next to the baselines;
+        # uploading them makes a CI-side drift diagnosable without a local
+        # reproduction.
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kittest-diff-images
+          path: crates/app-shell/tests/snapshots/*.diff.png
+          if-no-files-found: ignore
