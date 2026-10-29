@@ -563,3 +563,54 @@ fn ai_message_card_is_identifiable() {
     let ai_nodes = h.get_all_by_label_contains("AI").count();
     assert!(ai_nodes >= 2, "AI badge + role label must both exist");
 }
+
+// ---------------------------------------------------------------------------
+// RS-20 — wave D console set (DS-C-24)
+// ---------------------------------------------------------------------------
+
+struct HeroState {
+    installed: bool,
+}
+
+fn harness_hero(dark: bool) -> Harness<'static, HeroState> {
+    Harness::builder()
+        .with_size(egui::vec2(640.0, 240.0))
+        .with_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        })
+        .build_ui_state(
+            |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                // The sync-health composition: mono state + the lab's
+                // forensic note + the SYNC-map badge right.
+                design::hero(
+                    ui,
+                    "LIVE",
+                    "last success: 2026-10-27 04:31:12 · never shows relative time — forensic value",
+                    |ui| {
+                        design::badge(ui, "LIVE", design::BadgeTone::Success);
+                    },
+                );
+            },
+            HeroState { installed: false },
+        )
+}
+
+#[test]
+fn hero_snapshot_light() {
+    let mut h = harness_hero(false);
+    h.run_ok();
+    h.snapshot("r20_hero_light");
+}
+
+#[test]
+fn hero_snapshot_dark() {
+    let mut h = harness_hero(true);
+    h.run_ok();
+    h.snapshot("r20_hero_dark");
+}

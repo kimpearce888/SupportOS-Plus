@@ -1,8 +1,12 @@
 //! Sync Health page (port of the web `pages/sync_health.rs`).
 //!
-//! Status cards (engine state, last successful checkpoint, webhook queue
-//! counts), the checkpoint table, recent runs, and the sync actions —
-//! initial / incremental / reconcile / cancel, run in-process through the
+//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `sync-health` sheet (DS-A-06 console): the engine state
+//! and last success ride the DS-C-24 hero band — the lab's verbatim
+//! forensic note and the SYNC-map status badge right; the Engine card
+//! keeps the webhook queue and self-healing hints; the action toolbar
+//! splits (the three run acts left, the destructive cancel right); and
+//! the checkpoint / recent-runs tables stay. The sync actions run in-process through the
 //! shared `SyncEngine` (the `/api/sync/*` route logic without the HTTP
 //! hop). Since 1.2.0 the simulated-activity demo tools are gone: the
 //! page reports on real sync activity only.
@@ -424,22 +428,32 @@ impl SyncHealthPage {
         ui.add_space(8.0);
 
         let status = self.status.clone().unwrap_or_default();
+        // DS-C-24 hero: the mono engine state, the lab's verbatim forensic
+        // note, and the SYNC-map status badge right (live→success,
+        // error→danger, draft→neutral, catching_up→info, unknown→stale).
+        let state_tone = match status.state.as_str() {
+            "LIVE" => crate::design::BadgeTone::Success,
+            "ERROR" => crate::design::BadgeTone::Destructive,
+            "NEW" => crate::design::BadgeTone::Neutral,
+            "CATCHING_UP" => crate::design::BadgeTone::Info,
+            _ => crate::design::BadgeTone::Warning,
+        };
+        let state_label = status.state.clone();
+        design::hero(
+            ui,
+            &status.state,
+            &format!(
+                "last success: {} · never shows relative time — forensic value",
+                status
+                    .last_success
+                    .clone()
+                    .unwrap_or_else(|| "(never)".into())
+            ),
+            |ui| {
+                design::badge(ui, &state_label, state_tone);
+            },
+        );
         design::card_titled(ui, "Engine", None, |ui| {
-            let t = design::tokens(ui);
-            ui.horizontal(|ui| {
-                design::field_label(ui, "state:");
-                ui.monospace(egui::RichText::new(status.state.as_str()).color(t.foreground));
-                design::field_label(ui, "last success:");
-                ui.monospace(
-                    egui::RichText::new(
-                        status
-                            .last_success
-                            .clone()
-                            .unwrap_or_else(|| "(never)".into()),
-                    )
-                    .color(t.foreground),
-                );
-            });
             design::hint_text(
                 ui,
                 &format!(
@@ -465,16 +479,16 @@ impl SyncHealthPage {
         });
         ui.add_space(8.0);
 
+        // The lab's action toolbar: the three run acts left, the
+        // destructive cancel right.
         ui.horizontal(|ui| {
             for action in [
                 SyncAction::Initial,
                 SyncAction::Incremental,
                 SyncAction::Reconcile,
-                SyncAction::Cancel,
             ] {
                 let variant = match action {
                     SyncAction::Initial => ButtonVariant::Primary,
-                    SyncAction::Cancel => ButtonVariant::Destructive,
                     _ => ButtonVariant::Outline,
                 };
                 if design::button(ui, action.label(), variant).clicked() {
@@ -490,6 +504,22 @@ impl SyncHealthPage {
                     }
                 }
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if design::button(ui, SyncAction::Cancel.label(), ButtonVariant::Destructive)
+                    .clicked()
+                {
+                    match engine {
+                        Some(engine) => {
+                            self.run_sync_action(db, engine, SyncAction::Cancel);
+                            self.status = None;
+                        }
+                        None => {
+                            self.message =
+                                Some("The sync engine is not available in this build.".into());
+                        }
+                    }
+                }
+            });
         });
         ui.add_space(8.0);
 

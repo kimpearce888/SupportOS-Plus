@@ -1024,6 +1024,29 @@ pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&st
     });
 }
 
+/// DC: DS-C-24 console hero — the mono engine state (the lab's 17px),
+/// the muted description line, and the right cluster (actions/badges),
+/// on the shared card frame. Used by the console pages (sync health).
+pub fn hero(ui: &mut egui::Ui, state: &str, sub: &str, right: impl FnOnce(&mut egui::Ui)) {
+    card(ui, |ui| {
+        ui.horizontal(|ui| {
+            let t = tokens(ui);
+            ui.label(
+                egui::RichText::new(state)
+                    .size(17.0)
+                    .monospace()
+                    .color(t.foreground),
+            );
+            ui.label(
+                egui::RichText::new(sub)
+                    .size(scale::text::SMALL)
+                    .color(t.muted_foreground),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), right);
+        });
+    });
+}
+
 /// DC: DS-C-01 PageHeader counter pill (`.ds-counter`) — counts live here,
 /// never in card titles (register A-6).
 pub fn page_counter(ui: &mut egui::Ui, text: &str) {
