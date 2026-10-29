@@ -53,6 +53,11 @@ jobs:
       - name: No-simulation gate
         run: python3 scripts/gate_no_simulation.py
 
+      # RS-21 (R4): the release carries the reskin — the traceability gate
+      # must hold at the tagged commit exactly as it does in CI.
+      - name: Traceability gate
+        run: python3 scripts/gate_traceability.py
+
       - name: Install pinned Rust toolchain
         # rust-toolchain.toml is the single source of truth for the exact
         # toolchain version; `rustup toolchain install` reads it directly.

@@ -35,6 +35,12 @@ jobs:
       - name: No-simulation gate
         run: python3 scripts/gate_no_simulation.py
 
+      # RS-21 (R4): the traceability matrix must stay honest against the DC
+      # and the code — every DS-C/DS-A id resolves to the frozen contract,
+      # every route carries a matrix section, every golden lock file exists.
+      - name: Traceability gate
+        run: python3 scripts/gate_traceability.py
+
       - name: Install pinned Rust toolchain
         # rust-toolchain.toml is the single source of truth for the exact
         # toolchain version; `rustup toolchain install` reads it directly.
@@ -162,3 +168,47 @@ jobs:
           name: supportos-plus_amd64.deb
           path: target/deb/supportos-plus_*_amd64.deb
           if-no-files-found: error
+
+  # RS-21 (R4): the reskin's drift lock. The 23 kittest suites (152 tests,
+  # 168 goldens) diff-lock every rebuilt page — the REAL pages over seeded
+  # mirrors, 1440/1024/800 × 900, light + dark, a11y check ON — against the
+  # checked-in baselines. The runner has no GPU, so the frames render through
+  # Mesa's lavapipe, the same software-rasterizer family the baselines were
+  # produced with (RS-16..RS-20's diff-locked-twice discipline). A visual
+  # drift on any page now fails CI instead of shipping silently.
+  snapshots:
+    name: kittest snapshot locks (reskin drift gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+          rustc --version
+
+      - name: Cache cargo state
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Install the software Vulkan rasterizer (lavapipe)
+        # egui_kittest renders headless through wgpu; the runner has no GPU,
+        # so the goldens render through Mesa's lavapipe. Both env vars point
+        # wgpu at the ICD (VK_DRIVER_FILES is the current name,
+        # VK_ICD_FILENAMES the legacy one some wgpu versions read).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
+          ls /usr/share/vulkan/icd.d/
+
+      - name: Test (kittest suites, snapshots diff-locked)
+        env:
+          VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          WGPU_BACKEND: vulkan
+        # UPDATE_SNAPSHOTS is deliberately NOT set: the suites diff against
+        # the committed baselines and fail on any drift.
+        run: cargo test --locked -p supportos-plus-app-shell --features kittest-ui
