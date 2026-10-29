@@ -1,5 +1,16 @@
 //! Diagnostics page (1.2.0).
 //!
+//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `diagnostics` sheet (DS-A-06 console): the event log's
+//! filter row is DS chips (the pre-rebuild build painted raw
+//! selectable_labels) with the refresh/clear acts pushed right; the evRows
+//! adopt the lab's anatomy (small muted timestamp, the DS-C-06 state dot
+//! for the level, the service badge + message on one line); the audit
+//! trail's actor/ai cells ride the lab's AI badge tone; the sync-state
+//! badges follow the lab's SYNC map (LIVE→live/success, ERROR→error,
+//! NEW→draft/neutral, CATCHING_UP→catching_up/info, unknown→stale/warning).
+//! Queries and the armed clear byte-identical.
+//!
 //! Every error and report the app produces used to vanish into stdout
 //! logs — the user saw "nothing is syncing" with no way to find out why.
 //! This page surfaces the persisted record:
@@ -248,6 +259,8 @@ impl DiagnosticsPage {
         );
         let mut clear_requested = false;
         design::card_titled(ui, "Event log", Some(&subtitle), |ui| {
+            // The lab's toolbar: the filter chips left, the refresh/clear
+            // acts right.
             ui.horizontal(|ui| {
                 for filter in [
                     LevelFilter::All,
@@ -255,24 +268,25 @@ impl DiagnosticsPage {
                     LevelFilter::Warnings,
                     LevelFilter::Info,
                 ] {
-                    let selected = self.filter == filter;
-                    if ui.selectable_label(selected, filter.label()).clicked() {
+                    if design::chip(ui, self.filter == filter, filter.label()).clicked() {
                         self.filter = filter;
                         self.invalidate();
                     }
                 }
-                if design::button(ui, "refresh", ButtonVariant::Outline).clicked() {
-                    self.invalidate();
-                }
-                if !events.is_empty()
-                    && design::button(ui, "clear log", ButtonVariant::Destructive).clicked()
-                {
-                    // Clean-audit item 140: the clear arms the shell dialog
-                    // (with the row count it is about to destroy) instead of
-                    // running unconfirmed. Deferred out of the card closure —
-                    // a `return` here would only exit the closure.
-                    clear_requested = true;
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if !events.is_empty()
+                        && design::button(ui, "clear log", ButtonVariant::Destructive).clicked()
+                    {
+                        // Clean-audit item 140: the clear arms the shell dialog
+                        // (with the row count it is about to destroy) instead of
+                        // running unconfirmed. Deferred out of the card closure —
+                        // a `return` here would only exit the closure.
+                        clear_requested = true;
+                    }
+                    if design::button(ui, "refresh", ButtonVariant::Outline).clicked() {
+                        self.invalidate();
+                    }
+                });
             });
             ui.add_space(6.0);
             if events.is_empty() {
@@ -294,14 +308,17 @@ impl DiagnosticsPage {
                 .auto_shrink([false, false])
                 .show_rows(ui, 26.0, events.len(), |ui, range| {
                     for event in &events[range] {
+                        // The lab's evRow: small muted timestamp, the
+                        // DS-C-06 state dot for the level, then the service
+                        // badge + message.
                         let tone = match event.level.as_str() {
                             "error" => BadgeTone::Destructive,
                             "warn" => BadgeTone::Warning,
                             _ => BadgeTone::Info,
                         };
                         ui.horizontal(|ui| {
-                            design::badge(ui, &event.level, tone);
                             ui.monospace(egui::RichText::new(&event.timestamp).size(12.0).weak());
+                            design::status_dot(ui, tone, false);
                             if !event.service.is_empty() {
                                 design::badge(ui, &event.service, BadgeTone::Neutral);
                             }
@@ -355,7 +372,13 @@ impl DiagnosticsPage {
                                 .size(12.0)
                                 .weak(),
                         );
-                        design::badge(ui, &row.actor, BadgeTone::Neutral);
+                        // The lab: the ai actor rides the AI badge tone.
+                        let (actor_tone, actor_label) = if row.actor == "ai" {
+                            (BadgeTone::Ai, row.actor.as_str())
+                        } else {
+                            (BadgeTone::Neutral, row.actor.as_str())
+                        };
+                        design::badge(ui, actor_label, actor_tone);
                         ui.label(
                             egui::RichText::new(row.action.as_str())
                                 .size(12.5)
@@ -369,7 +392,7 @@ impl DiagnosticsPage {
                             .size(12.5),
                         );
                         let (tone, label) = if row.ai_involvement {
-                            (BadgeTone::Info, "ai")
+                            (BadgeTone::Ai, "ai")
                         } else {
                             (BadgeTone::Neutral, "—")
                         };
@@ -444,9 +467,15 @@ impl DiagnosticsPage {
                         for run in &runs {
                             ui.monospace(egui::RichText::new(run.id.to_string()).size(12.5));
                             ui.monospace(egui::RichText::new(run.kind.as_str()).size(12.5));
+                            // The lab's SYNC map: LIVE→live (success),
+                            // ERROR→error, NEW→draft (neutral),
+                            // CATCHING_UP→catching_up (info), unknown→stale
+                            // (warning) — the raw state stays the label.
                             let tone = match run.state.as_str() {
                                 "LIVE" => BadgeTone::Success,
                                 "ERROR" => BadgeTone::Destructive,
+                                "NEW" => BadgeTone::Neutral,
+                                "CATCHING_UP" => BadgeTone::Info,
                                 _ => BadgeTone::Warning,
                             };
                             design::badge(ui, &run.state, tone);
