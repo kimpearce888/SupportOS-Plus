@@ -200,3 +200,58 @@ hit 100% mid-verification, failing 72 filesystem core tests and one kittest link
 (bus error) — freed by pruning target/debug executables + stale rlibs + ~/.cache,
 everything re-ran green. **Next in batch:** RS-19 wave C (Operations, AiCenter,
 Automation, CustomObjects, Outreach).
+
+**RS-19 — R3 wave C (verified 2026-10-29):** all five pages rebuilt onto their DC
+archetypes, behavior byte-identical everywhere, a11y labels on every interactive
+control, zero bespoke styling. **Operations → DS-A-01 pilot** (7001cf8): DS-C-09
+underline tab rail; the Tiles tab renders severity-banded DS-C-04 metric tiles
+through design::metric_tile (band tints count + 3px rail per DS.TONE, drill tiles
+carry the lab's 'open →' line, full-tile hitbox keeps the inbox drill); the
+Workload table adopts the lab's presentation fix (weighted number under 'Load', %
+under 'Pressure' — the pre-rebuild build swapped the values; quirk receipt added);
+repair surfaced by the a11y-check-ON harness: the workload tab's two ScrollAreas
+shared egui's auto-id chain (a pre-existing ID clash whose debug overlay panics
+the kittest glyph check) — distinct id_salts now; kittest-only seam freezes the
+snapshots' wall-clock generated_at (D6 — the lab's hint is a static fixture),
+compiled out of prod. **AiCenter → DS-C-09 rail** (c6ecefd): the model-role
+routing combo shows the endpoint NAME instead of its index (the lab's
+presentation fix + quirk receipt) and both routing controls carry programmatic
+names. **Automation** (643f671): approval rows adopt the lab's presentation fix
+(the human-readable action renders first as a badge — the tagged-enum JSON parses
+through core's Action and rides action_description, raw strings fall back
+verbatim — and the raw JSON moves into a 'raw proposed action' collapse, quirk
+receipt added); approve rides the lab's outline button (the one-click decide
+write unchanged, item-80 attribution intact). **CustomObjects** (ecd0564): the
+header is the DS-C-01 PageHeader with the New Type primary + the A-6 counter
+pill; the object pane head becomes the lab's ds-tool-row (strong title, count
+pill right) and the M20 50-row-cap honesty note moves beneath as a hint; the
+search toolbar is the DS-C-10 FilterBar; object cards adopt the lab's kv-row
+anatomy (muted key, mono value) and the empty state carries the lab's copy; the
+select-options input (no visible label) carries the ai_center-style programmatic
+name. **Outreach** (2444a1f): the chip row is the DS-C-09 rail; campaign cards
+adopt the lab's split ds-tool-row (lifecycle acts left, cancel-remaining danger +
+retry-failed outline right) and the lab's CAMP badge semantics (completed onto
+the resolved success badge, every other lifecycle token neutral with the raw
+token visible per DC C-1); the Campaign report card grows the lab's DS-C-15 warn
+receipt (the report reads top-level keys while core nests them under totals —
+outreach.rs:1336 — every row renders 0; data-layer bug, out of reskin scope,
+documented not fixed, the reads stay byte-identical per the lab's own note);
+segment rows adopt the lab's card anatomy (strong id — name, delete pushed right,
+the criteria JSON as the mono line beneath — the definition was in the row JSON
+all along but the pre-rebuild build kept it invisible); DNC rows push the
+reason/ts/remove cluster right; every form input binds its visible label via
+Response::labelled_by. **Goldens:** 5 new suites this wave (kittest_operations_page.rs
+7, kittest_ai_center_page.rs 7, kittest_automation_page.rs 7,
+kittest_custom_objects_page.rs 7, kittest_outreach_page.rs 8 — 6 real-page goldens
+each at 1440/1024/800 × 900 light+dark + the interaction goldens: Workload-tab,
+Usage-tab, New-Rule-form, New-Type-form, Segments-tab + New-Campaign-form),
+diff-locked twice, a11y check ON. Verification per commit: fmt clean; clippy -D
+warnings (workspace + core sandbox); app-shell 234 + core 485 + core sandbox 493 +
+xtask 11 + lint 2 exit 0; kittest all suites green across the fourteen files;
+SPP_SMOKE exit 0. **Environment note (this sandbox, not a code event):** the root
+filesystem re-hit 100% mid-verification (bus error on two kittest links) — the
+9.9G volume cannot hold the whole suite's test binaries at once; suites were run
+sequentially with the just-linked binary pruned between runs, everything green.
+**Next in batch:** RS-20 wave D (Settings, Notifications, Search, SupportGraph,
+Connectors, Diagnostics, SyncHealth, Onboarding, Shell) — the final R3 wave,
+then the G2/G3 evidence packs at the batch STOP.
