@@ -1360,6 +1360,7 @@ pub fn metric_tile(
     label: &str,
     band: Option<BadgeTone>,
     drill: bool,
+    drill_line: Option<&str>,
 ) -> egui::Response {
     let t = tokens(ui);
     let count_color = band.map(|b| tone_colors_of(t, b).1).unwrap_or(t.foreground);
@@ -1386,8 +1387,23 @@ pub fn metric_tile(
         f32::INFINITY,
         egui::TextStyle::Body,
     );
+    // The lab's drill variant carries a second muted line ('open →' on the
+    // operations console) and grows by its height; plain tiles keep the
+    // 40px single row.
+    let drill_h = drill_line.map(|l| {
+        egui::WidgetText::from(egui::RichText::new(l).small().color(t.muted_foreground))
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Small,
+            )
+            .size()
+            .y
+    });
+    let height = 40.0 + drill_h.unwrap_or(0.0);
     let width = 196.0f32.max(count_g.size().x + label_g.size().x + 12.0 + 10.0 + 12.0 + 12.0);
-    let size = egui::vec2(width, 40.0);
+    let size = egui::vec2(width, height);
     let (id, rect) = ui.allocate_space(size);
     let sense = if drill {
         egui::Sense::click()
@@ -1417,7 +1433,7 @@ pub fn metric_tile(
     }
     let (cw, ch) = (count_g.size().x, count_g.size().y);
     let lh = label_g.size().y;
-    let y = rect.center().y;
+    let y = rect.center().y - drill_h.map(|h| h / 2.0).unwrap_or(0.0);
     ui.painter().galley(
         egui::pos2(rect.min.x + 12.0, y - ch / 2.0),
         count_g,
@@ -1428,6 +1444,21 @@ pub fn metric_tile(
         label_g,
         t.foreground,
     );
+    if let Some((line, line_h)) = drill_line.zip(drill_h) {
+        let line_g =
+            egui::WidgetText::from(egui::RichText::new(line).small().color(t.muted_foreground))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Small,
+                );
+        ui.painter().galley(
+            egui::pos2(rect.min.x + 12.0, rect.max.y - line_h - 6.0),
+            line_g,
+            t.muted_foreground,
+        );
+    }
     let resp = if drill {
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
     } else {

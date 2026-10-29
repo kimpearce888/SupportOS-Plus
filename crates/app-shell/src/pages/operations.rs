@@ -62,16 +62,6 @@ impl Severity {
             Self::Info => "Info",
         }
     }
-
-    /// Theme-aware value color for the tile counters (redesign: token
-    /// tones replace the raw RED/YELLOW/LIGHT_BLUE).
-    fn count_color(self, t: &design::Tokens) -> egui::Color32 {
-        match self {
-            Self::Critical => t.destructive_text,
-            Self::Warning => t.warning_foreground,
-            Self::Info => t.info_foreground,
-        }
-    }
 }
 
 /// Tile label (port of the web `tile_label`).
@@ -244,6 +234,21 @@ impl OperationsPage {
         }
     }
 
+    /// kittest-only seam: the tiles hint and the workload card render the
+    /// snapshots' wall-clock `generated_at` (HEAD behavior, D6) — pixel
+    /// goldens freeze the stamps at a fixed instant so the suites stay
+    /// diff-locked. Compiled out of non-kittest builds.
+    #[cfg(feature = "kittest-ui")]
+    #[doc(hidden)]
+    pub fn kittest_freeze_generated_at(&mut self) {
+        if let Some(s) = &mut self.snapshot {
+            s.generated_at = "2026-10-27T09:59:59.123Z".into();
+        }
+        if let Some(w) = &mut self.workload {
+            w.generated_at = "2026-10-27T09:59:59.123Z".into();
+        }
+    }
+
     /// Live-update invalidation (web: `sse_refresh` version bump).
     /// Clean-audit item 76: the Library's mirror data goes stale but the
     /// model (and the open edit form inside it) is NOT dropped — the
@@ -307,17 +312,20 @@ impl OperationsPage {
             ),
             |_| {},
         );
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                }
-            }
-        });
+        // DS-C-09 underline tab rail — the lab's three labels, same state
+        // machine (the rail carries its own divider).
+        let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
+        if let Some(i) = design::tabs(
+            ui,
+            &labels,
+            Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
+        ) && let Some(tab) = Tab::ALL.get(i)
+        {
+            self.tab = *tab;
+        }
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
         }
-        design::divider(ui);
 
         match self.tab {
             Tab::Tiles => nav = self.tiles_ui(ui),
@@ -366,8 +374,25 @@ impl OperationsPage {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                     for tile in group {
-                        let clicked = tile_ui(ui, &tile);
-                        if clicked && tile_drills_into_inbox(tile.key) {
+                        // The lab's tiles are DS-C-04 metric tiles: the
+                        // severity band tints the count + the 3px rail, and
+                        // the drill variant carries the lab's 'open →' line.
+                        let drills = tile_drills_into_inbox(tile.key);
+                        let tone = match band {
+                            Severity::Critical => BadgeTone::Destructive,
+                            Severity::Warning => BadgeTone::Warning,
+                            Severity::Info => BadgeTone::Info,
+                        };
+                        let resp = design::metric_tile(
+                            ui,
+                            &tile.count_label(),
+                            tile_label(tile.key),
+                            Some(tone),
+                            drills,
+                            drills.then_some("open →"),
+                        )
+                        .on_hover_text(tile_description(tile.key));
+                        if resp.clicked() && drills {
                             // First clicked drill wins; web navigates on click.
                             if nav.is_none() {
                                 nav = Some(NavRequest::InboxTile(tile.key.as_str().to_string()));
@@ -403,77 +428,99 @@ impl OperationsPage {
                 workload.generated_at, workload.unassigned_work
             )),
             |ui| {
-                egui::ScrollArea::vertical().show_rows(ui, 24.0, agents.len(), |ui, range| {
-                    design::table(
-                        ui,
-                        "ops-workload-table",
-                        &[
-                            "Agent", "Open", "Waiting", "Capacity", "Load", "Pressure", "Actions",
-                        ],
-                        28.0,
-                        |ui| {
-                            let t = design::tokens(ui);
-                            for agent in &agents[range] {
-                                ui.label(
-                                    egui::RichText::new(agent.display_name.as_str())
-                                        .size(13.0)
-                                        .color(t.foreground),
-                                );
-                                design::td_num(ui, &agent.open_workload.to_string());
-                                design::td_num(ui, &agent.customer_waiting_workload.to_string());
-                                design::td_num(ui, &agent.capacity.to_string());
-                                design::td_num(ui, &format!("{:.0}%", agent.pressure * 100.0));
-                                design::td_num(ui, &format!("{:.2}", agent.weighted_load));
-                                ui.horizontal(|ui| {
-                                    let mut new_model = model.clone();
-                                    if design::button(ui, "+", ButtonVariant::Outline)
-                                        .on_hover_text("Increase capacity")
-                                        .clicked()
-                                    {
-                                        let res = db.with_write(|conn| {
-                                            adjust_capacity(
-                                                conn,
-                                                &mut new_model,
-                                                agent.user_local_id,
-                                                1,
-                                            )
-                                        });
-                                        if let Err(e) = res {
-                                            self.error = Some(e);
-                                        } else {
-                                            self.capacity = Some(new_model);
-                                            self.workload = None;
-                                        }
-                                    }
-                                    if design::button(ui, "−", ButtonVariant::Outline)
-                                        .on_hover_text("Decrease capacity")
-                                        .clicked()
-                                    {
+                // Distinct id_salt: the suggestions scroll below shares the
+                // auto-id chain, and egui's id-clash debug overlay (🔥) made
+                // kittest's glyph check panic on the pre-existing clash.
+                egui::ScrollArea::vertical()
+                    .id_salt("ops-workload-rows")
+                    .show_rows(ui, 24.0, agents.len(), |ui, range| {
+                        design::table(
+                            ui,
+                            "ops-workload-table",
+                            &[
+                                "Agent", "Open", "Waiting", "Capacity", "Load", "Pressure",
+                                "Actions",
+                            ],
+                            28.0,
+                            |ui| {
+                                let t = design::tokens(ui);
+                                for agent in &agents[range] {
+                                    ui.label(
+                                        egui::RichText::new(agent.display_name.as_str())
+                                            .size(13.0)
+                                            .color(t.foreground),
+                                    );
+                                    design::td_num(ui, &agent.open_workload.to_string());
+                                    design::td_num(
+                                        ui,
+                                        &agent.customer_waiting_workload.to_string(),
+                                    );
+                                    design::td_num(ui, &agent.capacity.to_string());
+                                    // Reskin fix (presentation, the lab's quirk):
+                                    // the pre-rebuild build swapped the Load and
+                                    // Pressure values — the weighted number sat
+                                    // under 'Pressure' and the % under 'Load'.
+                                    // Labels match the values now; no data path
+                                    // changed.
+                                    design::td_num(ui, &format!("{:.2}", agent.weighted_load));
+                                    design::td_num(ui, &format!("{:.0}%", agent.pressure * 100.0));
+                                    ui.horizontal(|ui| {
                                         let mut new_model = model.clone();
-                                        let res = db.with_write(|conn| {
-                                            adjust_capacity(
-                                                conn,
-                                                &mut new_model,
-                                                agent.user_local_id,
-                                                -1,
-                                            )
-                                        });
-                                        if let Err(e) = res {
-                                            self.error = Some(e);
-                                        } else {
-                                            self.capacity = Some(new_model);
-                                            self.workload = None;
+                                        if design::button(ui, "+", ButtonVariant::Outline)
+                                            .on_hover_text("Increase capacity")
+                                            .clicked()
+                                        {
+                                            let res = db.with_write(|conn| {
+                                                adjust_capacity(
+                                                    conn,
+                                                    &mut new_model,
+                                                    agent.user_local_id,
+                                                    1,
+                                                )
+                                            });
+                                            if let Err(e) = res {
+                                                self.error = Some(e);
+                                            } else {
+                                                self.capacity = Some(new_model);
+                                                self.workload = None;
+                                            }
                                         }
-                                    }
-                                });
-                                ui.end_row();
-                            }
-                        },
-                    );
-                });
+                                        if design::button(ui, "−", ButtonVariant::Outline)
+                                            .on_hover_text("Decrease capacity")
+                                            .clicked()
+                                        {
+                                            let mut new_model = model.clone();
+                                            let res = db.with_write(|conn| {
+                                                adjust_capacity(
+                                                    conn,
+                                                    &mut new_model,
+                                                    agent.user_local_id,
+                                                    -1,
+                                                )
+                                            });
+                                            if let Err(e) = res {
+                                                self.error = Some(e);
+                                            } else {
+                                                self.capacity = Some(new_model);
+                                                self.workload = None;
+                                            }
+                                        }
+                                    });
+                                    ui.end_row();
+                                }
+                            },
+                        );
+                    });
             },
         );
         ui.add_space(10.0);
+        // The lab's quirk receipt for the Load/Pressure presentation fix.
+        design::quirk(
+            ui,
+            "Reskin fix (presentation): the pre-rebuild build swapped the Load/Pressure \
+             columns — % under 'Load', weighted number under 'Pressure'. Labels match the \
+             values now.",
+        );
 
         if suggestions.is_empty() {
             design::card_titled(
@@ -503,23 +550,25 @@ impl OperationsPage {
             ),
             |ui| {
                 let t = design::tokens(ui);
-                egui::ScrollArea::vertical().show_rows(ui, 20.0, suggestions.len(), |ui, range| {
-                    for s in &suggestions[range] {
-                        let subject = s.subject.clone().unwrap_or_default();
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "#{} {subject} → {} ({})",
-                                s.conversation_number.unwrap_or(s.conversation_id),
-                                s.suggested_display_name
-                                    .clone()
-                                    .unwrap_or_else(|| "(any)".into()),
-                                s.reason
-                            ))
-                            .size(13.0)
-                            .color(t.foreground),
-                        );
-                    }
-                });
+                egui::ScrollArea::vertical()
+                    .id_salt("ops-suggestions")
+                    .show_rows(ui, 20.0, suggestions.len(), |ui, range| {
+                        for s in &suggestions[range] {
+                            let subject = s.subject.clone().unwrap_or_default();
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "#{} {subject} → {} ({})",
+                                    s.conversation_number.unwrap_or(s.conversation_id),
+                                    s.suggested_display_name
+                                        .clone()
+                                        .unwrap_or_else(|| "(any)".into()),
+                                    s.reason
+                                ))
+                                .size(13.0)
+                                .color(t.foreground),
+                            );
+                        }
+                    });
             },
         );
     }
@@ -824,12 +873,13 @@ impl OperationsPage {
         // ---- Workflows: surfaced with a run action ----
         design::section_title(ui, "Workflows");
         ui.horizontal(|ui| {
-            design::field_label(ui, "conversation #:");
+            let wf_label = design::field_label(ui, "conversation #:");
             ui.add(
                 egui::TextEdit::singleline(&mut library.workflow_number)
                     .desired_width(110.0)
                     .hint_text("e.g. 778"),
-            );
+            )
+            .labelled_by(wf_label.id);
         });
         design::hint_text(
             ui,
@@ -863,6 +913,13 @@ impl OperationsPage {
         if wf_rows.is_empty() {
             design::hint_text(ui, "no workflows mirrored yet");
         }
+        // The lab's companion receipt: these saved replies are also
+        // insertable from the Inbox composer (the lab's R3 note).
+        design::quirk(
+            ui,
+            "Reskin companion (R3): these saved replies are also insertable from the Inbox \
+             composer — already prototyped in the Inbox After view.",
+        );
 
         // Apply the frame's action (outside the render closures).
         match action {
@@ -990,64 +1047,9 @@ impl Default for OperationsPage {
     }
 }
 
-/// One tile card; returns whether it was clicked.
-///
-/// Redesigned as a shadcn-style card tile: severity-toned counter, muted
-/// drill hint, full-card hitbox for the inbox drill-down (same action as
-/// the web tile's `<A>` link).
-fn tile_ui(ui: &mut egui::Ui, tile: &TileView) -> bool {
-    let band = tile_severity(tile.key);
-    let t = design::tokens(ui);
-    let count_color = band.count_color(t);
-    let mut clicked = false;
-    let drills = tile_drills_into_inbox(tile.key);
-    let card = design::card(ui, |ui| {
-        // Wider min-width keeps tile labels on one line; the wrapped row
-        // breaks into two tidy rows on narrow windows.
-        ui.set_min_width(196.0);
-        ui.set_min_height(52.0);
-        ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(tile.count_label())
-                        .size(20.0)
-                        .strong()
-                        .color(count_color),
-                );
-                ui.label(
-                    egui::RichText::new(tile_label(tile.key))
-                        .size(13.0)
-                        .color(t.foreground),
-                );
-            });
-            if drills {
-                ui.label(
-                    egui::RichText::new("open in inbox →")
-                        .small()
-                        .color(t.muted_foreground),
-                );
-            }
-        });
-    });
-    let card_rect = card.response.rect;
-    card.response.on_hover_text(tile_description(tile.key));
-    if drills {
-        // The whole card acts as the web tile's <A> link: the hitbox is
-        // the card's own rect (full-card semantics).
-        if ui
-            .interact(
-                card_rect,
-                egui::Id::unique(tile.key.as_str()),
-                egui::Sense::click(),
-            )
-            .clicked()
-        {
-            clicked = true;
-        }
-    }
-    clicked
-}
-
+// The saved-replies edit form card (the Library tab's CRUD surface) and
+// the FIND-005 confirm plumbing live on the page impl; the tiles render
+// through design::metric_tile (DS-C-04) in `tiles_ui`.
 #[cfg(test)]
 mod tests {
     use super::*;

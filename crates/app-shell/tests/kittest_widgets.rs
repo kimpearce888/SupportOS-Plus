@@ -127,12 +127,13 @@ fn draw(ui: &mut egui::Ui, s: &mut Widgets) {
             "sev-1 incidents",
             Some(BadgeTone::Destructive),
             false,
+            None,
         )
         .clicked()
         {
             s.drills += 1;
         }
-        if design::metric_tile(ui, "23", "open conversations", None, true).clicked() {
+        if design::metric_tile(ui, "23", "open conversations", None, true, None).clicked() {
             s.drills += 1;
         }
     });
