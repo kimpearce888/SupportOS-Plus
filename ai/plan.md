@@ -221,6 +221,8 @@ Batch mapping under `rule.md` (ten at a time):
   widget sets, page waves). Gate evidence packs (G2 tokens, G3 Inbox pilot) are
   presented at the batch STOP; the owner may split this batch at either gate on request.
 - **Batch RS-3** = RS-21 — Stage 2 close: R4 final acceptance + release (Gate G4).
+  Opened 2026-10-29 on the owner's `continue` after the RS-2 STOP; the item
+  moved to `progress.md` per Rule 2.
 
 ### Stage 1 — design-lab conformance, DS-4 (touches only `mockups/design-lab/`)
 
@@ -230,15 +232,11 @@ Batch mapping under `rule.md` (ten at a time):
 
 ### Stage 2 — egui reskin R1–R4 (Rust)
 
-> **Batch RS-2 (RS-11..RS-20) opened 2026-10-28 after Gate G1** — the ten items were
-> moved to `progress.md` per Rule 2; their full text lives there while the batch is
-> active. `RS-21` below remains the only queued item (Batch RS-3).
-
-**RS-21 — R4: final acceptance + release.** Traceability matrix (screen region → DS-C
-id → DC row); blind test (5-second AI reply identification); SUS questionnaire, target
-≥68; CI snapshot locks every rebuilt page against drift; v1.9.0 tag + release notes;
-acceptance records folded into the printable report series (the deferred PDF task).
-**GATE G4 — owner final acceptance.**
+> **Batch RS-2 (RS-11..RS-20) COMPLETE and closed in `completed.md` (2026-10-29)**
+> — R3 finished: every page renders through the DC widget set; G2/G3 evidence
+> packs recorded. **Batch RS-3 (RS-21) opened 2026-10-29** on the owner's
+> `continue`; the item moved to `progress.md` per Rule 2 — its full text lives
+> there while the batch is active.
 
 ## Notes
 
