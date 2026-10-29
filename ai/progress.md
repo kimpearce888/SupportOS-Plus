@@ -255,3 +255,69 @@ sequentially with the just-linked binary pruned between runs, everything green.
 **Next in batch:** RS-20 wave D (Settings, Notifications, Search, SupportGraph,
 Connectors, Diagnostics, SyncHealth, Onboarding, Shell) — the final R3 wave,
 then the G2/G3 evidence packs at the batch STOP.
+
+**RS-20 — R3 wave D (verified 2026-10-29):** all nine pages rebuilt onto their DC
+archetypes, behavior byte-identical everywhere, a11y labels on every interactive
+control, zero bespoke styling. **Notifications** (5ddb782): DS-C-09 rail, the
+mark-all-read act as the lab's text button, the card toolbar's real unread state
+dot (the lab's ds-udot — the '● '-inside-the-badge quirk receipt rides beneath
+the list), the raw type badge, the relative time with the raw UTC in the hover
+title (calendar-day semantics per the lab's relmap — days-from-civil on the ISO
+date prefixes, no new dependency; the formatter is deterministic so the goldens
+diff-lock without a wall-clock seam), the read/unread act pushed right, the
+lab's empty-state copy. **Search** (37621c9): the toolbar keeps the HEAD
+lost-focus + Enter semantics, the clear act as text, the empty state carries the
+lab's Try-"export" CTA (the se-demo act over the real FTS engine), hit cards
+adopt the lab's anatomy (scope badge + mono strong title + muted subtitle row,
+the why badges on their own chip row, the snippet hint last). **SupportGraph**
+(8d17105): the result count rides the header as the DS-C-01 counter pill; the
+results are the lab's ds-sel-rows (full-width selectable rows, the live-chats
+chat_row pattern — tokens only, ListItem a11y with the selected state); the
+Neighborhood edges render as DS.row pairs (relation strong + far-side label
+left, origin mono-muted right); a kittest-only seam (the operations freeze
+precedent) prefills the search through the real reload. **Connectors**
+(fae27fa): the count pill beside the New Connector primary; the health cell as
+the lab's dot + badge pair; the rows/refresh/delete triple collapses to refresh
++ delete per the lab's A-5 receipt (the chip already opens the rows viewer — no
+workflow step lost) with the receipt verbatim; the New Connector form binds
+every input. **Diagnostics** (82206f3): the filter row is DS chips (raw
+selectable_labels gone) with the refresh/clear acts pushed right; the evRows
+adopt the lab's anatomy (small muted timestamp, the DS-C-06 level dot, the
+service badge + message); the audit trail's actor/ai cells ride the AI badge
+tone; the sync-state badges follow the lab's SYNC map. **SyncHealth** (7e68541):
+the engine state + last success ride the new DS-C-24 hero band (design::hero —
+the lab's verbatim forensic note + the SYNC-map status badge right; the register
+B-2 closure wires the engine hero to DS-C-24; the widget suite grows 14→16);
+the action toolbar splits (three run acts left, destructive cancel right).
+**Onboarding** (aae5e84): the Setup status card renders the lab's DS.row anatomy
+(state dot via the lab's okFlag + strong key left, mono value right) over the
+same five keys. **Shell** (fc4efc9): the header act rides the DS-C-11 outline
+button (the raw egui::Button gone), the ported-pages hint carries the lab's
+stale-checklist tag verbatim; registered harness exception — the page is bound
+to the live App shell state, verified by SPP_SMOKE's 24-page paint gate.
+**Settings** (bc9d92a): the tab rail moves onto the DS-C-09 rail below the
+header (same six labels, same state machine); the a11y-check-ON harness flagged
+the Drag values + combos + eleven inputs — every one now carries its visible
+label via Response::labelled_by (zero visual change); the danger zones adopt the
+lab's card naming ('Danger zone — Workspace data' with the honest 'irreversible'
+sub); the arms (item-11 restore, purge) and every query/write byte-identical.
+**Goldens:** 9 new suites this wave (kittest_notifications_page 7,
+kittest_search_page 7, kittest_support_graph_page 7, kittest_connectors_page 7,
+kittest_diagnostics_page 7, kittest_sync_health_page 7,
+kittest_onboarding_page 7, kittest_settings_page 7, + the widget suite's hero
+pair) — every page at 1440/1024/800 × 900 light+dark + the interaction goldens
+(Mentions-tab, Try-export, Neighborhood, New-Connector-form, errors-filter,
+Run-action, Mark-complete, Help-Scout-tab), diff-locked twice, a11y check ON.
+The fixed-timestamp seeding discipline (events/audit/checkpoints/runs) keeps
+the diff-locked rule honest against the wall-clock writers. Verification per
+commit: fmt clean; clippy -D warnings; app-shell 236 + core 485 + core sandbox
+493 + xtask 11 + lint 2 exit 0; kittest all 23 suites green (152 tests);
+SPP_SMOKE exit 0. **Environment note (this sandbox, not a code event):** the
+9.9G root volume re-hit 100% repeatedly (bus errors on test links) — the suites
+were run sequentially with just-linked binaries pruned between runs and the
+GUI-stack rlibs dropped for the core-only runs, everything re-ran green. **CI
+note:** the first seven wave-D pushes failed the CI Format check — the
+mid-verification python seed patches landed after the last local fmt pass;
+feee18a applies rustfmt (formatting only) and re-runs. **R3 is complete: every
+page of the app (24 routes) now renders through the DC widget set.** Next at the
+batch STOP: the G2/G3 evidence packs, then the owner gate.
