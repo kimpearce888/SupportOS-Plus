@@ -1,8 +1,12 @@
 //! Search page (port of the web `pages/search.rs`).
 //!
-//! Presentational pass (shadcn redesign): this page renders through the
-//! shared design system in `crate::design`; the queries, state, and
-//! behavior are unchanged.
+//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `search` sheet (DS "stack" archetype): the toolbar
+//! keeps the lab's input + one primary apply, the clear act rides the
+//! lab's text button, the empty state carries the lab's Try-"export" CTA,
+//! and hit cards adopt the lab's anatomy — scope badge + mono strong
+//! title + muted subtitle row, the why badges on their own chip row, the
+//! snippet hint last. The queries, state, and behavior are unchanged.
 //!
 //! One input, scope selector (`all` / `tickets` / `knowledge` /
 //! `customers`), and the hit list from `spp_core::search::search` —
@@ -158,7 +162,7 @@ impl SearchPage {
                 self.error = None;
                 self.reload(db);
             }
-            if design::button(ui, "clear", ButtonVariant::Ghost).clicked() {
+            if design::button(ui, "clear", ButtonVariant::Text).clicked() {
                 self.query_edit.clear();
                 self.query.clear();
                 self.response = None;
@@ -184,12 +188,21 @@ impl SearchPage {
         }
         let Some(response) = &self.response else {
             if self.query.is_empty() {
-                design::empty_state(
+                // The lab's empty state: the Try-"export" CTA fills the
+                // query and runs the search (the se-demo act).
+                if design::empty_state_cta(
                     ui,
                     Icon::Search,
                     "Search across your workspace",
                     "Type a query and press Enter to search conversations, knowledge, and customers.",
-                );
+                    "Try \"export\"",
+                ) {
+                    self.query_edit = "export".to_string();
+                    self.query = "export".to_string();
+                    self.response = None;
+                    self.error = None;
+                    self.reload(db);
+                }
             } else {
                 ui.spinner();
             }
@@ -225,32 +238,44 @@ impl SearchPage {
             return;
         }
         let hits = response.hits.clone();
-        egui::ScrollArea::vertical().show_rows(ui, 40.0, hits.len(), |ui, range| {
-            for hit in &hits[range] {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for hit in &hits {
+                // The lab's hit card: scope badge + mono strong title +
+                // muted subtitle on the toolbar row, the why badges on
+                // their own chip row, the snippet hint last.
                 design::card(ui, |ui| {
                     ui.horizontal(|ui| {
                         design::badge(ui, hit.scope.as_str(), BadgeTone::Neutral);
                         ui.monospace(
                             egui::RichText::new(hit.title.as_str())
+                                .strong()
                                 .color(design::tokens(ui).foreground),
                         );
                         if !hit.subtitle.is_empty() {
-                            design::hint_text(ui, hit.subtitle.as_str());
-                        }
-                        // A4: real lane provenance — "keyword match",
-                        // "semantic match", "recent".
-                        for reason in &hit.why {
-                            design::badge(
-                                ui,
-                                reason,
-                                if reason == "semantic match" {
-                                    BadgeTone::Info
-                                } else {
-                                    BadgeTone::Neutral
-                                },
+                            ui.label(
+                                egui::RichText::new(hit.subtitle.as_str())
+                                    .small()
+                                    .color(design::tokens(ui).muted_foreground),
                             );
                         }
                     });
+                    // A4: real lane provenance — "keyword match",
+                    // "semantic match", "recent".
+                    if !hit.why.is_empty() {
+                        ui.horizontal(|ui| {
+                            for reason in &hit.why {
+                                design::badge(
+                                    ui,
+                                    reason,
+                                    if reason == "semantic match" {
+                                        BadgeTone::Info
+                                    } else {
+                                        BadgeTone::Neutral
+                                    },
+                                );
+                            }
+                        });
+                    }
                     if !hit.snippet.is_empty() {
                         design::hint_text(ui, hit.snippet.as_str());
                     }
