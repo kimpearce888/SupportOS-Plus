@@ -1,8 +1,12 @@
 //! Custom Objects page (port of the web `pages/custom_objects.rs`).
 //!
-//! Redesigned with the shadcn-style design system (`crate::design`): card
-//! sections, chip type selectors, a form-grid creator and destructive
-//! delete buttons — presentation only, all CRUD behavior intact.
+//! RS-19d reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `custom-objects` sheet (DS "stack" archetype, twoCol):
+//! PageHeader with the lab's counter pill beside the New Type primary
+//! (A-6), the Types rail as DS chips with the confirm-armed deletes, the
+//! object pane as section title + counter + FilterBar search over object
+//! cards with the lab's kv-row anatomy (muted key, mono value). All CRUD
+//! behavior intact — presentation only, all queries/writes byte-identical.
 //!
 //! Two panes (web: type sidebar + object table): a type list / create
 //! form (`custom_objects::{list_types,create_type,delete_type}`) and the
@@ -378,12 +382,18 @@ impl CustomObjectsPage {
                 i64_field(report, "total_links")
             )
         });
+        // DS-C-01 PageHeader: title + report subtitle, right cluster = the
+        // New Type primary (the lab's actions) + the counter pill (A-6:
+        // counts beside the header). egui right_to_left puts the first
+        // added widget rightmost, so the add order below paints
+        // [N types] [New Type] — the lab's DS-C-01 order.
         design::page_header(ui, "Custom Objects", subtitle.as_deref(), |ui| {
             if design::button_with_icon(ui, Icon::Plus, "New Type", ButtonVariant::Primary)
                 .clicked()
             {
                 self.show_new_type = !self.show_new_type;
             }
+            design::page_counter(ui, &format!("{} types", self.types.len()));
         });
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
@@ -463,35 +473,45 @@ impl CustomObjectsPage {
             return None;
         };
         let t = self.types.iter().find(|t| t.id == type_id)?;
-        // Audit fix (M20): the object list caps at 50 rows with no pager —
-        // say so instead of implying the full set is shown.
-        let title = if (self.objects.len() as i64) < self.objects_total {
-            format!(
-                "{} objects — showing first {} of {}",
-                t.name,
-                self.objects.len(),
-                self.objects_total
-            )
-        } else {
-            format!("{} objects ({})", t.name, self.objects_total)
-        };
-        design::section_title(ui, &title);
-        ui.add_space(4.0);
+        // The lab's ds-tool-row: section title left, the DS-C-01 counter
+        // pill right (A-6: counts never sit in titles). Audit fix (M20)
+        // honesty note rides beneath when the 50-row cap truncates —
+        // same wording the incidents pilot uses.
         ui.horizontal(|ui| {
-            let mut q = self.object_query.clone();
-            let response = ui.add_sized(
-                [220.0, 28.0],
-                egui::TextEdit::singleline(&mut q).hint_text("search objects…"),
-            );
-            if response.changed() {
-                self.object_query = q;
-            }
-            if design::button_with_icon(ui, Icon::Search, "search", ButtonVariant::Primary)
-                .clicked()
-            {
-                self.reload_objects(db);
-            }
+            design::section_title(ui, &format!("{} objects", t.name));
+            design::page_counter(ui, &self.objects_total.to_string());
         });
+        if (self.objects.len() as i64) < self.objects_total {
+            design::hint_text(
+                ui,
+                &format!(
+                    "showing first {} of {} — the list has no pager",
+                    self.objects.len(),
+                    self.objects_total
+                ),
+            );
+        }
+        ui.add_space(4.0);
+        // DS-C-10 FilterBar (A-2): the lab's search toolbar — input left,
+        // exactly one primary apply right. Behavior preserved: the query
+        // updates on keystroke, the apply triggers the reload.
+        let apply = design::filter_bar(
+            ui,
+            |ui| {
+                let mut q = self.object_query.clone();
+                let response = ui.add_sized(
+                    [220.0, 28.0],
+                    egui::TextEdit::singleline(&mut q).hint_text("search objects…"),
+                );
+                if response.changed() {
+                    self.object_query = q;
+                }
+            },
+            "search",
+        );
+        if apply.clicked() {
+            self.reload_objects(db);
+        }
         ui.add_space(6.0);
 
         let objects = self.objects.clone();
@@ -501,6 +521,10 @@ impl CustomObjectsPage {
             .show(ui, |ui| {
                 let tokens = design::tokens(ui);
                 for object in &objects {
+                    // The lab's object card: ds-tool-row head (strong
+                    // title, danger delete) over the lab's kv rows —
+                    // muted key, mono value (strings verbatim, scalars
+                    // through their JSON form).
                     design::card(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
@@ -525,10 +549,12 @@ impl CustomObjectsPage {
                                     serde_json::Value::String(s) => s.clone(),
                                     other => other.to_string(),
                                 };
-                                ui.monospace(
-                                    egui::RichText::new(format!("{key}: {rendered}"))
-                                        .color(tokens.foreground),
-                                );
+                                ui.horizontal(|ui| {
+                                    design::field_label(ui, &format!("{key}:"));
+                                    ui.monospace(
+                                        egui::RichText::new(rendered).color(tokens.foreground),
+                                    );
+                                });
                             }
                         }
                     });
@@ -538,7 +564,9 @@ impl CustomObjectsPage {
                         ui,
                         Icon::Boxes,
                         "No objects",
-                        "Create one below or adjust the search.",
+                        // The lab's empty-state copy for this pane.
+                        "Create one below or adjust the search — objects store \
+                         per-customer properties used by the graph and AI answers.",
                     );
                 }
             });
@@ -556,18 +584,22 @@ impl CustomObjectsPage {
             .collect();
         let has_fields = !keys.is_empty();
         design::card_titled(ui, "New object", None, |ui| {
+            // The lab's formGrid rows; every input binds its visible label
+            // (RS-18 wave-wide a11y rule — egui never reads a preceding
+            // label on its own).
+            let title_label = design::field_label(ui, "title:");
             ui.add_sized(
                 [ui.available_width(), 28.0],
                 egui::TextEdit::singleline(&mut self.new_object_title).hint_text("object title"),
-            );
+            )
+            .labelled_by(title_label.id);
             for (idx, key) in keys.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    design::field_label(ui, &format!("{key}:"));
-                    ui.add_sized(
-                        [180.0, 28.0],
-                        egui::TextEdit::singleline(&mut self.new_object_fields[idx].1),
-                    );
-                });
+                let label = design::field_label(ui, &format!("{key}:"));
+                ui.add_sized(
+                    [180.0, 28.0],
+                    egui::TextEdit::singleline(&mut self.new_object_fields[idx].1),
+                )
+                .labelled_by(label.id);
             }
             if has_fields && design::button(ui, "create object", ButtonVariant::Primary).clicked() {
                 self.create_object(db);
@@ -580,18 +612,22 @@ impl CustomObjectsPage {
         design::card(ui, |ui| {
             design::section_title(ui, "New Type");
             design::form_grid(ui, "co-new-type", |ui| {
-                design::field_label(ui, "name:");
+                // Every input binds its visible label (RS-18 wave-wide
+                // a11y rule — egui never reads a preceding label alone).
+                let name_label = design::field_label(ui, "name:");
                 ui.add_sized(
                     [220.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_type_name).hint_text("type name"),
-                );
+                )
+                .labelled_by(name_label.id);
                 ui.end_row();
-                design::field_label(ui, "description:");
+                let desc_label = design::field_label(ui, "description:");
                 ui.add_sized(
                     [260.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_type_description)
                         .hint_text("what this type collects"),
-                );
+                )
+                .labelled_by(desc_label.id);
                 ui.end_row();
             });
             ui.add_space(6.0);
@@ -633,16 +669,18 @@ impl CustomObjectsPage {
                     egui::Grid::new(format!("co-field-grid-{idx}"))
                         .num_columns(5)
                         .show(ui, |ui| {
-                            design::field_label(ui, "key:");
+                            let key_label = design::field_label(ui, "key:");
                             ui.add_sized(
                                 [120.0, 28.0],
                                 egui::TextEdit::singleline(&mut key).hint_text("key"),
-                            );
-                            design::field_label(ui, "label:");
+                            )
+                            .labelled_by(key_label.id);
+                            let label_label = design::field_label(ui, "label:");
                             ui.add_sized(
                                 [120.0, 28.0],
                                 egui::TextEdit::singleline(&mut label).hint_text("label"),
-                            );
+                            )
+                            .labelled_by(label_label.id);
                             design::field_label(ui, "type:");
                             ui.horizontal(|ui| {
                                 for field_type in FieldType::ALL {
@@ -659,11 +697,21 @@ impl CustomObjectsPage {
                             });
                             ui.checkbox(&mut self.new_fields[idx].required, "required");
                             if self.new_fields[idx].field_type == FieldType::Select {
+                                // No visible label for this one — the
+                                // ai_center pattern names it directly
+                                // (the programmatic aria-label).
                                 ui.add_sized(
                                     [180.0, 28.0],
                                     egui::TextEdit::singleline(&mut options),
                                 )
-                                .on_hover_text("comma-separated options");
+                                .on_hover_text("comma-separated options")
+                                .widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::Role::TextInput,
+                                        ui.is_enabled(),
+                                        "select options (comma-separated)",
+                                    )
+                                });
                             }
                             ui.end_row();
                         });
