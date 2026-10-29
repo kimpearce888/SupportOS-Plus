@@ -33,25 +33,37 @@ The human test below exercises a guarantee the code already enforces structurall
 ## Human test protocol (administered at G4; results recorded in §Result)
 
 1. **Stimuli.** Ten single-card images, shown one at a time: five AI-authored,
-   five non-AI (agent replies, customer messages, notes). Crops are taken from the
-   checked-in kittest goldens (real app renders, not lab mocks):
+   five non-AI (agent replies, customer messages, notes). Crops are taken from
+   the checked-in kittest goldens (real app renders, not lab mocks). The table
+   below is the verified crop set (2026-10-30, owner-directed kit build): the
+   first-draft sources were corrected where the named page golden does not
+   visually contain the described card — the AI-authored surfaces live in the
+   widget-suite identity goldens (the role-typed cards in isolation), and the
+   AI-badge status surface lives in the Diagnostics audit trail (the ai_center
+   goldens carry no violet AI card). Every crop was verified visually: single
+   card, role surface fully visible, no page context that answers the question
+   by location.
 
    | # | Source golden (crates/app-shell/tests/snapshots/) | Truth |
    |---|---|---|
-   | 1 | `r3_inbox_page_1440_light.png` — copilot suggest card | AI |
-   | 2 | `r3_inbox_page_1440_dark.png` — copilot chat bubble (assistant) | AI |
-   | 3 | `r3_inbox_page_1024_light.png` — AI-drafted reply card in the reader | AI |
-   | 4 | `r3_live_chats_page_1440_light.png` — AI/agent message card | AI |
-   | 5 | `r3_ai_center_page_1440_light.png` — AI status/badge surface | AI |
-   | 6 | `r3_inbox_page_1440_light.png` — agent reply card | not AI |
-   | 7 | `r3_inbox_page_1440_dark.png` — customer message card | not AI |
-   | 8 | `r3_live_chats_page_1440_light.png` — agent message card | not AI |
-   | 9 | `r3_inbox_page_1024_dark.png` — internal note card | not AI |
-   | 10 | `r3_customers_page_1440_light.png` — detail-panel text block | not AI |
+   | 1 | `r2c_inbox_identity_light.png` — AI draft card (Support Ai, violet, insert-as-reply) | AI |
+   | 2 | `r2c_inbox_identity_dark.png` — AI draft card (dark) | AI |
+   | 3 | `r2c_inbox_identity_light.png` — copilot Suggested-reply panel (AI badge) | AI |
+   | 4 | `r2c_inbox_identity_dark.png` — copilot Suggested-reply panel (dark) | AI |
+   | 5 | `r3_diagnostics_page_1440_dark.png` — audit row "reply drafted" with the AI actor + ai-column badges | AI |
+   | 6 | `r2c_inbox_identity_dark.png` — agent reply card (Kim Pearce) | not AI |
+   | 7 | `r2c_inbox_identity_light.png` — internal note card (amber) | not AI |
+   | 8 | `r3_inbox_page_1440_light.png` — agent reply card (Ada Lovelace) | not AI |
+   | 9 | `r3_inbox_page_1024_light.png` — customer message card (Kim Pearce) | not AI |
+   | 10 | `r3_customers_detail_light.png` — Support health stats block (no AI badge; the panel's Interaction-profile card IS AI-badged and must not be used as a not-AI stimulus) | not AI |
 
    Crop rule: single card, role surface fully visible, no page context that
    answers the question by location (the copilot panel position must not give it
    away — crop to the card). Shuffle before presenting; keep the truth key above.
+   The committed kit generator `make_g4_kit.py` (same directory) crops this table
+   verbatim, shuffles with a fixed seed, and emits `g4-kit/g4-blind-test-slides.pdf`
+   (instructions + ten stimulus pages + marked end + administrator key) and
+   `g4-kit/g4-answer-sheet.pdf` (blind-test answers + the SUS form).
 
 2. **Presentation.** Each card flashes for **5 seconds** (slides or a timed
    viewer), then the participant answers one question: *"Was this written by AI?"*
