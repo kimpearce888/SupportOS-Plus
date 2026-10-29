@@ -430,13 +430,21 @@ impl ReportsPage {
                 }
             },
         );
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                }
-            }
-        });
+        // DS-C-09 grouped tab rail — the lab's three groups over the same
+        // eleven labels and the same global-index state machine.
+        let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
+        if let Some(clicked) = design::tab_groups(
+            ui,
+            &[
+                ("Volume & quality", &labels[0..5]),
+                ("AI & digests", &labels[5..8]),
+                ("Platform & custom", &labels[8..11]),
+            ],
+            Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
+        ) && let Some(tab) = Tab::ALL.get(clicked)
+        {
+            self.tab = *tab;
+        }
         ui.add_space(6.0);
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
@@ -556,12 +564,27 @@ impl ReportsPage {
             ui.add_space(8.0);
         }
 
-        let bars = sla_first_response_bars(report);
+        // The lab's first SLA card is the DS-C-23 bar-row list (a real
+        // label/value per mailbox in the a11y tree, slim tracks) — the
+        // painter bar chart it replaces kept no per-mailbox text.
+        let bars: Vec<(&str, i64)> = report
+            .mailboxes
+            .iter()
+            .filter_map(|m| {
+                m.first_response
+                    .avg_business_min
+                    .map(|v| (m.mailbox_name.as_str(), v))
+            })
+            .collect();
         design::card_titled(ui, "First response avg (business minutes)", None, |ui| {
             if bars.is_empty() {
                 design::hint_text(ui, "(no first-response data in range)");
             } else {
-                chart::bar_chart(ui, "reports-sla-bars", &bars, "first response avg");
+                let max = bars.iter().map(|(_, v)| *v).max().unwrap_or(1);
+                for (label, value) in &bars {
+                    design::bar_row(ui, label, *value, max, true);
+                }
+                design::hint_text(ui, &format!("first response avg · max {max}"));
             }
         });
         ui.add_space(10.0);
@@ -661,17 +684,19 @@ impl ReportsPage {
                     }
                 });
                 design::form_grid(ui, "sla-track-cfg", |ui| {
-                    design::field_label(ui, "first response hours:");
+                    let fr_label = design::field_label(ui, "first response hours:");
                     if ui
                         .add(egui::TextEdit::singleline(&mut self.sla_cfg_fr).desired_width(120.0))
+                        .labelled_by(fr_label.id)
                         .changed()
                     {
                         self.sla_cfg_note = None;
                     }
                     ui.end_row();
-                    design::field_label(ui, "resolution hours:");
+                    let res_label = design::field_label(ui, "resolution hours:");
                     if ui
                         .add(egui::TextEdit::singleline(&mut self.sla_cfg_res).desired_width(120.0))
+                        .labelled_by(res_label.id)
                         .changed()
                     {
                         self.sla_cfg_note = None;
@@ -852,10 +877,10 @@ impl ReportsPage {
             ui.horizontal_wrapped(|ui| {
                 design::field_label(ui, "metric:");
                 let metrics = ReportMetricKey::ALL;
+                let metric_label =
+                    spp_core::catalog::reporting::metric_entry(metrics[self.b_metric]).label;
                 egui::ComboBox::from_id_salt("b-metric")
-                    .selected_text(
-                        spp_core::catalog::reporting::metric_entry(metrics[self.b_metric]).label,
-                    )
+                    .selected_text(metric_label)
                     .show_ui(ui, |ui| {
                         for (i, key) in metrics.iter().enumerate() {
                             ui.selectable_value(
@@ -864,13 +889,21 @@ impl ReportsPage {
                                 spp_core::catalog::reporting::metric_entry(*key).label,
                             );
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            ui.is_enabled(),
+                            format!("metric: {metric_label}"),
+                        )
                     });
                 design::field_label(ui, "grouped by:");
                 let dims = ReportDimensionKey::ALL;
+                let dim_label =
+                    spp_core::catalog::reporting::dimension_entry(dims[self.b_dimension]).label;
                 egui::ComboBox::from_id_salt("b-dim")
-                    .selected_text(
-                        spp_core::catalog::reporting::dimension_entry(dims[self.b_dimension]).label,
-                    )
+                    .selected_text(dim_label)
                     .show_ui(ui, |ui| {
                         for (i, key) in dims.iter().enumerate() {
                             ui.selectable_value(
@@ -879,6 +912,14 @@ impl ReportsPage {
                                 spp_core::catalog::reporting::dimension_entry(*key).label,
                             );
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            ui.is_enabled(),
+                            format!("grouped by: {dim_label}"),
+                        )
                     });
                 ui.checkbox(&mut self.b_compare, "compare with previous period");
                 design::field_label(ui, "sort:");
@@ -889,16 +930,19 @@ impl ReportsPage {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                design::field_label(ui, "from (YYYY-MM-DD):");
-                ui.add(egui::TextEdit::singleline(&mut self.b_from).desired_width(110.0));
-                design::field_label(ui, "to:");
-                ui.add(egui::TextEdit::singleline(&mut self.b_to).desired_width(110.0));
-                design::field_label(ui, "limit:");
+                let from_label = design::field_label(ui, "from (YYYY-MM-DD):");
+                ui.add(egui::TextEdit::singleline(&mut self.b_from).desired_width(110.0))
+                    .labelled_by(from_label.id);
+                let to_label = design::field_label(ui, "to:");
+                ui.add(egui::TextEdit::singleline(&mut self.b_to).desired_width(110.0))
+                    .labelled_by(to_label.id);
+                let limit_label = design::field_label(ui, "limit:");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.b_limit)
                         .hint_text("50")
                         .desired_width(60.0),
-                );
+                )
+                .labelled_by(limit_label.id);
             });
             ui.add_space(4.0);
             design::section_title(ui, "Filters (blank = unfiltered)");
@@ -915,8 +959,9 @@ impl ReportsPage {
                     ("mailbox ids (csv):", &mut self.b_f_mailbox_ids),
                     ("assignee ids (csv):", &mut self.b_f_assignee_ids),
                 ] {
-                    design::field_label(ui, label);
-                    ui.add(egui::TextEdit::singleline(field).desired_width(180.0));
+                    let label = design::field_label(ui, label);
+                    ui.add(egui::TextEdit::singleline(field).desired_width(180.0))
+                        .labelled_by(label.id);
                     ui.end_row();
                 }
             });
@@ -928,12 +973,13 @@ impl ReportsPage {
                         Err(e) => Err(e),
                     });
                 }
-                design::field_label(ui, "save as:");
+                let save_label = design::field_label(ui, "save as:");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.b_save_name)
                         .hint_text("name")
                         .desired_width(160.0),
-                );
+                )
+                .labelled_by(save_label.id);
                 if design::button(ui, "Save", ButtonVariant::Outline).clicked() {
                     self.save_report_config(db);
                 }
@@ -964,7 +1010,10 @@ impl ReportsPage {
                         if design::button(ui, "load", ButtonVariant::Outline).clicked() {
                             self.load_saved_report(&saved.config);
                         }
-                        if design::button(ui, "delete", ButtonVariant::Outline).clicked() {
+                        // The lab's saved rows pair the outline load with a
+                        // danger delete (the arm stays the shell's confirm
+                        // dialog — FIND-005).
+                        if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
                             // FIND-005: the delete used to run immediately —
                             // arm the shell confirm instead (it executes only
                             // when the dialog resolves Confirmed).
@@ -1366,19 +1415,31 @@ impl ReportsPage {
                 ui.horizontal_wrapped(|ui| {
                     design::field_label(ui, "kind:");
                     let kinds = spp_core::catalog::GraphNodeKind::ALL;
+                    let kind_label = kinds[self.i_g_kind].as_str();
                     egui::ComboBox::from_id_salt("g-kind")
-                        .selected_text(kinds[self.i_g_kind].as_str())
+                        .selected_text(kind_label)
                         .show_ui(ui, |ui| {
                             for (i, kind) in kinds.iter().enumerate() {
                                 ui.selectable_value(&mut self.i_g_kind, i, kind.as_str());
                             }
+                        })
+                        .response
+                        .widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Button,
+                                ui.is_enabled(),
+                                format!("kind: {kind_label}"),
+                            )
                         });
-                    design::field_label(ui, "label:");
-                    ui.add(egui::TextEdit::singleline(&mut self.i_g_label).desired_width(140.0));
-                    design::field_label(ui, "entity id:");
-                    ui.add(egui::TextEdit::singleline(&mut self.i_g_entity).desired_width(80.0));
-                    design::field_label(ui, "properties (JSON):");
-                    ui.add(egui::TextEdit::singleline(&mut self.i_g_props).desired_width(180.0));
+                    let label_label = design::field_label(ui, "label:");
+                    ui.add(egui::TextEdit::singleline(&mut self.i_g_label).desired_width(140.0))
+                        .labelled_by(label_label.id);
+                    let entity_label = design::field_label(ui, "entity id:");
+                    ui.add(egui::TextEdit::singleline(&mut self.i_g_entity).desired_width(80.0))
+                        .labelled_by(entity_label.id);
+                    let props_label = design::field_label(ui, "properties (JSON):");
+                    ui.add(egui::TextEdit::singleline(&mut self.i_g_props).desired_width(180.0))
+                        .labelled_by(props_label.id);
                     if design::button(ui, "Add node", ButtonVariant::Primary).clicked() {
                         self.add_graph_node_action(db);
                     }
@@ -1651,14 +1712,13 @@ impl ReportsPage {
                     .cloned()
                     .unwrap_or_default();
                 if !anomalies.is_empty() {
-                    ui.label(egui::RichText::new("Anomalies").strong());
+                    design::section_title(ui, "Anomalies");
                     for a in &anomalies {
                         let detail = a["detail"].as_str().unwrap_or_default();
-                        ui.label(
-                            egui::RichText::new(format!("• {detail}"))
-                                .small()
-                                .color(ui.visuals().warn_fg_color),
-                        );
+                        ui.horizontal(|ui| {
+                            design::badge(ui, "anomaly", BadgeTone::Warning);
+                            ui.label(detail);
+                        });
                     }
                     ui.add_space(4.0);
                 }
@@ -1670,31 +1730,20 @@ impl ReportsPage {
                     .as_array()
                     .cloned()
                     .unwrap_or_default();
-                ui.label(egui::RichText::new("What changed").strong());
+                design::section_title(ui, "What changed");
                 if new_gaps.is_empty() && new_articles.is_empty() {
-                    ui.label(
-                        egui::RichText::new(
-                            "No new gaps or article changes since the previous digest.",
-                        )
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
+                    design::hint_text(
+                        ui,
+                        "No new gaps or article changes since the previous digest.",
                     );
                 } else {
                     for g in &new_gaps {
                         let q = g["question"].as_str().unwrap_or_default();
-                        ui.label(
-                            egui::RichText::new(format!("• new gap: {q}"))
-                                .small()
-                                .color(ui.visuals().weak_text_color()),
-                        );
+                        design::hint_text(ui, &format!("new gap: {q}"));
                     }
                     for a in &new_articles {
                         let name = a["name"].as_str().unwrap_or_default();
-                        ui.label(
-                            egui::RichText::new(format!("• article changed: {name}"))
-                                .small()
-                                .color(ui.visuals().weak_text_color()),
-                        );
+                        design::hint_text(ui, &format!("article changed: {name}"));
                     }
                 }
             },
@@ -1759,31 +1808,32 @@ impl ReportsPage {
             );
             return;
         }
-        egui::Grid::new("p1-happiness-list")
-            .num_columns(4)
-            .striped(true)
-            .show(ui, |ui| {
-                ui.label(egui::RichText::new("Rating").strong());
-                ui.label(egui::RichText::new("Conversation").strong());
-                ui.label(egui::RichText::new("Customer").strong());
-                ui.label(egui::RichText::new("Comment").strong());
-                ui.end_row();
+        design::table(
+            ui,
+            "p1-happiness-list",
+            &["Rating", "Conversation", "Customer", "Comment"],
+            28.0,
+            |ui| {
                 for r in &recent {
                     let rating = str_field(r, "rating");
-                    ui.label(match rating.as_str() {
-                        "great" => egui::RichText::new("Great").color(ui.visuals().hyperlink_color),
-                        "not-good" => {
-                            egui::RichText::new("Not good").color(ui.visuals().error_fg_color)
-                        }
-                        _ => egui::RichText::new("Okay"),
-                    });
+                    if rating == "great" {
+                        ui.label(egui::RichText::new("Great").color(ui.visuals().hyperlink_color));
+                    } else if rating == "not-good" {
+                        design::badge(ui, "Not good", BadgeTone::Destructive);
+                    } else {
+                        ui.label("Okay");
+                    }
                     let number = r["conversation_number"].as_i64();
-                    ui.label(number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()));
+                    design::td_num(
+                        ui,
+                        &number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
+                    );
                     ui.label(str_field(r, "customer"));
                     ui.label(str_field(r, "comments"));
                     ui.end_row();
                 }
-            });
+            },
+        );
     }
 
     /// K5: the Help Scout Reports API tab — the 32-endpoint registry behind
@@ -1804,8 +1854,9 @@ impl ReportsPage {
         ui.horizontal(|ui| {
             let specs = spp_core::reports_api::REPORTS;
             let current = &specs[self.hs_pick.min(specs.len() - 1)];
+            let selected_label = format!("{} — {}", current.family.label(), current.name);
             egui::ComboBox::from_id_salt("k5-report-pick")
-                .selected_text(format!("{} — {}", current.family.label(), current.name))
+                .selected_text(selected_label.clone())
                 .width(340.0)
                 .show_ui(ui, |ui| {
                     for (i, spec) in specs.iter().enumerate() {
@@ -1815,11 +1866,19 @@ impl ReportsPage {
                             format!("{} — {}", spec.family.label(), spec.name),
                         );
                     }
+                })
+                .response
+                .widget_info(|| {
+                    // The visible "report picker" has no text label of its
+                    // own — the combo button carries the name or kittest's
+                    // a11y check trips on an unlabeled node.
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        ui.is_enabled(),
+                        format!("report: {selected_label}"),
+                    )
                 });
-            if ui
-                .add(egui::Button::new(egui::RichText::new(
-                    "Fetch from Help Scout",
-                )))
+            if design::button(ui, "Fetch from Help Scout", ButtonVariant::Outline)
                 .on_hover_text(
                     "GET the report for the selected range. A 403 answer means the plan does \
                      not include the Reports API and is recorded as such.",
@@ -2010,6 +2069,14 @@ impl ReportsPage {
                     ui.add_space(2.0);
                 }
             },
+        );
+        // The lab's DS-C-15 quirk receipt — the raw severity token stays
+        // visible (DC C-1) and the current engine never emits 'high'.
+        design::quirk(
+            ui,
+            "Reskin honesty: this tab's badge is always 'medium'/Warning in the current build \
+             because the engine never emits 'high' (reports.rs:1997-2001). The raw severity \
+             token is shown here.",
         );
     }
 

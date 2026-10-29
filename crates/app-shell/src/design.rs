@@ -1500,13 +1500,16 @@ pub fn form_grid<R>(
         .show(ui, add_contents)
 }
 
-/// A form field label (muted, right-aligned toward the control).
-pub fn field_label(ui: &mut egui::Ui, text: &str) {
+/// A muted 13px form field label. Returns the label's response so a
+/// following input can bind it via `Response::labelled_by` — the a11y
+/// check needs every TextInput named, and egui never reads a preceding
+/// label on its own.
+pub fn field_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.label(
         egui::RichText::new(text)
             .size(13.0)
             .color(tokens(ui).muted_foreground),
-    );
+    )
 }
 
 /// Success inline feedback text.
