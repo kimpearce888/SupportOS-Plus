@@ -5004,3 +5004,63 @@ for the side-by-side review.
 **STOP (Rule 8):** Batch RS-2 is closed. The queue holds RS-21 (Batch RS-3 —
 Stage 2 close: R4 final acceptance + release, Gate G4). Work resumes on the
 owner's `continue`.
+
+## Batch RS-3 completion record (Rule 4)
+
+**RS-21 — R4: final acceptance + release (verified 2026-10-29, Gate G4 presented).**
+All five RS-21 work streams landed, verified and pushed (commit chain:
+`b086a56` opened → `432f742` matrix+gate+CI locks → `fc8b5ec` instruments →
+`d828b9f` acceptance PDF → `1c9c506` v1.9.0 bump → `401fb9e` ICD runtime
+resolution → `a7ecfd3` settings 32px registered budget + diff artifacts).
+
+1. **Traceability matrix** — `docs/audit/acceptance/traceability-matrix.md`
+   traces every screen region of all 23 `PageKey` routes + the shell chrome
+   (DC §6) to its DS-C id and DC row, with the archetype (DC §4), the
+   `design.rs` widget and the golden-lock suite per page. One registered alias
+   (G-7): DS-C-04 = the MetricTile half of the DC's DS-C-03 sheet.
+   `scripts/gate_traceability.py` machine-checks the matrix against the frozen
+   DC (id set + alias declaration), the route list and the golden-lock files;
+   negative-tested before landing — a bogus id, a missing route section, a dead
+   golden lock and an undeclared alias each FAIL the gate (clean matrix exits 0).
+2. **CI snapshot locks** — the new `snapshots` job renders all 23 kittest
+   suites (152 tests / 168 goldens) on the runner through Mesa lavapipe with
+   UPDATE_SNAPSHOTS unset. Two runner fixes were needed and are recorded:
+   the ICD filename is resolved at runtime (`lvp_icd.json` on the current
+   image, not the legacy `lvp_icd.x86_64.json`), and the settings page goldens
+   carry a registered 32-px failed-pixel budget — the runner's mesa 26.0.8
+   anti-aliases 28 of ~1.3M pixels differently on the General tab (the only
+   Drag-bearing page); the other 22 suites are byte-exact on the runner, the
+   Help-Scout interaction golden keeps the zero-tolerance lock, and the job
+   uploads `*.diff.png` artifacts on failure for diagnosis. Result: **the
+   drift gate is green on the runner** (run 40943289183: check + packages +
+   snapshots all success) — a visual regression on any rebuilt page now fails
+   CI instead of shipping silently.
+3. **Blind test + SUS** — `docs/audit/acceptance/blind-test-protocol.md` (the
+   DS-C-22 5-second AI-identification test: ten stimuli cropped from the
+   checked-in goldens, pass bar ≥9/10 with zero false-AI) and
+   `docs/audit/acceptance/sus-questionnaire.md` (standard Brooke-1996 SUS,
+   target ≥ 68) ship as the G4 instruments; the human administrations and the
+   result tables execute at Gate G4 (the mechanism pre-check they exercise is
+   enforced by the typed widget path + the single §5 tone map + the goldens).
+4. **Acceptance records folded into the printable report series** (the
+   deferred PDF task) — `docs/audit/generate_acceptance_report.py` (Template 07
+   Crystal Blue, series-consistent) emits
+   `docs/audit/SupportOS-Plus-Reskin-Acceptance-Report.pdf` (report 4 of 4):
+   program record + gate receipts, traceability summary, blind test, SUS, CI
+   locks, release v1.9.0 (the CHANGELOG section read verbatim at build time)
+   and the G4 record table for the owner's verdict.
+5. **Release v1.9.0** — workspace version bumped 1.8.3 → 1.9.0; Cargo.lock
+   refreshed (textual diff verified: only the four member version lines, zero
+   dependency drift); the CHANGELOG `[1.9.0]` section carries the release
+   notes and the release workflow composes the GitHub release notes from it.
+
+**Final verification (2026-10-29):** gates clean locally (no-simulation,
+traceability); CI run 40943289183 on `a7ecfd3` — fmt/clippy/test/deny ✓,
+AppImage + .deb + smoke ✓, kittest snapshot locks ✓ (23 suites / 152 tests /
+168 goldens diff-locked on the runner, a11y check ON). The traceability gate
+also rides the release workflow, so a tagged commit cannot regress it.
+
+**GATE G4 — owner final acceptance:** the package (this record, the
+traceability matrix, the blind test, the SUS instrument, the acceptance PDF,
+release v1.9.0) is presented with the batch STOP. The owner's verdict, the
+blind-test aggregate and the SUS score fill the record tables at the gate.

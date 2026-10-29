@@ -274,3 +274,9 @@ new design system").
 
 - 2026-10-28 — D6 added: Design-System Reskin program approved; queue reopened in
   plan.md as RS-01..RS-21 (Stage 1 lab conformance → Gate G1 → Stage 2 egui reskin).
+- 2026-10-29 — RS-21 executed (Batch RS-3): the R4 acceptance package
+  (machine-gated traceability matrix, CI snapshot locks on lavapipe with the
+  settings 32px registered budget, blind-test + SUS instruments, the
+  acceptance report folded into the printable PDF series) and release v1.9.0
+  tagged. GATE G4 presented with the STOP — the reskin program RS-01..RS-21
+  is fully queued-through; only the owner's final acceptance remains.
