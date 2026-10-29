@@ -1,8 +1,14 @@
 //! Connectors page (port of the web `pages/connectors.rs`).
 //!
-//! Redesigned with the shadcn-style design system (`crate::design`):
-//! health badges on a striped connector table, card-wrapped rows viewer
-//! and a form-grid creator — presentation only, refresh behavior intact.
+//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
+//! conformed lab's `connectors` sheet (DS "stack" archetype): the result
+//! count rides the header as the DS-C-01 counter pill (A-6); the table's
+//! health cell renders the lab's dot + badge pair; the kind/last cells
+//! ride the muted mono role; the rows/refresh/delete triple collapses to
+//! refresh + delete per the lab's A-5 receipt (the connector chip already
+//! opens the rows viewer — no workflow step is lost, the lab documents
+//! exactly this) and the receipt rides beneath the table. Presentation
+//! only — refresh behavior intact.
 //!
 //! Connector table (`connectors::list` — `/api/connectors`), a rows viewer
 //! for the selected connector (`connectors::list_rows` —
@@ -280,6 +286,8 @@ impl ConnectorsPage {
                 {
                     self.show_new = !self.show_new;
                 }
+                // A-6: the result count beside the header actions.
+                design::page_counter(ui, &format!("{} connectors", self.connectors.len()));
             },
         );
         if let Some(message) = &self.message {
@@ -320,18 +328,20 @@ impl ConnectorsPage {
                             if design::chip(ui, self.selected == Some(id), &name).clicked() {
                                 picked = Some(id);
                             }
-                            ui.monospace(egui::RichText::new(kind).color(t.foreground));
-                            design::badge(ui, &health, health_tone(&health));
+                            ui.monospace(egui::RichText::new(kind).color(t.muted_foreground));
+                            // The lab's health cell: the DS-C-06 state dot
+                            // + the raw-token badge.
+                            ui.horizontal(|ui| {
+                                design::status_dot(ui, health_tone(&health), false);
+                                design::badge(ui, &health, health_tone(&health));
+                            });
                             ui.label(
                                 egui::RichText::new(refresh_method)
                                     .size(13.0)
                                     .color(t.foreground),
                             );
-                            ui.monospace(egui::RichText::new(last_sync).color(t.foreground));
+                            ui.monospace(egui::RichText::new(last_sync).color(t.muted_foreground));
                             ui.horizontal(|ui| {
-                                if design::button(ui, "rows", ButtonVariant::Outline).clicked() {
-                                    picked = Some(id);
-                                }
                                 if design::button_with_icon(
                                     ui,
                                     Icon::Refresh,
@@ -353,6 +363,15 @@ impl ConnectorsPage {
                     },
                 );
             });
+        // The lab's A-5 receipt: the rows/refresh/delete triple collapsed
+        // to refresh + delete — the connector chip opens the rows viewer
+        // below (no workflow step lost).
+        design::quirk(
+            ui,
+            "A-5 (DS-0): the rows/refresh/delete triple collapsed to refresh \
+             + delete (danger + confirm); the connector chip opens the rows \
+             viewer below.",
+        );
         if let Some(id) = picked {
             self.selected = Some(id);
             self.reload_rows(db, id);
@@ -422,12 +441,15 @@ impl ConnectorsPage {
     fn new_connector_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card(ui, |ui| {
             design::section_title(ui, "New Connector");
+            // Every input binds its visible label (RS-18 wave-wide a11y
+            // rule — egui never reads a preceding label on its own).
             design::form_grid(ui, "connector-new", |ui| {
-                design::field_label(ui, "name:");
+                let name_label = design::field_label(ui, "name:");
                 ui.add_sized(
                     [220.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("connector name"),
-                );
+                )
+                .labelled_by(name_label.id);
                 ui.end_row();
                 design::field_label(ui, "kind:");
                 ui.horizontal(|ui| {
@@ -440,28 +462,31 @@ impl ConnectorsPage {
                 ui.end_row();
                 match self.new_kind {
                     Kind::Csv => {
-                        design::field_label(ui, "file (data dir):");
+                        let file_label = design::field_label(ui, "file (data dir):");
                         ui.add_sized(
                             [260.0, 28.0],
                             egui::TextEdit::singleline(&mut self.new_file).hint_text("billing.csv"),
                         )
-                        .on_hover_text("relative to the app data directory");
+                        .on_hover_text("relative to the app data directory")
+                        .labelled_by(file_label.id);
                         ui.end_row();
                     }
                     Kind::Http => {
-                        design::field_label(ui, "url:");
+                        let url_label = design::field_label(ui, "url:");
                         ui.add_sized(
                             [280.0, 28.0],
                             egui::TextEdit::singleline(&mut self.new_url).hint_text("https://…"),
-                        );
+                        )
+                        .labelled_by(url_label.id);
                         ui.end_row();
                     }
                 }
-                design::field_label(ui, "refresh seconds:");
+                let refresh_label = design::field_label(ui, "refresh seconds:");
                 ui.add_sized(
                     [140.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_refresh_seconds).hint_text("3600"),
-                );
+                )
+                .labelled_by(refresh_label.id);
                 ui.end_row();
                 design::field_label(ui, "allow AI:");
                 ui.checkbox(&mut self.new_allowed_ai, "AI tools may query");
