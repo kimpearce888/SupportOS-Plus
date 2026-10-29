@@ -522,14 +522,17 @@ impl AiCenterPage {
         self.poll_copilot_job(db);
 
         design::page_header(ui, "AI Center", None, |_| {});
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                }
-            }
-        });
-        design::divider(ui);
+        // DS-C-09 underline tab rail — the lab's six labels, same state
+        // machine (the rail carries its own divider).
+        let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
+        if let Some(i) = design::tabs(
+            ui,
+            &labels,
+            Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
+        ) && let Some(tab) = Tab::ALL.get(i)
+        {
+            self.tab = *tab;
+        }
 
         match self.tab {
             Tab::Health => self.health_ui(ui, db),
@@ -1441,15 +1444,23 @@ impl AiCenterPage {
                             // `roles` while this value must stay readable.
                             let current: Option<spp_core::ai_hub::RoleAssignment> =
                                 roles.get(role).cloned();
+                            // Reskin fix (presentation, the lab's quirk): the
+                            // combo showed the endpoint's INDEX ('0', '1'),
+                            // not its name. Names now.
                             let selected = current
                                 .as_ref()
-                                .and_then(|a| endpoints.iter().position(|e| e.id == a.endpoint))
-                                .map(|i| i.to_string())
+                                .and_then(|a| {
+                                    endpoints
+                                        .iter()
+                                        .position(|e| e.id == a.endpoint)
+                                        .map(|i| endpoints[i].name.clone())
+                                })
                                 .unwrap_or_else(|| "(unset)".into());
+                            let selected_for_info = selected.clone();
                             let mut changed = false;
                             egui::ComboBox::from_id_salt(format!("hub-role-{}", role.as_str()))
                                 .width(200.0)
-                                .selected_text(selected)
+                                .selected_text(selected.clone())
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(&mut None::<usize>, None, "(unset)");
                                     for endpoint in endpoints.iter() {
@@ -1476,6 +1487,17 @@ impl AiCenterPage {
                                             changed = true;
                                         }
                                     }
+                                })
+                                .response
+                                .widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::Role::Button,
+                                        ui.is_enabled(),
+                                        format!(
+                                            "endpoint for {}: {selected_for_info}",
+                                            role.as_str()
+                                        ),
+                                    )
                                 });
                             let model_text = current
                                 .as_ref()
@@ -1486,6 +1508,16 @@ impl AiCenterPage {
                                 [180.0, 26.0],
                                 egui::TextEdit::singleline(&mut model_edit),
                             );
+                            // The lab's aria-label: the column header is the
+                            // visible label; the input carries the
+                            // role-scoped name itself.
+                            model_response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::TextInput,
+                                    ui.is_enabled(),
+                                    format!("model for {}", role.as_str()),
+                                )
+                            });
                             // Clean-audit item 74: keystrokes only sync the
                             // live map (so the field's egui state and the
                             // page agree — no focus loss, no revert); the
@@ -1519,7 +1551,14 @@ impl AiCenterPage {
                     });
             },
         );
-        ui.add_space(10.0);
+        ui.add_space(4.0);
+        // The lab's quirk receipt for the routing-combo presentation fix.
+        design::quirk(
+            ui,
+            "Reskin fix (presentation): the routing combo showed its index number \
+             ('0', '1'), not the endpoint name. Names now.",
+        );
+        ui.add_space(6.0);
 
         // ---- toggles + kill switch ------------------------------------
         design::card_titled(
