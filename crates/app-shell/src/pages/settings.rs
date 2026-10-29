@@ -1182,15 +1182,27 @@ impl SettingsPage {
             ui,
             "Settings",
             Some("local configuration, persisted in the settings table"),
-            |ui| {
-                for tab in Tab::ALL {
-                    if design::chip(ui, self.tab == tab, tab.label()).clicked() {
-                        self.tab = tab;
-                        self.reload(db);
-                    }
-                }
-            },
+            |_| {},
         );
+        // DS-C-09: the tab rail rides below the header (the archetype's
+        // placement — same six labels, same state machine; the reload on
+        // switch keeps the per-tab mirrors fresh).
+        if let Some(i) = design::tabs(
+            ui,
+            &[
+                Tab::General.label(),
+                Tab::HelpScout.label(),
+                Tab::LmStudio.label(),
+                Tab::VectorIndex.label(),
+                Tab::Hours.label(),
+                Tab::Backups.label(),
+            ],
+            Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
+        ) && let Some(tab) = Tab::ALL.get(i)
+        {
+            self.tab = *tab;
+            self.reload(db);
+        }
         if let Some(message) = &self.message {
             design::success_text(ui, message);
         }
@@ -1216,18 +1228,20 @@ impl SettingsPage {
         };
         design::card_titled(ui, "Synchronization", None, |ui| {
             design::form_grid(ui, "settings-general", |ui| {
-                design::field_label(ui, "max quiet sync interval (minutes):");
+                let interval_label = design::field_label(ui, "max quiet sync interval (minutes):");
                 ui.add(egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440))
+                    .labelled_by(interval_label.id)
                     .on_hover_text(
                         "1.4.0 R8: the sync polls every 30 s while the account is busy, \
                      then backs off by doubling toward this ceiling when quiet. \
                      Every send triggers an immediate poll.",
                     );
                 ui.end_row();
-                design::field_label(ui, "api concurrency:");
-                ui.add(egui::DragValue::new(&mut general.api_concurrency).range(1..=8));
+                let concurrency_label = design::field_label(ui, "api concurrency:");
+                ui.add(egui::DragValue::new(&mut general.api_concurrency).range(1..=8))
+                    .labelled_by(concurrency_label.id);
                 ui.end_row();
-                design::field_label(ui, "log level:");
+                let log_label = design::field_label(ui, "log level:");
                 let combo = egui::ComboBox::from_id_salt("settings-log-level")
                     .width(160.0)
                     .selected_text(general.log_level.clone())
@@ -1236,19 +1250,20 @@ impl SettingsPage {
                             ui.selectable_value(&mut general.log_level, level.into(), level);
                         }
                     });
-                combo.response.on_hover_text(
+                combo.response.labelled_by(log_label.id).on_hover_text(
                     "Clean-audit item 138: drives the real tracing filter — \
                      applied at boot from the saved value and immediately on save.",
                 );
                 ui.end_row();
-                design::field_label(ui, "agent language:");
+                let lang_label = design::field_label(ui, "agent language:");
                 ui.add_sized(
                     [220.0, 28.0],
                     egui::TextEdit::singleline(&mut general.agent_language),
-                );
+                )
+                .labelled_by(lang_label.id);
                 ui.end_row();
-                design::field_label(ui, "status after reply:");
-                egui::ComboBox::from_id_salt("settings-reply-status-after")
+                let reply_label = design::field_label(ui, "status after reply:");
+                let reply_combo = egui::ComboBox::from_id_salt("settings-reply-status-after")
                     .width(190.0)
                     .selected_text(general.reply_status_after.clone())
                     .show_ui(ui, |ui| {
@@ -1268,6 +1283,7 @@ impl SettingsPage {
                             );
                         }
                     });
+                reply_combo.response.labelled_by(reply_label.id);
                 ui.end_row();
             });
         });
@@ -1543,36 +1559,40 @@ impl SettingsPage {
             |ui| {
                 let mask = !self.hs_show_secrets;
                 design::form_grid(ui, "settings-hs-creds", |ui| {
-                    design::field_label(ui, "client id:");
+                    let cid_label = design::field_label(ui, "client id:");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_client_id)
                             .hint_text("Help Scout custom app — client ID"),
-                    );
+                    )
+                    .labelled_by(cid_label.id);
                     ui.end_row();
-                    design::field_label(ui, "client secret:");
+                    let secret_label = design::field_label(ui, "client secret:");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_client_secret)
                             .password(mask)
                             .hint_text("leave blank to keep the stored value"),
-                    );
+                    )
+                    .labelled_by(secret_label.id);
                     ui.end_row();
-                    design::field_label(ui, "webhook secret:");
+                    let whs_label = design::field_label(ui, "webhook secret:");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_webhook_secret)
                             .password(mask)
                             .hint_text("verifies incoming Help Scout webhooks"),
-                    );
+                    )
+                    .labelled_by(whs_label.id);
                     ui.end_row();
-                    design::field_label(ui, "docs api key:");
+                    let docs_label = design::field_label(ui, "docs api key:");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_docs_api_key)
                             .password(mask)
                             .hint_text("optional — leave blank to keep the stored value"),
-                    );
+                    )
+                    .labelled_by(docs_label.id);
                     ui.end_row();
                 });
                 ui.add_space(8.0);
@@ -1626,11 +1646,12 @@ impl SettingsPage {
                  when the platform silently drops it",
             ),
             |ui| {
-                design::field_label(ui, "public relay URL:");
+                let relay_label = design::field_label(ui, "public relay URL:");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.webhook_public_url)
                         .hint_text("https://your-relay → forwards to this app's loopback listener"),
-                );
+                )
+                .labelled_by(relay_label.id);
                 ui.horizontal(|ui| {
                     if design::button(ui, "save relay URL", ButtonVariant::Outline).clicked() {
                         self.save_webhook_relay_url(db);
@@ -1685,19 +1706,23 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
-        // Workspace reset (1.2.0): one click, two-step confirmation.
+        // Workspace reset (1.2.0): one click, two-step confirmation — the
+        // lab's danger-zone card (DS.card danger: the title carries the
+        // zone, the sub is the honest one-word verdict).
         design::card_titled(
             ui,
-            "Workspace data",
-            Some(
-                "Deletes every conversation, customer, thread, rating, \
-                 knowledge document, incident, report and AI record — all \
-                 synced content (and anything left over from the seeded \
-                 content that shipped before 1.2.0) — and arms a fresh first sync. \
-                 Keeps: credentials, settings, business hours, automation \
-                 rules, saved views and replies, custom object types.",
-            ),
+            "Danger zone — Workspace data",
+            Some("irreversible"),
             |ui| {
+                design::hint_text(
+                    ui,
+                    "Deletes every conversation, customer, thread, rating, \
+                     knowledge document, incident, report and AI record — all \
+                     synced content (and anything left over from the seeded \
+                     content that shipped before 1.2.0) — and arms a fresh first sync. \
+                     Keeps: credentials, settings, business hours, automation \
+                     rules, saved views and replies, custom object types.",
+                );
                 if !self.purge_armed {
                     if design::button(ui, "delete all workspace data", ButtonVariant::Destructive)
                         .clicked()
@@ -2107,24 +2132,27 @@ impl SettingsPage {
             Some("Test the connection from the AI Center page."),
             |ui| {
                 design::form_grid(ui, "settings-lmstudio", |ui| {
-                    design::field_label(ui, "base url:");
+                    let base_label = design::field_label(ui, "base url:");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.lmstudio_base_url)
                             .hint_text("http://localhost:1234/v1"),
-                    );
+                    )
+                    .labelled_by(base_label.id);
                     ui.end_row();
-                    design::field_label(ui, "chat model:");
+                    let chat_label = design::field_label(ui, "chat model:");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.lmstudio_chat_model),
-                    );
+                    )
+                    .labelled_by(chat_label.id);
                     ui.end_row();
-                    design::field_label(ui, "embedding model:");
+                    let embed_label = design::field_label(ui, "embedding model:");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.lmstudio_embedding_model),
-                    );
+                    )
+                    .labelled_by(embed_label.id);
                     ui.end_row();
                 });
                 ui.add_space(8.0);
@@ -2251,23 +2279,29 @@ impl SettingsPage {
         ui.add_space(10.0);
         design::card_titled(ui, &format!("Edit: {}", row.name), None, |ui| {
             design::form_grid(ui, "settings-hours-edit", |ui| {
-                design::field_label(ui, "timezone:");
-                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.timezone));
+                let tz_label = design::field_label(ui, "timezone:");
+                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.timezone))
+                    .labelled_by(tz_label.id);
                 ui.end_row();
-                design::field_label(ui, "days (0=Sun…6=Sat):");
-                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.days));
+                let days_label = design::field_label(ui, "days (0=Sun…6=Sat):");
+                ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.days))
+                    .labelled_by(days_label.id);
                 ui.end_row();
-                design::field_label(ui, "start (minutes):");
-                ui.add(egui::DragValue::new(&mut row.start_minute).range(0..=1440));
+                let start_label = design::field_label(ui, "start (minutes):");
+                ui.add(egui::DragValue::new(&mut row.start_minute).range(0..=1440))
+                    .labelled_by(start_label.id);
                 ui.end_row();
-                design::field_label(ui, "end (minutes):");
-                ui.add(egui::DragValue::new(&mut row.end_minute).range(0..=1440));
+                let end_label = design::field_label(ui, "end (minutes):");
+                ui.add(egui::DragValue::new(&mut row.end_minute).range(0..=1440))
+                    .labelled_by(end_label.id);
                 ui.end_row();
-                design::field_label(ui, "first response target (min):");
-                ui.add(egui::DragValue::new(&mut row.first_response_target_min).range(1..=10_000));
+                let first_resp_label = design::field_label(ui, "first response target (min):");
+                ui.add(egui::DragValue::new(&mut row.first_response_target_min).range(1..=10_000))
+                    .labelled_by(first_resp_label.id);
                 ui.end_row();
-                design::field_label(ui, "resolution target (min):");
-                ui.add(egui::DragValue::new(&mut row.resolution_target_min).range(1..=100_000));
+                let resolution_label = design::field_label(ui, "resolution target (min):");
+                ui.add(egui::DragValue::new(&mut row.resolution_target_min).range(1..=100_000))
+                    .labelled_by(resolution_label.id);
                 ui.end_row();
             });
             ui.add_space(8.0);
