@@ -624,11 +624,12 @@ impl KnowledgePage {
                 design::divider(ui);
                 design::section_title(ui, "Paste a document");
                 design::form_grid(ui, "knowledge-import-form", |ui| {
-                    design::field_label(ui, "Title");
+                    let title_label = design::field_label(ui, "Title");
                     ui.add_sized(
                         [260.0, 28.0],
                         egui::TextEdit::singleline(&mut self.import.title),
-                    );
+                    )
+                    .labelled_by(title_label.id);
                     ui.end_row();
                     design::field_label(ui, "Visibility");
                     ui.horizontal(|ui| {
@@ -640,18 +641,20 @@ impl KnowledgePage {
                         }
                     });
                     ui.end_row();
-                    design::field_label(ui, "Source name");
+                    let source_label = design::field_label(ui, "Source name");
                     ui.add_sized(
                         [260.0, 28.0],
                         egui::TextEdit::singleline(&mut self.import.source_name),
-                    );
+                    )
+                    .labelled_by(source_label.id);
                     ui.end_row();
-                    design::field_label(ui, "Content (Markdown)");
+                    let content_label = design::field_label(ui, "Content (Markdown)");
                     ui.add(
                         egui::TextEdit::multiline(&mut self.import.content)
                             .desired_rows(4)
                             .desired_width(f32::INFINITY),
-                    );
+                    )
+                    .labelled_by(content_label.id);
                     ui.end_row();
                 });
                 let ready =
@@ -736,20 +739,23 @@ impl KnowledgePage {
                  → Docs API). Add it in Settings → Help Scout, then press \"Sync Help Center now\".",
             );
         }
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                }
-            }
-        });
+        // DS-C-09 underline tab rail — the lab's five labels, same state
+        // machine (the rail carries its own divider).
+        let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
+        if let Some(i) = design::tabs(
+            ui,
+            &labels,
+            Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
+        ) && let Some(tab) = Tab::ALL.get(i)
+        {
+            self.tab = *tab;
+        }
         if let Some(msg) = &self.status_message {
             design::success_text(ui, msg);
         }
         if let Some(err) = &self.error {
             design::error_text(ui, err);
         }
-        design::divider(ui);
 
         match self.tab {
             Tab::Documents => self.documents_ui(ui, db),
@@ -822,7 +828,8 @@ impl KnowledgePage {
                         );
                         design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
                         ui.horizontal(|ui| {
-                            if design::button(ui, "reviewed", ButtonVariant::Outline).clicked() {
+                            if design::button(ui, "mark reviewed", ButtonVariant::Outline).clicked()
+                            {
                                 action = Some((id, str_field(doc, "title"), "reviewed"));
                             }
                             if design::button(ui, "verify", ButtonVariant::Outline).clicked() {
@@ -943,23 +950,31 @@ impl KnowledgePage {
         // --- Request a draft from an open gap ---
         if !self.gaps.is_empty() {
             design::card_titled(ui, "Draft an article from a gap", None, |ui| {
+                let gap_label = self
+                    .gap_pick
+                    .and_then(|id| {
+                        self.gaps
+                            .iter()
+                            .find(|(gid, _)| *gid == id)
+                            .map(|(_, q)| q.chars().take(60).collect::<String>())
+                    })
+                    .unwrap_or_else(|| "Select a gap…".into());
                 egui::ComboBox::from_id_salt("k2-gap-pick")
-                    .selected_text(
-                        self.gap_pick
-                            .and_then(|id| {
-                                self.gaps
-                                    .iter()
-                                    .find(|(gid, _)| *gid == id)
-                                    .map(|(_, q)| q.chars().take(60).collect::<String>())
-                            })
-                            .unwrap_or_else(|| "Select a gap…".into()),
-                    )
+                    .selected_text(gap_label.clone())
                     .width(ui.available_width() - 140.0)
                     .show_ui(ui, |ui| {
                         for (id, question) in &self.gaps {
                             let label: String = question.chars().take(80).collect();
                             ui.selectable_value(&mut self.gap_pick, Some(*id), label);
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            ui.is_enabled(),
+                            format!("gap: {gap_label}"),
+                        )
                     });
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -1027,27 +1042,35 @@ impl KnowledgePage {
                 .inner_margin(egui::Margin::same(6));
             row.show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let _ = ui.selectable_label(
-                        selected,
+                    ui.label(
                         egui::RichText::new(format!("{} — {}", draft.id, draft.title)).strong(),
                     );
-                    ui.label(egui::RichText::new(status_chip).small().color(
-                        if draft.status == "approved" {
-                            ui.visuals().hyperlink_color
-                        } else {
-                            ui.visuals().weak_text_color()
-                        },
-                    ));
-                    if !publish_chip.is_empty() {
-                        ui.label(egui::RichText::new(publish_chip).small().color(
-                            if draft.publish_state == "publish_failed" {
-                                ui.visuals().error_fg_color
-                            } else {
-                                ui.visuals().weak_text_color()
-                            },
-                        ));
+                    // The lab's row anatomy: the status and the publish
+                    // state ride DS.TONE badges (approved/rejected tinted,
+                    // awaiting review neutral, publish failures destructive;
+                    // the raw tokens stay visible, DC C-1).
+                    match draft.status.as_str() {
+                        "approved" => {
+                            design::badge(ui, status_chip, BadgeTone::Success);
+                        }
+                        "rejected" => {
+                            design::badge(ui, status_chip, BadgeTone::Destructive);
+                        }
+                        _ => {
+                            design::badge(ui, status_chip, BadgeTone::Neutral);
+                        }
                     }
-                    if ui.small_button("Open").clicked() {
+                    if !publish_chip.is_empty() {
+                        let tone = if draft.publish_state == "publish_failed" {
+                            BadgeTone::Destructive
+                        } else if matches!(draft.publish_state.as_str(), "published" | "verified") {
+                            BadgeTone::Success
+                        } else {
+                            BadgeTone::Info
+                        };
+                        design::badge(ui, publish_chip, tone);
+                    }
+                    if design::button(ui, "Open", ButtonVariant::Outline).clicked() {
                         self.draft_pick = Some(draft.id);
                     }
                 });
@@ -1143,7 +1166,7 @@ impl KnowledgePage {
                                 None => self.error = Some("The draft was already decided.".into()),
                             }
                         }
-                        if ui.button("Reject").clicked() {
+                        if design::button(ui, "Reject", ButtonVariant::Outline).clicked() {
                             let decided = db.with_write(|conn| {
                                 spp_core::knowledge_store::decide_article_draft(
                                     conn, draft.id, "rejected", None,
@@ -1171,17 +1194,17 @@ impl KnowledgePage {
                          (top right) or configure a Docs API key in Settings first.",
                         );
                     } else {
+                        let collection_label = self
+                            .publish_collection_pick
+                            .and_then(|id| {
+                                self.collections
+                                    .iter()
+                                    .find(|(cid, _)| *cid == id)
+                                    .map(|(_, name)| name.clone())
+                            })
+                            .unwrap_or_else(|| "Select collection…".into());
                         egui::ComboBox::from_id_salt("k2-publish-collection")
-                            .selected_text(
-                                self.publish_collection_pick
-                                    .and_then(|id| {
-                                        self.collections
-                                            .iter()
-                                            .find(|(cid, _)| *cid == id)
-                                            .map(|(_, name)| name.clone())
-                                    })
-                                    .unwrap_or_else(|| "Select collection…".into()),
-                            )
+                            .selected_text(collection_label.clone())
                             .show_ui(ui, |ui| {
                                 for (id, name) in &self.collections {
                                     ui.selectable_value(
@@ -1190,6 +1213,14 @@ impl KnowledgePage {
                                         name.clone(),
                                     );
                                 }
+                            })
+                            .response
+                            .widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::Button,
+                                    ui.is_enabled(),
+                                    format!("collection: {collection_label}"),
+                                )
                             });
                         ui.add_space(4.0);
                         if ui
@@ -1302,26 +1333,35 @@ impl KnowledgePage {
 
         ui.horizontal(|ui| {
             design::field_label(ui, "collection:");
+            let collection_label = self
+                .collection_pick
+                .and_then(|id| {
+                    self.collections
+                        .iter()
+                        .find(|(cid, _)| *cid == id)
+                        .map(|(_, name)| name.clone())
+                })
+                .unwrap_or_else(|| "All".into());
             egui::ComboBox::from_id_salt("docs-collection")
-                .selected_text(
-                    self.collection_pick
-                        .and_then(|id| {
-                            self.collections
-                                .iter()
-                                .find(|(cid, _)| *cid == id)
-                                .map(|(_, name)| name.clone())
-                        })
-                        .unwrap_or_else(|| "All".into()),
-                )
+                .selected_text(collection_label.clone())
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.collection_pick, None, "All");
                     for (id, name) in self.collections.clone() {
                         ui.selectable_value(&mut self.collection_pick, Some(id), name);
                     }
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        ui.is_enabled(),
+                        format!("collection: {collection_label}"),
+                    )
                 });
             design::field_label(ui, "status:");
+            let status_label = self.status_pick.clone().unwrap_or_else(|| "Any".into());
             egui::ComboBox::from_id_salt("docs-status")
-                .selected_text(self.status_pick.clone().unwrap_or_else(|| "Any".into()))
+                .selected_text(status_label.clone())
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.status_pick, None, "Any");
                     ui.selectable_value(
@@ -1331,6 +1371,14 @@ impl KnowledgePage {
                     );
                     ui.selectable_value(&mut self.status_pick, Some("draft".into()), "draft");
                     ui.selectable_value(&mut self.status_pick, Some("internal".into()), "internal");
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        ui.is_enabled(),
+                        format!("status: {status_label}"),
+                    )
                 });
             if design::button(ui, "apply", ButtonVariant::Outline).clicked() {
                 self.filter.collection = self.collection_pick;
