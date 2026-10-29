@@ -1,23 +1,33 @@
 //! Issue Radar page (port of the web `pages/issue_radar.rs`).
 //!
-//! Presentational pass (shadcn redesign): this page renders through the
-//! shared design system in `crate::design`; the queries, state, and
-//! behavior are unchanged.
+//! RS-18 (wave B) rebuild on **Design Contract v1.0 archetype DS-A-02** —
+//! the dashboard/stack recipe (docs/audit/design-contract-v1.md §4):
+//! PageHeader (the lab's three outline actions in the right cluster) →
+//! DS-C-09 underline tabs → per-tab block stack of DS cards. The
+//! conformed lab reference is `mockups/design-lab/pages-ds.js`
+//! (`DS.definePage("issue-radar", …)`).
 //!
-//! Tabs (web: Alerts / Clusters / Known issues / SLA):
-//! * **Alerts** — `issue_radar_impl` (`/api/reports/issue-radar`) plus
-//!   `sla::sla_alerts` (`/api/issues/sla-alerts`).
-//! * **Clusters** — the issue-cluster table (`/api/issues/clusters`) with
-//!   conversation ids.
-//! * **Known issues** — the known-issue list (`/api/issues/known`) plus the
-//!   create form (the create route's validation and inserts, in-process).
+//! Queries, state, and behavior are unchanged (decisions.md D6:
+//! presentation only). **Alerts** still reads `issue_radar_impl`
+//! (`/api/reports/issue-radar`) plus `sla::sla_alerts`
+//! (`/api/issues/sla-alerts` — SLA rows render through the DS-C-15
+//! callout roles: breached → Err, at-risk → Warn, exactly the lab's
+//! mapping); **Clusters** still reads the issue-cluster table
+//! (`/api/issues/clusters`) with conversation ids; **Gaps** still runs
+//! the deterministic K1 pipeline (`quality::gap_report`) with the same
+//! approve/reject writes — the reject act now follows the lab's armed
+//! two-click form (DS-C-16/A-5 armed danger), approve stays one click;
+//! **Known issues** still reads `/api/issues/known` plus the create form
+//! (the create route's validation and inserts, in-process). The lab's
+//! receipt-cited quirk about the raw severity tokens renders on the
+//! Alerts tab (DS-C-15 quirk — data-layer quirks stay visible, DC C-1).
 
 use eframe::egui;
 use rusqlite::Connection;
 use spp_core::db::DbHandle;
 
 use super::str_field;
-use crate::design::{self, BadgeTone, ButtonVariant};
+use crate::design::{self, BadgeTone, ButtonVariant, CalloutRole};
 use crate::icons::Icon;
 
 /// Page tabs.
@@ -39,6 +49,17 @@ impl Tab {
             Self::Gaps => "Gaps",
             Self::Known => "Known issues",
         }
+    }
+
+    fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|t| *t == self)
+            .unwrap_or_default()
+    }
+
+    fn from_index(i: usize) -> Self {
+        Self::ALL.get(i).copied().unwrap_or(Self::Alerts)
     }
 }
 
@@ -463,17 +484,16 @@ impl IssueRadarPage {
         if let Some(note) = &self.notice {
             crate::design::hint_text(ui, note);
         }
-        ui.horizontal(|ui| {
-            for tab in Tab::ALL {
-                if design::chip(ui, self.tab == tab, tab.label()).clicked() {
-                    self.tab = tab;
-                }
-            }
-        });
+
+        // DS-C-09 Tabs (the lab's DS.tab rail replaces the chip row; the
+        // tab labels and set are unchanged).
+        let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
+        if let Some(i) = design::tabs(ui, &labels, self.tab.index()) {
+            self.tab = Tab::from_index(i);
+        }
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
         }
-        design::divider(ui);
 
         match self.tab {
             Tab::Alerts => self.alerts_ui(ui),
@@ -494,6 +514,7 @@ impl IssueRadarPage {
             return;
         }
         let totals = report.get("totals").cloned().unwrap_or_default();
+        // The lab's ds-chip-row of decision totals.
         ui.horizontal(|ui| {
             design::badge(
                 ui,
@@ -550,7 +571,7 @@ impl IssueRadarPage {
                     for note in notes {
                         design::hint_text(ui, note.as_str().unwrap_or_default());
                     }
-                    ui.add_space(6.0);
+                    ui.add_space(design::scale::space::CLUSTER);
                 }
                 if let Some(kinds) = report.get("kinds").and_then(|k| k.as_array()) {
                     for kind in kinds {
@@ -564,12 +585,14 @@ impl IssueRadarPage {
                             continue;
                         }
                         design::card_titled(ui, label, None, |ui| {
-                            for candidate in &candidates {
+                            for (n, candidate) in candidates.iter().enumerate() {
+                                if n > 0 {
+                                    design::divider(ui);
+                                }
                                 self.gap_candidate_ui(ui, db, candidate);
-                                ui.add_space(6.0);
                             }
                         });
-                        ui.add_space(8.0);
+                        ui.add_space(design::scale::space::SP2);
                     }
                 }
             });
@@ -577,7 +600,8 @@ impl IssueRadarPage {
 
     /// K1: one gap candidate row — the question/topic, its occurrence count,
     /// example conversations, the deterministic explanation, and the
-    /// approve/reject decision buttons.
+    /// approve/reject decision buttons (the lab's approve is one click;
+    /// reject arms first — DS-C-16/A-5).
     fn gap_candidate_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -607,12 +631,15 @@ impl IssueRadarPage {
                     .and_then(|e| e.as_str())
             })
             .unwrap_or_default();
+        let t = design::tokens(ui);
+        // The lab's ds-tool-row: count badge, strong query, status badge.
         ui.horizontal(|ui| {
             design::badge(ui, &format!("{count}×"), BadgeTone::Warning);
             ui.label(
                 egui::RichText::new(query)
+                    .size(design::scale::text::BODY)
                     .strong()
-                    .color(design::tokens(ui).foreground),
+                    .color(t.foreground),
             );
             let tone = match status {
                 "approved" => BadgeTone::Success,
@@ -624,7 +651,8 @@ impl IssueRadarPage {
         if !explanation.is_empty() {
             design::hint_text(ui, explanation);
         }
-        // Example conversations: local ids -> numbers for display.
+        // Example conversations: local ids -> numbers for display (the
+        // lab's single "examples:" hint line).
         let examples: Vec<i64> = candidate
             .get("evidence_conversation_ids")
             .and_then(|v| v.as_array())
@@ -645,16 +673,11 @@ impl IssueRadarPage {
                     .map(|n| format!("#{n}"))
                     .collect()
             });
-            ui.horizontal(|ui| {
-                design::hint_text(ui, "examples:");
-                for number in numbers {
-                    design::badge(ui, &number, BadgeTone::Neutral);
-                }
-            });
+            design::hint_text(ui, &format!("examples: {}", numbers.join(" · ")));
         }
         if status == "open" {
             ui.horizontal(|ui| {
-                if design::button(ui, "approve", ButtonVariant::Secondary).clicked() {
+                if design::button(ui, "approve", ButtonVariant::Outline).clicked() {
                     let decided = db
                         .with_write(|conn| {
                             spp_core::quality::decide_gap(conn, id, "approved", None, None)
@@ -668,7 +691,12 @@ impl IssueRadarPage {
                         self.error = Some("approve failed — see Diagnostics.".into());
                     }
                 }
-                if design::button(ui, "reject", ButtonVariant::Ghost).clicked() {
+                // A-5: the destructive act arms first — one click shows
+                // "confirm reject?", the second click (or Esc elsewhere)
+                // completes it. The decision write is unchanged. The id is
+                // the candidate's own — it is unique in the report.
+                let reject_id = format!("gap-reject-{id}");
+                if design::armed_danger_button(ui, &reject_id, "reject", "confirm reject?") {
                     let decided = db
                         .with_write(|conn| {
                             spp_core::quality::decide_gap(conn, id, "rejected", None, None)
@@ -716,16 +744,24 @@ impl IssueRadarPage {
                             design::badge(ui, &severity, tone);
                             ui.label(
                                 egui::RichText::new(format!("{title} · {count} conversations"))
-                                    .size(13.0)
+                                    .size(design::scale::text::CONTROL)
                                     .color(design::tokens(ui).foreground),
                             );
                         });
-                        ui.add_space(2.0);
+                        ui.add_space(design::scale::space::SP1);
                     }
                 }
             },
         );
-        ui.add_space(10.0);
+        // DS-C-15 quirk (DC C-1): the raw severity tokens are the engine's
+        // own strings, and non-critical keeps the Warning tone — the lab
+        // keeps that honesty note visible on this tab.
+        design::quirk(
+            ui,
+            "Raw severity tokens (critical/warning/info) — the engine's own \
+             strings; info keeps the Warning tone exactly as the current build.",
+        );
+        ui.add_space(design::scale::space::SP2);
         let sla = self.sla.clone();
         let Some(sla) = sla else {
             ui.spinner();
@@ -749,10 +785,9 @@ impl IssueRadarPage {
                 } else {
                     egui::ScrollArea::vertical().show_rows(
                         ui,
-                        20.0,
+                        26.0,
                         sla.alerts.len(),
                         |ui, range| {
-                            let t = design::tokens(ui);
                             for alert in &sla.alerts[range] {
                                 let state = alert.state.as_str();
                                 let line = format!(
@@ -762,15 +797,14 @@ impl IssueRadarPage {
                                     alert.mailbox_name,
                                     state
                                 );
+                                // The lab's DS.callout roles: breached →
+                                // err, at-risk → warn.
                                 if state == "breached" {
-                                    design::error_text(ui, &line);
+                                    design::callout(ui, CalloutRole::Err, &line);
                                 } else {
-                                    ui.label(
-                                        egui::RichText::new(line)
-                                            .small()
-                                            .color(t.warning_foreground),
-                                    );
+                                    design::callout(ui, CalloutRole::Warn, &line);
                                 }
+                                ui.add_space(design::scale::space::SP1);
                             }
                         },
                     );
@@ -793,35 +827,30 @@ impl IssueRadarPage {
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for cluster in &clusters {
-                design::card(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(cluster.title.as_str())
-                                .size(13.0)
-                                .strong()
-                                .color(design::tokens(ui).foreground),
-                        );
-                        if let Some(trend) = &cluster.trend {
-                            let tone = if trend == "rising" || trend == "new" {
-                                BadgeTone::Warning
-                            } else {
-                                BadgeTone::Neutral
-                            };
-                            design::badge(ui, trend, tone);
-                        }
-                        design::hint_text(
-                            ui,
-                            &format!(
-                                "{} conversations · {} customers",
-                                cluster.conversation_count,
-                                cluster.customer_count.unwrap_or(0)
-                            ),
-                        );
-                    });
+                // The lab's card: title in the card head, then the trend
+                // badge, the counts line and the summary as the body.
+                design::card_titled(ui, &cluster.title, None, |ui| {
+                    if let Some(trend) = &cluster.trend {
+                        let tone = if trend == "rising" || trend == "new" {
+                            BadgeTone::Warning
+                        } else {
+                            BadgeTone::Neutral
+                        };
+                        design::badge(ui, trend, tone);
+                    }
+                    design::hint_text(
+                        ui,
+                        &format!(
+                            "{} conversations · {} customers",
+                            cluster.conversation_count,
+                            cluster.customer_count.unwrap_or(0)
+                        ),
+                    );
                     if let Some(summary) = &cluster.summary {
                         design::hint_text(ui, summary.as_str());
                     }
                 });
+                ui.add_space(design::scale::space::SP2);
             }
         });
     }
@@ -849,22 +878,19 @@ impl IssueRadarPage {
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for issue in &known {
-                design::card(ui, |ui| {
+                // The lab's card: title in the head, then the status badge,
+                // the conversation count, the symptoms and the workaround.
+                design::card_titled(ui, &issue.title, None, |ui| {
+                    let t = design::tokens(ui);
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(issue.title.as_str())
-                                .size(13.0)
-                                .strong()
-                                .color(design::tokens(ui).foreground),
-                        );
                         design::badge(ui, issue.status.as_str(), BadgeTone::Neutral);
-                        ui.monospace(
+                        ui.label(
                             egui::RichText::new(format!(
                                 "{} conversations",
                                 issue.conversation_count
                             ))
-                            .small()
-                            .color(design::tokens(ui).muted_foreground),
+                            .size(design::scale::text::META_HALF)
+                            .color(t.muted_foreground),
                         );
                     });
                     if let Some(symptoms) = &issue.symptoms {
@@ -873,11 +899,12 @@ impl IssueRadarPage {
                     if let Some(workaround) = &issue.workaround {
                         ui.label(
                             egui::RichText::new(format!("workaround: {workaround}"))
-                                .size(13.0)
-                                .color(design::tokens(ui).foreground),
+                                .size(design::scale::text::CONTROL)
+                                .color(t.foreground),
                         );
                     }
                 });
+                ui.add_space(design::scale::space::SP2);
             }
         });
     }
@@ -892,13 +919,25 @@ impl IssueRadarPage {
                 );
                 ui.end_row();
                 design::field_label(ui, "status:");
+                let status_label = self.new_status.clone();
                 egui::ComboBox::from_id_salt("radar-new-status")
-                    .selected_text(self.new_status.clone())
+                    .selected_text(status_label.clone())
                     .show_ui(ui, |ui| {
                         for status in ["investigating", "identified", "fix_in_progress", "resolved"]
                         {
                             ui.selectable_value(&mut self.new_status, status.into(), status);
                         }
+                    })
+                    .response
+                    .widget_info(|| {
+                        // The visible "status:" label is a separate widget,
+                        // so the combo button carries the name itself or
+                        // kittest's a11y check trips on an unlabeled node.
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Button,
+                            ui.is_enabled(),
+                            format!("status: {status_label}"),
+                        )
                     });
                 ui.end_row();
                 design::field_label(ui, "symptoms:");
@@ -920,6 +959,7 @@ impl IssueRadarPage {
                 .on_hover_text("comma-separated local conversation ids");
                 ui.end_row();
             });
+            ui.add_space(design::scale::space::SP1);
             if design::button(ui, "create", ButtonVariant::Primary).clicked() {
                 self.create(db);
             }
