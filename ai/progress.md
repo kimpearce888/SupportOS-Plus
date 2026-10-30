@@ -60,6 +60,6 @@ disposition in the G4-verdict addendum (completed.md, 2026-10-30).
     stimulus-source goldens changed, record the batch in completed.md, and
     re-present GATE G4 with the STOP.
 
-None — Batch RS-5 (RS-4-11) completed and moved to `completed.md`
-(2026-10-30). `plan.md` holds no further items; the G4 verdict (blind test /
-SUS / accepted / waive) remains with the owner.
+None — GATE G4 closed 2026-10-30 (owner verdict: **accepted**; blind test 5/10
+disclosed, SUS 85.0) and the closure record moved to `completed.md`. The reskin
+program is fully consumed; nothing is open.

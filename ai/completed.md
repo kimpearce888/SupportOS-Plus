@@ -5260,3 +5260,57 @@ Opened on the owner's `continue` after the RS-4 STOP; executed per rule.md
    and the budget removal; acceptance report regenerated (8 pages, RS-4-11
    present, `max_failed_pixels` absent); traceability matrix and ci.yml
    needed no change (counts unchanged, no budget text there).
+
+---
+
+## Gate G4 closure — owner verdict: accepted — 2026-10-30
+
+Opened on the owner's message `blind test + SUS / accepted / continue`: the
+owner chose the test path (Path A) and gave the final verdict **accepted** in
+the same breath. The chat-fallback answer lines delivered earlier were held
+unfilled per the no-simulation gate until exactly this authorization; they are
+now transcribed verbatim into the record tables. No number below is invented —
+every score is computed from the owner's delivered answers against the
+checked-in keys.
+
+1. **Blind test (RS-21, DS-C-22)** — administration: chat fallback (the owner
+   viewed `g4-kit/g4-blind-test-slides.pdf`; deviation recorded, not dropped:
+   the 5-second flash is not enforceable in chat). Answers transcribed:
+   `1Y 2N 3N 4Y 5N 6Y 7N 8N 9Y 10N`. Scored against the administrator key
+   (seeded shuffle): **5/10 correct, false-AI 2 of 5** — the pre-registered
+   bar (≥ 9/10 AND zero false-AI) **NOT met**. Correct: cards 1, 5, 6, 7, 10.
+   Misses on AI stimuli: cards 2, 3, 8 (AI draft cards light + dark, dark
+   copilot panel read as human). False-AI: cards 4, 9 (the amber internal-note
+   card and the Ada Lovelace agent reply in page context read as AI). The
+   failure-action surfaces are named in the protocol record and stand as
+   disclosed, owner-accepted limitations — the verdict was given with the
+   score in view and supersedes the fix-and-rerun loop for this program.
+
+2. **SUS (RS-21, target ≥ 68)** — chat fallback, transcribed:
+   `1=4 2=2 3=5 4=1 5=4 6=1 7=4 8=1 9=4 10=2`. Odd (4−1)+(5−1)+(4−1)+(4−1)+(4−1)=16 ·
+   even (5−2)+(5−1)+(5−1)+(5−1)+(5−2)=18 · sum 34 × 2.5 = **85.0** — bar met.
+   Caveat recorded verbatim: n=1 (the owner is the program's only user); not a
+   population estimate.
+
+3. **Records synced (zero-stale):**
+   - `docs/audit/acceptance/blind-test-protocol.md` §Result — filled
+     (per-card detail, administration deviation, the NOT-met bar, the verdict).
+   - `docs/audit/acceptance/sus-questionnaire.md` §Score sheet — filled
+     (ten per-item values, scoring arithmetic, 85.0, n=1 caveat).
+   - `docs/audit/generate_acceptance_report.py` — the four pending/awaiting
+     placeholders replaced with the closed record (cover Status row, §4.2,
+     §5, §8); acceptance report regenerated: 8 pages, every value verified in
+     the rendered text, zero stale strings (`awaiting G4` / `pending G4` /
+     `— (n = —)` all gone).
+   - `ai/plan.md` — G4-closed blockquote appended; `ai/progress.md` — None.
+   - Traceability matrix and CHANGELOG needed no change (no counts, no pending
+     language; the matrix's G4 mention is historical and remains true).
+
+4. **Gates:** gate_no_simulation clean; gate_traceability OK (23 routes,
+   27 ids). No Rust code changed in this closure — the 24-suite / 175-test /
+   171-golden set, SPP_SMOKE and the CI snapshot locks are untouched from the
+   RS-5 verified state (commit `0ad0bf1`).
+
+**The reskin program is closed:** RS-01..RS-21, the RS-4 rejection wave
+(RS-4-1..10), RS-4-11, and G4 (verdict: accepted). `plan.md` holds nothing;
+`progress.md` holds nothing. No further work is open or queued.

@@ -188,8 +188,8 @@ cover_rows = [
     ["Program", "Design-System Reskin RS-01..RS-21 (decisions.md D6)"],
     ["Item", "RS-21 — R4: final acceptance + release (Batch RS-3)"],
     ["Contract", "Design Contract v1.0 (FROZEN 2026-10-28) — docs/audit/design-contract-v1.md"],
-    ["Status", "R4 package complete — GATE G4 (owner final acceptance) pending"],
-    ["Date", "2026-10-29"],
+    ["Status", "Closed — GATE G4 owner verdict: accepted (2026-10-30); the blind-test miss is disclosed in §4.2, not waived"],
+    ["Date", "2026-10-30"],
 ]
 meta_t = Table([[Paragraph(f"<b>{esc(k)}</b>", S["cell_b"]), Paragraph(esc(v), S["cell"])] for k, v in cover_rows],
                colWidths=[1.5 * inch, PAGE_W - 2.4 * inch - 1.5 * inch])
@@ -344,12 +344,12 @@ bullets([
     "page can hand-tint a surface violet outside the tone map.",
     "Every AI surface is diff-locked in the kittest goldens — a tone regression fails the CI snapshots job.",
 ])
-h2("4.2 Result (recorded at G4)")
+h2("4.2 Result (recorded at G4 — 2026-10-30, chat administration)")
 table(
     ["Participant", "Correct /10", "False-AI (of 5)", "Time per card", "Pass"],
-    [["awaiting G4 administration", "—", "—", "—", "—"]],
+    [["owner (n=1)", "5 /10", "2 of 5", "not enforced (chat)", "no — bar not met"]],
     [0.34, 0.16, 0.18, 0.16, 0.16],
-    caption="Aggregate verdict: pending G4. Any miss is a reskin defect — fix the DS-C-22 surface, re-lock the goldens, re-run.")
+    caption="Pre-registered bar (≥ 9/10 and 0 false-AI) NOT met — recorded, not spun. Misses on the AI draft cards (light + dark) and the dark copilot panel; false-AI on the amber internal-note card and the Ada Lovelace agent reply in page context. Gate G4 verdict: the owner accepted with this score in view — the two false-AI surfaces stand as disclosed, owner-accepted limitations.")
 
 # ================= 5. SUS =================
 h1(5, "SUS Questionnaire — target ≥ 68")
@@ -363,9 +363,9 @@ p("The standard System Usability Scale (Brooke 1996), applied to v1.9.0 after at
   "fixed, and the full instrument is re-administered as a new row.")
 table(
     ["Participant", "Q1..Q10", "SUS", "Pass ≥ 68"],
-    [["awaiting G4 administration", "—", "—", "—"]],
+    [["owner (n=1)", "4 · 2 · 5 · 1 · 4 · 1 · 4 · 1 · 4 · 2", "85.0", "yes"]],
     [0.34, 0.30, 0.18, 0.18],
-    caption="Mean SUS: pending G4 · n: pending · caveat (n=1 where applicable): recorded verbatim at G4.")
+    caption="Mean SUS: 85.0 · n: 1 · caveat (n=1): the sole participant — recorded verbatim, not a population estimate. Chat administration 2026-10-30.")
 
 # ================= 6. CI SNAPSHOT LOCKS =================
 h1(6, "CI Snapshot Locks — the reskin drift gate")
@@ -421,16 +421,16 @@ else:
 h1(8, "GATE G4 — Owner Final Acceptance")
 p("Gate G4 is the owner's verdict on the reskin program. The package presented: this report; the "
   "traceability matrix (machine-gated in CI); the blind-test protocol and the SUS instrument "
-  "(results recorded below upon administration); the CI snapshot locks (24 suites / 175 tests — 173 kittest + 2 "
+  "(results recorded below); the CI snapshot locks (24 suites / 175 tests — 173 kittest + 2 "
   "style lint — over 171 goldens); and release v1.9.0 tagged and published with checksums.")
 table(
     ["Record", "Value"],
     [
-        ["Owner acceptance (accept / accept-with-notes / reject)", "—"],
-        ["Blind test aggregate (§4.2)", "— /10"],
-        ["SUS mean, n (§5)", "— (n = —)"],
-        ["Notes / conditions", "—"],
-        ["Date", "—"],
+        ["Owner acceptance (accept / accept-with-notes / reject)", "accept — GATE G4 closed 2026-10-30"],
+        ["Blind test aggregate (§4.2)", "5 /10 — pre-registered bar not met (2 false-AI); disclosed and owner-accepted"],
+        ["SUS mean, n (§5)", "85.0 (n = 1)"],
+        ["Notes / conditions", "Verdict given with the blind-test miss in view: the false-AI surfaces (amber internal-note card; Ada Lovelace agent reply in page context) stand as disclosed limitations; SUS 85.0 clears the ≥ 68 bar."],
+        ["Date", "2026-10-30"],
     ],
     [0.52, 0.48],
     caption="The completed record is folded back into this report (regenerate via "

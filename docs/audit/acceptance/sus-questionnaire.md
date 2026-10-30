@@ -43,13 +43,23 @@
 - Sum the ten adjusted values, multiply by 2.5 → 0–100 per participant.
 - **Pass bar: ≥ 68** (per participant and for the mean; a mean across n).
 
-## Score sheet (filled at Gate G4)
+## Score sheet (filled at Gate G4 — 2026-10-30)
+
+Administration: **chat fallback** (2026-10-30) — the answer sheet's SUS column
+transcribed verbatim: `1=4 2=2 3=5 4=1 5=4 6=1 7=4 8=1 9=4 10=2`. The owner had
+been working in v1.9.0 live (the Inbox copilot sessions the RS-4 rejection wave
+was reported from) before scoring.
 
 | Participant | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Q9 | Q10 | SUS |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| _awaiting G4 administration_ | — | — | — | — | — | — | — | — | — | — | — |
+| owner (n=1) | 4 | 2 | 5 | 1 | 4 | 1 | 4 | 1 | 4 | 2 | **85.0** |
 
-**Mean SUS: — · n: — · pass bar (≥ 68): pending G4 · caveat: —**
+Scoring: odd (4−1)+(5−1)+(4−1)+(4−1)+(4−1) = 16 · even (5−2)+(5−1)+(5−1)+(5−1)+(5−2) = 18 ·
+sum 34 × 2.5 = **85.0**.
+
+**Mean SUS: 85.0 · n: 1 · pass bar (≥ 68): met · caveat: n=1 — the owner is the
+sole participant (the program's only user); the score is recorded verbatim and
+is not a population estimate.**
 
 ## Interpretation notes (record with the result)
 

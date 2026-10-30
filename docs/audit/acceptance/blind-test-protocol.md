@@ -77,10 +77,33 @@ The human test below exercises a guarantee the code already enforces structurall
 4. **Failure action.** Any miss is a reskin defect: fix the DS-C-22 surface (badge
    placement/role surface), re-lock the goldens, re-run the protocol.
 
-## Result (filled at Gate G4)
+## Result (filled at Gate G4 — 2026-10-30)
+
+**Administration: chat fallback.** The owner viewed
+`g4-kit/g4-blind-test-slides.pdf` and answered the ten cards in chat; the answer
+sheet's yes/no column is transcribed verbatim:
+`1Y 2N 3N 4Y 5N 6Y 7N 8N 9Y 10N`. Deviation recorded, not silently dropped: the
+5-second per-card flash is **not enforced** in this administration mode. Scored
+against the administrator key (seeded shuffle, deterministic):
 
 | Participant | Correct /10 | False-AI (of 5) | Time per card | Pass |
 |---|---|---|---|---|
-| _awaiting G4 administration_ | — | — | — | — |
+| owner (n=1) | **5 /10** | **2 of 5** | not enforced (chat administration) | **no** — the pre-registered bar (≥ 9/10 and 0 false-AI) was **not** met |
 
-**Aggregate: — /10 · verdict: pending G4.**
+Per-card detail (presentation order per the administrator key): correct — cards
+1, 5, 6, 7, 10 · misses on AI stimuli — cards 2, 3, 8 (the AI draft cards
+light + dark and the dark copilot suggested-reply panel were read as human) ·
+**false-AI** — cards 4, 9 (the amber internal note card and the Ada Lovelace
+agent-reply card in page context were read as AI).
+
+**Aggregate: 5 /10 · false-AI 2 · pre-registered bar NOT met — recorded, not
+spun.** Per §Failure action these two false-AI surfaces are named as reskin
+defects: the amber note card (a warm tone the participant read as the AI
+identity) and the agent-reply-in-page-context card.
+
+**Gate G4 verdict (owner, 2026-10-30): accepted.** The owner's final acceptance
+— given in the same message as the verdict `blind test + SUS / accepted` — closes
+the gate with the score above in view. The owner's acceptance supersedes the
+protocol's fix-and-rerun loop for this program; the two false-AI surfaces stand
+as disclosed, owner-accepted limitations. No record above is altered by the
+verdict.

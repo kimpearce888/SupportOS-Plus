@@ -257,3 +257,12 @@ Batch mapping under `rule.md` (ten at a time):
 > holds no further items for the reskin program (RS-01..RS-21 + RS-4-11 all
 > consumed); the G4 verdict (blind test / SUS / accepted / waive) remains
 > with the owner — GATE G4 is re-presented with the STOP.
+
+> **GATE G4 CLOSED 2026-10-30 — owner verdict: accepted.** The owner
+> administered the blind test + SUS via chat fallback (`blind test + SUS /
+> accepted`) and the delivered answer lines were transcribed verbatim into the
+> record tables. Blind test 5/10 with 2 false-AI — the pre-registered bar
+> (≥ 9/10, 0 false-AI) NOT met, recorded as a disclosed, owner-accepted
+> limitation; SUS 85.0 (n=1), bar ≥ 68 met. The reskin program is fully
+> consumed: RS-01..RS-21, the RS-4 rejection wave (RS-4-1..10), RS-4-11 and
+> the G4 closure. Nothing is open.
