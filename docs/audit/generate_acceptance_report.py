@@ -243,7 +243,7 @@ p("On 28 October 2026 the owner set the program's goal: \x27everything is workin
 callout_row([
     ("23 routes", "every page re-rendered through the DC widget set (R3 complete)"),
     ("17 + 6", "canonical DS-C component sheets + DS-A archetype recipes, all traced"),
-    ("23 / 172 / 168", "kittest suites / tests (170 kittest + 2 style lint) / goldens diff-locking every page"),
+    ("24 / 175 / 171", "kittest suites / tests (173 kittest + 2 style lint) / goldens diff-locking every page"),
     ("v1.9.0", "the reskin release, tagged from the verified acceptance state"),
 ])
 p("The scope contract never moved: no feature, data, workflow, shortcut or page-set change "
@@ -373,7 +373,7 @@ p("Before RS-21 the 23 kittest suites ran only in this lab: the goldens were dif
   "locally, but CI never rendered them (the suites are kittest-ui-gated and need a Vulkan "
   "rasterizer). RS-21 adds the <b>snapshots</b> job to ci.yml: the runner installs Mesa's "
   "lavapipe — the software-rasterizer family the baselines were produced with — and runs the "
-  "whole set with UPDATE_SNAPSHOTS deliberately unset: every one of the 168 goldens diffs "
+  "whole set with UPDATE_SNAPSHOTS deliberately unset: every one of the 171 goldens diffs "
   "against the committed baselines and any pixel drift fails the build. The same gate rides the "
   "release workflow, so a tagged release cannot carry a drifted page.")
 h2("6.1 What is locked")
@@ -421,8 +421,8 @@ else:
 h1(8, "GATE G4 — Owner Final Acceptance")
 p("Gate G4 is the owner's verdict on the reskin program. The package presented: this report; the "
   "traceability matrix (machine-gated in CI); the blind-test protocol and the SUS instrument "
-  "(results recorded below upon administration); the CI snapshot locks (23 suites / 172 tests — 170 kittest + 2 "
-  "style lint — over 168 goldens); and release v1.9.0 tagged and published with checksums.")
+  "(results recorded below upon administration); the CI snapshot locks (24 suites / 175 tests — 173 kittest + 2 "
+  "style lint — over 171 goldens); and release v1.9.0 tagged and published with checksums.")
 table(
     ["Record", "Value"],
     [

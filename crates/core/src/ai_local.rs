@@ -284,6 +284,12 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
             Ok((r.get(0)?, r.get(1)?))
         })?
         .filter_map(|r| r.ok())
+        // RS-4-2 (G4-rejection fix): the mirror stores the source HTML
+        // (Help Scout import) — the reader renders it through
+        // `richtext::html_to_spans`, but the analyzer previously sliced
+        // the raw body, so `<br>`/`<p>` leaked into the copilot's summary
+        // and questions. Same pipeline, plain-text projection.
+        .map(|(t, b): (String, String)| (t, crate::richtext::strip_html(&b)))
         .collect();
 
     let customer_text: String = rows
@@ -657,6 +663,47 @@ mod tests {
         assert!(a.questions.iter().any(|q| q.contains("export timeout")));
         assert!(!a.summary.is_empty(), "summary must extract something");
         assert!(a.keywords.iter().any(|k| k == "export"));
+    }
+
+    /// RS-4-2 (G4-rejection fix): Help Scout imports store source HTML in
+    /// `body_text`; the analyzer must summarize what the reader shows —
+    /// the plain-text projection — never the raw markup. The owner's live
+    /// data produced summary lines like `• <br><br>When I opened the link
+    /// …` before the fix.
+    #[test]
+    fn analyze_strips_html_from_thread_bodies() {
+        let handle = db();
+        let conn = handle.write_guard();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (12, 3, 'Webinar watch page', 'preview', 'closed')",
+            [],
+        )
+        .unwrap();
+        let conv = conn.last_insert_rowid();
+        seed_thread(
+            &conn,
+            conv,
+            "customer",
+            "Hey there,<br><br>Thanks so much for all the help you've given me.<br><br>\
+             The export is broken, throws an error and fails every time. This is urgent \
+             and the export is not working! How do I give them full access to the watch page?",
+        );
+        let a = analyze(&conn, conv).unwrap();
+        let rendered: String = a
+            .summary
+            .iter()
+            .chain(a.questions.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(!rendered.contains('<'), "markup leaked: {rendered:?}");
+        assert!(!rendered.contains("br>"), "markup leaked: {rendered:?}");
+        assert!(
+            a.summary.iter().any(|l| l.contains("export is broken")),
+            "the stripped sentence must be summarizable: {:?}",
+            a.summary
+        );
     }
 
     #[test]

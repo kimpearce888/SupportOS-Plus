@@ -189,7 +189,7 @@ Folded helpers (DC §3 tail — no separate sheet): `pager`, `divider`, `day_div
 | Reader head (avatar row, assignee) | §3 DS-C-19 | `avatar`, `assignee` | kittest_inbox_page.rs |
 | Message cards (role-typed, day dividers, quoted collapse, attachments) | §3 DS-C-20 | `message_card_with`, `day_divider`, `quoted_history`, `file_chip` | kittest_inbox_page.rs |
 | Composer (Reply/Note, chips, draft flag) | §3 DS-C-21 | `composer` | kittest_inbox_page.rs |
-| Copilot panel (suggest/similar/chat, AI badge) | §3 DS-C-22 | `cop_suggest`, `cop_chat`, `badge` | kittest_inbox_page.rs |
+| Copilot panel (suggest/similar/chat, AI badge) | §3 DS-C-22 | `cop_suggest`, `cop_chat`, `badge` | kittest_inbox_page.rs + kittest_inbox_copilot.rs (open state, 1625px, light+dark) |
 | Triage chips + status | §3 DS-C-06 via §5 | `chip`, `badge` | kittest_inbox_page.rs |
 | Pagination | §3 folded helper | `pager` | kittest_inbox_page.rs |
 | Empty panes (slim) | §3 DS-C-14 | `empty_state_slim` | kittest_inbox_page.rs |
@@ -299,8 +299,11 @@ Folded helpers (DC §3 tail — no separate sheet): `pager`, `divider`, `day_div
 
 - Routes (`PageKey`): 23 — all carry a section above (Shell covered by §0 + the
   Shell route's own row in the kittest exception note).
-- Golden locks: 21 page suites + the widget suite + style lint = the 23-suite /
-  172-test (170 kittest + 2 style lint) / 168-golden set under `crates/app-shell/tests/`.
+- Golden locks: 21 page suites + the widget suite + the copilot-state suite
+  + style lint = the 24-suite / 175-test (173 kittest + 2 style lint) /
+  171-golden set under `crates/app-shell/tests/` (RS-4-8: the copilot-open
+  state class — never locked before the G4 rejection — is now
+  `kittest_inbox_copilot.rs`, light + dark at the owner's live aspect).
 - Exceptions in force: **E-1** (blur shadows → hairline strokes; motion only where
   egui animates — DC §7), **C-1** receipts (footnoted data-layer quirks, never faked
   fixed), **C-2** labels (data-track items marked mocked pending the async track).

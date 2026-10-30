@@ -222,7 +222,16 @@ pub fn list_conversations(
                 c.mailbox_local_id, m.name,
                 c.assignee_local_id, u.first_name || ' ' || u.last_name,
                 c.assigned_team_local_id, tm.name,
-                c.customer_local_id, cu.first_name || ' ' || cu.last_name,
+                c.customer_local_id,
+                -- RS-4-7 (G4-rejection fix): a customer imported with
+                -- blank first/last names produced `'' || ' ' || ''` = a
+                -- blank display name — a headerless list row. Fall back
+                -- to the email, then the honest generic.
+                CASE
+                  WHEN TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, '')) = ''
+                  THEN COALESCE(NULLIF(TRIM(COALESCE(cu.email, '')), ''), 'customer')
+                  ELSE TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, ''))
+                END,
                 c.priority, c.created_at, c.updated_at, c.closed_at,
                 c.response_state
          FROM conversations c
@@ -280,7 +289,14 @@ pub fn get_conversation(
                     c.mailbox_local_id, m.name,
                     c.assignee_local_id, u.first_name || ' ' || u.last_name,
                     c.assigned_team_local_id, tm.name,
-                    c.customer_local_id, cu.first_name || ' ' || cu.last_name, cu.email,
+                    c.customer_local_id,
+                    -- RS-4-7 (G4-rejection fix): same blank-name fallback
+                    -- as the list query — email, then 'customer'.
+                    CASE
+                      WHEN TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, '')) = ''
+                      THEN COALESCE(NULLIF(TRIM(COALESCE(cu.email, '')), ''), 'customer')
+                      ELSE TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, ''))
+                    END, cu.email,
                     c.priority, c.response_state,
                     c.created_at, c.updated_at, c.closed_at
              FROM conversations c
@@ -437,6 +453,49 @@ mod batch27_audit83_tests {
             hits,
             vec!["path C:\\temp missing".to_string()],
             "backslash-containing searches work"
+        );
+    }
+
+    /// RS-4-7 (G4-rejection fix): a customer imported with blank
+    /// first/last names (`'' || ' ' || ''` = `' '`) rendered a headerless
+    /// list row — the owner's live inbox showed one (#49224). The name
+    /// column now falls back to the email, then to 'customer'.
+    #[test]
+    fn blank_customer_name_falls_back_to_email() {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO customers (id, remote_id, first_name, last_name, email)
+             VALUES (9, 909, '', '', 'judy@example.com'),
+                    (10, 910, '', '', ''),
+                    (11, 911, 'Named', 'Customer', 'named@example.com')",
+            [],
+        )
+        .expect("customers");
+        for (id, customer) in [(1i64, 9i64), (2, 10), (3, 11)] {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, customer_local_id)
+                 VALUES (?1, ?1, 'subject', 'preview', ?2)",
+                rusqlite::params![id, customer],
+            )
+            .expect("conversation");
+        }
+        let (items, _) = list_conversations(&conn, &InboxFilters::default()).expect("list");
+        let names: Vec<String> = items
+            .iter()
+            .filter_map(|i| i.customer_name.clone())
+            .collect();
+        assert!(
+            names.contains(&"judy@example.com".to_string()),
+            "blank name falls back to the email: {names:?}"
+        );
+        assert!(
+            names.contains(&"customer".to_string()),
+            "blank name + blank email falls back to the generic: {names:?}"
+        );
+        assert!(
+            names.contains(&"Named Customer".to_string()),
+            "a real name is untouched: {names:?}"
         );
     }
 }

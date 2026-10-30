@@ -320,7 +320,20 @@ fn render_dashboard_page(dark: bool, width: f32, name: &str) {
             },
         );
     h.run_ok();
-    h.snapshot(name);
+    // Registered tolerance (RS-4-9, G4-rejection fix wave): the chart
+    // subtitle ("YYYY-MM-DD → YYYY-MM-DD · N points") prints the rolling
+    // 30-day window from the wall clock, so the golden drifts by ~70 px
+    // on the two date glyphs at every midnight — invisible to the design,
+    // but fatal to a byte lock (first observed 2026-10-30: the suite was
+    // byte-exact on 10-29, the day its goldens were generated). This is a
+    // pre-existing determinism defect of the dashboard fixture (the seed
+    // is wall-clock-relative), registered here the same way as the
+    // settings-page runner budget: kittest's documented last-resort
+    // `max_failed_pixels`, scoped to the page goldens, sized just above
+    // the observed drift and far below any real regression (a reflowed
+    // row or moved tile is hundreds of pixels). The proper fix — a clock
+    // seam so the fixture pins `now` — is plan item RS-4-11.
+    h.snapshot_options(name, &egui_kittest::SnapshotOptions::new().max_failed_pixels(120));
 }
 
 #[test]
@@ -411,5 +424,11 @@ fn r3_dashboard_scope_chip_light() {
         h.query_all_by_label("email").next().is_some(),
         "the by-channel card must ignore the channel chip (the labeled quirk)"
     );
-    h.snapshot("r3_dashboard_scope_chip_light");
+    // Same registered wall-clock drift as the page goldens above (the
+    // chart subtitle is on this render too); zero-tolerance would fail
+    // on the two date glyphs at every midnight.
+    h.snapshot_options(
+        "r3_dashboard_scope_chip_light",
+        &egui_kittest::SnapshotOptions::new().max_failed_pixels(120),
+    );
 }

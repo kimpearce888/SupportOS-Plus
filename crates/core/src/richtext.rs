@@ -84,6 +84,56 @@ pub fn sanitized_html_to_spans(clean: &str) -> Vec<Span> {
     Parser::new(clean).run()
 }
 
+/// Plain-text projection of (possibly untrusted) HTML: the same
+/// sanitizer + parser pipeline as [`html_to_spans`], joined back into one
+/// string. `<br>` becomes `\n`, block boundaries `\n\n` — exactly what the
+/// spans carry — so a caller that cannot render styled spans (the local
+/// copilot analyzer building its extractive summary) still sees the text
+/// the reader would show and never leaks raw markup (`<br>`, `<p>`) into
+/// the UI (G4-rejection fix RS-4-1/RS-4-2: the owner's live data carries
+/// Help Scout HTML, and the analyzer previously sliced it verbatim).
+pub fn strip_html(html: &str) -> String {
+    html_to_spans(html)
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect::<String>()
+        // Lazy separators can leave edge newlines (a leading `<br>`); a
+        // plain-text projection carries none of that framing.
+        .trim()
+        .to_string()
+}
+
+/// Zero-width-space break opportunities inside tokens longer than `max`
+/// characters, so the text engine can wrap them.
+///
+/// egui wraps at word boundaries and never breaks a token by default, so a
+/// single long URL forced whole lines — and any card sized to the line —
+/// wider than their viewport, painting over neighbouring panels (the
+/// G4-rejection overlap; RS-4-1/RS-4-3). U+200B is a UAX #14 break
+/// opportunity and renders zero-width. Whitespace resets the run; `max` of
+/// 0 (or a string with no such token) returns the text unchanged.
+pub fn break_long_tokens(s: &str, max: usize) -> String {
+    if max == 0 {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len() + s.len() / max.max(1));
+    let mut run = 0usize;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            run = 0;
+            out.push(c);
+        } else {
+            if run == max {
+                out.push('\u{200b}');
+                run = 0;
+            }
+            out.push(c);
+            run += 1;
+        }
+    }
+    out
+}
+
 fn sanitize(html: &str) -> String {
     let mut tags = HashSet::new();
     for t in [
@@ -742,6 +792,85 @@ mod tests {
             plain_text("<p>ok</p><textarea>draft</textarea><p>after</p>").contains("after"),
             "content after the dropped subtree survives"
         );
+    }
+
+    // ---- RS-4-1: strip_html + break_long_tokens (G4-rejection fixes) ----
+
+    #[test]
+    fn strip_html_plain_text_passes_through() {
+        assert_eq!(strip_html(""), "");
+        assert_eq!(strip_html("just some text"), "just some text");
+    }
+
+    #[test]
+    fn strip_html_blocks_and_breaks_become_newlines() {
+        assert_eq!(strip_html("<p>one</p><p>two</p>"), "one\n\ntwo");
+        // Consecutive `<br>`s are one lazy separator (the parser's shipped
+        // semantics); the projection only guarantees markup-free text.
+        assert_eq!(
+            strip_html("Hey there,<br><br>Thanks so much"),
+            "Hey there,\nThanks so much"
+        );
+    }
+
+    #[test]
+    fn strip_html_never_leaks_markup_or_script_content() {
+        // The exact live-data shape from the owner's G4 screenshot.
+        let out = strip_html("<br><br>When I opened the link in a private Safari tab");
+        assert_eq!(out, "When I opened the link in a private Safari tab");
+        assert!(!out.contains('<'), "no angle bracket may survive: {out:?}");
+        let out = strip_html("<p>Hey there, <p>what's Thursday, and my");
+        assert!(!out.contains('<'), "no angle bracket may survive: {out:?}");
+        assert!(out.contains("Hey there,"));
+        assert!(out.contains("what's Thursday"));
+        assert_eq!(strip_html("<p>ok</p><script>alert(1)</script>"), "ok");
+        assert_eq!(strip_html("<p>a &amp; b</p>"), "a & b");
+    }
+
+    #[test]
+    fn break_long_tokens_short_text_unchanged() {
+        assert_eq!(break_long_tokens("", 40), "");
+        assert_eq!(
+            break_long_tokens("short tokens only here", 40),
+            "short tokens only here"
+        );
+        assert_eq!(
+            break_long_tokens("exactly-forty-characters-are-fine-ok!", 40),
+            "exactly-forty-characters-are-fine-ok!"
+        );
+    }
+
+    #[test]
+    fn break_long_tokens_splits_long_runs_every_max() {
+        let s = "a".repeat(100);
+        let broken = break_long_tokens(&s, 40);
+        assert_eq!(broken.chars().filter(|c| *c == '\u{200b}').count(), 2);
+        // Removing the break opportunities restores the input.
+        assert_eq!(broken.replace('\u{200b}', ""), s);
+        // No unbroken run exceeds max.
+        for run in broken.split('\u{200b}') {
+            assert!(run.chars().count() <= 40);
+        }
+    }
+
+    #[test]
+    fn break_long_tokens_wraps_a_live_url() {
+        let url = "https://stealthseminarapp.com/?qa=2.216478160.73549554.1792024737-fb4c0a7b8d9e0f1a2b3c4d5e6f7a8b9c";
+        let broken = break_long_tokens(url, 40);
+        assert!(broken.contains('\u{200b}'));
+        assert_eq!(broken.replace('\u{200b}', ""), url);
+        // Whitespace and short neighbours stay untouched.
+        let line = format!("see {url} today");
+        let broken = break_long_tokens(&line, 40);
+        assert_eq!(broken.replace('\u{200b}', ""), line);
+        assert!(broken.contains("see "));
+        assert!(broken.ends_with(" today"));
+    }
+
+    #[test]
+    fn break_long_tokens_zero_max_is_noop() {
+        let s = "a".repeat(100);
+        assert_eq!(break_long_tokens(&s, 0), s);
     }
 
     #[test]

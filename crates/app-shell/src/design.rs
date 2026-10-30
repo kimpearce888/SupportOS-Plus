@@ -2339,14 +2339,22 @@ pub fn composer(
 
     // Foot: context + send.
     ui.horizontal(|ui| {
-        ui.label(
-            R::new(if note {
-                "note — visible to teammates only"
-            } else {
-                "reply — sent to the customer"
-            })
-            .size(scale::text::META_HALF)
-            .color(t.muted_foreground),
+        // RS-4-6 (G4-rejection fix): the keyboard shortcut hint lives next
+        // to the button it describes (it previously sat in the inbox
+        // views rail, where nothing sends). Truncate keeps the foot
+        // overflow-free at narrow reader widths.
+        let context = if note {
+            "note — visible to teammates only · Ctrl+Enter sends"
+        } else {
+            "reply — sent to the customer · Ctrl+Enter sends"
+        };
+        ui.add(
+            egui::Label::new(
+                R::new(context)
+                    .size(scale::text::META_HALF)
+                    .color(t.muted_foreground),
+            )
+            .truncate(),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let send_label = if note { "send note" } else { "send" };
@@ -2455,10 +2463,20 @@ pub fn cop_suggest(
                         t.border_strong,
                     );
                     ui.add_space(12.0);
-                    ui.label(
-                        egui::RichText::new(bullet)
-                            .size(scale::text::SMALL_HALF)
-                            .color(t.foreground),
+                    // RS-4-4 (G4-rejection root cause): a `ui.horizontal`
+                    // lays widgets out in Extend mode — egui never wraps
+                    // text there, so one multi-line suggested reply laid
+                    // itself out at its full single-line width, blew the
+                    // frame rect past the window edge, and squeezed the
+                    // whole copilot panel to a sliver. Wrap explicitly and
+                    // break any unbreakable token.
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(spp_core::richtext::break_long_tokens(bullet, 40))
+                                .size(scale::text::SMALL_HALF)
+                                .color(t.foreground),
+                        )
+                        .wrap(),
                     );
                 });
             }

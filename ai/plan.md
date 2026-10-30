@@ -250,3 +250,15 @@ Batch mapping under `rule.md` (ten at a time):
   (owner-approved, decisions.md D6). Numbering switches to the RS- prefix to keep the
   new program separate from the historical audit items. Batches: RS-1 = RS-01..10,
   RS-2 = RS-11..20, RS-3 = RS-21. Gate G1 (conformed-lab approval) blocks all Rust work.
+
+## Batch RS-5 — queued (discovered during RS-4 verification)
+
+1. **RS-4-11 (dashboard/reports determinism seam)** — the dashboard chart
+   subtitle and the reports builder date inputs derive their 30-day window
+   from the wall clock, so their goldens drift ~70–85 px at every midnight
+   (first observed 2026-10-30; both suites were byte-exact on 10-29 when
+   their goldens were generated). Currently held open by registered
+   `max_failed_pixels(120)` budgets with full disclosure in the suite files.
+   Proper fix: a clock seam (the loader takes an optional `today`, tests
+   pin it) per the repo's own fixed-timestamp doctrine, then the budgets
+   are removed and the goldens re-locked byte-exact.

@@ -1248,8 +1248,10 @@ impl InboxPage {
                 self.reload_list(db);
             }
         }
-        ui.add_space(design::scale::space::SP3);
-        design::hint_text(ui, "Ctrl+Enter sends the composer");
+        ui.add_space(design::scale::space::SP1);
+        // RS-4-6 (G4-rejection fix): the keyboard hint moved to the
+        // composer foot (design::composer) — next to the send button it
+        // describes, not in the views rail where nothing sends.
     }
 
     /// The conversation list pane (DS-A-05): head (view title + the honest
@@ -2015,20 +2017,29 @@ impl InboxPage {
                 ui.add_space(design::scale::space::SP2);
 
                 // Summary: what the customer needs + open questions.
+                // RS-4-4 (G4-rejection fix): line text passes through
+                // break_long_tokens so an unbreakable token can never
+                // overflow the card or the panel.
                 if !a.summary.is_empty() || !a.questions.is_empty() {
                     design::card_titled(ui, "Summary", None, |ui| {
                         for line in &a.summary {
                             ui.label(
-                                egui::RichText::new(format!("• {line}"))
-                                    .small()
-                                    .color(design::tokens(ui).foreground),
+                                egui::RichText::new(format!(
+                                    "• {}",
+                                    spp_core::richtext::break_long_tokens(line, 40)
+                                ))
+                                .small()
+                                .color(design::tokens(ui).foreground),
                             );
                         }
                         for q in &a.questions {
                             ui.label(
-                                egui::RichText::new(format!("? {q}"))
-                                    .small()
-                                    .color(design::tokens(ui).muted_foreground),
+                                egui::RichText::new(format!(
+                                    "? {}",
+                                    spp_core::richtext::break_long_tokens(q, 40)
+                                ))
+                                .small()
+                                .color(design::tokens(ui).muted_foreground),
                             );
                         }
                     });
@@ -2057,14 +2068,21 @@ impl InboxPage {
                     design::card_titled(ui, "Similar past issues", None, |ui| {
                         for s in report.similar.iter().take(3) {
                             ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "#{} {}",
-                                        s.number, s.subject
-                                    ))
-                                    .small()
-                                    .strong()
-                                    .color(design::tokens(ui).foreground),
+                                // RS-4-4 (G4-rejection fix): a horizontal
+                                // row lays its children out in Extend mode
+                                // (egui never wraps there) — a long subject
+                                // would overflow the pane. Rows truncate.
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!(
+                                            "#{} {}",
+                                            s.number, s.subject
+                                        ))
+                                        .small()
+                                        .strong()
+                                        .color(design::tokens(ui).foreground),
+                                    )
+                                    .truncate(),
                                 );
                                 // The similarity score is AI-derived —
                                 // G-2: violet.
@@ -2730,12 +2748,15 @@ impl InboxPage {
             }
         }
 
-        // Reply addressing (unchanged).
+        // Reply addressing. RS-4-5 (G4-rejection fix): the inputs span the
+        // composer width like every other composer row — the fixed
+        // half-width slots left dead space beside them and read as a
+        // layout bug against the full-width textarea above.
         if self.composer_mode == ComposerMode::Reply {
             ui.horizontal(|ui| {
                 let mut cc = self.composer_cc.clone();
                 let response = ui.add_sized(
-                    [ui.available_width() / 2.0 - 4.0, 28.0],
+                    [ui.available_width(), 28.0],
                     egui::TextEdit::singleline(&mut cc).hint_text("Cc (comma-separated emails)"),
                 );
                 let _ = response;
@@ -2744,7 +2765,7 @@ impl InboxPage {
             ui.horizontal(|ui| {
                 let mut bcc = self.composer_bcc.clone();
                 ui.add_sized(
-                    [ui.available_width() / 2.0 - 4.0, 28.0],
+                    [ui.available_width(), 28.0],
                     egui::TextEdit::singleline(&mut bcc).hint_text("Bcc (comma-separated emails)"),
                 );
                 self.composer_bcc = bcc;
@@ -3011,7 +3032,12 @@ fn compact_time(iso: &str) -> String {
 /// sizes).
 fn render_rich_spans(ui: &mut egui::Ui, spans: &[spp_core::richtext::Span]) {
     for span in spans {
-        let mut rich = egui::RichText::new(span.text.clone());
+        // RS-4-3 (G4-rejection fix): egui never breaks a token by default,
+        // so one long URL (Help Scout note bodies carry them) forced the
+        // reader's scroll content wider than its viewport and every card
+        // painted over the copilot panel. Zero-width break opportunities
+        // cap any token's unbroken run; the text itself is unchanged.
+        let mut rich = egui::RichText::new(spp_core::richtext::break_long_tokens(&span.text, 40));
         let style = &span.style;
         if style.bold {
             rich = rich.strong();
