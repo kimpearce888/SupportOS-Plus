@@ -4,6 +4,51 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.1] — 2026-10-30
+
+### Fixed — the Gate-G4 rejection fix wave (RS-4-1..RS-4-11), on the accepted state
+
+v1.9.0 was tagged at the R4 STOP **before** the owner's live-use rejection was
+diagnosed; every fix below lives first in this release. The owner re-tested the
+fixed build, administered the acceptance instruments and closed GATE G4 with
+the verdict **accepted** (2026-10-30; blind test + SUS records under
+`docs/audit/acceptance/`).
+
+- **The copilot panel rendered as a 42.5 px sliver overlapped by the reader**
+  (the reported defect, at the owner's live 1625×828 aspect): egui lays
+  widgets inside `ui.horizontal` out in EXTEND mode — text never wraps there —
+  so a 369-character suggested reply laid out at full single-line width, blew
+  the card's frame rect past the window edge, and the panel's size guard
+  re-clamped the 320 px panel at that blown-out right edge, leaving the reader
+  and composer to fill wrongly-reserved space. Root cause fixed:
+  `cop_suggest` bullets now wrap explicitly with `break_long_tokens`
+  (RS-4-4); rich-span body text token-breaks too (RS-4-3); the fix is locked
+  by pixel tests, not by assertion.
+- **HTML fragments could leak into the copilot summary** — `<br>`/`<p>` from
+  raw ticket bodies reached the analyzer output. The analyzer now consumes
+  strip_html'd bodies; core richtext gains `strip_html` + `break_long_tokens`
+  with unit tests (RS-4-1/RS-4-2).
+- **Cc/Bcc fields span the full composer width** instead of the narrower
+  legacy box (RS-4-5).
+- **The Ctrl+Enter send hint sits in the composer foot** — where the shortcut
+  acts — instead of the views rail (RS-4-6).
+- **Blank-name customers no longer render a headerless row**: conversation
+  list and detail queries fall back to the email local-part, then
+  `customer` (the Judy-row evidence; unit-tested, RS-4-7).
+- **The dashboard/reports goldens never drift at midnight again** (RS-4-11
+  clock seam): the chart subtitle and the reports builder date inputs derived
+  their 30-day window from the wall clock, so their snapshot locks carried
+  disclosed 120-px drift budgets — both budgets are DELETED and both suites
+  lock byte-exact with zero tolerance; the 7d-stale backlog predicate reads
+  the anchored window instead of the DB engine's `now` (production semantics
+  unchanged; regression-tested both ways).
+- **New permanent snapshot lock:** `kittest_inbox_copilot` locks the
+  copilot-open state class — never locked before — at the owner's live aspect
+  1625×828 light + dark, plus closed (RS-4-8). The verified set is 24 suites /
+  175 tests / 171 goldens, all green over lavapipe+Xvfb; the tag is cut on the
+  main commit CI's snapshots job already diffed, and the Release workflow
+  re-runs fmt, clippy and the workspace tests before publishing.
+
 ## [1.9.0] — 2026-10-29
 
 ### Changed — Design-System reskin (the presentation layer, rebuilt on DC v1.0)

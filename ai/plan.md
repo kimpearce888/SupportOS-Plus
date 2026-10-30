@@ -266,3 +266,17 @@ Batch mapping under `rule.md` (ten at a time):
 > limitation; SUS 85.0 (n=1), bar ≥ 68 met. The reskin program is fully
 > consumed: RS-01..RS-21, the RS-4 rejection wave (RS-4-1..10), RS-4-11 and
 > the G4 closure. Nothing is open.
+
+> **Batch RS-6 — release v1.9.1 (the accepted state) — opened 2026-10-30** on
+> the owner's `release the new version with all the fix applied`. Fact: tag
+> `v1.9.0` was cut AND pushed at the RS-3 STOP (`464000d`) BEFORE the RS-4
+> fix wave existed — the fixes live only on main. The accepted state therefore
+> ships as the **patch release v1.9.1**: workspace version bump + Cargo.lock,
+> CHANGELOG `[1.9.1]` (the fix wave RS-4-1..11 in product terms — the section
+> the Release workflow prints as the release notes), acceptance report synced
+> to name v1.9.1, annotated tag `v1.9.1` on the release commit. The tag push
+> triggers the Release workflow (build + no-sim/traceability gates + verify on
+> ubuntu 22.04/24.04/debian 12 + publish with checksums). Main + tag push
+> pending the credential re-supply (the sandbox rebuild lost
+> `~/.git-credentials`; rs5 `0ad0bf1` and the G4 closure `157f0ef` are
+> local-only too and go out in the same push).

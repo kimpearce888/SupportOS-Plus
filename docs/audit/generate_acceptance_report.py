@@ -169,7 +169,7 @@ def table(headers, rows, ratios, caption=None):
 # ============================ COVER ============================
 cover_meta = Table(
     [[Paragraph("<b>SupportOS+ · Design-System Reskin</b>", S["cover_title"])],
-     [Paragraph("R4 Final Acceptance + Release v1.9.0 — the acceptance record of the "
+     [Paragraph("R4 Final Acceptance + Release v1.9.1 — the acceptance record of the "
                 "presentation-layer reskin: traceability to the frozen Design Contract, "
                 "the 5-second AI-identification blind test, the SUS instrument, the CI "
                 "snapshot locks, and the release record. Report 4 of the printable "
@@ -188,7 +188,7 @@ cover_rows = [
     ["Program", "Design-System Reskin RS-01..RS-21 (decisions.md D6)"],
     ["Item", "RS-21 — R4: final acceptance + release (Batch RS-3)"],
     ["Contract", "Design Contract v1.0 (FROZEN 2026-10-28) — docs/audit/design-contract-v1.md"],
-    ["Status", "Closed — GATE G4 owner verdict: accepted (2026-10-30); the blind-test miss is disclosed in §4.2, not waived"],
+    ["Status", "Closed — GATE G4 owner verdict: accepted (2026-10-30); blind-test miss disclosed in §4.2, not waived; the accepted state releases as v1.9.1 (v1.9.0, tagged at the RS-3 STOP, predates the fix wave)"],
     ["Date", "2026-10-30"],
 ]
 meta_t = Table([[Paragraph(f"<b>{esc(k)}</b>", S["cell_b"]), Paragraph(esc(v), S["cell"])] for k, v in cover_rows],
@@ -374,8 +374,9 @@ p("Before RS-21 the 23 kittest suites ran only in this lab: the goldens were dif
   "rasterizer). RS-21 adds the <b>snapshots</b> job to ci.yml: the runner installs Mesa's "
   "lavapipe — the software-rasterizer family the baselines were produced with — and runs the "
   "whole set with UPDATE_SNAPSHOTS deliberately unset: every one of the 171 goldens diffs "
-  "against the committed baselines and any pixel drift fails the build. The same gate rides the "
-  "release workflow, so a tagged release cannot carry a drifted page.")
+  "against the committed baselines and any pixel drift fails the build. A release tag is cut "
+  "on a main commit, so the tagged commit's goldens are diffed by the snapshots job; the "
+  "Release workflow re-runs fmt, clippy and the workspace tests before publishing.")
 h2("6.1 What is locked")
 bullets([
     "<b>Real pages, not mocks</b> — every suite renders the production page struct over a seeded "
@@ -394,21 +395,22 @@ p("Regeneration is a deliberate, reviewed act: UPDATE_SNAPSHOTS=1 produces the n
   "ships in the commit that justifies it. In CI the rule is stricter — there is no regeneration; "
   "drift is failure.")
 
-# ================= 7. RELEASE v1.9.0 =================
-h1(7, "Release v1.9.0")
-p("The reskin ships as <b>v1.9.0</b> — a minor bump: the presentation layer changed wholesale; "
-  "the feature surface did not. The workspace version is bumped, the CHANGELOG carries the "
-  "release notes (the section below is read from CHANGELOG.md at report-build time), and the tag "
-  "v1.9.0 is cut from the verified acceptance state. The release workflow builds the AppImage "
-  "and the .deb on ubuntu:22.04 (glibc 2.35 baseline), verifies them in clean containers, and "
-  "publishes with checksums — composing the GitHub release notes from this same CHANGELOG "
-  "section.")
-h2("7.1 CHANGELOG — the [1.9.0] section (verbatim)")
+# ================= 7. RELEASE v1.9.1 =================
+h1(7, "Release v1.9.1")
+p("The accepted state ships as <b>v1.9.1</b> — a patch bump: v1.9.0 was tagged and pushed at "
+  "the R4 STOP, before the owner's G4 rejection produced the fix wave (RS-4-1..11), so the "
+  "fixes live first in v1.9.1; the presentation layer changed, the feature surface did not. "
+  "The workspace version is bumped, the CHANGELOG carries the release notes (the section "
+  "below is read from CHANGELOG.md at report-build time), and the annotated tag v1.9.1 is "
+  "cut from the G4-accepted state. The release workflow builds the AppImage and the .deb on "
+  "ubuntu:22.04 (glibc 2.35 baseline), verifies them in clean containers, and publishes with "
+  "checksums — composing the GitHub release notes from this same CHANGELOG section.")
+h2("7.1 CHANGELOG — the [1.9.1] section (verbatim)")
 _changelog = os.path.join(ROOT, "CHANGELOG.md")
 _section = []
 if os.path.exists(_changelog):
     _txt = open(_changelog, encoding="utf-8").read()
-    _m = re.search(r"^## \[1\.9\.0\].*?(?=^## \[|\Z)", _txt, re.M | re.S)
+    _m = re.search(r"^## \[1\.9\.1\].*?(?=^## \[|\Z)", _txt, re.M | re.S)
     if _m:
         _section = [ln for ln in _m.group(0).strip().splitlines()]
 if _section:
@@ -422,7 +424,8 @@ h1(8, "GATE G4 — Owner Final Acceptance")
 p("Gate G4 is the owner's verdict on the reskin program. The package presented: this report; the "
   "traceability matrix (machine-gated in CI); the blind-test protocol and the SUS instrument "
   "(results recorded below); the CI snapshot locks (24 suites / 175 tests — 173 kittest + 2 "
-  "style lint — over 171 goldens); and release v1.9.0 tagged and published with checksums.")
+  "style lint — over 171 goldens); and the accepted state released as v1.9.1 with checksums "
+  "(v1.9.0, tagged at the RS-3 STOP, is superseded by the fix release).")
 table(
     ["Record", "Value"],
     [

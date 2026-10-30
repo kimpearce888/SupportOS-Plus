@@ -60,6 +60,31 @@ disposition in the G4-verdict addendum (completed.md, 2026-10-30).
     stimulus-source goldens changed, record the batch in completed.md, and
     re-present GATE G4 with the STOP.
 
-None — GATE G4 closed 2026-10-30 (owner verdict: **accepted**; blind test 5/10
-disclosed, SUS 85.0) and the closure record moved to `completed.md`. The reskin
-program is fully consumed; nothing is open.
+## Batch RS-6 — release v1.9.1 (the accepted state) — opened 2026-10-30
+
+Opened on the owner's instruction `release the new version with all the fix
+applied`. Fact established: `v1.9.0` was tagged AND pushed (`464000d`, remote
+confirmed via ls-remote) at the RS-3 STOP — before the RS-4 fix wave — so the
+accepted state ships as patch **v1.9.1**. Items:
+
+1. **RS-6-1 (workspace)** — root Cargo.toml version 1.9.0 → 1.9.1 (members
+   inherit `version.workspace = true`); Cargo.lock synced — the Release
+   workflow runs `--locked` everywhere, so the lock must be committed.
+2. **RS-6-2 (docs)** — CHANGELOG `## [1.9.1] — 2026-10-30`: the fix wave
+   (copilot suggested-reply EXTEND-mode wrap root cause, rich-span
+   token-breaks, strip_html analyzer feed, Cc/Bcc composer width, Ctrl+Enter
+   hint move, blank-name fallback, the new `kittest_inbox_copilot` lock,
+   RS-4-11 clock seam + budget removal) in product terms; the Release
+   workflow composes the GitHub release notes from this section.
+3. **RS-6-3 (docs)** — acceptance report names v1.9.1 as the release carrying
+   the accepted state (cover subtitle + status, §7 narrative, §7.1 prints the
+   [1.9.1] section verbatim, §8 record); regenerated + probed.
+4. **RS-6-4 (gates/records)** — gate_no_simulation + gate_traceability;
+   completed.md record; progress → None.
+5. **RS-6-5 (tag/push)** — annotated tag `v1.9.1` (tagger identity matching
+   v1.9.0: kimpearce888) on the release commit; push main + tag when the
+   credentials return — the tag push triggers build → verify → publish.
+
+None — Batch RS-6 completed and moved to `completed.md` (2026-10-30): v1.9.1
+staged locally (workspace + lock + CHANGELOG + report + tag), push pending the
+credential re-supply.

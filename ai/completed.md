@@ -5314,3 +5314,68 @@ checked-in keys.
 **The reskin program is closed:** RS-01..RS-21, the RS-4 rejection wave
 (RS-4-1..10), RS-4-11, and G4 (verdict: accepted). `plan.md` holds nothing;
 `progress.md` holds nothing. No further work is open or queued.
+
+---
+
+## Batch RS-6 — release v1.9.1 (the accepted state) — COMPLETE 2026-10-30
+
+Opened on the owner's `release the new version with all the fix applied`;
+executed per rule.md (plan entry → progress move → this record). The
+established fact that shaped the batch: tag `v1.9.0` was cut AND pushed at the
+RS-3 STOP (`464000d`, remote confirmed via `git ls-remote`) BEFORE the owner's
+G4 rejection produced the RS-4 fix wave — the fixes live only on main. The
+accepted state therefore ships as the **patch release v1.9.1**; re-pointing or
+re-tagging v1.9.0 was never an option (it exists on the remote).
+
+1. **RS-6-1 (workspace)** — root `Cargo.toml` version 1.9.0 → **1.9.1**
+   (members inherit `version.workspace = true`); `Cargo.lock` synced via
+   `cargo metadata` (toolchain 1.99.1) — all three workspace packages at
+   1.9.1, zero `1.9.0` refs left in the lock. Required: the Release workflow
+   runs every cargo step `--locked`, and its dist-staging step reads the
+   version from the root `Cargo.toml` for the artifact names and BUILD-INFO.
+
+2. **RS-6-2 (CHANGELOG)** — new `## [1.9.1] — 2026-10-30` section:
+   `### Fixed — the Gate-G4 rejection fix wave (RS-4-1..RS-4-11), on the
+   accepted state`. Self-contained for the release page (the Release workflow
+   composes the GitHub release notes from exactly this section): the copilot
+   42.5 px-sliver root cause (egui EXTEND-mode horizontal layout → blown
+   frame rect → re-clamped 320 px panel) and the wrap fix, HTML-fragment
+   leakage + strip_html, Cc/Bcc width, the Ctrl+Enter hint move, the
+   blank-name fallback, the RS-4-11 clock seam + budget removal, and the new
+   `kittest_inbox_copilot` lock. Precision fix applied during drafting: the
+   snapshot gate does NOT run inside the Release workflow (the kittest suites
+   are `kittest-ui`-feature-gated, off by default; ci.yml's `snapshots` job
+   triggers on main pushes, not tags) — the correct statement, now in both
+   the CHANGELOG and the report §6: the tag is cut on the main commit the
+   snapshots job already diffed; the Release workflow re-runs fmt, clippy and
+   the workspace tests before publishing. (The pre-existing report §6 claim
+   "the same gate rides the release workflow" was corrected in RS-6-3 for the
+   same reason.)
+
+3. **RS-6-3 (acceptance report)** — generator synced: cover subtitle "R4
+   Final Acceptance + Release v1.9.1", cover Status row names v1.9.1 and the
+   v1.9.0 supersession, §6 sentence corrected (above), §7 rewritten
+   (v1.9.0 tagged pre-fix-wave → accepted state ships as v1.9.1; annotated
+   tag cut from the G4-accepted state), §7.1 prints the `[1.9.1]` section
+   verbatim (regex switched), §8 record names v1.9.1. Regenerated: 8 pages;
+   probes confirm the new content (Release v1.9.1, [1.9.1] section,
+   42.5 px sliver, kittest_inbox_copilot, released-as-v1.9.1, tagged-commit
+   mechanism); stale strings gone (Release v1.9.0, the-[1.9.0]-section,
+   The-reskin-ships-as, tagged-and-published-with-checksums).
+
+4. **RS-6-4 (gates/records)** — gate_no_simulation clean; gate_traceability
+   OK (23 routes, 27 ids). No Rust source changed (version metadata only, no
+   behavior) — the 24-suite / 175-test / 171-golden set stands as verified in
+   RS-5; the Release workflow re-runs fmt/clippy/tests on the tagged commit
+   and the snapshots job covers it via the main push.
+
+5. **RS-6-5 (tag/push)** — annotated tag `v1.9.1` created on the release
+   commit (tagger identity matching v1.9.0: kimpearce888). **Push pending the
+   credential re-supply**: the sandbox rebuild (2026-10-30 00:35) lost
+   `~/.git-credentials` (searched: dotfiles, shell history, /tmp, project
+   dirs, env, ssh — no copy). `git push` fails with "could not read Username"
+   until the owner re-supplies the token; rs5 `0ad0bf1`, the G4 closure
+   `157f0ef` and this release commit + tag all go out in the same push, and
+   the tag push triggers the Release workflow (build → gates → .deb verify on
+   ubuntu 22.04/24.04 + debian 12 → AppImage verify → publish with the [1.9.1]
+   notes + checksums).
