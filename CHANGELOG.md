@@ -33,7 +33,14 @@ footnoted as receipt-cited quirks (DC C-1) and stay visible.
   171 goldens lock the
   real pages (not mocks) at 1440/1024/800 × 900, light + dark, diff-locked
   twice; CI now runs them on every push (the new `snapshots` job, lavapipe
-  software Vulkan) — a visual regression on any page fails the build.
+  software Vulkan) — a visual regression on any page fails the build. The
+  dashboard chart subtitle and the reports builder date inputs no longer
+  derive from the wall clock at all (RS-4-11 clock seam: every window and
+  seed derives from one pinned anchor in the tests, production keeps the
+  wall clock; the 7d-stale backlog predicate reads the anchored window
+  instead of the DB engine's `now`) — the two 120-px drift budgets those
+  suites carried for two days are removed; both locks are byte-exact with
+  zero tolerance.
 - **Traceability gate (RS-21):** the R4 matrix
   (`docs/audit/acceptance/traceability-matrix.md`, screen region → DS-C id →
   DC row) is machine-checked in CI against the frozen contract and the route

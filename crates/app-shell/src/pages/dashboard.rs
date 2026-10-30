@@ -118,6 +118,10 @@ pub struct DashboardScope {
     pub mailbox_ids: Vec<i64>,
     /// `None` = all channels; `Some("email" | "chat")` otherwise.
     pub channel: Option<String>,
+    /// RS-4-11 clock seam: the instant the 30-day window derives from.
+    /// `None` (production) = the wall clock; tests pin a fixed instant so
+    /// the rendered range text is constant and the goldens never drift.
+    pub today: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl Default for DashboardScope {
@@ -126,6 +130,7 @@ impl Default for DashboardScope {
             days: 30,
             mailbox_ids: Vec::new(),
             channel: None,
+            today: None,
         }
     }
 }
@@ -157,8 +162,15 @@ fn name_counts(
 /// Read-only; safe to call on every invalidation tick.
 #[must_use]
 pub fn load_dashboard(conn: &Connection, scope: &DashboardScope) -> DashboardData {
-    let from = spp_core::business_hours::iso_days_ago(scope.days);
-    let to = spp_core::business_hours::now_iso_millis();
+    // RS-4-11 clock seam: the window derives from the pinned anchor when the
+    // scope carries one; production scopes leave it `None` (wall clock).
+    // The anchored instant flows to the SQL as `?2`, which also feeds the
+    // 7d-stale backlog predicate — `julianday(?2)` replaced the DB engine's
+    // `julianday('now')` so pinning the scope pins every clock the page
+    // reads (regression test: backlog_staleness_derives_from_the_pinned_anchor).
+    let now = scope.today.unwrap_or_else(chrono::Utc::now);
+    let from = spp_core::business_hours::iso_days_ago_at(scope.days, now);
+    let to = spp_core::business_hours::now_iso_millis_at(now);
 
     let mailbox_in = if scope.mailbox_ids.is_empty() {
         String::new()
@@ -199,7 +211,7 @@ pub fn load_dashboard(conn: &Connection, scope: &DashboardScope) -> DashboardDat
           COALESCE(SUM(CASE WHEN c.status = 'pending' AND c.deleted_at IS NULL THEN 1 ELSE 0 END), 0),
           COALESCE(SUM(CASE WHEN c.closed_at IS NOT NULL AND c.closed_at >= ?1 AND c.closed_at <= ?2 THEN 1 ELSE 0 END), 0),
           COALESCE(SUM(CASE WHEN c.status IN ('active','pending') AND c.assignee_local_id IS NULL AND c.deleted_at IS NULL THEN 1 ELSE 0 END), 0),
-          COALESCE(SUM(CASE WHEN c.status IN ('active','pending') AND (julianday('now') - COALESCE(julianday(c.updated_at), julianday(c.created_at))) >= 7 AND c.deleted_at IS NULL THEN 1 ELSE 0 END), 0)
+          COALESCE(SUM(CASE WHEN c.status IN ('active','pending') AND (julianday(?2) - COALESCE(julianday(c.updated_at), julianday(c.created_at))) >= 7 AND c.deleted_at IS NULL THEN 1 ELSE 0 END), 0)
          FROM conversations c WHERE c.deleted_at IS NULL{mailbox_in}{conv_channel}"
     );
     let (
@@ -394,7 +406,7 @@ pub fn load_dashboard(conn: &Connection, scope: &DashboardScope) -> DashboardDat
                     COALESCE(SUM(CASE WHEN c.created_at >= ?1 AND c.created_at <= ?2 THEN 1 ELSE 0 END), 0) AS new_conversations,
                     COALESCE(SUM(CASE WHEN c.status = 'active' AND c.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_conversations,
                     COALESCE(SUM(CASE WHEN c.closed_at IS NOT NULL AND c.closed_at >= ?1 AND c.closed_at <= ?2 THEN 1 ELSE 0 END), 0) AS closed_conversations,
-                    COALESCE(SUM(CASE WHEN c.status IN ('active','pending') AND (julianday('now') - COALESCE(julianday(c.updated_at), julianday(c.created_at))) >= 7 AND c.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS backlog,
+                    COALESCE(SUM(CASE WHEN c.status IN ('active','pending') AND (julianday(?2) - COALESCE(julianday(c.updated_at), julianday(c.created_at))) >= 7 AND c.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS backlog,
                     AVG((julianday(fr.first_reply) - julianday(COALESCE(c.first_customer_message_at, c.created_at))) * 1440) AS first_response_avg_min,
                     AVG((julianday(c.closed_at) - julianday(COALESCE(c.first_customer_message_at, c.created_at))) * 1440) AS resolution_avg_min,
                     (SELECT COUNT(*) FROM ratings r JOIN conversations c2 ON c2.id = r.conversation_id
@@ -508,6 +520,14 @@ impl DashboardPage {
     /// Mark dirty: the next frame reloads everything (scope, data, radar).
     pub fn invalidate(&mut self) {
         self.data = None;
+    }
+
+    /// RS-4-11 clock seam: pin the instant the page's windows derive from.
+    /// Tests call this with a fixed anchor so the rendered range text is
+    /// constant; production never pins (the wall clock rules).
+    pub fn pin_today(&mut self, today: chrono::DateTime<chrono::Utc>) {
+        self.scope.today = Some(today);
+        self.data = None; // the next frame reloads through the anchor
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -978,6 +998,63 @@ mod tests {
         assert_eq!(data.daily_new.len(), 1); // all seeded today
         assert_eq!(data.daily_new[0].value, 4);
         assert!(data.first_response_avg_min.is_some());
+    }
+
+    #[test]
+    fn backlog_staleness_derives_from_the_pinned_anchor() {
+        // RS-4-11: the 7d-stale predicate reads the scope's anchored `to`
+        // (`julianday(?2)`), not the DB engine's clock — pinning `today`
+        // must control which open conversations count as stale.
+        let db = fixture(Vec::new());
+        let anchor = chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 1, 15, 12, 0, 0)
+            .single()
+            .expect("anchor");
+        db.with_write(|conn| {
+            for (id, status, updated_days_ago) in
+                [(1i64, "active", 8i64), (2, "pending", 3)]
+            {
+                // 8 days before the anchor -> stale at the anchor;
+                // 3 days before the anchor -> fresh at the anchor.
+                let ts = spp_core::business_hours::iso_days_ago_at(updated_days_ago, anchor);
+                conn.execute(
+                    "INSERT INTO conversations (id, remote_id, number, subject, preview, status,
+                         type, mailbox_local_id, assignee_local_id, customer_local_id, priority,
+                         created_at, updated_at, closed_at, first_customer_message_at,
+                         local_created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'email', 1, 5, 9, 'none', ?7, ?7, NULL, ?7, ?7)",
+                    rusqlite::params![
+                        id,
+                        1000 + id,
+                        500 + id,
+                        format!("conv {id}"),
+                        format!("conv {id} preview"),
+                        status,
+                        ts
+                    ],
+                )
+                .expect("seed anchored conversation");
+            }
+        });
+
+        // Pinned scope: only the 8-day-stale conversation counts.
+        let scope = DashboardScope {
+            today: Some(anchor),
+            ..DashboardScope::default()
+        };
+        let pinned = db.with_read(|conn| load_dashboard(conn, &scope));
+        assert_eq!(
+            pinned.backlog, 1,
+            "the 8d-stale conversation counts at the anchor"
+        );
+
+        // Wall-clock scope (production path): the fixture rows are pinned in
+        // the past (2026-01), so both are stale against the real `now` —
+        // proof the anchor actually moves the predicate.
+        let wall = db.with_read(|conn| load_dashboard(conn, &DashboardScope::default()));
+        assert_eq!(
+            wall.backlog, 2,
+            "both anchored-past rows are stale at the wall clock"
+        );
     }
 
     #[test]

@@ -30,6 +30,7 @@ kittest-ui = []
 [dependencies]
 eframe.workspace = true
 supportos-plus-core.workspace = true
+chrono.workspace = true
 libc = "0.2"
 tokio.workspace = true
 tracing.workspace = true

@@ -9,12 +9,15 @@
 //! seeded mirror; the side-by-side review against the lab is the G3
 //! evidence pack.
 //!
-//! Determinism note: the reports page bounds every query at
-//! `now − days` (`spp_core::business_hours::iso_days_ago`), so the seeds
-//! are fixed OFFSETS from the seed moment — day-granular dates with pinned
-//! time-of-day — which keeps the metric values and the daily point count
-//! stable across runs. The chart card's range subtitle drifts only across
-//! a UTC midnight (HEAD's computed behavior, unchanged per D6).
+//! Determinism note (RS-4-11 clock seam): every window and seed derives
+//! from ONE pinned anchor (`anchor()` — 2026-01-15T12:00Z) via the anchored
+//! variants (`iso_days_ago_at` / `now_iso_millis_at`): the seeds are fixed
+//! offsets from that anchor — day-granular dates with pinned times-of-day —
+//! and the page's `today` is pinned to the same instant, so the metric
+//! values, the daily point count AND the rendered date texts (the chart
+//! card's range subtitle, the builder's date inputs) are constant forever.
+//! The old wall-clock behavior drifted those glyphs ~70-85 px at every UTC
+//! midnight; the seam removed it at the source and the pixel budgets with it.
 //!
 //! The interaction golden exercises the DS-C-09 rail's real state change:
 //! a `Builder` click lands on the report-builder surface (definition form
@@ -34,6 +37,10 @@ use spp_core::db::DbHandle;
 use spp_shell::design;
 use spp_shell::pages::reports::ReportsPage;
 
+// The pinned-anchor helper (RS-4-11 clock seam) builds its instant through
+// chrono's TimeZone trait.
+use chrono::TimeZone;
+
 /// Harness state: the REAL page + the seeded database it reads.
 struct ReportsPageState {
     installed: bool,
@@ -45,9 +52,18 @@ struct ReportsPageState {
 // Deterministic fixture (fixed day offsets with pinned times)
 // ---------------------------------------------------------------------------
 
-/// `days_ago` days before the seed moment, at a pinned UTC time-of-day.
+/// The fixed anchor every window and seed derives from (RS-4-11 clock
+/// seam — see the suite's determinism note).
+fn anchor() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc
+        .with_ymd_and_hms(2026, 1, 15, 12, 0, 0)
+        .single()
+        .expect("fixed anchor")
+}
+
+/// `days_ago` days before the pinned anchor, at a pinned UTC time-of-day.
 fn stamp(days_ago: i64, time: &str) -> String {
-    let date = spp_core::business_hours::iso_days_ago(days_ago)
+    let date = spp_core::business_hours::iso_days_ago_at(days_ago, anchor())
         .split_once('T')
         .expect("iso timestamp")
         .0
@@ -229,7 +245,13 @@ fn seeded_page() -> (ReportsPage, DbHandle) {
     )
     .expect("graph node");
 
-    (ReportsPage::new(), DbHandle::new(conn))
+    // RS-4-11 clock seam: the page's windows and the builder's date
+    // inputs derive from the same fixed anchor the seeds use — the
+    // rendered dates are constant text, so the goldens lock byte-exact
+    // with zero pixel budget.
+    let mut page = ReportsPage::new();
+    page.pin_today(anchor());
+    (page, DbHandle::new(conn))
 }
 
 /// One conversation row (created == updated == `created`; `closed` pins
@@ -406,14 +428,9 @@ fn r3_reports_builder_tab_light() {
         h.query_by_label("Run report").is_some(),
         "the Builder tab must show the report definition's Run report act"
     );
-    // Registered tolerance (RS-4-9, G4-rejection fix wave): the builder
-    // tab's date-range inputs default to the rolling 30-day window from
-    // the wall clock, so the two date glyphs drift at every midnight
-    // (~85 px; first observed 2026-10-30, suite byte-exact on 10-29).
-    // Same pre-existing dashboard-class determinism defect, same
-    // registered last-resort budget; the proper clock seam is RS-4-11.
-    h.snapshot_options(
-        "r3_reports_builder_tab_light",
-        &egui_kittest::SnapshotOptions::new().max_failed_pixels(120),
-    );
+    // RS-4-11: the builder's date inputs derive from the pinned anchor
+    // (see `anchor()`) — byte-exact, no pixel budget; the old
+    // max_failed_pixels(120) absorbed the midnight drift of the rolling
+    // wall-clock window, which no longer exists.
+    h.snapshot("r3_reports_builder_tab_light");
 }

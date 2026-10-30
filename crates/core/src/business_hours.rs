@@ -212,16 +212,32 @@ pub fn business_minutes_since(iso: &str, cfg: &BusinessHoursConfig) -> Option<f6
 
 #[must_use]
 pub fn now_iso_millis() -> String {
-    Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+    now_iso_millis_at(Utc::now())
+}
+
+/// The anchored variant of [`now_iso_millis`]: the same stamp derived from a
+/// caller-supplied `now` instead of the wall clock (the RS-4-11 clock seam —
+/// production passes the wall clock, tests pin a fixed instant so the
+/// rendered windows are constant text).
+#[must_use]
+pub fn now_iso_millis_at(now: chrono::DateTime<Utc>) -> String {
+    now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
 #[must_use]
 pub fn iso_days_ago(days: i64) -> String {
-    let ts = Utc::now().timestamp_millis() - days * 86_400_000;
+    iso_days_ago_at(days, Utc::now())
+}
+
+/// The anchored variant of [`iso_days_ago`]: `days` before the supplied
+/// `now` instead of before the wall clock (the RS-4-11 clock seam).
+#[must_use]
+pub fn iso_days_ago_at(days: i64, now: chrono::DateTime<Utc>) -> String {
+    let ts = now.timestamp_millis() - days * 86_400_000;
     Utc.timestamp_millis_opt(ts)
         .single()
         .map(|t| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
-        .unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+        .unwrap_or_else(|| now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
 
 #[cfg(test)]
@@ -235,6 +251,32 @@ mod tests {
             start_minute: 540,
             end_minute: 1020,
         }
+    }
+
+    #[test]
+    fn anchored_variants_match_the_wall_clock_shape() {
+        // RS-4-11 clock seam: the anchored variants must produce exactly the
+        // format the wall-clock fns produce, shifted to the supplied `now`.
+        let now = Utc
+            .with_ymd_and_hms(2026, 1, 15, 12, 0, 0)
+            .single()
+            .expect("fixed anchor");
+        assert_eq!(now_iso_millis_at(now), "2026-01-15T12:00:00.000Z");
+        assert_eq!(
+            iso_days_ago_at(30, now),
+            "2025-12-16T12:00:00.000Z",
+            "30 days before the anchor"
+        );
+        assert_eq!(iso_days_ago_at(0, now), now_iso_millis_at(now));
+        // The anchored fn equals the wall-clock fn evaluated at the same
+        // instant (iso_days_ago is the delegation).
+        assert_eq!(iso_days_ago_at(7, now), {
+            let ts = now.timestamp_millis() - 7 * 86_400_000;
+            Utc.timestamp_millis_opt(ts)
+                .single()
+                .map(|t| t.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
+                .expect("in-range timestamp")
+        });
     }
 
     #[test]

@@ -9,14 +9,16 @@
 //! and the closing by-channel quirk over a seeded mirror); the side-by-side
 //! review against the lab is the G3 evidence pack.
 //!
-//! Determinism note: the dashboard's real data path bounds every query at
-//! `now − days` (`spp_core::business_hours::iso_days_ago`), so the seeds
-//! are fixed OFFSETS from the seed moment — day-granular dates with pinned
-//! time-of-day — which keeps the metric values, breakdowns and daily point
-//! count stable across runs. The one live-clock text is the chart card's
-//! range subtitle (`{from} → {to} · n points`), which is HEAD's computed
-//! behavior (unchanged per D6; the lab's hint is a static fixture — the
-//! noted lab-vs-egui divergence) and drifts only across a UTC midnight.
+//! Determinism note (RS-4-11 clock seam): every window and seed derives
+//! from ONE pinned anchor (`anchor()` — 2026-01-15T12:00Z) via the anchored
+//! variants (`iso_days_ago_at` / `now_iso_millis_at`): the seeds are fixed
+//! offsets from that anchor — day-granular dates with pinned times-of-day —
+//! and the page's scope pins `today` to the same instant, so the metric
+//! values, breakdowns, daily point count AND the chart card's range
+//! subtitle (`{from} → {to} · n points`) are constant text forever. The
+//! old wall-clock behavior drifted that subtitle ~70 px at every UTC
+//! midnight (absorbed by a registered pixel budget for two days); the seam
+//! removed it at the source and the budget with it.
 //! (`spp_shell::testsupport` is `#[cfg(test)]`-gated and not visible to
 //! integration tests anyway; the SQL below mirrors it.)
 //!
@@ -41,6 +43,10 @@ use spp_core::db::DbHandle;
 use spp_shell::design;
 use spp_shell::pages::dashboard::DashboardPage;
 
+// The pinned-anchor helper (RS-4-11 clock seam) builds its instant through
+// chrono's TimeZone trait.
+use chrono::TimeZone;
+
 /// Harness state: the REAL page + the seeded database it reads.
 struct DashboardPageState {
     installed: bool,
@@ -52,12 +58,24 @@ struct DashboardPageState {
 // Deterministic fixture (fixed day offsets with pinned times)
 // ---------------------------------------------------------------------------
 
-/// `days_ago` days before the seed moment, at a pinned UTC time-of-day.
-/// Day-granularity keeps every row inside the default 30-day range no
-/// matter when the suite runs, while the pinned clock face makes the
-/// minute-valued metrics (first response, resolution) deterministic.
+/// The fixed anchor every window and seed derives from (RS-4-11 clock
+/// seam). It replaced the wall clock, which made the chart subtitle's
+/// "YYYY-MM-DD → YYYY-MM-DD" glyphs drift ~70 px at every UTC midnight —
+/// a pinned instant renders the same text forever, so the goldens lock
+/// byte-exact with no pixel budget.
+fn anchor() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc
+        .with_ymd_and_hms(2026, 1, 15, 12, 0, 0)
+        .single()
+        .expect("fixed anchor")
+}
+
+/// `days_ago` days before the pinned anchor, at a pinned UTC time-of-day.
+/// Day-granularity keeps every row inside the default 30-day range, while
+/// the pinned clock face makes the minute-valued metrics (first response,
+/// resolution) deterministic.
 fn stamp(days_ago: i64, time: &str) -> String {
-    let date = spp_core::business_hours::iso_days_ago(days_ago)
+    let date = spp_core::business_hours::iso_days_ago_at(days_ago, anchor())
         .split_once('T')
         .expect("iso timestamp")
         .0
@@ -203,7 +221,13 @@ fn seeded_page() -> (DashboardPage, DbHandle) {
     seed_tag(&conn, 1, "export-bug");
     seed_tag(&conn, 2, "login");
 
-    (DashboardPage::new(), DbHandle::new(conn))
+    // RS-4-11 clock seam: the page's 30-day window (and the chart
+    // subtitle's "YYYY-MM-DD → YYYY-MM-DD" text) derives from the same
+    // fixed anchor the seeds use — the rendered dates are constant text,
+    // so the goldens lock byte-exact with zero pixel budget.
+    let mut page = DashboardPage::new();
+    page.pin_today(anchor());
+    (page, DbHandle::new(conn))
 }
 
 /// One conversation row (created == updated == `created`; `closed` pins
@@ -320,20 +344,11 @@ fn render_dashboard_page(dark: bool, width: f32, name: &str) {
             },
         );
     h.run_ok();
-    // Registered tolerance (RS-4-9, G4-rejection fix wave): the chart
-    // subtitle ("YYYY-MM-DD → YYYY-MM-DD · N points") prints the rolling
-    // 30-day window from the wall clock, so the golden drifts by ~70 px
-    // on the two date glyphs at every midnight — invisible to the design,
-    // but fatal to a byte lock (first observed 2026-10-30: the suite was
-    // byte-exact on 10-29, the day its goldens were generated). This is a
-    // pre-existing determinism defect of the dashboard fixture (the seed
-    // is wall-clock-relative), registered here the same way as the
-    // settings-page runner budget: kittest's documented last-resort
-    // `max_failed_pixels`, scoped to the page goldens, sized just above
-    // the observed drift and far below any real regression (a reflowed
-    // row or moved tile is hundreds of pixels). The proper fix — a clock
-    // seam so the fixture pins `now` — is plan item RS-4-11.
-    h.snapshot_options(name, &egui_kittest::SnapshotOptions::new().max_failed_pixels(120));
+    // RS-4-11: the chart subtitle's date glyphs derive from the pinned
+    // anchor (see `anchor()`), so this lock is byte-exact with no pixel
+    // budget — the wall-clock drift the old max_failed_pixels(120) budget
+    // absorbed is gone at the source.
+    h.snapshot(name);
 }
 
 #[test]
@@ -424,11 +439,7 @@ fn r3_dashboard_scope_chip_light() {
         h.query_all_by_label("email").next().is_some(),
         "the by-channel card must ignore the channel chip (the labeled quirk)"
     );
-    // Same registered wall-clock drift as the page goldens above (the
-    // chart subtitle is on this render too); zero-tolerance would fail
-    // on the two date glyphs at every midnight.
-    h.snapshot_options(
-        "r3_dashboard_scope_chip_light",
-        &egui_kittest::SnapshotOptions::new().max_failed_pixels(120),
-    );
+    // RS-4-11: the chart subtitle on this render derives from the pinned
+    // anchor too — byte-exact, no pixel budget.
+    h.snapshot("r3_dashboard_scope_chip_light");
 }

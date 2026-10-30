@@ -251,14 +251,9 @@ Batch mapping under `rule.md` (ten at a time):
   new program separate from the historical audit items. Batches: RS-1 = RS-01..10,
   RS-2 = RS-11..20, RS-3 = RS-21. Gate G1 (conformed-lab approval) blocks all Rust work.
 
-## Batch RS-5 — queued (discovered during RS-4 verification)
-
-1. **RS-4-11 (dashboard/reports determinism seam)** — the dashboard chart
-   subtitle and the reports builder date inputs derive their 30-day window
-   from the wall clock, so their goldens drift ~70–85 px at every midnight
-   (first observed 2026-10-30; both suites were byte-exact on 10-29 when
-   their goldens were generated). Currently held open by registered
-   `max_failed_pixels(120)` budgets with full disclosure in the suite files.
-   Proper fix: a clock seam (the loader takes an optional `today`, tests
-   pin it) per the repo's own fixed-timestamp doctrine, then the budgets
-   are removed and the goldens re-locked byte-exact.
+> **Batch RS-5 (RS-4-11) COMPLETE 2026-10-30** — the clock seam landed, the
+> two drift budgets are gone, both suites lock byte-exact with zero
+> tolerance; the verification record lives in `completed.md`. `plan.md`
+> holds no further items for the reskin program (RS-01..RS-21 + RS-4-11 all
+> consumed); the G4 verdict (blind test / SUS / accepted / waive) remains
+> with the owner — GATE G4 is re-presented with the STOP.

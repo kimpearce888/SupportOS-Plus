@@ -5203,3 +5203,60 @@ corrected in the G4 pre-acceptance addendum (23/172/168 → documented as the
 then-current lock set) describe the pre-wave state; this record's 24/175/171
 is the post-wave set. The G4 blind-test/SUS record tables remain unfilled —
 the owner's verdict re-opens G4; it will be re-presented with the STOP.
+
+---
+
+## Batch RS-5 — RS-4-11 (dashboard/reports determinism seam) — COMPLETE 2026-10-30
+
+Opened on the owner's `continue` after the RS-4 STOP; executed per rule.md
+(Rule 2 move → implementation → verification → this record). One item.
+
+1. **RS-4-11** — the dashboard chart subtitle and the reports builder date
+   inputs derived their 30-day window from the wall clock, so their goldens
+   drifted ~70–85 px at every UTC midnight (held open since the RS-4
+   verification by registered `max_failed_pixels(120)` budgets).
+
+   **Fix (the clock seam, per the repo's fixed-timestamp doctrine):**
+   - `spp_core::business_hours` gains the anchored variants
+     `iso_days_ago_at(days, now)` / `now_iso_millis_at(now)`; the wall-clock
+     fns delegate to them (one implementation, zero behavior change;
+     unit-tested in core: `anchored_variants_match_the_wall_clock_shape`).
+   - `DashboardScope` and `ReportsPage` gain `today: Option<DateTime<Utc>>`
+     (production `None` = wall clock) consumed by `load_dashboard`,
+     `ReportsPage::reload`, the builder's fetch-HS-report window, and
+     `ReportsPage::pin_today` (re-seeds the builder date inputs; the page
+     methods are `pin_today`, tests pin a FIXED anchor 2026-01-15T12:00Z).
+   - **Second clock found and removed during verification:** the 7d-stale
+     backlog predicate read the DB engine's `julianday('now')`
+     (dashboard.rs, counts + mailbox-comparison queries) — a hidden wall
+     clock the plan text did not name. It now reads the anchored window
+     (`julianday(?2)`), so pinning the scope pins every clock the page
+     reads. Production semantics unchanged (`?2` = the formatted wall
+     clock). Regression test
+     `backlog_staleness_derives_from_the_pinned_anchor` (pinned scope:
+     8d-stale counts, 3d-fresh does not; wall-clock scope: both count).
+   - Both kittest suites pin the fixture AND the page to the same fixed
+     anchor (`anchor()`); `stamp()` derives seeds from it. All rendered
+     date text (chart subtitle, builder inputs, saved-row timestamp) is
+     constant forever.
+   - **The `max_failed_pixels(120)` budgets are deleted** — both page
+     suites lock byte-exact with zero tolerance.
+
+   **Verification:** fmt clean; clippy `--workspace --all-targets
+   -D warnings` 0; core 495/495 (+1 anchored-clock test); app-shell lib
+   237/237 (+1 backlog-seam regression test); kittest 24 suites / 175
+   tests / 171 goldens over lavapipe+Xvfb (sandbox rebuilt after an
+   environment reset: Rust 1.99.1 + mesa lavapipe user-prefix + Xvfb :99),
+   the two touched suites diff-locked-twice byte-exact with NO budget.
+   Golden changes all explained by pixel-diff against HEAD: 7 dashboard
+   goldens = the chart-subtitle date glyphs only (113×8 px strip);
+   1 reports builder golden = the two date inputs + the saved-report row's
+   seeded timestamp date glyphs; the six `r3_reports_page_*` goldens are
+   byte-identical to HEAD (they render no date text — the sole divergence
+   found mid-verification, the backlog tile flipping 1→3, was the hidden
+   `julianday('now')` clock and is fixed at the source). SPP_SMOKE exit 0;
+   gate_traceability OK (23 routes, 27 ids); gate_no_simulation clean.
+   Docs synced: CHANGELOG [1.9.0] drift-lock bullet now discloses the seam
+   and the budget removal; acceptance report regenerated (8 pages, RS-4-11
+   present, `max_failed_pixels` absent); traceability matrix and ci.yml
+   needed no change (counts unchanged, no budget text there).

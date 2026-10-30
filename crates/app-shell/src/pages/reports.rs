@@ -94,6 +94,10 @@ pub struct ReportsPage {
 
     tab: Tab,
     days: i64,
+    /// RS-4-11 clock seam: the instant the page's windows and builder date
+    /// inputs derive from. `None` (production) = the wall clock; tests pin
+    /// a fixed instant so the rendered dates are constant text.
+    today: Option<chrono::DateTime<chrono::Utc>>,
     overview: Option<DashboardData>,
     sla: Option<SlaReport>,
     why_contacting: Vec<serde_json::Value>,
@@ -165,6 +169,7 @@ impl ReportsPage {
             sync_note: String::new(),
             tab: Tab::Overview,
             days: 30,
+            today: None,
             overview: None,
             sla: None,
             why_contacting: Vec::new(),
@@ -255,11 +260,21 @@ impl ReportsPage {
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        let from = spp_core::business_hours::iso_days_ago(self.days);
-        let to = spp_core::business_hours::now_iso_millis();
+        // RS-4-11 clock seam: the windows derive from the pinned anchor when
+        // one is set; production leaves it `None` (wall clock).
+        let now = self.today.unwrap_or_else(chrono::Utc::now);
+        let from = spp_core::business_hours::iso_days_ago_at(self.days, now);
+        let to = spp_core::business_hours::now_iso_millis_at(now);
         let (overview, sla, why, questions, radar, quality, quality_rows) = db.with_read(|conn| {
             (
-                Some(load_dashboard(conn, &DashboardScope::days(self.days))),
+                Some(load_dashboard(
+                    conn,
+                    &DashboardScope {
+                        days: self.days,
+                        today: self.today,
+                        ..DashboardScope::days(self.days)
+                    },
+                )),
                 spp_core::sla::sla_report(conn, &from, &to, None).ok(),
                 spp_core::analytics::why_contacting_impl(conn, self.days),
                 spp_core::analytics::top_questions_impl(conn, self.days),
@@ -1885,8 +1900,13 @@ impl ReportsPage {
                 )
                 .clicked()
             {
-                let start = spp_core::business_hours::iso_days_ago(self.days);
-                let end = spp_core::business_hours::now_iso_millis();
+                let start = spp_core::business_hours::iso_days_ago_at(
+                    self.days,
+                    self.today.unwrap_or_else(chrono::Utc::now),
+                );
+                let end = spp_core::business_hours::now_iso_millis_at(
+                    self.today.unwrap_or_else(chrono::Utc::now),
+                );
                 let payload = serde_json::json!({
                     "key": spp_core::reports_api::REPORTS[self.hs_pick].key,
                     "start": start,
@@ -2118,6 +2138,27 @@ impl Default for ReportsPage {
     }
 }
 
+impl ReportsPage {
+    /// RS-4-11 clock seam: pin the instant the page's windows and builder
+    /// date inputs derive from. Tests call this with a fixed anchor so the
+    /// rendered dates are constant; production never pins (the wall clock
+    /// rules). Re-seeds the builder date inputs from the anchor — they are
+    /// construction-time state, so pinning after construction must refresh
+    /// them for the pin to be visible.
+    pub fn pin_today(&mut self, today: chrono::DateTime<chrono::Utc>) {
+        self.today = Some(today);
+        self.b_from = spp_core::business_hours::iso_days_ago_at(30, today)
+            .get(..10)
+            .unwrap_or("1970-01-01")
+            .to_string();
+        self.b_to = spp_core::business_hours::now_iso_millis_at(today)
+            .get(..10)
+            .unwrap_or("2100-01-01")
+            .to_string();
+        self.overview = None; // the next reload runs through the anchor
+    }
+}
+
 /// Extra constructor used by the reports page.
 impl DashboardScope {
     /// Scope with only the day range set.
@@ -2127,6 +2168,7 @@ impl DashboardScope {
             days,
             mailbox_ids: Vec::new(),
             channel: None,
+            today: None,
         }
     }
 }

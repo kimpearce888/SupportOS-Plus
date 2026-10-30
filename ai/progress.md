@@ -60,6 +60,6 @@ disposition in the G4-verdict addendum (completed.md, 2026-10-30).
     stimulus-source goldens changed, record the batch in completed.md, and
     re-present GATE G4 with the STOP.
 
-None — Batch RS-4 (RS-4-1..RS-4-10) completed and moved to `completed.md`
-(2026-10-30). `plan.md` holds item RS-4-11 (the dashboard/reports clock seam
-discovered during RS-4 verification) awaiting the owner's `continue`.
+None — Batch RS-5 (RS-4-11) completed and moved to `completed.md`
+(2026-10-30). `plan.md` holds no further items; the G4 verdict (blind test /
+SUS / accepted / waive) remains with the owner.
