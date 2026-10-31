@@ -280,3 +280,20 @@ new design system").
   acceptance report folded into the printable PDF series) and release v1.9.0
   tagged. GATE G4 presented with the STOP — the reskin program RS-01..RS-21
   is fully queued-through; only the owner's final acceptance remains.
+
+## D7 — Refactor program recovery (2026-10-31)
+
+The sandbox reset between sessions destroyed the refactor program's local
+state: batches RF-1..RF-5 existed only as unpushed commits (`b7a5fcb`,
+`4128f53`, `9179e60`) and their ai/* batch records. The remote (owner
+re-confirmed via API with the re-supplied credentials) is exactly the
+v1.9.1 release commit `acd557a`. Decision (owner-directed, "continue and
+push the updates to git"): recover by re-cloning v1.9.1 and re-executing
+the program under its original batch numbers from a reconstructed plan.md
+section — same scope, order, gates and patterns, with every re-derived
+item carrying fresh file:line evidence from the surviving tree. The
+reconstruction is disclosed here rather than silently re-enacted. Pushes
+to remote are authorized for this program (credentials stored at
+`~/.git-credentials`, credential.helper=store, per the owner's explicit
+instruction; the owner will revoke when required — no warnings to be
+issued).

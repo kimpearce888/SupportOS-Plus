@@ -5379,3 +5379,17 @@ re-tagging v1.9.0 was never an option (it exists on the remote).
    the tag push triggers the Release workflow (build → gates → .deb verify on
    ubuntu 22.04/24.04 + debian 12 → AppImage verify → publish with the [1.9.1]
    notes + checksums).
+
+## Batch RF-1 — recovery baseline — COMPLETE 2026-10-31
+
+Reconstructed program, decisions.md D7. The sandbox reset destroyed the
+original RF-1..RF-5 local commits and ai records; recovery re-cloned the
+v1.9.1 tree (`acd557a`) with the owner's re-supplied credentials and
+re-verified the full baseline gate table on it: fmt clean; check clean
+(2m59s cold); clippy -D warnings 0; gate_traceability OK (23 routes / 20
+DC tags / 27 ids); gate_no_simulation clean; core lib 495 passed / 4
+ignored / 0 failed; app-shell lib 237 / 0; xtask 11 / 0; catalog lib 0/0;
+doc-tests 0/0; verify-icons clean; kittest 24 suites re-confirmed as the
+CI lane (standing disclosed gap in this sandbox). Baseline locked as the
+pre-refactor gate table; plan.md RF section reconstructed with fresh
+file:line evidence; pushes owner-authorized.

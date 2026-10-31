@@ -88,3 +88,25 @@ accepted state ships as patch **v1.9.1**. Items:
 None — Batch RS-6 completed and moved to `completed.md` (2026-10-30): v1.9.1
 staged locally (workspace + lock + CHANGELOG + report + tag), push pending the
 credential re-supply.
+
+## Batch RF-1 — recovery baseline (reconstructed program) — opened 2026-10-31
+
+Opened on the owner's `continue and push the updates to git` after the sandbox
+loss (decisions.md D7). Items RF-1-1..RF-1-10 moved from plan.md per Rule 2.
+All ten are the recovery verification itself (toolchain + the full gate table
+on the recovered v1.9.1 tree), executed before this record was written and
+re-recorded here for the audit trail:
+
+1. RF-1-1 toolchain 1.99.1 (profile default, rust-analyzer incl.) re-provisioned; env contract set (PATH, CARGO_INCREMENTAL=0).
+2. RF-1-2 `cargo fmt --all --check` clean.
+3. RF-1-3 `cargo check --workspace --all-targets` clean (cold 2m59s).
+4. RF-1-4 clippy `--workspace --all-targets -- -D warnings` = 0.
+5. RF-1-5 gate_traceability OK (23 routes / 20 DC tags / 27 ids), gate_no_simulation clean.
+6. RF-1-6 core lib 495 passed / 4 ignored / 0 failed (`--test-threads=1`, 455s — matches v1.9.1's 495/495 +4 ignored).
+7. RF-1-7 app-shell lib 237 passed / 0 failed (matches v1.9.1).
+8. RF-1-8 xtask 11/0; catalog lib 0/0; doc-tests 0/0; verify-icons clean.
+9. RF-1-9 kittest 24 suites / 175 tests / 171 goldens re-confirmed CI-lane-only (sandbox 3 GB RAM / 7.8 GB disk; ~600 MB dev-dep chain) — standing disclosed gap.
+10. RF-1-10 this record + plan.md RF section (reconstructed) + decisions.md D7 + completed.md recovery record.
+
+None — Batch RF-1 completed and moved to `completed.md` (2026-10-31). Next
+per plan.md (opens on the owner's `continue`): Batch RF-2.

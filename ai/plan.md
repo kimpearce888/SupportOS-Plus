@@ -280,3 +280,177 @@ Batch mapping under `rule.md` (ten at a time):
 > pending the credential re-supply (the sandbox rebuild lost
 > `~/.git-credentials`; rs5 `0ad0bf1` and the G4 closure `157f0ef` are
 > local-only too and go out in the same push).
+
+## Items — Refactor program RF-1..RF-11 (reconstructed 2026-10-31)
+
+Source: **owner-directed dead-code/refactor program** (explicitly separated from
+the v1.7.0 defect-audit items above). History fact (recorded honestly, not
+reconstructed): the program's first five batches (RF-1..RF-5) were opened,
+executed and verified in the working sandbox on top of the v1.9.1 release
+(`pre-refactor` anchor = `acd557a`), as local commits `b7a5fcb` (RF-3),
+`4128f53` (RF-4), `9179e60` (RF-5, was HEAD) — never pushed. The sandbox was
+reset between sessions (2026-10-31) and **all local state was lost**; only this
+v1.9.1 tree survives (remote-confirmed: `main` = `acd557a` = tag `v1.9.1`).
+
+This section is therefore the **reconstructed** program: same scope, same batch
+order, same verification gates and same established patterns (the R100
+`git mv` + re-export relocation pattern; the two unifications; kittest deferred
+to CI from RF-4 onward), re-derived from the surviving codebase and the
+session record. Re-derived items carry fresh file:line evidence gathered
+2026-10-31 from the v1.9.1 tree. Nothing is silently skipped (rule.md Rule 6):
+every lost batch is re-executed under its original number.
+
+Standing constraints for the whole program (owner decisions, unchanged):
+
+- OFF-LIMITS: generated code, lockfiles, migration SQL semantics, entry points
+  (`main.rs`/`lib.rs` module wiring beyond the documented relocation wiring),
+  env handling, DB schema.
+- NO-TOUCH modules (migration module internals stay as-is; they are relocated
+  byte-identically only): `intelligence.rs`, `maintenance.rs`, `ai_center.rs`,
+  `db.rs`, `response_state_sql.rs`.
+- Known production bugs stay LIST-ONLY (4× empty-list per-frame refetch;
+  Settings LM Studio dirty-clobber) — never fixed inside this program.
+- Kittest 24 suites (175 tests / 171 goldens) run in CI / on the release
+  machine, not in the sandbox (dev-dep chain ~600 MB; sandbox RAM 3 GB) —
+  standing gap carried from the original program, disclosed at every STOP.
+- Pushes to remote are owner-authorized (2026-10-31: "push the updates to
+  git", credentials re-supplied and stored).
+
+### RF-1 — recovery baseline (opened 2026-10-31)
+
+1. **RF-1-1 (env)** — re-provision the pinned toolchain (rust-toolchain.toml
+   → 1.99.1, profile default) and record the env contract: `PATH` +
+   `~/.cargo/bin`, `CARGO_INCREMENTAL=0`, incremental dir cleaned at batch
+   start.
+2. **RF-1-2 (fmt gate)** — `cargo fmt --all --check` clean on the recovered
+   tree.
+3. **RF-1-3 (check gate)** — `cargo check --workspace --all-targets` clean
+   (cold, 2m59s recorded).
+4. **RF-1-4 (clippy gate)** — `cargo clippy --workspace --all-targets --
+   -D warnings` = 0 warnings.
+5. **RF-1-5 (python gates)** — `gate_traceability` OK (23 routes / 20 DC
+   tags / 27 ids) and `gate_no_simulation` clean.
+6. **RF-1-6 (core baseline)** — core lib 495 passed / 4 ignored / 0 failed
+   (`--test-threads=1` for the 3 GB sandbox; matches the v1.9.1 verified
+   record 495/495 (+1), 4 ignored).
+7. **RF-1-7 (app-shell baseline)** — app-shell lib 237 passed / 0 failed
+   (matches v1.9.1).
+8. **RF-1-8 (aux baselines)** — xtask 11/0; catalog lib 0/0; doc-tests 0/0;
+   `xtask verify-icons` clean.
+9. **RF-1-9 (kittest disposition)** — 24 suites / 175 tests / 171 goldens
+   re-confirmed as CI-lane-only for this sandbox (RAM/disk record); gap
+   disclosed at every STOP and at FINISH.
+10. **RF-1-10 (records)** — plan RF section (this text) + decisions.md D7
+    (recovery) + completed.md recovery record; baseline numbers locked as
+    the pre-refactor gate table.
+
+### RF-2 — core dead code, wave 1 (re-derived from the v1.9.1 tree)
+
+Evidence method: symbol-level reference census (each candidate's definition
+grepped across all four crates + tests before deletion; deletion requires
+zero non-test references). Ten items:
+
+1. **RF-2-1** — `crates/core/src/hybrid_search.rs`: the legacy fusion stack
+   survived batch 34's removal only where still `pub`; census and remove any
+   remaining unreferenced surface (module or items).
+2. **RF-2-2** — `crates/core/src/bench.rs` + `it_*` cfg(test) modules: keep
+   (test-only by declaration); census ONLY the non-test modules for dead
+   `pub(crate)` items invisible to the compiler (dead_code does not fire on
+   `pub`).
+3. **RF-2-3..RF-2-10** — the census wave: walk core's 108 modules by size
+   class (workers/ai_pipeline/helpscout_real/outreach/segment/sync_engine/
+   quality/reports/saved_views/automation …), collect unreferenced pub fns /
+   consts / structs, delete with per-item evidence. Each item = one module
+   group cleaned + compiled + tested. The census list is recorded in
+   progress.md when the batch opens (rule.md Rule 2).
+
+### RF-3 — catalog + app-shell dead code (re-derived)
+
+1. **RF-3-1..RF-3-4** — catalog crate (9 modules): unreferenced pub surface.
+2. **RF-3-5..RF-3-9** — app-shell: unreferenced pub items outside the pages/
+   hot path (design.rs DC-tagged items are gate-locked — traceability gate
+   must stay 20/20; any dead non-gated surface goes).
+3. **RF-3-10** — cross-crate census re-run: the deletion wave's net effect
+   recorded (lines removed per crate) in completed.md.
+
+### RF-4 — unifications (re-derived; the two named consolidations + helpers)
+
+1. **RF-4-1** — `escape_like` 5→1: definitions at segment.rs:9,
+   saved_views.rs:2297 (pub), ai_attributes.rs:429, support_graph.rs:1502,
+   search.rs:348 (pub) — one canonical `pub fn escape_like` stays in
+   `search.rs` (the only externally-reachable consumer surface), the other
+   four become call sites; callers: segment 22×, saved_views 11×,
+   support_graph 2×, ai_attributes 2×, mirror_readouts/inbox/customers 1×.
+2. **RF-4-2** — `add_column_if_missing` 9→1: definitions at mirror_tables,
+   intelligence_features, search, quality, customer_events, connectors (+3
+   more to census at open) — one canonical `pub(crate)` helper in
+   `db.rs`-adjacent schema surface, eight modules re-pointed.
+3. **RF-4-3..RF-4-10** — the duplicate-helper census (same shape as RF-2:
+   identical-name or identical-body helpers across ≥2 core modules; each
+   consolidated item = one helper family). Census recorded at batch open.
+
+### RF-5 — migration module relocation (R100 pattern, re-derived)
+
+Target: `migrations.rs` (currently the MIGRATIONS SQL array only, 205 lines)
+becomes the migration home; the migration-bearing modules relocate under
+`crates/core/src/migrations/` by byte-identical `git mv`, with a `pub use`
+re-export block in lib.rs so every `crate::X::apply_mNNN` path keeps
+resolving (bootstrap.rs BootStep table untouched, external
+`spp_core::bootstrap::apply_all` callers untouched: xtask + kittest tests).
+NO-TOUCH internals: intelligence.rs, maintenance.rs, ai_center.rs, db.rs,
+response_state_sql.rs relocate as-is if they appear, without edits.
+
+1. **RF-5-1..RF-5-8** — relocation waves by module group (apply_m003..m045
+   owners: activity, ticket_states, notifications, side_threads, automation,
+   embeddings, ai_analysis, ai_features, intelligence_features, reports,
+   outreach, data_tools, inbox, sync_schema, conversation_ops,
+   ai_attributes, customer_events, connectors, mirror_tables, mirror_parity,
+   helpscout_real, db_breadth … census at open; each item = one group).
+2. **RF-5-9** — re-export wiring + lib.rs `pub mod migrations;` block
+   finalized; zero call-site edits verified by grep (`crate::X::apply_` and
+   `spp_core::bootstrap::apply_all` counts unchanged).
+3. **RF-5-10** — it_sync regression check: the 4 tests that needed
+   `install_master_key()` in the original run re-verified; gates green.
+
+### RF-6 — god-file split, part 1 (the batch this section re-opens)
+
+Ten items selected at open from the size census (2026-10-31: workers.rs
+5276; ai_pipeline.rs 3913; helpscout_real.rs 3696; outreach.rs 3190;
+segment.rs 3171; sync_engine.rs 3115; quality.rs 3055; design.rs 2814;
+reports.rs 2640; saved_views.rs 2618 …). Pattern: byte-identical `git mv` of
+cohesive regions into sibling modules + `pub use` re-export at the old home
+(zero call-site churn). Selection recorded in progress.md per Rule 2.
+
+### RF-7 — god-file split, part 2 + pages/queries.rs
+
+Second wave of the census list + the app-shell relocation: page-model query
+surfaces move to `pages/queries.rs` (the invalidation-map port named in
+pages/mod.rs doc comments).
+
+### RF-8 — renames
+
+The rename wave recorded by the original program (file- and item-level
+naming debts surfaced by RF-2..RF-7 execution; census at open).
+
+### RF-9 — docs sync
+
+README / USER_MANUAL / .gitignore / ai/* module maps synced to the post-split
+tree; zero stale paths (grep-verified).
+
+### RF-10 — test paths follow the new structure
+
+Test module paths/imports follow the RF-5..RF-7 layout (import-path-only
+edits; no semantic test change).
+
+### RF-11 — comment deletion (LAST, per the original program order)
+
+All comments deleted in one final wave (module docs, item docs, inline);
+rustfmt + full gates after; the program's known-bugs list and rollback
+instructions ship at FINISH.
+
+### FINISH
+
+Final record: rollback = `git reset --hard acd557a` (tag `pre-refactor`
+equivalent = v1.9.1); known-bugs list carried verbatim (4× empty-list
+per-frame refetch; Settings LM Studio dirty-clobber); kittest CI lane
+disposition.
