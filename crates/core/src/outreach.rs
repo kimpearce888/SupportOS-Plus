@@ -1436,47 +1436,6 @@ pub fn list_outreach_campaigns(conn: &Connection) -> Result<Vec<serde_json::Valu
         .map_err(|e| e.into())
 }
 
-pub fn list_campaign_recipients(
-    conn: &Connection,
-    campaign_id: i64,
-    limit: i64,
-) -> Result<Vec<serde_json::Value>> {
-    let mut stmt = conn.prepare(
-        "SELECT r.id, r.customer_local_id, r.customer_remote_id, r.email, r.snapshot,
-                r.state, r.attempts, r.last_error, r.hs_conversation_remote_id,
-                r.hs_conversation_number, r.sent_at, r.replied_at,
-                c.first_name, c.last_name
-           FROM outreach_recipients r
-           LEFT JOIN customers c ON c.id = r.customer_local_id
-          WHERE r.campaign_id = ?1 ORDER BY r.id LIMIT ?2",
-    )?;
-    let rows = stmt.query_map(params![campaign_id, limit], |r| {
-        let snapshot_raw: String = r.get(4)?;
-        let snapshot: serde_json::Value =
-            serde_json::from_str(&snapshot_raw).unwrap_or(serde_json::json!({}));
-        Ok(serde_json::json!({
-            "id": r.get::<_, i64>(0)?,
-            "customer_local_id": r.get::<_, i64>(1)?,
-            "customer_remote_id": r.get::<_, Option<i64>>(2)?,
-            "first_name": r.get::<_, Option<String>>(12)?,
-            "last_name": r.get::<_, Option<String>>(13)?,
-            "email": r.get::<_, Option<String>>(3)?,
-            "state": r.get::<_, String>(5)?,
-            "attempts": r.get::<_, i64>(6)?,
-            "last_error": r.get::<_, Option<String>>(7)?,
-            "hs_conversation_remote_id": r.get::<_, Option<i64>>(8)?,
-            "hs_conversation_number": r.get::<_, Option<i64>>(9)?,
-            "conversation_local_id": serde_json::Value::Null,
-            "sent_at": r.get::<_, Option<String>>(10)?,
-            "replied_at": r.get::<_, Option<String>>(11)?,
-            "why": snapshot.get("why").cloned().unwrap_or(serde_json::json!([])),
-            "matching_tickets": snapshot.get("matching_tickets").cloned().unwrap_or(serde_json::json!([])),
-        }))
-    })?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.into())
-}
-
 pub const SEND_BATCH_SIZE: i64 = 5;
 
 pub const SEND_MAX_ATTEMPTS: i64 = 3;

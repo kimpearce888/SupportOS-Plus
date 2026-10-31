@@ -205,12 +205,6 @@ pub fn sla_status(minutes: Option<f64>, target_min: Option<i64>) -> SlaVerdict {
 }
 
 #[must_use]
-pub fn business_minutes_since(iso: &str, cfg: &BusinessHoursConfig) -> Option<f64> {
-    let now = now_iso_millis();
-    business_minutes_between(iso, &now, cfg)
-}
-
-#[must_use]
 pub fn now_iso_millis() -> String {
     now_iso_millis_at(Utc::now())
 }

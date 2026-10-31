@@ -2,9 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::interaction_current::{
-    CurrentInteraction, InteractionSignal, MessageStats, sanitize_signals,
-};
+use crate::interaction_current::{CurrentInteraction, InteractionSignal, MessageStats};
 
 struct ForbiddenPattern {
     regex: regex::Regex,
@@ -821,68 +819,6 @@ pub fn get_preferences(
             },
         )
         .collect())
-}
-
-pub fn set_human_override(
-    conn: &Connection,
-    customer_id: i64,
-    value: &str,
-    ai_value: Option<&str>,
-    reason: Option<&str>,
-) -> Result<()> {
-    conn.execute(
-        "UPDATE client_human_overrides SET active = 0
-          WHERE customer_id = ?1 AND field = 'response_preference' AND active = 1",
-        params![customer_id],
-    )?;
-    conn.execute(
-        "INSERT INTO client_human_overrides
-             (customer_id, field, ai_value, human_value, reason, active, created_at)
-         VALUES (?1, 'response_preference', ?2, ?3, ?4, 1, datetime('now'))",
-        params![customer_id, ai_value, value, reason],
-    )?;
-    conn.execute(
-        "DELETE FROM client_communication_preferences
-          WHERE customer_id = ?1 AND origin = 'human_entered' AND evidence_count = 0",
-        params![customer_id],
-    )?;
-    conn.execute(
-        "INSERT INTO client_communication_preferences
-             (customer_id, preference, evidence_count, first_observed, last_observed, confidence,
-              origin, human_override_value, human_override_reason, overridden_at, provenance)
-         VALUES (?1, ?2, 0, NULL, datetime('now'), 'high', 'human_entered', ?3, ?4, datetime('now'), 'human')
-         ON CONFLICT (customer_id, preference) DO UPDATE SET
-           last_observed = datetime('now'),
-           confidence = 'high',
-           origin = 'human_entered',
-           human_override_value = excluded.human_override_value,
-           human_override_reason = excluded.human_override_reason,
-           overridden_at = datetime('now')",
-        params![customer_id, value, value, reason],
-    )?;
-    Ok(())
-}
-
-pub fn clear_human_override(conn: &Connection, customer_id: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE client_human_overrides SET active = 0
-          WHERE customer_id = ?1 AND field = 'response_preference' AND active = 1",
-        params![customer_id],
-    )?;
-    conn.execute(
-        "DELETE FROM client_communication_preferences
-          WHERE customer_id = ?1 AND evidence_count = 0 AND origin = 'human_entered'",
-        params![customer_id],
-    )?;
-    conn.execute(
-        "UPDATE client_communication_preferences SET
-            human_override_value = NULL, human_override_reason = NULL, overridden_at = NULL,
-            origin = 'ai_inferred',
-            confidence = CASE WHEN evidence_count >= 3 THEN confidence ELSE 'low' END
-          WHERE customer_id = ?1",
-        params![customer_id],
-    )?;
-    Ok(())
 }
 
 pub fn get_active_overrides(conn: &Connection, customer_id: i64) -> Result<Vec<OverrideRow>> {
@@ -1945,118 +1881,6 @@ pub type AiEnrichment<'a> = (
     Option<&'a str>,
     Option<&'a str>,
 );
-
-pub fn build_card(
-    conn: &Connection,
-    conversation_id: i64,
-    ai_enrichment: Option<AiEnrichment<'_>>,
-) -> Result<Option<InteractionCard>> {
-    let Some(conv) = conversation_info(conn, conversation_id) else {
-        return Ok(None);
-    };
-    ensure_history_backfill(conn, conv.customer_local_id)?;
-    let stored = get_latest_current_interaction(conn, conversation_id)?;
-    let mut current_interaction = match (&stored, ai_enrichment) {
-        (Some(s), _) if !s.signals.is_empty() => {
-            let mut c =
-                crate::interaction_current::compute_current_interaction(conn, conversation_id)?
-                    .unwrap_or_else(|| CurrentInteraction {
-                        conversation_local_id: conversation_id,
-                        customer_local_id: conv.customer_local_id,
-                        is_returning_client: false,
-                        signals: Vec::new(),
-                        customer_goal: None,
-                        message_stats: MessageStats::default(),
-                        sources: String::new(),
-                        generated_at: None,
-                    });
-            c.signals = sanitize_signals(s.signals.clone()).signals;
-            c.message_stats = s.message_stats.unwrap_or_default();
-            c.customer_goal = s.customer_goal.clone().or(c.customer_goal);
-            c.sources = match s.sources.as_str() {
-                "ai" => "ai".to_string(),
-                "heuristic+ai" => "heuristic+ai".to_string(),
-                _ => "heuristic".to_string(),
-            };
-            c.generated_at = Some(s.generated_at.clone());
-            c
-        }
-        _ => {
-            let Some(computed) =
-                crate::interaction_current::compute_current_interaction(conn, conversation_id)?
-            else {
-                return Ok(None);
-            };
-            let mut c = computed;
-            if let Some((ai_signals, _, _, _)) = ai_enrichment
-                && !ai_signals.is_empty()
-            {
-                let merged = merge_signals(&c.signals, ai_signals);
-                c.signals = sanitize_signals(merged).signals;
-                c.sources = "heuristic+ai".to_string();
-            }
-            c
-        }
-    };
-    current_interaction.conversation_local_id = conversation_id;
-    current_interaction.customer_local_id = conv.customer_local_id;
-    current_interaction.is_returning_client = conv
-        .customer_local_id
-        .map(|cid| {
-            get_customer_conversations(conn, cid, Some(conversation_id))
-                .map(|rows| !rows.is_empty())
-                .unwrap_or(false)
-        })
-        .unwrap_or(false);
-    let customer_id = conv.customer_local_id;
-    let baseline = customer_id
-        .and_then(|cid| comparison_baseline(conn, cid, conversation_id).ok())
-        .flatten();
-    let changes = compute_changes(&current_interaction, baseline.as_ref());
-    let overrides: Vec<OverrideRow> = customer_id
-        .map(|cid| get_active_overrides(conn, cid).unwrap_or_default())
-        .unwrap_or_default();
-    let stored_rec = stored.as_ref().and_then(|s| s.recommendation.clone());
-    let recommendation: Option<SupportApproach> = ai_enrichment
-        .and_then(|(_, rec, _, _)| rec.cloned())
-        .or(stored_rec.as_ref().map(|r| r.recommendation.clone()))
-        .or_else(|| {
-            heuristic_recommendation(
-                &current_interaction,
-                &changes,
-                baseline.as_ref(),
-                &overrides,
-            )
-        });
-    let outcome = compute_outcome(conn, conversation_id)?;
-    let repeat_issue = detect_repeat_issue(conn, conversation_id)?;
-    Ok(Some(InteractionCard {
-        conversation_local_id: conversation_id,
-        customer_local_id: conv.customer_local_id,
-        client_kind: if current_interaction.is_returning_client {
-            "returning".into()
-        } else {
-            "first_time".into()
-        },
-        current: current_interaction,
-        baseline,
-        changes,
-        recommendation,
-        effort_score: outcome.as_ref().and_then(|o| o.effort_score),
-        friction: outcome.as_ref().map(|o| o.friction.clone()),
-        repeat_issue,
-        provenance: CardProvenance {
-            ai_generated: ai_enrichment.is_some() || stored_rec.is_some(),
-            prompt_version: ai_enrichment
-                .and_then(|(_, _, pv, _)| pv.map(String::from))
-                .or(stored_rec.as_ref().and_then(|r| r.prompt_version.clone())),
-            model: ai_enrichment
-                .and_then(|(_, _, _, m)| m.map(String::from))
-                .or(stored_rec.as_ref().and_then(|r| r.model.clone())),
-            generated_at: stored.as_ref().map(|s| s.generated_at.clone()),
-        },
-    }))
-}
 
 fn build_timeline(conv_rows: &[CustomerConversation]) -> Vec<TimelineEntry> {
     let mut sorted: Vec<&CustomerConversation> = conv_rows.iter().collect();

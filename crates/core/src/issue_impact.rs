@@ -25,28 +25,6 @@ pub fn for_incident(conn: &Connection, incident_id: i64) -> Option<Value> {
     ))
 }
 
-#[must_use]
-pub fn for_known_issue(conn: &Connection, known_issue_id: i64) -> Option<Value> {
-    let exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM known_issues WHERE id = ?1",
-            params![known_issue_id],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    if !exists {
-        return None;
-    }
-    Some(compute(
-        conn,
-        known_issue_id,
-        "known_issue",
-        "known_issue_links",
-        "known_issue_id",
-    ))
-}
-
 fn compute(
     conn: &Connection,
     subject_id: i64,

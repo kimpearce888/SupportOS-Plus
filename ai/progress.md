@@ -137,3 +137,35 @@ None — Batch RF-2 completed and moved to `completed.md` (2026-10-31): 3,761
 lines of dead code removed from core (net -3,736 across 11 files, incl. the
 orphaned private helpers clippy exposed). All ten items verified. Next per
 plan.md (opens on the owner's `continue`): Batch RF-3.
+
+## Batch RF-3 — core dead code wave 2 (second-order orphans + census tail) + app-shell — opened 2026-10-31
+
+Evidence: census re-run on the post-RF-2 tree (`census_core2.txt`): RF-2's
+root deletions cascaded — 70 zero-reference pub items remain in core (incl.
+new orphans like automation::trigger_matches, whose only caller was the
+deleted evaluate_rules), app-shell holds 1 (chart.rs bar_chart). NO-TOUCH
+excluded: response_state_sql.rs [3], ai_center.rs [1], db.rs [1]. Ten items
+moved from plan.md per Rule 2:
+
+1. RF-3-1 custom_objects.rs [5]
+2. RF-3-2 quality.rs [4]
+3. RF-3-3 support_graph.rs [4]
+4. RF-3-4 eventing.rs [4] — notify_* wrappers (zero subscribers verified)
+5. RF-3-5 knowledge_store.rs [4]
+6. RF-3-6 ai_attributes [3] + interaction_engine [3] + people_store [3]
+7. RF-3-7 webhook [3] + segment [3] + ticket_states [3, new orphans]
+8. RF-3-8 saved_views [2] + notification_prefs [2] + encrypted_sync [2]
+9. RF-3-9 the singles wave (every [1] file, excl. NO-TOUCH: ai_pipeline,
+   audit, automation, business_hours, coaching, config, copilot,
+   customer_events, customers, embeddings, incident_workspace,
+   intelligence_features, interaction_current, issue_impact, notifications,
+   operations, outreach, richtext, translation, workload)
+10. RF-3-10 app-shell chart.rs bar_chart [1] + catalog re-census (expected 0)
+    + full re-census proving convergence to zero deletable items.
+
+None — Batch RF-3 completed and moved to `completed.md` (2026-10-31): census
+convergence reached (only the 5 NO-TOUCH items remain: response_state_sql ×3,
+ai_center ×1, db ×1). Two swallowed regression-test modules (saved_views
+batch31_tests, segment batch30_tests) were caught by the #[test] census and
+restored byte-identical from acd557a — core test count back to the baseline
+495/4ig/0. Next per plan.md (opens on the owner's `continue`): Batch RF-4.

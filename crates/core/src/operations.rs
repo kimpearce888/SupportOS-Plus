@@ -160,11 +160,6 @@ pub fn waiting_threshold_minutes(conn: &Connection) -> i64 {
     }
 }
 
-pub fn set_waiting_threshold_minutes(conn: &Connection, minutes: i64) -> Result<()> {
-    let clamped = minutes.clamp(1, 20_160);
-    crate::settings::set_i64(conn, OPS_WAITING_THRESHOLD_SETTING, clamped)
-}
-
 fn sanitize_scope(mailbox_ids: Option<&[i64]>) -> Option<Vec<i64>> {
     let ids: Vec<i64> = mailbox_ids?
         .iter()

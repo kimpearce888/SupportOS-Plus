@@ -358,22 +358,6 @@ pub fn clear_events(conn: &Connection) -> Result<usize> {
     Ok(n)
 }
 
-pub fn list_recent_errors(conn: &Connection, limit: i64) -> Result<Vec<Value>> {
-    ensure_tables(conn)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, timestamp, service, message FROM application_errors ORDER BY id DESC LIMIT ?1",
-    )?;
-    let rows = stmt.query_map(rusqlite::params![limit], |r| {
-        Ok(json!({
-            "id": r.get::<_, i64>(0)?,
-            "timestamp": r.get::<_, String>(1)?,
-            "service": r.get::<_, Option<String>>(2)?,
-            "message": r.get::<_, Option<String>>(3)?,
-        }))
-    })?;
-    Ok(rows.flatten().collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

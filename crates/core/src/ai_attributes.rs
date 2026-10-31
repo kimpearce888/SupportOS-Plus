@@ -426,105 +426,12 @@ impl MatchOp {
     }
 }
 
-fn escape_like(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        if ch == '\\' || ch == '%' || ch == '_' {
-            out.push('\\');
-        }
-        out.push(ch);
-    }
-    out
-}
-
 fn parse_js_number(raw: &str) -> Option<f64> {
     let t = raw.trim();
     if t.is_empty() {
         return Some(0.0);
     }
     t.parse::<f64>().ok()
-}
-
-pub fn conversations_matching(
-    conn: &Connection,
-    attribute: AiAttributeKey,
-    op: MatchOp,
-    value: &str,
-    limit: i64,
-) -> Result<Vec<AttributeMatch>> {
-    let cap = limit.clamp(1, 200);
-    let map_match = |r: &rusqlite::Row<'_>| -> rusqlite::Result<AttributeMatch> {
-        Ok(AttributeMatch {
-            conversation_id: r.get(0)?,
-            number: r.get(1)?,
-            subject: r.get(2)?,
-            value: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            confidence: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            source: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
-            computed_at: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
-        })
-    };
-
-    if op == MatchOp::Unknown {
-        let mut stmt = conn.prepare(&format!(
-            "SELECT c.id, c.number, c.subject, '' AS value, 'unknown' AS confidence,
-                    'none' AS source, '' AS computed_at
-             FROM conversations c
-             WHERE {NOT_DELETED} AND NOT EXISTS (
-               SELECT 1 FROM ai_attributes a
-               WHERE a.conversation_id = c.id AND a.attribute = ?1 AND a.superseded_at IS NULL
-             )
-             ORDER BY c.number LIMIT ?2"
-        ))?;
-        let rows = stmt
-            .query_map(params![attribute.as_str(), cap], map_match)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        return Ok(rows);
-    }
-
-    let is_number = attribute.value_type() == AttributeValueType::Number;
-    let (table, cmp, param): (&str, &str, String) = if is_number {
-        let Some(target) = parse_js_number(value) else {
-            return Ok(Vec::new());
-        };
-        if !target.is_finite() {
-            return Ok(Vec::new());
-        }
-        let cmp = match op {
-            MatchOp::Equals => "= ?",
-            MatchOp::NotEquals => "!= ?",
-            MatchOp::Gt => "> ?",
-            MatchOp::Gte => ">= ?",
-            MatchOp::Lt => "< ?",
-            MatchOp::Lte => "<= ?",
-            _ => return Ok(Vec::new()),
-        };
-        ("CAST(a.value AS REAL)", cmp, format!("{target}"))
-    } else {
-        match op {
-            MatchOp::Contains => (
-                "LOWER(a.value)",
-                "LIKE ? ESCAPE '\\'",
-                format!("%{}%", escape_like(value)),
-            ),
-            MatchOp::Equals => ("LOWER(a.value)", "= ?", value.to_lowercase()),
-            MatchOp::NotEquals => ("LOWER(a.value)", "!= ?", value.to_lowercase()),
-            _ => return Ok(Vec::new()),
-        }
-    };
-
-    let sql = format!(
-        "SELECT a.conversation_id, c.number, c.subject, a.value, a.confidence, a.source,
-                a.computed_at
-         FROM ai_attributes a JOIN conversations c ON c.id = a.conversation_id
-         WHERE a.attribute = ? AND a.superseded_at IS NULL AND {NOT_DELETED} AND {table} {cmp}
-         ORDER BY c.number LIMIT ?"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
-        .query_map(params![attribute.as_str(), param, cap], map_match)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
 }
 
 pub fn distributions(conn: &Connection) -> Result<Vec<AttributeDistribution>> {
@@ -560,36 +467,6 @@ pub fn distributions(conn: &Connection) -> Result<Vec<AttributeDistribution>> {
         });
     }
     Ok(out)
-}
-
-pub fn distinct_values(
-    conn: &Connection,
-    attribute: AiAttributeKey,
-    limit: i64,
-) -> Result<Vec<String>> {
-    let cap = limit.clamp(1, 200);
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT value FROM ai_attributes
-         WHERE attribute = ?1 AND superseded_at IS NULL
-         ORDER BY value LIMIT ?2",
-    )?;
-    let rows = stmt
-        .query_map(params![attribute.as_str(), cap], |r| r.get::<_, String>(0))?
-        .filter_map(|row| row.ok())
-        .collect();
-    Ok(rows)
-}
-
-pub fn conversations_with_attributes(conn: &Connection, limit: i64) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT conversation_id FROM ai_attributes
-         WHERE superseded_at IS NULL LIMIT ?1",
-    )?;
-    let rows = stmt
-        .query_map(params![limit], |r| r.get::<_, i64>(0))?
-        .filter_map(|row| row.ok())
-        .collect();
-    Ok(rows)
 }
 
 fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AttributeRow> {

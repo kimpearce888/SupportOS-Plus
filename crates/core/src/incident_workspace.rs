@@ -382,29 +382,6 @@ pub fn list_notes(conn: &Connection, incident_id: i64, limit: i64) -> Vec<Value>
 }
 
 #[must_use]
-pub fn incident_note_json(conn: &Connection, note_id: i64) -> Option<Value> {
-    conn.query_row(
-        "SELECT n.id, n.incident_id, n.author_user_local_id,
-           (SELECT NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '')
-              FROM users u WHERE u.id = n.author_user_local_id) AS author_name,
-           n.body, n.created_at
-         FROM incident_notes n WHERE n.id = ?1",
-        params![note_id],
-        |r| {
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "incident_id": r.get::<_, i64>(1)?,
-                "author_user_local_id": r.get::<_, Option<i64>>(2)?,
-                "author_name": r.get::<_, Option<String>>(3)?,
-                "body": r.get::<_, String>(4)?,
-                "created_at": r.get::<_, String>(5)?,
-            }))
-        },
-    )
-    .ok()
-}
-
-#[must_use]
 pub fn list_events(conn: &Connection, incident_id: i64, limit: i64) -> Vec<Value> {
     conn.prepare(
         "SELECT id, incident_id, event_type, actor_user_local_id, occurred_at, detail, source

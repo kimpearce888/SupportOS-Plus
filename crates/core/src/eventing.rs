@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::events::{ConversationUpdatedEvent, ServerEvent};
+use crate::events::ServerEvent;
 
 #[derive(Clone)]
 pub struct EventBus {
@@ -47,43 +47,6 @@ impl Default for EventBus {
     fn default() -> Self {
         Self::new(Self::default_capacity())
     }
-}
-
-// Clean-audit item 148: the `EventEmitter` trait impl lived here and had
-// no caller — every producer (this module's `notify_*` helpers and the
-// engines) emits through the inherent `EventBus::emit` directly.
-
-pub fn notify_conversation_updated(bus: &EventBus, event: &ConversationUpdatedEvent) {
-    bus.emit(&ServerEvent::ConversationUpdated(event.clone()));
-}
-
-pub fn notify_sync_completed(
-    bus: &EventBus,
-    kind: &str,
-    processed: u32,
-    errors: u32,
-    trigger: crate::events::SyncTrigger,
-) {
-    bus.emit(&ServerEvent::sync_completed(
-        kind, processed, errors, trigger,
-    ));
-}
-
-pub fn notify_sync_progress(
-    bus: &EventBus,
-    stage: &str,
-    done: u32,
-    total: u32,
-    processed: u64,
-    stage_records: u32,
-) {
-    bus.emit(&ServerEvent::sync_progress(
-        stage,
-        done,
-        total,
-        processed,
-        stage_records,
-    ));
 }
 
 pub fn notify_outbound_finished(
@@ -138,26 +101,6 @@ pub fn notify_rating_received(
         customer_id,
         customer_name.map(String::from),
         comments.map(String::from),
-    ));
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn notify_campaign_updated(
-    bus: &EventBus,
-    campaign_id: i64,
-    status: &str,
-    sent: u32,
-    failed: u32,
-    unknown: u32,
-    remaining: u32,
-) {
-    bus.emit(&ServerEvent::campaign_updated(
-        campaign_id,
-        status,
-        sent,
-        failed,
-        unknown,
-        remaining,
     ));
 }
 

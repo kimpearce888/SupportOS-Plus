@@ -5420,3 +5420,32 @@ ai_center.rs untouched. Verification: fmt clean; clippy --workspace
 20 DC tags / 27 ids); gate_no_simulation clean; verify-icons clean.
 Kittest 24 suites: standing CI-lane gap (disclosed). Net: 11 files,
 -3,761/+25 lines.
+
+## Batch RF-3 — core dead code wave 2 + app-shell — COMPLETE 2026-10-31
+
+The second-order orphan wave (RF-2's root deletions cascaded 70 more
+zero-reference pub items) plus the census tail, processed in ten items per
+the progress.md selection: custom_objects 5, quality 4 (+ the DerivedOutcome
+field trim its deletion orphaned — segment::derive_outcome consumer kept, six
+never-read fields dropped), support_graph 4 (+2 cascaded), eventing 4,
+knowledge_store 4, ai_attributes/interaction_engine/people_store 3+3+3,
+webhook/segment/ticket_states 3+3+3 (ticket_states' new orphans incl.
+get_state_history group), saved_views/notification_prefs/encrypted_sync
+2+2+2, the singles wave (20 one-item files: ai_pipeline process_new_ticket,
+audit, automation trigger_matches, business_hours, coaching
+ensure_coaching_schema, config ensure_dir, copilot delete_session,
+customer_events, customers, embeddings decode_f32_le, incident_workspace,
+intelligence_features incident_row_json, interaction_current, issue_impact,
+notifications, operations, outreach, richtext, translation, workload
+capacity_metrics), and app-shell chart.rs bar_chart. NO-TOUCH held:
+response_state_sql ×3, ai_center ×1, db open_with_migrations — the only
+census items allowed to remain (convergence proof). Incident + recovery: two
+deletion spans overran into adjacent #[cfg(test)] modules (saved_views
+batch31_tests, segment batch30_tests — the batch 30/31 regression tests);
+caught by the #[test]-count census (507→504), both modules restored
+byte-identical from acd557a, test count re-verified at the baseline.
+Verification: fmt clean; clippy --workspace --all-targets -D warnings 0;
+core lib 495 passed / 4 ignored / 0 failed; app-shell lib 237/0;
+gate_traceability OK (23/20/27); gate_no_simulation clean; verify-icons
+clean. Working diff vs pre-batch: 36 files, −4,062/+30 lines (+ the restored
+test modules). Kittest: standing CI-lane gap.

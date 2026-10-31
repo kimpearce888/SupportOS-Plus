@@ -75,15 +75,6 @@ pub fn html_to_spans(html: &str) -> Vec<Span> {
     Parser::new(&clean).run()
 }
 
-/// Convert already-sanitized HTML into styled spans.
-///
-/// Only for callers that ran [`crate::security::sanitize_thread_html`] (or
-/// an equivalent ammonia pass) themselves; [`html_to_spans`] is the
-/// safe default.
-pub fn sanitized_html_to_spans(clean: &str) -> Vec<Span> {
-    Parser::new(clean).run()
-}
-
 /// Plain-text projection of (possibly untrusted) HTML: the same
 /// sanitizer + parser pipeline as [`html_to_spans`], joined back into one
 /// string. `<br>` becomes `\n`, block boundaries `\n\n` — exactly what the

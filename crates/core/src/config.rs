@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use crate::error::{Error, Result};
-
 /// Data-directory name: the default location is
 /// `$XDG_DATA_HOME/supportos-plus`.
 pub const DATA_DIR_NAME: &str = "supportos-plus";
@@ -266,13 +264,6 @@ pub fn load_env_config() -> EnvConfig {
             api_concurrency: env_int("SYNC_API_CONCURRENCY", 2),
         },
     }
-}
-
-pub fn ensure_dir(path: &Path) -> Result<()> {
-    if !path.exists() {
-        std::fs::create_dir_all(path).map_err(Error::Io)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

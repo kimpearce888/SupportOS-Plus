@@ -668,12 +668,6 @@ fn insert_message(
     })
 }
 
-pub fn delete_session(conn: &Connection, id: i64) -> bool {
-    conn.execute("DELETE FROM copilot_sessions WHERE id = ?1", params![id])
-        .map(|n| n > 0)
-        .unwrap_or(false)
-}
-
 pub fn starter_questions(conn: &Connection, conversation_id: i64) -> Vec<(String, String)> {
     let facts: Option<i64> = conn
         .query_row(

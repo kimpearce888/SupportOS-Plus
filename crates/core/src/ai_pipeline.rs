@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::ai_evidence::{AiSourceRef, build as build_evidence, find_similar, sources_for};
+use crate::ai_evidence::{AiSourceRef, build as build_evidence, sources_for};
 use crate::ai_lm_studio::{ChatOpts, OpenAiCompatibleClient};
 use crate::ai_prompts::{
     CUSTOMER_DRAFT_SYSTEM, ClusterConversation, DRAFT_VERIFICATION_SYSTEM, DraftVerification,
@@ -13,7 +13,7 @@ use crate::ai_prompts::{
     PROMPT_VERSIONS_MEMORY_EXTRACTION, PROMPT_VERSIONS_TICKET_ANALYSIS, TICKET_ANALYSIS_SYSTEM,
     TicketAnalysis, build_customer_draft_user, build_draft_verification_user,
     build_interaction_observation_user, build_interaction_recommendation_user,
-    build_issue_cluster_user, build_memory_extraction_user, build_ticket_analysis_user, truncate,
+    build_issue_cluster_user, build_memory_extraction_user, build_ticket_analysis_user,
 };
 use crate::ai_provider::ChatMessage;
 use crate::error::Result;
@@ -1934,76 +1934,6 @@ fn compute_trends(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-// Clean-audit item 149: the standalone `report_narrative` runner is gone —
-// it had no caller (the weekly digest runs its own narrative lane with
-// its own run bookkeeping since batch 28), so the dead surface, its
-// system prompt and its prompt-version constant are removed with it.
-
-pub fn build_ai_note(
-    _conversation_local_id: i64,
-    analysis: &TicketAnalysis,
-    similar: &[crate::ai_evidence::SimilarConversation],
-    known_issue_title: Option<&str>,
-) -> String {
-    let mut parts = vec![
-        "[AI Analysis - generated locally by SupportOS AI, not written by a human]".to_string(),
-    ];
-    if let Some(ref g) = analysis.customer_goal {
-        parts.push(format!("Customer goal: {g}"));
-    }
-    if let Some(ref q) = analysis.primary_question {
-        parts.push(format!("Main question: {q}"));
-    }
-    if !analysis.secondary_questions.is_empty() {
-        parts.push(format!(
-            "Secondary questions: {}",
-            analysis.secondary_questions.join(" | ")
-        ));
-    }
-    if let Some(ref p) = analysis.problem_type {
-        let feature = analysis
-            .feature
-            .as_ref()
-            .map(|f| format!(" ({f})"))
-            .unwrap_or_default();
-        parts.push(format!("Detected issue type: {p}{feature}"));
-    }
-    if let Some(ref u) = analysis.urgency {
-        parts.push(format!("Urgency: {u}"));
-    }
-    if let Some(ref s) = analysis.sentiment {
-        parts.push(format!("Sentiment: {s}"));
-    }
-    if !similar.is_empty() {
-        parts.push("Similar past tickets:".to_string());
-        for s in similar.iter().take(3) {
-            let resolution = if s.resolution.is_empty() {
-                "(no resolution recorded)".to_string()
-            } else {
-                truncate(&s.resolution, 160).to_string()
-            };
-            parts.push(format!("  #{} {} - {}", s.number, s.subject, resolution));
-        }
-    }
-    if let Some(t) = known_issue_title {
-        parts.push(format!("Known issue: {t}"));
-    }
-    if !analysis.missing_information.is_empty() {
-        parts.push(format!(
-            "Missing information: {}",
-            analysis.missing_information.join("; ")
-        ));
-    }
-    parts.push(format!(
-        "Confidence: {} (operational confidence based on evidence quality, not a probability)",
-        analysis.confidence.as_deref().unwrap_or("unknown")
-    ));
-    if let Some(ref s) = analysis.summary {
-        parts.push(format!("Summary: {s}"));
-    }
-    parts.join("\n")
-}
-
 pub fn build_interaction_strategy_block(
     conn: &Connection,
     conversation_local_id: i64,
@@ -2185,80 +2115,6 @@ pub struct ProcessNewTicketResult {
     pub draft_created: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-}
-
-pub async fn process_new_ticket(
-    conn: &Connection,
-    backend: &AiBackend,
-    index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
-    conversation_local_id: i64,
-) -> ProcessNewTicketResult {
-    let outcome = analyze_ticket(conn, backend, index, conversation_local_id, false).await;
-    let analysis = match outcome {
-        Ok(o) => o.analysis,
-        Err(e) => {
-            return ProcessNewTicketResult {
-                analysis: None,
-                note_created: false,
-                draft_created: false,
-                error: Some(e.message),
-            };
-        }
-    };
-    let mut note_created = false;
-    let mut draft_created = false;
-    let automatic_note =
-        crate::settings::get_bool(conn, "automatic_note_enabled", false).unwrap_or(false);
-    if automatic_note {
-        let semantic: Vec<(i64, f64)> = match index {
-            Some(ix) => crate::ai_evidence::semantic_hits(conn, ix, conversation_local_id, 6),
-            None => Vec::new(),
-        };
-        let similar = find_similar(conn, conversation_local_id, 3, &semantic).unwrap_or_default();
-        let note = build_ai_note(
-            conversation_local_id,
-            &analysis,
-            &similar,
-            analysis.known_issue_candidate.as_deref(),
-        );
-        let _ = crate::jobs::enqueue_on(
-            conn,
-            "ai",
-            "create_ai_note",
-            &serde_json::to_string(&serde_json::json!({
-                "conversationId": conversation_local_id,
-                "text": note
-            }))
-            .unwrap_or_default(),
-            2,
-            1,
-        );
-        note_created = true;
-    }
-    let automatic_draft =
-        crate::settings::get_bool(conn, "automatic_draft_enabled", false).unwrap_or(false);
-    if automatic_draft
-        && generate_draft(
-            conn,
-            backend,
-            index,
-            conversation_local_id,
-            "verified_answer",
-            false,
-            Some(&analysis),
-        )
-        .await
-        .is_ok()
-    {
-        draft_created = true;
-    }
-    let _ = extract_memories(conn, backend, conversation_local_id).await;
-    ProcessNewTicketResult {
-        analysis: Some(analysis),
-        note_created,
-        draft_created,
-        error: None,
-    }
 }
 
 #[derive(Debug, Clone)]

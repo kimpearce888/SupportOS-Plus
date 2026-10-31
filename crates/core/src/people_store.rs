@@ -1075,40 +1075,6 @@ pub fn customer_support_health(conn: &Connection, customer_id: i64) -> Result<Op
     .map(Some)
 }
 
-pub fn organization_support_health(conn: &Connection, org_id: i64) -> Result<Option<Value>> {
-    let row: Option<(i64, String)> = conn
-        .query_row(
-            "SELECT id, name FROM organizations WHERE id = ?1 AND deleted_at IS NULL",
-            params![org_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .ok();
-    let Some((id, raw_name)) = row else {
-        return Ok(None);
-    };
-    let name = raw_name.trim();
-    let label = if name.is_empty() {
-        format!("organization #{org_id}")
-    } else {
-        name.to_string()
-    };
-    let members = format!(
-        "(SELECT cu.id FROM customers cu WHERE {ORG_MEMBERS_SQL} AND cu.deleted_at IS NULL)"
-    );
-    let conv_scope = format!("c.customer_local_id IN {members}");
-    let rating_scope = format!("r.customer_local_id IN {members}");
-    build_support_health_report(
-        conn,
-        "organization",
-        id,
-        &label,
-        &conv_scope,
-        &rating_scope,
-        &conv_scope,
-    )
-    .map(Some)
-}
-
 pub struct NewCustomer {
     pub first_name: Option<String>,
     pub last_name: Option<String>,
@@ -1349,68 +1315,6 @@ pub fn create_organization(conn: &Connection, name: &str, domains: &[String]) ->
         })),
     );
     Ok(id)
-}
-
-pub fn update_organization(
-    conn: &Connection,
-    org_id: i64,
-    name: Option<&str>,
-    domains: Option<&[String]>,
-) -> Result<bool> {
-    let exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM organizations WHERE id = ?1 AND deleted_at IS NULL",
-            params![org_id],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    if !exists {
-        return Ok(false);
-    }
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
-    if let Some(domains) = domains {
-        let domains_json = serde_json::to_string(domains).unwrap_or_else(|_| "[]".into());
-        conn.execute(
-            "UPDATE organizations SET domains = ?2, local_updated_at = ?3 WHERE id = ?1",
-            params![org_id, domains_json, now],
-        )?;
-    }
-    if let Some(new_name) = name {
-        conn.execute(
-            "UPDATE organizations SET name = ?2, local_updated_at = ?3 WHERE id = ?1",
-            params![org_id, new_name, now],
-        )?;
-        conn.execute(
-            "UPDATE customers SET organization = ?2, updated_at = ?3
-             WHERE organization_id = ?1
-                OR (organization_id IS NULL AND organization = (SELECT name FROM organizations WHERE id = ?1) COLLATE NOCASE)",
-            params![org_id, new_name, now],
-        )?;
-    }
-    let _ = crate::audit::audit(
-        conn,
-        &crate::audit::AuditEntry::user("organization_updated").with_after_state(json!({
-            "organization_id": org_id,
-            "name": name,
-            "domains": domains,
-        })),
-    );
-    Ok(true)
-}
-
-pub fn timeline_rebuild(conn: &Connection) -> Result<usize> {
-    let events = crate::customer_events::rebuild(conn)?;
-    conn.execute(
-        "UPDATE customers SET organization_id = (
-            SELECT o.id FROM organizations o
-             WHERE o.name = customers.organization COLLATE NOCASE AND o.deleted_at IS NULL LIMIT 1)
-         WHERE organization_id IS NULL AND organization IS NOT NULL AND organization != ''",
-        [],
-    )?;
-    Ok(events)
 }
 
 #[cfg(test)]

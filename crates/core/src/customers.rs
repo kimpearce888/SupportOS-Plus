@@ -73,44 +73,6 @@ pub fn get_customer(conn: &Connection, customer_id: i64) -> Result<Option<Custom
     }
 }
 
-pub fn list_customer_conversations(
-    conn: &Connection,
-    customer_id: i64,
-    limit: Option<u32>,
-) -> Result<Vec<CustomerConversation>> {
-    let limit = limit.unwrap_or(50).min(200);
-    let mut stmt = conn.prepare(
-        "SELECT c.id, c.remote_id, c.number, c.subject, c.status,
-                c.mailbox_local_id, m.name, c.priority,
-                c.created_at, c.updated_at, c.closed_at, c.response_state
-         FROM conversations c
-         LEFT JOIN mailboxes m ON m.id = c.mailbox_local_id
-         WHERE c.customer_local_id = ?
-         ORDER BY COALESCE(c.updated_at, c.local_created_at) DESC
-         LIMIT ?",
-    )?;
-    let items: Result<Vec<CustomerConversation>> = stmt
-        .query_map(params![customer_id, i64::from(limit)], |row| {
-            Ok(CustomerConversation {
-                id: row.get(0)?,
-                remote_id: row.get(1)?,
-                number: row.get(2)?,
-                subject: row.get(3)?,
-                status: row.get(4)?,
-                mailbox_id: row.get(5)?,
-                mailbox_name: row.get(6)?,
-                priority: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-                closed_at: row.get(10)?,
-                response_state: row.get::<_, Option<String>>(11).ok().flatten(),
-            })
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| e.into());
-    items
-}
-
 pub fn customer_timeline(
     conn: &Connection,
     customer_id: i64,

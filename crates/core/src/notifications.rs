@@ -381,16 +381,6 @@ pub fn mark_all_read(conn: &Connection, me: Option<i64>) -> Result<usize> {
     Ok(rows)
 }
 
-pub fn prune_older_than(conn: &Connection, cutoff: &str) -> Result<usize> {
-    let rows = conn.execute(
-        "DELETE FROM notifications
-         WHERE julianday(created_at) < julianday(?1)
-            OR (read_at IS NOT NULL AND julianday(read_at) < julianday(?1))",
-        params![cutoff],
-    )?;
-    Ok(rows)
-}
-
 fn row_to_notification(r: &rusqlite::Row<'_>) -> rusqlite::Result<NotificationRecord> {
     let type_str: String = r.get(1)?;
     let notification_type = parse_type(&type_str).ok_or_else(|| {

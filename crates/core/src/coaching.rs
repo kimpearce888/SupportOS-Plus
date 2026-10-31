@@ -48,24 +48,6 @@ fn check_layer(kind: &str) -> &'static str {
     }
 }
 
-pub fn ensure_coaching_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS coaching_reviews (
-            conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
-            draft_sha256    TEXT NOT NULL,
-            draft_excerpt   TEXT NOT NULL,
-            deterministic   TEXT NOT NULL DEFAULT '{}',
-            ai              TEXT,
-            ai_run_id       INTEGER,
-            draft_chars     INTEGER NOT NULL DEFAULT 0,
-            draft_words     INTEGER NOT NULL DEFAULT 0,
-            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-            provenance      TEXT NOT NULL DEFAULT 'deterministic_local'
-        );",
-    )?;
-    Ok(())
-}
-
 fn stopwords() -> &'static HashSet<&'static str> {
     static WORDS: std::sync::OnceLock<HashSet<&'static str>> = std::sync::OnceLock::new();
     WORDS.get_or_init(|| {

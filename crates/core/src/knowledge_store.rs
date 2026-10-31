@@ -155,47 +155,6 @@ pub fn list_documents(conn: &Connection, source_id: Option<i64>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-#[must_use]
-pub fn get_document(conn: &Connection, id: i64) -> Option<Value> {
-    conn.query_row(
-        "SELECT d.id, d.source_id, d.title, d.visibility, d.version, d.content, d.format,
-                d.created_at, d.updated_at, d.last_reviewed_at, d.last_verified_at,
-                s.name AS source_name,
-                (SELECT COUNT(*) FROM knowledge_chunks c WHERE c.document_id = d.id) AS chunk_count
-         FROM knowledge_documents d JOIN knowledge_sources s ON s.id = d.source_id
-         WHERE d.id = ?1",
-        params![id],
-        |r| {
-            let content: Option<String> = r.get(5)?;
-            let preview: String = content
-                .clone()
-                .unwrap_or_default()
-                .chars()
-                .take(200)
-                .collect::<String>()
-                .trim()
-                .to_string();
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "source_id": r.get::<_, i64>(1)?,
-                "title": r.get::<_, String>(2)?,
-                "visibility": r.get::<_, String>(3)?,
-                "version": r.get::<_, Option<i64>>(4)?.unwrap_or(1),
-                "content": content.unwrap_or_default(),
-                "content_preview": preview,
-                "format": r.get::<_, Option<String>>(6)?,
-                "created_at": r.get::<_, String>(7)?,
-                "updated_at": r.get::<_, String>(8)?,
-                "last_reviewed_at": r.get::<_, Option<String>>(9)?,
-                "last_verified_at": r.get::<_, Option<String>>(10)?,
-                "source_name": r.get::<_, String>(11)?,
-                "chunk_count": r.get::<_, i64>(12)?,
-            }))
-        },
-    )
-    .ok()
-}
-
 pub fn upsert_document(
     conn: &Connection,
     source_id: i64,
@@ -543,75 +502,6 @@ fn days_since(stamp: &str) -> Option<i64> {
             })?;
     let delta = chrono::Utc::now().naive_utc() - naive;
     Some(delta.num_days())
-}
-
-#[must_use]
-pub fn related_ticket_estimate(conn: &Connection, id: i64) -> i64 {
-    conn.query_row(
-        "SELECT COUNT(DISTINCT r.conversation_id) AS n
-           FROM ai_sources s JOIN ai_runs r ON r.id = s.run_id
-          WHERE s.source_type = 'knowledge_document' AND s.source_id = ?1
-            AND r.conversation_id IS NOT NULL",
-        params![id],
-        |r| r.get(0),
-    )
-    .unwrap_or(0)
-}
-
-#[must_use]
-pub fn search_known_issues_by_title(conn: &Connection, title: &str) -> Vec<Value> {
-    let fts_query: String = title
-        .replace(['"', '*', '(', ')'], " ")
-        .split_whitespace()
-        .take(8)
-        .map(|t| format!("\"{t}\"*"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if !fts_query.is_empty() {
-        let rows: Vec<Value> = conn
-            .prepare(
-                "SELECT ki.id, COALESCE(ki.title, ki.name) AS title,
-                        snippet(fts_known_issues, 0, '[', ']', '…', 12) AS snippet
-                 FROM fts_known_issues f JOIN known_issues ki ON ki.id = f.known_issue_id
-                 WHERE fts_known_issues MATCH ?1 ORDER BY rank LIMIT 5",
-            )
-            .and_then(|mut stmt| {
-                let rows = stmt.query_map(params![fts_query], |r| {
-                    Ok(json!({
-                        "id": r.get::<_, i64>(0)?,
-                        "title": r.get::<_, Option<String>>(1)?,
-                        "snippet": r.get::<_, Option<String>>(2)?,
-                    }))
-                })?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .unwrap_or_default();
-        if !rows.is_empty() {
-            return rows;
-        }
-    }
-    let like = format!(
-        "%{}%",
-        title
-            .split_whitespace()
-            .next()
-            .unwrap_or("**** no such issue ****")
-    );
-    conn.prepare(
-        "SELECT id, COALESCE(title, name) AS title, NULL AS snippet
-         FROM known_issues WHERE COALESCE(title, name) LIKE ?1 LIMIT 5",
-    )
-    .and_then(|mut stmt| {
-        let rows = stmt.query_map(params![like], |r| {
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "title": r.get::<_, Option<String>>(1)?,
-                "snippet": r.get::<_, Option<String>>(2)?,
-            }))
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-    })
-    .unwrap_or_default()
 }
 
 #[must_use]
@@ -1546,19 +1436,6 @@ pub fn article_draft_exists_for_candidate(conn: &Connection, candidate_id: i64) 
     )
     .map(|n| n > 0)
     .unwrap_or(false)
-}
-
-/// Queue counts for the tab badge.
-#[must_use]
-pub fn article_draft_queue_counts(conn: &Connection) -> (i64, i64, i64) {
-    conn.query_row(
-        "SELECT (SELECT COUNT(*) FROM article_drafts WHERE status = 'drafted'),
-                (SELECT COUNT(*) FROM article_drafts WHERE status = 'approved'),
-                (SELECT COUNT(*) FROM article_drafts WHERE publish_state IN ('published','verified'))",
-        [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-    )
-    .unwrap_or((0, 0, 0))
 }
 
 #[cfg(test)]

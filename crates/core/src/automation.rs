@@ -178,28 +178,6 @@ pub fn delete_rule(conn: &Connection, rule_id: i64) -> Result<bool> {
     Ok(rows > 0)
 }
 
-pub fn trigger_matches(trigger: &Trigger, event: &AutomationEvent) -> bool {
-    match (trigger, event) {
-        (
-            Trigger::StatusChanged {
-                from_status,
-                to_status,
-            },
-            AutomationEvent::StatusChanged { from, to },
-        ) => {
-            let from_ok =
-                from_status.as_deref().is_none() || from_status.as_deref() == Some(from.as_str());
-            let to_ok = to_status.as_deref().is_none() || to_status.as_deref() == Some(to.as_str());
-            from_ok && to_ok
-        }
-        (Trigger::TagAdded { tag }, AutomationEvent::TagAdded { tag: added_tag }) => {
-            tag == added_tag
-        }
-        (Trigger::SlaRisk, AutomationEvent::SlaRisk) => true,
-        _ => false,
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutomationEvent {
     StatusChanged { from: String, to: String },

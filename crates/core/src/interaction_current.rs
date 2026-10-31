@@ -964,53 +964,6 @@ pub struct StoredCurrentSignals {
     pub analysis_version: Option<String>,
 }
 
-pub fn get_current_interaction(
-    conn: &Connection,
-    conversation_id: i64,
-) -> Result<Option<StoredCurrentSignals>> {
-    let row = conn
-        .query_row(
-            "SELECT customer_id, signals_json, customer_goal, message_stats_json,
-                    generated_at, provenance, analysis_version
-             FROM client_current_signals WHERE conversation_id = ?1",
-            params![conversation_id],
-            |r| {
-                Ok((
-                    r.get::<_, Option<i64>>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                    r.get::<_, Option<String>>(6)?,
-                ))
-            },
-        )
-        .ok();
-    let Some((
-        customer_id,
-        signals_json,
-        customer_goal,
-        stats_json,
-        generated_at,
-        provenance,
-        analysis_version,
-    )) = row
-    else {
-        return Ok(None);
-    };
-    Ok(Some(StoredCurrentSignals {
-        conversation_id,
-        customer_id,
-        signals: serde_json::from_str(&signals_json).unwrap_or_default(),
-        customer_goal,
-        message_stats: stats_json.and_then(|s| serde_json::from_str(&s).ok()),
-        generated_at,
-        provenance,
-        analysis_version,
-    }))
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDimensionValue {

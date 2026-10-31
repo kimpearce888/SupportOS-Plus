@@ -116,58 +116,6 @@ pub fn line_chart(ui: &mut egui::Ui, _id: &str, points: &[Point], label: &str) -
     rect
 }
 
-/// Draw a bar chart (one bar per `(index, value)`) into the available
-/// space, returns the drawn rect.
-pub fn bar_chart(ui: &mut egui::Ui, _id: &str, bars: &[Point], label: &str) -> egui::Rect {
-    let t = design::tokens(ui);
-    let (rect, _response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 180.0),
-        egui::Sense::hover(),
-    );
-    paint_frame(ui, rect, t);
-    if bars.is_empty() {
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "(no data to plot)",
-            egui::FontId::proportional(12.5),
-            t.muted_foreground,
-        );
-        return rect;
-    }
-    paint_grid(ui, rect, t);
-    let max = bars
-        .iter()
-        .map(|b| b[1])
-        .fold(f64::NEG_INFINITY, f64::max)
-        .max(1.0);
-    let inset = 8.0;
-    let plot_area = egui::Rect::from_min_max(
-        egui::pos2(rect.min.x + inset, rect.min.y + inset),
-        egui::pos2(rect.max.x - inset, rect.max.y - inset),
-    );
-    let bar_width = (plot_area.width() / bars.len() as f32 * 0.6).max(6.0);
-    let baseline = plot_area.max.y;
-    for (i, bar) in bars.iter().enumerate() {
-        let height = (bar[1] / max) as f32 * plot_area.height();
-        let center_x = plot_area.min.x + plot_area.width() * (i as f32 + 0.5) / bars.len() as f32;
-        let bar_rect = egui::Rect::from_min_max(
-            egui::pos2(center_x - bar_width / 2.0, baseline - height),
-            egui::pos2(center_x + bar_width / 2.0, baseline),
-        );
-        ui.painter()
-            .rect_filled(bar_rect, egui::CornerRadius::same(3), t.chart_accent);
-    }
-    ui.painter().text(
-        rect.left_bottom() + egui::vec2(4.0, 12.0),
-        egui::Align2::LEFT_TOP,
-        format!("{label} · max {max:.0}"),
-        egui::FontId::proportional(11.5),
-        t.muted_foreground,
-    );
-    rect
-}
-
 /// Card-like chart frame (rounded, hairline border).
 fn paint_frame(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
     ui.painter()

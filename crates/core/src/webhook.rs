@@ -238,43 +238,6 @@ pub fn get_pending_webhook_events(
     Ok(rows)
 }
 
-pub fn persist_event(conn: &Connection, event_id: &str, body: &str) -> Result<bool> {
-    let existing: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM webhook_events WHERE event_id = ?1",
-            params![event_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    if existing.is_some() {
-        return Ok(false);
-    }
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(format!("legacy:{event_id}:{body}"));
-    let hash = hex::encode(hasher.finalize());
-    conn.execute(
-        "INSERT INTO webhook_events (event_id, event_hash, event_type, received_at, payload, processing_state)
-         VALUES (?1, ?2, 'unknown', ?3, ?4, 'pending')",
-        params![event_id, hash, now, body],
-    )?;
-    Ok(true)
-}
-
-pub fn mark_event_processed(conn: &Connection, event_id: &str) -> Result<()> {
-    conn.execute(
-        "UPDATE webhook_events
-            SET processing_state = 'processed',
-                processing_error = NULL
-          WHERE event_id = ?1",
-        params![event_id],
-    )?;
-    Ok(())
-}
-
 pub fn pending_event_count(conn: &Connection) -> Result<u32> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM webhook_events WHERE processing_state = 'pending'",
@@ -282,16 +245,6 @@ pub fn pending_event_count(conn: &Connection) -> Result<u32> {
         |r| r.get(0),
     )?;
     Ok(u32::try_from(n).unwrap_or(0))
-}
-
-pub fn pending_event_ids(conn: &Connection) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT event_id FROM webhook_events WHERE processing_state = 'pending' AND event_id IS NOT NULL ORDER BY id ASC",
-    )?;
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
 }
 
 #[cfg(test)]

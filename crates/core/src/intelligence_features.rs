@@ -1,6 +1,5 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
 use crate::error::Result;
 
@@ -528,42 +527,6 @@ pub fn create_manual_incident(conn: &Connection, inc: &ManualIncident) -> Result
     }
     tx.commit()?;
     Ok(id)
-}
-
-pub fn incident_row_json(conn: &Connection, id: i64) -> Option<Value> {
-    conn.query_row(
-        "SELECT id, code, title, known_issue_id, status, severity, source,
-                description, internal_explanation, customer_safe_explanation,
-                known_cause, workaround, resolution, started_at, resolved_at,
-                owner_user_local_id, product, feature, created_at, updated_at
-         FROM incidents WHERE id = ?1",
-        params![id],
-        |r| {
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "code": r.get::<_, Option<String>>(1)?,
-                "title": r.get::<_, Option<String>>(2)?,
-                "known_issue_id": r.get::<_, Option<i64>>(3)?,
-                "status": r.get::<_, String>(4)?,
-                "severity": r.get::<_, String>(5)?,
-                "source": r.get::<_, String>(6)?,
-                "description": r.get::<_, Option<String>>(7)?,
-                "internal_explanation": r.get::<_, Option<String>>(8)?,
-                "customer_safe_explanation": r.get::<_, Option<String>>(9)?,
-                "known_cause": r.get::<_, Option<String>>(10)?,
-                "workaround": r.get::<_, Option<String>>(11)?,
-                "resolution": r.get::<_, Option<String>>(12)?,
-                "started_at": r.get::<_, Option<String>>(13)?,
-                "resolved_at": r.get::<_, Option<String>>(14)?,
-                "owner_user_local_id": r.get::<_, Option<i64>>(15)?,
-                "product": r.get::<_, Option<String>>(16)?,
-                "feature": r.get::<_, Option<String>>(17)?,
-                "created_at": r.get::<_, String>(18)?,
-                "updated_at": r.get::<_, String>(19)?,
-            }))
-        },
-    )
-    .ok()
 }
 
 #[derive(Default)]

@@ -376,20 +376,6 @@ pub fn get_type(conn: &Connection, type_id: i64) -> Result<Option<TypeDetail>> {
     }
 }
 
-pub fn get_type_by_slug(conn: &Connection, slug: &str) -> Result<Option<TypeDetail>> {
-    let id: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM custom_object_types WHERE slug = ?1 AND deleted_at IS NULL",
-            params![slug],
-            |r| r.get(0),
-        )
-        .ok();
-    match id {
-        Some(id) => get_type(conn, id),
-        None => Ok(None),
-    }
-}
-
 pub fn delete_type(conn: &Connection, type_id: i64) -> Result<bool> {
     let Some(existing) = get_type(conn, type_id)? else {
         return Ok(false);
@@ -814,66 +800,6 @@ pub fn list_objects(
     Ok((objects, total))
 }
 
-pub fn search_objects(
-    conn: &Connection,
-    query: &str,
-    type_id: Option<i64>,
-    limit: u32,
-) -> Result<Vec<Value>> {
-    let tokens: String = query
-        .replace(['"', '*', '(', ')'], " ")
-        .split_whitespace()
-        .filter(|t| t.chars().count() > 1)
-        .take(6)
-        .map(|t| format!("\"{}\"*", t.replace('"', "")))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if tokens.is_empty() {
-        return Ok(Vec::new());
-    }
-    let limit = limit.clamp(1, 50) as i64;
-    let sql = match type_id {
-        Some(tid) if tid > 0 => format!(
-            "SELECT o.id, o.type_id, o.title, o.data_json, o.created_at, o.updated_at, o.provenance,
-                    t.name AS type_name,
-                    snippet(fts_custom_objects, 1, '[', ']', '...', 12) AS snippet
-               FROM fts_custom_objects f
-               JOIN custom_objects o ON o.id = f.object_id AND o.deleted_at IS NULL
-               JOIN custom_object_types t ON t.id = o.type_id
-              WHERE fts_custom_objects MATCH ?1 AND o.type_id = {tid}
-              ORDER BY rank LIMIT {limit}"
-        ),
-        _ => format!(
-            "SELECT o.id, o.type_id, o.title, o.data_json, o.created_at, o.updated_at, o.provenance,
-                    t.name AS type_name,
-                    snippet(fts_custom_objects, 1, '[', ']', '...', 12) AS snippet
-               FROM fts_custom_objects f
-               JOIN custom_objects o ON o.id = f.object_id AND o.deleted_at IS NULL
-               JOIN custom_object_types t ON t.id = o.type_id
-              WHERE fts_custom_objects MATCH ?1
-              ORDER BY rank LIMIT {limit}"
-        ),
-    };
-    let mut stmt = conn.prepare(&sql)?;
-    let rows: Vec<Value> = stmt
-        .query_map(params![tokens], |r| {
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "type_id": r.get::<_, i64>(1)?,
-                "title": r.get::<_, String>(2)?,
-                "properties": parse_properties(r.get(3)?),
-                "created_at": r.get::<_, Option<String>>(4)?,
-                "updated_at": r.get::<_, Option<String>>(5)?,
-                "provenance": r.get::<_, String>(6)?,
-                "type_name": r.get::<_, String>(7)?,
-                "snippet": r.get::<_, String>(8)?,
-            }))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(rows)
-}
-
 fn insert_link(conn: &Connection, object_id: i64, link: &LinkInput) -> Result<()> {
     if !link_target_exists(conn, &link.target_kind, link.target_local_id)? {
         return Err(Error::Validation(format!(
@@ -888,62 +814,6 @@ fn insert_link(conn: &Connection, object_id: i64, link: &LinkInput) -> Result<()
         params![object_id, link.target_kind, link.target_local_id, link.note],
     )?;
     Ok(())
-}
-
-pub fn add_link(conn: &Connection, object_id: i64, link: &LinkInput) -> Result<()> {
-    if get_object(conn, object_id)?.is_none() {
-        return Err(Error::Validation("Object not found".to_string()));
-    }
-    insert_link(conn, object_id, link)
-}
-
-pub fn remove_link(
-    conn: &Connection,
-    object_id: i64,
-    target_kind: &str,
-    target_local_id: i64,
-) -> Result<bool> {
-    let removed = conn.execute(
-        "DELETE FROM custom_object_links
-          WHERE object_id = ?1 AND target_kind = ?2 AND target_local_id = ?3",
-        params![object_id, target_kind, target_local_id],
-    )?;
-    Ok(removed > 0)
-}
-
-pub fn objects_for_target(
-    conn: &Connection,
-    target_kind: &str,
-    target_local_id: i64,
-    limit: u32,
-) -> Result<Vec<Value>> {
-    let limit = limit.clamp(1, 100) as i64;
-    let mut stmt = conn.prepare(
-        "SELECT o.id, o.type_id, o.title, o.data_json, o.created_at, o.updated_at, o.provenance,
-                t.name AS type_name
-           FROM custom_object_links l
-           JOIN custom_objects o ON o.id = l.object_id AND o.deleted_at IS NULL
-           JOIN custom_object_types t ON t.id = o.type_id
-          WHERE l.target_kind = ?1 AND l.target_local_id = ?2
-          ORDER BY o.updated_at DESC
-          LIMIT ?3",
-    )?;
-    let rows: Vec<Value> = stmt
-        .query_map(params![target_kind, target_local_id, limit], |r| {
-            Ok(json!({
-                "id": r.get::<_, i64>(0)?,
-                "type_id": r.get::<_, i64>(1)?,
-                "title": r.get::<_, String>(2)?,
-                "properties": parse_properties(r.get(3)?),
-                "created_at": r.get::<_, Option<String>>(4)?,
-                "updated_at": r.get::<_, Option<String>>(5)?,
-                "provenance": r.get::<_, String>(6)?,
-                "type_name": r.get::<_, String>(7)?,
-            }))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(rows)
 }
 
 fn link_target_exists(conn: &Connection, kind: &str, id: i64) -> Result<bool> {

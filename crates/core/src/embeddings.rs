@@ -366,12 +366,6 @@ pub struct DocChunkWithEmbedding {
 }
 
 #[must_use]
-pub fn decode_f32_le(bytes: &[u8]) -> Vec<f32> {
-    let (words, _) = bytes.as_chunks::<4>();
-    words.iter().map(|w| f32::from_le_bytes(*w)).collect()
-}
-
-#[must_use]
 pub fn encode_f32_le(vector: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(vector.len() * 4);
     for f in vector {

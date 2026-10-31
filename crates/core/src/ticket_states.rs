@@ -180,35 +180,6 @@ pub fn set_ticket_state(
     Ok(())
 }
 
-pub fn get_state_history(
-    conn: &Connection,
-    conversation_remote_id: i64,
-) -> Result<Vec<StateTransition>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, conversation_remote_id, from_state, to_state, from_priority, to_priority,
-                actor_type, actor_id, transitioned_at
-         FROM ticket_state_transitions
-         WHERE conversation_remote_id = ?1 AND (from_state IS NOT NULL OR to_state IS NOT NULL)
-         ORDER BY transitioned_at ASC",
-    )?;
-    let rows = stmt
-        .query_map(params![conversation_remote_id], |r| {
-            Ok(StateTransition {
-                id: Some(r.get(0)?),
-                conversation_remote_id: r.get(1)?,
-                from_state: r.get::<_, Option<String>>(2)?,
-                to_state: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                from_priority: r.get::<_, Option<String>>(4)?,
-                to_priority: r.get::<_, Option<String>>(5)?,
-                actor_type: r.get(6)?,
-                actor_id: r.get(7)?,
-                transitioned_at: r.get(8)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
-}
-
 pub fn apply_m032(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ticket_states (
@@ -274,76 +245,4 @@ pub struct TicketStateDef {
     pub built_in: i64,
     pub created_at: String,
     pub updated_at: String,
-}
-
-fn row_to_def(r: &rusqlite::Row<'_>) -> rusqlite::Result<TicketStateDef> {
-    Ok(TicketStateDef {
-        id: r.get(0)?,
-        key: r.get(1)?,
-        name: r.get(2)?,
-        color: r.get(3)?,
-        sort_order: r.get(4)?,
-        is_resolved: r.get(5)?,
-        built_in: r.get(6)?,
-        created_at: r.get(7)?,
-        updated_at: r.get(8)?,
-    })
-}
-
-pub fn get_conversation_state(
-    conn: &Connection,
-    conversation_local_id: i64,
-) -> Option<TicketStateDef> {
-    conn.query_row(
-        "SELECT ts.id, ts.key, ts.name, ts.color, ts.sort_order, ts.is_resolved,
-                ts.built_in, ts.created_at, ts.updated_at
-         FROM conversations c JOIN ticket_states ts ON ts.id = c.supportos_state_id
-         WHERE c.id = ?1",
-        [conversation_local_id],
-        row_to_def,
-    )
-    .ok()
-}
-
-pub fn list_transitions(
-    conn: &Connection,
-    conversation_local_id: i64,
-    limit: i64,
-) -> Result<Vec<serde_json::Value>> {
-    let mut stmt = conn.prepare(
-        "SELECT t.id, t.conversation_id, t.previous_state_id, t.new_state_id,
-                t.actor_type, t.actor_local_id, t.reason, t.occurred_at, t.source,
-                p.name AS previous_state_name,
-                COALESCE(n.name, '(no state)') AS new_state_name,
-                CASE WHEN t.actor_type = 'user' THEN
-                    (SELECT TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, ''))
-                       FROM users u WHERE u.id = t.actor_local_id)
-                END AS actor_name
-         FROM state_transitions t
-         LEFT JOIN ticket_states p ON p.id = t.previous_state_id
-         LEFT JOIN ticket_states n ON n.id = t.new_state_id
-         WHERE t.conversation_id = ?1
-         ORDER BY t.occurred_at DESC, t.id DESC
-         LIMIT ?2",
-    )?;
-    let rows = stmt
-        .query_map(params![conversation_local_id, limit], |r| {
-            Ok(serde_json::json!({
-                "id": r.get::<_, i64>(0)?,
-                "conversation_id": r.get::<_, i64>(1)?,
-                "previous_state_id": r.get::<_, Option<i64>>(2)?,
-                "new_state_id": r.get::<_, Option<i64>>(3)?,
-                "previous_state_name": r.get::<_, Option<String>>(9)?,
-                "new_state_name": r.get::<_, String>(10)?,
-                "actor_type": r.get::<_, String>(4)?,
-                "actor_local_id": r.get::<_, Option<i64>>(5)?,
-                "actor_name": r.get::<_, Option<String>>(11)?,
-                "reason": r.get::<_, Option<String>>(6)?,
-                "occurred_at": r.get::<_, String>(7)?,
-                "source": r.get::<_, String>(8)?,
-            }))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(rows)
 }

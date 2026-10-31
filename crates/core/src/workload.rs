@@ -22,36 +22,6 @@ pub struct CapacityMetrics {
     pub closing_rate_per_day: f64,
 }
 
-pub fn capacity_metrics(conn: &Connection) -> Result<CapacityMetrics> {
-    let incoming_7d: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM conversations
-         WHERE julianday(local_created_at) >= julianday('now', ?1)",
-        params![format!("-{CAPACITY_WINDOW_DAYS} days")],
-        |r| r.get(0),
-    )?;
-
-    let closing_7d: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM conversations
-         WHERE closed_at IS NOT NULL
-           AND status = 'closed'
-           AND julianday(closed_at) >= julianday('now', ?1)",
-        params![format!("-{CAPACITY_WINDOW_DAYS} days")],
-        |r| r.get(0),
-    )?;
-
-    let incoming = u32::try_from(incoming_7d).unwrap_or(0);
-    let closing = u32::try_from(closing_7d).unwrap_or(0);
-    let window = CAPACITY_WINDOW_DAYS as f64;
-
-    Ok(CapacityMetrics {
-        incoming_7d: incoming,
-        closing_7d: closing,
-        window_days: CAPACITY_WINDOW_DAYS,
-        incoming_rate_per_day: incoming as f64 / window,
-        closing_rate_per_day: closing as f64 / window,
-    })
-}
-
 pub const CAPACITY_SETTING_KEY: &str = "capacity_model";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
