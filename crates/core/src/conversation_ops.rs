@@ -80,75 +80,6 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> Res
     Ok(())
 }
 
-pub fn js_number(raw: &str) -> Option<f64> {
-    let t = raw.trim();
-    if t.is_empty() {
-        return Some(0.0);
-    }
-    t.parse::<f64>().ok()
-}
-
-pub fn zod_enum_message(variants: &[&str], received: &str) -> String {
-    let expected = variants
-        .iter()
-        .map(|v| format!("'{v}'"))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    format!("Invalid enum value. Expected {expected}, received '{received}'")
-}
-
-pub fn zod_int_msg(body: &Value, field: &str) -> std::result::Result<i64, String> {
-    match body.get(field) {
-        None | Some(Value::Null) => Err("Required".into()),
-        Some(v) if v.is_number() => {
-            let f = v.as_f64().unwrap();
-            if f.fract() != 0.0 || f < i64::MIN as f64 || f > i64::MAX as f64 {
-                Err("Expected integer, received float".into())
-            } else {
-                Ok(f as i64)
-            }
-        }
-        Some(v) => Err(format!("Expected number, received {}", zod_typeof(v))),
-    }
-}
-
-pub fn zod_string_msg(body: &Value, field: &str) -> std::result::Result<String, String> {
-    match body.get(field) {
-        None | Some(Value::Null) => Err("Required".into()),
-        Some(Value::String(s)) => Ok(s.clone()),
-        Some(v) => Err(format!("Expected string, received {}", zod_typeof(v))),
-    }
-}
-
-pub fn zod_bool_msg(body: &Value, field: &str) -> std::result::Result<bool, String> {
-    match body.get(field) {
-        None | Some(Value::Null) => Err("Required".into()),
-        Some(Value::Bool(b)) => Ok(*b),
-        Some(v) => Err(format!("Expected boolean, received {}", zod_typeof(v))),
-    }
-}
-
-fn zod_typeof(v: &Value) -> &'static str {
-    match v {
-        Value::String(_) => "string",
-        Value::Number(_) => "number",
-        Value::Bool(_) => "boolean",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-        Value::Null => "null",
-    }
-}
-
-pub fn eval_mode_blocked(conn: &Connection) -> Option<&'static str> {
-    let on: Option<String> = crate::settings::get_string(conn, "ai_evaluation_mode")
-        .ok()
-        .flatten();
-    matches!(on.as_deref(), Some("1") | Some("true") | Some("on"))
-        .then_some(
-            "AI evaluation mode is ON: no replies, notes, status changes or other updates are sent to Help Scout.",
-        )
-}
-
 // `create_outbound_job` (the unkeyed variant) was removed in v1.4.0 R4:
 // it had no callers since the Phase 4 cutover and its silent
 // `return 0` on INSERT failure was defect D8's root. Everything
@@ -202,47 +133,6 @@ pub fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<St
     stmt.query_map(params![conversation_id], |r| r.get::<_, String>(0))
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
         .unwrap_or_default()
-}
-
-pub fn merge_tags(current: &[String], change: &Value) -> Vec<String> {
-    if let Some(set) = change.get("set").and_then(|v| v.as_array()) {
-        let mut seen = std::collections::HashSet::new();
-        return set
-            .iter()
-            .filter_map(|t| t.as_str())
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty() && seen.insert(t.clone()))
-            .collect();
-    }
-    let remove: Vec<String> = change
-        .get("remove")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|t| t.as_str())
-                .map(|t| t.to_lowercase())
-                .collect()
-        })
-        .unwrap_or_default();
-    let add: Vec<String> = change
-        .get("add")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|t| t.as_str())
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut seen = std::collections::HashSet::new();
-    current
-        .iter()
-        .filter(|t| !remove.contains(&t.to_lowercase()))
-        .chain(add.iter())
-        .filter(|t| seen.insert((*t).clone()))
-        .cloned()
-        .collect()
 }
 
 pub fn write_conversation_tags(conn: &Connection, conversation_id: i64, tags: &[String]) {
@@ -402,39 +292,7 @@ pub struct ConvFull {
     pub merged_into_conversation_id: Option<i64>,
 }
 
-pub fn conv_full_by_local_id(conn: &Connection, id: i64) -> Option<ConvFull> {
-    conn.query_row(
-        "SELECT id, remote_id, status, subject, closed_at, assignee_local_id,
-                merged_into_conversation_id
-           FROM conversations WHERE id = ?1",
-        params![id],
-        |r| {
-            Ok(ConvFull {
-                id: r.get(0)?,
-                remote_id: r.get(1)?,
-                status: r.get(2)?,
-                subject: r.get(3)?,
-                closed_at: r.get(4)?,
-                assignee_local_id: r.get(5)?,
-                merged_into_conversation_id: r.get(6)?,
-            })
-        },
-    )
-    .ok()
-}
-
 pub const NOT_CONNECTED: &str = "Help Scout is not connected. Remote actions are disabled - connect Help Scout in Settings first.";
-
-pub fn require_auth(conn: &Connection, provider_kind: &str) -> Option<&'static str> {
-    if provider_kind != "real" {
-        return None;
-    }
-    // 1.4.0 R7 (D13): the token itself lives in the encrypted envelope now,
-    // so the existence check goes through the same reader the provider uses
-    // (envelope first, pre-m053 plaintext columns as a transitional fallback).
-    let connected = crate::helpscout_real::has_stored_tokens(conn).unwrap_or(false);
-    if connected { None } else { Some(NOT_CONNECTED) }
-}
 
 /// Create an outbound job row (v1.4.0 R4 / D8: the id is now a real
 /// `Result` — an INSERT failure used to return job id `0` and every

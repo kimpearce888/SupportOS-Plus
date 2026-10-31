@@ -69,41 +69,6 @@ pub fn create_segment(conn: &Connection, name: &str, criteria: &str) -> Result<i
     Ok(conn.last_insert_rowid())
 }
 
-pub fn list_segments(conn: &Connection) -> Result<Vec<SavedSegment>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, criteria_json, created_at FROM saved_segments ORDER BY id DESC",
-    )?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok(SavedSegment {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                criteria: r.get(2)?,
-                created_at: r.get(3)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
-}
-
-pub fn get_segment(conn: &Connection, id: i64) -> Result<Option<SavedSegment>> {
-    let row = conn
-        .query_row(
-            "SELECT id, name, criteria_json, created_at FROM saved_segments WHERE id = ?1",
-            params![id],
-            |r| {
-                Ok(SavedSegment {
-                    id: r.get(0)?,
-                    name: r.get(1)?,
-                    criteria: r.get(2)?,
-                    created_at: r.get(3)?,
-                })
-            },
-        )
-        .ok();
-    Ok(row)
-}
-
 pub fn delete_segment(conn: &Connection, id: i64) -> Result<bool> {
     let rows = conn.execute("DELETE FROM saved_segments WHERE id = ?1", params![id])?;
     Ok(rows > 0)
@@ -147,107 +112,6 @@ pub fn create_campaign(
         params![name, segment_id, message_template],
     )?;
     Ok(conn.last_insert_rowid())
-}
-
-pub fn add_campaign_recipient(
-    conn: &Connection,
-    campaign_id: i64,
-    customer_id: i64,
-) -> Result<i64> {
-    conn.execute(
-        "INSERT INTO campaign_recipients (campaign_id, customer_id) VALUES (?1, ?2)",
-        params![campaign_id, customer_id],
-    )?;
-    Ok(conn.last_insert_rowid())
-}
-
-pub fn start_campaign(conn: &Connection, campaign_id: i64) -> Result<bool> {
-    let rows = conn.execute(
-        "UPDATE campaigns SET status = 'sending', started_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id = ?1 AND status = 'draft'",
-        params![campaign_id],
-    )?;
-    Ok(rows > 0)
-}
-
-pub fn mark_recipient_sent(conn: &Connection, recipient_id: i64) -> Result<bool> {
-    let rows = conn.execute(
-        "UPDATE campaign_recipients SET status = 'sent', sent_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id = ?1 AND status = 'pending'",
-        params![recipient_id],
-    )?;
-    Ok(rows > 0)
-}
-
-pub fn mark_recipient_failed(conn: &Connection, recipient_id: i64, error: &str) -> Result<bool> {
-    let rows = conn.execute(
-        "UPDATE campaign_recipients SET status = 'failed', last_error = ?1
-         WHERE id = ?2",
-        params![error, recipient_id],
-    )?;
-    Ok(rows > 0)
-}
-
-pub fn increment_attempt(conn: &Connection, recipient_id: i64) -> Result<i64> {
-    conn.execute(
-        "UPDATE campaign_recipients SET attempts = attempts + 1 WHERE id = ?1",
-        params![recipient_id],
-    )?;
-    let attempts: i64 = conn.query_row(
-        "SELECT attempts FROM campaign_recipients WHERE id = ?1",
-        params![recipient_id],
-        |r| r.get(0),
-    )?;
-    Ok(attempts)
-}
-
-pub fn recipient_exhausted(conn: &Connection, recipient_id: i64) -> Result<bool> {
-    let (attempts, max): (i64, i64) = conn.query_row(
-        "SELECT attempts, max_attempts FROM campaign_recipients WHERE id = ?1",
-        params![recipient_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
-    Ok(attempts >= max)
-}
-
-pub fn retry_failed_recipients(conn: &Connection, campaign_id: i64) -> Result<u32> {
-    let rows = conn.execute(
-        "UPDATE campaign_recipients
-         SET status = 'pending', attempts = 0, last_error = NULL
-         WHERE campaign_id = ?1 AND status = 'failed'",
-        params![campaign_id],
-    )?;
-    Ok(u32::try_from(rows).unwrap_or(0))
-}
-
-pub fn count_active_campaigns(conn: &Connection) -> Result<u32> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM campaigns WHERE status = 'sending'",
-        [],
-        |r| r.get(0),
-    )?;
-    Ok(u32::try_from(count).unwrap_or(0))
-}
-
-pub fn list_campaigns(conn: &Connection) -> Result<Vec<Campaign>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, segment_id, status, message_template, created_at, started_at, completed_at
-         FROM campaigns ORDER BY id DESC",
-    )?;
-    let rows = stmt.query_map([], |r| {
-        Ok(Campaign {
-            id: r.get(0)?,
-            name: r.get(1)?,
-            segment_id: r.get(2)?,
-            status: r.get(3)?,
-            message_template: r.get(4)?,
-            created_at: r.get(5)?,
-            started_at: r.get(6)?,
-            completed_at: r.get(7)?,
-        })
-    })?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.into())
 }
 
 pub fn add_to_dnc(conn: &Connection, customer_id: i64, reason: &str) -> Result<()> {
@@ -299,59 +163,6 @@ pub struct CampaignStats {
     pub pending: u32,
     pub replied: u32,
     pub reply_rate: f64,
-}
-
-pub fn get_campaign_stats(conn: &Connection, campaign_id: i64) -> Result<CampaignStats> {
-    let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ?1",
-        params![campaign_id],
-        |r| r.get(0),
-    )?;
-    let sent: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ?1 AND status = 'sent'",
-        params![campaign_id],
-        |r| r.get(0),
-    )?;
-    let failed: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ?1 AND status = 'failed'",
-        params![campaign_id],
-        |r| r.get(0),
-    )?;
-    let pending: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ?1 AND status = 'pending'",
-        params![campaign_id],
-        |r| r.get(0),
-    )?;
-    let replied: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ?1 AND replied_at IS NOT NULL",
-        params![campaign_id],
-        |r| r.get(0),
-    )?;
-    let total_u = u32::try_from(total).unwrap_or(0);
-    let sent_u = u32::try_from(sent).unwrap_or(0);
-    let replied_u = u32::try_from(replied).unwrap_or(0);
-    let reply_rate = if sent_u > 0 {
-        replied_u as f64 / sent_u as f64
-    } else {
-        0.0
-    };
-    Ok(CampaignStats {
-        total_recipients: total_u,
-        sent: sent_u,
-        failed: u32::try_from(failed).unwrap_or(0),
-        pending: u32::try_from(pending).unwrap_or(0),
-        replied: replied_u,
-        reply_rate,
-    })
-}
-
-pub fn mark_recipient_replied(conn: &Connection, recipient_id: i64) -> Result<bool> {
-    let rows = conn.execute(
-        "UPDATE campaign_recipients SET replied_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id = ?1 AND replied_at IS NULL",
-        params![recipient_id],
-    )?;
-    Ok(rows > 0)
 }
 
 pub const PERSONALIZATION_VARIABLES: [&str; 6] = [
@@ -528,25 +339,6 @@ pub fn get_outreach_campaign(conn: &Connection, id: i64) -> Result<Option<Campai
     let mut stmt = conn.prepare(&format!("{CAMPAIGN_SELECT} WHERE oc.id = ?1"))?;
     let mut rows = stmt.query_map([id], map_campaign_row)?;
     Ok(rows.next().transpose()?)
-}
-
-pub fn list_campaign_events(conn: &Connection, campaign_id: i64) -> Result<Vec<serde_json::Value>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, campaign_id, recipient_id, event, detail, at
-           FROM outreach_events WHERE campaign_id = ?1 ORDER BY id DESC",
-    )?;
-    let rows = stmt.query_map([campaign_id], |r| {
-        Ok(serde_json::json!({
-            "id": r.get::<_, i64>(0)?,
-            "campaign_id": r.get::<_, i64>(1)?,
-            "recipient_id": r.get::<_, Option<i64>>(2)?,
-            "event": r.get::<_, String>(3)?,
-            "detail": r.get::<_, Option<String>>(4)?,
-            "at": r.get::<_, String>(5)?,
-        }))
-    })?;
-    rows.collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| e.into())
 }
 
 fn log_event(
@@ -1416,23 +1208,6 @@ pub fn campaign_report(conn: &Connection, campaign_id: i64) -> serde_json::Value
     })
 }
 
-pub fn campaign_delete(conn: &Connection, campaign_id: i64) -> serde_json::Value {
-    let Some(c) = get_outreach_campaign(conn, campaign_id).ok().flatten() else {
-        return serde_json::json!({ "ok": false, "message": "Campaign not found." });
-    };
-    if c.status == "queued" || c.status == "sending" {
-        return serde_json::json!({ "ok": false, "message": "Pause or cancel the campaign before deleting it." });
-    }
-    let ok = conn
-        .execute(
-            "DELETE FROM outreach_campaigns WHERE id = ?1",
-            [campaign_id],
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    serde_json::json!({ "ok": ok, "message": if ok { "Campaign deleted (audit events and Help Scout conversations are untouched)." } else { "Delete failed." } })
-}
-
 pub fn ensure_segments_v2(conn: &Connection) -> Result<()> {
     fn add_column_if_missing(
         conn: &Connection,
@@ -1700,52 +1475,6 @@ pub fn list_campaign_recipients(
     })?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.into())
-}
-
-pub fn get_campaign_full(conn: &Connection, id: i64) -> Result<Option<serde_json::Value>> {
-    let Some(c) = get_outreach_campaign(conn, id)? else {
-        return Ok(None);
-    };
-    let segment_snapshot: serde_json::Value = conn
-        .query_row(
-            "SELECT segment_snapshot FROM outreach_campaigns WHERE id = ?1",
-            [id],
-            |r| r.get::<_, Option<String>>(0),
-        )
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .filter(|v: &serde_json::Value| {
-            v.get("conditions").and_then(|x| x.as_array()).is_some()
-                && v.get("exclude").and_then(|x| x.as_array()).is_some()
-        })
-        .unwrap_or_else(
-            || serde_json::json!({"combinator": "all", "conditions": [], "exclude": []}),
-        );
-    let recipients_list = list_campaign_recipients(conn, id, 1000)?;
-    Ok(Some(serde_json::json!({
-        "id": c.id,
-        "name": c.name,
-        "subject": c.subject,
-        "body": c.body,
-        "status": c.status,
-        "mailbox_local_id": c.mailbox_local_id,
-        "mailbox_name": c.mailbox_name,
-        "segment_id": c.segment_id,
-        "segment_name": c.segment_name,
-        "tags": c.tags,
-        "segment_snapshot": segment_snapshot,
-        "recipients": c.recipients,
-        "sent": c.sent,
-        "failed": c.failed,
-        "skipped": c.skipped,
-        "unknown": c.unknown,
-        "replied": c.replied,
-        "created_at": c.created_at,
-        "queued_at": c.queued_at,
-        "completed_at": c.completed_at,
-        "recipients_list": recipients_list,
-    })))
 }
 
 pub const SEND_BATCH_SIZE: i64 = 5;

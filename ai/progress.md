@@ -110,3 +110,30 @@ re-recorded here for the audit trail:
 
 None — Batch RF-1 completed and moved to `completed.md` (2026-10-31). Next
 per plan.md (opens on the owner's `continue`): Batch RF-2.
+
+## Batch RF-2 — core dead code, wave 1 — opened 2026-10-31
+
+Opened per plan.md (RF program, reconstructed). Evidence: symbol census
+2026-10-31 over all four crates (`/home/z/census/deadcensus.py`, identifier
+frequency across every .rs file incl. string dispatch + doc mentions + tests;
+163 zero-reference pub items in core, 0 in catalog). Spot-verified
+definition-only: get_radar_snapshot, start_campaign, create_side_thread,
+evaluate_rules. NO-TOUCH excluded from selection: response_state_sql.rs (3),
+ai_center.rs (1). Ten items moved from plan.md per Rule 2 (one module group
+each; deletion includes the now-orphaned private helpers clippy exposes):
+
+1. RF-2-1 intelligence_features.rs [21 zero-ref pub fns] — dead radar/incident/issue API surface.
+2. RF-2-2 outreach.rs [16] — dead segment/campaign API surface (live send path lives in workers).
+3. RF-2-3 side_threads.rs [14] — dead side-thread API surface.
+4. RF-2-4 automation.rs [12] — dead rule/approval API surface.
+5. RF-2-5 conversation_ops.rs [9] — dead js/zod/eval helper surface.
+6. RF-2-6 ticket_states.rs [8].
+7. RF-2-7 saved_views.rs [7].
+8. RF-2-8 embeddings.rs [5].
+9. RF-2-9 search.rs [5] — escape_like stays (RF-4 canonical), delete only the flagged dead items.
+10. RF-2-10 jobs.rs [5].
+
+None — Batch RF-2 completed and moved to `completed.md` (2026-10-31): 3,761
+lines of dead code removed from core (net -3,736 across 11 files, incl. the
+orphaned private helpers clippy exposed). All ten items verified. Next per
+plan.md (opens on the owner's `continue`): Batch RF-3.

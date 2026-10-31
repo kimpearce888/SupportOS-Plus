@@ -68,10 +68,6 @@ pub fn utf16_slice(s: &str, start: usize, end: usize) -> String {
     String::from_utf16_lossy(&units[start..end])
 }
 
-pub fn utf16_len(s: &str) -> usize {
-    s.encode_utf16().count()
-}
-
 #[must_use]
 pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
     let mut collapsed = String::with_capacity(text.len());
@@ -355,40 +351,6 @@ pub struct ConversationChunkStats {
     pub failed: usize,
 }
 
-pub fn conversation_chunk_stats(conn: &Connection) -> Result<ConversationChunkStats> {
-    let row = conn.query_row(
-        "SELECT COUNT(*) AS chunks,
-           SUM(CASE WHEN embedding_state = 'indexed' THEN 1 ELSE 0 END) AS indexed,
-           SUM(CASE WHEN embedding_state IN ('not_indexed', 'queued') THEN 1 ELSE 0 END) AS pending,
-           SUM(CASE WHEN embedding_state = 'failed' THEN 1 ELSE 0 END) AS failed
-         FROM conversation_chunks",
-        [],
-        |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, Option<i64>>(1)?,
-                r.get::<_, Option<i64>>(2)?,
-                r.get::<_, Option<i64>>(3)?,
-            ))
-        },
-    );
-    let (chunks, indexed, pending, failed) = match row {
-        Ok(v) => v,
-        Err(rusqlite::Error::QueryReturnedNoRows) => (0, None, None, None),
-        Err(e) => return Err(e.into()),
-    };
-    Ok(ConversationChunkStats {
-        chunks: usize::try_from(chunks).unwrap_or(0),
-        indexed: indexed
-            .map(|n| usize::try_from(n).unwrap_or(0))
-            .unwrap_or(0),
-        pending: pending
-            .map(|n| usize::try_from(n).unwrap_or(0))
-            .unwrap_or(0),
-        failed: failed.map(|n| usize::try_from(n).unwrap_or(0)).unwrap_or(0),
-    })
-}
-
 #[derive(Debug, Clone)]
 pub struct ConversationChunkWithEmbedding {
     pub conversation_id: i64,
@@ -401,92 +363,6 @@ pub struct DocChunkWithEmbedding {
     pub article_id: i64,
     pub content: String,
     pub embedding: Vec<f32>,
-}
-
-pub fn list_doc_chunks_with_embedding(conn: &Connection) -> Result<Vec<DocChunkWithEmbedding>> {
-    let mut stmt = conn.prepare(
-        "SELECT article_id, content, embedding FROM docs_chunks
-          WHERE embedding IS NOT NULL AND embedding_state = 'indexed'
-          LIMIT 2000",
-    )?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, Option<Vec<u8>>>(2)?.unwrap_or_default(),
-            ))
-        })?
-        .filter_map(|r| r.ok())
-        .map(|(article_id, content, blob)| DocChunkWithEmbedding {
-            article_id,
-            content,
-            embedding: decode_f32_le(&blob),
-        })
-        .collect();
-    Ok(rows)
-}
-
-pub fn docs_chunk_stats(conn: &Connection) -> Result<ConversationChunkStats> {
-    let row = conn.query_row(
-        "SELECT COUNT(*) AS chunks,
-           SUM(CASE WHEN embedding_state = 'indexed' THEN 1 ELSE 0 END) AS indexed,
-           SUM(CASE WHEN embedding_state IN ('not_indexed', 'queued') THEN 1 ELSE 0 END) AS pending,
-           SUM(CASE WHEN embedding_state = 'failed' THEN 1 ELSE 0 END) AS failed
-         FROM docs_chunks",
-        [],
-        |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, Option<i64>>(1)?,
-                r.get::<_, Option<i64>>(2)?,
-                r.get::<_, Option<i64>>(3)?,
-            ))
-        },
-    );
-    let (chunks, indexed, pending, failed) = match row {
-        Ok(v) => v,
-        Err(rusqlite::Error::QueryReturnedNoRows) => (0, None, None, None),
-        Err(e) => return Err(e.into()),
-    };
-    Ok(ConversationChunkStats {
-        chunks: usize::try_from(chunks).unwrap_or(0),
-        indexed: indexed
-            .map(|n| usize::try_from(n).unwrap_or(0))
-            .unwrap_or(0),
-        pending: pending
-            .map(|n| usize::try_from(n).unwrap_or(0))
-            .unwrap_or(0),
-        failed: failed.map(|n| usize::try_from(n).unwrap_or(0)).unwrap_or(0),
-    })
-}
-
-pub fn list_conversation_chunks_with_embedding(
-    conn: &Connection,
-) -> Result<Vec<ConversationChunkWithEmbedding>> {
-    let mut stmt = conn.prepare(
-        "SELECT conversation_id, content, embedding FROM conversation_chunks
-          WHERE embedding IS NOT NULL AND embedding_state = 'indexed'
-          LIMIT 5000",
-    )?;
-    let rows = stmt
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, Option<Vec<u8>>>(2)?.unwrap_or_default(),
-            ))
-        })?
-        .filter_map(|r| r.ok())
-        .map(
-            |(conversation_id, content, blob)| ConversationChunkWithEmbedding {
-                conversation_id,
-                content,
-                embedding: decode_f32_le(&blob),
-            },
-        )
-        .collect();
-    Ok(rows)
 }
 
 #[must_use]

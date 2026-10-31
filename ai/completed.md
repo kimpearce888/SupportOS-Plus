@@ -5393,3 +5393,30 @@ doc-tests 0/0; verify-icons clean; kittest 24 suites re-confirmed as the
 CI lane (standing disclosed gap in this sandbox). Baseline locked as the
 pre-refactor gate table; plan.md RF section reconstructed with fresh
 file:line evidence; pushes owner-authorized.
+
+## Batch RF-2 — core dead code, wave 1 — COMPLETE 2026-10-31
+
+Evidence: symbol census over all four crates (identifier frequency incl.
+string dispatch, doc mentions, tests; 163 zero-reference pub items in core,
+0 in catalog) + per-item spot verification before deletion + clippy-driven
+orphan sweep after (never-used privates, never-constructed structs, orphaned
+impl blocks, dead imports). Deletions (line counts before→after):
+RF-2-1 intelligence_features 1761→1116 (21 dead fns: the vestigial
+radar/incident/issue API layer — the live pages use only
+add_incident_note / create_manual_incident / link_incident_conversation /
+refresh_known_issue_counts / count_stale_docs / list_knowledge_gaps /
+record_knowledge_gap / count_sla_breaches / get_sla_config / set_sla_config
+/ sweep_unmonitored_sla / sweep / update_doc_freshness / apply_m*);
+RF-2-2 outreach 2935→2919 (16: dead segment/campaign API — live send path
+lives in workers); RF-2-3 side_threads 985→181 (14 + orphans: dead
+side-thread API); RF-2-4 automation 2366→1595 (12 + orphans); RF-2-5
+conversation_ops (9 + orphans); RF-2-6 ticket_states 688→349 (8 + orphaned
+OrderedF64 impls); RF-2-7 saved_views 2618→2376 (7); RF-2-8 embeddings
+(5); RF-2-9 search 1813→1659 (5 index_*_fts) — escape_like retained for
+RF-4; RF-2-10 jobs (5). NO-TOUCH respected: response_state_sql.rs,
+ai_center.rs untouched. Verification: fmt clean; clippy --workspace
+--all-targets -D warnings 0; core lib 495 passed / 4 ignored / 0 failed
+(--test-threads=1); app-shell lib 237/0; gate_traceability OK (23 routes /
+20 DC tags / 27 ids); gate_no_simulation clean; verify-icons clean.
+Kittest 24 suites: standing CI-lane gap (disclosed). Net: 11 files,
+-3,761/+25 lines.

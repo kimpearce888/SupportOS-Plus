@@ -71,21 +71,6 @@ pub fn is_valid_timezone(timezone: &str) -> bool {
     crate::business_hours::is_valid_timezone(timezone)
 }
 
-#[must_use]
-pub fn resolve_timezone(explicit: Option<&str>, stored_setting: Option<&str>) -> String {
-    for candidate in [explicit, stored_setting].into_iter().flatten() {
-        if candidate != "system" && is_valid_timezone(candidate) {
-            return candidate.to_string();
-        }
-    }
-    if let Ok(tz) = std::env::var("TZ")
-        && is_valid_timezone(&tz)
-    {
-        return tz;
-    }
-    "UTC".to_string()
-}
-
 fn parse_time_of_day(v: Option<&str>) -> Option<i64> {
     let v = v?;
     let bytes = v.as_bytes();
@@ -1352,143 +1337,6 @@ pub fn parse_view_definition(v: &Json) -> std::result::Result<ViewDefinition, Ve
     }
 }
 
-pub fn parse_create_view_request(
-    v: &Json,
-) -> std::result::Result<CreateViewRequest, Vec<ViewIssue>> {
-    let mut sink = IssueSink { issues: Vec::new() };
-    let Some(obj) = v.as_object() else {
-        return Err(vec![ViewIssue {
-            path: String::new(),
-            message: format!("Expected object, received {}", json_type_name(v)),
-        }]);
-    };
-    let name = parse_bounded_string(obj.get("name"), "name", 1, 120, &mut sink);
-    let description =
-        parse_nullable_max_string(obj.get("description"), "description", 500, &mut sink);
-    let definition = match obj.get("definition") {
-        None | Some(Json::Null) => {
-            sink.push("definition", "Required");
-            None
-        }
-        Some(d) => match parse_view_definition(d) {
-            Ok(def) => Some(def),
-            Err(issues) => {
-                for issue in issues {
-                    sink.push(&format!("definition.{}", issue.path), issue.message);
-                }
-                None
-            }
-        },
-    };
-    let sort_order = match obj.get("sort_order") {
-        None | Some(Json::Null) => None,
-        Some(Json::Number(n)) => match n.as_i64() {
-            Some(i) if (0..=9999).contains(&i) => Some(i),
-            Some(_) => {
-                sink.push("sort_order", "Number must be between 0 and 9999");
-                None
-            }
-            None => {
-                sink.push("sort_order", "Expected int, received float");
-                None
-            }
-        },
-        Some(other) => {
-            sink.push(
-                "sort_order",
-                format!("Expected number, received {}", json_type_name(other)),
-            );
-            None
-        }
-    };
-    let folder = parse_nullable_max_string(obj.get("folder"), "folder", 80, &mut sink);
-    if sink.is_empty() {
-        Ok(CreateViewRequest {
-            name: name.expect("validated"),
-            description: description.flatten(),
-            definition: definition.expect("validated"),
-            sort_order,
-            folder: folder.flatten(),
-        })
-    } else {
-        Err(sink.issues)
-    }
-}
-
-pub fn parse_update_view_request(
-    v: &Json,
-) -> std::result::Result<UpdateViewRequest, Vec<ViewIssue>> {
-    let mut sink = IssueSink { issues: Vec::new() };
-    let Some(obj) = v.as_object() else {
-        return Err(vec![ViewIssue {
-            path: String::new(),
-            message: format!("Expected object, received {}", json_type_name(v)),
-        }]);
-    };
-    let name = match obj.get("name") {
-        None | Some(Json::Null) => None,
-        Some(_) => parse_bounded_string(obj.get("name"), "name", 1, 120, &mut sink),
-    };
-    let description = match obj.get("description") {
-        None => None,
-        Some(Json::Null) => Some(None),
-        Some(_) => parse_nullable_max_string(obj.get("description"), "description", 500, &mut sink)
-            .flatten()
-            .map(Some),
-    };
-    let definition = match obj.get("definition") {
-        None | Some(Json::Null) => None,
-        Some(d) => match parse_view_definition(d) {
-            Ok(def) => Some(def),
-            Err(issues) => {
-                for issue in issues {
-                    sink.push(&format!("definition.{}", issue.path), issue.message);
-                }
-                None
-            }
-        },
-    };
-    let sort_order = match obj.get("sort_order") {
-        None | Some(Json::Null) => None,
-        Some(Json::Number(n)) => match n.as_i64() {
-            Some(i) if (0..=9999).contains(&i) => Some(i),
-            Some(_) => {
-                sink.push("sort_order", "Number must be between 0 and 9999");
-                None
-            }
-            None => {
-                sink.push("sort_order", "Expected int, received float");
-                None
-            }
-        },
-        Some(other) => {
-            sink.push(
-                "sort_order",
-                format!("Expected number, received {}", json_type_name(other)),
-            );
-            None
-        }
-    };
-    let folder = match obj.get("folder") {
-        None => None,
-        Some(Json::Null) => Some(None),
-        Some(_) => parse_nullable_max_string(obj.get("folder"), "folder", 80, &mut sink)
-            .flatten()
-            .map(Some),
-    };
-    if sink.is_empty() {
-        Ok(UpdateViewRequest {
-            name,
-            description,
-            definition,
-            sort_order,
-            folder,
-        })
-    } else {
-        Err(sink.issues)
-    }
-}
-
 pub type SqlParams = Vec<rusqlite::types::Value>;
 
 struct Fragment {
@@ -2322,10 +2170,6 @@ pub fn ensure_inbox_views_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn now_iso() -> String {
-    iso_utc(now_ms_epoch())
-}
-
 fn row_to_view(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedInboxView> {
     let definition_json: String = row.get(3)?;
     let definition: ViewDefinition = serde_json::from_str(&definition_json).map_err(|e| {
@@ -2347,17 +2191,6 @@ fn row_to_view(row: &rusqlite::Row<'_>) -> rusqlite::Result<SavedInboxView> {
 const VIEW_COLUMNS: &str =
     "id, name, description, definition, sort_order, folder, version, created_at, updated_at";
 
-pub fn list_views(conn: &Connection) -> Result<Vec<SavedInboxView>> {
-    ensure_inbox_views_table(conn)?;
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {VIEW_COLUMNS} FROM inbox_views ORDER BY sort_order ASC, name ASC"
-    ))?;
-    let views = stmt
-        .query_map([], row_to_view)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(views)
-}
-
 pub fn get_view(conn: &Connection, id: i64) -> Result<Option<SavedInboxView>> {
     ensure_inbox_views_table(conn)?;
     let mut stmt = conn.prepare(&format!(
@@ -2365,81 +2198,6 @@ pub fn get_view(conn: &Connection, id: i64) -> Result<Option<SavedInboxView>> {
     ))?;
     let view = stmt.query_row(rusqlite::params![id], row_to_view).ok();
     Ok(view)
-}
-
-pub fn create_view(
-    conn: &Connection,
-    name: &str,
-    description: Option<&str>,
-    definition: &ViewDefinition,
-    sort_order: i64,
-    folder: Option<&str>,
-) -> Result<SavedInboxView> {
-    ensure_inbox_views_table(conn)?;
-    let definition_json = serde_json::to_string(definition)?;
-    conn.execute(
-        "INSERT INTO inbox_views (name, description, definition, sort_order, folder) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![name, description, definition_json, sort_order, folder],
-    )?;
-    let id = conn.last_insert_rowid();
-    get_view(conn, id)?.ok_or_else(|| {
-        crate::error::Error::Config(format!("saved view {id} vanished after insert"))
-    })
-}
-
-pub fn update_view(
-    conn: &Connection,
-    id: i64,
-    name: Option<&str>,
-    description: Option<Option<&str>>,
-    definition: Option<&ViewDefinition>,
-    sort_order: Option<i64>,
-    folder: Option<Option<&str>>,
-) -> Result<Option<SavedInboxView>> {
-    let Some(existing) = get_view(conn, id)? else {
-        return Ok(None);
-    };
-    let new_definition_json = definition.map(serde_json::to_string).transpose()?;
-    let definition_changed = new_definition_json.as_deref().is_some_and(|new| {
-        Some(new) != serde_json::to_string(&existing.definition).ok().as_deref()
-    });
-    let new_name = name.unwrap_or(&existing.name);
-    let new_description = description
-        .map(|d| d.map(String::from))
-        .unwrap_or_else(|| existing.description.clone());
-    let new_definition = new_definition_json
-        .unwrap_or_else(|| serde_json::to_string(&existing.definition).unwrap_or_default());
-    let new_sort = sort_order.unwrap_or(existing.sort_order);
-    let new_folder = folder
-        .map(|f| f.map(String::from))
-        .unwrap_or_else(|| existing.folder.clone());
-    conn.execute(
-        "UPDATE inbox_views SET
-           name = ?1, description = ?2, definition = ?3, sort_order = ?4, folder = ?5,
-           version = CASE WHEN ?6 THEN version + 1 ELSE version END,
-           updated_at = ?7
-         WHERE id = ?8",
-        rusqlite::params![
-            new_name,
-            new_description,
-            new_definition,
-            new_sort,
-            new_folder,
-            i64::from(definition_changed),
-            now_iso(),
-            id
-        ],
-    )?;
-    get_view(conn, id)
-}
-
-pub fn delete_view(conn: &Connection, id: i64) -> Result<bool> {
-    ensure_inbox_views_table(conn)?;
-    let changes = conn.execute(
-        "DELETE FROM inbox_views WHERE id = ?1",
-        rusqlite::params![id],
-    )?;
-    Ok(changes > 0)
 }
 
 #[cfg(test)]
