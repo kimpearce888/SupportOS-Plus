@@ -5476,3 +5476,20 @@ warnings 0; core lib 495 passed / 4 ignored / 0 failed; app-shell lib
 237/0; gate_traceability OK (23/20/27); gate_no_simulation clean;
 verify-icons clean. Diff: 27 files, +72/−252 (net −180). Kittest:
 standing CI-lane gap.
+
+## Batch RF-5 — migration module relocation (R100 pattern) — COMPLETE 2026-10-31
+
+Census-derived selection: exactly 8 modules whose ENTIRE pub surface is
+migration fns — ai_analysis, ai_features, data_tools, db_breadth,
+intelligence (NO-TOUCH module: relocated byte-identically, zero internal
+edits, per the standing constraint), mirror_parity, mirror_tables,
+side_threads. Execution: `git mv` each into `crates/core/src/migrations/`
+(R100: byte-identical, rename detection intact), migrations.rs gains the 8
+`pub mod` declarations, lib.rs replaces the 8 `pub mod` lines with one
+`pub use migrations::{…}` block. Zero call-site edits proven by grep counts
+(154 crate::X::apply_ / 82 spp_core::bootstrap::apply_all callers / 20
+spp_core moved-module refs — before = after). Verified: fmt clean; clippy
+--workspace --all-targets -D warnings 0; core lib 495 passed / 4 ignored /
+0 failed (the it_sync install_master_key quartet included — 10/10 it_sync
+tests); app-shell lib 237/0; gate_traceability OK (23/20/27);
+gate_no_simulation clean; verify-icons clean. Kittest: standing CI-lane gap.

@@ -194,3 +194,31 @@ old silent-ignore was load-bearing there); the canonical primitive now
 skips missing TABLES (no-op — the creating migration ships the column) and
 propagates real ALTER failures on existing tables; full suite re-green.
 Next per plan.md (opens on the owner's `continue`): Batch RF-5.
+
+## Batch RF-5 — migration module relocation (R100 pattern) — opened 2026-10-31
+
+Census: exactly 8 modules are migration-only (every pub fn is a migration
+fn): ai_analysis (49 ln), ai_features (69), data_tools (47), db_breadth
+(1127), intelligence (48, NO-TOUCH module — relocates byte-identically per
+the standing constraint, zero internal edits), mirror_parity (1226),
+mirror_tables (319), side_threads (181). Feature modules that merely CONTAIN
+migration fns (activity, outreach, reports, ...) stay — wrong home.
+Ten items:
+
+1. RF-5-1 selection census (this record).
+2. RF-5-2 mkdir migrations/ + `git mv` wave 1 (ai_analysis, ai_features, data_tools, intelligence).
+3. RF-5-3 `git mv` wave 2 (db_breadth, mirror_parity, mirror_tables, side_threads).
+4. RF-5-4 migrations.rs gains the 8 `pub mod` declarations.
+5. RF-5-5 lib.rs: the 8 `pub mod` lines replaced by one `pub use migrations::{…}` block — every `crate::X` and `spp_core::X` path keeps resolving, zero call-site edits.
+6. RF-5-6 compile + clippy fix pass.
+7. RF-5-7 zero-call-site-edit proof (grep counts of crate::X::apply_ / spp_core::bootstrap::apply_all before = after).
+8. RF-5-8 it_sync regression: the install_master_key() tests still pass.
+9. RF-5-9 full gate table.
+10. RF-5-10 records + single commit.
+
+None — Batch RF-5 completed and moved to `completed.md` (2026-10-31): the 8
+migration-only modules relocated byte-identically under migrations/, re-export
+wiring restored every path, zero call-site edits (154 crate::X::apply_ refs +
+82 apply_all callers + 20 spp_core moved-module refs, all unchanged). Next
+per plan.md (opens on the owner's `continue`): Batch RF-6 — god-file split,
+part 1.

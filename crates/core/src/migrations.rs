@@ -1,4 +1,13 @@
 use rusqlite::Connection;
+pub mod ai_analysis;
+pub mod ai_features;
+pub mod data_tools;
+pub mod db_breadth;
+pub mod intelligence;
+pub mod mirror_parity;
+pub mod mirror_tables;
+pub mod side_threads;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Migration {
     pub version: u32,
