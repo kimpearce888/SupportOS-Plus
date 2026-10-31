@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use crate::ai_provider::{ChatMessage, LocalAiProvider};
 use crate::catalog::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValueType};
 use crate::error::{Error, Result};
+use crate::sync_schema::table_exists;
 
 pub const M033_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS ai_attributes (
@@ -28,15 +29,6 @@ pub const M033_SQL: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_ai_attributes_run
         ON ai_attributes (run_id);
 "#;
-
-fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-        params![table],
-        |r| r.get(0),
-    )?;
-    Ok(n != 0)
-}
 
 fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;

@@ -65,10 +65,7 @@ pub struct DateRangeInput<'a> {
     pub now: Option<i64>,
 }
 
-#[must_use]
-pub fn is_valid_timezone(timezone: &str) -> bool {
-    crate::business_hours::is_valid_timezone(timezone)
-}
+pub use crate::business_hours::is_valid_timezone;
 
 fn parse_time_of_day(v: Option<&str>) -> Option<i64> {
     let v = v?;
@@ -1376,17 +1373,7 @@ fn real(f: f64) -> rusqlite::types::Value {
     rusqlite::types::Value::Real(f)
 }
 
-#[must_use]
-pub fn escape_like(v: &str) -> String {
-    let mut out = String::with_capacity(v.len());
-    for ch in v.chars() {
-        if matches!(ch, '\\' | '%' | '_') {
-            out.push('\\');
-        }
-        out.push(ch);
-    }
-    out
-}
+pub use crate::search::escape_like;
 
 pub fn ensure_inbox_views_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(

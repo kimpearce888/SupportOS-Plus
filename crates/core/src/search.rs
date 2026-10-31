@@ -2,6 +2,7 @@ use rusqlite::{Connection, OptionalExtension, ToSql, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::migrations::add_column_if_missing;
 
 pub const MAX_SEARCH_QUERY_LENGTH: usize = 500;
 
@@ -267,25 +268,6 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
         )
         .optional()?;
     Ok(exists.is_some())
-}
-
-fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let present = stmt
-        .query_map([], |row| row.get::<_, String>(1))?
-        .filter_map(|c| c.ok())
-        .any(|c| c == column);
-    Ok(present)
-}
-
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
-    if !column_exists(conn, table, column)? {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
-            [],
-        )?;
-    }
-    Ok(())
 }
 
 #[must_use]

@@ -239,7 +239,7 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
         None => None,
     };
     if let (Some(prev), Some(conv_local), Some(prev_tags)) = (previous, local, previous_tags) {
-        let observed_at = crate::activity::now_iso();
+        let observed_at = crate::business_hours::now_iso();
         let emit_diff = |event_type: &str,
                          prev_val: &serde_json::Value,
                          next_val: &serde_json::Value|

@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 
 use crate::error::Result;
+use crate::migrations::add_column_if_missing;
 
 pub fn apply_m039(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -230,21 +231,6 @@ pub fn apply_m039(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "issue_clusters", "feature", "TEXT")?;
     add_column_if_missing(conn, "issue_clusters", "ai_generated", "INTEGER DEFAULT 0")?;
     let _ = conn.execute("UPDATE app_state SET schema_version = 39 WHERE id = 1", []);
-    Ok(())
-}
-
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
-    let exists: bool = conn
-        .prepare(&format!("PRAGMA table_info({table})"))?
-        .query_map([], |r| r.get::<_, String>(1))?
-        .filter_map(|r| r.ok())
-        .any(|c| c == column);
-    if !exists {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
-            [],
-        )?;
-    }
     Ok(())
 }
 

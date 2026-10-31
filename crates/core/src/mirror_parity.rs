@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 
 use crate::error::Result;
+use crate::sync_schema::table_exists;
 
 struct Rebuild<'a> {
     new_name: &'a str,
@@ -17,15 +18,6 @@ fn with_if_not_exists(sql: &str) -> String {
     } else {
         s.to_string()
     }
-}
-
-fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
-    let n: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-        [table],
-        |r| r.get(0),
-    )?;
-    Ok(n > 0)
 }
 
 fn captured_indexes(conn: &Connection, table: &str) -> Result<Vec<String>> {

@@ -5449,3 +5449,30 @@ core lib 495 passed / 4 ignored / 0 failed; app-shell lib 237/0;
 gate_traceability OK (23/20/27); gate_no_simulation clean; verify-icons
 clean. Working diff vs pre-batch: 36 files, −4,062/+30 lines (+ the restored
 test modules). Kittest: standing CI-lane gap.
+
+## Batch RF-4 — unifications — COMPLETE 2026-10-31
+
+Ten items per progress.md: RF-4-1 escape_like 5→1 (canonical search.rs,
+byte-equivalent bodies, all external callers already canonical);
+RF-4-2 add_column_if_missing 9→2 (canonical migrations.rs pub(crate) +
+maintenance.rs NO-TOUCH local; outreach's nested copy removed; semantics:
+missing table = no-op, missing column on existing table = ALTER with error
+propagation — replacing the two silent `let _ =` copies); RF-4-3
+table_exists 5→2 (canonical sync_schema::table_exists; search's
+tables-or-views variant intentional, documented); RF-4-4 now_iso 7→4 (the
+two byte-identical-output idioms collapse onto business_hours::now_iso;
+outreach + sync_engine semantic variants documented in place); RF-4-5 hex
+3→1 (crypto::hex); RF-4-6 is_closing_acknowledgment 2→1 (quality's
+OnceLock-cached version); RF-4-7 is_valid_timezone → pub use re-export;
+RF-4-8 round2 2→1; RF-4-9 five families dispositioned as INTENTIONAL
+VARIANTS with the semantic differences recorded (decode_entity,
+chunk_text, truncate_chars, is_word_char, table_columns); RF-4-10
+verification. Incident: the first propagation change failed 294 tests
+(BootStep 8 → ensure_main_rule_columns → apply_m035 widens `incidents`
+before its creating step runs) — fixed by the missing-table no-op
+semantic; the primitive is now strictly stronger than either historical
+copy. Verification: fmt clean; clippy --workspace --all-targets -D
+warnings 0; core lib 495 passed / 4 ignored / 0 failed; app-shell lib
+237/0; gate_traceability OK (23/20/27); gate_no_simulation clean;
+verify-icons clean. Diff: 27 files, +72/−252 (net −180). Kittest:
+standing CI-lane gap.

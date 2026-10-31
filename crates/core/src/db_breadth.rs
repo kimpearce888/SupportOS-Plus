@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 
 use crate::error::Result;
+use crate::sync_schema::table_exists;
 
 pub fn apply_m040(conn: &Connection) -> Result<()> {
     create_missing_reference_tables(conn)?;
@@ -1080,7 +1081,7 @@ fn seed_metric_definitions(conn: &Connection) -> Result<()> {
 }
 
 fn add(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
-    if !table_exists(conn, table) {
+    if !table_exists(conn, table)? {
         tracing::debug!(table, column, "m040: table absent, skipping column add");
         return Ok(());
     }
@@ -1096,16 +1097,6 @@ fn add(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
         )?;
     }
     Ok(())
-}
-
-fn table_exists(conn: &Connection, table: &str) -> bool {
-    conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?1",
-        [table],
-        |r| r.get::<_, i64>(0),
-    )
-    .map(|n| n > 0)
-    .unwrap_or(false)
 }
 
 fn try_create_unique_index(

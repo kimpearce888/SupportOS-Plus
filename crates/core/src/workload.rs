@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::interaction_current::round2;
 
 pub const CAPACITY_WINDOW_DAYS: i64 = 7;
 
@@ -228,10 +229,6 @@ pub struct SuggestedAssignee {
     pub suggested_availability: Option<String>,
     pub all_away: bool,
     pub reason: String,
-}
-
-fn round2(x: f64) -> f64 {
-    (x * 100.0).round() / 100.0
 }
 
 struct UserRow {

@@ -234,6 +234,13 @@ pub fn iso_days_ago_at(days: i64, now: chrono::DateTime<Utc>) -> String {
         .unwrap_or_else(|| now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
 
+/// Canonical wall-clock ISO timestamp (millis precision, Z suffix) — the
+/// output of both historical idioms (`format("%Y-%m-%dT%H:%M:%S%.3fZ")`
+/// and `to_rfc3339_opts(SecondsFormat::Millis, true)`) is byte-identical.
+pub(crate) fn now_iso() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

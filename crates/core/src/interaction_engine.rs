@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::interaction_current::{CurrentInteraction, InteractionSignal, MessageStats};
+use crate::quality::is_closing_acknowledgment;
 
 struct ForbiddenPattern {
     regex: regex::Regex,
@@ -1008,25 +1009,6 @@ fn conversation_info(conn: &Connection, conversation_id: i64) -> Option<Conversa
 
 pub fn conversation_customer(conn: &Connection, conversation_id: i64) -> Option<i64> {
     conversation_info(conn, conversation_id)?.customer_local_id
-}
-
-pub fn is_closing_acknowledgment(text: &str) -> bool {
-    let t = text.trim();
-    if t.is_empty() || t.chars().count() > 400 || t.contains('?') {
-        return false;
-    }
-    let problem = regex::Regex::new(
-        r"(?i)still|again|but\b|however|issue|problem|not work|broken|error|fail|doesn'?t|didn'?t|can'?t|cannot",
-    )
-    .expect("static");
-    if problem.is_match(t) {
-        return false;
-    }
-    let closing = regex::Regex::new(
-        r"(?i)^(thanks|thank you|thankyou|thx|appreciate|that (is|was|'s|sounds|seems) (exactly |just |very )?(what i|great|perfect|helpful|awesome|amazing|clear)|perfect|great|works|working|resolved|closing|closed|all set|confirmed|done|sorted)",
-    )
-    .expect("static");
-    closing.is_match(t)
 }
 
 fn ratio(n: i64, d: i64) -> Option<f64> {

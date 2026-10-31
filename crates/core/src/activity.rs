@@ -1,5 +1,6 @@
 use rusqlite::{Connection, params};
 
+use crate::business_hours::now_iso;
 use crate::catalog::ResponseState;
 use crate::error::Result;
 
@@ -140,12 +141,6 @@ pub fn record_full_event(conn: &Connection, event: &FullActivityEvent) -> Result
 }
 
 #[must_use]
-pub fn now_iso() -> String {
-    chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string()
-}
-
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
 pub struct RebuildSummary {
     pub conversations: i64,

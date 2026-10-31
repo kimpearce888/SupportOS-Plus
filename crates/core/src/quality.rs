@@ -1,7 +1,9 @@
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
+use crate::business_hours::now_iso;
 use crate::error::Result;
+use crate::migrations::add_column_if_missing;
 
 const FRICTION_FINDINGS_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS friction_findings (
@@ -26,20 +28,6 @@ pub fn ensure_quality_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(FRICTION_FINDINGS_SQL)?;
     add_column_if_missing(conn, "friction_findings", "detail", "TEXT")?;
     add_column_if_missing(conn, "post_resolution_qa", "computed_at", "TEXT")?;
-    Ok(())
-}
-
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
-    let cols: Vec<String> = conn
-        .prepare(&format!("PRAGMA table_info({table})"))?
-        .query_map([], |r| r.get::<_, String>(1))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    if !cols.iter().any(|c| c == column) {
-        let _ = conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
-            [],
-        );
-    }
     Ok(())
 }
 
@@ -96,12 +84,6 @@ pub(crate) fn is_closing_acknowledgment(text: &str) -> bool {
         return false;
     }
     start.is_match(t)
-}
-
-fn now_iso() -> String {
-    chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string()
 }
 
 fn excerpt_of(text: &str, max: usize) -> String {

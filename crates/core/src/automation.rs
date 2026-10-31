@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::migrations::add_column_if_missing;
 
 pub const M007_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS automation_rules (
@@ -294,21 +295,6 @@ pub fn ensure_main_rule_columns(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "automation_rules", "run_count", "INTEGER DEFAULT 0")?;
     crate::intelligence_features::apply_m035(conn)?;
     add_column_if_missing(conn, "automation_runs", "detail", "TEXT")
-}
-
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
-    let exists: bool = conn
-        .prepare(&format!("PRAGMA table_info({table})"))?
-        .query_map([], |r| r.get::<_, String>(1))?
-        .filter_map(|r| r.ok())
-        .any(|c| c == column);
-    if !exists {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
-            [],
-        )?;
-    }
-    Ok(())
 }
 
 /// Migration m060 (boot step 51, clean-audit item 57): `conversations` gains

@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::business_hours::now_iso;
 use crate::crypto;
 use crate::error::{Error, Result};
 
@@ -18,10 +19,6 @@ pub struct BackupResult {
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified: Option<bool>,
-}
-
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn stamp() -> String {

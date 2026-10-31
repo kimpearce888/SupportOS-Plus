@@ -169,3 +169,28 @@ ai_center ×1, db ×1). Two swallowed regression-test modules (saved_views
 batch31_tests, segment batch30_tests) were caught by the #[test] census and
 restored byte-identical from acd557a — core test count back to the baseline
 495/4ig/0. Next per plan.md (opens on the owner's `continue`): Batch RF-4.
+
+## Batch RF-4 — unifications — opened 2026-10-31
+
+Evidence: per-body hash + manual body diffs of the duplicate-helper census
+(27 same-name families across core). Ten items per plan.md:
+
+1. RF-4-1 `escape_like` 5→1 — DONE at open: all bodies byte-equivalent; canonical `search::escape_like` (pub); segment + support_graph now import it; saved_views re-exports it; the three external callers already used the canonical path.
+2. RF-4-2 `add_column_if_missing` 9→2 — DONE at open: canonical `migrations::add_column_if_missing` (pub(crate), errors PROPAGATE — the majority semantic; quality/intelligence_features' old silent-ignore copies re-pointed, bootstrap now fails loudly on a failed ALTER instead of silently skipping a column); maintenance.rs copy retained (NO-TOUCH module, standing constraint); outreach's nested copy removed.
+3. RF-4-3 `table_exists` 5→2 — canonical `sync_schema::table_exists` (already pub, sqlite_master COUNT); ai_attributes, mirror_parity re-point; db_breadth re-pointed (its silent unwrap_or(false) error path now propagates — same fail-loud rationale); search's table-or-view variant INTENTIONAL (it matches views too — different query).
+4. RF-4-4 `now_iso` 7→4 — the two idioms producing byte-identical output (`format("%Y-%m-%dT%H:%M:%S%.3fZ")` ≡ `to_rfc3339_opts(Millis, true)`) collapse onto one canonical `business_hours::now_iso()`; activity, ai_pipeline, quality, backup_service, encrypted_sync re-pointed; outreach (SystemTime day-math) and sync_engine (Help Scout rejects sub-second/+00:00 — in-code reason) stay as documented semantic variants.
+5. RF-4-5 `hex` 3→1 — canonical `crypto::hex` (the efficient fold); ai_pipeline + conversation_ops' naive format! copies deleted (identical output, lower perf).
+6. RF-4-6 `is_closing_acknowledgment` 2→1 — canonical `quality::is_closing_acknowledgment` (OnceLock-cached regexes, the developed b-wave version); interaction_engine re-pointed.
+7. RF-4-7 `is_valid_timezone` — saved_views' one-line wrapper becomes `pub use crate::business_hours::is_valid_timezone;`.
+8. RF-4-8 `round2` 2→1 — canonical `interaction_current::round2`; workload re-pointed.
+9. RF-4-9 INTENTIONAL VARIANTS — census-dispositioned, NOT unified (differing semantics, recorded): decode_entity (richtext: NBSP→U+00A0 + numeric/#x entities vs textutil: NBSP→space + '#39'), chunk_text (embeddings: char-window+overlap vs knowledge_store: whitespace-collapse+boundary), truncate_chars (plain take vs trim+ellipsis), is_word_char (ascii vs unicode alphanumeric), table_columns (typed pragma rows vs name list).
+10. RF-4-10 — batch verification + census re-run + records.
+
+None — Batch RF-4 completed and moved to `completed.md` (2026-10-31). One
+incident recorded: the add_column_if_missing unification first propagated
+ALTER failures unconditionally and broke 294 tests (m035's widen of
+`incidents` legitimately targets a table created by a later boot step — the
+old silent-ignore was load-bearing there); the canonical primitive now
+skips missing TABLES (no-op — the creating migration ships the column) and
+propagates real ALTER failures on existing tables; full suite re-green.
+Next per plan.md (opens on the owner's `continue`): Batch RF-5.

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::error::Result;
+use crate::migrations::add_column_if_missing;
 
 pub const M023_TO_M025_SQL: &str = r#"
     -- M023: saved_segments
@@ -1209,24 +1210,6 @@ pub fn campaign_report(conn: &Connection, campaign_id: i64) -> serde_json::Value
 }
 
 pub fn ensure_segments_v2(conn: &Connection) -> Result<()> {
-    fn add_column_if_missing(
-        conn: &Connection,
-        table: &str,
-        column: &str,
-        decl: &str,
-    ) -> Result<()> {
-        let exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?",
-                params![table, column],
-                |r| r.get(0),
-            )
-            .unwrap_or(false);
-        if !exists {
-            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))?;
-        }
-        Ok(())
-    }
     add_column_if_missing(conn, "saved_segments", "description", "TEXT")?;
     add_column_if_missing(conn, "saved_segments", "condition_tree", "TEXT")?;
     add_column_if_missing(

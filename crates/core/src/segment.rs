@@ -1,21 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::search::escape_like;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 pub const MAX_TREE_DEPTH: u32 = 10;
 pub const MAX_NODE_COUNT: u32 = 200;
-
-fn escape_like(v: &str) -> String {
-    let mut out = String::with_capacity(v.len());
-    for ch in v.chars() {
-        if ch == '\\' || ch == '%' || ch == '_' {
-            out.push('\\');
-        }
-        out.push(ch);
-    }
-    out
-}
 
 fn lower(s: &str) -> String {
     s.to_lowercase()

@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 use crate::catalog::{GraphHumanRelation, GraphNodeKind};
 use crate::error::Result;
+use crate::search::escape_like;
 
 const GRAPH_EDGES_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS graph_edges (
@@ -1181,17 +1182,6 @@ pub fn graph_stats(conn: &Connection) -> Result<Value> {
             "linked_to_issue edges aggregate the human and AI link provenance stored per row."
         ]
     }))
-}
-
-fn escape_like(v: &str) -> String {
-    let mut out = String::with_capacity(v.len());
-    for ch in v.chars() {
-        if matches!(ch, '\\' | '%' | '_') {
-            out.push('\\');
-        }
-        out.push(ch);
-    }
-    out
 }
 
 pub fn graph_search(

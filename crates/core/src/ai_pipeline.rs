@@ -16,6 +16,8 @@ use crate::ai_prompts::{
     build_issue_cluster_user, build_memory_extraction_user, build_ticket_analysis_user,
 };
 use crate::ai_provider::ChatMessage;
+use crate::business_hours::now_iso;
+use crate::crypto::hex;
 use crate::error::Result;
 use crate::search::apply_fts_migration;
 
@@ -438,10 +440,6 @@ pub fn input_hash(conversation_id: i64, content_signature: &str) -> String {
     hex(&hasher.finalize())
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 pub fn get_analysis_signature(conn: &Connection, conversation_id: i64) -> String {
     let (n, max_id): (i64, i64) = conn
         .query_row(
@@ -797,12 +795,6 @@ fn levenshtein(a: &str, b: &str) -> usize {
         prev = cur;
     }
     prev[n]
-}
-
-fn now_iso() -> String {
-    chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string()
 }
 
 pub struct UpsertMemoryOpts<'a> {

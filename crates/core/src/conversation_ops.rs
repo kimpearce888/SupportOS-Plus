@@ -8,6 +8,7 @@
 use rusqlite::{Connection, params};
 use serde_json::Value;
 
+use crate::crypto::hex;
 use crate::error::Result;
 
 pub fn apply_m030(conn: &Connection) -> Result<()> {
@@ -330,8 +331,4 @@ pub fn create_outbound_job_keyed(
             |r| r.get(0),
         )
         .unwrap_or_else(|_| conn.last_insert_rowid()))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

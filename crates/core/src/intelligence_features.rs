@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::migrations::add_column_if_missing;
 
 pub const M015_TO_M019_SQL: &str = r#"
     -- M015: known_issues + known_issue_links
@@ -418,20 +419,6 @@ pub fn apply_m041(conn: &Connection) -> Result<()> {
             ON incident_events (incident_id, occurred_at);",
     )?;
     let _ = conn.execute("UPDATE app_state SET schema_version = 41 WHERE id = 1", []);
-    Ok(())
-}
-
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
-    let cols: Vec<String> = conn
-        .prepare(&format!("PRAGMA table_info({table})"))?
-        .query_map([], |r| r.get::<_, String>(1))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    if !cols.iter().any(|c| c == column) {
-        let _ = conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
-            [],
-        );
-    }
     Ok(())
 }
 

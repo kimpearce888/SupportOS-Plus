@@ -1,3 +1,4 @@
+use rusqlite::Connection;
 #[derive(Debug, Clone, Copy)]
 pub struct Migration {
     pub version: u32,
@@ -201,5 +202,31 @@ pub fn run_all(conn: &mut rusqlite::Connection) -> crate::error::Result<()> {
         tracing::info!(version = m.version, label = m.label, "applying migration");
         crate::db::apply_migration(conn, m.version, m.label, m.sql)?;
     }
+    Ok(())
+}
+
+/// Schema-widen primitive shared by every migration module: add `column`
+/// to `table` (with `decl`) when the table exists and the pragma says the
+/// column is missing. A missing TABLE is a no-op (Ok): several widen
+/// helpers run mid-sequence before the step that creates their target
+/// table — the creating migration already ships the full column set, so
+/// there is nothing to widen. A failing ALTER on an existing table
+/// propagates: the bootstrap step fails loudly instead of silently
+/// leaving the schema short of the column.
+pub(crate) fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    decl: &str,
+) -> crate::error::Result<()> {
+    if !crate::sync_schema::table_exists(conn, table)?
+        || crate::sync_schema::column_exists(conn, table, column)?
+    {
+        return Ok(());
+    }
+    conn.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
+        [],
+    )?;
     Ok(())
 }

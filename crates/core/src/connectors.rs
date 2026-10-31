@@ -5,6 +5,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Map, Value, json};
 
 use crate::error::{Error, Result};
+use crate::migrations::add_column_if_missing;
 
 pub const MAX_ROWS_PER_CONNECTOR: usize = 5000;
 const MAX_ROW_BYTES: usize = 32_000;
@@ -63,21 +64,6 @@ pub fn apply_m038(conn: &Connection) -> Result<()> {
         "TEXT NOT NULL DEFAULT 'local_ui'",
     );
     let _ = conn.execute("UPDATE app_state SET schema_version = 38 WHERE id = 1", []);
-    Ok(())
-}
-
-fn add_column_if_missing(conn: &Connection, table: &str, column: &str, decl: &str) -> Result<()> {
-    let exists: bool = conn
-        .prepare(&format!("PRAGMA table_info({table})"))?
-        .query_map([], |r| r.get::<_, String>(1))?
-        .filter_map(|r| r.ok())
-        .any(|c| c == column);
-    if !exists {
-        conn.execute(
-            &format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"),
-            [],
-        )?;
-    }
     Ok(())
 }
 

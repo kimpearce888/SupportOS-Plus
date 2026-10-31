@@ -535,7 +535,7 @@ fn context_block(conn: &Connection, conversation_id: Option<i64>) -> String {
             customer_name = c;
         }
     }
-    let today = crate::activity::now_iso();
+    let today = crate::business_hours::now_iso();
     build_copilot_context_block(number, subject.as_deref(), customer_name.as_deref(), &today)
 }
 
@@ -664,7 +664,7 @@ fn insert_message(
         "tool_calls": tool_calls,
         "latency_ms": latency_ms,
         "persist_error": persist_error,
-        "created_at": crate::activity::now_iso(),
+        "created_at": crate::business_hours::now_iso(),
     })
 }
 

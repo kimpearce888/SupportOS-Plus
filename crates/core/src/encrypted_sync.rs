@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::business_hours::now_iso;
 use crate::crypto;
 use crate::error::Result;
 
@@ -81,10 +82,6 @@ struct KdfParams {
     r: u32,
     p: u32,
     salt: String,
-}
-
-fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 fn app_version() -> Option<String> {
