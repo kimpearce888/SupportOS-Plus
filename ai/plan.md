@@ -453,9 +453,11 @@ rustfmt + full gates after; the program's known-bugs list and rollback
 instructions ship at FINISH. The ten deletion waves selected by the comment
 census at open live in `progress.md` per Rule 2 while the batch is active.
 
-### FINISH
+### FINISH — EXECUTED 2026-11-01 (record in completed.md)
 
-Final record: rollback = `git reset --hard acd557a` (tag `pre-refactor`
-equivalent = v1.9.1); known-bugs list carried verbatim (4× empty-list
-per-frame refetch; Settings LM Studio dirty-clobber); kittest CI lane
-disposition.
+Final record: rollback = `git reset --hard pre-refactor` (tag created at
+FINISH on acd557a = v1.9.1); known-bugs list carried verbatim (4× empty-list
+per-frame refetch; Settings LM Studio dirty-clobber) with current-code
+file:line evidence; kittest CI lane disposition (closed at CI — all three
+check runs success on 672fef7). The program RF-1..RF-11 is complete:
+plan.md has no open items.

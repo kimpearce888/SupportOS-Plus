@@ -6001,3 +6001,77 @@ lesson); core lib 495 passed / 0 failed / 4 ignored (--test-threads=1,
 proof: +268/−12,099 across 181 files (179 .rs + ai/plan.md +
 ai/progress.md); the +268 = comment-trimmed code lines, the four
 collapses, fmt reflows, and the ai records.
+
+## FINISH — program close-out (2026-11-01)
+
+The dead-code/refactor program RF-1..RF-11 is complete. Every batch was
+executed, verified and pushed under rule.md; plan.md has no open items.
+
+**Program ledger (pushed commits, oldest → newest):** 454b6f0 (rf1),
+62a2277 (rf2), 29215a1 (rf3), 63ee353 (rf4), 1f48b0d (rf5), a60904c
+(rf6), 984f83a (rf6 hotfix), 7d15bbe (rf7), 5a33641 (rf7 hotfix),
+95c5cc9 (rf8), f70b97c (rf9), c65dba3 (rf10), 672fef7 (rf11). Final
+state: main = 672fef7, comment-free tree (58 gate-locked DS-id lines in
+design/mod.rs are the only comments in any .rs file), working tree
+clean, all gates green at RF-11 (the table in the RF-11 record above).
+
+**Rollback instruction (ships at FINISH per plan.md):**
+
+    git reset --hard pre-refactor
+
+- The named anchor `pre-refactor` now exists: annotated tag pushed at
+  FINISH on commit `acd557afb3105b34bec99b7aa82a6aebb85ca93e` — the
+  v1.9.1 release commit ("the G4-accepted state"), verified an ancestor
+  of main. Equivalently: `git reset --hard v1.9.1`.
+- Disclosed record fact: no `pre-refactor` tag existed before FINISH
+  (verified local + `git ls-remote`); the plan's parenthetical "(tag
+  `pre-refactor` equivalent = v1.9.1)" was literal — v1.9.1 was the
+  only anchor. FINISH created the tag so the instruction above is
+  self-contained. The tag adds nothing to the code; it names the
+  commit the plan already designated.
+- Effect: discards the entire program (13 commits, rf1..rf11) and
+  restores the v1.9.1 tree byte-for-byte. No other steps required.
+
+**Known-bugs list (carried verbatim from the plan's standing
+constraints — LIST-ONLY, never fixed inside this program, still open on
+main):**
+
+  4× empty-list per-frame refetch; Settings LM Studio dirty-clobber
+
+Current-code evidence (FINISH re-census, so the owner can act on the
+list without re-deriving it):
+
+- Empty-list per-frame refetch — the exact `if state.is_empty() {
+  reload(db) }` shape batch 34 fixed elsewhere (item 147, with
+  `loaded` latches) is still live, latch-free, in three pages (7
+  gates): pages/custom_objects.rs:182 (`reload_types`) and :184
+  (`reload_objects`); pages/inbox.rs:847 (`reload_refs`) and :850
+  (`reload_list`) in `ensure_loaded`, plus the same mailboxes gate
+  inside `reload_list` at :402; pages/knowledge.rs:687 and :764 (both
+  `reload_all` — an empty documents/sources mirror re-runs the full
+  reload twice per rendered frame, once per tab's ui fn). A genuinely
+  empty mirror — the steady state of a fresh install — re-runs the
+  full reload query on every rendered frame at each gate.
+- Settings LM Studio dirty-clobber — pages/settings.rs:538-557: the
+  lmstudio_* form load is gated on `self.lmstudio_base_url.is_empty()`
+  with no dirty guard (the General section's `general_persisted`
+  compare at :507-511 is the in-file counterexample): clearing the
+  base-url field — or any persisted-empty config — re-pulls the stored
+  lmstudio_base_url/chat_model/embedding_model over unsaved edits on
+  every subsequent frame.
+
+**Kittest CI-lane disposition (the standing gap, closed at CI):** the
+24 suites / 175 tests / 171 goldens never ran in the sandbox (dev-dep
+chain ~600 MB vs 3 GB sandbox RAM — RF-1-9, disclosed at every STOP).
+They ran in CI on every program push; the final proof on the last
+program commit 672fef7 (GitHub check runs, all completed/success):
+"kittest snapshot locks (reskin drift gate)", "fmt, clippy, test,
+deny", "AppImage + .deb build, smoke". The comment-free tree —
+including the four disclosed collapsible_if collapses — shipped with
+zero golden drift and a green build+smoke.
+
+**FINISH environment disclosure:** the sandbox was reset again between
+RF-11 and FINISH (local tree and stored credentials lost); this record
+was written from a fresh clone of origin/main (recovery precedent,
+RF-1). FINISH changed zero code bytes: two ai records, the
+pre-refactor tag, this commit.
