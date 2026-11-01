@@ -222,3 +222,105 @@ wiring restored every path, zero call-site edits (154 crate::X::apply_ refs +
 82 apply_all callers + 20 spp_core moved-module refs, all unchanged). Next
 per plan.md (opens on the owner's `continue`): Batch RF-6 — god-file split,
 part 1.
+
+## Batch RF-6 — god-file split, part 1 — opened 2026-11-01
+
+Opened per plan.md (RF program) on the owner's `continue`. Re-census on the
+post-RF-5 tree (2026-11-01, `wc -l` + top-level/method structure scan): the
+plan's evidence census was taken pre-RF-2..RF-5; on the current tree
+saved_views.rs measures 1568 ln (RF-2/RF-3 removed its dead CRUD) and no
+longer qualifies as a god-file — its split item dissolves with the size,
+dispositioned here rather than silently dropped. The tenth slot goes to the
+next qualifying file, interaction_engine.rs (2142 ln). app-shell pages
+(inbox 4040, settings 3139, …) stay reserved for RF-7's app-shell wave per
+plan.md. design.rs is gate-constrained: gate_traceability.py reads
+`crates/app-shell/src/design.rs` by fixed path and validates every
+`DC: DS-C-xx` doc-tag (recorded figure 20) — its split seam is chosen
+tag-free so the DC-tag set never moves (gate table unchanged).
+
+Pattern (per plan.md): byte-identical region extraction into sibling modules
+under directory-converted parents (`git mv X.rs X/mod.rs` preserves rename
+history) + `pub use` re-export at the old home; moved impl slices keep their
+`impl` headers byte-identical (multi-impl blocks per type across child
+modules of the defining crate); child files open with `use super::*;`
+(descendants inherit the parent's items and import bindings); the only
+permitted edits are the new import headers, `mod`/`pub use` wiring lines, and
+`pub(super)` visibility bumps the compiler demands where the retained parent
+code calls a moved private item. Zero call-site churn outside the split
+module itself. lib.rs untouched. Tests stay in place (RF-10 owns test-path
+work). NO-TOUCH modules unaffected (none of the ten is on the list).
+
+Ten items moved from plan.md per Rule 2 (evidence = 2026-11-01 structure
+scan; exact cut lines verified at implementation against boundary reads):
+
+1. **RF-6-1 workers.rs (5276 ln)** — the job-execution engine moves to
+   `workers/execute.rs`: impl slice ~1346–3976 (execute_job dispatcher,
+   on_after_initial_sync, on_conversation_changed, run_engine, the 21
+   run_*_job runners, run_attachment_downloads) + the `AiJob` enum slice
+   (~3979–3984, family-internal). mod.rs keeps the struct, start/tick,
+   execute_outbound, auto_sync, maintenance, sync-loop methods and all tests.
+2. **RF-6-2 ai_pipeline.rs (3761 ln)** — the interaction-analysis family to
+   `ai_pipeline/interaction.rs`: slice ~1929–2644 (build_interaction_strategy_block,
+   extract_provided_facts, has_version_number, ProcessNewTicketResult [zero-ref
+   pub struct found by the boundary scan — moved byte-identically, disclosed,
+   NOT deleted in a split batch], AnalyzeInteractionOutcome, ObservationOutput,
+   parse_observation, parse_recommendation, analyze_interaction). Re-export
+   the pub surface at ai_pipeline.
+3. **RF-6-3 helpscout_real.rs (3696 ln)** — the HTTP/auth core to
+   `helpscout_real/http.rs`: impl slice ~829–1535 (docs_request_inner,
+   docs_request_send, access_token, client_credentials_login_if_configured,
+   request_inner). Provider struct, mappers and API methods stay.
+4. **RF-6-4 sync_engine.rs (3115 ln)** — the resource-sync loops to
+   `sync_engine/loops.rs`: impl slice ~1751–2896 (finish_resource, reconcile,
+   sync_resource, sync_customers, sync_conversations, ingest_conversation).
+   Engine struct, entries (initial/incremental/sync_docs_only), upsert/event
+   fns and tests stay.
+5. **RF-6-5 outreach.rs (2861 ln)** — the campaign send path to
+   `outreach/send.rs`: slice ~1485–2030 (pick_batch, classify_error,
+   record_outcome, datetime_now, ensure_recipient_updated_at, send_batch,
+   BatchCounts, count_remaining_for_send, finalize_if_drained). send_batch
+   re-exported at outreach (external callers unchanged).
+6. **RF-6-6 design.rs (2814 ln)** — the card/controls family to
+   `design/controls.rs`: slice 802–975 (chip_impl, card, card_titled,
+   section_title, hint_text, pager) — the tag-free span between the DC tag
+   clusters (563 → 1000); the 20 DC doc-tags stay byte-identical in
+   design.rs and the gate figure is unchanged. chip_impl gets the minimal
+   pub(super) bump for the retained chip wrappers.
+7. **RF-6-7 segment.rs (2697 ln)** — the evaluator tree to `segment/eval.rs`:
+   impl slice ~1155–2542 (tickets_for_customer_matching + the eval_* family
+   through eval_customer_event; ends at renumber_placeholders whose callers
+   are all inside the slice). Engine struct, parse/describe/preview/
+   evaluate_nodes/build_rows/explain_for and tests stay.
+8. **RF-6-8 reports.rs (2640 ln)** — the builder-config codec to
+   `reports/config.rs`: two slices ~1248–1306 (config_to_json) and
+   ~1358–1767 (parse_report_config, enum_error, metric_variants,
+   dimension_variants, parse_report_config_inner, parse_report_filters); the
+   saved-report CRUD (list/save/delete) stays between them. Re-export the
+   pub codec surface at reports.
+9. **RF-6-9 quality.rs (2536 ln)** — the AI-QA layer to `quality/qa_ai.rs`:
+   slice 1517–1862 (coerce_ai_json, compute_qa_ai_layer, finish_qa_ai_layer,
+   round1, DerivedOutcome, derive_outcome) — contiguous, ends at the tests
+   mod. pub/pub(crate) surface re-exported (derive_outcome's segment
+   consumer unchanged).
+10. **RF-6-10 interaction_engine.rs (2142 ln)** — the baseline+profile family
+    to `interaction_engine/baseline.rs`: slice ~1132–2077 (closed_conversation_ids,
+    rebuild_baseline, comparison_baseline, compute_changes, ThreadRow,
+    outcome_summary, heuristic_recommendation, detect_repeat_issue,
+    ensure_history_backfill, build_timeline, build_profile, build_playbook).
+    Schema/current-interaction/preferences fns and tests stay.
+
+Batch verification (Rule 5, before any item completes): fmt clean; clippy
+`--workspace --all-targets -D warnings` 0; gate_traceability OK (23 routes /
+20 DC tags / 27 ids — the 20 must not move); gate_no_simulation clean;
+verify-icons clean; core lib 495 passed / 4 ignored / 0 failed
+(`--test-threads=1`); app-shell lib 237/0; xtask 11/0; doc-tests 0/0;
+kittest 24 suites = standing CI-lane gap (disclosed). Zero-call-site-churn
+proof: external callers of every moved pub surface grep-verified unchanged.
+
+None — Batch RF-6 completed and moved to `completed.md` (2026-11-01): ten
+cohesive regions (9,089 lines) extracted byte-identically into ten sibling
+modules under directory-converted parents, re-export wiring at every old
+home, zero call-site edits outside the split modules; full gate table green
+(core 495/0/4ig, app-shell 237/0, clippy 0, gates 23/20/27). Next per
+plan.md (opens on the owner's `continue`): Batch RF-7 — god-file split,
+part 2 + pages/queries.rs.

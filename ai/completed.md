@@ -5493,3 +5493,76 @@ spp_core moved-module refs — before = after). Verified: fmt clean; clippy
 0 failed (the it_sync install_master_key quartet included — 10/10 it_sync
 tests); app-shell lib 237/0; gate_traceability OK (23/20/27);
 gate_no_simulation clean; verify-icons clean. Kittest: standing CI-lane gap.
+
+## Batch RF-6 — god-file split, part 1 — COMPLETE 2026-11-01
+
+Re-census selection on the post-RF-5 tree (the plan's evidence census
+predates RF-2..RF-5): saved_views.rs measured 1568 ln after the RF-2/RF-3
+deletions and no longer qualifies as a god-file — its split item dissolved
+with the size (dispositioned at open, not skipped); the tenth slot went to
+interaction_engine.rs (2142 ln). app-shell pages stay reserved for RF-7 per
+plan.md. Execution: ten cohesive regions (9,089 lines) extracted
+byte-identically into ten sibling modules under directory-converted parents
+(`git mv X.rs X/mod.rs` per file; child files `use super::*;` and inherit
+the parent's items and import bindings; moved impl slices keep their
+`impl` headers — multi-impl blocks per type across child modules;
+`pub use`/`pub(crate) use` re-exports at every old home keep the public
+paths resolving; lib.rs untouched; tests stayed in place; zero call-site
+edits outside the ten split modules — proven by the full-workspace
+check/clippy compiling with only the split-module diffs). Items:
+RF-6-1 workers.rs 5276→2639 (`workers/execute.rs` 2641: execute_job
+dispatcher, on_after_initial_sync, on_conversation_changed, run_engine, the
+21 run_*_job runners, run_attachment_downloads + the family-internal AiJob
+enum); RF-6-2 ai_pipeline.rs 3761→3052 (`ai_pipeline/interaction.rs` 715:
+build_interaction_strategy_block, extract_provided_facts,
+has_version_number, ProcessNewTicketResult, AnalyzeInteractionOutcome,
+ObservationOutput, parse_observation, parse_recommendation,
+analyze_interaction); RF-6-3 helpscout_real.rs 3696→2991
+(`helpscout_real/http.rs` 710: docs_request_inner, docs_request_send,
+access_token, client_credentials_login_if_configured, request_inner — the
+slice also carried the small mappers sitting inside the request span
+(map_user/mailbox/folder/field/tag, doc_article_from_value);
+map_conversation/customer/thread stayed); RF-6-4 sync_engine.rs
+3115→1973 (`sync_engine/loops.rs` 1151: finish_resource, reconcile,
+sync_resource, sync_customers, sync_conversations, ingest_conversation);
+RF-6-5 outreach.rs 2861→2316 (`outreach/send.rs` 549: pick_batch,
+classify_error, record_outcome, datetime_now, ensure_recipient_updated_at,
+send_batch, BatchCounts, count_remaining_for_send, finalize_if_drained);
+RF-6-6 design.rs 2814→2646 (`design/controls.rs` 177: chip_impl, card,
+card_titled, section_title, hint_text, pager — the DC-tag-free span between
+the tag clusters; the 20 DC doc-tags never moved and the gate figure is
+unchanged); RF-6-7 segment.rs 2697→1312 (`segment/eval.rs` 1390:
+tickets_for_customer_matching + the eval_* tree through eval_customer_event,
+incl. the sub-40-ln eval_history_tag/eval_incident_exposure); RF-6-8
+reports.rs 2640→2175 (`reports/config.rs` 467, two slices: config_to_json +
+parse_report_config/enum_error/metric_variants/dimension_variants/
+parse_report_config_inner/parse_report_filters; the saved-report CRUD
+stayed between them); RF-6-9 quality.rs 2536→2195 (`quality/qa_ai.rs` 345:
+coerce_ai_json, compute_qa_ai_layer, finish_qa_ai_layer, round1,
+DerivedOutcome, derive_outcome); RF-6-10 interaction_engine.rs 2142→1205
+(`interaction_engine/baseline.rs` 944: closed_conversation_ids,
+rebuild_baseline, comparison_baseline, compute_changes, ThreadRow,
+outcome_summary, heuristic_recommendation, detect_repeat_issue,
+ensure_history_backfill, build_timeline, build_profile, build_playbook,
+compute_outcome). Visibility: 37 compiler-demanded `pub(super)` bumps on
+moved private items called from retained parent code (7 workers, 9
+helpscout, 5 sync_engine, 14 segment, 1 outreach, 1 design) — bodies
+untouched; plus two name-binding imports for unqualified retained calls
+(outreach→send::ensure_recipient_updated_at,
+design→controls::chip_impl). Disclosures: (a) gate_traceability.py's
+DESIGN path constant followed the rename (design.rs → design/mod.rs) — a
+one-line verification-infra fix; gate output figures unchanged (23 routes /
+20 DC tags / 27 ids); (b) two zero-reference pub items found by the split
+and preserved byte-identically, NOT deleted in a split batch:
+ai_pipeline::ProcessNewTicketResult and
+interaction_engine::AiEnrichment (re-exported to keep the pub path —
+candidates for a future dead-code census); (c) incident at RF-6-2: the
+first cut swallowed the `#[cfg(test)]` line (census end-line off by a
+blank line) — caught by the compiler, restored, and every subsequent
+boundary was read literally before cutting. Verification: fmt clean;
+clippy --workspace --all-targets -D warnings 0; gate_traceability OK
+(23/20/27); gate_no_simulation clean; verify-icons clean; core lib 495
+passed / 4 ignored / 0 failed (--test-threads=1, 351.92s); app-shell lib
+237/0; xtask 11/0; doc-tests 0/0. Diff: 21 files (+9,126/−9,071 net +55 —
+the split is structural, not a deletion wave). Kittest: standing CI-lane
+gap.

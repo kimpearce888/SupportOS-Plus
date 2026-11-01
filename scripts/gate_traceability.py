@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MATRIX = ROOT / "docs/audit/acceptance/traceability-matrix.md"
 DC = ROOT / "docs/audit/design-contract-v1.md"
 PAGEKEY = ROOT / "crates/app-shell/src/pages/mod.rs"
-DESIGN = ROOT / "crates/app-shell/src/design.rs"
+DESIGN = ROOT / "crates/app-shell/src/design/mod.rs"
 TESTS = ROOT / "crates/app-shell/tests"
 
 # Registered alias (G-7): cited id → DC sheet that owns it. Only honored when
