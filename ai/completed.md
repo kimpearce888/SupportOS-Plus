@@ -5857,3 +5857,76 @@ doc; doc-tests 0/0 (core + app-shell); hygiene 2/0 post-prune. Kittest
 24 suites: CI lane (runs on this push). Churn proof: 3 content files
 (README.md, .gitignore, ai/decisions.md) + the two ai records; diff is
 docs-only (zero .rs bytes, zero CI/workflow bytes, zero script bytes).
+
+## Batch RF-10 — test paths follow the new structure (opened and completed 2026-11-01)
+
+Ten items selected at open by the test-surface census: every test vehicle
+inventoried (core in-lib: it_sync/it_helpscout/it_loopback/it_lm_studio/
+bench.rs + the `#[cfg(test)]` mods of every split parent; app-shell: 24
+external suites + in-src test mods), every RF-8 old name grepped, every
+split parent's child re-export lines extracted and cross-checked against
+its own test-mod ranges. Finding: the external vehicles and the
+overwhelming majority of parent test mods already follow the new layout —
+RF-8 re-pointed every renamed path (zero old-name hits in test code), the
+kittest suites import current homes (`spp_shell::design` = design/ mod.rs,
+`pages::<page>`, `spp_core::bootstrap::apply_all` = the intended public
+API), the it_*/bench imports name unaffected or current homes, and the
+search/quality/outreach/design-controls/interaction-engine/segment/
+sync_engine/workers child items are used only by parent production code or
+via inherent impls (methods need no imports). Exactly FIVE files carried
+parent-resident test mods resolving child-module items through `use
+super::*` → the parent's compatibility re-exports: nine import-path-only
+re-points, zero semantic test change.
+
+RF-10-1 (census) — the evidence ledger recorded in progress.md: RF-8 old
+names zero hits; kittest 1-2 current-home refs each; it_*/bench clean;
+child-item probes across all parents isolate the five files.
+RF-10-2 (ai_attributes a2_wiring_tests) — explicit
+`use super::extraction::compute_with_backend;` (was: `use super::*` →
+parent's `pub use extraction::{…}`).
+RF-10-3 (ai_attributes batch22_audit_tests) — explicit `use
+super::extraction::{ExtractionOutput, finish_computation,
+prepare_computation, run_extraction};`.
+RF-10-4 (ai_attributes batch23_audit_tests) — explicit `use
+super::extraction::{ATTRIBUTE_EXTRACTION_PROMPT_VERSION, ExtractionOutput,
+customer_messages, finish_computation, prepare_computation};`.
+RF-10-5 (ai_tools batch23_audit_tests) — explicit `use
+super::execute::execute;` (module and item share the name — valid path;
+was: parent's `pub use execute::execute;`).
+RF-10-6 (helpscout batch20_audit25_tests) — explicit `use
+super::inert::EmptyHelpScoutProvider;` (InertWorld unused by the mod —
+verified; was: parent's `pub use inert::{…}`).
+RF-10-7 (app-shell app/mod.rs tests) — explicit `use
+super::chrome::{NAV_GROUPS, sync_completed_toast};` (was: `use super::*`
+→ the parent's production `use chrome::{…}`). Disclosed keep: the mod's
+`use crate::pages::invalidated_pages;` stays — `mod queries` is private
+to pages, so the parent re-export IS the load-bearing cross-module test
+surface; widening it would be a production-visibility change (out of the
+import-path-only scope).
+RF-10-8 (app-shell pages/mod.rs tests) — explicit `use
+super::queries::{i64_field, invalidated_pages, opt_str_field, str_field};`
+(was: `use super::*` → parent's `pub use` + `pub(crate) use`).
+RF-10-9 (external vehicles verify, no-op) — it_sync / it_helpscout /
+it_loopback / it_lm_studio / bench.rs + 23 kittest suites + style_lint:
+every import names an unaffected or current home; zero old names;
+style_lint's token-factory exemption already follows `src/design/` (RF-6
+hotfix). Verified, nothing to change.
+RF-10-10 (closing gate) — post-edit re-census: all nine test mods name
+the RF-6/RF-7 child homes explicitly (7 use statements, grep-verified);
+parent re-exports untouched and still load-bearing for cross-module test
+imports and production callers (sync_engine/mod.rs:1777, workers_host.rs:
+173 → helpscout::EmptyHelpScoutProvider).
+
+Verification (all green): fmt clean (applied + re-checked after the last
+content edit; the inserted use lines were already rustfmt-conformant);
+cargo check --workspace --all-targets 0 errors; clippy `--workspace
+--all-targets -D warnings` 0; gate_traceability OK (23 routes / 20 DC
+tags / 27 ids, alias declared True); gate_no_simulation clean;
+verify-icons clean; style_lint 2 passed / 0 failed (explicit — RF-6
+lesson); core lib 495 passed / 0 failed / 4 ignored (--test-threads=1,
+351.83s — the re-pointed core mods execute); app-shell lib 237/0
+(206.24s — the re-pointed shell mods execute); xtask 11/0; doc-tests
+0/0. Kittest 24 suites: CI lane (runs on this push). Churn proof: +12
+lines across exactly the 5 target files (imports only) + the ai records;
+`git diff` review = zero test-body bytes, zero production bytes, zero
+gate/workflow bytes.

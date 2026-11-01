@@ -542,6 +542,7 @@ pub use extraction::{
 
 #[cfg(test)]
 mod a2_wiring_tests {
+    use super::extraction::compute_with_backend;
     use super::*;
 
     fn db_with_conversation() -> Connection {
@@ -646,6 +647,9 @@ mod a2_wiring_tests {
 /// boundary every other AI path crosses.
 #[cfg(test)]
 mod batch22_audit_tests {
+    use super::extraction::{
+        ExtractionOutput, finish_computation, prepare_computation, run_extraction,
+    };
     use super::*;
     use crate::ai_provider::{ChatResponse, LocalAiProvider, ModelInfo};
 
@@ -892,6 +896,10 @@ mod batch22_audit_tests {
 
 #[cfg(test)]
 mod batch23_audit_tests {
+    use super::extraction::{
+        ATTRIBUTE_EXTRACTION_PROMPT_VERSION, ExtractionOutput, customer_messages,
+        finish_computation, prepare_computation,
+    };
     use super::*;
     use rusqlite::Connection;
 

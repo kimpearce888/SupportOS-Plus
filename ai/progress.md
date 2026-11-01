@@ -692,3 +692,117 @@ design/ token factory; 7 verify/disposition items disclosed). Next per
 plan.md (opens on the owner's `continue`): Batch RF-10 — test paths follow
 the new structure.
 
+## Batch RF-10 — test paths follow the new structure (items RF-10-1..RF-10-10)
+
+**Batch RF-10 (items RF-10-1..RF-10-10)** — active, moved from plan.md per
+Rule 2 (2026-11-01, owner's `continue`). Source: the plan.md RF-10 one-liner +
+the test-surface census at open (2026-11-01): every test vehicle inventoried
+(core in-lib: it_sync/it_helpscout/it_loopback/it_lm_studio/bench.rs + ~40
+`#[cfg(test)]` mods in the split parents; app-shell: 24 external suites +
+in-src test mods), every RF-8 old name grepped (zero hits), every split
+parent's child re-export lines extracted and cross-checked against its own
+test-mod ranges. Finding: external vehicles and the overwhelming majority of
+parent test mods already follow the new layout (RF-8 re-pointed the renames;
+RF-6/7 re-exports carry the rest); exactly FIVE files carry parent-resident
+test mods that resolve child-module items through `use super::*` → the
+parent's compatibility re-exports instead of naming the RF-6/RF-7 child home
+— nine concrete re-point edits (three ai_attributes mods, ai_tools, helpscout,
+app, pages).
+
+1. **RF-10-1 (census)** — the evidence ledger: (a) RF-8 old names
+   (eventing/hybrid_search/interaction_current/crate::sync::/upsert_customer_
+   basic/conv_by_number/red_chars) = zero hits across all test code; (b)
+   kittest suites import `spp_shell::design` (design/ mod.rs = current home)
+   + `pages::<page>` = current + `spp_core::bootstrap::apply_all` = the
+   intended public API, 1-2 refs each; (c) core it_*/bench imports name only
+   unaffected or current homes (db, helpscout [trait's parent home],
+   helpscout_real, mockserver, sync_engine, settings, bootstrap, loopback,
+   ai_lm_studio, ai_provider, error, event_bus); (d) child-homed item probes
+   across all parents: search lanes / quality qa_ai / outreach send /
+   design controls / interaction_engine baseline / segment eval / sync_engine
+   loops / workers execute are used ONLY by parent production code or via
+   inherent impls (no test-mod usage); the five targets below are the
+   complete exception set.
+2. **RF-10-2 (ai_attributes a2_wiring_tests)** — `mod a2_wiring_tests`
+   (mod.rs:543) calls `compute_with_backend` (lines 584/615) through `use
+   super::*` → the parent's `pub use extraction::{…}` (mod.rs:537-541).
+   Re-point: explicit `use super::extraction::compute_with_backend;` in the
+   mod (glob + explicit of the same item = clean shadow, import-path-only).
+3. **RF-10-3 (ai_attributes batch22_audit_tests)** — `mod batch22_audit_tests`
+   (mod.rs:647) uses prepare_computation (697), finish_computation (703),
+   ExtractionOutput (706), run_extraction (841/882). Re-point: explicit `use
+   super::extraction::{ExtractionOutput, finish_computation, prepare_
+   computation, run_extraction};`.
+4. **RF-10-4 (ai_attributes batch23_audit_tests)** — `mod batch23_audit_tests`
+   (mod.rs:893) uses customer_messages (960), prepare_computation (1003/
+   1110/1134), finish_computation (1006/1119), ExtractionOutput (1009/1122),
+   ATTRIBUTE_EXTRACTION_PROMPT_VERSION (1102). Re-point: explicit `use
+   super::extraction::{ATTRIBUTE_EXTRACTION_PROMPT_VERSION, ExtractionOutput,
+   customer_messages, finish_computation, prepare_computation};`.
+5. **RF-10-5 (ai_tools batch23_audit_tests)** — `mod batch23_audit_tests`
+   (ai_tools/mod.rs:292) calls `execute` (line 341) through the parent's `pub
+   use execute::execute;` (mod.rs:289). Re-point: explicit `use super::
+   execute::execute;` (module + item share the name — valid path).
+6. **RF-10-6 (helpscout batch20_audit25_tests)** — `mod batch20_audit25_tests`
+   (helpscout/mod.rs:1001) builds EmptyHelpScoutProvider (1005/1006/1020) via
+   the parent's `pub use inert::{EmptyHelpScoutProvider, InertWorld};`
+   (mod.rs:998). Re-point: explicit `use super::inert::EmptyHelpScoutProvider;`
+   (InertWorld is not referenced by the mod — verified).
+7. **RF-10-7 (app-shell app/mod.rs tests)** — `mod tests` (app/mod.rs:1263)
+   uses NAV_GROUPS (1298) + sync_completed_toast (1307/1320/1336/1360)
+   through `use super::*` → the parent's production `use chrome::{…}`
+   (mod.rs:874-877). Re-point: explicit `use super::chrome::{NAV_GROUPS,
+   sync_completed_toast};` (the mod's other import — `crate::pages::
+   invalidated_pages` — stays: `mod queries` is private to pages, so the
+   parent re-export IS the load-bearing cross-module surface, disclosed).
+8. **RF-10-8 (app-shell pages/mod.rs tests)** — `mod tests` (pages/mod.rs:397)
+   uses invalidated_pages (402/437/457/460/462) + the three field helpers
+   str_field/i64_field/opt_str_field (484-488) via `use super::*` → the
+   parent's re-exports (393-394). Re-point: explicit `use super::queries::
+   {i64_field, invalidated_pages, opt_str_field, str_field};`.
+9. **RF-10-9 (external vehicles verify, no-op)** — it_sync / it_helpscout /
+   it_loopback / it_lm_studio / bench.rs + the 24 app-shell external suites
+   (23 kittest + style_lint) proven on the new structure: every import names
+   an unaffected or current home; zero old names; style_lint's token-factory
+   exemption already follows `src/design/` (RF-6 hotfix). Verify-only,
+   disclosed.
+10. **RF-10-10 (closing gate)** — post-edit re-census (the five files now
+    name the child homes; nothing else moved), full verification table (fmt
+    after the last content edit; clippy `--workspace --all-targets -D
+    warnings`; gate_traceability 23/20/27; gate_no_simulation; verify-icons;
+    **style_lint explicit — RF-6 hotfix lesson**; core lib
+    `--test-threads=1`; app-shell lib; xtask; doc-tests; kittest 24 suites =
+    CI lane), ai records synced, single commit, push.
+
+Batch verification (Rule 5, before any item completes): the table above is
+the gate list; every row must be green with numbers recorded in this file
+before the batch moves to completed.md.
+
+Batch verification results (all green): fmt clean (applied + re-checked
+after the last content edit — the inserted use lines were already
+rustfmt-conformant, zero reformatting needed); cargo check
+--workspace --all-targets 0 errors (the glob + explicit same-item shadow
+pattern compiles clean everywhere); clippy `--workspace --all-targets -D
+warnings` 0; gate_traceability OK (23 routes / 20 DC tags / 27 ids, alias
+declared True); gate_no_simulation clean; verify-icons clean; style_lint
+2 passed / 0 failed (explicit — RF-6 hotfix lesson); core lib 495 passed
+/ 0 failed / 4 ignored (--test-threads=1, 351.83s — the re-pointed
+ai_attributes/ai_tools/helpscout mods all execute); app-shell lib 237/0
+(206.24s — the re-pointed app/pages mods execute); xtask 11/0; doc-tests
+0/0 (core + app-shell); kittest 24 suites = CI lane. Post-edit re-census
+(RF-10-10): all nine test mods across the five files now name the
+RF-6/RF-7 child homes explicitly (7 use statements, grep-verified); the
+parent re-exports are untouched and remain load-bearing for cross-module
+test imports (app/mod.rs:1266 `crate::pages::invalidated_pages` stays —
+`mod queries` is private to pages) and production callers
+(sync_engine/workers_host → helpscout::EmptyHelpScoutProvider). Churn:
++12 lines across the 5 source files (imports only) + the ai records;
+zero semantic test change (same items, same tests, same assertions).
+
+None — Batch RF-10 completed and moved to `completed.md` (2026-11-01):
+test paths now follow the RF-5..RF-8 layout (5 files, 9 test mods
+re-pointed to their child homes; external vehicles verified clean). Next
+per plan.md (opens on the owner's `continue`): Batch RF-11 — comment
+deletion (LAST), then FINISH.
+
+

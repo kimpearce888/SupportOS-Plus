@@ -999,6 +999,7 @@ pub use inert::{EmptyHelpScoutProvider, InertWorld};
 
 #[cfg(test)]
 mod batch20_audit25_tests {
+    use super::inert::EmptyHelpScoutProvider;
     use super::*;
 
     /// Seed one conversation into the inert world and return the provider.

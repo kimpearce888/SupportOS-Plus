@@ -290,6 +290,7 @@ pub use execute::execute;
 
 #[cfg(test)]
 mod batch23_audit_tests {
+    use super::execute::execute;
     use super::*;
     use rusqlite::Connection;
 

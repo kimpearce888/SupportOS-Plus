@@ -395,6 +395,7 @@ pub(crate) use queries::{i64_field, opt_str_field, str_field};
 
 #[cfg(test)]
 mod tests {
+    use super::queries::{i64_field, invalidated_pages, opt_str_field, str_field};
     use super::*;
 
     #[test]

@@ -440,10 +440,11 @@ README / USER_MANUAL / .gitignore / ai/* module maps synced to the post-split
 tree; zero stale paths (grep-verified). The ten items selected by the docs
 census at open live in `progress.md` per Rule 2 while the batch is active.
 
-### RF-10 — test paths follow the new structure
+### RF-10 — test paths follow the new structure (OPENED 2026-11-01 on the owner's `continue`)
 
 Test module paths/imports follow the RF-5..RF-7 layout (import-path-only
-edits; no semantic test change).
+edits; no semantic test change). The ten items selected by the test-surface
+census at open live in `progress.md` per Rule 2 while the batch is active.
 
 ### RF-11 — comment deletion (LAST, per the original program order)
 

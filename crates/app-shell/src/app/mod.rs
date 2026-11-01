@@ -1262,6 +1262,7 @@ mod headless_tests {
 
 #[cfg(test)]
 mod tests {
+    use super::chrome::{NAV_GROUPS, sync_completed_toast};
     use super::*;
     use crate::pages::invalidated_pages;
     use spp_core::events::ServerEvent;
