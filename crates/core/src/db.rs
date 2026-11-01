@@ -59,8 +59,6 @@ pub fn apply_migration(conn: &mut Connection, version: u32, label: &str, sql: &s
     Ok(())
 }
 
-/// Filesystem path of the connection's `main` database, or `None` for
-/// in-memory or temporary databases.
 #[must_use]
 pub fn db_file_path(conn: &Connection) -> Option<PathBuf> {
     let mut stmt = conn.prepare("PRAGMA database_list").ok()?;
@@ -77,23 +75,10 @@ pub fn db_file_path(conn: &Connection) -> Option<PathBuf> {
     None
 }
 
-/// Number of reader connections in the WAL reader pool.
-///
-/// The pool lane is the migration-map "writer + 2 WAL readers" design: one
-/// exclusive writer connection (SQLite WAL permits exactly one writer at a
-/// time — serializing it with its own mutex is the same contract an OS
-/// writer thread would enforce, without forcing every write closure to be
-/// `'static`), plus [`READER_POOL_SIZE`] dedicated reader connections that
-/// serve concurrent reads while a write is in flight.
 const READER_POOL_SIZE: usize = 2;
 
 enum Lane {
-    /// In-memory / temporary databases: a single shared connection. Every
-    /// `:memory:` connection is a private database, so separate readers
-    /// would see none of the writer's data.
     Single(Arc<Mutex<Connection>>),
-    /// File-backed databases: an exclusive writer connection plus a small
-    /// pool of WAL reader connections on the same file.
     Pooled {
         writer: Arc<Mutex<Connection>>,
         readers: Vec<Arc<Mutex<Connection>>>,
@@ -107,27 +92,12 @@ fn recover(m: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
     })
 }
 
-/// Pooled connection facade (decisions D3/D4-era "DB pool inside DbHandle").
-///
-/// All UI-side and background code binds to `DbHandle` instead of a raw
-/// `Arc<Mutex<Connection>>`: reads go through [`Self::with_read`] (the WAL
-/// reader pool on file-backed databases, the shared connection on
-/// in-memory ones), writes through [`Self::with_write`] (the exclusive
-/// writer lane). Code that needs a scoped guard instead of a closure uses
-/// [`Self::write_guard`]. `lock()` poisoning is recovered from, matching
-/// the pre-pool facade behavior.
 #[derive(Clone)]
 pub struct DbHandle {
     lane: Arc<Lane>,
 }
 
 impl DbHandle {
-    /// Wrap a freshly opened connection, upgrading file-backed databases
-    /// to the pooled lane (writer + readers on the same file).
-    ///
-    /// Migrations must run on `conn` **before** it is wrapped: the reader
-    /// connections are opened immediately and only ever read committed
-    /// state, so they rely on the schema already being in place.
     #[must_use]
     pub fn new(conn: Connection) -> Self {
         let Some(path) = db_file_path(&conn) else {
@@ -150,8 +120,6 @@ impl DbHandle {
             }
         }
         if readers.is_empty() {
-            // No readers could be opened (e.g. transient IO error): behave
-            // exactly like the pre-pool single-connection facade.
             tracing::warn!("DbHandle degraded to the single-connection lane");
             Self {
                 lane: Arc::new(Lane::Single(Arc::new(Mutex::new(conn)))),
@@ -166,8 +134,6 @@ impl DbHandle {
         }
     }
 
-    /// Size of the WAL reader pool (0 for the single-connection lane).
-    /// Exposed for diagnostics and tests.
     #[must_use]
     pub fn reader_pool_size(&self) -> usize {
         match &*self.lane {
@@ -176,11 +142,6 @@ impl DbHandle {
         }
     }
 
-    /// Run `f` with a read connection.
-    ///
-    /// On file-backed databases this takes a connection from the reader
-    /// pool (an idle one when available) so reads run concurrently with
-    /// each other and with an in-flight writer transaction, per WAL.
     pub fn with_read<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
         match &*self.lane {
             Lane::Single(conn) => {
@@ -194,15 +155,11 @@ impl DbHandle {
         }
     }
 
-    /// Run `f` with the exclusive writer connection.
     pub fn with_write<T>(&self, f: impl FnOnce(&mut Connection) -> T) -> T {
         let mut guard = self.write_guard();
         f(&mut guard)
     }
 
-    /// Scoped exclusive (writer-lane) guard for code that cannot be
-    /// expressed as a closure — the direct replacement for the old
-    /// `lock()` accessor. Deref/DerefMut to [`Connection`].
     pub fn write_guard(&self) -> DbWriteGuard<'_> {
         let guard = match &*self.lane {
             Lane::Single(conn) => recover(conn),
@@ -211,9 +168,6 @@ impl DbHandle {
         DbWriteGuard { guard }
     }
 
-    /// Scoped long-operation connection — see [`DbLongOpGuard`]. For
-    /// background work that spans network round-trips (LLM pipelines), so
-    /// the exclusive UI writer lane is never pinned across them.
     pub fn long_op_guard(&self) -> DbLongOpGuard<'_> {
         let path = self.with_read(db_file_path);
         if let Some(path) = path
@@ -228,14 +182,11 @@ impl DbHandle {
         }
     }
 
-    /// Filesystem path of the wrapped database, or `None` for
-    /// in-memory/temporary databases.
     #[must_use]
     pub fn file_path(&self) -> Option<PathBuf> {
         db_file_path(&self.write_guard())
     }
 
-    /// Whether two handles share the exact same connection pool.
     #[must_use]
     pub fn is_shared_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.lane, &other.lane)
@@ -248,15 +199,9 @@ fn acquire_reader(readers: &[Arc<Mutex<Connection>>]) -> MutexGuard<'_, Connecti
             return guard;
         }
     }
-    // Every reader is busy: queue behind the first one (blocking lock
-    // preserves FIFO fairness; the pool only has to absorb bursts).
     recover(&readers[0])
 }
 
-/// RAII guard over the exclusive writer connection (or the single shared
-/// connection on the single-lane mode). Returned by
-/// [`DbHandle::write_guard`]; dereferences to [`Connection`] so existing
-/// `let conn = ...; conn.execute(...)` call sites keep working unchanged.
 pub struct DbWriteGuard<'a> {
     guard: MutexGuard<'a, Connection>,
 }
@@ -275,28 +220,12 @@ impl DerefMut for DbWriteGuard<'_> {
     }
 }
 
-/// Scoped connection for long-running background work — AI pipelines that
-/// span full LLM round-trips (audit A2).
-///
-/// File-backed databases get a fresh, tuned connection on the same file, so
-/// the exclusive writer lane is never held across network round-trips: this
-/// connection reads committed state per WAL, and its writes serialize
-/// against the writer lane at the SQLite level inside the shared 5-second
-/// busy_timeout. In-memory databases have no second connection (a second
-/// `:memory:` handle would be an empty private database), so the shared
-/// single connection is returned instead — identical to `write_guard`, the
-/// only lane that exists there.
-///
-/// Deref/DerefMut to [`Connection`], so call sites read exactly like
-/// `write_guard()` sites.
 pub struct DbLongOpGuard<'a> {
     lane: LongOpLane<'a>,
 }
 
 enum LongOpLane<'a> {
-    /// File-backed database: a fresh, tuned connection on the same file.
     Owned(Connection),
-    /// In-memory database: the shared single connection (`write_guard`).
     Shared(DbWriteGuard<'a>),
 }
 
@@ -418,8 +347,6 @@ mod tests {
         let handle = DbHandle::new(conn);
         assert_eq!(handle.reader_pool_size(), READER_POOL_SIZE);
 
-        // Readers see the writer's committed state (separate connections,
-        // same WAL file).
         handle.with_write(|conn| {
             conn.execute("INSERT INTO probe (v) VALUES (5)", [])
                 .expect("insert");
@@ -444,15 +371,11 @@ mod tests {
                 .expect("insert");
         });
 
-        // Both readers must be usable simultaneously: hold one read open
-        // (guarded by a channel) and prove a second with_read completes
-        // without waiting for it.
         let (tx_hold, rx_hold) = std::sync::mpsc::channel::<()>();
         let (tx_done, rx_done) = std::sync::mpsc::channel::<()>();
         let holder = handle.clone();
         std::thread::spawn(move || {
             holder.with_read(|conn| {
-                // Hold the reader connection while the main thread reads.
                 let _count: i64 = conn
                     .query_row("SELECT COUNT(*) FROM probe", [], |r| r.get(0))
                     .expect("count under held reader");
@@ -461,8 +384,6 @@ mod tests {
             tx_done.send(()).expect("done signal");
         });
 
-        // The holder's reader is busy inside with_read; the main thread
-        // must land on the other pool connection.
         let v: i64 = handle
             .with_read(|conn| conn.query_row("SELECT v FROM probe", [], |r| r.get(0)))
             .expect("second concurrent read");
@@ -483,7 +404,6 @@ mod tests {
             handle_ptr.with_write(|_| panic!("poison the DbHandle mutex"));
         }));
         assert!(boom.is_err());
-        // The next access must recover instead of panicking.
         handle
             .with_read(|conn| {
                 conn.query_row("SELECT COUNT(*) FROM probe", [], |r| r.get::<_, i64>(0))

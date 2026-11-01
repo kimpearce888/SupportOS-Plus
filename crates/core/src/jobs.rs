@@ -36,12 +36,6 @@ pub fn ensure_jobs_table(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_jobs_queue
             ON jobs (queue, status);",
     )?;
-    // Clean-audit item 24: the composer-AI poll reads the job's OWN
-    // result instead of scraping the newest matching `ai_runs` row (which
-    // could be a stale or foreign historical run). Databases created
-    // before this column lack it — heal lazily, the same
-    // self-healing pattern the outreach claim clock uses. Cheap enough
-    // to run on every ensure (a pragma lookup, no writes once present).
     let has_result: bool = conn
         .query_row(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('jobs') WHERE name = 'result'",
@@ -166,13 +160,6 @@ pub fn complete(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Complete a job while pinning its output to the job row (clean-audit
-/// item 24): the composer-AI transforms (rewrite/translate) return text
-/// the inbox polls for — previously the poll scraped the newest matching
-/// `ai_runs` row, which could be a stale or foreign historical run (any
-/// conversation, any session, cache hits that never wrote a run at all).
-/// The job is the unit of work the UI polls; its result belongs on the
-/// job row.
 pub fn complete_with_result(conn: &Connection, id: i64, result: &str) -> Result<()> {
     let rows = conn.execute(
         "UPDATE jobs SET status = 'completed', completed_at = datetime('now'), error = NULL,
@@ -244,9 +231,6 @@ pub struct QueueJob {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
-    /// The job's own output (audit item 24) — the composer-AI transforms
-    /// store their transformed text here so the polling surface reads
-    /// exactly this job's result.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
     pub attempt: i64,
@@ -286,14 +270,6 @@ pub fn list_jobs(
     }
     sql.push_str(" ORDER BY id DESC LIMIT ?");
     let mut stmt = conn.prepare(&sql)?;
-    // Audit (low): the old SQL mixed `?1` with bare `?`, so the statement's
-    // parameter count drifted with which filters were set while the bind
-    // array always carried three values — every call except the
-    // both-filters-set combination failed to bind. Strictly positional
-    // binding, one value per present placeholder.
-    // Hoisted to function scope so the `&&str` trait objects below outlive
-    // `query_map`; the empty-string fallbacks are never bound (each push is
-    // guarded by the same `is_some` check that added the placeholder).
     let status_s = status.unwrap_or_default();
     let queue_s = queue.unwrap_or_default();
     let mut binds: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(3);
@@ -355,14 +331,6 @@ pub fn requeue_stale_running_jobs(
     executing: &std::collections::HashSet<i64>,
     boot_unix: i64,
 ) -> Result<usize> {
-    // Audit fix (M16): the sweep used to re-queue every job running past
-    // the threshold — including jobs actively executing in THIS process
-    // (long outreach batches, LLM notes), double-executing them and
-    // duplicating sends. Two guards now:
-    //   1. jobs in the live executing set are skipped outright;
-    //   2. jobs started after THIS process booted have a live executor
-    //      (tick() runs them inline) — only pre-boot rows, orphaned by a
-    //      dead process, are safe to re-queue.
     let stale: Vec<i64> = {
         let mut stmt = conn.prepare(
             "SELECT id FROM jobs
@@ -386,7 +354,6 @@ pub fn requeue_stale_running_jobs(
             )
             .unwrap_or(i64::MAX);
         if started_unix >= boot_unix {
-            // Started by this process: its executor is alive — leave it.
             continue;
         }
         let n = conn.execute(
@@ -498,7 +465,6 @@ mod batch20_audit24_tests {
         let mut conn = Connection::open_in_memory().expect("db");
         ensure_jobs_table(&conn).expect("ensure");
         let job_id = enqueue_on(&conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue");
-        // Claim it the way the worker loop does.
         let claimed = claim_next(&mut conn, Some("ai"))
             .expect("claim")
             .expect("one job");
@@ -509,21 +475,15 @@ mod batch20_audit24_tests {
         assert_eq!(job.status, status::COMPLETED);
         assert_eq!(job.result.as_deref(), Some("rewritten text"));
 
-        // The listing surface carries it too (the Operations queue table —
-        // both filters bound, the shape the page itself uses).
         let listed = list_jobs(&conn, Some(status::COMPLETED), Some("ai"), 10).expect("list");
         assert_eq!(
             listed.first().and_then(|j| j.result.as_deref()),
             Some("rewritten text")
         );
 
-        // Terminal job cannot be re-completed.
         assert!(complete_with_result(&conn, job_id, "again").is_err());
     }
 
-    /// Audit (low): the mixed `?1`/`?` numbering in `list_jobs` made every
-    /// filter combination except "both set" fail to bind. All four
-    /// combinations must list the seeded rows.
     #[test]
     fn list_jobs_binds_for_every_filter_combination() {
         let conn = Connection::open_in_memory().expect("db");
@@ -555,12 +515,9 @@ mod batch20_audit24_tests {
         );
     }
 
-    /// Audit item 24: databases created before the `result` column get it
-    /// healed by the next ensure — no missing-column failures for readers.
     #[test]
     fn audit24_old_databases_gain_the_result_column_lazily() {
         let mut conn = Connection::open_in_memory().expect("db");
-        // Hand-build the pre-fix jobs table (no result column).
         conn.execute_batch(
             "CREATE TABLE jobs (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -581,9 +538,6 @@ mod batch20_audit24_tests {
             );",
         )
         .expect("legacy schema");
-        // Insert a row the pre-fix way — going through enqueue_on would
-        // heal the table first, which is exactly what old databases never
-        // did between their last write and the next boot.
         conn.execute(
             "INSERT INTO jobs (queue, type, status, payload, run_at)
              VALUES ('ai', 'translate_composer', 'queued', '{}', datetime('now'))",
@@ -591,22 +545,16 @@ mod batch20_audit24_tests {
         )
         .expect("legacy row");
         let legacy_id = conn.last_insert_rowid();
-        // Reader path before the heal: the row is unreadable — the
-        // result-column lookup fails inside the mapper and the error is
-        // swallowed, so the job is invisible to the Operations queue
-        // until the heal lands.
         assert!(
             get_job(&conn, legacy_id).expect("no db error").is_none(),
             "the legacy row must be unreadable before the heal"
         );
-        // The heal (runs on every ensure, idempotent once present).
         ensure_jobs_table(&conn).expect("heal");
         let job = get_job(&conn, legacy_id)
             .expect("read after heal")
             .expect("row");
         assert_eq!(job.kind, "translate_composer");
         assert!(job.result.is_none());
-        // And completion with a result works on the healed table.
         claim_next(&mut conn, Some("ai"))
             .expect("claim")
             .expect("job");

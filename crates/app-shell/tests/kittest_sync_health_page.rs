@@ -1,22 +1,3 @@
-//! RS-20 — DS sync-health goldens (wave D).
-//!
-//! The lab reference lives at `mockups/design-lab/goldens/v4/{light,dark}/sync-health-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real `SyncHealthPage`: the DS-C-24 hero band with
-//! the mono engine state, the lab's verbatim forensic note and the
-//! SYNC-map status badge, the Engine card's webhook hints, the split
-//! action toolbar (the three run acts left, the destructive cancel right)
-//! and the checkpoint / recent-runs tables) over a seeded mirror; the
-//! side-by-side review against the lab is the G3 evidence pack.
-//!
-//! The interaction golden clicks "Run initial sync" with the engine
-//! unavailable (the harness runs the page the way the headless build does)
-//! — the honest status line is the visible outcome of the click path.
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_sync_health_page`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -26,24 +7,15 @@ use spp_core::db::DbHandle;
 use spp_shell::design;
 use spp_shell::pages::sync_health::SyncHealthPage;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct SyncHealthPageState {
     installed: bool,
     page: SyncHealthPage,
     db: DbHandle,
 }
 
-/// Bootstrap an in-memory database and seed the sync-health fixture: one
-/// engine state row (LIVE with a last-success stamp), three checkpoints
-/// (one healthy, one retrying, one failed — the dot tones), two runs
-/// (LIVE + CATCHING_UP — the SYNC-map tones) and a webhook queue spread.
-/// All timestamps are fixed strings so the diff-locked rule holds.
 fn seeded_page() -> (SyncHealthPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
-    // Engine state lives in application_settings ('sync_state'); the
-    // last-success stamp derives from the ok checkpoints (MAX
-    // last_success_at) — seeded below.
     spp_core::sync_engine::set_state(&conn, "LIVE");
     for (resource, status, ok, fail, retries, last) in [
         (
@@ -96,12 +68,6 @@ fn seeded_page() -> (SyncHealthPage, DbHandle) {
     (SyncHealthPage::new(), DbHandle::new(conn))
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens + the run-action interaction
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light and lock it
-/// as `{name}.png` under `tests/snapshots/`.
 fn render_sync_health_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -159,9 +125,6 @@ fn r3_sync_health_page_800_dark() {
     render_sync_health_page(true, 800.0, "r3_sync_health_page_800_dark");
 }
 
-/// The primary act: clicking "Run initial sync" without an engine (the
-/// headless build's condition) surfaces the honest status line — the
-/// click path the user's button runs. Snapshot the state.
 #[test]
 fn r3_sync_health_run_action_light() {
     let (page, db) = seeded_page();
@@ -188,10 +151,7 @@ fn r3_sync_health_run_action_light() {
         .expect("the primary act")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the message frame
-    // StaticText labels are excluded from the default query filter, so
-    // the assertion rides the interactive surface; the snapshot locks the
-    // honest "not available in this build" status line.
+    h.run_steps(2);
     assert!(
         h.get_all_by_label("Run incremental sync").next().is_some(),
         "the action toolbar must stay after the click"

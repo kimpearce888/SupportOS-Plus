@@ -1,25 +1,3 @@
-//! RS-18 — DS-A-01 incidents goldens (wave B pilot).
-//!
-//! The lab reference lives at `mockups/design-lab/goldens/v4/{light,dark}/incidents-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real page: PageHeader with the counter pill, the
-//! DS-C-10 FilterBar, the DS-C-05 DataTable, and the DS-C-17 DetailPanel
-//! with its DS-A-03 record composition over a seeded database); the
-//! side-by-side review against the lab is the G3 evidence pack.
-//!
-//! Determinism note: the seed helpers below write **fixed timestamps** —
-//! the incidents themselves are created through the real
-//! `create_manual_incident` write, then the store-level fields the create
-//! route does not fill (started_at, owner, updated_at ordering, notes and
-//! releases rows) are pinned with UPDATEs/INSERTs so nothing can drift
-//! with wall-clock time. The list sorts non-resolved first by updated_at
-//! DESC, so the pinned updated_at values fix the render order (INC-001,
-//! INC-002, INC-003).
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_incidents_page`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -30,24 +8,12 @@ use spp_core::intelligence_features::ManualIncident;
 use spp_shell::design;
 use spp_shell::pages::incidents::IncidentsPage;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct IncidentsPageState {
     installed: bool,
     page: IncidentsPage,
     db: DbHandle,
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic fixture (fixed timestamps; mirrors the lab's incident fixture)
-// ---------------------------------------------------------------------------
-
-/// Bootstrap an in-memory database (all migrations) and seed the incidents
-/// fixture into it. The three incidents mirror the conformed lab fixture
-/// (`mockups/design-lab/data.js` → `PAGES.incidents.list`): INC checkout
-/// outage (sev1, investigating, two linked conversations), SSO redirect
-/// loop (sev2, identified) and CSV export failures (sev3, monitoring). The
-/// detail row pins the lab's started/owner/description/customer-safe/
-/// notes/releases values.
 fn seeded_page() -> (IncidentsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
@@ -56,9 +22,6 @@ fn seeded_page() -> (IncidentsPage, DbHandle) {
     seed_customer(&conn, 9, 909, "Kim", "Pearce", "kim@example.test");
     seed_customer(&conn, 11, 911, "Nabin", "Sayeed", "nabin@example.test");
 
-    // The two linked conversations (the lab's linked card: #5021 export,
-    // #5019 card decline) ride customers 9 / 11 so the affected-customers
-    // card lists Kim Pearce and Nabin Sayeed.
     seed_conversation(
         &conn,
         1,
@@ -123,10 +86,6 @@ fn seeded_page() -> (IncidentsPage, DbHandle) {
     )
     .expect("third incident");
 
-    // Pin the store-level fields the create route does not fill: the
-    // detail's started/owner line and the list ordering (non-resolved
-    // first, updated_at DESC — so INC-001 must be the most recently
-    // updated of the three).
     conn.execute(
         "UPDATE incidents SET started_at = '2026-01-12 08:41:03',
              owner_user_local_id = 5,
@@ -137,7 +96,6 @@ fn seeded_page() -> (IncidentsPage, DbHandle) {
     )
     .expect("pin started/owner/updated");
 
-    // The lab's note and release rows, with fixed created_at stamps.
     conn.execute(
         "INSERT INTO incident_notes (incident_id, author_user_local_id, body, created_at)
          VALUES (?1, 5, 'Mitigated by rolling back the payments deploy',
@@ -198,8 +156,6 @@ fn seed_customer(
     .expect("customer");
 }
 
-/// One conversation row with fixed timestamps (created == updated == `at`);
-/// the same columns the sync pipeline fills.
 fn seed_conversation(
     conn: &rusqlite::Connection,
     id: i64,
@@ -229,12 +185,6 @@ fn seed_conversation(
     .expect("conversation");
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens + the DetailPanel interaction
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light and lock it as
-/// `{name}.png` under `tests/snapshots/`.
 fn render_incidents_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -292,11 +242,6 @@ fn r3_incidents_page_800_dark() {
     render_incidents_page(true, 800.0, "r3_incidents_page_800_dark");
 }
 
-/// The A-1 flow: a row's `open` act opens the DS-C-17 DetailPanel with the
-/// DS-A-03 record composition (rows sort non-resolved first by updated_at
-/// DESC, so the first `open` is INC-001 — the checkout outage with the two
-/// linked conversations, the note and the releases). Snapshot the open
-/// panel.
 #[test]
 fn r3_incidents_open_detail_light() {
     let (page, db) = seeded_page();
@@ -318,15 +263,12 @@ fn r3_incidents_open_detail_light() {
             },
         );
     h.run_ok();
-    // Click the first row's open act through the accessibility tree.
     h.get_all_by_label("open")
         .next()
         .expect("the first row's open act")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the panel frame
-    // The panel is open: its close button is in the tree, and
-    // the a11y check (still ON) validates the panel's controls.
+    h.run_steps(2);
     assert!(
         h.query_by_label("close panel").is_some(),
         "the DetailPanel must be open after the row's open act"

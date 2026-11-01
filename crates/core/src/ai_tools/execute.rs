@@ -5,20 +5,12 @@ fn clamp_limit(args: &serde_json::Map<String, Value>) -> i64 {
     n.clamp(1, 10)
 }
 
-/// Clean-audit item 98: the tool schemas declare `"type": "number"`, and
-/// JSON lets a model emit whole values as floats (`12345.0`) — which
-/// `Value::as_i64` rejects, so a schema-valid argument came back
-/// "Invalid number". Read any integral encoding as the integer it is;
-/// non-integral values stay `None` (never silently truncated).
 fn arg_i64(args: &serde_json::Map<String, Value>, key: &str) -> Option<i64> {
     let n = args.get(key)?.as_number()?;
     if let Some(i) = n.as_i64() {
         return Some(i);
     }
     let f = n.as_f64()?;
-    // Exactly representable integers only: no fraction, inside i64's
-    // range (the strict upper bound keeps 2^63 — unrepresentable as i64 —
-    // out).
     if f.fract() == 0.0 && f >= -(2f64.powi(63)) && f < 2f64.powi(63) {
         return Some(f as i64);
     }
@@ -375,9 +367,6 @@ pub fn execute(
             let Some((id, _)) = conversation_by_number(conn, num) else {
                 return json!({ "error": "Conversation not found" });
             };
-            // A4: the agent's similar lane rides the same semantic spine as
-            // the evidence engine — FTS fused with sqlite-vec hits when the
-            // index is available, honest FTS-only otherwise.
             let semantic: Vec<(i64, f64)> = match index {
                 Some(ix) => crate::ai_evidence::semantic_hits(conn, ix, id, 8),
                 None => Vec::new(),
@@ -424,10 +413,6 @@ pub fn execute(
                 } else {
                     "WHERE ic.title LIKE ?1 ESCAPE '\\' OR ic.summary LIKE ?1 ESCAPE '\\' OR ic.category LIKE ?1 ESCAPE '\\'".to_string()
                 },
-                // Clean-audit item 99: the schema documents limit as
-                // "Max clusters (default 5, max 10)" — the old `* 3`
-                // multiplier with a query returned up to three times the
-                // documented cap.
                 limit,
             );
             let rows: Vec<Value> = if q.is_empty() {
@@ -1103,12 +1088,6 @@ pub fn execute(
                 "customer": format!("{} {}", first, last).trim(),
                 "sections": sections,
                 "quarantined": quarantined,
-                // Clean-audit item 41: the note used to claim "human-written
-                // entries are the only persisted rows" while the memory
-                // extraction writes source='ai' rows into the same table —
-                // the model relayed machine-extracted facts as human
-                // statements. Each entry now carries its own source and the
-                // note says exactly what that means.
                 "note": "Composed live from the local mirror - each entry carries its own source: 'human' rows were written by support staff; 'ai' rows are machine-extracted facts (confidence-tagged, not human-verified). Treat 'ai' rows as leads to verify, not as customer statements. Psychological/personality judgments are never included."
             })
         }
@@ -1169,10 +1148,6 @@ mod batch29_audit98_99_tests {
         conn
     }
 
-    /// Clean-audit item 98: `arg_i64` must decode every integral encoding a
-    /// model may legally emit under a `"type": "number"` schema — a whole
-    /// float like `12345.0` is the integer it carries, while genuinely
-    /// non-integral or non-numeric values stay rejected.
     #[test]
     fn audit98_arg_i64_accepts_integral_floats_only() {
         let mut map = serde_json::Map::new();
@@ -1193,9 +1168,6 @@ mod batch29_audit98_99_tests {
         assert_eq!(arg_i64(&map, "missing"), None);
     }
 
-    /// Clean-audit item 98, end to end: a tool call whose `number` argument
-    /// arrives as the schema-valid float `95.0` used to fail with
-    /// "Invalid number"; the tool now resolves the conversation.
     #[test]
     fn audit98_float_number_argument_resolves() {
         let conn = db_with_conversation();
@@ -1209,7 +1181,6 @@ mod batch29_audit98_99_tests {
             out.get("error").is_none(),
             "no Invalid number rejection may remain: {out}"
         );
-        // A genuinely non-integral value still rejects honestly.
         let out = execute(&conn, None, "get_conversation", r#"{"number": 9.5}"#);
         assert_eq!(
             out.get("error").and_then(Value::as_str),
@@ -1217,9 +1188,6 @@ mod batch29_audit98_99_tests {
         );
     }
 
-    /// Clean-audit item 99: the get_issue_clusters schema documents limit as
-    /// "Max clusters (default 5, max 10)"; the pre-fix `* 3` multiplier on
-    /// the query path returned up to three times that documented cap.
     #[test]
     fn audit99_cluster_limit_is_never_inflated_by_a_query() {
         let mut conn = Connection::open_in_memory().expect("db");

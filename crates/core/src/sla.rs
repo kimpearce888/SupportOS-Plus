@@ -251,11 +251,6 @@ fn effective_config(conn: &Connection, mailbox_local_id: i64) -> Result<Option<E
     };
     let mut days = default_business_hours().days;
     if let Ok(parsed) = serde_json::from_str::<Vec<i64>>(&stored.days) {
-        // Clean-audit item 141: only in-range weekdays participate (the
-        // business-hours math drops the rest anyway). Pre-fix, a list
-        // like "[7,8]" passed the raw is_empty check and then filtered
-        // to nothing downstream — the window silently DISABLED instead
-        // of degrading to the default schedule.
         let in_range: Vec<i64> = parsed.into_iter().filter(|d| (0..=6).contains(d)).collect();
         if !in_range.is_empty() {
             days = in_range;
@@ -515,22 +510,6 @@ fn waiting_stats(
     cfg: Option<&EffectiveConfig>,
 ) -> Result<SlaWaitingStats> {
     let mut stmt = conn.prepare(
-        // Audit item 13: "waiting" means waiting for a reply to the
-        // customer's last message. `updated_at` flips on every status
-        // change, tag edit, assignment or sync touch, which silently
-        // reset the waiting clock and understated SLA pressure; the
-        // honest since-point is the newest published customer thread,
-        // falling back to the conversation's own creation time when the
-        // customer has not spoken yet.
-        //
-        // Clean-audit item 53: the replied flag rides along so at_risk
-        // judges each conversation against the target it can actually
-        // miss — the first-response target only while the first response
-        // is still owed, the resolution target once an agent has
-        // answered (mirroring the alerts lane). The pre-fix count judged
-        // every ticket, replied or not, against the first-response
-        // target, flagging long back-and-forth tickets whose first
-        // response happened days ago.
         "SELECT COALESCE(
              (SELECT MAX(COALESCE(t.remote_created_at, t.created_at))
                 FROM conversation_threads t
@@ -774,8 +753,6 @@ pub fn sla_alerts(conn: &Connection) -> Result<SlaAlerts> {
     })
 }
 
-/// Clean-audit batch 18 (item 13): waiting statistics measure from the
-/// customer's last message, not from any `updated_at` touch.
 #[cfg(test)]
 mod batch18_tests {
     use super::*;
@@ -783,12 +760,6 @@ mod batch18_tests {
 
     const OLD: &str = "2026-01-01T00:00:00.000Z";
 
-    /// Seeds one mailbox with three waiting conversations:
-    /// - A: customer message at OLD, updated_at OLD
-    /// - B: customer message at OLD, but updated_at is RECENT (a status
-    ///   or sync touch — what the old query wrongly treated as the
-    ///   waiting start)
-    /// - C: no customer threads at all, created_at OLD (fallback path)
     fn db_with_waiting_conversations() -> (Connection, i64, String) {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -856,9 +827,6 @@ mod batch18_tests {
 
     #[test]
     fn waiting_stats_let_recently_touched_conversations_show_their_real_wait() {
-        // Conversation B alone: its updated_at is RECENT, its customer
-        // message is OLD. Under the old query this conversation looked
-        // fresh-again after every status/tag/sync touch; it must not.
         let (conn, mailbox, recent) = db_with_waiting_conversations();
         let now = now_iso_millis();
         let expected = wall_minutes_between(OLD, &now).expect("expected wall minutes");
@@ -879,13 +847,6 @@ mod batch18_tests {
     }
 }
 
-/// Clean-audit item 53: at_risk must judge each waiting conversation
-/// against the target it can actually miss — first-response while the
-/// first response is still owed, resolution once an agent has answered
-/// (the same rule the alerts lane applies). The pre-fix count judged
-/// replied tickets against the first-response target too, flagging
-/// long-running back-and-forth tickets whose first response happened
-/// long ago.
 #[cfg(test)]
 mod batch24_audit53_tests {
     use super::*;
@@ -902,10 +863,6 @@ mod batch24_audit53_tests {
         }
     }
 
-    /// One mailbox, two waiting conversations: X owes its first response
-    /// (customer thread at OLD, no reply); Y was answered at OLD and the
-    /// customer's last message is still from OLD (a long-running
-    /// back-and-forth ticket).
     fn db_with_replied_and_unreplied() -> (Connection, i64) {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -932,10 +889,6 @@ mod batch24_audit53_tests {
             )
             .expect("customer thread");
             if remote == 702 {
-                // Y has been answered — its first response is long done.
-                // (Audit fix H5: the real Help Scout API never produces a
-                // 'reply' thread type — agent replies are type 'message'
-                // authored by a user. The mock fixture now matches reality.)
                 conn.execute(
                     "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
                                                        from_type, remote_created_at)
@@ -958,10 +911,6 @@ mod batch24_audit53_tests {
         }
     }
 
-    /// First-response 60 min, resolution effectively unbounded: only the
-    /// unreplied X is at risk. The pre-fix count flagged Y too — its
-    /// months-old wait measured against a 60-minute first-response
-    /// target it already met.
     #[test]
     fn audit53_replied_tickets_are_not_judged_against_first_response() {
         let (conn, mailbox) = db_with_replied_and_unreplied();
@@ -974,9 +923,6 @@ mod batch24_audit53_tests {
         );
     }
 
-    /// Mirror config — first-response unconfigured, resolution 60 min:
-    /// now only the REPLIED ticket counts (it can still miss its
-    /// resolution target); the unreplied one has no target to miss.
     #[test]
     fn audit53_replied_tickets_are_judged_against_resolution() {
         let (conn, mailbox) = db_with_replied_and_unreplied();
@@ -988,7 +934,6 @@ mod batch24_audit53_tests {
         );
     }
 
-    /// No targets configured: nobody is at risk (unchanged behavior).
     #[test]
     fn audit53_no_targets_means_no_risk() {
         let (conn, mailbox) = db_with_replied_and_unreplied();
@@ -998,10 +943,6 @@ mod batch24_audit53_tests {
         let no_cfg = waiting_stats(&conn, mailbox, None).expect("waiting stats");
         assert_eq!(no_cfg.at_risk, 0);
     }
-    /// Clean-audit item 141: a stored `days` list whose every entry sits
-    /// outside 0..=6 used to pass the raw is_empty check and then filter
-    /// to nothing downstream — the SLA window silently DISABLED. It now
-    /// degrades to the default schedule; in-range lists stay verbatim.
     #[test]
     fn audit141_out_of_range_days_fall_back_to_the_default_schedule() {
         let mut conn = Connection::open_in_memory().expect("db");

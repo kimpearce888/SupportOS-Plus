@@ -1,25 +1,3 @@
-//! Outreach page (port of the web `pages/outreach.rs`).
-//!
-//! RS-19e reskin: rebuilt onto the DC widget set (`crate::design`) per the
-//! conformed lab's `outreach` sheet (DS "stack" archetype): the tab row is
-//! the DS-C-09 underline rail (same three labels, same state machine);
-//! campaign cards keep the lab's chip + raw-status badge head and split
-//! action row (lifecycle acts left, destructive cancel + retry right);
-//! the report card grows the lab's warn-callout receipt for the
-//! totals-read gap; segment rows adopt the lab's card anatomy (strong id —
-//! name with the delete pushed right, the criteria JSON as the mono line
-//! beneath, DC C-1); DNC rows push the reason/ts/remove cluster right.
-//! Presentation only — every query and write is byte-identical.
-//!
-//! Campaigns tab — `list_outreach_campaigns` (`/api/outreach/campaigns`)
-//! with the queue/pause/resume/cancel/retry actions
-//! (`outreach::campaign_*`, the `/api/outreach/campaigns/{id}/{action}`
-//! routes), the new-campaign form (the create route's validation +
-//! `create_outreach_campaign` with a segment snapshot), and the campaign
-//! report (`campaign_report`). Segments tab — `list_segments_v2` /
-//! `create_segment` / `delete_segment`. DNC tab — `list_dnc` /
-//! `add_to_dnc` / `remove_from_dnc`.
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::segment::{SegmentDefinition, SegmentEngine};
@@ -28,7 +6,6 @@ use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant, CalloutRole};
 use crate::icons::Icon;
 
-/// Page tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Campaigns,
@@ -48,7 +25,6 @@ impl Tab {
     }
 }
 
-/// The interactive outreach page state.
 pub struct OutreachPage {
     tab: Tab,
     campaigns: Vec<serde_json::Value>,
@@ -69,18 +45,9 @@ pub struct OutreachPage {
     new_dnc_reason: String,
     message: Option<String>,
     error: Option<String>,
-    /// Audit fix (M22): wall-clock stamps for the transient status
-    /// lines — a finished note ("status: …") or a stale validation
-    /// error expires on its own instead of sitting on screen until the
-    /// next action replaces it.
     message_at: Option<std::time::Instant>,
     error_at: Option<std::time::Instant>,
-    /// FIND-005: armed shell-confirm request for a destructive action —
-    /// raised by [`Self::ui`] at the end of the frame.
     pending_confirm: Option<ConfirmRequest>,
-    /// Clean-audit item 147: reload latch — an empty mirror is a legal
-    /// steady state, so "lists empty" can no longer mean "re-query every
-    /// frame".
     loaded: bool,
 }
 
@@ -114,7 +81,6 @@ impl OutreachPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.loaded = false;
         self.campaigns.clear();
@@ -144,10 +110,6 @@ impl OutreachPage {
         self.report = Some(db.with_read(|conn| spp_core::outreach::campaign_report(conn, id)));
     }
 
-    /// Audit fix (M22): transient status lines carry their set-time so
-    /// rendering can expire them (see [`Self::expire_status_lines`]); a
-    /// success also supersedes a stale error (and vice versa) so an old
-    /// line never survives a later, opposite outcome.
     fn set_message(&mut self, message: impl Into<String>) {
         self.message = Some(message.into());
         self.message_at = Some(std::time::Instant::now());
@@ -155,7 +117,6 @@ impl OutreachPage {
         self.error_at = None;
     }
 
-    /// Audit fix (M22): see [`Self::set_message`].
     fn set_error(&mut self, error: impl Into<String>) {
         self.error = Some(error.into());
         self.error_at = Some(std::time::Instant::now());
@@ -163,8 +124,6 @@ impl OutreachPage {
         self.message_at = None;
     }
 
-    /// Audit fix (M22): drop status lines past their TTL before
-    /// rendering.
     fn expire_status_lines(&mut self) {
         const STATUS_TTL: std::time::Duration = std::time::Duration::from_secs(45);
         if let Some(set_at) = self.message_at
@@ -219,8 +178,6 @@ impl OutreachPage {
             self.set_error("A valid sending mailbox is required.");
             return;
         }
-        // A saved segment id or a raw definition must be present (the
-        // route's guard against accidental whole-address-book sends).
         let segment_id: Option<i64> = self
             .new_segment_json
             .trim()
@@ -249,12 +206,6 @@ impl OutreachPage {
             );
             return;
         };
-        // Clean-audit item 146: the snapshot previewed a fixed 5000-row
-        // page and threw the matched total away — every recipient past
-        // the cap silently never became one, while the segment said
-        // otherwise. The snapshot now takes EVERY matched row (page 1,
-        // unbounded page size); the success message reports the same
-        // count the user matched against.
         let engine_result = db.with_read(|conn| {
             let engine = SegmentEngine::new(conn);
             let preview = engine.preview(&tree, 1, i64::MAX);
@@ -352,8 +303,6 @@ impl OutreachPage {
         }
     }
 
-    /// Delete an outreach segment (runs on shell confirmation only —
-    /// clean-audit item 140). Returns the core outcome for the toast.
     pub fn delete_segment(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::delete_segment(conn, id));
         if let Err(e) = &result {
@@ -391,7 +340,6 @@ impl OutreachPage {
         }
     }
 
-    /// FIND-005: runs only after the shell dialog confirms.
     pub fn remove_dnc(&mut self, db: &DbHandle, customer_id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::remove_from_dnc(conn, customer_id));
         if let Err(e) = &result {
@@ -401,8 +349,6 @@ impl OutreachPage {
         result.map(|_| ())
     }
 
-    /// FIND-005: runs only after the shell dialog confirms — discards the
-    /// campaign's remaining queued sends.
     pub fn cancel_campaign_remaining_confirmed(
         &mut self,
         db: &DbHandle,
@@ -419,15 +365,10 @@ impl OutreachPage {
         Ok(())
     }
 
-    /// Render the page. Returns a confirm request when the user asked to
-    /// delete a segment (clean-audit item 140 — the delete runs only
-    /// after the shell dialog confirms).
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         design::page_header(ui, "Outreach", None, |_| {});
-        // DS-C-09: the chip row is the underline tab rail — same three
-        // labels, same state machine.
         if let Some(i) = design::tabs(
             ui,
             &[
@@ -440,7 +381,6 @@ impl OutreachPage {
         {
             self.tab = *tab;
         }
-        // Audit fix (M22): expire stale status lines before rendering.
         self.expire_status_lines();
         if let Some(message) = &self.message {
             design::success_text(ui, &format!("status: {message}"));
@@ -461,7 +401,6 @@ impl OutreachPage {
                 None
             }
         };
-        // FIND-005: raise the armed confirm request (see the field doc).
         if let Some(request) = self.pending_confirm.take() {
             return Some(NavRequest::Confirm(request));
         }
@@ -518,8 +457,6 @@ impl OutreachPage {
                                 str_field(campaign, "mailbox_name")
                             ),
                         );
-                        // The lab's split ds-tool-row: the lifecycle acts
-                        // left, the destructive cancel + retry right.
                         ui.horizontal(|ui| {
                             for action in [
                                 CampaignAction::Queue,
@@ -542,10 +479,6 @@ impl OutreachPage {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    // right_to_left paints the first added
-                                    // widget rightmost — retry first so the
-                                    // visual order matches the lab's
-                                    // [cancel remaining] [retry failed].
                                     if design::button(
                                         ui,
                                         CampaignAction::RetryFailed.label(),
@@ -584,8 +517,6 @@ impl OutreachPage {
         }
         if let Some((id, action)) = acted {
             if action == CampaignAction::CancelRemaining {
-                // FIND-005: discarding every queued send used to run on the
-                // click — arm the shell confirm instead.
                 let name = campaigns
                     .iter()
                     .find(|c| i64_field(c, "id") == id)
@@ -627,9 +558,6 @@ impl OutreachPage {
                     ui.end_row();
                 }
             });
-            // The lab's reportNote — the DS-C-15 warn receipt for the
-            // totals-read gap (data-layer, out of reskin scope; the read
-            // stays byte-identical per the lab's own note).
             ui.add_space(4.0);
             design::callout(
                 ui,
@@ -645,8 +573,6 @@ impl OutreachPage {
     fn new_campaign_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card(ui, |ui| {
             design::section_title(ui, "New Campaign");
-            // Every input binds its visible label (RS-18 wave-wide a11y
-            // rule — egui never reads a preceding label on its own).
             design::form_grid(ui, "outreach-new", |ui| {
                 let name_label = design::field_label(ui, "name:");
                 ui.add_sized(
@@ -707,8 +633,6 @@ impl OutreachPage {
         });
     }
 
-    /// The Segments tab. Returns a confirm request when the user asked
-    /// to delete a segment (clean-audit item 140).
     fn segments_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         ui.horizontal(|ui| {
             if design::button_with_icon(ui, Icon::Plus, "New Segment", ButtonVariant::Primary)
@@ -720,8 +644,6 @@ impl OutreachPage {
         if self.show_new_segment {
             design::card(ui, |ui| {
                 design::section_title(ui, "New Segment");
-                // Every input binds its visible label (RS-18 wave-wide
-                // a11y rule — egui never reads a preceding label alone).
                 design::form_grid(ui, "outreach-new-segment", |ui| {
                     let name_label = design::field_label(ui, "name:");
                     ui.add_sized(
@@ -754,11 +676,6 @@ impl OutreachPage {
             .show(ui, |ui| {
                 let t = design::tokens(ui);
                 for segment in &segments {
-                    // The lab's segment card: strong id — name with the
-                    // danger delete pushed right (DS.row's side cluster),
-                    // the criteria JSON as the mono line beneath (raw
-                    // tokens visible per DC C-1 — the pre-rebuild build
-                    // kept the definition invisible).
                     design::card(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
@@ -805,8 +722,6 @@ impl OutreachPage {
                     );
                 }
             });
-        // Clean-audit item 140: arming the dialog replaces the
-        // unconfirmed delete.
         if let Some((id, name)) = deleted {
             return Some(NavRequest::Confirm(ConfirmRequest::delete_segment(
                 id, &name,
@@ -824,8 +739,6 @@ impl OutreachPage {
             Some("Customers on this list are excluded from every campaign."),
             |ui| {
                 design::form_grid(ui, "outreach-dnc-new", |ui| {
-                    // Every input binds its visible label (RS-18 wave-wide
-                    // a11y rule — egui never reads a preceding label alone).
                     let customer_label = design::field_label(ui, "customer id:");
                     ui.add_sized(
                         [140.0, 28.0],
@@ -853,8 +766,6 @@ impl OutreachPage {
                     .id_salt("outreach-dnc")
                     .show(ui, |ui| {
                         for (customer_id, reason, created_at) in &dnc {
-                            // The lab's DS.row: the mono id left, the
-                            // reason/ts/remove cluster pushed right.
                             ui.horizontal(|ui| {
                                 ui.monospace(
                                     egui::RichText::new(format!("customer #{customer_id}"))
@@ -863,15 +774,9 @@ impl OutreachPage {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        // right_to_left paints the first
-                                        // added widget rightmost — remove
-                                        // first so the visual order matches
-                                        // the lab's [reason][ts][remove].
                                         if design::button(ui, "remove", ButtonVariant::Destructive)
                                             .clicked()
                                         {
-                                            // FIND-005: the removal used to run on the
-                                            // click — arm the shell confirm instead.
                                             self.pending_confirm =
                                                 Some(ConfirmRequest::remove_from_dnc(*customer_id));
                                         }
@@ -909,7 +814,6 @@ impl Default for OutreachPage {
     }
 }
 
-/// Campaign lifecycle actions (web: the `{action}` path segment).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CampaignAction {
     Queue,
@@ -919,10 +823,6 @@ enum CampaignAction {
     RetryFailed,
 }
 
-/// Campaign status → badge tone. The lab's CAMP map rides the raw token
-/// through `statusBadge`: `completed` maps onto the resolved success
-/// badge, every other lifecycle token (queued/running/paused/cancelled)
-/// keeps the neutral badge with the raw token visible (DC C-1).
 fn campaign_status_tone(status: &str) -> BadgeTone {
     match status {
         "completed" => BadgeTone::Success,
@@ -957,17 +857,12 @@ mod tests {
     use super::*;
     use crate::testsupport::fixture;
 
-    /// Build a saved segment matching customers with tickets (v2 shape).
     fn seed_segment(conn: &rusqlite::Connection, name: &str, definition: &str) -> i64 {
         spp_core::outreach::save_segment_v2(conn, None, name, None, definition).expect("segment")
     }
 
     const TICKET_CUSTOMERS_DEFINITION: &str = r#"{"combinator":"all","conditions":[{"kind":"history","metric":"ticket_count","op":"gte","value":1}],"exclude":[]}"#;
 
-    /// Clean-audit item 147: the reload latch — an empty outreach mirror
-    /// is a legal steady state, so the second `ensure_loaded` on an empty
-    /// database must not flip any state (the old `is_empty()` gate
-    /// re-queried every frame); a real invalidation still reloads.
     #[test]
     fn ensure_loaded_latches_and_invalidate_refetches() {
         let db = fixture(vec![("conv", 1, "Hello", "active", "email", 1, 5, 9)]);
@@ -978,8 +873,6 @@ mod tests {
         assert!(page.loaded);
         assert!(page.campaigns.is_empty(), "no campaigns seeded yet");
 
-        // Seed a campaign behind the page's back (as a sync would) and
-        // prove the stale page does NOT hot-reload without invalidation.
         let segment_id = db.with_write(|conn| seed_segment(conn, "S", TICKET_CUSTOMERS_DEFINITION));
         let mailbox = db
             .with_read(|conn| {
@@ -999,12 +892,9 @@ mod tests {
         page.create_campaign(&db);
         assert!(page.error.is_none(), "{:?}", page.error);
 
-        // The latch path: a second ensure_loaded keeps whatever reload
-        // produced (no re-query churn, same mirror).
         page.ensure_loaded(&db);
         assert_eq!(page.campaigns.len(), 1);
 
-        // Invalidation clears the latch; the next ensure_loaded refetches.
         page.invalidate();
         assert!(!page.loaded);
         page.ensure_loaded(&db);
@@ -1064,10 +954,8 @@ mod tests {
     fn campaign_create_requires_valid_fields() {
         let db = fixture(Vec::new());
         let mut page = OutreachPage::new();
-        // Empty name.
         page.create_campaign(&db);
         assert!(page.error.is_some());
-        // Bad mailbox.
         page.new_name = "X".into();
         page.new_subject = "Y".into();
         page.new_body = "Z".into();
@@ -1116,10 +1004,6 @@ mod tests {
         page.add_dnc(&db);
         assert!(page.error.is_some());
     }
-    /// Clean-audit item 146: the recipient snapshot previewed a fixed
-    /// 5000-row page and threw the matched total away — recipients past
-    /// the cap silently never became recipients. A segment matching
-    /// 5001 customers now snapshots all 5001.
     #[test]
     fn campaign_snapshot_carries_every_matched_recipient_past_the_cap() {
         let db = fixture(vec![("conv", 1, "Hello", "active", "email", 1, 5, 9)]);
@@ -1131,8 +1015,6 @@ mod tests {
                     rusqlite::params![10_000 + i, format!("bulk{i}@bulkmail.example")],
                 )
                 .expect("bulk customer");
-                // The contact/email_domain condition reads
-                // customer_emails — give each bulk customer its row.
                 conn.execute(
                     "INSERT INTO customer_emails (customer_id, value, type)
                      VALUES (?1, ?2, 'work')",

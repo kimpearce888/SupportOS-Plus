@@ -169,14 +169,6 @@ impl<'a> ViewEngine<'a> {
                 })
             }
             ViewNode::Tags { tags, mode } => {
-                // Audit item 119: the Rust side folded with Unicode rules
-                // (`str::to_lowercase`) while SQL `LOWER` folds ASCII
-                // only — a tag stored as "ELECTRONICS" (or any name with
-                // a non-ASCII letter) produced a parameter the SQL side
-                // could never match. Both sides now fold ASCII-only, so
-                // the filter agrees with the stored collation: ASCII
-                // tags match case-insensitively, non-ASCII names compare
-                // symmetrically on both sides.
                 let lowered: Vec<String> = tags.iter().map(|t| t.to_ascii_lowercase()).collect();
                 if lowered.is_empty() {
                     return Ok(Fragment::empty());
@@ -327,14 +319,6 @@ impl<'a> ViewEngine<'a> {
                             "lt" => "<",
                             _ => "<=",
                         };
-                        // Audit item 122: `CAST(cp.value AS REAL)` turns
-                        // any non-numeric text into 0.0 — "N/A", "blue",
-                        // "yes" all satisfied `lt`/`lte` comparisons
-                        // against positive thresholds. Only values that
-                        // are actually numeric participate now: at least
-                        // one digit, and nothing outside a number's
-                        // character set (sign, digits, decimal point,
-                        // exponent).
                         Ok(Fragment {
                             sql: format!(
                                 "EXISTS (SELECT 1 FROM customer_properties cp WHERE {cust_join} AND {def} \

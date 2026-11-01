@@ -1,10 +1,3 @@
-//! Conversation write operations (promoted from the retired axum
-//! `http/routes/conversations.rs` at the Phase 4 cutover — this module
-//! predates the cutover and always held the shared logic; the axum
-//! response wrappers and AppState handlers are gone, the pure SQL
-//! operations the sync engine, workers, automation, and the native shell
-//! call remain).
-
 use rusqlite::{Connection, params};
 use serde_json::Value;
 
@@ -80,12 +73,6 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, ddl: &str) -> Res
     }
     Ok(())
 }
-
-// `create_outbound_job` (the unkeyed variant) was removed in v1.4.0 R4:
-// it had no callers since the Phase 4 cutover and its silent
-// `return 0` on INSERT failure was defect D8's root. Everything
-// enqueues through `create_outbound_job_keyed`, which now returns a
-// truthful Result.
 
 pub fn set_outbound_status(conn: &Connection, id: i64, status: &str, error: Option<&str>) {
     if id == 0 {
@@ -295,17 +282,6 @@ pub struct ConvFull {
 
 pub const NOT_CONNECTED: &str = "Help Scout is not connected. Remote actions are disabled - connect Help Scout in Settings first.";
 
-/// Create an outbound job row (v1.4.0 R4 / D8: the id is now a real
-/// `Result` — an INSERT failure used to return job id `0` and every
-/// caller reported success with it, so a queued reply could evaporate
-/// while the composer said it was sent).
-///
-/// With an idempotency key the insert is an upsert: an existing row for
-/// the same key is re-queued (attempts reset, error cleared) and its id
-/// returned — the duplicate-send retry path.
-///
-/// # Errors
-/// Propagates the database write failure verbatim.
 pub fn create_outbound_job_keyed(
     conn: &Connection,
     kind: &str,

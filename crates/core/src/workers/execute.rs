@@ -14,13 +14,6 @@ impl WorkerManager {
             })
         };
         let outcome: Result<()> = async {
-            // Clean-audit item 24: the composer-AI transforms (rewrite /
-            // translate) return the transformed text; it is pinned to the
-            // job row so the inbox poll reads THIS job's result instead
-            // of scraping the newest matching `ai_runs` row (which could
-            // be a stale or foreign historical run — or absent entirely
-            // on cache hits and feature-off paths, which used to make
-            // the poll fill the composer with a foreign run's text).
             let mut composer_result: Option<String> = None;
             match kind {
                 "initial_sync" => {
@@ -104,15 +97,6 @@ impl WorkerManager {
                 "sync_conversation_ratings" => {
                     let rating_id = num("ratingId");
                     let conv_remote = num("conversationId").or_else(|| num("remoteId"));
-                    // Clean-audit item 85: a failed rating fetch used to be
-                    // swallowed whole (`let Ok(Some(r))` matched nothing on
-                    // an Err) — the satisfaction webhook fires once, the
-                    // one fetch failed once, and the rating was lost
-                    // forever while the job still reported success. An Err
-                    // now fails the job so the queue's retry machinery
-                    // re-fetches it (exponential backoff, max_attempts);
-                    // a rating that genuinely does not exist platform-side
-                    // (Ok(None)) stays a logged no-op.
                     if let Some(rating_id) = rating_id {
                         match self.provider.get_rating(rating_id).await {
                             Ok(Some(r)) => {
@@ -173,14 +157,6 @@ impl WorkerManager {
                         .await?;
                     }
                 }
-                // Audit fix (H8): the three embed arms used self.lock() — the
-                // EXCLUSIVE UI writer lane — across the whole embedding pass,
-                // which makes LM-Studio/cloud HTTP calls chunk by chunk (up
-                // to 60 per pass, 120s+ total). Every user write (save
-                // draft, queue reply) stalled behind them for minutes. All
-                // other LLM lanes already use long_op_guard() — a dedicated
-                // connection that never pins the writer lane — so these
-                // three arms now do the same.
                 "embed_knowledge_chunks" => {
                     let conn = self.db.long_op_guard();
                     let n = crate::embeddings::embed_pending_knowledge(
@@ -278,8 +254,6 @@ impl WorkerManager {
                     };
                     self.run_ai_job(kind, conv_id, AiJob::Note).await?;
                 }
-                // A2: triage-on-arrival batch — attribute extraction,
-                // customer-memory extraction and issue clustering.
                 "extract_attributes" => {
                     let Some(conv_id) = num("conversationId") else {
                         let conn = self.lock();
@@ -309,11 +283,6 @@ impl WorkerManager {
                 "cluster_issues" => {
                     self.run_clustering_job().await?;
                 }
-                // ---- Batch 13 (A3/A5/A6/K1): composer transforms, QA,
-                // interaction intelligence, copilot chat, golden evals,
-                // gap detection. Every runner re-checks its feature gate
-                // and role at execution (enqueue-time gates are not
-                // trusted on their own). ----
                 "rewrite_composer" => {
                     composer_result = self.run_rewrite_job(&payload).await?;
                 }
@@ -358,7 +327,6 @@ impl WorkerManager {
                 "rebuild_gaps" => {
                     self.run_gap_rebuild_job().await?;
                 }
-                // Batch 14 (K2, K3, K4, K5)
                 "draft_article" => {
                     self.run_draft_article_job(job_id, &payload).await?;
                 }
@@ -371,8 +339,6 @@ impl WorkerManager {
                 "fetch_hs_report" => {
                     self.run_fetch_hs_report_job(job_id, &payload).await?;
                 }
-                // Batch 15 (P2, P3, P4): live chat sends, saved reply
-                // writes, workflow runs, the webhook relay guard.
                 "send_chat_message" => {
                     let chat_id = payload
                         .get("chatId")
@@ -454,10 +420,6 @@ impl WorkerManager {
                 "download_recent_attachments" => {
                     self.run_attachment_downloads().await;
                 }
-                // Clean-audit item 148: the `bulk_*` job-kinds arm is gone —
-                // nothing enqueued jobs with those kinds (the UI's bulk
-                // actions ride the outbound dispatcher), so the dispatch
-                // arm and `execute_bulk_action` below it were unreachable.
                 "sync.conversations" => {
                     self.run_engine(|e| async move {
                         e.incremental_sync(crate::events::SyncTrigger::Manual)
@@ -466,9 +428,6 @@ impl WorkerManager {
                     })
                     .await?;
                 }
-                // Test-only job kind: exercises the panic containment
-                // boundary (clean-audit item 86) end-to-end through the
-                // real `tick` path without shipping any test hook.
                 #[cfg(test)]
                 "__test_panic" => {
                     panic!("intentional test panic (batch 27 item 86)");
@@ -511,14 +470,6 @@ impl WorkerManager {
             crate::settings::get_i64(&conn, "attachment_auto_download", 1).unwrap_or(1) != 0;
         let _ = jobs::enqueue_on(&conn, "embeddings", "embed_knowledge_chunks", "{}", 4, 2);
         let _ = jobs::enqueue_on(&conn, "embeddings", "embed_conversation_chunks", "{}", 4, 2);
-        // Clean-audit item 22: `rebuild_activity` existed as a worker job
-        // but nothing ever enqueued it, so the derived response-state
-        // columns (first_customer_message_at, customer_waiting_since,
-        // response_state, …) stayed at their schema defaults forever —
-        // the only writer that ever touched them was the per-action
-        // ticket_ops path. The threads just landed in the mirror; derive
-        // the activity events and refresh every conversation's columns
-        // from them (idempotent: dedup-keyed inserts + recompute).
         let _ = jobs::enqueue_on(&conn, "sync", "rebuild_activity", "{}", 3, 2);
         if auto_download {
             let _ = jobs::enqueue_on(
@@ -530,14 +481,6 @@ impl WorkerManager {
                 2,
             );
         }
-        // A1: the ticket_analysis feature gate (kill switch aware).
-        // Clean-audit item 90: the backfill used to cap both queries at
-        // LIMIT 50 — with more than 50 unanalyzed conversations (any
-        // sizeable import), the 51st onward never gained an analysis:
-        // this hook runs exactly once after the initial sync and nothing
-        // else ever re-selected them. The cap is gone; every unanalyzed,
-        // non-deleted conversation is enqueued (the ai queue serializes
-        // the work at its own pace).
         if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis") {
             let fresh: Vec<i64> = {
                 let mut stmt = match conn.prepare(
@@ -570,10 +513,6 @@ impl WorkerManager {
                 );
             }
         }
-        // A2: conversations analyzed before attributes existed (or
-        // analyzed with the feature off) get their snapshot backfilled
-        // here — the deterministic layer needs no model. Same item-90
-        // fix: no LIMIT — every unbackfilled conversation is enqueued.
         if crate::ai_hub::ai_feature_enabled(&conn, "attributes") {
             let mut stmt = match conn.prepare(
                 "SELECT c.id FROM conversations c
@@ -605,8 +544,6 @@ impl WorkerManager {
         }
     }
 
-    /// Local → remote conversation id (for re-emitting updates after jobs
-    /// that only know the local mirror id).
     fn remote_id_for_local(&self, local_id: i64) -> Option<i64> {
         let conn = self.lock();
         conn.query_row(
@@ -650,18 +587,6 @@ impl WorkerManager {
 
     pub(super) fn on_conversation_changed(&self, conversation_local_id: i64) {
         let result: Result<()> = (|| {
-            // Clean-audit item 57: the trigger pair carries a once-guard.
-            // The pre-fix code fired BOTH `new_conversation` and
-            // `customer_reply` whenever the newest non-deleted thread was
-            // from the customer — every reply re-sent "new conversation"
-            // rules (auto-acks), and the very first customer message already
-            // fired "customer reply" rules. The guard remembers, per
-            // conversation, the newest customer thread that already fired
-            // (conversations.automation_last_customer_thread_id, m060):
-            // the first customer thread ever seen fires `new_conversation`,
-            // every LATER customer thread fires `customer_reply`, and a
-            // sync that introduces no new customer thread (a tag change, a
-            // status flip, a re-sync) fires neither.
             let (last_thread_type, latest_customer_thread, last_fired): (
                 Option<String>,
                 Option<i64>,
@@ -702,9 +627,6 @@ impl WorkerManager {
             if last_thread_type.as_deref() != Some("customer") {
                 return Ok(());
             }
-            // The once-guard decision (clean-audit item 57): `new_conversation`
-            // for the first customer thread ever seen, `customer_reply` for a
-            // later one, nothing when this customer thread already fired.
             let trigger = crate::automation::customer_thread_trigger_decision(
                 last_fired,
                 latest_customer_thread,
@@ -718,9 +640,6 @@ impl WorkerManager {
                     trigger,
                     conversation_local_id,
                 );
-                // Record the thread as consumed only when the rules actually
-                // ran; a failed firing (context load error and friends) stays
-                // unrecorded so the next change retries it.
                 if fired.is_ok() {
                     conn.execute(
                         "UPDATE conversations
@@ -732,7 +651,6 @@ impl WorkerManager {
             }
             {
                 let conn = self.lock();
-                // A1: the ticket_analysis feature gate (kill switch aware).
                 if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis") {
                     let _ = jobs::enqueue_on(
                         &conn,
@@ -743,9 +661,6 @@ impl WorkerManager {
                         2,
                     );
                 }
-                // A2: when analysis is switched off, the deterministic
-                // attribute layer still runs (it needs no model); memory
-                // extraction has its own toggle independent of analysis.
                 if !crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis")
                     && crate::ai_hub::ai_feature_enabled(&conn, "attributes")
                 {
@@ -768,10 +683,6 @@ impl WorkerManager {
                         2,
                     );
                 }
-                // A3: the interaction-intelligence AI stage rides right
-                // after the heuristic stage so the Customers profile gains
-                // the merged heuristic+ai card while the conversation is
-                // fresh. Gated at enqueue AND at execution.
                 if crate::ai_hub::ai_feature_enabled(&conn, "interaction_intelligence") {
                     let _ = jobs::enqueue_on(
                         &conn,
@@ -811,10 +722,6 @@ impl WorkerManager {
     }
 
     async fn run_ai_job(&self, kind: &str, conv_id: i64, job: AiJob) -> Result<()> {
-        // A1: the provider hub routes each feature through its model role —
-        // triage/analysis classify, customer drafts draft, internal notes
-        // summarize (blueprint Table 6) — and each feature checks its own
-        // kill switch at execution time, not just at enqueue time.
         let (role, feature) = match job {
             AiJob::Analyze => (crate::ai_hub::AiRole::Classify, "ticket_analysis"),
             AiJob::Draft => (crate::ai_hub::AiRole::Draft, "draft"),
@@ -842,9 +749,6 @@ impl WorkerManager {
             return Ok(());
         }
         let db = self.db.clone();
-        // A4: the pipeline fns take the vector index so evidence packs can
-        // fuse FTS + sqlite-vec hits; the Arc rides along into the blocking
-        // task unchanged.
         let index = self.qdrant.clone();
         let (result, note_text, remote_id) = tokio::task::spawn_blocking(move || {
             let conn = db.long_op_guard();
@@ -957,9 +861,6 @@ impl WorkerManager {
         .map_err(|e| Error::Other(e.to_string().into()))?;
 
         result?;
-        // A2: a completed analysis triggers the rest of the triage batch —
-        // the 14-key attribute snapshot and the customer-memory extraction
-        // ride the same train (each still feature-gated at execution).
         if matches!(job, AiJob::Analyze) {
             let conn = self.lock();
             if crate::ai_hub::ai_feature_enabled(&conn, "attributes") {
@@ -1022,11 +923,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// A2: populate the 14-key ai_attributes snapshot for one conversation.
-    /// The deterministic layer always lands; the AI layer fills intent/
-    /// product/feature/issue/customer_goal/response_style when the Classify
-    /// role has a live endpoint. The snapshot feeds the AI Center
-    /// Attributes tab and the ai_attribute automation conditions.
     async fn run_attributes_job(&self, conv_id: i64) -> Result<()> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1064,7 +960,6 @@ impl WorkerManager {
         .map_err(|e| Error::Other(e.to_string().into()))?;
         let (snapshotted, remote) = result?;
         if let Some(remote) = remote.filter(|_| snapshotted) {
-            // The inbox triage chips read ai_attributes; refresh the page.
             self.emit_conversation_updated_for_remote(remote);
         }
         tracing::info!(
@@ -1076,9 +971,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// A2: extract durable customer facts into customer_memory. Summarize
-    /// role; skipped honestly when no endpoint is routed (memory extraction
-    /// is model-driven — there is no deterministic fallback to pretend with).
     async fn run_memory_job(&self, conv_id: i64) -> Result<()> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1121,8 +1013,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// A2: issue clustering over the last 14 days (the real Issue Radar
-    /// clusters). Classify role; skipped honestly without an endpoint.
     async fn run_clustering_job(&self) -> Result<()> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1156,16 +1046,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// A3: composer rewrite (shorten/expand/warmer/more_direct). Draft role;
-    /// user-triggered, so an unrouted role fails the job with the setup truth
-    /// instead of a silent skip — the composer is polling the job row.
-    ///
-    /// Clean-audit item 24: returns the rewritten text so the dispatcher
-    /// pins it to the job row (`jobs.result`) — the poll reads exactly
-    /// this job's output. `Ok(None)` means "completed without output"
-    /// (feature off / no endpoint / empty input): the poll then says so
-    /// honestly instead of filling the composer from a stale or foreign
-    /// historical run.
     async fn run_rewrite_job(&self, payload: &serde_json::Value) -> Result<Option<String>> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1222,14 +1102,6 @@ impl WorkerManager {
         Ok(Some(rewritten))
     }
 
-    /// A3: composer translation (18 languages, cached). Draft role; the run
-    /// row records only actual model calls — a cache hit costs nothing and
-    /// says so in its own response.
-    ///
-    /// Clean-audit item 24: returns the translated text so the dispatcher
-    /// pins it to the job row (`jobs.result`). Cache hits write NO
-    /// `ai_runs` row at all — the old poll's newest-run scrape picked a
-    /// stale or foreign run's text on exactly those paths.
     async fn run_translate_job(&self, payload: &serde_json::Value) -> Result<Option<String>> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1366,10 +1238,6 @@ impl WorkerManager {
         }
     }
 
-    /// A3: pre-send draft coaching review. The nine deterministic checks
-    /// always run; the AI layer joins only when the coaching feature is on
-    /// AND a Summarize endpoint is routed (review_draft persists the
-    /// upsert row the inbox coaching card reads).
     async fn run_coaching_job(&self, conv_id: i64, payload: &serde_json::Value) -> Result<()> {
         let draft: String = payload
             .get("draft")
@@ -1415,15 +1283,11 @@ impl WorkerManager {
         })
         .await
         .map_err(|e| Error::Other(e.to_string().into()))?;
-        // review_draft's inner result: Ok(..) = review persisted; the
-        // &'static str reasons ("not_found", "empty_draft") were validated
-        // above, so an Err here still deserves a log line, not silence.
         if let Err(reason) = review {
             let conn = self.lock();
             let _ = jobs::log_error(&conn, "workers", &format!("review_draft: {reason}"));
             return Ok(());
         }
-        // The inbox reads the persisted coaching_reviews row on reload.
         if let Some(remote) = self.remote_id_for_local(conv_id) {
             self.emit_conversation_updated_for_remote(remote);
         }
@@ -1436,8 +1300,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// A3: the on-demand AI layer of post-resolution QA. Classify role;
-    /// user-triggered, so missing setup fails the job honestly.
     async fn run_qa_ai_job(&self, conv_id: i64) -> Result<()> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1483,10 +1345,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// A3: the interaction-intelligence AI stage (Classify role) —
-    /// observation + recommendation merged on top of the heuristic card.
-    /// Automatic (not user-triggered): missing setup completes silently in
-    /// the log, matching the other A2 triage jobs.
     async fn run_interaction_job(&self, conv_id: i64) -> Result<()> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1523,10 +1381,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// A5: one copilot chat turn on the 22-tool agent. Agent role. Failures
-    /// are non-retryable by construction here — `copilot::chat` persists the
-    /// user message before the model call, so the outer retry loop must not
-    /// re-run it; the failure is recorded on the job the UI polls.
     async fn run_copilot_chat_job(&self, job_id: i64, payload: &serde_json::Value) -> Result<()> {
         let question: String = payload
             .get("question")
@@ -1587,8 +1441,6 @@ impl WorkerManager {
         .map_err(|e| Error::Other(e.to_string().into()));
         match outcome {
             Ok(Ok(_value)) => {
-                // Session + messages are persisted; both chat surfaces
-                // re-read them on invalidation.
                 if let Some(conv) = conversation_id
                     && let Some(remote) = self.remote_id_for_local(conv)
                 {
@@ -1607,7 +1459,6 @@ impl WorkerManager {
                 Ok(())
             }
             Ok(Err(e)) => {
-                // Non-retryable: the user message is already persisted.
                 let conn = self.lock();
                 jobs::fail(&conn, job_id, &e.message, false)?;
                 let _ = jobs::log_error(
@@ -1621,9 +1472,6 @@ impl WorkerManager {
         }
     }
 
-    /// A6: the golden-set runner on the routed Classify backend; the
-    /// fingerprint is stored after the run so maintenance only re-runs on
-    /// real prompt/role changes.
     async fn run_golden_job(&self) -> Result<()> {
         let (enabled, backend) = {
             let conn = self.lock();
@@ -1669,8 +1517,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// K1: the deterministic gap pipeline — friction findings first, then
-    /// gap candidates ("asked often, documented nowhere" and friends).
     async fn run_gap_rebuild_job(&self) -> Result<()> {
         let enabled = {
             let conn = self.lock();
@@ -1709,11 +1555,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// K2: the AI article-draft job. Feature-gated + Draft-role routed;
-    /// skips honestly when either is missing. Refusals (no grounded
-    /// evidence, duplicate queue row, unrouted backend) fail the job with
-    /// the honest message - the Knowledge page surfaces it from the job
-    /// row, and nothing lands in the queue ungrounded.
     async fn run_draft_article_job(&self, job_id: i64, payload: &serde_json::Value) -> Result<()> {
         let candidate_id = payload
             .get("candidateId")
@@ -1721,9 +1562,6 @@ impl WorkerManager {
             .unwrap_or(0);
         if candidate_id <= 0 {
             let conn = self.lock();
-            // Clean-audit item 84: the failure lands on the REAL job row —
-            // the pre-fix literal id 0 updated nothing, so the job sat in
-            // 'running' forever with its honest error written nowhere.
             jobs::fail(
                 &conn,
                 job_id,
@@ -1773,10 +1611,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// K3: the publish chain - upsert the Docs API draft, publish the
-    /// human-approved text, verify by re-syncing the article into the
-    /// local mirror. Only approved drafts may publish; every failure
-    /// records `publish_failed` + the error on the queue row.
     async fn run_publish_article_draft_job(
         &self,
         job_id: i64,
@@ -1816,7 +1650,6 @@ impl WorkerManager {
                 )?;
                 return Ok(());
             }
-            // Audit fix (C2, live): docs collection ids are hex ObjectIds (TEXT).
             let collection_remote: Option<String> = draft
                 .collection_local_id
                 .or_else(|| payload.get("collectionLocalId").and_then(|v| v.as_i64()))
@@ -1849,7 +1682,6 @@ impl WorkerManager {
             return Ok(());
         };
 
-        // Step 1: upsert the Docs API draft.
         let input = crate::helpscout::DocArticleDraftInput {
             collection_id: collection_remote.clone(),
             name: draft.title.clone(),
@@ -1885,7 +1717,6 @@ impl WorkerManager {
             )?;
         }
 
-        // Step 2: publish the final approved text.
         if let Err(e) = self
             .provider
             .publish_doc_article(remote_id.clone(), &draft.title, &draft.body)
@@ -1915,8 +1746,6 @@ impl WorkerManager {
             )?;
         }
 
-        // Step 3: verify by re-syncing the article into the local mirror
-        // (FTS + chunks re-index ride the same upsert path).
         match self.provider.get_doc_article(remote_id.clone()).await {
             Ok(Some(article)) => {
                 let collection_local = {
@@ -1938,9 +1767,6 @@ impl WorkerManager {
                 )?;
             }
             verify => {
-                // The publish succeeded but the verify fetch failed - the
-                // row stays `published` with the reason recorded; the next
-                // full docs sync re-syncs it anyway.
                 let msg = match verify {
                     Ok(None) => {
                         "The article published but the verify fetch found no article.".to_string()
@@ -1977,8 +1803,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// K4: the digest job - manual or scheduled; the Summarize role writes
-    /// the narrative when routed, and the digest is archived either way.
     async fn run_weekly_digest_job(&self, payload: &serde_json::Value) -> Result<()> {
         let enabled = {
             let conn = self.lock();
@@ -2026,11 +1850,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// K5: fetch one Reports API endpoint behind capability detection. A
-    /// 403 answer sets the plan-blocked verdict (one honest sentence in
-    /// the UI instead of empty charts); success caches the report and
-    /// marks the capability available; the empty provider records
-    /// not-connected.
     async fn run_fetch_hs_report_job(
         &self,
         job_id: i64,
@@ -2053,8 +1872,6 @@ impl WorkerManager {
             .to_string();
         if crate::reports_api::report_spec(&key).is_none() {
             let conn = self.lock();
-            // Clean-audit item 84: same as draft_article — the real job
-            // row takes the failure, not literal id 0.
             jobs::fail(&conn, job_id, "fetch_hs_report: unknown report key", false)?;
             return Ok(());
         }
@@ -2117,8 +1934,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// The local mirror id for a remote mailbox (0 when unknown — the
-    /// saved-reply re-read upserts against it like the sync stage does).
     fn mailbox_local_id(conn: &rusqlite::Connection, remote_id: i64) -> i64 {
         conn.query_row(
             "SELECT id FROM mailboxes WHERE remote_id = ?1",
@@ -2128,14 +1943,6 @@ impl WorkerManager {
         .unwrap_or(0)
     }
 
-    /// P2: send one live chat message under the platform's assigned-agent
-    /// rule. The message id was generated at enqueue time and rides in
-    /// the payload, so a retry after a timeout can never double-send —
-    /// the provider treats the platform's 422 "id value is already in
-    /// use" answer as delivered. A 400 (someone else's chat) or a 404
-    /// (the chat became a conversation) is a terminal failure that
-    /// carries the platform's own reason to the jobs table; anything
-    /// else (auth, rate limit, network) stays retryable.
     async fn run_send_chat_message_job(
         &self,
         job_id: i64,
@@ -2182,10 +1989,6 @@ impl WorkerManager {
         }
     }
 
-    /// P3: one saved-reply write (create / update / delete) straight to
-    /// the platform, followed by a re-read of the mailbox's saved
-    /// replies into the mirror — never an optimistic local edit. The
-    /// platform's required `name` is validated before the round trip.
     async fn run_saved_reply_write_job(
         &self,
         job_id: i64,
@@ -2224,15 +2027,6 @@ impl WorkerManager {
                     )?;
                     return Ok(());
                 }
-                // Clean-audit item 30: the v2 saved-replies API has no
-                // client-supplied id, so a retried create used to re-POST
-                // the payload and duplicate the reply on the platform —
-                // most often when the create itself had landed but the
-                // response or the post-write re-read timed out. The
-                // create is idempotent by its natural key instead: when
-                // the mailbox already holds a reply with this exact name
-                // and text, that twin is this job's earlier write, so the
-                // POST is skipped and the re-read below reflects it.
                 let existing = self.provider.list_saved_replies(mailbox_remote_id).await?;
                 let already_landed = existing
                     .iter()
@@ -2301,8 +2095,6 @@ impl WorkerManager {
             }
         }
 
-        // Re-read the platform's post-write list into the mirror: the
-        // table shows the platform's truth, never an optimistic edit.
         let replies = self.provider.list_saved_replies(mailbox_remote_id).await?;
         {
             let conn = self.lock();
@@ -2328,11 +2120,6 @@ impl WorkerManager {
         Ok(())
     }
 
-    /// P3: run one manual workflow on a conversation, resolving the
-    /// conversation number against the local mirror first (the run
-    /// action lives on the Operations Library tab). The platform
-    /// enforces same-inbox and manual-only and answers 400 otherwise —
-    /// that reason lands in the jobs table verbatim.
     async fn run_workflow_job(&self, job_id: i64, payload: &serde_json::Value) -> Result<()> {
         let workflow_remote_id = payload
             .get("workflowRemoteId")
@@ -2412,11 +2199,6 @@ impl WorkerManager {
         }
     }
 
-    /// P4 (D21): the webhook relay guard on a job — list the account's
-    /// hooks, re-register ours when the platform dropped, disabled or
-    /// pruned it (then remove the stale twin), and store the outcome for
-    /// the Settings and Sync Health surfaces. Not-configured is an
-    /// honest outcome, not an error.
     async fn run_webhook_health_job(&self) -> Result<()> {
         if self.provider.kind() == "empty" {
             let conn = self.lock();
@@ -2451,13 +2233,6 @@ impl WorkerManager {
             )?;
             return Ok(());
         }
-        // Audit fix (M6): the guard used to register a hook with an EMPTY
-        // secret when the relay URL was set but the stored secret was
-        // blank. Every delivery then failed signature verification (403),
-        // Help Scout discarded the event 10 times and deactivated the
-        // hook — and this very job re-registered the same doomed hook
-        // every 6 hours, forever. Refuse to register without a secret and
-        // surface the misconfiguration instead.
         if secret.trim().is_empty() {
             let conn = self.lock();
             crate::webhook_health::store_outcome(
@@ -2488,11 +2263,6 @@ impl WorkerManager {
                     verdict = %outcome.verdict,
                     "webhook health checked"
                 );
-                // 1.8.3: the Diagnostics page promises "webhook
-                // rejections" but the health check only ever wrote its
-                // outcome to the Sync Health snapshot — a failing check
-                // was invisible in the event log. Persist the interesting
-                // verdicts (failed -> error, healed -> info).
                 if outcome.verdict == "failed" {
                     let conn = self.lock();
                     let _ = crate::audit::log_event(
@@ -2516,8 +2286,6 @@ impl WorkerManager {
                 }
                 use crate::events::ServerEvent;
                 if healed {
-                    // A healed hook deserves an honest word: it means the
-                    // platform had silently stopped delivering events.
                     self.bus.emit(&ServerEvent::error_occurred(
                         "warn",
                         "the webhook was re-registered (it had been dropped or disabled)",

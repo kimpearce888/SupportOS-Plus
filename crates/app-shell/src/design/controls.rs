@@ -69,11 +69,6 @@ pub(super) fn chip_impl(
     response
 }
 
-// ---------------------------------------------------------------------------
-// Components: cards, sections, page headers, tables, empty states
-// ---------------------------------------------------------------------------
-
-/// A card: bordered surface with the theme's card background.
 pub fn card<R>(
     ui: &mut egui::Ui,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
@@ -93,7 +88,6 @@ pub fn card<R>(
     frame.show(ui, add_contents)
 }
 
-/// A card with a title (small, semibold) and optional muted hint.
 pub fn card_titled<R>(
     ui: &mut egui::Ui,
     title: &str,
@@ -113,7 +107,6 @@ pub fn card_titled<R>(
     })
 }
 
-/// Section heading inside a page or card.
 pub fn section_title(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
@@ -123,7 +116,6 @@ pub fn section_title(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// Muted secondary text.
 pub fn hint_text(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
@@ -132,10 +124,6 @@ pub fn hint_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// A minimal pager: `‹ prev   page 2 of 7   next ›` (clean-audit items
-/// 78/82: the Inbox and Customers lists were hard-capped at one page of
-/// rows with no way to reach the rest). Renders nothing when everything
-/// fits on one page. Returns the page delta to apply (-1, 0, +1).
 pub fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
     if pages <= 1 {
         return 0;
@@ -143,8 +131,6 @@ pub fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
     let mut delta = 0;
     ui.horizontal(|ui| {
         let t = tokens(ui);
-        // The disabled ends render as inert muted glyphs so the control
-        // keeps its shape at either boundary (no layout jump).
         if page > 0 {
             if button(ui, "‹ prev", ButtonVariant::Outline).clicked() {
                 delta = -1;

@@ -43,15 +43,6 @@ pub fn sweep(conn: &Connection, bus: Option<&crate::event_bus::EventBus>) -> Res
 
     let (created, processed_to) = run_sub_sweeps(conn, bus, cursor, &sweep_at)?;
 
-    // Clean-audit item 65: the cursor used to jump to `max_event_id` no
-    // matter what the event sweep actually read. The event lane reads at
-    // most 500 rows per sweep; with a bigger backlog the remainder was
-    // skipped FOREVER (the cursor sailed past it). The cursor now stops
-    // where the sweep's read stopped: at the 500th row when the cap hit,
-    // or at the table's ceiling when every matching event was processed
-    // (`processed_to` is `None` only when the read provably matched
-    // nothing, which is also safe to advance past — the type filter can
-    // never select those rows).
     let ceiling = max_event_id(conn);
     let next_cursor = match processed_to {
         Some(cap) => cap.min(ceiling).max(cursor),
@@ -63,10 +54,6 @@ pub fn sweep(conn: &Connection, bus: Option<&crate::event_bus::EventBus>) -> Res
     Ok(SweepOutcome { created })
 }
 
-/// `(created, processed_to)`: `processed_to` is the event id the
-/// conversation-events sweep's read stopped at when the 500-row cap hit
-/// (the cursor must not advance past it), or `None` when the read matched
-/// everything it could (or nothing at all).
 type SubSweepOutcome = (u32, Option<i64>);
 
 fn run_sub_sweeps(
@@ -130,9 +117,6 @@ fn load_conversation(conn: &Connection, id_or_remote: i64) -> Result<Option<Conv
     Ok(row)
 }
 
-/// The event lane's read cap: at most this many activity events are
-/// processed per sweep (clean-audit item 65 — the remainder stays queued
-/// behind the cursor instead of being skipped forever).
 const EVENT_SWEEP_CAP: usize = 500;
 
 fn sweep_conversation_events(
@@ -140,11 +124,6 @@ fn sweep_conversation_events(
     bus: Option<&crate::event_bus::EventBus>,
     after_event_id: i64,
 ) -> Result<(u32, Option<i64>)> {
-    // Clean-audit item 65: fetch one row PAST the cap. If it exists, the
-    // backlog exceeds what this sweep can process — only the first
-    // EVENT_SWEEP_CAP rows run, and the 500th row's id is returned so the
-    // caller parks the cursor there (the old code advanced the cursor to
-    // max_event_id and the >500 remainder was never looked at again).
     let mut events: Vec<(i64, EventRow)> = {
         let mut stmt = conn.prepare(
             "SELECT e.id, e.conversation_id, e.thread_local_id, e.event_type,
@@ -178,8 +157,6 @@ fn sweep_conversation_events(
         events.truncate(EVENT_SWEEP_CAP);
     }
     let processed_to = if hit_cap {
-        // Park the cursor at the last event this sweep actually processed;
-        // the surplus row (and anything behind it) is next sweep's work.
         Some(
             events
                 .last()
@@ -187,9 +164,6 @@ fn sweep_conversation_events(
                 .expect("hit_cap implies at least one row"),
         )
     } else {
-        // Every matching event after the cursor was processed; non-matching
-        // events can never be selected by the filter, so the caller may
-        // safely advance to the table ceiling.
         None
     };
     let mut created = 0u32;
@@ -407,13 +381,6 @@ fn sweep_failed_jobs(
     bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
-    // Audit item 125: the window selected `ORDER BY id DESC LIMIT 200`
-    // FIRST and filtered by stamp in Rust afterwards — already-swept rows
-    // filled the cap, and the oldest rows of a burst fell outside it and
-    // were never notified (the next sweep's stamp skips them forever).
-    // The stamp filter runs in SQL now (datetime() normalizes the mixed
-    // space/ISO-T formats, matching the Rust parse_stamp), so the cap can
-    // only ever hide rows that are still newer.
     let rows: Vec<SweepRow> = {
         let mut stmt = conn.prepare(
             "SELECT id, queue, type, error, completed_at FROM jobs
@@ -510,8 +477,6 @@ fn sweep_campaign_replies(
     };
     let mut created = 0u32;
     for (id, campaign_id, customer_local_id, replied_at, name, subject) in rows {
-        // The stamp only ever fed the removed Rust-side filter; the SQL
-        // filter guarantees it now, so the binding is an invariant check.
         let Some(_stamp) = replied_at else {
             continue;
         };
@@ -743,11 +708,6 @@ fn sweep_ratings(
     bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
-    // Audit item 125: same window repair as the other stamp lanes — the
-    // filter runs in SQL (datetime()-normalized) before the cap, so
-    // already-swept ratings can no longer fill the window and starve the
-    // oldest unrated ones; the stamp rides in the row now instead of a
-    // per-row re-query.
     type RatingRow = (
         i64,
         Option<i64>,
@@ -911,10 +871,6 @@ fn trim(s: &str, max: usize) -> String {
     }
 }
 
-/// Clean-audit batch 25 (item 65): the sweep cursor must never advance past
-/// events it did not process — the pre-fix `sweep` jumped the cursor to
-/// `max_event_id` after reading at most 500 rows, so any backlog beyond 500
-/// was skipped forever.
 #[cfg(test)]
 mod batch25_item65_tests {
     use super::*;
@@ -922,8 +878,6 @@ mod batch25_item65_tests {
     fn conn() -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        // A settled sync state so the sweep runs its lanes instead of
-        // initializing its cursor and returning.
         crate::sync_engine::set_state(&conn, "LIVE");
         conn
     }
@@ -964,9 +918,6 @@ mod batch25_item65_tests {
     fn a_backlog_beyond_the_cap_is_not_skipped_forever() {
         let conn = conn();
         let max_id = seed_backlog(&conn, 502);
-        // An already-initialized sweep (the very first sweep on a fresh DB
-        // only anchors its cursor at the ceiling; this test drives the
-        // steady-state behavior).
         crate::settings::set_i64(&conn, CURSOR_KEY, 0).expect("cursor seeded");
         crate::settings::set_string(&conn, SWEEP_AT_KEY, "2026-10-23 00:00:00")
             .expect("sweep_at seeded");
@@ -978,8 +929,6 @@ mod batch25_item65_tests {
             )
             .expect("the 500th event");
 
-        // First sweep: reads 501 rows, processes the first 500, and the
-        // cursor parks at the 500th event's id — NOT at max_event_id.
         let outcome = sweep(&conn, None).expect("first sweep");
         assert_eq!(
             outcome.created, 500,
@@ -1000,7 +949,6 @@ mod batch25_item65_tests {
             "the 501st event was NOT processed by the first sweep (pre-fix it was skipped forever)"
         );
 
-        // Second sweep drains the remainder and then reaches the ceiling.
         let outcome = sweep(&conn, None).expect("second sweep");
         assert_eq!(outcome.created, 2, "the two surplus events run now");
         let cursor = crate::settings::get_i64(&conn, CURSOR_KEY, -1).expect("cursor");
@@ -1017,7 +965,6 @@ mod batch25_item65_tests {
             "n:evt:customer_replied:evt-0501"
         ));
 
-        // Third sweep is quiet.
         let outcome = sweep(&conn, None).expect("third sweep");
         assert_eq!(outcome.created, 0, "nothing left to process");
     }
@@ -1080,11 +1027,6 @@ mod batch31_tests {
     use super::*;
     use rusqlite::{Connection, params};
 
-    /// Audit item 125: the sweep window selected `ORDER BY id DESC LIMIT
-    /// N` FIRST and filtered by stamp in Rust afterwards — already-swept
-    /// rows filled the cap and the oldest rows of a burst were never
-    /// notified. The stamp filter runs in SQL now: five new failures
-    /// buried under 205 already-swept ones still all notify.
     #[test]
     fn sweep_burst_oldest_are_not_dropped() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -1094,9 +1036,6 @@ mod batch31_tests {
         let sweep_at = "2026-10-24 10:00:00";
         crate::settings::set_string(&conn, SWEEP_AT_KEY, sweep_at).expect("sweep_at");
 
-        // The burst: five NEW failures seeded FIRST (lowest ids), then 205
-        // already-swept failures. The old DESC LIMIT 200 window never
-        // reached the burst.
         for i in 1..=5_i64 {
             conn.execute(
                 "INSERT INTO jobs (queue, type, status, error, completed_at)

@@ -115,9 +115,6 @@ pub fn enforce_retention(conn: &Connection, retention_days: i64) -> Result<usize
         ("application_errors", "timestamp"),
         ("audit_log", "timestamp"),
         ("ai_runs", "created_at"),
-        // Clean-audit item 67: the translation cache grows without bound
-        // otherwise — every cached translation lives forever while every
-        // other retention-covered table is pruned.
         ("translation_cache", "created_at"),
     ] {
         let sql = format!(
@@ -148,15 +145,10 @@ mod tests {
         conn
     }
 
-    /// Clean-audit item 67: `enforce_retention` prunes the translation
-    /// cache like every other retention-covered table. Before, a cached
-    /// translation lived forever (the cache is written on every
-    /// non-cached translate; nothing else ever removed rows).
     #[test]
     fn retention_prunes_stale_translation_cache_rows() {
         let conn = migrated();
         crate::translation::ensure_translation_schema(&conn).expect("translation schema");
-        // One row inside the window, one row past it, one row written now.
         conn.execute(
             "INSERT INTO translation_cache
                  (cache_key, source_lang, target_lang, purpose, source_text,
@@ -189,8 +181,6 @@ mod tests {
         assert_eq!(fresh, 1, "the 1-day-old cache row survives");
     }
 
-    /// A disabled retention policy (`retention_days <= 0`) still prunes
-    /// nothing — the translation cache included.
     #[test]
     fn retention_disabled_prunes_nothing() {
         let conn = migrated();

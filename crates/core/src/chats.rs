@@ -1,20 +1,3 @@
-//! P2: live Beacon chats — the local mirror of Help Scout's Chat API.
-//!
-//! Platform reality (Chat API + Webhooks docs, verified 2026-10-21):
-//! * Chat ids are **UUID strings**, unlike every numeric id the Inbox API
-//!   uses. There is **no list endpoint** — chats arrive through the five
-//!   `beacon.chat.*` webhook events (`created`, `customer.replied`,
-//!   `agent.replied`, `assigned`, `ended`), each carrying the chat object.
-//! * A chat is not a conversation: Help Scout creates the conversation only
-//!   when the chat *ends*, and `GET /v2/chats/{id}` answers **404** from
-//!   then on. The local mirror therefore keeps ended chats (the webhook's
-//!   last word) while a follow-up fetch honestly reports them gone.
-//! * Only the assigned agent may message the customer (`PUT
-//!   /v2/chats/{id}/messages/{uuid}`); an unassigned chat is accepted
-//!   automatically, a chat held by someone else answers 400. The message
-//!   id is a caller-generated UUID — the platform answers 422 "id value
-//!   is already in use" instead of double-posting, so retries reuse it.
-
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -23,7 +6,6 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::helpscout::{HsChat, HsChatEvent, HsChatParticipant};
 
-/// m059: the live-chat mirror.
 pub fn apply_m059_beacon_chats(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS beacon_chats (
@@ -58,7 +40,6 @@ pub fn apply_m059_beacon_chats(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// One row of the mirror, as the Live chats page renders it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MirrorChat {
     pub chat_id: String,
@@ -78,16 +59,12 @@ pub struct MirrorChat {
 }
 
 impl MirrorChat {
-    /// Whether the chat can still be answered (`ended` chats cannot).
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.state != "ended"
     }
 }
 
-/// One stored chat message (webhook events and our own sends share the
-/// message-id key, so the platform's own `agent.replied` echo of our send
-/// lands as the same row).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MirrorMessage {
     pub chat_id: String,
@@ -112,12 +89,6 @@ fn parse_participant(v: &Value) -> Option<HsChatParticipant> {
     })
 }
 
-/// Parse a Chat API / webhook chat object into [`HsChat`] — the one
-/// parser shared by the real provider's `GET /v2/chats/{id}` and the
-/// webhook ingest. Tolerant by design: the platform embeds the event list
-/// on the GET and carries the newest state on webhook events, and the
-/// mirror stores what is actually there, never an invented value.
-/// `None` when the payload is not a chat object at all (no string id).
 #[must_use]
 pub fn parse_chat_object(v: &Value) -> Option<HsChat> {
     let id = v.get("id").and_then(|x| x.as_str())?.to_string();
@@ -150,10 +121,6 @@ pub fn parse_chat_object(v: &Value) -> Option<HsChat> {
     })
 }
 
-/// Parse one `beacon.chat.*` webhook payload into an [`HsChatEvent`].
-/// Webhook bodies carry the chat object either directly or under
-/// `"chat"` — both shapes are accepted. `None` when no chat object rides
-/// along (the caller marks the event failed rather than pretending).
 #[must_use]
 pub fn parse_chat_event(event_type: &str, payload: &Value) -> Option<HsChatEvent> {
     let chat_value = payload
@@ -166,14 +133,6 @@ pub fn parse_chat_event(event_type: &str, payload: &Value) -> Option<HsChatEvent
     })
 }
 
-/// Ingest one `beacon.chat.*` webhook event into the mirror. All five
-/// event types carry the chat object; `beacon.chat.ended` additionally
-/// closes the chat and links the conversation it collapsed into.
-///
-/// # Errors
-/// [`Error::Validation`] when the payload carries no chat object — the
-/// webhook layer marks the event failed with this reason instead of
-/// pretending it was processed.
 pub fn ingest_event(conn: &Connection, event_type: &str, payload: &Value) -> Result<()> {
     let Some(event) = parse_chat_event(event_type, payload) else {
         return Err(Error::Validation(format!(
@@ -240,8 +199,6 @@ fn upsert_chat(conn: &Connection, event: &HsChatEvent) -> Result<()> {
             last_event_at,
             serde_json::to_string(chat).unwrap_or_default(),
             chat.conversation_remote_id,
-            // The chat object carries the conversation's remote id; the
-            // number is resolved against the conversations mirror later.
             Option::<i64>::None,
         ],
     )?;
@@ -299,12 +256,6 @@ fn record_event_messages(conn: &Connection, chat: &HsChat) -> Result<()> {
     Ok(())
 }
 
-/// List mirrored chats — open ones first (newest event first), ended
-/// ones after them, so the page can answer Beacon visitors while the
-/// chat is live and still show what collapsed into a conversation.
-///
-/// # Errors
-/// Propagates the sqlite read failure.
 pub fn list_chats(conn: &Connection, include_ended: bool) -> Result<Vec<MirrorChat>> {
     let filter = if include_ended {
         String::new()
@@ -342,10 +293,6 @@ pub fn list_chats(conn: &Connection, include_ended: bool) -> Result<Vec<MirrorCh
     Ok(rows)
 }
 
-/// One mirrored chat by its UUID id.
-///
-/// # Errors
-/// Propagates the sqlite read failure.
 pub fn chat_by_id(conn: &Connection, chat_id: &str) -> Result<Option<MirrorChat>> {
     let chat = conn
         .query_row(
@@ -377,10 +324,6 @@ pub fn chat_by_id(conn: &Connection, chat_id: &str) -> Result<Option<MirrorChat>
     Ok(chat)
 }
 
-/// The stored messages of one chat, oldest first.
-///
-/// # Errors
-/// Propagates the sqlite read failure.
 pub fn messages_for(conn: &Connection, chat_id: &str) -> Result<Vec<MirrorMessage>> {
     let mut stmt = conn.prepare(
         "SELECT chat_id, message_id, direction, sender_name, text, created_at
@@ -404,14 +347,6 @@ pub fn messages_for(conn: &Connection, chat_id: &str) -> Result<Vec<MirrorMessag
 
 static MESSAGE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// A fresh caller-generated message id for `PUT /v2/chats/{id}/messages/{uuid}`.
-///
-/// The platform contract only demands that the id be **ours** and unique
-/// per message: a retry that reuses it is answered 422 "id value is
-/// already in use" instead of double-posting. Generated from the wall
-/// clock, the process id and a monotonic counter, formatted in the
-/// 8-4-4-4-12 UUID shape — no new dependency for a value that never
-/// needs to be a real RFC 4122 variant.
 #[must_use]
 pub fn new_message_id() -> String {
     let nanos = chrono::Utc::now()
@@ -431,14 +366,6 @@ pub fn new_message_id() -> String {
     )
 }
 
-/// Record our own sent message in the mirror. The platform's own
-/// `beacon.chat.agent.replied` webhook echo arrives with the same
-/// caller-generated id, so the shared `(chat_id, message_id)` key makes
-/// the echo a no-op — the message exists once, whichever path lands
-/// first.
-///
-/// # Errors
-/// Propagates the sqlite write failure.
 pub fn record_outgoing_message(
     conn: &Connection,
     chat_id: &str,
@@ -458,12 +385,6 @@ pub fn record_outgoing_message(
     Ok(())
 }
 
-/// The assigned-agent rule, resolved for the send box in plain language
-/// (the Live chats page renders [`SendBlock::hint`] verbatim):
-/// * open + held by another agent → blocked with the 400 reason the
-///   platform will give;
-/// * open + unassigned → sending accepts the chat automatically;
-/// * ended → closed, pointing at the conversation the chat became.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SendBlock {
     pub can_send: bool,
@@ -472,10 +393,6 @@ pub struct SendBlock {
     pub hint: String,
 }
 
-/// Resolve whether the send box may act on this chat.
-///
-/// # Errors
-/// Propagates the sqlite read failure.
 pub fn send_block(
     conn: &Connection,
     chat_id: &str,
@@ -525,7 +442,6 @@ pub fn send_block(
         }),
         _ => {
             let hint = if chat.assignee_remote_id.is_some() {
-                // Assigned to us: no rule note needed.
                 String::new()
             } else {
                 "no agent is assigned — sending accepts this chat automatically".to_string()
@@ -583,8 +499,6 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM beacon_chats", [], |r| r.get(0))
             .expect("beacon_chats exists");
         assert_eq!(before, 0);
-        // Re-applying the migration is a no-op (fresh boots run it once,
-        // upgrades run it once; both paths must be safe).
         apply_m059_beacon_chats(&conn).expect("re-apply m059");
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM beacon_chat_messages", [], |r| {
@@ -611,8 +525,6 @@ mod tests {
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-1")).expect("created");
         let payload = replied_payload("c-1", "m-1", "hello there");
         ingest_event(&conn, "beacon.chat.customer.replied", &payload).expect("replied");
-        // The platform retries the same event — the shared message id
-        // keeps the mirror honest: one message, not two.
         ingest_event(&conn, "beacon.chat.customer.replied", &payload).expect("replayed");
 
         let messages = messages_for(&conn, "c-1").expect("messages");
@@ -654,13 +566,10 @@ mod tests {
         });
         ingest_event(&conn, "beacon.chat.ended", &ended).expect("ended");
 
-        // The mirror keeps ended chats: the platform stops serving them,
-        // the webhook's last word is all there is.
         let chat = chat_by_id(&conn, "c-1").expect("read").expect("row");
         assert_eq!(chat.state, "ended");
         assert_eq!(chat.conversation_remote_id, Some(12345));
 
-        // A later non-ended event must not reopen an ended chat.
         let late = serde_json::json!({"id": "c-1", "mailboxId": 3, "state": "open"});
         ingest_event(&conn, "beacon.chat.customer.replied", &late).expect("late event");
         let chat = chat_by_id(&conn, "c-1").expect("read").expect("row");
@@ -692,7 +601,6 @@ mod tests {
         let err = ingest_event(&conn, "beacon.chat.created", &serde_json::json!({"id": 1}))
             .expect_err("numeric id is not a chat uuid object");
         assert!(err.to_string().contains("no chat object"), "{err}");
-        // Nothing was written.
         assert!(chat_by_id(&conn, "1").expect("read").is_none());
     }
 
@@ -706,24 +614,20 @@ mod tests {
         });
         ingest_event(&conn, "beacon.chat.assigned", &assigned).expect("assigned");
 
-        // Someone else's chat: blocked, with the platform's own reason.
         let held = send_block(&conn, "c-1", Some(42)).expect("block");
         assert!(!held.can_send);
         assert!(held.held_by_other);
         assert!(held.hint.contains("400"), "{}", held.hint);
 
-        // Our own chat: the box is open, no rule note needed.
         let mine = send_block(&conn, "c-1", Some(9)).expect("block");
         assert!(mine.can_send);
         assert!(mine.hint.is_empty());
 
-        // An unassigned chat is sendable and says what sending does.
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-2")).expect("second");
         let free = send_block(&conn, "c-2", Some(9)).expect("block");
         assert!(free.can_send);
         assert!(free.hint.contains("accepts"), "{}", free.hint);
 
-        // An ended chat points at the conversation it became.
         let ended = serde_json::json!({
             "id": "c-2", "mailboxId": 3, "state": "ended",
             "conversationId": 777
@@ -741,8 +645,6 @@ mod tests {
         let mid = new_message_id();
         record_outgoing_message(&conn, "c-1", &mid, "we are on it").expect("record");
 
-        // The platform's agent.replied echo carries our own id back —
-        // one message row, whichever lands first.
         let echo = serde_json::json!({
             "id": "c-1", "mailboxId": 3, "state": "open",
             "events": [{"id": mid, "type": "agent.message.created",
@@ -768,8 +670,6 @@ mod tests {
     #[test]
     fn a_chat_missing_from_the_mirror_answers_none_and_guards_honestly() {
         let conn = fresh_conn();
-        // Nothing ingested: every read answers "absent", never a zeroed
-        // phantom chat, and the send box says why it cannot act.
         assert!(chat_by_id(&conn, "ghost-chat").expect("read").is_none());
         assert!(
             messages_for(&conn, "ghost-chat")

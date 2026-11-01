@@ -1,25 +1,13 @@
-//! flock-based single-instance guard (plan: app-shell).
-//!
-//! The Tauri shell used the `tauri-plugin-single-instance` crate; the
-//! native shell replaces it with an advisory `flock(2)` on a lock file in
-//! the data directory. Replaces the plugin's "focus the existing window"
-//! behavior with a clear message and a non-zero exit code, since there is
-//! no IPC channel between two native processes yet.
-
 use std::fs::{File, OpenOptions};
 use std::io::ErrorKind;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-/// Name of the advisory lock file inside the data directory.
 pub const LOCK_FILE_NAME: &str = "instance.lock";
 
-/// Failure modes of [`acquire`].
 #[derive(Debug)]
 pub enum AcquireError {
-    /// Another process holds the lock.
     AlreadyRunning,
-    /// The lock file could not be created or locked.
     Io(std::io::Error),
 }
 
@@ -43,15 +31,12 @@ impl std::error::Error for AcquireError {
     }
 }
 
-/// A held single-instance lock. Keep it alive for the whole process
-/// lifetime; dropping it (or exiting) releases the lock.
 pub struct InstanceLock {
     file: File,
     path: PathBuf,
 }
 
 impl InstanceLock {
-    /// Path of the lock file this instance holds.
     #[must_use]
     pub fn path(&self) -> PathBuf {
         self.path.clone()
@@ -60,17 +45,10 @@ impl InstanceLock {
 
 impl Drop for InstanceLock {
     fn drop(&mut self) {
-        // SAFETY: the fd comes from a live File we own exclusively; flock
-        // on a valid fd cannot violate memory safety.
         let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
     }
 }
 
-/// Acquire the single-instance lock for `data_dir`.
-///
-/// # Errors
-/// Returns [`AcquireError::AlreadyRunning`] when another instance holds
-/// the lock, [`AcquireError::Io`] on filesystem failures.
 pub fn acquire(data_dir: &Path) -> Result<InstanceLock, AcquireError> {
     std::fs::create_dir_all(data_dir).map_err(AcquireError::Io)?;
     let path = data_dir.join(LOCK_FILE_NAME);
@@ -81,7 +59,6 @@ pub fn acquire(data_dir: &Path) -> Result<InstanceLock, AcquireError> {
         .truncate(false)
         .open(&path)
         .map_err(AcquireError::Io)?;
-    // SAFETY: flock on a valid fd opened above; no memory-safety impact.
     let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if rc != 0 {
         let err = std::io::Error::last_os_error();

@@ -5930,3 +5930,74 @@ lesson); core lib 495 passed / 0 failed / 4 ignored (--test-threads=1,
 lines across exactly the 5 target files (imports only) + the ai records;
 `git diff` review = zero test-body bytes, zero production bytes, zero
 gate/workflow bytes.
+
+## Batch RF-11 — comment deletion (LAST batch of the program order) — completed 2026-11-01
+
+All comments deleted in one final wave (module docs, item docs, inline) —
+11,929 comment lines censused at open, 11,871 deleted, **58 gate-locked
+lines kept**; rustfmt + full gates green after. The ten items:
+
+RF-11-1 (census + protection contract) — Rust-lexer census of all four
+crates: 11,929 comment lines (11,927 line comments + 2 block comments —
+pages/ai_center.rs:742, pages/knowledge.rs:1133 `/* DC sp-1 */`; zero
+`/**`/`/*!` doc blocks) ≈ 693 KB. Protections recorded at open and held
+throughout: (a) the stripper is a real lexer (strings, raw strings, byte
+strings, chars, lifetimes, nested block comments) — comment-like
+sequences inside string literals (SQL `--`, `https://`, security.rs's
+CSS `/*…*/` prose) structurally unreachable; (b) every DS-id-bearing
+comment line in design/mod.rs (58) kept byte-identical → gate output
+unchanged; (c) `missing_docs` probe: core/catalog's later
+`#![allow(..., missing_docs)]` overrides the earlier `#![warn(...,
+missing_docs)]` (rustc -D warnings probe) → doc deletion fires zero
+missing_docs warnings, **zero lib.rs attribute edits**; (d) zero
+`style-lint:allow` opt-outs existed; (e) `#[doc(hidden)]`
+(pages/operations.rs:242) is an attribute — stays.
+
+RF-11-2..RF-11-9 (the eight deletion waves, each stripped + compiled +
+gated) — core root wave 1 (41 files, activity→inbox) and wave 2 (42
+files) incl. the NO-TOUCH root members ai_center.rs, db.rs,
+maintenance.rs, response_state_sql.rs; core subdirs wave 1 (workers/,
+helpscout_real/, ai_pipeline/, sync_engine/) and wave 2 (all remaining,
+incl. migrations/ and its NO-TOUCH intelligence.rs — MIGRATIONS SQL
+string contents byte-identical incl. the `--` sequences inside the
+strings); catalog/src + xtask/src incl. bin/; app-shell root + app/;
+app-shell pages/ (the two DC sp-1 block comments die here —
+gate_traceability does not read pages/); design/ (mod.rs with the 58
+DS-id lines kept, controls.rs) + crates/app-shell/tests/ (24 kittest
+suites + style_lint.rs). NO-TOUCH interpretation recorded: NO-TOUCH =
+zero semantic/code edits — comments die with the batch per the RF-8
+record ("intelligence.rs:46 comment … dies at RF-11"); the five modules'
+non-comment bytes stayed byte-identical (0 insertions in their diffs).
+
+RF-11-10 (closing gate) — the full battery, all green (numbers in the
+verification table below). Structural proofs beyond the battery:
+string-literal multiset identity vs HEAD for all 179 changed .rs files
+(0 failures); residual census = exactly 58 comment lines, all DS-id
+lines in design/mod.rs; DS lines 58→58 with zero deleted.
+
+**Disclosed deviation — four compiler-suggested collapses**: clippy's
+`collapsible_if` is comment-aware; deleting the comments exposed four
+latently-collapsible `if`s the intervening comments had suppressed:
+people_store/mod.rs:706 (Clean-audit item 47 comment), overlays.rs:119
+("Window close button / Escape cancel" comment), pages/operations.rs:
+337, pages/settings.rs:810. Fixed per the machine suggestions (one by
+hand, three via `cargo clippy --fix`, then fmt-reflowed) — zero
+behavior change, proven by the full suite. These four sites are the
+batch's only non-comment code bytes.
+
+Scope: .rs files only — scripts/*.py, ci.yml, Cargo.toml, README/USER_
+MANUAL and the ai/*.md records keep their comments (harness and records
+are not program source).
+
+Verification (all green): fmt clean (applied + re-checked after the
+last content edit); cargo check --workspace --all-targets 0 errors;
+clippy `--workspace --all-targets -D warnings` 0 (after the four
+disclosed collapses); gate_traceability OK — identical line: 23 routes
+/ 20 DC tags / 27 ids, alias declared True; gate_no_simulation clean;
+verify-icons clean; style_lint 2 passed / 0 failed (explicit — RF-6
+lesson); core lib 495 passed / 0 failed / 4 ignored (--test-threads=1,
+353.10s); app-shell lib 237/0 (204.41s); xtask 11/0; doc-tests 0/0
+(four crates). Kittest 24 suites: CI lane (runs on this push). Churn
+proof: +268/−12,099 across 181 files (179 .rs + ai/plan.md +
+ai/progress.md); the +268 = comment-trimmed code lines, the four
+collapses, fmt reflows, and the ai records.

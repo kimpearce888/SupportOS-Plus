@@ -1,22 +1,10 @@
-//! Command palette (port of the web `components/command_palette.rs` and
-//! `pages/command_palette.rs`).
-//!
-//! Ctrl/Cmd+K opens a global overlay: one text field debounced through the
-//! local search engine (`spp_core::search::search`, the `/api/search`
-//! route without the HTTP hop), arrow keys move the selection, Enter
-//! resolves the hit's web href (`/inbox/conversation/{id}`,
-//! `/customers/{id}`, `/knowledge?doc={id}`) into a
-//! [`NavRequest`](crate::pages::NavRequest) the shell applies.
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 
 use crate::pages::NavRequest;
 
-/// Palette hit cap (web: `MAX_HITS`).
 pub const MAX_HITS: usize = 12;
 
-/// One palette hit (port of the web `PaletteHit`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteHit {
     pub scope: String,
@@ -27,7 +15,6 @@ pub struct PaletteHit {
 }
 
 impl PaletteHit {
-    /// Parse from a search-hit JSON row.
     #[must_use]
     pub fn from_json(v: &serde_json::Value) -> Self {
         Self {
@@ -55,7 +42,6 @@ impl PaletteHit {
         }
     }
 
-    /// Build from a typed search hit (the in-process search result).
     #[must_use]
     pub fn from_search_hit(hit: &spp_core::search::SearchHit) -> Self {
         Self {
@@ -68,13 +54,11 @@ impl PaletteHit {
     }
 }
 
-/// Cap the hit list (web: `take_hits`).
 #[must_use]
 pub fn take_hits(hits: &[PaletteHit]) -> &[PaletteHit] {
     &hits[..hits.len().min(MAX_HITS)]
 }
 
-/// Move the selection by `delta`, clamped (web: `move_selection`).
 #[must_use]
 pub fn move_selection(selected: usize, len: usize, delta: i64) -> usize {
     if len == 0 {
@@ -84,8 +68,6 @@ pub fn move_selection(selected: usize, len: usize, delta: i64) -> usize {
     next.clamp(0, len as i64 - 1) as usize
 }
 
-/// Resolve a web href into a navigation request (the router navigation
-/// the web palette performed).
 #[must_use]
 pub fn href_to_nav(href: &str) -> Option<NavRequest> {
     let rest = href.strip_prefix('/')?;
@@ -107,29 +89,14 @@ pub fn href_to_nav(href: &str) -> Option<NavRequest> {
     None
 }
 
-/// The palette overlay state.
 pub struct CommandPalette {
     open: bool,
     query: String,
     hits: Vec<PaletteHit>,
     selected: usize,
-    /// Set by [`Self::open`] so the next rendered pass requests keyboard
-    /// focus for the query field. DEFECT-03 (qa-audit/20261019T050847Z):
-    /// the palette used to open unfocused and silently swallowed
-    /// keystrokes until the user clicked inside the input.
     wants_focus: bool,
-    /// Deferred Enter handling: the query row renders inside a nested
-    /// closure, so the take flag is stored here and read after the row.
     palette_take: bool,
-    /// FIND-011: the palette window's on-screen rect from the last
-    /// rendered frame — clicks outside it dismiss the overlay. The old
-    /// full-screen Area catcher's hit-testing was runtime-disproven
-    /// (clicks fell through to the UI underneath at most positions), so
-    /// dismissal now keys off the window rect directly: layer-independent
-    /// by construction.
     last_window_rect: egui::Rect,
-    /// FIND-011: set by [`Self::open`] so the very click that opened the
-    /// palette (same frame) cannot immediately dismiss it again.
     just_opened: bool,
 }
 
@@ -148,13 +115,11 @@ impl CommandPalette {
         }
     }
 
-    /// Whether the overlay is open.
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.open
     }
 
-    /// Open the palette.
     pub fn open(&mut self) {
         self.open = true;
         self.query.clear();
@@ -164,9 +129,6 @@ impl CommandPalette {
         self.just_opened = true;
     }
 
-    /// Toggle between open and closed. FIND-011: the mouse triggers only
-    /// ever called [`Self::open`], so with the palette open they could
-    /// never dismiss it.
     pub fn toggle(&mut self) {
         if self.open {
             self.close();
@@ -175,12 +137,10 @@ impl CommandPalette {
         }
     }
 
-    /// Close the palette.
     pub fn close(&mut self) {
         self.open = false;
     }
 
-    /// Toggle from a Ctrl/Cmd+K key press handled by the shell.
     pub fn toggle_shortcut(&mut self, ctx: &egui::Context) {
         let pressed = (ctx.input(|i| i.modifiers.command || i.modifiers.ctrl)
             && ctx.input(|i| i.key_pressed(egui::Key::K)))
@@ -201,8 +161,6 @@ impl CommandPalette {
             self.selected = 0;
             return;
         }
-        // The web debounced 200ms and raced generations; the local query
-        // is fast enough to run per keystroke change.
         let result = db.with_read(|conn| {
             spp_core::search::search(
                 conn,
@@ -223,26 +181,11 @@ impl CommandPalette {
         self.selected = 0;
     }
 
-    /// Render the overlay; returns a navigation request when Enter was
-    /// pressed on a hit.
     pub fn ui(&mut self, ctx: &egui::Context, db: &DbHandle) -> Option<NavRequest> {
         self.toggle_shortcut(ctx);
         if !self.open {
             return None;
         }
-        // FIND-011 + audit fix M19: outside clicks dismiss the palette AND
-        // must not leak to the UI underneath. The original clean-audit-133
-        // catcher failed at runtime (its layer never actually covered the
-        // pointer), so FIND-011 replaced it with a pointer-position check —
-        // which dismisses reliably but still lets the same click activate
-        // the widget underneath (the fall-through consequence M19 records).
-        // The egui 0.37 hit-test stops at the top-most layer that fully
-        // covers the pointer's interact radius, so a full-screen catcher in
-        // the Foreground order — registered just BELOW the palette window,
-        // which is now Foreground too — genuinely absorbs every click the
-        // window itself does not take. The pointer-position check stays as
-        // a layer-independent backstop (e.g. for the one frame before the
-        // catcher's layer has entered the hit-test order).
         let screen = ctx.input(|i| i.viewport_rect());
         let catcher = egui::Area::new(egui::Id::unique("spp_command_palette_catcher"))
             .order(egui::Order::Foreground)
@@ -274,10 +217,6 @@ impl CommandPalette {
         let frame_border = frame_tokens.border;
         let icon_muted = frame_tokens.muted_foreground;
         let win = egui::Window::new("Command Palette")
-            // M19: same Foreground order as the catcher, but shown after
-            // it — within one order egui ranks layers by registration, so
-            // the window sits directly above the catcher and keeps its
-            // own clicks.
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 80.0))
             .fixed_size([560.0, 360.0])
@@ -295,11 +234,10 @@ impl CommandPalette {
                         offset: [0, 8],
                         blur: 32,
                         spread: 0,
-                        color: frame_tokens.shadow, // DC e2 (RS-12 token port)
+                        color: frame_tokens.shadow,
                     }),
             )
             .show(ctx, |ui| {
-                // Query row with a leading search icon.
                 ui.horizontal(|ui| {
                     let (id, rect) = ui.allocate_space(egui::vec2(17.0, 17.0));
                     crate::icons::Icon::Search.paint_at(ui.painter(), rect, icon_muted);
@@ -312,8 +250,6 @@ impl CommandPalette {
                             .hint_text("search tickets, customers, knowledge, issues…"),
                     );
                     if self.wants_focus {
-                        // DEFECT-03: open with the keyboard already in the
-                        // query field, like the web palette auto-focus.
                         response.request_focus();
                         self.wants_focus = false;
                     }
@@ -324,16 +260,6 @@ impl CommandPalette {
                     let take =
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     self.palette_take = take;
-                    // Clean-audit item 72: egui 0.37 single-line TextEdits
-                    // surrender focus on Enter — with nothing to confirm
-                    // (zero hits) the field used to sit defocused and every
-                    // following keystroke was swallowed until the user
-                    // clicked back in. Grab the focus right back so typing
-                    // continues (a hit-bearing Enter keeps the old
-                    // confirm-and-close path).
-                    // Clean-audit item 133: a same-frame Enter after a
-                    // query change is suppressed below — the field keeps
-                    // focus so Enter can be pressed again on fresh hits.
                     if take && (query_changed || take_hits(&self.hits).is_empty()) {
                         response.request_focus();
                     }
@@ -373,18 +299,12 @@ impl CommandPalette {
                     crate::design::hint_text(ui, "↑ ↓ to move · Enter to open · Esc to close");
                 }
                 if take
-                    // Clean-audit item 133: an Enter processed in the same
-                    // frame the query changed must not confirm the PREVIOUS
-                    // query's result set — the search for the new text only
-                    // runs after this window closes. Suppress the stale
-                    // confirm; the fresh hits land next frame.
                     && !query_changed
                     && let Some(hit) = hits.get(self.selected)
                 {
                     nav = href_to_nav(&hit.href);
                     self.open = false;
                 }
-                // Arrow-key navigation.
                 if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
                     self.selected = move_selection(self.selected, hits.len(), 1);
                 }
@@ -392,8 +312,6 @@ impl CommandPalette {
                     self.selected = move_selection(self.selected, hits.len(), -1);
                 }
             });
-        // FIND-011: remember the window rect for the outside-click check
-        // (the anchor and size are fixed, so last frame's rect is current).
         if let Some(win) = &win {
             self.last_window_rect = win.response.rect;
         }
@@ -404,7 +322,6 @@ impl CommandPalette {
     }
 }
 
-/// One full-width palette hit row (scope badge + title + muted snippet).
 fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui::Response {
     let t = crate::design::tokens(ui);
     let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 40.0));
@@ -452,7 +369,6 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
         f32::INFINITY,
         egui::TextStyle::Small,
     );
-    // Scope badge on the left, title next, snippet muted below.
     let scope_w = scope_galley.size().x + 16.0;
     let badge_rect = egui::Rect::from_min_max(
         egui::pos2(
@@ -619,8 +535,6 @@ mod tests {
         assert!(empty.title.is_empty());
     }
 
-    /// Headless egui passes for the DEFECT-02/03 proofs: render the
-    /// palette the way the shell does and drive the real event loop.
     fn seeded_palette_ctx() -> (egui::Context, CommandPalette, DbHandle) {
         let db = fixture(vec![(
             "conv",
@@ -644,7 +558,6 @@ mod tests {
     fn palette_takes_focus_on_open_and_keystrokes_reach_the_query() {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
-        // Pass 1: the palette renders once; the query field requests focus.
         ctx.run_pass(egui::RawInput::default(), |ctx| {
             palette.ui(ctx, &db);
         })
@@ -654,8 +567,6 @@ mod tests {
             "DEFECT-03: the query field must take keyboard focus when the palette opens"
         );
 
-        // Pass 2: typing lands in the query with no click — proof that the
-        // auto-focus actually delivers keystrokes.
         let mut typing = egui::RawInput::default();
         typing.events.push(egui::Event::Text("Export".into()));
         ctx.run_pass(typing, |ctx| {
@@ -684,10 +595,6 @@ mod tests {
         })
         .drop_without_applying_deltas();
 
-        // Pass 3: Enter while the field is focused. egui 0.37 single-line
-        // TextEdits surrender focus on Enter, so `lost_focus() && Enter`
-        // (the web-port idiom audited as DEFECT-02) must fire and confirm
-        // the selected hit.
         let mut enter = egui::RawInput::default();
         enter.events.push(egui::Event::Key {
             key: egui::Key::Enter,
@@ -709,21 +616,15 @@ mod tests {
         assert!(!palette.is_open());
     }
 
-    /// Clean-audit item 133: an Enter processed in the same frame the
-    /// query changed must not confirm the PREVIOUS query's result set —
-    /// the hits still belong to the old text. The confirm is suppressed,
-    /// the palette stays open, and the fresh search lands.
     #[test]
     fn audit133_same_frame_enter_confirms_nothing_stale() {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
-        // Pass 1: open + focus.
         ctx.run_pass(egui::RawInput::default(), |ctx| {
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
 
-        // Pass 2: type "Export" — hits land for that query.
         let mut typing = egui::RawInput::default();
         typing.events.push(egui::Event::Text("Export".into()));
         ctx.run_pass(typing, |ctx| {
@@ -732,9 +633,6 @@ mod tests {
         .drop_without_applying_deltas();
         assert!(!palette.hits.is_empty(), "the fixture matches Export");
 
-        // Pass 3: append text AND press Enter in the SAME frame. The hits
-        // still belong to "Export" — the search for the new text has not
-        // run. Pre-fix this navigated to the stale hit and closed.
         let mut type_and_enter = egui::RawInput::default();
         type_and_enter.events.push(egui::Event::Text("zz".into()));
         type_and_enter.events.push(egui::Event::Key {
@@ -753,9 +651,6 @@ mod tests {
         assert!(palette.is_open(), "the palette stays open for fresh hits");
         assert_eq!(palette.query, "Exportzz", "the new query was recorded");
 
-        // Pass 4: the fresh (empty — nothing matches "Exportzz") results
-        // have landed and the field holds focus; a dry Enter keeps the
-        // palette open and the keystrokes flowing (item 72 intact).
         assert!(palette.hits.is_empty(), "Exportzz matches nothing");
         let mut enter = egui::RawInput::default();
         enter.events.push(egui::Event::Key {
@@ -774,19 +669,10 @@ mod tests {
         assert!(palette.is_open(), "a dry Enter keeps the palette open");
     }
 
-    /// Clean-audit item 133 + audit fix M19: clicking outside the palette
-    /// window closes it (the web overlay's backdrop), and — since M19's
-    /// full-screen Foreground catcher — the dismissing click is genuinely
-    /// absorbed: a clickable widget underneath (order Middle) never
-    /// receives it, instead of being pressed through the overlay.
     #[test]
     fn audit133_clicking_outside_the_palette_closes_it() {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
-        // The "page UI underneath": a clickable victim widget on a Middle
-        // layer at the exact position we will click (bottom-left, far from
-        // the center-top anchored palette window). Pre-M19 the dismissing
-        // click fell through and pressed it.
         let victim_pos = egui::pos2(10.0, 300.0);
         let victim_clicked = std::rc::Rc::new(std::cell::Cell::new(false));
         let render_victim = |ctx: &egui::Context, flag: &std::cell::Cell<bool>| {
@@ -810,10 +696,6 @@ mod tests {
         .drop_without_applying_deltas();
         assert!(palette.is_open());
 
-        // A press, then a release in the bottom-left corner — far from
-        // the center-top anchored window (560 wide, starts at y=80). egui
-        // registers the click on the release pass; the motion event puts
-        // the synthetic pointer on screen first.
         let mut move_pointer = egui::RawInput::default();
         move_pointer
             .events
@@ -858,22 +740,15 @@ mod tests {
         );
     }
 
-    /// Clean-audit item 72: Enter with ZERO hits must not strand the
-    /// query field defocused — egui single-line TextEdits surrender
-    /// focus on Enter, and the pre-fix palette left it surrendered, so
-    /// every keystroke after a fruitless Enter was swallowed until the
-    /// user clicked back in. The field re-grabs focus; typing continues.
     #[test]
     fn audit72_enter_on_zero_hits_keeps_the_query_focused() {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
-        // Pass 1: open + focus.
         ctx.run_pass(egui::RawInput::default(), |ctx| {
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
 
-        // Type a query that matches nothing.
         let mut typing = egui::RawInput::default();
         typing.events.push(egui::Event::Text("zzzznomatch".into()));
         ctx.run_pass(typing, |ctx| {
@@ -885,8 +760,6 @@ mod tests {
             "the fixture has no hit for this query"
         );
 
-        // Pass 3: Enter — nothing to confirm, so the palette stays open
-        // AND the query field must still hold keyboard focus afterwards.
         let mut enter = egui::RawInput::default();
         enter.events.push(egui::Event::Key {
             key: egui::Key::Enter,
@@ -903,9 +776,6 @@ mod tests {
         assert!(nav.is_none(), "nothing to confirm — no navigation");
         assert!(palette.is_open(), "the palette stays open on a dry Enter");
 
-        // Pass 4: the proof — the next keystroke still lands in the query
-        // field without any click. Pre-fix, the field sat defocused and
-        // this character vanished.
         let mut more = egui::RawInput::default();
         more.events.push(egui::Event::Text("x".into()));
         ctx.run_pass(more, |ctx| {

@@ -1,59 +1,17 @@
-//! One-click workspace reset (Settings → Help Scout → Workspace data).
-//!
-//! "Workspace data" is every business record the app holds: the full
-//! Help Scout mirror (conversations, customers, threads, ratings, ...),
-//! the knowledge base, incidents, reports, AI records, and the
-//! sync/webhook bookkeeping that tracked how it got there — including
-//! anything left over from the demo dataset that shipped before 1.2.0.
-//! The reset walks the **live schema** instead of a hand-maintained
-//! delete list: every table not on the [`KEEP_TABLES`] allowlist is
-//! emptied. A test pins the allowlist against the migrated schema, so a
-//! name typo fails the build, and a table added by a future migration
-//! lands in the purge set by default — its author must make a
-//! conscious KEEP decision here to preserve it.
-//!
-//! The reset also writes `sync_state = NEW` inside the same
-//! transaction: the next boot with credentials configured immediately
-//! starts a fresh initial sync (since 1.2.0 `NEW` means "pull
-//! everything", not "do nothing"), and without credentials the app
-//! stays empty — nothing is ever simulated.
-//!
-//! Foreign keys make the dance delicate: deleting mirror rows while
-//! child tables still hold rows would fire immediate cascades or
-//! constraint errors under live enforcement, so the reset runs with
-//! enforcement suspended (the same pattern as boot migrations since
-//! 1.1.2) and restores consistency itself: a `PRAGMA foreign_key_check`
-//! sweep deletes every row left dangling by the bulk delete —
-//! repeatedly, until the schema checks clean — so the commit is either
-//! fully consistent or the whole reset rolls back. KEEP rows that
-//! reference purged content (a business-hours row for a mailbox that
-//! no longer exists) die in the sweep: config tied to deleted content
-//! is stale by definition.
-
 use std::path::Path;
 
 use rusqlite::Connection;
 
 use crate::error::{Error, Result};
 
-/// Tables that survive the reset: migration bookkeeping, application
-/// settings and diagnostics, encrypted credentials, connection state,
-/// and every user-configured artifact (views, rules, templates,
-/// definitions, connector configs). Everything else is business
-/// content — synced or left over from the pre-1.2.0 demo — and is
-/// deleted.
 const KEEP_TABLES: &[&str] = &[
-    // Migration bookkeeping and app state
     "_migrations",
     "app_state",
-    // Application configuration and diagnostics
     "application_settings",
     "application_errors",
-    // Encrypted credentials and connection state
     "secrets",
     "oauth_tokens",
     "oauth_states",
-    // User-configured views, rules, templates, definitions
     "inbox_views",
     "inbox_fields",
     "inbox_field_options",
@@ -74,9 +32,6 @@ const KEEP_TABLES: &[&str] = &[
     "products",
 ];
 
-/// What the reset did: rows deleted, tables emptied (only tables that
-/// actually held rows), vector collections and payload entries dropped,
-/// downloaded attachment files removed from disk.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResetReport {
     pub rows_deleted: u64,
@@ -85,37 +40,12 @@ pub struct ResetReport {
     pub attachment_files_deleted: u64,
 }
 
-/// Delete all business content from the database (workspace reset).
-///
-/// Keeps the tables on [`KEEP_TABLES`], resets the vector store next to
-/// the database (`data_dir/vectors/vectors.db`) when `data_dir` is
-/// given, and leaves credentials, settings and connection tokens
-/// untouched. Runs in one transaction — a failure rolls the database
-/// back to its pre-reset state. `sync_state` is set to `NEW` so the
-/// next boot either pulls the account fresh (credentials configured)
-/// or stays honestly empty.
-///
-/// # Errors
-/// Returns [`Error::Migration`]-style failures from SQLite, or a
-/// `Config` error when the post-reset `foreign_key_check` sweep fails
-/// to converge (should be impossible; the transaction rolls back).
 pub fn reset_workspace_data(conn: &mut Connection, data_dir: Option<&Path>) -> Result<ResetReport> {
-    // Enforcement is suspended for the whole reset; the sweep below
-    // restores a verified-consistent state before the commit. The
-    // pragma is a no-op inside a transaction, so it must run here,
-    // before `purge_in_transaction` begins one.
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     let report = purge_in_transaction(conn);
     conn.pragma_update(None, "foreign_keys", "ON")?;
     let mut report = report?;
 
-    // Audit fix (M14): with secure_delete the freed pages were already
-    // zeroed in place; a VACUUM after the reset additionally compacts the
-    // file (drops the free pages entirely and truncates WAL residue), so
-    // nothing recoverable remains at all. The reset is an explicit
-    // destructive action, so the one-off rewrite cost is acceptable; a
-    // failure (tight disk, a concurrent reader) must never fail an
-    // already-successful reset, so it is logged and swallowed.
     if report.rows_deleted > 0
         && let Err(e) = conn.execute_batch("VACUUM")
     {
@@ -135,20 +65,11 @@ pub fn reset_workspace_data(conn: &mut Connection, data_dir: Option<&Path>) -> R
                  (content is re-embedded through the pending pipeline)"
             ),
         }
-        // Clean-audit item 49: the attachments table is purged above, but
-        // the downloaded files survived on disk — customer documents kept
-        // sitting in data_dir/attachments after the user wiped the
-        // workspace. The directory is now emptied with the same best-effort
-        // posture as the vector purge.
         report.attachment_files_deleted = purge_attachment_files(&dir.join("attachments"));
     }
     Ok(report)
 }
 
-/// Clean-audit item 49: remove every downloaded attachment file from
-/// `data_dir/attachments`. Best effort like the vector purge — an
-/// undeletable entry is skipped with a warning, never failing the reset;
-/// subdirectories are left to their owner (none exist today).
 fn purge_attachment_files(attachments_dir: &Path) -> u64 {
     let Ok(entries) = std::fs::read_dir(attachments_dir) else {
         return 0;
@@ -171,12 +92,6 @@ fn purge_attachment_files(attachments_dir: &Path) -> u64 {
 }
 
 fn purge_in_transaction(conn: &mut Connection) -> Result<ResetReport> {
-    // Audit fix (M14): the reset is the app's "wipe customer data"
-    // control, but plain DELETEs leave the purged rows recoverable in the
-    // file's free pages and WAL. secure_delete = ON makes SQLite zero
-    // every freed cell/page at delete time, on this connection's deletes
-    // below. Best-effort by design: if the pragma errors, the reset must
-    // still proceed (warned) — a wipe must not be blockable by a pragma.
     if let Err(e) = conn.pragma_update(None, "secure_delete", "ON") {
         tracing::warn!(
             error = %e,
@@ -185,8 +100,6 @@ fn purge_in_transaction(conn: &mut Connection) -> Result<ResetReport> {
         );
     }
     let result = purge_tables(conn);
-    // Restore normal (cheap) delete behavior for the rest of the session,
-    // whatever the purge outcome was.
     if let Err(e) = conn.pragma_update(None, "secure_delete", "OFF") {
         tracing::warn!(error = %e, "secure_delete could not be restored to OFF");
     }
@@ -197,7 +110,6 @@ fn purge_tables(conn: &mut Connection) -> Result<ResetReport> {
     let mut report = ResetReport::default();
     let tx = conn.transaction()?;
 
-    // (name, create-sql) of every user table, in schema order.
     let tables: Vec<(String, String)> = {
         let mut stmt = tx.prepare(
             "SELECT name, COALESCE(sql, '') FROM sqlite_master \
@@ -208,9 +120,6 @@ fn purge_tables(conn: &mut Connection) -> Result<ResetReport> {
             .collect()
     };
 
-    // Virtual tables (FTS5, vec0): DELETE FROM goes through the module
-    // and maintains the shadow tables; the shadows themselves must
-    // never be touched directly.
     let virtual_tables: Vec<String> = tables
         .iter()
         .filter(|(_, sql)| sql.contains("USING fts5") || sql.contains("USING vec0"))
@@ -222,7 +131,7 @@ fn purge_tables(conn: &mut Connection) -> Result<ResetReport> {
             .iter()
             .any(|v| name.as_str() != v.as_str() && name.starts_with(&format!("{v}_")));
         if is_shadow {
-            continue; // owned by the virtual table module
+            continue;
         }
         if virtual_tables.iter().any(|v| v == name) || !KEEP_TABLES.contains(&name.as_str()) {
             let deleted = tx
@@ -235,15 +144,8 @@ fn purge_tables(conn: &mut Connection) -> Result<ResetReport> {
         }
     }
 
-    // Fresh sync state, atomically with the delete: the next boot with
-    // credentials starts a clean initial pull (`NEW`), and without
-    // credentials the app stays empty (nothing is ever simulated).
     crate::sync_engine::set_state(&tx, "NEW");
 
-    // Restore consistency: delete rows that dangle after the bulk
-    // delete (children of purged parents, recursively). Convergence is
-    // guaranteed — every pass strictly removes rows — but the loop is
-    // bounded so a pathological schema cannot spin forever.
     for pass in 0..64 {
         let dangling: Vec<(String, Option<i64>)> = {
             let mut stmt = tx.prepare("SELECT \"table\", rowid FROM pragma_foreign_key_check")?;
@@ -266,9 +168,6 @@ fn purge_tables(conn: &mut Connection) -> Result<ResetReport> {
                     report.rows_deleted += 1;
                 }
                 None => {
-                    // WITHOUT ROWID children report NULL; empty the whole
-                    // child table (none exist today; this is the safe
-                    // fallback if one ever appears).
                     let deleted = tx
                         .execute(&format!("DELETE FROM \"{table}\""), [])
                         .map_err(|e| Error::Config(format!("prune of {table} failed: {e}")))?;
@@ -325,8 +224,6 @@ mod tests {
             "KEEP_TABLES names missing from the schema (typo? table renamed?): {unknown:?}\n\
              all tables: {tables:?}"
         );
-        // And the sweep target exists: at least one content table is
-        // outside the keep list.
         let purged_tables = tables
             .iter()
             .filter(|t| !KEEP_TABLES.contains(&t.as_str()))
@@ -341,7 +238,6 @@ mod tests {
     fn purge_clears_content_preserves_config_and_is_repeatable() {
         let mut conn = migrated_conn();
 
-        // Business content in representative tables.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject) VALUES (1, 5001, 'demo')",
             [],
@@ -369,7 +265,6 @@ mod tests {
             [],
         )
         .expect("webhook event");
-        // A mailbox for the dangling-config sweep case below.
         conn.execute(
             "INSERT INTO mailboxes (remote_id, name) VALUES (7, 'Support')",
             [],
@@ -377,11 +272,7 @@ mod tests {
         .expect("mailbox");
         let mailbox_local_id: i64 = conn.last_insert_rowid();
 
-        // User configuration that must survive.
         crate::settings::set_string(&conn, "display_timezone", "Asia/Dhaka").expect("setting");
-        // Two saved replies: one standalone (must survive), one tied to
-        // the demo mailbox (must die in the dangling sweep with the
-        // purged mailboxes table).
         conn.execute(
             "INSERT INTO saved_replies (name, text) VALUES ('greeting', 'Hi there!')",
             [],
@@ -425,12 +316,7 @@ mod tests {
             );
         }
         for (table, expected) in [
-            // display_timezone (seeded) + the sync_state row the reset
-            // itself writes (asserted by value below). The retired demo
-            // rows are gone: m050 deletes them at migration time.
             ("application_settings", 2),
-            // Both replies: the standalone one survives; the mailbox-bound
-            // one was pruned by the dangling sweep.
             ("saved_replies", 1),
             ("oauth_tokens", 1),
         ] {
@@ -445,14 +331,9 @@ mod tests {
             .expect("present");
         assert_eq!(tz, "Asia/Dhaka");
 
-        // The reset arms a fresh first pull: sync_state is NEW (boot
-        // starts the initial sync immediately when credentials exist,
-        // and nothing is simulated otherwise).
         assert_eq!(crate::sync_engine::get_state(&conn), "NEW");
-        // And the retired demo settings rows are not resurrected.
         assert!(!crate::settings::get_bool(&conn, "demo_mode", false).unwrap_or(false));
 
-        // The post-reset schema checks foreign-key clean.
         let violations: i64 = conn
             .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
                 r.get(0)
@@ -460,7 +341,6 @@ mod tests {
             .expect("fk check");
         assert_eq!(violations, 0);
 
-        // Idempotent: a second reset succeeds and deletes nothing.
         let again = reset_workspace_data(&mut conn, None).expect("second reset");
         assert_eq!(
             again.rows_deleted, 0,
@@ -475,7 +355,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
 
-        // A vector collection with one point (via the public store API).
         {
             let store = crate::vectorstore_sqlitevec::SqliteVecStore::open(
                 &crate::vectorstore_sqlitevec::store_dir(&dir).join("vectors.db"),
@@ -506,10 +385,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Clean-audit item 49: downloaded attachment files are business
-    /// content on disk — the reset must empty data_dir/attachments along
-    /// with the attachments table, or customer documents keep sitting in
-    /// the data directory after the user wiped the workspace.
     #[test]
     fn audit49_reset_removes_downloaded_attachment_files() {
         let mut conn = migrated_conn();
@@ -525,7 +400,6 @@ mod tests {
         let file_b = attachments.join("13-35-screenshot.png");
         std::fs::write(&file_a, b"customer document").expect("write a");
         std::fs::write(&file_b, b"customer image").expect("write b");
-        // An unrelated subdirectory is not ours to touch.
         let other = dir.join("vectors");
         std::fs::create_dir_all(&other).expect("other dir");
 

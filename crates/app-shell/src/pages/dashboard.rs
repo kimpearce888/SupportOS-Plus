@@ -1,28 +1,3 @@
-//! Dashboard page (port of the web `pages/dashboard.rs`).
-//!
-//! The model re-implements the `/api/analytics/dashboard` SQL from
-//! `core::http::routes::analytics` as typed queries over the local
-//! connection — same predicates, same rounding, no JSON layer and no HTTP
-//! round-trip. Reads are pure: the HTTP route's `daily_metrics` cache
-//! upsert is a write-on-read side effect of the request path and is
-//! intentionally not reproduced here.
-//!
-//! RS-17 (wave A) rebuild on **Design Contract v1.0 archetype DS-A-02**
-//! (docs/audit/design-contract-v1.md §4): PageHeader → block stack — the
-//! lab's scope card (three `ds-tool-rows` of DS-C-06 chips), the DS-C-03
-//! statGrid (twelve metric cards), the per-day chart card, the breakdown
-//! cards as DS-C-23 bar rows (the lab's `brk`), the channel-metrics and
-//! mailbox-comparison tables as DS-C-05 data tables, the AI-badged issue
-//! radar, and the closing C-1 quirk on the by-channel data-layer bug. The
-//! conformed lab reference is `mockups/design-lab/pages-ds.js`
-//! (`DS.definePage("dashboard", …)`): no hero (A-4), no tabs, no counter
-//! pill — the twelve stat cards ARE the counts.
-//!
-//! Behavior, queries, and data flow are unchanged (decisions.md D6:
-//! presentation only). Chip clicks still re-run the same scope queries
-//! immediately, invalidation still re-reads on the next frame, and
-//! `Sync now` still routes through the same scoped fetch.
-
 use eframe::egui;
 use rusqlite::Connection;
 use spp_core::db::DbHandle;
@@ -31,7 +6,6 @@ use crate::chart;
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Date ranges offered by the web page.
 pub const RANGES: [(i64, &str); 4] = [
     (7, "7 days"),
     (30, "30 days"),
@@ -39,28 +13,24 @@ pub const RANGES: [(i64, &str); 4] = [
     (365, "1 year"),
 ];
 
-/// Channel filter values ("" = all).
 const CHANNELS: [(&str, &str); 3] = [
     ("", "All channels"),
     ("email", "Email"),
     ("chat", "Chat (Beacon)"),
 ];
 
-/// (name, count) breakdown row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameCount {
     pub name: String,
     pub count: i64,
 }
 
-/// One point of the per-day series.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DailyPoint {
     pub date: String,
     pub value: i64,
 }
 
-/// Per-channel metric row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelMetric {
     pub channel: String,
@@ -69,7 +39,6 @@ pub struct ChannelMetric {
     pub resolution_avg_min: Option<i64>,
 }
 
-/// Mailbox comparison row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailboxComparison {
     pub mailbox_id: i64,
@@ -84,7 +53,6 @@ pub struct MailboxComparison {
     pub total_ratings: i64,
 }
 
-/// Typed dashboard payload (the analytics route's JSON shape).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DashboardData {
     pub range_from: String,
@@ -111,16 +79,11 @@ pub struct DashboardData {
     pub mailbox_comparison: Vec<MailboxComparison>,
 }
 
-/// Filters the dashboard is computed over.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashboardScope {
     pub days: i64,
     pub mailbox_ids: Vec<i64>,
-    /// `None` = all channels; `Some("email" | "chat")` otherwise.
     pub channel: Option<String>,
-    /// RS-4-11 clock seam: the instant the 30-day window derives from.
-    /// `None` (production) = the wall clock; tests pin a fixed instant so
-    /// the rendered range text is constant and the goldens never drift.
     pub today: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -157,17 +120,8 @@ fn name_counts(
         .unwrap_or_default()
 }
 
-/// Load the full dashboard payload for `scope`.
-///
-/// Read-only; safe to call on every invalidation tick.
 #[must_use]
 pub fn load_dashboard(conn: &Connection, scope: &DashboardScope) -> DashboardData {
-    // RS-4-11 clock seam: the window derives from the pinned anchor when the
-    // scope carries one; production scopes leave it `None` (wall clock).
-    // The anchored instant flows to the SQL as `?2`, which also feeds the
-    // 7d-stale backlog predicate — `julianday(?2)` replaced the DB engine's
-    // `julianday('now')` so pinning the scope pins every clock the page
-    // reads (regression test: backlog_staleness_derives_from_the_pinned_anchor).
     let now = scope.today.unwrap_or_else(chrono::Utc::now);
     let from = spp_core::business_hours::iso_days_ago_at(scope.days, now);
     let to = spp_core::business_hours::now_iso_millis_at(now);
@@ -464,7 +418,6 @@ pub fn load_dashboard(conn: &Connection, scope: &DashboardScope) -> DashboardDat
     }
 }
 
-/// Mailbox chips row: `(id, name)`.
 #[must_use]
 pub fn mailboxes(conn: &Connection) -> Vec<(i64, String)> {
     conn.prepare("SELECT id, name FROM mailboxes ORDER BY id")
@@ -475,13 +428,11 @@ pub fn mailboxes(conn: &Connection) -> Vec<(i64, String)> {
         .unwrap_or_default()
 }
 
-/// Issue-radar alerts (same data the web page polled every 2 minutes).
 #[must_use]
 pub fn radar_alerts(conn: &Connection) -> Vec<serde_json::Value> {
     spp_core::analytics::issue_radar_impl(conn)
 }
 
-/// Chart-ready `[[x, y]]` pairs: x = day index, y = new conversations.
 #[must_use]
 pub fn daily_new_points(data: &DashboardData) -> Vec<[f64; 2]> {
     data.daily_new
@@ -491,10 +442,7 @@ pub fn daily_new_points(data: &DashboardData) -> Vec<[f64; 2]> {
         .collect()
 }
 
-/// The interactive page state.
 pub struct DashboardPage {
-    /// R8 (D5): outcome note for the page's "Sync now" action — the
-    /// completion itself is reported by the global sync toast.
     pub sync_note: String,
 
     scope: DashboardScope,
@@ -517,17 +465,13 @@ impl DashboardPage {
         }
     }
 
-    /// Mark dirty: the next frame reloads everything (scope, data, radar).
     pub fn invalidate(&mut self) {
         self.data = None;
     }
 
-    /// RS-4-11 clock seam: pin the instant the page's windows derive from.
-    /// Tests call this with a fixed anchor so the rendered range text is
-    /// constant; production never pins (the wall clock rules).
     pub fn pin_today(&mut self, today: chrono::DateTime<chrono::Utc>) {
         self.scope.today = Some(today);
-        self.data = None; // the next frame reloads through the anchor
+        self.data = None;
     }
 
     fn reload(&mut self, db: &DbHandle) {
@@ -544,8 +488,6 @@ impl DashboardPage {
         self.error = None;
     }
 
-    /// Render the page; reloads lazily when data is missing (first frame or
-    /// after an invalidation).
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -556,20 +498,12 @@ impl DashboardPage {
             self.reload(db);
         }
 
-        // DS-C-01 PageHeader: title + subtitle, right cluster = the sync
-        // composite (A-8). egui right_to_left puts the first added widget
-        // rightmost, so the add order below paints [Sync now] [status line]
-        // — the lab's DS.syncControl(). The lab's dashboard meta carries no
-        // counter pill; the twelve DS-C-03 stat cards below are the counts.
         design::page_header(
             ui,
             "Dashboard",
             Some("Local metrics · sources labeled Help Scout / local / AI-derived everywhere"),
             |ui| {
                 if !self.sync_note.is_empty() {
-                    // The in-flight/already-running note: the lab's unclassed
-                    // `.ds-status-line` state (text-2) — the completion tone
-                    // is the global toast's job (R8, D5).
                     design::hint_text(ui, &self.sync_note);
                 }
                 if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
@@ -579,10 +513,6 @@ impl DashboardPage {
                     )
                     .clicked()
                 {
-                    // R8 (D5): this used to be a local-only "Reload" that silently
-                    // re-read sqlite and looked like a refresh. It now performs a
-                    // real scoped fetch and reports the outcome; the invalidation
-                    // below re-reads whatever arrives.
                     match engine {
                         Some(engine) => {
                             if crate::pages::sync_health::spawn_sync_action(
@@ -604,7 +534,6 @@ impl DashboardPage {
             },
         );
 
-        // Scope filters.
         design::card(ui, |ui| {
             ui.horizontal(|ui| {
                 design::field_label(ui, "Range");
@@ -664,9 +593,6 @@ impl DashboardPage {
             }
         };
 
-        // DS-C-03 statGrid — the lab's twelve stat cards; the responsive
-        // column count is egui's equivalent of the lab's `auto-fill
-        // minmax(150px, 1fr)` grid.
         let width = ui.available_width();
         let cols = if width < 640.0 {
             2
@@ -711,7 +637,6 @@ impl DashboardPage {
             });
         ui.add_space(10.0);
 
-        // Per-day chart.
         let points = daily_new_points(data);
         let range_hint = format!(
             "{} → {} · {} points",
@@ -733,10 +658,6 @@ impl DashboardPage {
         });
         ui.add_space(10.0);
 
-        // Breakdowns — the lab's two-col pairs of `brk` cards: DS-C-23 slim
-        // bar rows scaled to the card's max; the by-channel card carries the
-        // lab's `note` (the data-layer bug, also footnoted by the closing
-        // quirk). The channel-metrics DS-C-05 table pairs with "By team".
         let breakdown_cols = if width < 760.0 { 1 } else { 2 };
         egui::Grid::new("dashboard-breakdowns")
             .num_columns(breakdown_cols)
@@ -760,10 +681,8 @@ impl DashboardPage {
                     }
                     ui.end_row();
                 }
-                // The channel-metrics table pairs with the last breakdown.
                 channel_metrics_table(ui, &data.channel_metrics);
                 if breakdown_cols == 2 {
-                    // Placeholder keeps the grid balanced.
                     ui.label("");
                 }
                 ui.end_row();
@@ -775,8 +694,6 @@ impl DashboardPage {
 
         radar_panel(ui, &self.radar);
 
-        // The lab's closing quirk (DC C-1): the by-channel distribution
-        // ignores the channel chip — receipt cited, kept honest.
         ui.add_space(10.0);
         design::quirk(
             ui,
@@ -793,7 +710,6 @@ impl Default for DashboardPage {
     }
 }
 
-/// Trim an ISO timestamp down to its date (`YYYY-MM-DD`).
 fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
     match iso.split_once('T') {
         Some((date, _)) => std::borrow::Cow::Borrowed(date),
@@ -801,8 +717,6 @@ fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// One breakdown card — the lab's `brk`: title + optional note over a body
-/// of DS-C-23 slim bar rows scaled to the card's max count.
 fn breakdown(ui: &mut egui::Ui, title: &str, note: &str, rows: &[NameCount]) {
     design::card_titled(
         ui,
@@ -928,7 +842,6 @@ fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value]) {
             }
             for (i, alert) in alerts.iter().enumerate() {
                 if i > 0 {
-                    // The lab's `.ds-row + .ds-row` hairline separators.
                     design::divider(ui);
                 }
                 let title = super::str_field(alert, "title");
@@ -939,9 +852,6 @@ fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value]) {
                     .map(|a| a.len())
                     .unwrap_or(0);
                 ui.horizontal(|ui| {
-                    // The lab's radar rows carry the AI badge (G-2: AI-
-                    // derived content is always violet) with the raw
-                    // severity token as its text.
                     design::badge(ui, &severity, BadgeTone::Ai);
                     ui.label(
                         egui::RichText::new(format!("{title} · {conversations} conversations",))
@@ -981,7 +891,7 @@ mod tests {
         assert_eq!(data.active_conversations, 1);
         assert_eq!(data.pending_conversations, 1);
         assert_eq!(data.closed_conversations, 2);
-        assert_eq!(data.unassigned, 0); // all assigned to user 5
+        assert_eq!(data.unassigned, 0);
         assert_eq!(data.replies_sent, 1);
         assert_eq!(data.ratings_great, 1);
         assert_eq!(data.ratings_okay, 1);
@@ -989,22 +899,19 @@ mod tests {
 
         let mailboxes: Vec<&NameCount> = data.by_mailbox.iter().collect();
         assert_eq!(mailboxes.len(), 2);
-        assert_eq!(mailboxes[0].name, "Support"); // id 1 first, more convs
+        assert_eq!(mailboxes[0].name, "Support");
         assert_eq!(mailboxes[0].count, 3);
 
         assert_eq!(data.by_tag.len(), 2);
         assert_eq!(data.by_channel.len(), 2);
         assert_eq!(data.channel_metrics.len(), 2);
-        assert_eq!(data.daily_new.len(), 1); // all seeded today
+        assert_eq!(data.daily_new.len(), 1);
         assert_eq!(data.daily_new[0].value, 4);
         assert!(data.first_response_avg_min.is_some());
     }
 
     #[test]
     fn backlog_staleness_derives_from_the_pinned_anchor() {
-        // RS-4-11: the 7d-stale predicate reads the scope's anchored `to`
-        // (`julianday(?2)`), not the DB engine's clock — pinning `today`
-        // must control which open conversations count as stale.
         let db = fixture(Vec::new());
         let anchor = chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 1, 15, 12, 0, 0)
             .single()
@@ -1013,8 +920,6 @@ mod tests {
             for (id, status, updated_days_ago) in
                 [(1i64, "active", 8i64), (2, "pending", 3)]
             {
-                // 8 days before the anchor -> stale at the anchor;
-                // 3 days before the anchor -> fresh at the anchor.
                 let ts = spp_core::business_hours::iso_days_ago_at(updated_days_ago, anchor);
                 conn.execute(
                     "INSERT INTO conversations (id, remote_id, number, subject, preview, status,
@@ -1036,7 +941,6 @@ mod tests {
             }
         });
 
-        // Pinned scope: only the 8-day-stale conversation counts.
         let scope = DashboardScope {
             today: Some(anchor),
             ..DashboardScope::default()
@@ -1047,9 +951,6 @@ mod tests {
             "the 8d-stale conversation counts at the anchor"
         );
 
-        // Wall-clock scope (production path): the fixture rows are pinned in
-        // the past (2026-01), so both are stale against the real `now` —
-        // proof the anchor actually moves the predicate.
         let wall = db.with_read(|conn| load_dashboard(conn, &DashboardScope::default()));
         assert_eq!(
             wall.backlog, 2,
@@ -1074,9 +975,6 @@ mod tests {
         db.with_read(|conn| {
             let data = load_dashboard(conn, &only_mailbox_one);
             assert_eq!(data.new_conversations, 1);
-            // `by_channel` deliberately ignores the channel filter (it shows
-            // the distribution — same as the HTTP route), but the mailbox
-            // scope applies.
             assert_eq!(data.by_channel.len(), 1);
             assert_eq!(data.by_channel[0].name, "email");
 
@@ -1108,7 +1006,6 @@ mod tests {
     fn radar_alerts_run_against_seeded_db() {
         let db = fixture(Vec::new());
         let alerts = db.with_read(radar_alerts);
-        // No ai_runs rows → no alerts, but the query must not error.
         assert!(alerts.is_empty());
     }
 

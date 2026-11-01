@@ -3,14 +3,6 @@ pub fn build_interaction_strategy_block(
     conn: &Connection,
     conversation_local_id: i64,
 ) -> Option<String> {
-    // Clean-audit item 40: this used to return a hard-coded None, so the
-    // draft prompt's "COMMUNICATION APPROACH" section was unreachable —
-    // the interaction machinery computed recommendations that no prompt
-    // ever saw. The block now renders the conversation's stored
-    // interaction recommendation (AI-saved), falling back to the
-    // deterministic heuristic approach from its stored signals, plus
-    // the customer's durable communication preferences and the facts
-    // they already provided (so the draft never asks for them again).
     use crate::interaction_engine as engine;
 
     let stored = engine::get_latest_current_interaction(conn, conversation_local_id)
@@ -47,8 +39,6 @@ pub fn build_interaction_strategy_block(
         .map(|prefs| prefs.into_iter().map(|p| p.preference).collect())
         .unwrap_or_default();
 
-    // What the customer already told us in this conversation's newest
-    // messages — the draft must not ask for these again.
     let already_provided: Vec<String> = conn
         .prepare(
             "SELECT COALESCE(body_text, '') FROM conversation_threads

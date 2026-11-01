@@ -1,22 +1,3 @@
-//! AI Center page (port of the web `pages/ai_center.rs`).
-//!
-//! Redesigned with the shadcn-style design system (`crate::design`):
-//! AI-derived content is marked with a Sparkles icon and an “AI” badge,
-//! while operational state (connection, run statuses) uses the semantic
-//! success/neutral/destructive badge tones — presentation only.
-//!
-//! Tabs (web: Health / Analytics / Attributes / Jobs):
-//! * **Health** — LM Studio settings read from the settings table plus a
-//!   test-connection button that lists models through
-//!   `ai_lm_studio::OpenAiCompatibleClient` (the `/api/ai/status` route).
-//! * **Analytics** — the `/api/ai/analytics` SQL: tickets analyzed, run
-//!   success rate, draft states, edit rate, verification warnings,
-//!   unsupported-claim rate, common failure patterns.
-//! * **Attributes** — the AI attribute catalog (`AiAttributeKey::ALL`,
-//!   `/api/attributes/catalog`) and live distributions
-//!   (`ai_attributes::distributions`, `/api/attributes/report`).
-//! * **Jobs** — the recent `ai_runs` table (`/api/ai/jobs`).
-
 use std::sync::{Arc, Mutex};
 
 use super::{ConfirmRequest, NavRequest};
@@ -28,7 +9,6 @@ use spp_core::db::DbHandle;
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Page tabs (web: `AiTab`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Health,
@@ -61,7 +41,6 @@ impl Tab {
     }
 }
 
-/// LM Studio settings snapshot (the `/api/ai/status` settings half).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AiSettings {
     pub ai_enabled: bool,
@@ -72,7 +51,6 @@ pub struct AiSettings {
     pub concurrency: i64,
 }
 
-/// Load the settings half of the AI status (the route's read-only view).
 #[must_use]
 pub fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
     AiSettings {
@@ -96,7 +74,6 @@ pub fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
     }
 }
 
-/// AI analytics metrics (typed port of the `/api/ai/analytics` SQL).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AiAnalytics {
     pub tickets_analyzed: i64,
@@ -110,7 +87,6 @@ pub struct AiAnalytics {
     pub failure_patterns: Vec<(String, i64)>,
 }
 
-/// Load the analytics (the route SQL, in-process).
 #[must_use]
 pub fn load_analytics(conn: &rusqlite::Connection) -> AiAnalytics {
     let (tickets_analyzed, analysis_completed, analysis_failed): (i64, i64, i64) = conn
@@ -195,7 +171,6 @@ pub fn load_analytics(conn: &rusqlite::Connection) -> AiAnalytics {
     }
 }
 
-/// One `ai_runs` job row (typed port of `/api/ai/jobs`).
 #[derive(Debug, Clone, Default)]
 pub struct AiJobRow {
     pub id: i64,
@@ -208,7 +183,6 @@ pub struct AiJobRow {
     pub latency_ms: Option<i64>,
 }
 
-/// Load the recent AI job rows.
 #[must_use]
 pub fn load_jobs(conn: &rusqlite::Connection, limit: i64) -> Vec<AiJobRow> {
     let limit = limit.clamp(1, 1000);
@@ -234,87 +208,47 @@ pub fn load_jobs(conn: &rusqlite::Connection, limit: i64) -> Vec<AiJobRow> {
     .unwrap_or_default()
 }
 
-/// The interactive AI center page state.
 pub struct AiCenterPage {
     tab: Tab,
     settings: Option<AiSettings>,
     analytics: Option<AiAnalytics>,
     distributions: Vec<AttributeDistribution>,
     jobs: Vec<AiJobRow>,
-    /// FIND-005: armed shell-confirm request for the global AI kill
-    /// switch — raised by [`Self::ui`] at the end of the frame.
     pending_confirm: Option<ConfirmRequest>,
-    /// Connection test outcome, written by the background test thread
-    /// and polled each frame.
     connection_status: Arc<Mutex<Option<String>>>,
-    // ---- A1 provider hub state ----
     hub_endpoints: Vec<spp_core::ai_hub::EndpointConfig>,
     hub_roles: spp_core::ai_hub::RoleMap,
-    /// Clean-audit item 74: the last PERSISTED role map. The model text
-    /// field commits on blur (and only when the live map differs from
-    /// this snapshot) — keystrokes update the live map in memory only,
-    /// so typing no longer persists and enqueues a golden_eval per
-    /// character.
     hub_roles_saved: spp_core::ai_hub::RoleMap,
     hub_loaded: bool,
-    /// Probe outcomes per endpoint id, filled by the probe thread.
     probe_results: std::collections::BTreeMap<String, String>,
-    /// Shared probe slot: (endpoint id, result) — one probe at a time.
     probe_slot: Arc<Mutex<Option<(String, String)>>>,
-    /// The endpoint whose API-key field is currently open.
     key_edit_for: Option<String>,
     key_edit_value: String,
-    /// Add-endpoint form.
     add_name: String,
     add_url: String,
     add_key: String,
     add_price_prompt: String,
     add_price_completion: String,
-    /// Cost ledger rows (last 7 days).
     ledger: Vec<spp_core::ai_hub::UsageRow>,
-    /// Per-feature toggle states (name, enabled), loaded at reload.
     feature_states: Vec<(&'static str, bool)>,
-    /// Shared vector index (A4/A5): the copilot chat's similar-issues tools
-    /// fuse FTS + sqlite-vec through it.
     vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
-    // ---- A5 copilot chat state ----
-    /// Copilot sessions (copilot_sessions rows, newest first).
     copilot_sessions: Vec<serde_json::Value>,
-    /// The open session's messages (copilot_messages rows).
     copilot_messages: Vec<serde_json::Value>,
-    /// The open session id (None = fresh chat; the job creates the row).
     copilot_session: Option<i64>,
-    /// The question being typed.
     copilot_input: String,
-    /// The in-flight copilot_chat job id (polled each frame).
     copilot_pending: Option<i64>,
-    /// Last chat error (job failures land here verbatim).
     copilot_error: Option<String>,
-    /// Chat data loaded flag (invalidation clears it).
     copilot_loaded: bool,
-    // ---- A6 usage dashboard state ----
-    /// Golden runs, newest first (eval scores).
     golden_runs: Vec<spp_core::ai_eval::GoldenRunRow>,
-    /// (total drafts, accepted, rejected) from ai_drafts states.
     draft_states: (i64, i64, i64),
-    /// (feedback rows, edited rows, avg edit distance) from ai_feedback.
     edit_stats: (i64, i64, f64),
-    // ---- item 151: the ai_settings provider record (pre-hub fallback) ----
-    /// The stored ai_settings row (get_ai_status snapshot), loaded with
-    /// the rest of the Health tab.
     ai_record: Option<spp_core::ai_center::AiStatus>,
-    /// Provider-kind selection index into `ProviderKind::ALL`.
     ai_kind_pick: usize,
     ai_chat_model_edit: String,
     ai_embed_model_edit: String,
     ai_embed_dim_edit: String,
     ai_base_url_edit: String,
-    /// False once any form field is edited. A clean form re-seeds its
-    /// fields from the stored record on every reload; a dirty form keeps
-    /// its edits across invalidation (the batch-27 unsaved-edits
-    /// convention) until Save commits them through the core write API.
     ai_form_clean: bool,
-    /// Last save outcome: (ok, message).
     ai_record_note: Option<(bool, String)>,
 }
 
@@ -366,7 +300,6 @@ impl AiCenterPage {
         }
     }
 
-    /// A4/A5: receive the shared vector index for the copilot chat tools.
     pub fn set_vector_index(
         &mut self,
         index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
@@ -374,7 +307,6 @@ impl AiCenterPage {
         self.vector_index = index;
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.settings = None;
         self.analytics = None;
@@ -383,8 +315,6 @@ impl AiCenterPage {
         self.hub_loaded = false;
         self.ledger.clear();
         self.copilot_loaded = false;
-        // Item 151: drop the stored-record snapshot (it reloads) but keep
-        // the edit fields and the dirty flag — unsaved edits survive.
         self.ai_record = None;
     }
 
@@ -395,7 +325,6 @@ impl AiCenterPage {
                 Some(load_analytics(conn)),
                 spp_core::ai_attributes::distributions(conn).unwrap_or_default(),
                 load_jobs(conn, 100),
-                // Item 151: the stored provider record drives the panel.
                 spp_core::ai_center::get_ai_status(conn).ok(),
             )
         });
@@ -407,9 +336,6 @@ impl AiCenterPage {
         self.reload_hub(db);
     }
 
-    /// Item 151: refresh the stored-record snapshot and, while the form
-    /// is clean, re-seed the edit fields from it. A dirty (typed) form
-    /// keeps its edits until Save commits them.
     fn seed_ai_record(&mut self, record: Option<spp_core::ai_center::AiStatus>) {
         self.ai_record = record;
         if self.ai_form_clean
@@ -426,13 +352,6 @@ impl AiCenterPage {
         }
     }
 
-    /// Clean-audit item 74: persist a role-map edit and re-run the
-    /// golden set — ONCE per committed edit. Called when the model text
-    /// field gives up focus (a finished edit) and when the endpoint
-    /// combo picks a new endpoint (a discrete selection). Keystrokes
-    /// alone never reach this method: they only sync the live map.
-    /// An unchanged map is a no-op — no second save, no second eval
-    /// (the blur guard at the call site and this check agree).
     fn commit_role_map(&mut self, db: &DbHandle, roles: &spp_core::ai_hub::RoleMap) {
         self.hub_roles = roles.clone();
         if *roles == self.hub_roles_saved {
@@ -440,13 +359,10 @@ impl AiCenterPage {
         }
         let _ = db.with_write(|conn| spp_core::ai_hub::save_roles(conn, roles));
         self.hub_roles_saved = roles.clone();
-        // A6: model-role reassignment re-runs the golden set — the eval
-        // scores on the Usage tab must describe the routing that is live.
         let _ =
             db.with_write(|conn| spp_core::jobs::enqueue_on(conn, "ai", "golden_eval", "{}", 3, 2));
     }
 
-    /// Load the A1 provider hub state (endpoints, roles, ledger, toggles).
     fn reload_hub(&mut self, db: &DbHandle) {
         let (endpoints, roles, ledger, features) = db.with_read(|conn| {
             (
@@ -473,8 +389,6 @@ impl AiCenterPage {
         }
     }
 
-    /// Test the LM Studio connection (the async half of `/api/ai/status`):
-    /// the result lands in the shared status slot on a background thread.
     pub fn test_connection(&mut self) {
         let Some(settings) = self.settings.clone() else {
             return;
@@ -511,19 +425,13 @@ impl AiCenterPage {
                 }
             })
             .ok();
-        // The thread is detached: the status slot is polled every frame.
     }
 
-    /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
-        // A5: resolve the in-flight copilot chat turn (the worker persists
-        // messages; the poll only moves the terminal state into the page).
         self.poll_copilot_job(db);
 
         design::page_header(ui, "AI Center", None, |_| {});
-        // DS-C-09 underline tab rail — the lab's six labels, same state
-        // machine (the rail carries its own divider).
         let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
         if let Some(i) = design::tabs(
             ui,
@@ -542,23 +450,18 @@ impl AiCenterPage {
             Tab::Usage => self.usage_ui(ui, db),
             Tab::Jobs => self.jobs_ui(ui),
         }
-        // FIND-005: raise the armed confirm request (see the field doc).
         if let Some(request) = self.pending_confirm.take() {
             return Some(NavRequest::Confirm(request));
         }
         None
     }
 
-    /// FIND-005: runs only after the shell dialog confirms — disables
-    /// every AI feature and endpoint call at once.
     pub fn disable_all_ai_confirmed(&mut self, db: &DbHandle) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::settings::set_bool(conn, "ai_enabled", false));
         self.reload_hub(db);
         result
     }
 
-    /// A5: poll the in-flight copilot_chat job — completed turns reload the
-    /// session + messages; failures surface the exact worker error.
     fn poll_copilot_job(&mut self, db: &DbHandle) {
         let Some(job_id) = self.copilot_pending else {
             return;
@@ -587,12 +490,9 @@ impl AiCenterPage {
         }
     }
 
-    /// A5: load sessions (newest first) + the open session's messages.
     fn reload_copilot(&mut self, db: &DbHandle) {
         let (sessions, messages) = db.with_read(|conn| {
             let sessions = spp_core::copilot::list_sessions(conn, 50);
-            // If no session is open, fall back to the newest so the page
-            // always shows something after a completed turn.
             let session = self.copilot_session.or_else(|| {
                 sessions
                     .first()
@@ -609,15 +509,11 @@ impl AiCenterPage {
         self.copilot_loaded = true;
     }
 
-    /// A5: the copilot chat on the 22-tool read-only agent. Sessions and
-    /// messages are durable rows; the turn runs as a worker job so the UI
-    /// thread never blocks on the model.
     fn copilot_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         if !self.copilot_loaded {
             self.reload_copilot(db);
         }
         let t = design::tokens(ui);
-        // Gate the whole surface honestly: feature + Agent role.
         let (feature_on, agent_ok) = db.with_read(|conn| {
             (
                 spp_core::ai_hub::ai_feature_enabled(conn, "copilot"),
@@ -647,7 +543,6 @@ impl AiCenterPage {
         }
         ui.horizontal(|ui| {
             ui.set_min_width(ui.available_width());
-            // Left column: sessions.
             egui::ScrollArea::vertical()
                 .id_salt("copilot-sessions")
                 .max_height(420.0)
@@ -684,7 +579,6 @@ impl AiCenterPage {
                 });
         });
         design::divider(ui);
-        // Messages.
         design::section_title(ui, "Chat");
         if let Some(err) = self.copilot_error.clone() {
             design::error_text(ui, &format!("last turn failed: {err}"));
@@ -739,10 +633,9 @@ impl AiCenterPage {
                             }
                         });
                     }
-                    ui.add_space(4.0); /* DC sp-1 (B-3 normalization, RS-12) */
+                    ui.add_space(4.0);
                 }
             });
-        // Input.
         let busy = self.copilot_pending.is_some();
         ui.horizontal(|ui| {
             let mut question = self.copilot_input.clone();
@@ -753,11 +646,6 @@ impl AiCenterPage {
             if response.changed() {
                 self.copilot_input = question;
             }
-            // Clean-audit item 75: Enter submits only when the copilot
-            // input itself surrendered focus on that keypress (egui
-            // single-line TextEdits give up focus on Enter) — a global
-            // Enter used to submit from anywhere on the AI Center page,
-            // firing mid-typing in other fields and on stray keypresses.
             let submit = response.lost_focus()
                 && ui.input(|i| i.key_pressed(egui::Key::Enter))
                 && !self.copilot_input.is_empty();
@@ -799,11 +687,7 @@ impl AiCenterPage {
         });
     }
 
-    /// A6: the AI usage dashboard — per-feature tokens/latency/cost from the
-    /// ledger, live edit rate from real feedback rows, and the golden-set
-    /// eval scores with the on-demand runner.
     fn usage_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // Usage data rides `reload` (invalidation refreshes it).
         let ledger30: Vec<spp_core::ai_hub::UsageRow> =
             db.with_read(|conn| spp_core::ai_hub::usage_ledger(conn, 30).unwrap_or_default());
         let (golden_runs, draft_states, edit_stats) = db.with_read(|conn| {
@@ -1073,20 +957,10 @@ impl AiCenterPage {
                 self.test_connection();
             }
         });
-        // Item 151: the ai_settings write API is live here — this panel
-        // edits the pre-hub fallback record that
-        // ai_pipeline::backend_from_settings and
-        // embeddings::lm_studio_embedding_settings consult when the
-        // Settings → LM Studio keys are unset.
         self.ai_record_ui(ui, db);
-        // A1: the provider hub lives directly under the health snapshot.
         self.hub_ui(ui, db);
     }
 
-    /// Item 151: the ai_settings provider-record editor. Every control
-    /// writes through the core write API (`ai_center::set_*`) on Save —
-    /// the row is the fallback layer the pipeline already consumes, so
-    /// these edits are load-bearing, not decorative.
     fn ai_record_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let Some(record) = self.ai_record.clone() else {
             return;
@@ -1197,10 +1071,6 @@ impl AiCenterPage {
         );
     }
 
-    /// Item 151: apply the provider-record edits through the core write
-    /// API and re-read the stored row. An empty embedding-model field
-    /// leaves the embedding columns untouched (the write API has no
-    /// NULL-clearing path, and pretending otherwise would invent one).
     fn save_ai_record(&mut self, db: &DbHandle) {
         let kind = spp_core::ai_center::ProviderKind::ALL
             .get(self.ai_kind_pick)
@@ -1254,9 +1124,6 @@ impl AiCenterPage {
         }
     }
 
-    /// The A1 provider hub: endpoints (health probes, BYOK keys in the
-    /// envelope), model-role routing, per-feature toggles + the global
-    /// kill switch, and the per-feature cost ledger.
     fn hub_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         if !self.hub_loaded {
             self.reload_hub(db);
@@ -1264,7 +1131,6 @@ impl AiCenterPage {
         self.poll_probe_slot();
         let t = design::tokens(ui);
 
-        // ---- endpoints ------------------------------------------------
         design::card_titled(
             ui,
             "Provider hub — endpoints",
@@ -1420,7 +1286,6 @@ impl AiCenterPage {
         );
         ui.add_space(10.0);
 
-        // ---- model-role routing --------------------------------------
         design::card_titled(
             ui,
             "Model-role routing",
@@ -1440,13 +1305,8 @@ impl AiCenterPage {
                         ui.end_row();
                         for role in spp_core::ai_hub::AiRole::ALL {
                             ui.strong(role.as_str());
-                            // Owned clone: the combo box below mutates
-                            // `roles` while this value must stay readable.
                             let current: Option<spp_core::ai_hub::RoleAssignment> =
                                 roles.get(role).cloned();
-                            // Reskin fix (presentation, the lab's quirk): the
-                            // combo showed the endpoint's INDEX ('0', '1'),
-                            // not its name. Names now.
                             let selected = current
                                 .as_ref()
                                 .and_then(|a| {
@@ -1508,9 +1368,6 @@ impl AiCenterPage {
                                 [180.0, 26.0],
                                 egui::TextEdit::singleline(&mut model_edit),
                             );
-                            // The lab's aria-label: the column header is the
-                            // visible label; the input carries the
-                            // role-scoped name itself.
                             model_response.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::Role::TextInput,
@@ -1518,12 +1375,6 @@ impl AiCenterPage {
                                     format!("model for {}", role.as_str()),
                                 )
                             });
-                            // Clean-audit item 74: keystrokes only sync the
-                            // live map (so the field's egui state and the
-                            // page agree — no focus loss, no revert); the
-                            // persist + golden_eval happen once, on blur,
-                            // and only when the map actually differs from
-                            // what was last saved.
                             if model_edit != model_text {
                                 roles.set(
                                     role,
@@ -1552,7 +1403,6 @@ impl AiCenterPage {
             },
         );
         ui.add_space(4.0);
-        // The lab's quirk receipt for the routing-combo presentation fix.
         design::quirk(
             ui,
             "Reskin fix (presentation): the routing combo showed its index number \
@@ -1560,7 +1410,6 @@ impl AiCenterPage {
         );
         ui.add_space(6.0);
 
-        // ---- toggles + kill switch ------------------------------------
         design::card_titled(
             ui,
             "Features & kill switches",
@@ -1597,9 +1446,6 @@ impl AiCenterPage {
                     .on_hover_text("disables every AI feature and every endpoint call at once")
                     .clicked()
                     {
-                        // FIND-005: the write used to run on the click — arm
-                        // the shell confirm instead (one click disabled all
-                        // AI behavior).
                         self.pending_confirm = Some(ConfirmRequest::disable_all_ai());
                     }
                 } else if design::button(
@@ -1617,7 +1463,6 @@ impl AiCenterPage {
         );
         ui.add_space(10.0);
 
-        // ---- cost ledger ---------------------------------------------
         design::card_titled(
             ui,
             "Cost ledger — last 7 days",
@@ -1984,19 +1829,14 @@ impl Default for AiCenterPage {
     }
 }
 
-/// Run-status → badge tone (redesign): running/succeeded and completed
-/// read as success, queued/pending stay neutral, failed is destructive.
 fn job_status_tone(status: &str) -> BadgeTone {
     match status {
-        // 1.3.0: "running" is in-flight, not success — a job stuck
-        // "running" after a transport failure used to wear a green badge.
         "completed" | "succeeded" => BadgeTone::Success,
         "failed" => BadgeTone::Destructive,
         _ => BadgeTone::Neutral,
     }
 }
 
-/// Catalog row for the attribute table (web: `/api/attributes/catalog`).
 #[must_use]
 pub fn attribute_catalog() -> Vec<(&'static str, &'static str, &'static str)> {
     AiAttributeKey::ALL
@@ -2084,11 +1924,9 @@ mod tests {
         let distributions = db
             .with_read(spp_core::ai_attributes::distributions)
             .unwrap_or_default();
-        // Fresh DB: attributes exist in the schema but no snapshots yet.
         assert!(distributions.iter().all(|d| d.total_conversations >= 0));
     }
 
-    /// Count queued golden_eval jobs (the item-74 signal).
     fn golden_eval_jobs(db: &DbHandle) -> i64 {
         db.with_read(|conn| {
             conn.query_row(
@@ -2100,9 +1938,6 @@ mod tests {
         .expect("count golden_eval jobs")
     }
 
-    /// Clean-audit item 74: a COMMITTED role-map edit persists exactly
-    /// once and enqueues exactly one golden_eval; re-committing the same
-    /// map is a no-op because the saved snapshot catches up.
     #[test]
     fn audit74_commit_persists_once_and_enqueues_one_eval() {
         let db = fixture(Vec::new());
@@ -2110,7 +1945,6 @@ mod tests {
         page.reload(&db);
         assert_eq!(golden_eval_jobs(&db), 0);
 
-        // A committed model edit (what the blur path delivers).
         let mut roles = page.hub_roles.clone();
         roles.draft = Some(spp_core::ai_hub::RoleAssignment {
             endpoint: "lmstudio".into(),
@@ -2120,16 +1954,12 @@ mod tests {
         assert_eq!(golden_eval_jobs(&db), 1, "one eval per committed edit");
         assert_eq!(page.hub_roles_saved, roles, "the snapshot catches up");
 
-        // The persisted state round-trips.
         let stored = db.with_read(spp_core::ai_hub::load_roles).expect("roles");
         assert_eq!(
             stored.draft.and_then(|d| d.model),
             Some("qwen2.5-7b".into())
         );
 
-        // Re-committing the identical map: the UI blur path is guarded by
-        // the snapshot comparison (roles == saved reaches nothing), and a
-        // direct re-commit must not re-run the eval either.
         page.commit_role_map(&db, &roles);
         assert_eq!(
             golden_eval_jobs(&db),
@@ -2138,18 +1968,11 @@ mod tests {
         );
     }
 
-    /// Clean-audit item 74, the regression itself: typing (a live map that
-    /// diverged from the persisted one) persists NOTHING and enqueues NO
-    /// eval across any number of rendered frames — only a blur commits.
-    /// Pre-fix, every keystroke was a save_roles + golden_eval.
     #[test]
     fn audit74_typing_divergence_never_persists_or_enqueues() {
         let db = fixture(Vec::new());
         let ctx = egui::Context::default();
         let mut page = AiCenterPage::new();
-        // Load once (what the first rendered frame does), then simulate
-        // the in-memory state after a few keystrokes in the model field:
-        // the live map diverges, the saved snapshot does not.
         page.reload(&db);
         page.hub_roles.draft = Some(spp_core::ai_hub::RoleAssignment {
             endpoint: "lmstudio".into(),
@@ -2161,8 +1984,6 @@ mod tests {
             "the divergence is set up"
         );
 
-        // Ten rendered frames of the Health tab (where the routing table
-        // lives) — the keystroke-synced live map stays memory-only.
         for _ in 0..10 {
             ctx.run_pass(egui::RawInput::default(), |ctx| {
                 ctx.root_ui(|ui| {
@@ -2186,26 +2007,17 @@ mod tests {
             page.hub_roles_saved, saved_before,
             "the snapshot is untouched"
         );
-        // The live map is still rendered from (no revert, no loss).
         assert_eq!(page.hub_roles.draft.and_then(|d| d.model), Some("q".into()));
     }
 
-    /// Clean-audit item 75: a global Enter must NOT submit the copilot
-    /// chat. Pre-fix, any Enter on the AI Center page fired the job —
-    /// including one pressed with no field focused at all. Post-fix the
-    /// submit rides the copilot input's own focus loss (Enter in a
-    /// single-line TextEdit), so a stray Enter enqueues nothing.
     #[test]
     fn audit75_global_enter_never_submits_the_copilot() {
         let db = fixture(Vec::new());
         let ctx = egui::Context::default();
         let mut page = AiCenterPage::new();
         page.tab = Tab::Copilot;
-        // A question is sitting in the input (typed earlier): the pre-fix
-        // global Enter would fire the job on this state alone.
         page.copilot_input = "what is the refund policy?".into();
 
-        // Render, then press Enter with nothing focused.
         ctx.run_pass(egui::RawInput::default(), |ctx| {
             ctx.root_ui(|ui| {
                 egui::CentralPanel::default().show(ui, |ui| page.ui(ui, &db));
@@ -2244,13 +2056,9 @@ mod tests {
             page.copilot_pending.is_none(),
             "no in-flight job was started either"
         );
-        // The typed question is still sitting in the input, un-submitted.
         assert_eq!(page.copilot_input, "what is the refund policy?");
     }
 
-    /// Item 151: the provider-record save path writes through the core
-    /// setters and the re-read picks the values up; the ready badge
-    /// flips only with provider + chat model both present.
     #[test]
     fn provider_record_save_round_trips() {
         let db = fixture(Vec::new());
@@ -2263,7 +2071,7 @@ mod tests {
                 .provider_kind,
             spp_core::ai_center::ProviderKind::None
         );
-        page.ai_kind_pick = 1; // LM Studio
+        page.ai_kind_pick = 1;
         page.ai_chat_model_edit = "test-chat".into();
         page.ai_base_url_edit = "http://127.0.0.1:9999".into();
         page.save_ai_record(&db);
@@ -2280,8 +2088,6 @@ mod tests {
         assert!(page.ai_record_note.as_ref().expect("note").0);
     }
 
-    /// Item 151: an embedding model without a positive dim is rejected
-    /// with a visible error and nothing is written.
     #[test]
     fn provider_record_requires_positive_dim_with_embed_model() {
         let db = fixture(Vec::new());
@@ -2303,8 +2109,6 @@ mod tests {
         assert!(record.embedding_model.is_none(), "nothing was written");
     }
 
-    /// Item 151: a dirty (typed, unsaved) form survives invalidation +
-    /// reload with its edits intact; a clean form re-seeds instead.
     #[test]
     fn provider_record_dirty_form_survives_reload() {
         let db = fixture(Vec::new());

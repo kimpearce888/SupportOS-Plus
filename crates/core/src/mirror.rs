@@ -133,10 +133,6 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
         .assignee_id
         .filter(|rid| *rid > 0)
         .and_then(|rid| crate::sync_engine::local_id(conn, "users", rid));
-    // Clean-audit item 33: `assigned_team_id` used to be parsed and
-    // dropped — team assignments were invisible in the mirror. Resolve
-    // the team's local id and persist it (the column has existed since
-    // m040's breadth sweep; the sync simply never wrote it).
     let assigned_team_local = c
         .assigned_team_id
         .filter(|rid| *rid > 0)
@@ -227,9 +223,6 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
             |r| r.get(0),
         )
         .ok();
-    // Clean-audit item 29: read the pre-write tag set so tags_changed can
-    // carry a real previous value — it used to ride with previous=null and
-    // fired on every re-ingest, tags unchanged or not.
     let previous_tags: Option<Vec<String>> = match local {
         Some(conv_local) => {
             let tags = conversation_tag_names(conn, conv_local)?;
@@ -307,9 +300,6 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
             &serde_json::json!(prev.thread_count),
             &serde_json::json!(c.thread_count),
         )?;
-        // Item 29: the tag comparison uses normalized sets (sorted +
-        // deduplicated), so a pure reorder of the platform's tag array is
-        // not an event — only membership changes are.
         emit_diff(
             "tags_changed",
             &serde_json::json!(normalized_tag_set(&prev_tags)),
@@ -319,8 +309,6 @@ pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> 
     Ok(())
 }
 
-/// The mirror's current tag names for one conversation (item 29: the
-/// previous state for the tags_changed diff).
 fn conversation_tag_names(conn: &Connection, conversation_id: i64) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT t.name FROM conversation_tags ct
@@ -333,8 +321,6 @@ fn conversation_tag_names(conn: &Connection, conversation_id: i64) -> Result<Vec
     Ok(names)
 }
 
-/// Sort + dedupe a tag list so set comparisons ignore the platform's
-/// ordering and repeated names.
 fn normalized_tag_set(tags: &[String]) -> Vec<String> {
     let mut set = tags.to_vec();
     set.sort();
@@ -346,13 +332,6 @@ pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
     upsert_customer_with(conn, c, true)
 }
 
-/// Audit fix (C4): upserts a customer WITHOUT touching the contact-channel
-/// tables (emails/phones/chats/websites/social profiles). The real Help
-/// Scout API never embeds channels, so re-upserting a customer from a bare
-/// payload used to DELETE every previously synced email/phone — the data
-/// loss behind the empty Customers page and the Outreach "No usable email
-/// address on file" wall. Use this whenever the payload carries no channel
-/// data and the stored rows are still authoritative.
 pub fn upsert_customer_without_channels(conn: &Connection, c: &HsCustomer) -> Result<()> {
     upsert_customer_with(conn, c, false)
 }
@@ -392,8 +371,6 @@ fn upsert_customer_with(conn: &Connection, c: &HsCustomer, replace_channels: boo
     let replace_set =
         |delete_sql: &str, insert_sql: &str, rows: Vec<Vec<Box<dyn rusqlite::ToSql>>>| {
             if !replace_channels {
-                // Preserve the stored channel rows — the incoming payload
-                // carries no authoritative channel data.
                 return crate::error::Result::Ok(());
             }
             tx.execute(delete_sql, params![local])?;
@@ -596,31 +573,22 @@ mod batch21_audit29_tests {
             .collect()
     }
 
-    /// Audit item 29: `tags_changed` rode with previous=null and fired on
-    /// every re-ingest — tags unchanged or not. It now carries the mirror's
-    /// real pre-write tag set (as a normalized set, so reorders are not
-    /// events) and fires only on membership changes.
     #[test]
     fn audit29_tags_changed_fires_only_when_the_tag_set_changes() {
         let conn = conn();
 
-        // First ingest: no previous row, so no diff events at all.
         upsert_conversation(&conn, &conv(&["login", "urgent"])).expect("first ingest");
         assert!(
             tags_events(&conn).is_empty(),
             "the first ingest must not emit tags_changed"
         );
 
-        // Re-ingest with the same tags in a different order: a reorder is
-        // not a change — no event.
         upsert_conversation(&conn, &conv(&["urgent", "login"])).expect("reordered re-ingest");
         assert!(
             tags_events(&conn).is_empty(),
             "an unchanged (reordered) tag set must not emit tags_changed"
         );
 
-        // A real membership change fires exactly one event with the real
-        // previous state instead of null.
         upsert_conversation(&conn, &conv(&["login"])).expect("changed tags");
         let events = tags_events(&conn);
         assert_eq!(events.len(), 1, "one membership change, one event");
@@ -631,7 +599,6 @@ mod batch21_audit29_tests {
         );
         assert_eq!(events[0]["next"], serde_json::json!(["login"]));
 
-        // Re-ingesting the new set again stays silent.
         upsert_conversation(&conn, &conv(&["login"])).expect("stable re-ingest");
         assert_eq!(
             tags_events(&conn).len(),
@@ -640,8 +607,6 @@ mod batch21_audit29_tests {
         );
     }
 
-    /// The normalized comparison also dedupes repeated names, so a
-    /// platform payload repeating a tag is not a change either.
     #[test]
     fn audit29_repeated_tag_names_are_not_a_change() {
         let conn = conn();
@@ -654,10 +619,6 @@ mod batch21_audit29_tests {
     }
 }
 
-/// Clean-audit item 33: a team assignment lands in its own column —
-/// `assigned_team_local_id` — and never in the user-assignee slot, even
-/// when a team and a user share the same platform id. The inbox surfaces
-/// the team by name.
 #[cfg(test)]
 mod batch22_audit33_tests {
     use super::*;
@@ -666,8 +627,6 @@ mod batch22_audit33_tests {
     fn conn() -> Connection {
         let mut conn = Connection::open_in_memory().expect("memory db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        // The collision case: user 42 and team 42 are different platform
-        // objects with the same id.
         conn.execute(
             "INSERT INTO mailboxes (remote_id, name) VALUES (1, 'Support')",
             [],
@@ -700,8 +659,6 @@ mod batch22_audit33_tests {
             status: "active".into(),
             mailbox_id: 1,
             customer_id: 900,
-            // The mapper's output shape for a team assignment: the user
-            // slot empty, the team id in its own field.
             assignee_id: None,
             assignee_type: Some("team".into()),
             assigned_team_id: Some(42),
@@ -737,8 +694,6 @@ mod batch22_audit33_tests {
             "the team lands in its own column, resolved to the team's local id"
         );
 
-        // The inbox list shows the team, not 'unassigned' and not Grace
-        // Hopper (user 42 — the collision the pre-fix code resolved to).
         let (items, total) =
             crate::inbox::list_conversations(&conn, &crate::inbox::InboxFilters::default())
                 .expect("list");
@@ -752,7 +707,6 @@ mod batch22_audit33_tests {
             "the team is surfaced by name"
         );
 
-        // The detail view carries the same honesty.
         let conv_local: i64 = conn
             .query_row(
                 "SELECT id FROM conversations WHERE remote_id = 555",
@@ -766,8 +720,6 @@ mod batch22_audit33_tests {
         assert_eq!(detail.assignee_name, None);
         assert_eq!(detail.assigned_team_name.as_deref(), Some("Billing"));
 
-        // A later user assignment flips the columns honestly: the team
-        // slot clears, the user slot fills.
         let mut user_assigned = team_assigned_conv();
         user_assigned.assignee_id = Some(42);
         user_assigned.assignee_type = Some("user".into());
@@ -790,13 +742,11 @@ mod batch22_audit33_tests {
         assert_eq!(team, None, "the team column clears on a user assignment");
     }
 
-    /// An unknown team id (not yet mirrored) degrades to 'no team'
-    /// rather than poisoning the user slot or the row.
     #[test]
     fn unknown_team_id_degrades_to_no_team() {
         let conn = conn();
         let mut c = team_assigned_conv();
-        c.assigned_team_id = Some(9999); // not in the teams mirror
+        c.assigned_team_id = Some(9999);
         upsert_conversation(&conn, &c).expect("upsert");
         let (assignee, team): (Option<i64>, Option<i64>) = conn
             .query_row(

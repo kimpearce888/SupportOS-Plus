@@ -1,21 +1,3 @@
-//! Integration tests (TODO 45): the loopback listener over real TCP.
-//!
-//! The unit tests in `loopback.rs` call `handle_request` in-process; these
-//! tests start the actual `LoopbackServer` accept loop and drive it with a
-//! raw HTTP client over a socket, which is the exact path a Help Scout
-//! webhook POST or a browser OAuth redirect takes in production:
-//!
-//! * webhook ingress: HMAC-SHA1 signature verification, persistence,
-//!   deduplication, job enqueue, status-code mapping, a concurrent burst;
-//! * the OAuth authorization-code flow end-to-end: `begin_oauth` issues a
-//!   single-use state, the browser-style `GET /oauth/callback?code=…`
-//!   lands on the listener, the **real** `RealHelpScoutProvider` exchanges
-//!   the code against the mock Help Scout token endpoint, fetches the
-//!   connected user, and the tokens/audit rows land in the database.
-//!
-//! Secrets use the encrypted envelope (`settings::set_secret`) exactly as
-//! production does — the master key comes from a per-process key file.
-
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -32,11 +14,6 @@ fn fixture_db() -> DbHandle {
     DbHandle::new(conn)
 }
 
-/// Hold the process-global secrets lock for the test's duration and
-/// install the deterministic master key the whole test binary shares
-/// (R7/D13: the OAuth flow and webhook-secret resolution now both touch
-/// the encrypted envelope, so the key must stay stable while a test runs;
-/// other modules clear/replace the key under this same lock).
 fn install_master_key() -> std::sync::MutexGuard<'static, ()> {
     let guard = crate::settings::SECRETS_TEST_LOCK
         .lock()
@@ -45,7 +22,6 @@ fn install_master_key() -> std::sync::MutexGuard<'static, ()> {
     guard
 }
 
-/// The OAuth tokens as stored by the envelope-backed `save_tokens`.
 fn envelope_tokens(db: &DbHandle) -> (Option<String>, Option<String>) {
     db.with_read(|conn| {
         let read = |key: &str| {
@@ -60,8 +36,6 @@ fn envelope_tokens(db: &DbHandle) -> (Option<String>, Option<String>) {
     })
 }
 
-/// Minimal HTTP/1.1 client over a raw socket: send, read to EOF (the
-/// loopback server closes after responding), return (status, body).
 fn http(port: u16, request: &str) -> (u16, String) {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to loopback");
     stream
@@ -105,10 +79,6 @@ fn get(port: u16, target: &str) -> (u16, String) {
     http(port, &req)
 }
 
-// ---------------------------------------------------------------------------
-// Webhook ingress over real TCP
-// ---------------------------------------------------------------------------
-
 #[test]
 fn signed_webhook_roundtrip_over_tcp() {
     let _secrets = install_master_key();
@@ -135,7 +105,6 @@ fn signed_webhook_roundtrip_over_tcp() {
     assert_eq!(status, 200, "signed webhook accepted: {body}");
     assert_eq!(body, "{\"received\":true}");
 
-    // Persisted, marked processed, and the sync job enqueued.
     let (state, jobs): (String, i64) = db
         .with_read(|conn| {
             conn.query_row(
@@ -149,7 +118,6 @@ fn signed_webhook_roundtrip_over_tcp() {
     assert_eq!(state, "processed");
     assert_eq!(jobs, 1);
 
-    // A full duplicate replays the same row: 200, flagged, no new job.
     let (status, body) = post_webhook(port, Some(&sig), "convo.created", event_body);
     assert_eq!(status, 200);
     assert!(body.contains("\"duplicate\":true"), "body: {body}");
@@ -164,7 +132,6 @@ fn signed_webhook_roundtrip_over_tcp() {
         .unwrap_or(-1);
     assert_eq!(jobs, 1, "duplicates must not enqueue twice");
 
-    // Tampered body (signature no longer matches): 401, nothing stored.
     let (status, _) = post_webhook(port, Some(&sig), "convo.created", r#"{"objectID":124}"#);
     assert_eq!(status, 401);
     let events: i64 = db
@@ -172,7 +139,6 @@ fn signed_webhook_roundtrip_over_tcp() {
         .unwrap_or(-1);
     assert_eq!(events, 1, "rejected webhook must not be stored");
 
-    // Unsigned: 401.
     let (status, _) = post_webhook(port, None, "convo.created", r#"{"objectID":125}"#);
     assert_eq!(status, 401);
 
@@ -182,7 +148,7 @@ fn signed_webhook_roundtrip_over_tcp() {
 #[test]
 fn webhook_without_configured_secret_hard_rejects() {
     let _secrets = install_master_key();
-    let db = fixture_db(); // no webhook_secret stored
+    let db = fixture_db();
     let mut server = LoopbackServer::start(
         db.clone(),
         std::sync::Arc::new(crate::provider_handle::ProviderHandle::new_empty()),
@@ -216,8 +182,6 @@ fn webhook_burst_is_served_concurrently() {
     .expect("start listener");
     let port = server.port();
 
-    // 12 concurrent POSTs of distinct events: the per-connection threads
-    // must all answer, all rows must land.
     let mut handles = Vec::new();
     for id in 1..=12i64 {
         let handle = std::thread::spawn(move || {
@@ -258,16 +222,11 @@ fn webhook_burst_is_served_concurrently() {
     server.stop();
 }
 
-// ---------------------------------------------------------------------------
-// OAuth authorization-code flow, end-to-end over TCP
-// ---------------------------------------------------------------------------
-
 #[test]
 fn oauth_authorization_code_flow_over_tcp() {
     let _secrets = install_master_key();
     let db = fixture_db();
 
-    // Mock Help Scout: token endpoint + the connected user.
     let me = serde_json::json!({
         "id": 42, "firstName": "Kim", "lastName": "Pearce",
         "email": "kim@example.com", "role": "owner", "type": "user"
@@ -317,8 +276,6 @@ fn oauth_authorization_code_flow_over_tcp() {
     .expect("listener");
     let port = server.port();
 
-    // begin_oauth issues the single-use state and builds the real
-    // authorize URL.
     let redirect = format!("http://127.0.0.1:{port}/oauth/callback");
     let authorize_url = crate::loopback::begin_oauth(&db, &creds, &redirect).expect("begin_oauth");
     assert!(
@@ -332,7 +289,6 @@ fn oauth_authorization_code_flow_over_tcp() {
         .to_string();
     assert_eq!(state.len(), 32, "state is 16 random bytes hex-encoded");
 
-    // The browser lands on the callback.
     let target = format!("/oauth/callback?code=THE-CODE&state={state}");
     let (status, body) = get(port, &target);
     assert_eq!(status, 200);
@@ -343,8 +299,6 @@ fn oauth_authorization_code_flow_over_tcp() {
     assert!(body.contains("Kim Pearce"));
     assert!(body.contains("kim@example.com"));
 
-    // The code was exchanged against the mock token endpoint with the
-    // generated test credentials.
     let token_req = {
         let hits = mock.hits();
         hits.iter()
@@ -367,8 +321,6 @@ fn oauth_authorization_code_flow_over_tcp() {
         Some("test-client-secret")
     );
 
-    // Tokens persisted in the envelope; the row keeps metadata only
-    // (R7/D13: no plaintext tokens in sqlite).
     let (envelope_access, envelope_refresh) = envelope_tokens(&db);
     assert_eq!(envelope_access.as_deref(), Some("tcp-flow-token"));
     assert_eq!(envelope_refresh.as_deref(), Some("tcp-flow-refresh"));
@@ -406,8 +358,6 @@ fn oauth_authorization_code_flow_over_tcp() {
     });
     assert!(audits >= 1, "connection must be audited");
 
-    // The state is single-use: replaying it fails safely without another
-    // exchange. (Audit §4: failure pages answer 400, not 200.)
     let exchanges_before = mock.hit_count("POST", "/v2/oauth2/token");
     let (status, body) = get(port, &target);
     assert_eq!(status, 400);
@@ -421,7 +371,6 @@ fn oauth_authorization_code_flow_over_tcp() {
         "a replayed state must never trigger a second exchange"
     );
 
-    // The provider is now authenticated with the exchanged token.
     let status = provider.oauth_status();
     assert_eq!(status["authenticated"], serde_json::json!(true));
 
@@ -472,7 +421,6 @@ fn oauth_callback_reports_token_endpoint_rejection() {
         "failure page must explain: {body}"
     );
 
-    // No token may have been stored for a failed exchange.
     let tokens: i64 = db
         .with_read(|conn| {
             conn.query_row(
@@ -486,14 +434,6 @@ fn oauth_callback_reports_token_endpoint_rejection() {
     server.stop();
 }
 
-// ---------------------------------------------------------------------------
-// P1: satisfaction-webhook ingress over real TCP (relay-ready ingestion)
-// ---------------------------------------------------------------------------
-
-/// A relay (P4's user-run tunnel) forwards Help Scout's
-/// `satisfaction.ratings` webhook to the loopback listener; the signed
-/// event must verify, persist, and enqueue the fetch-by-id job — the
-/// only ratings path the platform offers (there is no list-ratings API).
 #[test]
 fn satisfaction_webhook_ingests_over_tcp() {
     let _secrets = install_master_key();
@@ -509,8 +449,6 @@ fn satisfaction_webhook_ingests_over_tcp() {
     let port = server.port();
 
     let secret = b"top-secret";
-    // The documented payload shape: a Rating object with ratingId plus the
-    // conversation reference.
     let event_body =
         r#"{"ratingId": 501, "conversationId": 900, "rating": "great", "comments": "Fast help"}"#;
     let sig = crate::webhook::compute_signature(secret, event_body.as_bytes());
@@ -531,17 +469,11 @@ fn satisfaction_webhook_ingests_over_tcp() {
     assert_eq!(state, "processed");
     assert_eq!(jobs, 1, "the fetch-by-id rating job is enqueued");
 
-    // Unsigned satisfaction events are rejected at the door, exactly like
-    // every other event kind.
     let (status, body) = post_webhook(port, None, "satisfaction.ratings", event_body);
     assert_ne!(status, 200, "unsigned events must not pass: {body}");
     server.stop();
 }
 
-// P2: the live-chat mirror ingests over real TCP — the five
-// `beacon.chat.*` events are the platform's only push path for chats
-// (Help Scout has no list endpoint), so the relay → listener → mirror
-// chain is the whole story, verified end to end.
 #[test]
 fn beacon_chat_created_ingests_into_the_mirror_over_tcp() {
     let _secrets = install_master_key();
@@ -556,8 +488,6 @@ fn beacon_chat_created_ingests_into_the_mirror_over_tcp() {
     .expect("start listener");
     let port = server.port();
 
-    // The documented shape: the five beacon.chat.* events carry the Chat
-    // object; chat ids are UUID strings, unlike every numeric Inbox id.
     let event_body = r#"{"chat": {"id": "b7e5-uuid-1", "mailboxId": 3, "state": "open",
         "customer": {"id": 71, "first": "Kim", "last": "One"},
         "events": [{"id": "m-1", "type": "customer.message.created",
@@ -588,7 +518,6 @@ fn beacon_chat_created_ingests_into_the_mirror_over_tcp() {
     assert_eq!(mirrored, 1, "the chat object must land in the m059 mirror");
     assert_eq!(messages, 1, "the embedded customer message is stored");
 
-    // Unsigned chat events are rejected at the door like everything else.
     let (status, body) = post_webhook(port, None, "beacon.chat.created", event_body);
     assert_ne!(status, 200, "unsigned events must not pass: {body}");
     server.stop();

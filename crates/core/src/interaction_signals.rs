@@ -799,11 +799,6 @@ pub(crate) fn customer_messages(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Vec<MessageForAnalysis>> {
-    // Audit item 116: the sync writer (sync_engine::upsert_thread) never
-    // populates remote_created_at — every synced thread row carries NULL,
-    // so `ORDER BY remote_created_at` sorted on a constant and message
-    // order was whatever the scan produced. The COALESCE fallback is the
-    // codebase-wide convention (ai_pipeline, ai_evidence, ai_local).
     let mut stmt = conn.prepare(
         "SELECT id, body_html, body_text, remote_created_at, created_at
            FROM conversation_threads
@@ -1148,11 +1143,6 @@ mod batch30_tests {
     use super::*;
     use rusqlite::{Connection, params};
 
-    /// Audit item 116: the sync writer never populates
-    /// conversation_threads.remote_created_at, so `ORDER BY
-    /// remote_created_at` sorted on a constant NULL and the customer
-    /// message sequence was whatever the scan returned. The COALESCE
-    /// fallback restores chronology from the local stamps.
     #[test]
     fn customer_messages_order_chronologically_without_remote_stamps() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -1164,9 +1154,6 @@ mod batch30_tests {
         )
         .expect("conversation");
         let conv: i64 = conn.last_insert_rowid();
-        // Insert newest first: with the constant-NULL ORDER BY the scan
-        // order won (newest first); the COALESCE order must restore
-        // oldest → newest.
         for (offset, body) in [
             ("-1 minutes", "newest"),
             ("-2 hours", "middle"),

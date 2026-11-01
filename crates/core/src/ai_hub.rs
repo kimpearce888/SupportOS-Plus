@@ -1,16 +1,3 @@
-//! The AI provider hub (A1): endpoints, model-role routing, per-feature
-//! toggles, health probes and the cost ledger.
-//!
-//! Design (blueprint §8.1): endpoints are a *list* — the default local LM
-//! Studio, an optional Ollama endpoint, and any number of user-added
-//! OpenAI-compatible cloud endpoints (BYOK per decision D-a: opt-in per
-//! feature, off by default). API keys live in the encrypted envelope; the
-//! stored JSON only references them by envelope key name. Every inference
-//! goes through one of five model *roles* (Embed / Classify / Summarize /
-//! Draft / Agent, blueprint Table 6), and every run lands in `ai_runs` —
-//! the cost ledger aggregates tokens, latency and estimated spend per
-//! feature per day from it.
-
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -26,9 +13,6 @@ pub const ENDPOINT_KEY_PREFIX: &str = "ai_endpoint_key_";
 pub const DEFAULT_LMSTUDIO_URL: &str = "http://127.0.0.1:1234/v1";
 pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434/v1";
 
-/// The five model roles (blueprint Table 6). Classify/Summarize default to
-/// small local models; Draft is the only role where cloud BYOK is
-/// recommended (still opt-in); Agent powers the tool-calling copilot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AiRole {
     Embed,
@@ -58,8 +42,6 @@ impl AiRole {
         }
     }
 
-    /// Human-facing note explaining what the role powers (rendered in the
-    /// AI Center routing table).
     #[must_use]
     pub fn note(self) -> &'static str {
         match self {
@@ -74,7 +56,6 @@ impl AiRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EndpointConfig {
-    /// Stable id (referenced by role assignments and `ai_runs.endpoint_id`).
     pub id: String,
     pub name: String,
     pub base_url: String,
@@ -83,7 +64,6 @@ pub struct EndpointConfig {
     pub price_prompt_per_mtok: f64,
     #[serde(default)]
     pub price_completion_per_mtok: f64,
-    /// Marks the seeded defaults so the UI can hint their origin.
     #[serde(default)]
     pub builtin: bool,
 }
@@ -95,10 +75,6 @@ impl EndpointConfig {
     }
 }
 
-/// One role assignment: which endpoint serves the role and which model.
-/// `PartialEq` powers the AI Center's persisted-vs-live comparison
-/// (clean-audit item 74: commit a model edit only when it differs from
-/// what was last saved).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoleAssignment {
     pub endpoint: String,
@@ -144,9 +120,6 @@ impl RoleMap {
     }
 }
 
-/// Load the endpoint list, seeding it on first use: the local LM Studio
-/// default (inheriting the pre-hub `lmstudio_*` settings, including the
-/// base URL the user already configured) plus an optional Ollama row.
 pub fn load_endpoints(conn: &Connection) -> Result<Vec<EndpointConfig>> {
     if let Some(list) = settings::get_json::<Vec<EndpointConfig>>(conn, SETTINGS_ENDPOINTS)? {
         return Ok(list);
@@ -197,9 +170,6 @@ pub fn set_endpoint_api_key(conn: &Connection, id: &str, key: &str) -> Result<()
 }
 
 pub fn get_endpoint_api_key(conn: &Connection, id: &str) -> Option<String> {
-    // Audit (low): a corrupt/undecryptable envelope used to read as "no
-    // key" with no trace. The caller-visible behavior is unchanged
-    // (Option::None ⇒ "unset"), but the root cause now warns.
     match settings::get_secret(conn, &EndpointConfig::secret_key(id)) {
         Ok(bytes) => bytes
             .and_then(|b| String::from_utf8(b).ok())
@@ -215,9 +185,6 @@ pub fn endpoint_has_key(conn: &Connection, id: &str) -> bool {
     settings::has_secret(conn, &EndpointConfig::secret_key(id)).unwrap_or(false)
 }
 
-/// Remove an endpoint: its envelope key and any role assignments pointing
-/// at it go with it (a role pointing at a deleted endpoint would silently
-/// resolve to nothing — better to clear it and let the UI say "unset").
 pub fn remove_endpoint(conn: &Connection, id: &str) -> Result<()> {
     let _ = settings::delete_secret(conn, &EndpointConfig::secret_key(id));
     let mut list: Vec<EndpointConfig> = load_endpoints(conn)?;
@@ -236,9 +203,6 @@ fn endpoint_by_id<'a>(list: &'a [EndpointConfig], id: &str) -> Option<&'a Endpoi
     list.iter().find(|e| e.id == id && e.enabled)
 }
 
-/// Resolve a role to its endpoint + model + key. `None` when the role is
-/// unassigned, its endpoint is disabled/missing, or the endpoint list
-/// cannot be read.
 #[must_use]
 pub fn resolve_role(
     conn: &Connection,
@@ -252,9 +216,6 @@ pub fn resolve_role(
     Some((endpoint, assignment.model, api_key))
 }
 
-/// The role-aware backend factory (A1). Falls back to the pre-hub
-/// `backend_from_settings` behavior when no role assignment exists, so an
-/// upgraded install keeps working with its legacy single-model config.
 pub fn backend_for_role(conn: &Connection, role: AiRole) -> AiBackend {
     if !settings::get_bool(conn, "ai_enabled", true).unwrap_or(true) {
         return AiBackend::Disabled;
@@ -273,22 +234,12 @@ pub fn backend_for_role(conn: &Connection, role: AiRole) -> AiBackend {
             endpoint_id: Some(endpoint.id),
         };
     }
-    // Legacy fallback (pre-hub installs): the single configured chat model
-    // serves every chat role. The Embed role falls back to the embedding
-    // model through the legacy pipeline when it gains its caller (A4).
     if matches!(role, AiRole::Embed) {
         return AiBackend::Disabled;
     }
     crate::ai_pipeline::backend_from_settings(conn)
 }
 
-// ---------------------------------------------------------------------------
-// Per-feature toggles and the global kill switch
-// ---------------------------------------------------------------------------
-
-/// The wired AI features with their settings keys. The first three keep the
-/// pre-hub keys the Settings page already writes; the rest are new A1/A2
-/// toggles living in the AI Center.
 pub const AI_FEATURES: [(&str, &str, bool); 16] = [
     ("ticket_analysis", "automatic_analysis_enabled", true),
     ("ai_note", "automatic_note_enabled", false),
@@ -305,9 +256,6 @@ pub const AI_FEATURES: [(&str, &str, bool); 16] = [
         true,
     ),
     ("copilot", "ai_feature_copilot_enabled", true),
-    // Batch 13 (A3–A6, K1): every new AI surface is registered so the kill
-    // switch and the AI Center toggle grid cover it. On-demand surfaces
-    // default ON (copilot precedent); automatic generative ones stay OFF.
     ("draft_coaching", "ai_feature_draft_coaching_enabled", true),
     ("translation", "ai_feature_translation_enabled", true),
     (
@@ -323,9 +271,6 @@ pub const AI_FEATURES: [(&str, &str, bool); 16] = [
     ("retrieval", "ai_feature_retrieval_enabled", true),
     ("golden_eval", "ai_feature_golden_eval_enabled", true),
     ("gap_detection", "ai_feature_gap_detection_enabled", true),
-    // Batch 14 (K2, K4): the article-draft review queue and the weekly
-    // digest. Both are on-demand-capable surfaces default ON (copilot
-    // precedent); the queue's human gate is in the data model, not here.
     (
         "article_drafting",
         "ai_feature_article_drafting_enabled",
@@ -334,8 +279,6 @@ pub const AI_FEATURES: [(&str, &str, bool); 16] = [
     ("weekly_digest", "ai_feature_weekly_digest_enabled", true),
 ];
 
-/// Feature gate: the global kill switch (`ai_enabled`) dominates, then the
-/// per-feature key with its default.
 pub fn ai_feature_enabled(conn: &Connection, feature: &str) -> bool {
     if !settings::get_bool(conn, "ai_enabled", true).unwrap_or(true) {
         return false;
@@ -359,10 +302,6 @@ pub fn set_ai_feature_enabled(conn: &Connection, feature: &str, value: bool) -> 
     )))
 }
 
-// ---------------------------------------------------------------------------
-// Health probes
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct EndpointProbe {
     pub ok: bool,
@@ -372,8 +311,6 @@ pub struct EndpointProbe {
     pub models: Vec<String>,
 }
 
-/// One endpoint health probe (list models): the green/red light the hub
-/// renders instead of guesswork.
 pub async fn probe_endpoint(
     base_url: &str,
     timeout_ms: u64,
@@ -405,10 +342,6 @@ pub async fn probe_endpoint(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Cost ledger
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize)]
 pub struct UsageRow {
     pub day: String,
@@ -422,10 +355,6 @@ pub struct UsageRow {
     pub est_cost_usd: f64,
 }
 
-/// Aggregated per-feature cost ledger over `ai_runs` (the A1 cost ledger:
-/// tokens, latency, estimated spend per feature per day). Prices come from
-/// the endpoint configs; runs whose endpoint is unknown (legacy pre-hub
-/// rows) price at zero — the tokens still show.
 pub fn usage_ledger(conn: &Connection, days: i64) -> Result<Vec<UsageRow>> {
     let endpoints = load_endpoints(conn).unwrap_or_default();
     let price_for = |endpoint_id: Option<&str>| -> (f64, f64) {
@@ -487,13 +416,6 @@ pub fn usage_ledger(conn: &Connection, days: i64) -> Result<Vec<UsageRow>> {
         .collect())
 }
 
-// ---------------------------------------------------------------------------
-// Migration m054: ai_runs.endpoint_id (the ledger's cost attribution)
-// ---------------------------------------------------------------------------
-
-/// Migration m054 (boot step): `ai_runs` gains `endpoint_id` so the cost
-/// ledger can price each run against the endpoint that served it, even
-/// after role reassignments change future routing.
 pub fn apply_m054_ai_runs_endpoint(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "ai_runs")? {
         return Ok(());
@@ -543,10 +465,8 @@ mod tests {
                 .any(|e| e.id == "lmstudio" && e.base_url == "http://legacy:1234/v1" && e.builtin)
         );
         assert!(endpoints.iter().any(|e| e.id == "ollama" && e.builtin));
-        // Idempotent: the second load returns the stored list.
         assert_eq!(load_endpoints(&conn).expect("again").len(), endpoints.len());
 
-        // Assign the Draft role to a cloud endpoint with a BYO key.
         let cloud = EndpointConfig {
             id: "cloudy".into(),
             name: "Cloud (OpenAI-compatible)".into(),
@@ -575,7 +495,6 @@ mod tests {
         assert_eq!(endpoint.id, "cloudy");
         assert_eq!(model.as_deref(), Some("gpt-test"));
         assert_eq!(api_key.as_deref(), Some("sk-test-1234"));
-        // Unassigned roles resolve to nothing.
         assert!(resolve_role(&conn, AiRole::Classify).is_none());
     }
 
@@ -620,11 +539,9 @@ mod tests {
     #[test]
     fn feature_gate_honors_the_kill_switch_and_defaults() {
         let conn = conn();
-        // Kill switch dominates.
         crate::settings::set_bool(&conn, "ai_enabled", false).expect("off");
         assert!(!ai_feature_enabled(&conn, "attributes"));
         crate::settings::set_bool(&conn, "ai_enabled", true).expect("on");
-        // Defaults: analysis/attributes/clustering/copilot on, note/draft off.
         assert!(ai_feature_enabled(&conn, "ticket_analysis"));
         assert!(!ai_feature_enabled(&conn, "ai_note"));
         assert!(!ai_feature_enabled(&conn, "draft"));
@@ -632,9 +549,7 @@ mod tests {
         assert!(ai_feature_enabled(&conn, "memory_extraction"));
         assert!(ai_feature_enabled(&conn, "issue_clustering"));
         assert!(ai_feature_enabled(&conn, "copilot"));
-        // Unknown features are off by construction.
         assert!(!ai_feature_enabled(&conn, "nope"));
-        // A per-feature toggle flips and persists.
         set_ai_feature_enabled(&conn, "issue_clustering", false).expect("set");
         assert!(!ai_feature_enabled(&conn, "issue_clustering"));
     }
@@ -644,7 +559,6 @@ mod tests {
         let _g = key_guard();
         crate::settings::set_master_key_for_tests([7u8; 32]);
         let conn = conn();
-        // A priced cloud endpoint.
         let mut list = load_endpoints(&conn).expect("seed");
         list.push(EndpointConfig {
             id: "priced".into(),
@@ -657,7 +571,6 @@ mod tests {
         });
         save_endpoints(&conn, &list).expect("save");
 
-        // One completed run: 500k prompt + 250k completion tokens.
         conn.execute(
             "INSERT INTO ai_runs (type, model, endpoint_id, status, latency_ms, started_at, token_usage, input_hash, prompt_version, response_json)
              VALUES ('ticket_analysis', 'gpt-test', 'priced', 'completed', 1200,
@@ -665,7 +578,6 @@ mod tests {
             [],
         )
         .expect("run");
-        // One legacy row with no endpoint and no usage: tokens zero, cost zero.
         conn.execute(
             "INSERT INTO ai_runs (type, model, status, latency_ms, started_at, input_hash, prompt_version, response_json)
              VALUES ('ticket_analysis', 'old-model', 'completed', 800, datetime('now'), 'seed2', 'seedv', '{}')",

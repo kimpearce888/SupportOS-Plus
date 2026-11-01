@@ -1,16 +1,3 @@
-//! Sync Health page (port of the web `pages/sync_health.rs`).
-//!
-//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
-//! conformed lab's `sync-health` sheet (DS-A-06 console): the engine state
-//! and last success ride the DS-C-24 hero band — the lab's verbatim
-//! forensic note and the SYNC-map status badge right; the Engine card
-//! keeps the webhook queue and self-healing hints; the action toolbar
-//! splits (the three run acts left, the destructive cancel right); and
-//! the checkpoint / recent-runs tables stay. The sync actions run in-process through the
-//! shared `SyncEngine` (the `/api/sync/*` route logic without the HTTP
-//! hop). Since 1.2.0 the simulated-activity demo tools are gone: the
-//! page reports on real sync activity only.
-
 use std::sync::Arc;
 
 use eframe::egui;
@@ -21,7 +8,6 @@ use spp_core::sync_engine::SyncEngine;
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
-/// One sync checkpoint row (typed port of the status route SQL).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CheckpointRow {
     pub resource: String,
@@ -33,7 +19,6 @@ pub struct CheckpointRow {
     pub status: String,
 }
 
-/// One sync run row (typed port of the status route SQL).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RunRow {
     pub id: i64,
@@ -47,7 +32,6 @@ pub struct RunRow {
     pub errors: i64,
 }
 
-/// Webhook queue counters (typed port of the status route SQL).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WebhookQueue {
     pub total: i64,
@@ -57,8 +41,6 @@ pub struct WebhookQueue {
     pub duplicates: i64,
 }
 
-/// The P4 webhook health snapshot: the last check's verdict, as the
-/// status card renders it (source: `spp_core::webhook_health`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct WebhookHealthSnapshot {
     pub verdict: String,
@@ -66,7 +48,6 @@ pub struct WebhookHealthSnapshot {
     pub checked_at: String,
 }
 
-/// The full sync health status model.
 #[derive(Debug, Clone, Default)]
 pub struct SyncStatus {
     pub state: String,
@@ -77,7 +58,6 @@ pub struct SyncStatus {
     pub webhook_health: Option<WebhookHealthSnapshot>,
 }
 
-/// Load the status model (typed port of `/api/sync/status`).
 #[must_use]
 pub fn load_status(conn: &Connection) -> SyncStatus {
     let state = spp_core::sync_engine::get_state(conn);
@@ -169,7 +149,6 @@ pub fn load_status(conn: &Connection) -> SyncStatus {
     }
 }
 
-/// Which sync action a button dispatches (web: `/api/sync/{action}`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncAction {
     Initial,
@@ -189,15 +168,6 @@ impl SyncAction {
     }
 }
 
-/// Run a sync action on a detached thread with its own single-threaded
-/// runtime (the web route's tokio spawn, ported). Shared by Sync Health,
-/// Onboarding and — since 1.3.0 — the "Sync now" buttons on the Inbox
-/// and Knowledge pages. Terminal state arrives via the event bus
-/// (SyncCompleted), never via the dropped thread result.
-///
-/// 1.4.0 (R8, D6): returns whether the action actually started — a sync
-/// in progress no longer silently swallows the click; callers tell the
-/// user and the header ring keeps the live state visible.
 pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) -> bool {
     if action != SyncAction::Cancel && engine.is_running() {
         return false;
@@ -211,8 +181,6 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
-            // The async block below moves `engine`; keep the bus for the
-            // failure report (R5).
             let bus = engine.bus.clone();
             let result = runtime
                 .map_err(|e| spp_core::Error::Config(e.to_string()))
@@ -246,9 +214,6 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
                         &format!("{} failed: {e}", action_label_static(action)),
                     );
                 });
-                // v1.4.0 (R5, D4): manual-sync failures reach the UI live —
-                // before, they landed only in Diagnostics and a red-zero
-                // Sync Health page looked like a healthy quiet account.
                 if let Some(bus) = &bus {
                     spp_core::event_bus::notify_error(
                         bus,
@@ -270,9 +235,6 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
     true
 }
 
-/// Kick off a Help Center (Docs API) refresh — the Knowledge page's
-/// "Sync Help Center now" button. Full docs v1 walk: collections,
-/// categories and per-article content.
 pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
     if engine.is_running() {
         return;
@@ -286,8 +248,6 @@ pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build();
-            // The async block below moves `engine`; keep the bus for the
-            // failure report (R5).
             let bus = engine.bus.clone();
             let result = runtime
                 .map_err(|e| spp_core::Error::Config(e.to_string()))
@@ -307,7 +267,6 @@ pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
                         &format!("Help Center sync failed: {e}"),
                     );
                 });
-                // v1.4.0 (R5, D4): same live surfacing for the docs pass.
                 if let Some(bus) = &bus {
                     spp_core::event_bus::notify_error(
                         bus,
@@ -330,13 +289,9 @@ pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
     }
 }
 
-/// The interactive sync health page state.
 pub struct SyncHealthPage {
     status: Option<SyncStatus>,
     message: Option<String>,
-    /// The most recent SyncProgress event — Sync Health renders live
-    /// "X of Y resources" instead of a frozen "started in background"
-    /// banner that never cleared (the 1.2.0 behavior).
     last_progress: Option<spp_core::events::SyncProgressEvent>,
 }
 
@@ -350,15 +305,11 @@ impl SyncHealthPage {
         }
     }
 
-    /// Live-update invalidation. The stale action banner clears with it —
-    /// before 1.3.0 "Initial sync started…" lingered forever.
     pub fn invalidate(&mut self) {
         self.status = None;
         self.message = None;
     }
 
-    /// Record a mid-run progress event (driven by the invalidation
-    /// bridge; cheap — the status reload reads the same tables).
     pub fn note_progress(&mut self, event: spp_core::events::SyncProgressEvent) {
         self.last_progress = Some(event);
         self.status = None;
@@ -368,22 +319,15 @@ impl SyncHealthPage {
         self.status = Some(db.with_read(load_status));
     }
 
-    /// Run one sync action in the background (delegates to the shared
-    /// helper used by every page's refresh buttons).
     pub fn run_sync_action(&mut self, db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) {
         if action != SyncAction::Cancel && engine.is_running() {
             self.message = Some("A sync is already running.".into());
             return;
         }
-        // FIND-006: on an idle engine there is nothing to cancel — the
-        // guard above deliberately skips Cancel, which used to fall through
-        // to a spawned no-op and the misleading "(started in background)"
-        // toast. Say what actually happened instead.
         if action == SyncAction::Cancel && !engine.is_running() {
             self.message = Some("No sync is running.".into());
             return;
         }
-        // R8 (D6): the helper now reports whether it really started.
         if spawn_sync_action(db, engine, action) {
             self.message = Some(format!("{} (started in background)", action.label()));
         } else {
@@ -391,8 +335,6 @@ impl SyncHealthPage {
         }
     }
 
-    /// Render the page. `engine` is the shared sync engine; `None` mirrors
-    /// the web route's ServiceUnavailable response.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, engine: Option<&Arc<SyncEngine>>) {
         if self.status.is_none() {
             self.reload(db);
@@ -404,9 +346,6 @@ impl SyncHealthPage {
             Some("engine state, checkpoints, and recent runs"),
             |_| {},
         );
-        // Live progress (SyncProgress events): "conversations · 3/22 ·
-        // 1,204 records" while a run is executing — replaces the frozen
-        // "started in background" banner of the 1.2.0 era.
         if let Some(p) = &self.last_progress {
             let stage_line = if p.total > 0 {
                 format!(
@@ -428,9 +367,6 @@ impl SyncHealthPage {
         ui.add_space(8.0);
 
         let status = self.status.clone().unwrap_or_default();
-        // DS-C-24 hero: the mono engine state, the lab's verbatim forensic
-        // note, and the SYNC-map status badge right (live→success,
-        // error→danger, draft→neutral, catching_up→info, unknown→stale).
         let state_tone = match status.state.as_str() {
             "LIVE" => crate::design::BadgeTone::Success,
             "ERROR" => crate::design::BadgeTone::Destructive,
@@ -465,8 +401,6 @@ impl SyncHealthPage {
                     status.webhooks.duplicates
                 ),
             );
-            // P4: the self-healing guard's last verdict — a re-registered
-            // hook is the visible trace of a silent platform deactivation.
             if let Some(health) = &status.webhook_health {
                 design::hint_text(
                     ui,
@@ -479,8 +413,6 @@ impl SyncHealthPage {
         });
         ui.add_space(8.0);
 
-        // The lab's action toolbar: the three run acts left, the
-        // destructive cancel right.
         ui.horizontal(|ui| {
             for action in [
                 SyncAction::Initial,

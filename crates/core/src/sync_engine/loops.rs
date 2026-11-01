@@ -538,10 +538,6 @@ impl SyncEngine {
                 })
             }
             "conversations" => self.sync_conversations(None, initial).await,
-            // The conversations pass above already hydrates threads; this
-            // resource now only backfills rows that came back thread-less
-            // (a crashed run, a rate-limited page) instead of walking the
-            // whole account a second time.
             "threads" => self.sync_missing_threads().await,
             "docs_collections" => {
                 let collections = self.provider.list_doc_collections().await?;
@@ -565,7 +561,6 @@ impl SyncEngine {
             }
             "docs_articles" => {
                 let mut processed = 0;
-                // Audit fix (C2, live): collection remote ids are hex ObjectIds (TEXT).
                 let collections: Vec<String> = {
                     let conn = self.lock();
                     let mut stmt = conn.prepare("SELECT remote_id FROM docs_collections")?;
@@ -656,10 +651,6 @@ impl SyncEngine {
         };
         let mut pages = 0i64;
         let mut heartbeat = -1i64;
-        // Audit fix (C4): bound the per-pass channel backfill so a huge
-        // initial crawl cannot monopolize the rate budget — customers
-        // beyond the cap simply stay in the "no local rows" bucket and are
-        // backfilled on a later pass.
         let mut channel_fetches = 0usize;
         const CHANNEL_FETCH_BUDGET: usize = 400;
         loop {
@@ -676,19 +667,6 @@ impl SyncEngine {
                 })
                 .await?;
 
-            // Audit fix (C4): the real Help Scout API NEVER embeds contact
-            // channels in the customer payload (they live behind
-            // /v2/customers/{id}/emails|phones|chats|websites|social-profiles).
-            // Syncing a bare payload used to leave customer_emails empty —
-            // every customer showed "—" and Outreach refused to send.
-            //
-            // Decide which customers need a channel fetch WITHOUT holding
-            // the writer lock (the fetches below await network I/O):
-            //   - embedded channels (mock / future API): use them as-is;
-            //   - no local channel rows yet: fetch the sub-resources;
-            //   - rows exist and the payload is bare: preserve them —
-            //     re-upserting a bare payload used to DELETE the stored
-            //     emails (the customers-page "—" bug's second half).
             let mut to_fetch: Vec<i64> = Vec::new();
             let mut bare_payload_ids: std::collections::HashSet<i64> =
                 std::collections::HashSet::new();
@@ -696,7 +674,7 @@ impl SyncEngine {
                 let conn = self.lock();
                 for c in &page.items {
                     if !c.channels_all_empty() {
-                        continue; // embedded channels — full replace is correct
+                        continue;
                     }
                     bare_payload_ids.insert(c.remote_id);
                     match local_id(&conn, "customers", c.remote_id) {
@@ -721,9 +699,6 @@ impl SyncEngine {
                     }
                 }
             }
-            // Fetch the sub-resources with NO lock held (5 GETs each; the
-            // provider's rate limiter spaces them out). A failed fetch
-            // degrades to the bare payload with stored rows preserved.
             let mut fetched: std::collections::HashMap<i64, crate::helpscout::HsCustomer> =
                 std::collections::HashMap::new();
             for rid in &to_fetch {
@@ -734,7 +709,6 @@ impl SyncEngine {
                     }
                     Ok(None) => {}
                     Err(e) => {
-                        // One unreachable customer must not sink the page.
                         tracing::warn!(
                             customer = rid,
                             error = %e,
@@ -746,9 +720,6 @@ impl SyncEngine {
             }
             {
                 let conn = self.lock();
-                // Audit fix (M1): one poisoned row used to abort the whole
-                // customers stage (and every later pass re-failed at the
-                // same row). Isolate per-row failures, count them, keep going.
                 for c in &page.items {
                     let outcome = if let Some(ch) = fetched.get(&c.remote_id) {
                         let mut full = c.clone();
@@ -847,9 +818,6 @@ impl SyncEngine {
         let mut heartbeat = -1i64;
         let mut failed = 0i64;
         loop {
-            // Audit fix (M2): the incremental loop had no cancel checks —
-            // "Cancel running sync" was only consulted between resources,
-            // so it looked dead exactly during the long conversation walk.
             if self.cancelled() {
                 tracing::info!(
                     resource = "conversations",
@@ -876,9 +844,6 @@ impl SyncEngine {
                 } else {
                     Vec::new()
                 };
-                // Audit fix (M1): one poisoned conversation used to abort
-                // the whole stage — and every later pass re-failed at the
-                // same row forever. Isolate the failure, log it, keep going.
                 if let Err(e) = self.ingest_conversation(c, &threads, !initial).await {
                     failed += 1;
                     tracing::warn!(
@@ -895,9 +860,6 @@ impl SyncEngine {
                     continue;
                 }
                 processed += 1;
-                // Real-time feel: each ingested conversation notifies the
-                // UI immediately, so the inbox fills while the sync runs
-                // instead of after it.
                 if let Some(bus) = &self.bus
                     && let Some(local) = {
                         let conn = self.lock();
@@ -924,8 +886,6 @@ impl SyncEngine {
                     }
                 }
             }
-            // A page-level progress heartbeat even when the page is the
-            // current stage (total unknown mid-walk: done = records).
             self.emit_progress(
                 "conversations",
                 processed.max(0) as u32,
@@ -1081,15 +1041,6 @@ impl SyncEngine {
                     tx.commit()?;
                 }
             }
-            // Audit fix (C3): index THIS conversation into the FTS corpus at
-            // ingest. Before, `index_conversation_fts` was only reachable
-            // from the bulk rebuild — which nothing ever enqueued — so
-            // fts_conversations stayed at 0 rows and Search returned
-            // "0 hits" on a real account no matter how much data synced.
-            // Indexing per conversation is O(this conversation), keeps the
-            // corpus fresh for both the initial crawl and incremental passes
-            // (webhook ingests share this path), and marks the threads' book
-            // flag so diagnostics stop showing fts_indexed = 0.
             if let Err(e) = crate::search::index_conversation_fts(&conn, local_id) {
                 let _ = crate::jobs::log_error(
                     &conn,
@@ -1105,12 +1056,6 @@ impl SyncEngine {
                 );
             }
         }
-        // A4 retrieval spine: every ingested conversation is re-chunked
-        // (idempotent rebuild) so semantic search and the evidence engine see
-        // fresh content. The embedding pass is enqueued only when the
-        // retrieval feature is on, new chunks exist, and one isn't already
-        // queued — chunking itself stays on regardless (it is local, cheap,
-        // and future-proof: enabling embeddings later picks chunks up).
         {
             let conn = self.lock();
             match crate::embeddings::chunk_conversation(&conn, local_id) {

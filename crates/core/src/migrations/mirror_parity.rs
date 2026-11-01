@@ -43,8 +43,6 @@ fn captured_triggers(conn: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(rows)
 }
 
-/// Every `(child_table, from_column, parent_column)` edge in which
-/// `child_table` references `parent` via a declared foreign key.
 fn referencing_edges(conn: &Connection, parent: &str) -> Result<Vec<(String, String, String)>> {
     let mut stmt = conn.prepare(
         "SELECT name FROM sqlite_master
@@ -75,13 +73,6 @@ fn referencing_edges(conn: &Connection, parent: &str) -> Result<Vec<(String, Str
     Ok(edges)
 }
 
-/// Remove rows that dangle after `root` was rebuilt with a possibly
-/// filtered row set. v1.1.2 design: migrations run with foreign-key
-/// enforcement suspended (see `apply_boot_steps`), so nothing cascades
-/// on its own — this walk performs the cascade explicitly, breadth
-/// first: rows of every table referencing `root` whose target row no
-/// longer exists are deleted, then their dependents likewise, so no
-/// dangling reference survives to the step's foreign_key_check.
 fn prune_dangling_references(conn: &Connection, root: &str) -> Result<()> {
     let mut queue = std::collections::VecDeque::new();
     queue.push_back(root.to_string());
@@ -104,19 +95,6 @@ fn prune_dangling_references(conn: &Connection, root: &str) -> Result<()> {
     Ok(())
 }
 
-/// Rebuild a table in place: create `__rebuild`, copy rows through
-/// `copy_sql` (which may filter), drop the original, rename, restore
-/// indexes and triggers, then prune rows that now dangle.
-///
-/// v1.1.2 contract: the caller (`apply_boot_steps`) suspends foreign-key
-/// enforcement for the whole step, and verifies integrity with
-/// `PRAGMA foreign_key_check` before committing — SQLite's live
-/// enforcement cannot survive a drop-and-rename dance (immediate
-/// cascade actions fire against rows that are about to come back, and
-/// the deferred-violation counter never forgets a violation that
-/// UPDATE-in-place or a rename has long since repaired — the mechanism
-/// behind the 1.1.0/1.1.1 "migration 36 failed" boot failures on real
-/// 0.2.x data).
 fn rebuild_table(conn: &Connection, table: &str, rb: &Rebuild<'_>) -> Result<()> {
     let indexes = captured_indexes(conn, table)?;
     let triggers = captured_triggers(conn, table)?;
@@ -164,10 +142,6 @@ fn rebuild_table(conn: &Connection, table: &str, rb: &Rebuild<'_>) -> Result<()>
         for ddl in &triggers {
             conn.execute_batch(ddl)?;
         }
-        // The copy may have dropped rows (orphaned threads, merged
-        // conversations, ...): every row that now points at a missing
-        // row of the rebuilt table — recursively — must go before the
-        // step's foreign_key_check.
         prune_dangling_references(conn, table)?;
     } else {
         conn.execute_batch(&format!("CREATE TABLE \"{}\" {};", rb.new_name, rb.new_ddl))?;
@@ -887,9 +861,6 @@ fn fk_declared(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     Ok(hits > 0)
 }
 
-/// The customers rebuild of m046, factored out so the regression tests
-/// can drive the exact production DDL and copy path over a legacy
-/// fixture (see the `tests` module below).
 fn rebuild_customers(conn: &Connection) -> Result<()> {
     if !fk_declared(conn, "customers", "organization_id")? {
         rebuild_table(
@@ -949,20 +920,9 @@ fn rebuild_customers(conn: &Connection) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    //! Regression coverage for the table-rebuild machinery on legacy
-    //! (0.2.x-shaped) data. The CI upgrade test uses an empty database,
-    //! which is why the 1.1.0/1.1.1 "UNIQUE constraint failed:
-    //! ratings.id" boot failure on real data was never caught: the
-    //! capture half of the capture/restore pair did not delete the
-    //! child rows it captured, so the restore re-inserted rows that had
-    //! never been removed.
 
     use super::*;
 
-    /// Build the legacy shape the m045/m046 rebuilds expect: threads
-    /// with `actor_id` (pre-actor-model), ratings and attachments as
-    /// foreign-key children of `conversation_threads`, and customers
-    /// whose `organization_id` carries no foreign key yet.
     fn legacy_shape() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -1071,9 +1031,6 @@ mod tests {
         conn
     }
 
-    /// Mirror `apply_boot_steps`: every migration step suspends
-    /// foreign-key enforcement, runs in one transaction, and must pass
-    /// `PRAGMA foreign_key_check` before the commit is accepted.
     fn run_step(conn: &mut Connection, step: fn(&Connection) -> Result<()>) {
         conn.pragma_update(None, "foreign_keys", "OFF")
             .expect("suspend FK enforcement for the step");
@@ -1115,14 +1072,9 @@ mod tests {
 
     #[test]
     fn m045_rebuild_restores_ratings_children_on_legacy_data() {
-        // Before v1.1.2 this died with "UNIQUE constraint failed:
-        // ratings.id" on the first non-empty child table (the user's
-        // real 0.2.x database); empty databases never saw it.
         let mut conn = legacy_shape();
         run_step(&mut conn, apply_m045);
 
-        // Threads: the orphan (conversation 99 never existed) is gone,
-        // survivors keep their ids and gain the actor-model columns.
         assert_eq!(ids(&conn, "conversation_threads"), vec![1, 3]);
         assert!(
             !columns(&conn, "conversation_threads").contains(&"actor_id".to_string()),
@@ -1140,9 +1092,6 @@ mod tests {
         assert_eq!(by_user, Some(1), "user actor maps to created_by_user_id");
         assert_eq!(by_customer, None, "thread 1 had no customer actor");
 
-        // Ratings: restored with their original ids; the row pointing
-        // at the dropped orphan thread is not restored; the row with
-        // no thread reference comes back unchanged.
         assert_eq!(ids(&conn, "ratings"), vec![10, 12]);
         let (thread_ref, rating): (Option<i64>, String) = conn
             .query_row(
@@ -1154,22 +1103,11 @@ mod tests {
         assert_eq!(thread_ref, Some(1));
         assert_eq!(rating, "3");
 
-        // Attachments: second FK child of the rebuilt table, restored
-        // with its original id and still pointing at thread 1.
         assert_eq!(ids(&conn, "attachments"), vec![20]);
     }
 
     #[test]
     fn m046_customers_rebuild_keeps_conversations_and_ratings() {
-        // The upgrade path continues into the m046 customers rebuild,
-        // whose capture set includes conversations and ratings (children
-        // of customers via customer_local_id) — and conversations is
-        // itself the parent of ratings, attachments and threads, so the
-        // delete/re-insert must not disturb the grandchildren. All rows
-        // must come back with their original ids, and an organization_id
-        // pointing at a missing organization is nulled by the copy CASE.
-        // (Driven through `rebuild_customers` because the full m046 also
-        // rebuilds ten other tables the minimal fixture does not carry.)
         let mut conn = legacy_shape();
         run_step(&mut conn, apply_m045);
         conn.pragma_update(None, "foreign_keys", "OFF")
@@ -1205,15 +1143,11 @@ mod tests {
             "organization 99 does not exist; the copy CASE nulls it"
         );
 
-        // Conversations and ratings were children of the rebuilt
-        // customers table (customer_local_id); both must be back with
-        // their original ids, and the grandchildren untouched.
         assert_eq!(ids(&conn, "conversations"), vec![1, 2]);
         assert_eq!(ids(&conn, "ratings"), vec![10, 12]);
         assert_eq!(ids(&conn, "conversation_threads"), vec![1, 3]);
         assert_eq!(ids(&conn, "attachments"), vec![20]);
 
-        // The rebuild is what declares the organization_id foreign key.
         let has_org_fk = conn
             .prepare("PRAGMA foreign_key_list(customers)")
             .expect("prepare fk list")

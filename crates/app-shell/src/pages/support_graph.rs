@@ -1,22 +1,3 @@
-//! Support Graph page (port of the web `pages/support_graph.rs`).
-//!
-//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
-//! conformed lab's `support-graph` sheet (DS "stack" archetype): the
-//! result count rides the header as the DS-C-01 counter pill (A-6 — the
-//! lab's meta counter; the bespoke '{n} node(s)' section title is gone),
-//! the results are the lab's ds-sel-rows (full-width selectable rows with
-//! the selected fill + 2px primary inset — the live-chats chat_row
-//! pattern — kind + label on the head line, the sublabel beneath), and
-//! the Neighborhood edges render as DS.row pairs (relation strong + the
-//! far-side label left, the origin mono-muted right). The queries, state,
-//! and behavior are unchanged.
-//!
-//! Search box → `spp_core::support_graph::graph_search` (the `/api/graph/search`
-//! SQL) listing node references; picking one loads its neighborhood via
-//! `neighbors_json` (the `/api/graph/neighbors/{kind}/{id}` SQL, direction
-//! `both`, limit 5 — same defaults as the web page) and renders the edge
-//! list. The header stats row ports `graph_stats`.
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::support_graph::GraphNodeRef;
@@ -24,7 +5,6 @@ use spp_core::support_graph::GraphNodeRef;
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
-/// Parsed neighborhood view of one graph node.
 #[derive(Debug, Clone, Default)]
 pub struct Neighborhood {
     pub center: Option<GraphNodeRef>,
@@ -46,8 +26,6 @@ impl Neighborhood {
                         if relation.is_empty() {
                             return None;
                         }
-                        // Each edge carries (source, target); the far side
-                        // is whichever end is not the center node.
                         let source = e.get("source");
                         let target = e.get("target");
                         let far = match &center {
@@ -87,7 +65,6 @@ impl Neighborhood {
     }
 }
 
-/// The interactive support-graph page state.
 pub struct SupportGraphPage {
     query_edit: String,
     query: String,
@@ -96,13 +73,7 @@ pub struct SupportGraphPage {
     selected: Option<(String, i64)>,
     neighborhood: Option<Neighborhood>,
     error: Option<String>,
-    /// Clean-audit item 144: invalidation clears the visible results of
-    /// an active search — this flag schedules the refetch on the next
-    /// frame so the search survives sync events instead of blanking
-    /// until the user re-submits it.
     results_stale: bool,
-    /// Audit fix (M21): when the stats query errors, `stats` stays None —
-    /// without a backoff stamp the aggregate query re-ran every frame.
     stats_at: Option<std::time::Instant>,
 }
 
@@ -118,37 +89,26 @@ impl SupportGraphPage {
             neighborhood: None,
             error: None,
             results_stale: false,
-            // Audit fix (M21): last stats-reload attempt — a failing
-            // stats query used to re-run on the UI thread every frame.
             stats_at: None,
         }
     }
 
-    /// kittest-only seam (the operations freeze precedent): prefills the
-    /// search box and runs the real search so the golden harness renders
-    /// the lab's fixture state without synthesizing keystrokes. Prod
-    /// never calls this.
     pub fn kittest_seed_search(&mut self, db: &DbHandle, query: &str) {
         self.query = query.to_string();
         self.query_edit = query.to_string();
         self.reload_results(db);
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.stats = None;
-        // Audit fix (M21): an explicit invalidation reloads next frame.
         self.stats_at = None;
         if self.query.is_empty() {
             return;
         }
         self.results.clear();
-        // Clean-audit item 144: the cleared search refetches next frame.
         self.results_stale = true;
     }
 
-    /// Clean-audit item 144: the invalidation-cleared search refetches
-    /// against the refreshed mirror.
     fn refetch_if_stale(&mut self, db: &DbHandle) {
         if self.results_stale {
             self.results_stale = false;
@@ -198,11 +158,7 @@ impl SupportGraphPage {
         }
     }
 
-    /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // Audit fix (M21): when the stats query fails, `stats` stays None
-        // and this re-ran the aggregate query every rendered frame —
-        // throttle reload attempts to at most one per second.
         if self.stats.is_none() && self.stats_at.is_none_or(|t| t.elapsed().as_secs() >= 1) {
             self.stats_at = Some(std::time::Instant::now());
             self.reload_stats(db);
@@ -220,8 +176,6 @@ impl SupportGraphPage {
             "linked customers, conversations, and users".to_string()
         };
         design::page_header(ui, "Support Graph", Some(subtitle.as_str()), |ui| {
-            // The lab's meta counter: the result count beside the header
-            // (A-6 — counts never sit in titles).
             design::page_counter(ui, &format!("{} nodes", self.results.len()));
         });
         ui.horizontal(|ui| {
@@ -270,10 +224,6 @@ impl SupportGraphPage {
                     let label = super::str_field(node, "label");
                     let sub = super::opt_str_field(node, "sublabel");
                     let selected = self.selected == Some((kind.clone(), id));
-                    // The lab's ds-sel-row: full-width selectable row, kind
-                    // + label on the head line, the sublabel beneath (the
-                    // live-chats chat_row pattern: painted selection fill
-                    // + the 2px primary inset).
                     if result_row(ui, &kind, &label, sub.as_deref(), selected) {
                         clicked = Some((kind.clone(), id));
                     }
@@ -312,9 +262,6 @@ impl SupportGraphPage {
                         .show(ui, |ui| {
                             let t = design::tokens(ui);
                             for (relation, origin, target) in &neighborhood.edges {
-                                // The lab's DS.row: the relation + the
-                                // far-side label strong left, the origin
-                                // mono-muted right.
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         egui::RichText::new(relation.as_str())
@@ -354,17 +301,12 @@ impl Default for SupportGraphPage {
     }
 }
 
-/// Parse a wire node kind (graceful for unknown values).
 fn kind_from_str(kind: &str) -> Option<spp_core::catalog::GraphNodeKind> {
     spp_core::catalog::GraphNodeKind::ALL
         .into_iter()
         .find(|k| k.as_str() == kind)
 }
 
-/// The lab's ds-sel-row: a full-width selectable row — kind + label on
-/// the head line, the sublabel beneath, the selected fill + 2px primary
-/// inset (the live-chats chat_row pattern, tokens only). Returns true on
-/// click.
 fn result_row(
     ui: &mut egui::Ui,
     kind: &str,
@@ -418,7 +360,6 @@ fn result_row(
     });
 
     if selected {
-        // Neutral fill + the selected-row inset (DC §2.2: --ds-primary).
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(6), t.selection);
         ui.painter().rect_filled(
@@ -485,10 +426,6 @@ mod tests {
         );
     }
 
-    /// Clean-audit item 144: invalidation used to clear the visible
-    /// results of an active search with nothing refetching them — the
-    /// search stayed blank until the user re-submitted it. The cleared
-    /// search now refetches on the next frame.
     #[test]
     fn invalidation_refetches_the_cleared_search() {
         let db = fixture(vec![(
@@ -507,12 +444,10 @@ mod tests {
         page.reload_results(&db);
         assert!(!page.results.is_empty());
 
-        // A sync event invalidates the page...
         page.invalidate();
         assert!(page.results.is_empty(), "the cache is cleared");
         assert!(page.results_stale, "a refetch is scheduled");
 
-        // ...and the next frame's refetch restores the active search.
         page.refetch_if_stale(&db);
         assert!(
             !page.results.is_empty(),
@@ -574,9 +509,7 @@ mod tests {
         let n = Neighborhood::from_json(value);
         assert_eq!(n.center.expect("center").local_id, 9);
         assert_eq!(n.edges.len(), 2);
-        // Out-edge: far side is the target.
         assert_eq!(Neighborhood::target_label(&n.edges[0].2), "#501 Export");
-        // In-edge: far side is the source.
         assert_eq!(Neighborhood::target_label(&n.edges[1].2), "Ada");
     }
 }

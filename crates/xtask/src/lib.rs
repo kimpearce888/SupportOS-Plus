@@ -3,19 +3,9 @@ pub mod package;
 
 #[cfg(test)]
 mod hygiene {
-    //! FIND-003 regression guards.
-    //!
-    //! The prior QA session (`qa-audit/20261019T050847Z`) committed app-local
-    //! secret-envelope key material (`evidence/artifacts/qa-profile-*/secrets.key`)
-    //! as repo artifacts. On 2026-10-25 the maintainer authorized a history
-    //! purge (git-filter-repo, all refs incl. release tags) and the material
-    //! was removed from every commit. These tests prevent reintroduction: the
-    //! key files must never reappear in the tree, and the `.gitignore` rule
-    //! that blocks them must stay in place.
 
     use std::path::{Path, PathBuf};
 
-    /// Directories excluded from the scan (VCS internals / build output).
     const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "dist"];
 
     fn repo_root() -> PathBuf {

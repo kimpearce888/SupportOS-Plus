@@ -1,10 +1,3 @@
-//! The in-process event bus (promoted from the retired axum
-//! `http/event_bus.rs` at the Phase 4 cutover).
-//!
-//! A tokio broadcast channel the background engines (sync, workers,
-//! sweeps) emit [`ServerEvent`]s onto and the native shell subscribes to
-//! through its repaint bridge.
-
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
@@ -66,10 +59,6 @@ pub fn notify_outbound_finished(
     ));
 }
 
-/// R5 (D4): the first live emitters for `ErrorOccurred`. Background
-/// failures (sync, outbound, connect, worker jobs) used to land only in
-/// the Diagnostics log; now they also invalidate pages and surface as
-/// toasts through the shell's event bridge.
 pub fn notify_error(
     bus: &EventBus,
     severity: &str,

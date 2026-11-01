@@ -132,13 +132,6 @@ pub fn get_dashboard_metrics(
 
     let new_conv: i64 = conn.query_row(
         &format!(
-            // Audit item 109: the "new conversations" window keyed on
-            // `local_created_at` — the LOCAL INSERT stamp (schema default
-            // datetime('now')), never the platform payload — so every
-            // backfilled/historical conversation counted as new on the
-            // day it was synced. It also counted soft-deleted rows. The
-            // window now keys on the real creation stamp and excludes
-            // deleted conversations.
             "SELECT COUNT(*) FROM conversations
              WHERE julianday(COALESCE(remote_created_at, created_at)) >= julianday('now', '-{days_back} days')
                AND deleted_at IS NULL
@@ -237,15 +230,6 @@ pub fn build_report(
 ) -> Result<ReportResult> {
     let days_back = days_back.max(1) as i64;
 
-    // The conversation's real creation stamp — the platform payload's
-    // createdAt, with the remote alias first — the same key the rest of
-    // the reporting surface (digest, segments, AI pipeline) uses.
-    // Audit items 109 + 110: the windows and the time dimensions keyed on
-    // `local_created_at` (the local insert stamp) and the week dimension
-    // paired `%Y` with `%W` — `2025-W53`/`2026-W00` split one natural
-    // week at the year boundary. Buckets and windows now share the
-    // creation stamp, and weeks are ISO (`%G`-`%V`, SQLite >= 3.44), so
-    // Dec 29 and Jan 1 land in the same week bucket.
     let created_stamp = "COALESCE(remote_created_at, created_at)";
 
     let (dim_expr, dim_label) = match dimension {
@@ -271,10 +255,6 @@ pub fn build_report(
     let (metric_expr, definition, limitations) = metric_info(metric);
 
     let sql = format!(
-        // Audit item 109: the metric limitation for Conversations claims
-        // "Does not include deleted conversations" — no filter did. Every
-        // report row now excludes soft-deleted conversations and keys the
-        // period window on the creation stamp instead of the local insert stamp.
         "SELECT {dim_expr} as dim, {metric_expr} as val
          FROM conversations
          WHERE julianday({created_stamp}) >= julianday('now', '-{days_back} days')
@@ -585,10 +565,6 @@ fn metric_spec(metric: ReportMetricKey) -> MetricSpec {
             date_expr: "t.created_at",
             value_expr: "COUNT(*)",
             extra_where: &[
-                // Audit fix (H5): the real API has no 'reply' thread type —
-                // agent replies are 'message' (chat/phone too) authored by a
-                // user. Legacy mock-seeded 'reply' rows count as agent
-                // replies unconditionally (they never occur live).
                 "(t.type = 'reply' OR (t.type IN ('message','chat','phone') AND t.from_type IN ('user','agent')))",
                 "t.deleted_at IS NULL",
                 "t.state = 'published'",
@@ -1699,15 +1675,6 @@ pub fn list_graph_nodes(conn: &Connection, limit: Option<u32>) -> Result<Vec<Gra
         .map_err(|e| e.into())
 }
 
-// ---------------------------------------------------------------------------
-// P1: the happiness / CSAT readout (webhook-sourced local truth)
-// ---------------------------------------------------------------------------
-
-/// The local happiness overview P1 renders: rating counts in range, the
-/// CSAT share (great / all ratings), and the recent ratings list. Every
-/// number comes from `ratings` rows the satisfaction webhook delivered —
-/// Help Scout exposes no list-ratings API to poll, so an empty table means
-/// "no ratings received yet", never "zero ratings happened".
 pub fn happiness_overview(conn: &Connection, days: i64) -> serde_json::Value {
     let days = days.clamp(1, 365);
     let since = format!(
@@ -1823,7 +1790,6 @@ mod p1_tests {
                 .contains("no list-ratings API"),
             "the honest source note must survive"
         );
-        // A rating outside the range never counts.
         conn.execute(
             "INSERT INTO ratings (remote_id, rating, remote_created_at)
              VALUES (804, 'great', '2020-01-01T00:00:00.000Z')",
@@ -1845,31 +1811,21 @@ mod batch30_tests {
         conn
     }
 
-    /// Audit item 109: the "new conversations" window keyed on
-    /// local_created_at — the local INSERT stamp — so a backfilled
-    /// conversation created 5 days ago but synced today counted as new,
-    /// while a genuinely new conversation synced late still counted. The
-    /// window keys on the platform creation stamp now and skips deleted
-    /// rows.
     #[test]
     fn dashboard_new_conversations_key_on_creation_not_local_insert() {
         let conn = db();
-        // Created 5 days ago on the platform, synced today
-        // (local_created_at takes its datetime('now') default).
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at)
              VALUES (10, 10, 'backfilled', 'p', 'active', datetime('now', '-5 days'))",
             [],
         )
         .expect("backfilled conversation");
-        // Created 60 days ago on the platform, also synced today — not new.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at)
              VALUES (11, 11, 'old backfill', 'p', 'active', datetime('now', '-60 days'))",
             [],
         )
         .expect("old conversation");
-        // Created now but soft-deleted — never counts.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at, deleted_at)
              VALUES (12, 12, 'deleted', 'p', 'active', datetime('now'), datetime('now'))",
@@ -1881,10 +1837,6 @@ mod batch30_tests {
         assert_eq!(m.new_conversations, 1, "only the 5-day-old creation counts");
     }
 
-    /// Audit item 110: %Y+%W split one natural week at the year boundary
-    /// (2025-12-30 reported as "2025-W53"-style, 2026-01-01 as "2026-W00").
-    /// ISO %G-%V keeps both in 2026-W01. Buckets also key on the creation
-    /// stamp and exclude deleted rows (item 109).
     #[test]
     fn week_dimension_is_iso_and_keeps_year_boundary_together() {
         let conn = db();
@@ -1899,7 +1851,6 @@ mod batch30_tests {
             )
             .expect("boundary conversation");
         }
-        // Same week window, but deleted — must not join the bucket.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status, created_at, deleted_at)
              VALUES (22, 22, 'deleted boundary', 'p', 'active',
@@ -1924,8 +1875,6 @@ mod batch30_tests {
         assert_eq!(report.rows[0].metric_value, 2.0);
     }
 
-    /// Audit item 109: the Conversations metric's limitation claims
-    /// "Does not include deleted conversations" — nothing filtered them.
     #[test]
     fn build_report_excludes_soft_deleted_conversations() {
         let conn = db();
@@ -1955,21 +1904,6 @@ mod batch30_tests {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Item 56: the wiring the owner's "wire it" decision asked for. The
-// builder + insights surface below reports.rs:1110 was computed but never
-// rendered; the app-shell Reports page now renders it. This helper is the
-// one NEW write path the render needs: a bounded friction recompute whose
-// high scores persist as customer_timeline milestones (the same milestone
-// lane the SLA-breach sweep writes).
-// ---------------------------------------------------------------------------
-
-/// Bounded friction recompute over the most recently closed conversations.
-/// Every computed score persists to `friction_scores`
-/// (compute_friction's INSERT OR REPLACE), and a conversation that
-/// crosses HIGH_FRICTION_THRESHOLD records a customer_timeline milestone
-/// (deduped per conversation via the event's JSON payload). Returns
-/// (computed_count, high_friction_found).
 pub fn recompute_recent_friction(conn: &Connection, limit: u32) -> Result<(u32, u32)> {
     let limit = limit.clamp(1, 500) as i64;
     let ids: Vec<i64> = {
@@ -2029,9 +1963,6 @@ mod item56_tests {
         conn
     }
 
-    /// Item 56: the bounded recompute persists friction scores, and a
-    /// conversation crossing the threshold gains exactly one customer
-    /// timeline milestone even across repeated recomputes.
     #[test]
     fn recompute_friction_persists_scores_and_deduped_milestones() {
         let conn = db();
@@ -2040,8 +1971,6 @@ mod item56_tests {
             [],
         )
         .expect("customer");
-        // A closed conversation that took 3 days (48h+ resolution) with 21
-        // message events: effort score 0.3 + 0.3 = 0.6 >= threshold.
         conn.execute(
             "INSERT INTO conversations (id, remote_id, number, subject, preview, status,
                                         customer_local_id, created_at, closed_at)
@@ -2076,7 +2005,6 @@ mod item56_tests {
             .expect("milestones");
         assert_eq!(milestones, 1);
 
-        // A second recompute must not duplicate the milestone.
         let (_again, _high) = recompute_recent_friction(&conn, 100).expect("recompute 2");
         let milestones: i64 = conn
             .query_row(
@@ -2088,9 +2016,6 @@ mod item56_tests {
         assert_eq!(milestones, 1, "milestone deduped per conversation");
     }
 
-    /// Item 56: the builder path round-trips — a config runs, serializes,
-    /// and parses back equal, which is exactly what the saved-report CRUD
-    /// rides on.
     #[test]
     fn builder_config_round_trips_through_json() {
         let conn = db();
@@ -2115,7 +2040,6 @@ mod item56_tests {
         assert_eq!(parsed.limit, config.limit);
     }
 
-    /// Item 56: saved-report CRUD — save, list, delete.
     #[test]
     fn saved_reports_crud_round_trips() {
         let conn = db();
@@ -2140,8 +2064,6 @@ mod item56_tests {
         assert!(list_saved_reports(&conn).expect("list").is_empty());
     }
 
-    /// Item 56: the graph-node surface validates kinds on write and the
-    /// list/get/count read path returns what was stored.
     #[test]
     fn graph_nodes_validate_and_round_trip() {
         let conn = db();

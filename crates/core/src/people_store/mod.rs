@@ -134,12 +134,6 @@ pub fn get_organization_detail(conn: &Connection, org_id: i64) -> Result<Option<
         .filter_map(|r| r.ok())
         .collect();
 
-    // Clean-audit item 103: the members LIST stays capped at 100 rows for
-    // display, but the org's counts must be exact — the pre-fix code
-    // derived member_count and the open/conversation totals from the
-    // capped list, so an org with 250 members reported 100 and summed
-    // only the first page. The totals now come from an unbounded aggregate
-    // over every member, in the same per-member terms the list rows use.
     let (member_total, open_total, conversation_total): (i64, i64, i64) = conn
         .query_row(
             &format!(
@@ -654,9 +648,6 @@ pub fn update_customer(conn: &Connection, customer_id: i64, patch: &CustomerPatc
     if !exists {
         return Ok(false);
     }
-    // Clean-audit item 47: the old primary email must be captured BEFORE
-    // the UPDATE below overwrites the column — the email-set maintenance
-    // needs it to replace exactly that one row, never the whole set.
     let old_email: Option<String> = conn
         .query_row(
             "SELECT email FROM customers WHERE id = ?1",
@@ -712,31 +703,23 @@ pub fn update_customer(conn: &Connection, customer_id: i64, patch: &CustomerPatc
             params![customer_id],
         )?;
     }
-    if let Some(email) = patch.email.as_ref() {
-        // Clean-audit item 47: this used to DELETE every stored email for
-        // the customer and swallow both statements' errors — one patch of
-        // the primary email destroyed every secondary address the platform
-        // sync had recorded (personal/other), and a failed INSERT silently
-        // left the customer with none. The patch's email field is the
-        // PRIMARY address: only that one value is replaced in the
-        // customer_emails set, every other row survives, and failures now
-        // propagate instead of discarding the customer's contact data.
-        if let Some(e) = email.as_deref().filter(|e| !e.trim().is_empty()) {
-            if let Some(old) = old_email.as_deref().filter(|o| !o.trim().is_empty())
-                && !old.trim().eq_ignore_ascii_case(e.trim())
-            {
-                conn.execute(
-                    "DELETE FROM customer_emails
-                      WHERE customer_id = ?1 AND value = ?2",
-                    params![customer_id, old.trim()],
-                )?;
-            }
+    if let Some(email) = patch.email.as_ref()
+        && let Some(e) = email.as_deref().filter(|e| !e.trim().is_empty())
+    {
+        if let Some(old) = old_email.as_deref().filter(|o| !o.trim().is_empty())
+            && !old.trim().eq_ignore_ascii_case(e.trim())
+        {
             conn.execute(
-                "INSERT OR IGNORE INTO customer_emails (customer_id, value, type)
-                 VALUES (?1, ?2, 'work')",
-                params![customer_id, e.trim()],
+                "DELETE FROM customer_emails
+                      WHERE customer_id = ?1 AND value = ?2",
+                params![customer_id, old.trim()],
             )?;
         }
+        conn.execute(
+            "INSERT OR IGNORE INTO customer_emails (customer_id, value, type)
+                 VALUES (?1, ?2, 'work')",
+            params![customer_id, e.trim()],
+        )?;
     }
     let changed_fields: Vec<Value> = [
         "first_name",
@@ -798,8 +781,6 @@ mod batch24_audit47_tests {
     use super::*;
     use rusqlite::Connection;
 
-    /// A customer whose email set mirrors what a platform sync records:
-    /// a primary work address plus a secondary personal address.
     fn customer_with_two_emails() -> (Connection, i64) {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -837,10 +818,6 @@ mod batch24_audit47_tests {
         rows
     }
 
-    /// Clean-audit item 47: patching the primary email must replace only
-    /// that address in the stored set — the platform-synced secondary
-    /// survives, the old primary is swapped for the new one, and the
-    /// customers.email column follows the patch.
     #[test]
     fn audit47_email_patch_preserves_secondary_emails() {
         let (conn, id) = customer_with_two_emails();
@@ -872,8 +849,6 @@ mod batch24_audit47_tests {
         );
     }
 
-    /// Clean-audit item 47: clearing the primary email must not shred the
-    /// stored set — the addresses the platform sync recorded stay.
     #[test]
     fn audit47_clearing_the_primary_keeps_the_stored_set() {
         let (conn, id) = customer_with_two_emails();
@@ -904,8 +879,6 @@ mod batch24_audit47_tests {
         );
     }
 
-    /// Clean-audit item 47: a failing email write must surface as an
-    /// error instead of being silently swallowed.
     #[test]
     fn audit47_email_write_failures_propagate() {
         let (conn, id) = customer_with_two_emails();
@@ -937,10 +910,6 @@ mod batch29_audit103_104_105_tests {
         conn
     }
 
-    /// Clean-audit item 103: the members LIST stays capped at 100 rows for
-    /// display, but member_count and the conversation totals must be exact
-    /// — the pre-fix code derived them from the capped list, so a
-    /// 250-member org reported 100 and summed only the first page.
     #[test]
     fn audit103_member_counts_are_exact_past_the_display_cap() {
         let conn = test_db();
@@ -995,9 +964,6 @@ mod batch29_audit103_104_105_tests {
         );
     }
 
-    /// Clean-audit item 104: a soft-deleted conversation must not speak for
-    /// the customer's last activity — neither in the list row nor in the
-    /// recency sort.
     #[test]
     fn audit104_deleted_conversations_do_not_drive_last_activity() {
         let conn = test_db();
@@ -1008,7 +974,6 @@ mod batch29_audit103_104_105_tests {
         )
         .expect("customer");
         let customer = conn.last_insert_rowid();
-        // The LIVE conversation: last activity a day ago.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, status, customer_local_id,
                                         last_activity_at)
@@ -1016,7 +981,6 @@ mod batch29_audit103_104_105_tests {
             params![customer],
         )
         .expect("live conversation");
-        // The DELETED conversation: last activity now — must be ignored.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, status, customer_local_id,
                                         last_activity_at, deleted_at)
@@ -1038,9 +1002,6 @@ mod batch29_audit103_104_105_tests {
         );
     }
 
-    /// Clean-audit item 104: the customer detail's resolution excerpt must
-    /// ignore soft-deleted reply threads — a deleted reply never speaks
-    /// for how a closed ticket was resolved.
     #[test]
     fn audit104_deleted_threads_do_not_serve_as_resolutions() {
         let conn = test_db();
@@ -1058,7 +1019,6 @@ mod batch29_audit103_104_105_tests {
         )
         .expect("closed conversation");
         let conversation = conn.last_insert_rowid();
-        // The live, older reply — the true resolution.
         conn.execute(
             "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
                                                created_at)
@@ -1066,7 +1026,6 @@ mod batch29_audit103_104_105_tests {
             params![conversation],
         )
         .expect("live reply");
-        // The newer but DELETED reply — must never surface.
         conn.execute(
             "INSERT INTO conversation_threads (conversation_id, type, state, body_text,
                                                created_at, deleted_at)
@@ -1095,10 +1054,6 @@ mod batch29_audit103_104_105_tests {
         );
     }
 
-    /// Clean-audit item 105: the customer-to-organization name link is
-    /// case-insensitive everywhere — a customer created as "acme corp"
-    /// links to the stored org "Acme Corp", and the org list counts the
-    /// case-differing member both ways.
     #[test]
     fn audit105_org_name_linking_is_case_insensitive() {
         let conn = test_db();
@@ -1108,7 +1063,6 @@ mod batch29_audit103_104_105_tests {
         )
         .expect("org");
         let org = conn.last_insert_rowid();
-        // Create with a case-different name: the INSERT-time link fires.
         let id = create_customer(
             &conn,
             &NewCustomer {
@@ -1134,7 +1088,6 @@ mod batch29_audit103_104_105_tests {
             "the case-differing organization text must link to the stored org"
         );
 
-        // The name-based fallback (organization_id NULL) matches NOCASE too.
         conn.execute(
             "INSERT INTO customers (remote_id, first_name, last_name, organization)
              VALUES (90, 'Grace', 'Hopper', 'ACME CORP')",
@@ -1150,7 +1103,6 @@ mod batch29_audit103_104_105_tests {
             "both the id-linked and the case-differing name-linked member count"
         );
 
-        // The org list's customer_count sees the same members.
         let orgs = list_organizations(&conn, None, 200).expect("orgs");
         assert_eq!(orgs.len(), 1);
         assert_eq!(

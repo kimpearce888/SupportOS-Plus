@@ -747,22 +747,7 @@ pub fn campaign_retry_failed(conn: &Connection, campaign_id: i64) -> serde_json:
     }})
 }
 
-/// Audit items 16 + 17: recover recipients whose delivery state is
-/// stranded or ambiguous — resolve 'unknown' rows against the platform
-/// mirror (sent / safe-retry / exhausted) and recover 'sending' rows left
-/// behind by a crash (mirror match → 'sent', otherwise bounded requeue).
-/// Returns (resolved_sent, returned_to_queue, still_unknown). Pure state
-/// repair: no continuation job is enqueued here.
 fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64, i64) {
-    // Audit item 115: the reconcile UPDATEs stamp `updated_at`, but on
-    // databases created before the item-17 batch the column does not
-    // exist, and this path ran without the schema self-heal — every
-    // state-transition UPDATE failed with "no such column", the error was
-    // swallowed by `let _`, the row stayed in 'unknown' forever (re-logged
-    // by every reconcile pass) and the counters still reported it as
-    // processed. The ensure runs here so BOTH entry paths
-    // (`campaign_reconcile` and the `send_batch` sweep) repair the schema
-    // before touching the clock; it is idempotent and cheap.
     if let Err(e) = ensure_recipient_updated_at(conn) {
         log_event(
             conn,
@@ -836,12 +821,6 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
                 );
                 resolved_sent += 1;
             }
-            // Audit item 17: reconciliation proved NOT delivered and
-            // attempts remain, so the row returns to the retryable pool —
-            // 'failed' here contradicted the branch guard, the message and
-            // the `returned` counter (and, with attempts always 0 before
-            // item 16, it fired every time, so no reconciled row ever
-            // actually retried). Item 16's attempts cap bounds the retry.
             None if attempts < MAX_ATTEMPTS => {
                 let _ = conn.execute(
                     "UPDATE outreach_recipients SET state = 'queued',
@@ -859,10 +838,6 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
                 );
                 returned += 1;
             }
-            // Reconciliation proved not delivered AND the attempts are
-            // exhausted: the honest terminal state is 'failed' with the
-            // reason recorded (previously the row lingered in 'unknown'
-            // forever, re-logged by every reconcile pass).
             None => {
                 let _ = conn.execute(
                     "UPDATE outreach_recipients SET state = 'failed',
@@ -884,14 +859,6 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
         let _ = email;
     }
 
-    // Audit item 17: rows stranded in 'sending' by a crash. The original
-    // bulk requeue was doubly dead code: it compared `updated_at` against
-    // the literal TEXT of a datetime() expression bound as a parameter
-    // (never a past timestamp), and the column itself only exists from
-    // this batch on. Probe the platform mirror first — a crashed send
-    // that actually landed is marked 'sent' (no duplicate email), and
-    // only a genuinely undelivered row returns to 'queued' for a
-    // bounded retry.
     let campaign_subject: Option<String> = conn
         .query_row(
             "SELECT subject FROM outreach_campaigns WHERE id = ?1",
@@ -979,10 +946,6 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
     (resolved_sent, returned, still_unknown)
 }
 
-/// The full public reconcile pass: recover stranded/ambiguous recipients
-/// (`reconcile_recipient_states`), then either keep the batch chain going
-/// or complete the campaign honestly. The send loop calls only the recovery
-/// portion so it never double-enqueues the continuation job.
 pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Value {
     let (resolved_sent, returned, still_unknown) = reconcile_recipient_states(conn, campaign_id);
     let remaining = count_remaining(conn, campaign_id);
@@ -1036,9 +999,6 @@ pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Va
 
 pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
     let tx = conn.unchecked_transaction()?;
-    // The sent_at stamp is no longer read here — audit item 117 anchors
-    // the reply detection on the mirrored campaign thread, not on the
-    // local clock.
     let sent: Vec<(i64, Option<i64>)> = {
         let mut stmt = tx.prepare(
             "SELECT r.id, r.hs_conversation_remote_id
@@ -1065,19 +1025,6 @@ pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
         else {
             continue;
         };
-        // Audit item 117: the guard used to be `created_at > sent_at`,
-        // with sent_at stamped by the LOCAL clock (`datetime('now')`) and
-        // created_at stamped by the platform — and the campaign's own
-        // message is mirrored as a `type = 'customer'` thread
-        // (helpscout_real::create_conversation sends it with
-        // `"type": "customer"`). Any platform-clock-ahead skew put the
-        // campaign's own email after the local sent_at stamp, and the
-        // sweep counted it as the recipient's reply. The anchor is now
-        // the mirrored campaign thread itself — the conversation's first
-        // thread (create_conversation creates the conversation with
-        // exactly one thread) — so both sides of the comparison come
-        // from the same clock; a reply is a customer thread strictly
-        // after it (or sharing its stamp but created after it).
         let campaign_thread: Option<(i64, String)> = tx
             .query_row(
                 "SELECT id, created_at FROM conversation_threads
@@ -1479,9 +1426,6 @@ fn skip_ineligible_recipients(conn: &Connection, campaign_id: i64) -> i64 {
     no_email + on_dnc
 }
 
-/// Clean-audit batch 18 (item 15): campaign sends must pass the REMOTE
-/// Help Scout mailbox id (never the local mirror row id), and a mailbox
-/// that never synced must fail the batch honestly.
 #[cfg(test)]
 mod batch18_tests {
     use super::*;
@@ -1494,7 +1438,6 @@ mod batch18_tests {
     };
     use std::sync::Mutex;
 
-    /// Records every `CreateConversationInput` it is asked to send.
     struct RecordingSender {
         created: Mutex<Vec<crate::helpscout::CreateConversationInput>>,
     }
@@ -1591,8 +1534,6 @@ mod batch18_tests {
             .expect("test runtime")
     }
 
-    /// Seeds a mailbox with REMOTE id 2024 and a queued campaign with one
-    /// ready recipient. Returns (mailbox_local_id, campaign_id).
     fn seed_campaign(conn: &Connection) -> (i64, i64) {
         conn.execute(
             "INSERT INTO mailboxes (remote_id, name) VALUES (2024, 'Support')",
@@ -1658,13 +1599,7 @@ mod batch18_tests {
     #[test]
     fn an_unsynced_mailbox_fails_the_batch_honestly() {
         let db = db();
-        // A campaign whose mailbox references a local row that does not
-        // exist (pruned / never synced): nothing may be sent, and the
-        // recipient must carry a permanent, honest failure.
         let campaign = db.with_write(|c| {
-            // The live schema foreign-keys campaigns to mailboxes, but a
-            // dangling mailbox reference is still constructable in the
-            // wild (best-effort `let _ =` deletes); simulate that state.
             c.execute("PRAGMA foreign_keys = OFF", []).expect("fk off");
             c.execute(
                 "INSERT INTO outreach_campaigns
@@ -1712,9 +1647,6 @@ mod batch18_tests {
     }
 }
 
-/// Clean-audit batch 19 (items 16 + 17): recipient attempts are spent and
-/// counted, picked rows are claimed against duplicate sends, and
-/// crash-stranded / ambiguous rows recover through the reconcile sweep.
 #[cfg(test)]
 mod batch19_tests {
     use super::*;
@@ -1728,9 +1660,6 @@ mod batch19_tests {
     use crate::helpscout_real::HsApiError;
     use std::sync::Mutex;
 
-    /// Fails the first N `create_conversation` calls with a retryable 500,
-    /// then records and succeeds — lets one mock drive both the retry-storm
-    /// and the happy-path tests.
     struct ScriptedProvider {
         failures_remaining: Mutex<i64>,
         created: Mutex<Vec<crate::helpscout::CreateConversationInput>>,
@@ -1862,8 +1791,6 @@ mod batch19_tests {
             .expect("test runtime")
     }
 
-    /// Seeds a synced mailbox and a queued campaign with one ready
-    /// recipient. Returns (campaign_id, recipient_id).
     fn seed_campaign(conn: &Connection) -> (i64, i64) {
         conn.execute(
             "INSERT INTO mailboxes (remote_id, name) VALUES (2024, 'Support')",
@@ -1931,9 +1858,6 @@ mod batch19_tests {
         let db = db();
         let (campaign, recipient) = db.with_write(|c| {
             let (campaign, recipient) = seed_campaign(c);
-            // Simulate a crash AFTER the claim: the row is 'sending' with a
-            // fresh claim timestamp, so neither pick_batch nor the stale
-            // sweep may touch it, and no duplicate send may go out.
             c.execute(
                 "UPDATE outreach_recipients SET state = 'sending',
                      updated_at = datetime('now')
@@ -2115,18 +2039,10 @@ mod batch30_tests {
     use super::*;
     use rusqlite::Connection;
 
-    /// Audit item 115: campaign_reconcile → reconcile_recipient_states
-    /// stamps `updated_at`, but on databases created before the item-17
-    /// batch the column does not exist and this path ran without the
-    /// schema self-heal — every transition UPDATE failed with "no such
-    /// column", the error was swallowed, the row stayed 'unknown' forever
-    /// and the counters still counted it. The reconcile path repairs the
-    /// schema itself now.
     #[test]
     fn campaign_reconcile_self_heals_missing_updated_at_column() {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        // Simulate a pre-item-17 database: no claim/staleness clock column.
         conn.execute_batch("ALTER TABLE outreach_recipients DROP COLUMN updated_at;")
             .expect("legacy schema");
 
@@ -2153,8 +2069,6 @@ mod batch30_tests {
         let out = campaign_reconcile(&conn, campaign);
         assert_eq!(out["stillUnknown"], 1);
 
-        // The self-heal re-added the column and the exhausted-attempts
-        // transition actually landed instead of silently no-opping.
         let state: String = conn
             .query_row(
                 "SELECT state FROM outreach_recipients WHERE campaign_id = ?1",
@@ -2192,12 +2106,6 @@ mod batch31_tests {
         conn
     }
 
-    /// Audit item 117: the campaign's own message is mirrored as a
-    /// `type = 'customer'` thread, and the old `created_at > sent_at`
-    /// guard compared platform stamps against a LOCAL clock stamp — any
-    /// platform-clock-ahead skew counted the campaign's own email as the
-    /// recipient's reply. The anchor is the mirrored campaign thread now,
-    /// so only a genuinely later reply counts.
     #[test]
     fn refresh_replies_ignores_the_campaigns_own_message_under_clock_skew() {
         let conn = db();
@@ -2228,9 +2136,6 @@ mod batch31_tests {
             params![campaign],
         )
         .expect("recipient");
-        // The campaign's own message, mirrored from the platform with a
-        // stamp ONE SECOND after the local sent_at (clock skew) — the old
-        // guard counted exactly this row.
         conn.execute(
             "INSERT INTO conversation_threads (conversation_id, type, state, body_text, created_at)
              VALUES (?1, 'customer', 'published', 'the campaign email itself',
@@ -2238,7 +2143,6 @@ mod batch31_tests {
             [conv],
         )
         .expect("campaign thread");
-        // The recipient's real reply, an hour later.
         conn.execute(
             "INSERT INTO conversation_threads (conversation_id, type, state, body_text, created_at)
              VALUES (?1, 'customer', 'published', 'thanks — where do I find it?',
@@ -2262,8 +2166,6 @@ mod batch31_tests {
         );
     }
 
-    /// Audit item 117, the suppression half: with the skew present but no
-    /// real reply, nothing may be counted.
     #[test]
     fn refresh_replies_counts_nothing_when_only_the_campaign_message_exists() {
         let conn = db();

@@ -1,20 +1,3 @@
-//! Custom Objects page (port of the web `pages/custom_objects.rs`).
-//!
-//! RS-19d reskin: rebuilt onto the DC widget set (`crate::design`) per the
-//! conformed lab's `custom-objects` sheet (DS "stack" archetype, twoCol):
-//! PageHeader with the lab's counter pill beside the New Type primary
-//! (A-6), the Types rail as DS chips with the confirm-armed deletes, the
-//! object pane as section title + counter + FilterBar search over object
-//! cards with the lab's kv-row anatomy (muted key, mono value). All CRUD
-//! behavior intact — presentation only, all queries/writes byte-identical.
-//!
-//! Two panes (web: type sidebar + object table): a type list / create
-//! form (`custom_objects::{list_types,create_type,delete_type}`) and the
-//! selected type's object table (`list_objects`, the
-//! `/api/custom-objects` SQL) with the new-object form (`create_object`)
-//! and delete. The report banner ports `custom_objects::report`
-//! (`/api/custom-objects/report`).
-
 use eframe::egui;
 use spp_core::custom_objects::{FieldInput, LinkInput, TypeDetail};
 use spp_core::db::DbHandle;
@@ -23,14 +6,6 @@ use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
-/// Field types offered by the type builder (web: the field type select).
-///
-/// Clean-audit item 27: this list is exactly the vocabulary the core's
-/// `validate_properties` accepts (`custom_objects.rs`) — the builder used
-/// to offer `checkbox` and `url`, which the core rejected as unknown
-/// field types, so any type built with them could never hold an object.
-/// `long_text` is included because the core accepts it and the builder
-/// was previously the only way to add fields to a type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldType {
     Text,
@@ -63,7 +38,6 @@ impl FieldType {
     }
 }
 
-/// A field row under construction in the type builder.
 #[derive(Debug, Clone)]
 struct FieldDraft {
     key: String,
@@ -109,7 +83,6 @@ impl FieldDraft {
     }
 }
 
-/// The interactive custom objects page state.
 pub struct CustomObjectsPage {
     types: Vec<TypeDetail>,
     selected_type: Option<i64>,
@@ -152,7 +125,6 @@ impl CustomObjectsPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.types.clear();
         self.objects.clear();
@@ -219,7 +191,6 @@ impl CustomObjectsPage {
         self.selected_type = Some(id);
         self.objects.clear();
         self.reload_objects(db);
-        // Rebuild the new-object form fields from the type definition.
         if let Some(t) = self.types.iter().find(|t| t.id == id) {
             self.new_object_fields = t
                 .fields
@@ -270,9 +241,6 @@ impl CustomObjectsPage {
         }
     }
 
-    /// Delete a custom-object type (runs on shell confirmation only —
-    /// clean-audit item 140). Returns the core outcome for the shell's
-    /// toast.
     pub fn delete_type(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::custom_objects::delete_type(conn, id));
         match &result {
@@ -298,11 +266,6 @@ impl CustomObjectsPage {
             self.error = Some("object title required".into());
             return;
         }
-        // Clean-audit item 26: the form used to serialise every field
-        // value as a JSON string, so number and boolean fields always
-        // failed the core's type validation ("Invalid number", …) and
-        // object creation never succeeded. Coerce each raw input against
-        // the selected type's own field definitions.
         let field_types: Vec<(String, String)> = self
             .types
             .iter()
@@ -352,8 +315,6 @@ impl CustomObjectsPage {
         }
     }
 
-    /// Delete one custom-object record (runs on shell confirmation only
-    /// — clean-audit item 140). Returns the core outcome for the toast.
     pub fn delete_object(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::custom_objects::delete_object(conn, id));
         if let Err(e) = &result {
@@ -364,9 +325,6 @@ impl CustomObjectsPage {
         result.map(|_| ())
     }
 
-    /// Render the page. Returns a confirm request when the user asked to
-    /// delete a type or an object (clean-audit item 140 — the deletes run
-    /// only after the shell dialog confirms).
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
@@ -382,11 +340,6 @@ impl CustomObjectsPage {
                 i64_field(report, "total_links")
             )
         });
-        // DS-C-01 PageHeader: title + report subtitle, right cluster = the
-        // New Type primary (the lab's actions) + the counter pill (A-6:
-        // counts beside the header). egui right_to_left puts the first
-        // added widget rightmost, so the add order below paints
-        // [N types] [New Type] — the lab's DS-C-01 order.
         design::page_header(ui, "Custom Objects", subtitle.as_deref(), |ui| {
             if design::button_with_icon(ui, Icon::Plus, "New Type", ButtonVariant::Primary)
                 .clicked()
@@ -446,15 +399,12 @@ impl CustomObjectsPage {
             if let Some(id) = picked {
                 self.select_type(db, id);
             }
-            // Clean-audit item 140: arming the dialog replaces the
-            // unconfirmed delete.
             if let Some((id, name)) = deleted_type {
                 nav = Some(NavRequest::Confirm(ConfirmRequest::delete_custom_type(
                     id, &name,
                 )));
             }
 
-            // The type-delete request wins over the object pane's.
             if nav.is_none() {
                 nav = self.objects_ui(&mut columns[1], db);
             }
@@ -473,10 +423,6 @@ impl CustomObjectsPage {
             return None;
         };
         let t = self.types.iter().find(|t| t.id == type_id)?;
-        // The lab's ds-tool-row: section title left, the DS-C-01 counter
-        // pill right (A-6: counts never sit in titles). Audit fix (M20)
-        // honesty note rides beneath when the 50-row cap truncates —
-        // same wording the incidents pilot uses.
         ui.horizontal(|ui| {
             design::section_title(ui, &format!("{} objects", t.name));
             design::page_counter(ui, &self.objects_total.to_string());
@@ -492,9 +438,6 @@ impl CustomObjectsPage {
             );
         }
         ui.add_space(4.0);
-        // DS-C-10 FilterBar (A-2): the lab's search toolbar — input left,
-        // exactly one primary apply right. Behavior preserved: the query
-        // updates on keystroke, the apply triggers the reload.
         let apply = design::filter_bar(
             ui,
             |ui| {
@@ -521,10 +464,6 @@ impl CustomObjectsPage {
             .show(ui, |ui| {
                 let tokens = design::tokens(ui);
                 for object in &objects {
-                    // The lab's object card: ds-tool-row head (strong
-                    // title, danger delete) over the lab's kv rows —
-                    // muted key, mono value (strings verbatim, scalars
-                    // through their JSON form).
                     design::card(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
@@ -540,11 +479,6 @@ impl CustomObjectsPage {
                         });
                         if let Some(props) = object.get("properties").and_then(|p| p.as_object()) {
                             for (key, value) in props {
-                                // Item 26 follow-through: number and
-                                // boolean properties are real scalars now,
-                                // so render them with their JSON form
-                                // instead of the string-only path that
-                                // showed them blank.
                                 let rendered = match value {
                                     serde_json::Value::String(s) => s.clone(),
                                     other => other.to_string(),
@@ -564,14 +498,11 @@ impl CustomObjectsPage {
                         ui,
                         Icon::Boxes,
                         "No objects",
-                        // The lab's empty-state copy for this pane.
                         "Create one below or adjust the search — objects store \
                          per-customer properties used by the graph and AI answers.",
                     );
                 }
             });
-        // Clean-audit item 140: arming the dialog replaces the
-        // unconfirmed delete.
         let nav = deleted.map(|(id, title)| {
             NavRequest::Confirm(ConfirmRequest::delete_custom_object(id, &title))
         });
@@ -584,9 +515,6 @@ impl CustomObjectsPage {
             .collect();
         let has_fields = !keys.is_empty();
         design::card_titled(ui, "New object", None, |ui| {
-            // The lab's formGrid rows; every input binds its visible label
-            // (RS-18 wave-wide a11y rule — egui never reads a preceding
-            // label on its own).
             let title_label = design::field_label(ui, "title:");
             ui.add_sized(
                 [ui.available_width(), 28.0],
@@ -612,8 +540,6 @@ impl CustomObjectsPage {
         design::card(ui, |ui| {
             design::section_title(ui, "New Type");
             design::form_grid(ui, "co-new-type", |ui| {
-                // Every input binds its visible label (RS-18 wave-wide
-                // a11y rule — egui never reads a preceding label alone).
                 let name_label = design::field_label(ui, "name:");
                 ui.add_sized(
                     [220.0, 28.0],
@@ -697,9 +623,6 @@ impl CustomObjectsPage {
                             });
                             ui.checkbox(&mut self.new_fields[idx].required, "required");
                             if self.new_fields[idx].field_type == FieldType::Select {
-                                // No visible label for this one — the
-                                // ai_center pattern names it directly
-                                // (the programmatic aria-label).
                                 ui.add_sized(
                                     [180.0, 28.0],
                                     egui::TextEdit::singleline(&mut options),
@@ -733,12 +656,6 @@ impl Default for CustomObjectsPage {
     }
 }
 
-/// Coerce one trimmed form input into the JSON scalar the core's
-/// `validate_properties` expects for that field type (clean-audit item 26):
-/// numbers arrive as JSON numbers, booleans as JSON bools, everything
-/// else as strings. The legacy `checkbox`/`url` field names coerce through
-/// their canonical equivalents (`boolean`/`text`) so types created before
-/// item 27 keep accepting objects from this form.
 fn coerce_property_value(
     field_type: &str,
     value: &str,
@@ -760,9 +677,6 @@ fn coerce_property_value(
             "false" | "0" | "no" | "off" => Ok(serde_json::Value::from(false)),
             _ => Err(format!("'{value}' is not a boolean (true/false)")),
         },
-        // text, long_text, url (legacy), date, select and unknown fields
-        // stay strings — the core's own validation rejects bad dates and
-        // off-option selects with a precise message.
         _ => Ok(serde_json::Value::from(value)),
     }
 }
@@ -877,9 +791,6 @@ mod tests {
         let error = draft.to_input().unwrap_err();
         assert!(error.contains("key required"));
     }
-    /// Audit item 27: the builder's vocabulary is exactly what the core's
-    /// `validate_properties` accepts — the phantom `checkbox`/`url` chips
-    /// are gone, and the previously unreachable `long_text` is offered.
     #[test]
     fn field_type_builder_offers_exactly_the_core_vocabulary() {
         let offered: Vec<&str> = FieldType::ALL.iter().map(|f| f.as_str()).collect();
@@ -896,10 +807,6 @@ mod tests {
         }
     }
 
-    /// Audit item 26: the form used to serialise every value as a JSON
-    /// string, so number and boolean fields always failed the core's type
-    /// validation and object creation never succeeded. Number inputs now
-    /// arrive as JSON numbers and boolean inputs as JSON bools.
     #[test]
     fn number_and_boolean_form_inputs_become_real_json_scalars() {
         let db = fixture(Vec::new());
@@ -976,8 +883,6 @@ mod tests {
         assert_eq!(props["stage"], serde_json::json!("live"));
     }
 
-    /// Item 26: garbage in a number field is a clear form error instead of
-    /// a failed platform-side object create.
     #[test]
     fn number_form_input_rejects_garbage_with_a_clear_error() {
         let db = fixture(Vec::new());
@@ -1004,7 +909,6 @@ mod tests {
         );
         assert_eq!(page.objects_total, 0);
 
-        // The same field accepts a decimal once corrected.
         page.error = None;
         page.new_object_fields = vec![("count".into(), "2.25".into())];
         page.create_object(&db);
@@ -1013,8 +917,6 @@ mod tests {
         assert_eq!(page.objects[0]["properties"]["count"].as_f64(), Some(2.25));
     }
 
-    /// Item 26: boolean fields accept the obvious truthy/falsy words, and
-    /// anything else is a form error.
     #[test]
     fn boolean_form_inputs_accept_common_truth_words() {
         let db = fixture(Vec::new());
@@ -1053,10 +955,6 @@ mod tests {
         );
     }
 
-    /// Item 27 (legacy): types created back when the builder offered the
-    /// phantom `checkbox`/`url` names keep working through this form — the
-    /// page coerces them via their canonical equivalents and the core's
-    /// alias validation accepts the values.
     #[test]
     fn legacy_checkbox_and_url_fields_work_from_the_form() {
         let db = fixture(Vec::new());

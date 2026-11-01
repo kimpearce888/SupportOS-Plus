@@ -1,6 +1,3 @@
-// `deny` rather than `forbid`: vectorstore_sqlitevec registers the
-// sqlite-vec extension via rusqlite FFI (`sqlite3_auto_extension`) — the
-// single place unsafe code is allowed, and only there.
 #![deny(unsafe_code, rust_2018_idioms)]
 #![warn(clippy::all, missing_docs)]
 #![allow(
@@ -82,8 +79,6 @@ pub mod reports_api;
 pub mod response_state_sql;
 pub mod richtext;
 pub mod rrf;
-/// Landlock + seccomp sandbox for untrusted document parsing.
-/// Linux-only and feature-flagged (`--features sandbox`).
 #[cfg(all(target_os = "linux", feature = "sandbox"))]
 pub mod sandbox;
 pub mod saved_views;
@@ -108,17 +103,11 @@ pub mod webhook_health;
 pub mod workers;
 pub mod workload;
 
-// Migration-only modules relocated under migrations/ (RF-5, R100 pattern:
-// byte-identical `git mv` + re-export — every `crate::X` path keeps
-// resolving, zero call-site edits).
 pub use migrations::{
     ai_analysis, ai_features, data_tools, db_breadth, intelligence, mirror_parity, mirror_tables,
     side_threads,
 };
 
-// Test-only integration-verification modules (TODO 45 / 46). Declared
-// `#[cfg(test)]` so none of this compiles into release builds; see each
-// file's header for what it covers.
 #[cfg(test)]
 pub mod bench;
 #[cfg(test)]

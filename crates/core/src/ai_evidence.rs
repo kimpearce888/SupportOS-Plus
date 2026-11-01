@@ -21,8 +21,6 @@ pub struct SimilarConversation {
     pub why: Vec<String>,
 }
 
-/// Top durable customer facts, quarantine-filtered (A2 briefing feed —
-/// shared by the evidence pack and the inbox "know before you reply" panel).
 pub fn customer_memory_facts(
     conn: &Connection,
     customer_id: i64,
@@ -170,10 +168,6 @@ pub fn build(
         None => Vec::new(),
     };
 
-    // A4 retrieval spine: the semantic lane feeds real sqlite-vec hits into
-    // the similar-issues merge, so evidence chips can say "semantic match"
-    // with an actual vector behind them. Absent index / unrouted Embed role /
-    // disabled feature = the honest empty lane (FTS-only).
     let semantic: Vec<(i64, f64)> = match index {
         Some(ix) => semantic_hits(conn, ix, conversation_local_id, 8),
         None => Vec::new(),
@@ -290,24 +284,12 @@ pub fn build(
         knowledge,
         saved_replies,
         interaction_strategy: None,
-        // A2: the evidence pack carries the customer's durable facts —
-        // filtered through the memory guard so quarantined material
-        // (payment/credential/health) never reaches a prompt.
         customer_memory: customer_id
             .map(|cid| customer_memory_facts(conn, cid, 5))
             .unwrap_or_default(),
     }))
 }
 
-/// A4 retrieval spine: real sqlite-vec hits for a conversation's own text.
-///
-/// Embeds the conversation's subject+preview through the hub Embed role
-/// (local by default, cloud only on explicit user routing), searches the
-/// vector index, and maps `conversation_chunk` payload hits back to their
-/// conversations — one `(conversation_local_id, score)` pair per
-/// conversation, keeping the best score. Best-effort by design: the
-/// retrieval feature off, an unrouted Embed role, an unreachable endpoint
-/// or an empty index all yield an empty vec and callers stay FTS-only.
 #[must_use]
 pub fn semantic_hits(
     conn: &Connection,
@@ -767,9 +749,6 @@ mod a2_memory_feed_tests {
         conn
     }
 
-    /// A2: the evidence pack carries the customer's durable facts — and the
-    /// memory guard keeps quarantined material (payment details here) out
-    /// of every prompt.
     #[test]
     fn evidence_pack_carries_memory_and_quarantines_secrets() {
         let conn = db_with_customer_memory();
@@ -792,7 +771,6 @@ mod a2_memory_feed_tests {
             "quarantined material must never reach a prompt: {:?}",
             ctx.customer_memory
         );
-        // The rendered evidence carries the briefing block for the model.
         let rendered = crate::ai_prompts::build_ticket_analysis_user(&ctx);
         assert!(rendered.contains("DURABLE CUSTOMER FACTS"));
         assert!(rendered.contains("prefers short replies"));
@@ -818,9 +796,6 @@ mod batch13_a4_evidence_tests {
         (conn, conv)
     }
 
-    /// A4: with no Embed role routed (and no legacy embedding model), the
-    /// semantic lane yields nothing — find_similar stays FTS-only and its
-    /// results keep their honest "keyword match" reasons.
     #[test]
     fn semantic_hits_empty_without_routed_embed_role() {
         let (conn, conv) = db_with_conversation();
@@ -838,8 +813,6 @@ mod batch13_a4_evidence_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A4: the retrieval feature gate closes the semantic lane even when a
-    /// model would be reachable.
     #[test]
     fn semantic_hits_respect_the_feature_gate() {
         let (conn, conv) = db_with_conversation();

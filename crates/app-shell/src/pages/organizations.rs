@@ -1,26 +1,3 @@
-//! Organizations page (port of the web `pages/organizations.rs`).
-//!
-//! RS-17 (wave A) rebuild on **Design Contract v1.0 archetype DS-A-01** —
-//! the list-page recipe (docs/audit/design-contract-v1.md §4): PageHeader
-//! with the counter pill (DS-C-01, register A-6 — counts live beside the
-//! header) → FilterBar with exactly one primary apply (DS-C-10, A-2) →
-//! DataTable (DS-C-05, virtualized rows) → the row `open` act opens the
-//! DetailPanel (DS-C-17, A-1) whose content is the DS-A-03 record
-//! composition (record-head avatar + name + meta, then the members card).
-//! The conformed lab reference is `mockups/design-lab/pages-ds.js`
-//! (`DS.definePage("organizations", …)`).
-//!
-//! Behavior, queries, and data flow are unchanged (decisions.md D6:
-//! presentation only). The list still reads
-//! `spp_core::people_store::list_organizations` (the `/api/organizations`
-//! SQL, capped at 200) with the two-field filter (edit vs applied), the
-//! detail still reads `get_organization_detail` (the
-//! `/api/organizations/{id}` SQL — customer members, domain list,
-//! conversation counts), create still runs `create_organization` with the
-//! same name + comma-separated-domains validation, and the sync action /
-//! invalidate latch (clean-audit item 147) / selection-validity semantics
-//! are the exact same state machine as before the rebuild.
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 
@@ -28,13 +5,9 @@ use super::{i64_field, opt_str_field, str_field};
 use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// DataTable row height — the 32px button row (DS-C-05 cells ride it).
 const ROW_HEIGHT: f32 = 32.0;
 
-/// The interactive organizations page state.
 pub struct OrganizationsPage {
-    /// R8 (D5): outcome note for the page's "Sync now" action — the
-    /// completion itself is reported by the global sync toast.
     pub sync_note: String,
 
     filter_edit: String,
@@ -45,12 +18,7 @@ pub struct OrganizationsPage {
     new_name: String,
     new_domains: String,
     error: Option<String>,
-    /// Clean-audit item 147: reload latch — an empty mirror is a legal
-    /// steady state, so "list empty" can no longer mean "re-query every
-    /// frame".
     loaded: bool,
-    /// DS-C-17 DetailPanel open flag (A-1): the row `open` act opens the
-    /// right sheet; Esc, the scrim, or the close button close it.
     panel_open: bool,
 }
 
@@ -72,7 +40,6 @@ impl OrganizationsPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.loaded = false;
         self.orgs.clear();
@@ -96,7 +63,6 @@ impl OrganizationsPage {
             Ok(orgs) => {
                 self.orgs = orgs;
                 self.error = None;
-                // Keep the selection valid across reloads.
                 if let Some(id) = self.selected
                     && !self.orgs.iter().any(|o| i64_field(o, "id") == id)
                 {
@@ -145,8 +111,6 @@ impl OrganizationsPage {
                 self.new_name.clear();
                 self.new_domains.clear();
                 self.selected = Some(id);
-                // The created org's detail becomes visible — the panel takes
-                // the role the old right column played.
                 self.panel_open = true;
                 self.reload(db);
             }
@@ -154,7 +118,6 @@ impl OrganizationsPage {
         }
     }
 
-    /// Render the page.
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -163,19 +126,12 @@ impl OrganizationsPage {
     ) {
         self.ensure_loaded(db);
 
-        // DS-C-01 PageHeader: title + subtitle, right cluster = counter pill
-        // (A-6) + the sync composite (A-8). egui right_to_left puts the first
-        // added widget rightmost, so the add order below paints
-        // [counter] [Sync now] [status line] — the lab's DS-C-01 order.
         design::page_header(
             ui,
             "Organizations",
             Some("customer organizations, their domains, and their members"),
             |ui| {
                 if !self.sync_note.is_empty() {
-                    // The in-flight/already-running note: the lab's unclassed
-                    // `.ds-status-line` state (text-2) — the completion tone
-                    // is the global toast's job (R8, D5).
                     design::hint_text(ui, &self.sync_note);
                 }
                 if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
@@ -185,10 +141,6 @@ impl OrganizationsPage {
                     )
                     .clicked()
                 {
-                    // R8 (D5): this used to be a local-only "Reload" that silently
-                    // re-read sqlite and looked like a refresh. It now performs a
-                    // real scoped fetch and reports the outcome; the invalidation
-                    // below re-reads whatever arrives.
                     match engine {
                         Some(engine) => {
                             if crate::pages::sync_health::spawn_sync_action(
@@ -211,10 +163,6 @@ impl OrganizationsPage {
             },
         );
 
-        // DS-C-10 FilterBar (A-2): filters left, exactly one primary apply
-        // right. The two-field design is preserved — `filter_edit` is the
-        // edit state, `filter` the applied state; the primary action is the
-        // same apply trigger as before the rebuild.
         let apply = design::filter_bar(
             ui,
             |ui| {
@@ -238,10 +186,6 @@ impl OrganizationsPage {
         }
         ui.add_space(design::scale::space::SP2);
 
-        // DS-C-05 DataTable — virtualized rows over the same 200-capped
-        // list query; columns per the conformed lab list (organization,
-        // domains, customers, conversations, open act). With no rows the
-        // lab engine swaps the table for the empty state (A-7).
         let orgs = self.orgs.clone();
         let mut pick: Option<i64> = None;
         if orgs.is_empty() {
@@ -321,16 +265,12 @@ impl OrganizationsPage {
             );
         }
 
-        // A-1: the row `open` act selects the org and opens the DetailPanel.
         if let Some(id) = pick {
             self.selected = Some(id);
             self.panel_open = true;
             self.reload_detail(db, id);
         }
 
-        // The lab's create affordance: a page-flow card under the table
-        // (`blocks` in the DS lab — `card_titled` + DS-C-13 form rows +
-        // one primary create action). Same validation, same write.
         ui.add_space(design::scale::space::SP2);
         design::card_titled(ui, "New organization", None, |ui| {
             design::form_row(ui, "name", |ui| {
@@ -364,9 +304,6 @@ impl OrganizationsPage {
             }
         });
 
-        // DS-C-17 DetailPanel (A-1) over the scrim — content is the DS-A-03
-        // record composition: record-head (avatar + name + meta + domains),
-        // then the members card.
         let detail = self.detail.clone();
         let title = detail
             .as_ref()
@@ -392,9 +329,6 @@ impl OrganizationsPage {
                 };
                 let t = design::tokens(ui);
                 let name = str_field(&org, "name");
-                // The store emits the member array under `members`
-                // (people_store::get_organization_detail) — the pre-rebuild
-                // page read `customers` and silently rendered none of them.
                 let members = org
                     .get("members")
                     .and_then(|c| c.as_array())
@@ -409,7 +343,6 @@ impl OrganizationsPage {
                 let conversation_count = i64_field(&org, "conversation_count");
                 let domains = domains_text(&org);
 
-                // DS-A-03 record-head: avatar + name + meta line, domains as text.
                 ui.horizontal(|ui| {
                     design::avatar(ui, AvatarSize::Md, &initials(&name), BadgeTone::Neutral);
                     ui.vertical(|ui| {
@@ -434,8 +367,6 @@ impl OrganizationsPage {
                 }
                 design::divider(ui);
 
-                // Members block: per-member line (avatar + name + email, job
-                // title as meta).
                 design::card_titled(ui, "Members", None, |ui| {
                     if members.is_empty() {
                         design::empty_state_slim(
@@ -491,8 +422,6 @@ impl Default for OrganizationsPage {
     }
 }
 
-/// The organization's domains as display text (`"acme.com, acme.io"`).
-/// The mirror stores a JSON array; a plain string passes through.
 fn domains_text(org: &serde_json::Value) -> String {
     match org.get("domains") {
         Some(serde_json::Value::Array(items)) => items
@@ -505,7 +434,6 @@ fn domains_text(org: &serde_json::Value) -> String {
     }
 }
 
-/// DS-C-19 initials: the first character of up to two words, uppercased.
 fn initials(name: &str) -> String {
     name.split_whitespace()
         .filter_map(|w| w.chars().next())
@@ -514,9 +442,6 @@ fn initials(name: &str) -> String {
         .to_uppercase()
 }
 
-/// One DataTable cell: fixed width, vertically centered in the 32px row,
-/// truncated (DS-C-05 cell anatomy). `right` right-aligns the text (the
-/// mono numeral cells).
 fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, right: bool) {
     let layout = if right {
         egui::Layout::right_to_left(egui::Align::Center)

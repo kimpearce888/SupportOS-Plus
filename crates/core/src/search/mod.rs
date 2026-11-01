@@ -296,8 +296,6 @@ pub fn fts_query_or(q: &str, max_tokens: usize) -> String {
         .join(" OR ")
 }
 
-/// Tokenize a search query. Public so the native shell's docs search builds
-/// the exact same FTS patterns as the HTTP route.
 pub fn tokenize(q: &str, min_chars: usize, max_tokens: usize) -> Vec<String> {
     let cleaned: String = q
         .chars()
@@ -317,15 +315,6 @@ pub fn tokenize(q: &str, min_chars: usize, max_tokens: usize) -> Vec<String> {
         .collect()
 }
 
-/// Escape a user-supplied LIKE pattern body so `%`, `_` and the escape
-/// character `\` match literally (the pattern's wrapping `%…%` and the
-/// query's `ESCAPE '\\'` clause stay in charge of the wildcarding).
-///
-/// Clean-audit item 83: the inbox query filter, the customers search
-/// and the saved-replies mirror search interpolated raw input into LIKE
-/// patterns — a `%`/`_` in the search text acted as a wildcard and a
-/// trailing `\` escaped the wrapping percent, silently breaking the
-/// search. Shared by every LIKE-with-user-input call site.
 #[must_use]
 pub fn escape_like(q: &str) -> String {
     let mut out = String::with_capacity(q.len());
@@ -383,17 +372,6 @@ pub fn search(
     })
 }
 
-/// A4 retrieval spine: FTS search fused with real sqlite-vec hits.
-///
-/// The BM25 lanes run exactly as [`search`] does; when the retrieval feature
-/// is enabled, an Embed role is routed, and a vector index is available, the
-/// query is embedded and dense hits are fused per lane via the existing RRF
-/// k=60 math (see `rrf::RRF_K`). The reported flags are real:
-/// `used_semantic` is set only when vector hits actually made the list, and
-/// every fused hit carries its lane provenance ("keyword match" /
-/// "semantic match") in `why`. Absent any part of the chain the response is
-/// the honest FTS-only result with `semantic_available: false` (or a
-/// one-line mode note explaining the fallback).
 pub fn search_with_semantics(
     conn: &Connection,
     index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
@@ -447,7 +425,6 @@ pub fn search_with_semantics(
     };
     let dense = index.search(&query_vec, 60);
 
-    // Map dense hits to per-lane semantic SearchHits.
     let want_tickets = scope == "all" || scope == "tickets";
     let want_knowledge = scope == "all" || scope == "knowledge";
     let mut semantic_hits: Vec<SearchHit> = Vec::new();
@@ -550,9 +527,6 @@ pub fn search_with_semantics(
         return Ok(response);
     }
 
-    // RRF fusion (k=60, same constant as rrf): per lane, every hit
-    // scores 1/(k + rank) on each list it appears on. FTS rank is position in
-    // its lane; semantic rank is by cosine score.
     let k = crate::rrf::RRF_K;
     let mut fused: Vec<SearchHit> = Vec::new();
     for lane in ["tickets", "knowledge"] {
@@ -604,19 +578,9 @@ pub fn search_with_semantics(
             hit.score = (f.rrf * 10_000.0).round() / 10_000.0;
             fused.push(hit);
         }
-        // The FTS-only hits of this lane are superseded by the fused list.
         response.hits.retain(|h| h.scope != lane);
     }
     let fused_any = !fused.is_empty();
-    // Clean-audit item 59: the final sort ranks the whole response by score,
-    // but the fused lanes carry RRF-scale scores (≈ 0.016–0.033) while the
-    // untouched FTS-only lanes (customers/issues/saved_replies/ai) still
-    // carried their FTS-era constant 1.0 — every one of them outranked every
-    // fused hit, so the response claimed "BM25 + sqlite-vec fused" while the
-    // semantic results sat at the bottom of the list. When fusion ran, the
-    // surviving FTS-only lanes are re-scored onto the same RRF scale (by
-    // their rank within the lane, exactly how the fused lanes scored their
-    // FTS halves), so the cross-lane ordering is meaningful.
     if fused_any {
         rescore_fts_only_lanes_to_rrf_scale(&mut response.hits, k);
     }
@@ -636,11 +600,6 @@ pub fn search_with_semantics(
     Ok(response)
 }
 
-/// Clean-audit item 59: put the FTS-only lanes on the RRF scale the fused
-/// lanes score on — `1/(k + rank + 1)` by rank within each lane, the same
-/// formula the fusion loop applied to the FTS halves of the fused lanes.
-/// Only the lanes that never fused are touched (the fused lanes were already
-/// retained out of `hits` by the caller).
 fn rescore_fts_only_lanes_to_rrf_scale(hits: &mut [SearchHit], k: u32) {
     const FTS_ONLY_LANES: [&str; 4] = ["customers", "issues", "saved_replies", "ai"];
     let mut rank_by_lane: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
@@ -779,12 +738,6 @@ fn rebuild_indexes_tx(conn: &Connection) -> Result<usize> {
     }
     let conv_count = conv_ids.len();
 
-    // Clean-audit item 64: this bulk insert used to run right after the
-    // per-conversation loop above — but `index_conversation_fts` already
-    // inserts every non-deleted conversation's threads into `fts_threads`,
-    // so every live thread was inserted TWICE per rebuild (FTS5 corpus
-    // statistics doubled; matched threads double-counted). The loop is the
-    // single writer now; the flag bookkeeping below stays as it was.
     if table_exists(conn, "conversation_threads")? {
         conn.execute(
             "UPDATE conversation_threads SET fts_indexed = 1
@@ -897,12 +850,6 @@ fn build_custom_object_search_text(title: &str, data_json: Option<&str>) -> Stri
     }
 }
 
-// Clean-audit item 155: `index_conversation` and `index_customer`
-// are gone. They fed the legacy `conversations_fts` / `customers_fts`
-// tables, which no search lane ever queried (the live lanes read
-// `fts_conversations` / `fts_threads` / `customers`); the writers had
-// no callers left.
-
 #[cfg(test)]
 mod batch13_a4_search_tests {
     use super::*;
@@ -922,9 +869,6 @@ mod batch13_a4_search_tests {
         conn
     }
 
-    /// A4: without an index the fused search degrades to the honest FTS-only
-    /// response — used_semantic false, a mode note explaining why, and the
-    /// FTS hits intact.
     #[test]
     fn fused_search_degrades_honestly_without_index() {
         let conn = db_with_conversation();
@@ -949,8 +893,6 @@ mod batch13_a4_search_tests {
         );
     }
 
-    /// A4: a disabled index is also an honest FTS-only answer (the
-    /// qdrant_enabled setting off).
     #[test]
     fn fused_search_with_disabled_index_stays_fts_only() {
         let conn = db_with_conversation();
@@ -969,10 +911,6 @@ mod batch13_a4_search_tests {
     }
 }
 
-/// Clean-audit batch 25: item 58 (the knowledge FTS lane never deduped per
-/// document — one multi-chunk document flooded the LIMIT), item 59 (fused
-/// RRF scores were sorted against FTS-only constant-1.0 scores), item 64
-/// (rebuild_indexes double-inserted every thread into fts_threads).
 #[cfg(test)]
 mod batch25_search_tests {
     use super::*;
@@ -985,9 +923,6 @@ mod batch25_search_tests {
         conn
     }
 
-    /// One knowledge source; documents get explicit chunk rows in both
-    /// knowledge_chunks and fts_knowledge exactly the way the ingest lane
-    /// writes them.
     fn seed_knowledge(conn: &Connection, docs: &[(&str, &[&str])]) {
         conn.execute(
             "INSERT INTO knowledge_sources (name, kind) VALUES ('src', 'local_file')",
@@ -1021,16 +956,12 @@ mod batch25_search_tests {
         }
     }
 
-    /// Item 58: a document split into several matching chunks must occupy
-    /// ONE result slot (its best chunk), not flood the limit with copies of
-    /// itself while other matching documents are pushed out entirely.
     #[test]
     fn audit58_knowledge_hits_dedupe_per_document() {
         let conn = db();
         seed_knowledge(
             &conn,
             &[
-                // A 6-chunk document, every chunk mentioning "invoice".
                 (
                     "Invoice manual",
                     &[
@@ -1042,7 +973,6 @@ mod batch25_search_tests {
                         "invoice six",
                     ],
                 ),
-                // Two single-chunk documents that also match "invoice".
                 ("Invoice FAQ", &["the invoice cycle"]),
                 ("Invoice policy", &["pay the invoice in 30 days"]),
             ],
@@ -1062,8 +992,6 @@ mod batch25_search_tests {
             3,
             "every hit is a different document: {hits:?}"
         );
-        // Pre-fix: the 6-chunk manual would have consumed the whole LIMIT 3
-        // by itself, and the FAQ/policy documents would be invisible.
         assert!(
             hits.iter().any(|h| h.title == "Invoice FAQ")
                 && hits.iter().any(|h| h.title == "Invoice policy"),
@@ -1071,7 +999,6 @@ mod batch25_search_tests {
         );
     }
 
-    /// Item 58, visibility filter: the dedupe respects the filter.
     #[test]
     fn audit58_dedupe_respects_the_visibility_filter() {
         let conn = db();
@@ -1126,10 +1053,6 @@ mod batch25_search_tests {
         }
     }
 
-    /// Item 59: after a fusion ran, the surviving FTS-only lanes are
-    /// re-scored onto the RRF scale — the pre-fix constant 1.0 outranked
-    /// every fused hit (RRF scores peak around 0.033) and pushed the
-    /// "semantic" results to the bottom of a response that claimed fusion.
     #[test]
     fn audit59_fts_only_lanes_rescore_to_the_rrf_scale() {
         let k = crate::rrf::RRF_K;
@@ -1161,9 +1084,6 @@ mod batch25_search_tests {
             "saved_replies rank 0: {}",
             hits[3].score
         );
-        // A hit that appeared on BOTH fused lists (1/61 + 1/62 ≈ 0.0325)
-        // now outranks any single-list FTS-only hit (1/61 ≈ 0.0164) —
-        // before the fix the FTS-only 1.0 beat everything fused.
         let fused_both = 1.0 / (f64::from(k) + 1.0) + 1.0 / (f64::from(k) + 2.0);
         let mut all = hits.clone();
         all.push(hit("tickets", 42, fused_both));
@@ -1178,9 +1098,6 @@ mod batch25_search_tests {
         );
     }
 
-    /// Item 59: lanes that never fuse are untouched when no fusion ran
-    /// (the caller gates the rescore on `fused_any` — this pins the
-    /// helper's own lane list).
     #[test]
     fn audit59_rescore_leaves_unknown_lanes_alone() {
         let k = crate::rrf::RRF_K;
@@ -1198,10 +1115,6 @@ mod batch25_search_tests {
         );
     }
 
-    /// Item 64: a rebuild inserts every live thread exactly once — the
-    /// pre-fix rebuild ran the per-conversation indexer (which writes each
-    /// conversation's threads) AND a bulk INSERT over all threads, so every
-    /// thread landed in fts_threads twice.
     #[test]
     fn audit64_rebuild_inserts_each_thread_exactly_once() {
         let conn = db();
@@ -1241,7 +1154,6 @@ mod batch25_search_tests {
             )
             .expect("distinct");
         assert_eq!(distinct_thread_ids, 3, "no thread id appears twice");
-        // The threads still match after the rebuild.
         let found = search_conversations(&conn, "second thread", &SearchFilters::default(), 10)
             .expect("search");
         assert!(

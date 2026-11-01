@@ -1,26 +1,12 @@
 use std::path::{Path, PathBuf};
 
-/// Data-directory name: the default location is
-/// `$XDG_DATA_HOME/supportos-plus`.
 pub const DATA_DIR_NAME: &str = "supportos-plus";
 
-/// Database file name inside the data directory.
 pub const DB_FILE_NAME: &str = "supportos-plus.db";
 
-/// Pre-1.0.0 data-directory name (the SupportOS++ era).
 const LEGACY_DATA_DIR_NAME: &str = "supportos-plusplus";
 
-/// Pre-1.0.0 database file name.
 const LEGACY_DB_FILE_NAME: &str = "supportos-plusplus.db";
-
-// Clean-audit item 153: the `AppConfig` surface (`helpscout`, `ai`,
-// `sync_interval_minutes`, `loopback_port` — and the `HelpScoutConfig`/
-// `AiConfig` structs with their `redacted()` helper) is gone. Every
-// field was constructed and never consumed: credentials come from the
-// env (`EnvConfig`), settings live in the database, the sync interval
-// is the settings row, and the loopback listener binds an OS-assigned
-// port. Only `data_dir` was ever read (`main.rs`), so the shell now
-// calls `default_data_dir()` directly.
 
 fn data_dir_root() -> PathBuf {
     let base = std::env::var("XDG_DATA_HOME")
@@ -38,31 +24,6 @@ pub fn default_data_dir() -> PathBuf {
     data_dir_root().join(DATA_DIR_NAME)
 }
 
-/// One-time migration of the pre-1.0.0 data layout.
-///
-/// v0.2.x kept everything under `$XDG_DATA_HOME/supportos-plusplus` with
-/// the database named `supportos-plusplus.db`; 1.0.0 moves the whole
-/// directory (database, `secrets.key`, vector store, backups) to
-/// `$XDG_DATA_HOME/supportos-plus` and renames the database inside it.
-///
-/// Best effort and idempotent:
-///
-/// * no-op while `SPP_DATA_DIR` overrides the location — the override is
-///   the exact same path in both versions, so there is nothing to move;
-/// * no-op once the new directory holds a database (fresh 1.0.0 install
-///   or an already-completed migration);
-/// * no-op when the legacy directory has no database (not a real install);
-/// * prefers an atomic same-filesystem `rename(2)` of the entire
-///   directory, falling back to item-by-item moves when the new
-///   directory already exists (partial-boot leftovers).
-///
-/// Never overwrites anything that already exists in the new directory,
-/// and never deletes from the legacy directory — the move is either
-/// complete (whole-dir rename) or leaves items where they were.
-///
-/// # Errors
-/// Never fails hard: an I/O problem is logged and the app continues
-/// with a fresh data directory (the legacy data stays on disk).
 pub fn migrate_legacy_data_dir() {
     if std::env::var("SPP_DATA_DIR").is_ok() {
         return;
@@ -85,18 +46,13 @@ pub fn migrate_legacy_data_dir() {
     }
 }
 
-/// Testable core of [`migrate_legacy_data_dir`]: `root` is the parent of
-/// both directories, `new` the 1.0.0 data directory. Returns how many
-/// items were moved (0 = nothing to do).
 fn migrate_legacy_dir(root: &Path, new: &Path) -> std::io::Result<usize> {
     let legacy = root.join(LEGACY_DATA_DIR_NAME);
     let legacy_db = legacy.join(LEGACY_DB_FILE_NAME);
-    // Only act on a real legacy install whose data has not been moved yet.
     if !legacy_db.is_file() || new.join(DB_FILE_NAME).is_file() {
         return Ok(0);
     }
 
-    // Preferred path: the whole legacy directory becomes the new one.
     if !new.exists() {
         std::fs::rename(&legacy, new)?;
         let moved_db = new.join(LEGACY_DB_FILE_NAME);
@@ -106,14 +62,11 @@ fn migrate_legacy_dir(root: &Path, new: &Path) -> std::io::Result<usize> {
         return Ok(1);
     }
 
-    // Fallback: the new directory already exists (a partial boot left it
-    // behind). Move every legacy item individually, without overwriting.
     let mut moved = 0usize;
     for entry in std::fs::read_dir(&legacy)? {
         let entry = entry?;
         let name = entry.file_name();
         if name == "instance.lock" {
-            // Stale single-instance lock; a live one is recreated on demand.
             continue;
         }
         let to = if name == LEGACY_DB_FILE_NAME {
@@ -175,10 +128,6 @@ pub struct EnvHelpScout {
     pub docs_api_base: String,
 }
 
-// Audit (low): the derived `Debug` printed `client_secret`,
-// `webhook_secret` and `docs_api_key` verbatim — one `debug!(?env)` away
-// from leaking them into logs and support bundles. Lengths only; the
-// values themselves never reach a formatter.
 impl core::fmt::Debug for EnvHelpScout {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("EnvHelpScout")
@@ -193,9 +142,6 @@ impl core::fmt::Debug for EnvHelpScout {
     }
 }
 
-/// Debug-only secret masker: shows whether a value is set and how long
-/// it is, never the value itself. Shared by every secret-bearing struct
-/// that used to derive `Debug`.
 pub(crate) fn debug_redact(v: &str) -> String {
     if v.is_empty() {
         "<unset>".to_string()
@@ -258,8 +204,6 @@ pub fn load_env_config() -> EnvConfig {
             enabled: env_bool("QDRANT_ENABLED", true),
         },
         sync: EnvSync {
-            // R8 (D18): one default everywhere (this env var is now consumed by the
-            // adaptive auto-sync timer as the quiet-ceiling fallback).
             interval_minutes: env_int("SYNC_INTERVAL_MINUTES", 1),
             api_concurrency: env_int("SYNC_API_CONCURRENCY", 2),
         },
@@ -271,7 +215,6 @@ mod migrate_tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    /// Unique temp root so parallel tests never collide.
     fn temp_root(tag: &str) -> PathBuf {
         let unique = format!(
             "spp-migrate-{tag}-{}-{}",
@@ -286,12 +229,10 @@ mod migrate_tests {
         dir
     }
 
-    /// A realistic v0.2.x install: db, key material, vector store, lock.
     fn seed_legacy(root: &Path) -> PathBuf {
         let legacy = root.join(LEGACY_DATA_DIR_NAME);
         let vectors = legacy.join("vectors");
         std::fs::create_dir_all(&vectors).expect("legacy dirs");
-        // A zero-byte file is a valid empty SQLite database.
         std::fs::write(legacy.join(LEGACY_DB_FILE_NAME), b"").expect("db");
         std::fs::write(legacy.join("secrets.key"), [0u8; 32]).expect("key");
         std::fs::write(vectors.join("vectors.db"), b"v").expect("vectors db");
@@ -340,9 +281,7 @@ mod migrate_tests {
     fn no_op_without_a_real_legacy_install() {
         let root = temp_root("noop-none");
         let new = root.join(DATA_DIR_NAME);
-        // Legacy directory absent entirely.
         assert_eq!(migrate_legacy_dir(&root, &new).expect("migration"), 0);
-        // Legacy directory present but without a database.
         let legacy = root.join(LEGACY_DATA_DIR_NAME);
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("secrets.key"), [0u8; 32]).unwrap();
@@ -356,7 +295,7 @@ mod migrate_tests {
         let root = temp_root("fallback");
         seed_legacy(&root);
         let new = root.join(DATA_DIR_NAME);
-        std::fs::create_dir_all(&new).unwrap(); // partial boot leftover
+        std::fs::create_dir_all(&new).unwrap();
 
         let moved = migrate_legacy_dir(&root, &new).expect("migration");
         assert_eq!(moved, 3, "db + key + vectors moved");
@@ -364,7 +303,6 @@ mod migrate_tests {
         assert!(new.join("secrets.key").is_file());
         assert!(new.join("vectors").join("vectors.db").is_file());
         assert!(!new.join("instance.lock").exists(), "stale lock not moved");
-        // Items are removed from legacy as they move (rename semantics).
         assert!(!legacy_has_db(&root));
         std::fs::remove_dir_all(&root).ok();
     }
@@ -380,9 +318,6 @@ mod migrate_tests {
 mod debug_redaction_tests {
     use super::*;
 
-    /// Audit (low): secret-bearing structs must never render their
-    /// secrets through `Debug` — one `debug!(?env)` in a log path is all
-    /// it would take to leak them.
     #[test]
     fn env_helpscout_debug_never_contains_secret_values() {
         let env = EnvHelpScout {
@@ -398,7 +333,6 @@ mod debug_redaction_tests {
         assert!(!rendered.contains("SUPERSECRETVALUE1"), "{rendered}");
         assert!(!rendered.contains("WEBHOOKSECRET1"), "{rendered}");
         assert!(!rendered.contains("DOCSAPIKEY1"), "{rendered}");
-        // Presence and length remain diagnosable; the value does not.
         assert!(rendered.contains("<redacted 17 chars>"), "{rendered}");
         assert!(rendered.contains("client-id-abc"), "{rendered}");
     }
@@ -412,19 +346,7 @@ mod debug_redaction_tests {
 
 #[cfg(test)]
 mod batch30_tests {
-    // Batch 34 (item 153): the helper moved INTO this module, so nothing
-    // is imported from the parent anymore.
-    /// Batch 34 (item 153) note: `redact_string` was the `HelpScoutConfig
-    /// ::redacted` helper until the dead AppConfig surface was removed.
-    /// It stays here, test-only, so the item-107 regression below keeps
-    /// its pinned proof (the batch-30 harness reads this file).
     fn redact_string(s: &str) -> String {
-        // Audit item 107: head/tail were raw BYTE offsets (`&s[..2]`), so any
-        // secret whose second byte sits inside a multi-byte character — a CJK,
-        // emoji, or accented-Latin client id — panicked with "byte index 2 is
-        // not a char boundary" the moment the redacted config was rendered.
-        // Redaction is a display helper: take the first and last two
-        // CHARACTERS and mask short strings by character count, never bytes.
         if s.is_empty() {
             return String::new();
         }
@@ -437,23 +359,16 @@ mod batch30_tests {
         format!("{head}••••{tail}")
     }
 
-    /// Audit item 107: the head/tail offsets were raw byte indices, so a
-    /// secret whose second byte sits inside a multi-byte character panicked
-    /// with "byte index 2 is not a char boundary". Every shape renders now.
     #[test]
     fn redact_string_survives_multibyte_secrets() {
         assert_eq!(redact_string(""), "");
         assert_eq!(redact_string("ab"), "••••");
         assert_eq!(redact_string("abcd"), "••••");
-        // Six 4-byte emoji: 24 bytes, 6 chars — the old code sliced at
-        // byte 2 and panicked.
         assert_eq!(redact_string("🔒🔒🔒🔒🔒🔒"), "🔒🔒••••🔒🔒");
-        // CJK (3 bytes per char).
         let cjk = redact_string("秘密のキーです");
         assert!(cjk.starts_with("秘"), "{cjk}");
         assert!(cjk.ends_with("す"), "{cjk}");
         assert!(cjk.contains("••••"));
-        // Long ASCII keeps the original head/tail shape.
         assert_eq!(redact_string("sk-live-abcdef123456"), "sk••••56");
     }
 }

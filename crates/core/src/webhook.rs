@@ -9,21 +9,8 @@ pub const HELPSCOUT_SIGNATURE_HEADER: &str = "X-Helpscout-Signature";
 
 type HmacSha1 = Hmac<Sha1>;
 
-/// The platform's cap on webhook secrets (registration answers 400 for
-/// anything longer — Help Scout's own rule).
 pub const SECRET_CAP: usize = 40;
 
-/// The secret Help Scout actually holds: the first 40 characters of the
-/// configured one (the platform rejects longer values at registration).
-///
-/// Audit item 32: registration capped the secret at 40 characters while
-/// signature verification used the full stored value — any configured
-/// secret longer than the cap meant the platform signed with the
-/// truncation while the app verified with the whole string, so every
-/// delivery failed the check, ten discards deactivated the hook, and the
-/// health check re-registered it into the same trap. Both sides now
-/// resolve through this one function: registration and verification
-/// always agree.
 #[must_use]
 pub fn effective_secret(secret: &str) -> String {
     secret.chars().take(SECRET_CAP).collect()
@@ -42,7 +29,6 @@ pub fn verify_signature(secret: &[u8], body: &[u8], provided_signature: &str) ->
     let provided = base64::engine::general_purpose::STANDARD
         .decode(provided_signature)
         .map_err(|_| Error::WebhookSignature)?;
-    // Mac::verify_slice compares the tag in constant time.
     mac.verify_slice(&provided)
         .map_err(|_| Error::WebhookSignature)
 }
@@ -56,17 +42,7 @@ pub struct WebhookEventRecord {
     pub processing_state: String,
 }
 
-/// Numbered migration (boot step m048): creates the `webhook_events`
-/// table and index, upgrading legacy tables that stored the raw body.
-///
-/// The schema is created here — at boot, inside its own migration — and is
-/// deliberately NOT ensured per-insert: data-path functions assume a database
-/// opened through `bootstrap::apply_all` and surface real errors instead of
-/// silently rebuilding schema mid-write.
 pub fn apply_m048_webhook_events(conn: &Connection) -> Result<()> {
-    // Tables from the pre-migration era stored the raw body and no event hash.
-    // They are dropped rather than migrated: their events were re-delivered by
-    // Help Scout on retry anyway, and the hash column is now NOT NULL.
     let old_schema = conn
         .query_row(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='webhook_events'",
@@ -148,12 +124,6 @@ pub fn set_webhook_event_state(
     Ok(())
 }
 
-/// Audit fix (M8): a crash between marking an event 'processing' and its
-/// terminal write used to strand the row forever — nothing ever looked at
-/// 'processing' rows again. Runs on every webhook receipt: rows stuck in
-/// 'processing' past the lease return to 'pending' (a later delivery or
-/// the next event re-drives them); past the retry budget they fail
-/// honestly instead of looping forever.
 pub fn recover_stale_webhook_events(conn: &Connection) -> Result<usize> {
     const LEASE_MINUTES: i64 = 15;
     const MAX_STALE_ATTEMPTS: i64 = 5;
@@ -198,14 +168,6 @@ pub fn recover_stale_webhook_events(conn: &Connection) -> Result<usize> {
 }
 
 pub fn prune_webhook_events(conn: &Connection, keep: u32) -> Result<()> {
-    // Clean-audit item 94: the pre-fix prune kept the newest `keep` rows
-    // REGARDLESS of state — under a backlog (an offline weekend, a burst
-    // while processing is failing) the OLDEST rows are exactly the
-    // pending ones, so the prune deleted work that was never processed
-    // before the drain ever reached it. Only terminally-done rows are
-    // prunable now (processed, or failed with the retry budget spent);
-    // rows that still need processing survive at any age, and the newest
-    // `keep` of everything stay for diagnostics.
     conn.execute(
         "DELETE FROM webhook_events
           WHERE NOT (processing_state IN ('pending','failed') AND attempts < 5)
@@ -259,15 +221,10 @@ mod tests {
 
     #[test]
     fn signature_matches_hmac_sha1_test_vector() {
-        // RFC 2202-style vector: HMAC-SHA1("key", "The quick brown fox jumps
-        // over the lazy dog") = de7c9b85b8b78aa6bc8a7a36f70a90701c9db4d9
         let sig = compute_signature(b"key", b"The quick brown fox jumps over the lazy dog");
         assert_eq!(sig, "3nybhbi3iqa8ino29wqQcBydtNk=");
     }
 
-    /// Clean-audit item 32: registration and verification must agree on
-    /// the effective secret — the platform's 40-character cap applied to
-    /// whatever the user stored.
     #[test]
     fn effective_secret_applies_the_platform_cap() {
         assert_eq!(
@@ -287,11 +244,6 @@ mod tests {
             "y".repeat(40),
             "over the cap: the first 40 characters are what the platform holds"
         );
-        // The truncation and the registration path sign identically: the
-        // signature computed over the capped secret verifies with the
-        // capped secret, and NOT with the full one — which is exactly the
-        // trap the pre-fix loopback fell into (register truncated,
-        // verify full).
         let body = br#"{"objectID":1}"#;
         let sig = compute_signature(effective_secret(&longer).as_bytes(), body);
         assert!(verify_signature(effective_secret(&longer).as_bytes(), body, &sig).is_ok());
@@ -300,16 +252,12 @@ mod tests {
 
     #[test]
     fn signature_matches_rfc2202_vectors() {
-        // RFC 2202 test 1: key = 0x0b x 20, data = "Hi There"
         let sig = compute_signature(&[0x0b; 20], b"Hi There");
         assert_eq!(sig, b64_of_hex("b617318655057264e28bc0b6fb378c8ef146be00"));
 
-        // RFC 2202 test 2: key = "Jefe"
         let sig = compute_signature(b"Jefe", b"what do ya want for nothing?");
         assert_eq!(sig, b64_of_hex("effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"));
 
-        // RFC 2202 test 6: key longer than the 64-byte block size (key is hashed first).
-        // Digest cross-verified against Python stdlib hmac (hashlib.sha1).
         let long_key = [0xaa; 131];
         let data = b"Test Using Larger Than Block-Size Key - Hash Key First";
         let sig = compute_signature(&long_key, data);
@@ -365,16 +313,9 @@ mod tests {
             .collect()
     }
 
-    /// Clean-audit batch 28, item 94: the prune kept the newest N rows
-    /// regardless of state — under a backlog the OLDEST rows are exactly
-    /// the pending ones, so unprocessed events were deleted before the
-    /// drain ever reached them. Only terminally-done rows are prunable
-    /// now.
     #[test]
     fn audit94_prune_keeps_unprocessed_events_under_backlog() {
         let conn = event_db();
-        // A backlog: the oldest three are still pending; three processed
-        // rows sit on top of them.
         for id in 1..=3 {
             insert_event(&conn, id, "pending", 0);
         }
@@ -396,10 +337,6 @@ mod tests {
         );
     }
 
-    /// Item 94, terminal states: a failed event with its retry budget
-    /// spent is dead work — outside the history window it is prunable;
-    /// a failed event that still owes retries survives regardless of
-    /// the window.
     #[test]
     fn audit94_prune_removes_failed_events_past_the_retry_budget() {
         let conn = event_db();
@@ -407,9 +344,6 @@ mod tests {
         insert_event(&conn, 2, "failed", 2);
         insert_event(&conn, 3, "processed", 1);
 
-        // Newest 2 (ids 3, 2) are the history window. Row 1 is terminal
-        // (attempts = 5, nothing left to process) and outside it: gone.
-        // Row 2 is outside it too, but still owes processing: kept.
         prune_webhook_events(&conn, 2).expect("prune");
         let remaining: Vec<i64> = {
             let mut stmt = conn

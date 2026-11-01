@@ -1,34 +1,3 @@
-//! Customers page (port of the web `pages/customers.rs`).
-//!
-//! RS-17 (wave A) rebuild on **Design Contract v1.0 archetype DS-A-01** —
-//! the list-page recipe (docs/audit/design-contract-v1.md §4): PageHeader
-//! with the counter pill (DS-C-01, register A-6 — the item-82 result count
-//! lives beside the header now) → FilterBar with exactly one primary apply
-//! (DS-C-10, A-2; the Enter-on-the-input trigger is preserved) → DataTable
-//! (DS-C-05, virtualized rows) → the row `open` act opens the DetailPanel
-//! (DS-C-17, A-1) whose content is the DS-A-03 record composition (avatar
-//! record head + contact meta, then the support-health / milestones /
-//! interaction-profile / conversations cards and the timeline). The old
-//! full-page profile mode with its back button was exactly the register
-//! A-1 divergence ("Customers: search→table→open→full-page profile + back
-//! button") the archetype closes; the conformed lab reference is
-//! `mockups/design-lab/pages-ds.js` (`DS.definePage("customers", …)`).
-//!
-//! Behavior, queries, and data flow are unchanged (decisions.md D6:
-//! presentation only). The list still reads
-//! `spp_core::people_store::list_customers_summary` (the `/api/customers`
-//! SQL, the 50-row page with the item-82 pager and the past-the-end
-//! clamp), and the detail still loads `get_customer_detail`,
-//! `interaction_engine::build_profile`, `customer_support_health`,
-//! `customer_events::list_for_customer` + `kind_counts`, the
-//! customer-filtered `inbox::list_conversations` and
-//! `reports::get_timeline`, plus the M21 `client_current_signals`
-//! recommendation — all in the same one `with_read` per profile load.
-//! The search keeps its edit-vs-applied state (`search_edit` vs
-//! `applied_query`), the pager moves the same 1-based `page`, and
-//! `invalidate` still marks the visible surface stale — the list is
-//! always up now, and the panel's detail reloads while it is open.
-
 use eframe::egui;
 use rusqlite::Connection;
 use serde_json::Value;
@@ -38,15 +7,10 @@ use super::{i64_field, opt_str_field, str_field};
 use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// DataTable row height — the 32px button row (DS-C-05 cells ride it).
 const ROW_HEIGHT: f32 = 32.0;
 
-/// Rows per customers page (clean-audit item 82: the search fetched
-/// page 1 only — customer 51+ was unreachable behind the 50-row cap;
-/// the cap is now a page size with prev/next controls under the table).
 const CUSTOMERS_PAGE_SIZE: i64 = 50;
 
-/// One row of the search results (typed view over the summary JSON).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CustomerRow {
     pub id: i64,
@@ -56,8 +20,6 @@ pub struct CustomerRow {
     pub last_contact: Option<String>,
 }
 
-/// Read a summary row out of the people-store JSON (field names follow
-/// `people_store::customer_summary_row`).
 #[must_use]
 pub fn row_from_summary(v: &Value) -> CustomerRow {
     let first = str_field(v, "first_name");
@@ -77,7 +39,6 @@ pub fn row_from_summary(v: &Value) -> CustomerRow {
     }
 }
 
-/// Contact card facts extracted from `get_customer_detail`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ContactCard {
     pub display_name: String,
@@ -88,8 +49,6 @@ pub struct ContactCard {
     pub locale: Option<String>,
 }
 
-/// Read the contact card out of the detail JSON. The detail nests the
-/// summary row under `"customer"` (see `people_store::get_customer_detail`).
 #[must_use]
 pub fn contact_from_detail(detail: &Value) -> ContactCard {
     let customer = detail.get("customer").unwrap_or(detail);
@@ -116,7 +75,6 @@ pub fn contact_from_detail(detail: &Value) -> ContactCard {
     }
 }
 
-/// Timeline event row.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TimelineEvent {
     pub kind: String,
@@ -125,7 +83,6 @@ pub struct TimelineEvent {
     pub summary: String,
 }
 
-/// Read a timeline event out of the customer-events JSON.
 #[must_use]
 pub fn event_row(v: &Value) -> TimelineEvent {
     let occurred_at = str_field(v, "occurred_at");
@@ -148,7 +105,6 @@ pub fn event_row(v: &Value) -> TimelineEvent {
     }
 }
 
-/// Support-health summary (subset the page shows in the health card).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SupportHealth {
     pub open_conversations: i64,
@@ -156,7 +112,6 @@ pub struct SupportHealth {
     pub breached_sla: i64,
 }
 
-/// Read the health summary out of the support-health report JSON.
 #[must_use]
 pub fn health_from_report(report: &Value) -> SupportHealth {
     let root = report.get("report").unwrap_or(report);
@@ -167,7 +122,6 @@ pub fn health_from_report(report: &Value) -> SupportHealth {
     }
 }
 
-/// Conversations for a customer (typed reuse of the inbox query).
 pub fn conversations_for(
     conn: &Connection,
     customer_id: i64,
@@ -180,40 +134,24 @@ pub fn conversations_for(
     Ok(spp_core::inbox::list_conversations(conn, &filters)?.0)
 }
 
-/// The interactive customers page state.
 pub struct CustomersPage {
-    /// R8 (D5): outcome note for the page's "Sync now" action — the
-    /// completion itself is reported by the global sync toast.
     pub sync_note: String,
 
     search_edit: String,
     applied_query: Option<String>,
     rows: Vec<CustomerRow>,
     total: i64,
-    /// Clean-audit item 82: the 1-based results page the pager is on
-    /// (a new search resets it to 1; the pager moves it).
     page: i64,
     profile: Option<Value>,
     interaction: Option<Value>,
     health: Option<Value>,
-    /// Audit fix (M21): the AI-stage recommendation for the profile's
-    /// latest analyzed conversation — loaded with the rest of the
-    /// profile instead of re-queried on the UI thread every frame.
     recommendation: Option<Value>,
     timeline: Vec<TimelineEvent>,
     kind_counts: Vec<(String, i64)>,
     conversations: Vec<spp_core::inbox::ConversationListItem>,
-    /// Item 56: the support-milestone timeline (persisted SLA breaches
-    /// and high-friction recomputes) — the writers are the intelligence
-    /// sweep and the Insights recompute; this is the reader.
     milestones: Vec<spp_core::reports::TimelineEvent>,
     error: Option<String>,
-    /// Set by `invalidate`; the next frame reloads the visible surface.
     stale: bool,
-    /// DS-C-17 DetailPanel state (A-1): the row `open` act selects the
-    /// customer and opens the right sheet; Esc, the scrim, or the close
-    /// button close it. The selection survives a filter change — the
-    /// old profile surface stayed loaded until the user left it too.
     selected: Option<i64>,
     panel_open: bool,
 }
@@ -243,9 +181,6 @@ impl CustomersPage {
         }
     }
 
-    /// Live-update invalidation (rating/sync events refresh customer
-    /// data): mark stale; the next frame reloads the visible surface —
-    /// the list is always visible now, the panel detail while it is open.
     pub fn invalidate(&mut self) {
         self.stale = true;
     }
@@ -261,9 +196,6 @@ impl CustomersPage {
         });
         match result {
             Ok((summaries, total)) => {
-                // Clean-audit item 82: a page past the last one (the data
-                // shrank underneath) falls back to the last page that
-                // still holds rows instead of rendering a dead end.
                 if summaries.is_empty() && self.page > 1 && total > 0 {
                     self.page = (total + CUSTOMERS_PAGE_SIZE - 1) / CUSTOMERS_PAGE_SIZE;
                     return self.reload_search(db);
@@ -276,9 +208,6 @@ impl CustomersPage {
         }
     }
 
-    /// Open the detail panel for a customer (the row `open` act). The
-    /// same profile loads the old full-page mode ran; the DS-C-17 panel
-    /// is the archetype's master–detail surface (register A-1).
     pub fn open_profile(&mut self, db: &DbHandle, customer_id: i64) {
         self.selected = Some(customer_id);
         self.panel_open = true;
@@ -322,8 +251,6 @@ impl CustomersPage {
             let conversations = conversations_for(conn, customer_id).unwrap_or_default();
             let milestones =
                 spp_core::reports::get_timeline(conn, customer_id, 50).unwrap_or_default();
-            // Audit fix (M21): the profile's AI-stage recommendation is
-            // fetched once per profile load, not once per frame.
             let recommendation: Option<serde_json::Value> = conn
                 .query_row(
                     "SELECT s.recommendation_json, s.sources
@@ -372,7 +299,6 @@ impl CustomersPage {
         self.recommendation = recommendation;
     }
 
-    /// Render the page.
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -381,8 +307,6 @@ impl CustomersPage {
     ) {
         if self.stale {
             self.stale = false;
-            // The visible surface: the list is always up; the detail rides
-            // the DS-C-17 panel, so it reloads only while the panel is open.
             self.reload_search(db);
             if self.panel_open
                 && let Some(id) = self.selected
@@ -391,15 +315,8 @@ impl CustomersPage {
             }
         }
 
-        // DS-C-01 PageHeader: title + right cluster = counter pill (A-6)
-        // + the sync composite (A-8). egui right_to_left puts the first
-        // added widget rightmost, so the add order below paints
-        // [counter] [Sync now] [status line] — the lab's DS-C-01 order.
         design::page_header(ui, "Customers", None, |ui| {
             if !self.sync_note.is_empty() {
-                // The in-flight/already-running note: the lab's unclassed
-                // `.ds-status-line` state (text-2) — the completion tone
-                // is the global toast's job (R8, D5).
                 design::hint_text(ui, &self.sync_note);
             }
             if design::button_with_icon(ui, Icon::Refresh, "Sync now", ButtonVariant::Outline)
@@ -409,10 +326,6 @@ impl CustomersPage {
                 )
                 .clicked()
             {
-                // R8 (D5): this used to be a local-only "Reload" that silently
-                // re-read sqlite and looked like a refresh. It now performs a
-                // real scoped fetch and reports the outcome; the invalidation
-                // below re-reads whatever arrives.
                 match engine {
                     Some(engine) => {
                         if crate::pages::sync_health::spawn_sync_action(
@@ -434,11 +347,6 @@ impl CustomersPage {
             design::page_counter(ui, &self.count_label());
         });
 
-        // DS-C-10 FilterBar (A-2): filters left, exactly one primary apply
-        // right. The edit-vs-applied design is preserved — `search_edit`
-        // is the edit state, `applied_query` the applied one — and so are
-        // both apply triggers: the primary button and Enter while the
-        // input holds focus.
         let mut enter_apply = false;
         let apply = design::filter_bar(
             ui,
@@ -472,12 +380,6 @@ impl CustomersPage {
         }
         ui.add_space(design::scale::space::SP2);
 
-        // DS-C-05 DataTable — virtualized rows over the same 50-capped
-        // page of the list query; columns per the conformed lab list
-        // (name, email, conversations, last contact, open act). With no
-        // rows the lab engine swaps the table for the empty state (A-7) —
-        // the same "search first" empty state the page has always opened
-        // with.
         let rows = self.rows.clone();
         let mut pick: Option<i64> = None;
         if rows.is_empty() {
@@ -551,8 +453,6 @@ impl CustomersPage {
             );
         }
 
-        // Clean-audit item 82: prev/next under the table — page 1 used to
-        // be the only page the search ever fetched.
         let pages = u32::try_from((self.total + CUSTOMERS_PAGE_SIZE - 1) / CUSTOMERS_PAGE_SIZE)
             .unwrap_or(1);
         let delta = design::pager(
@@ -569,17 +469,10 @@ impl CustomersPage {
             self.reload_search(db);
         }
 
-        // A-1: the row `open` act selects the customer and opens the
-        // DetailPanel (the panel takes the role the old full-page profile
-        // mode played — same loads, same data).
         if let Some(id) = pick {
             self.open_profile(db, id);
         }
 
-        // DS-C-17 DetailPanel (A-1) over the scrim — content is the DS-A-03
-        // record composition: record-head (avatar + name + contact meta),
-        // then the lab's two-col block cards (support health + milestones |
-        // interaction profile + conversations) and the timeline.
         let profile = self.profile.clone();
         let interaction = self.interaction.clone();
         let health = self.health.clone();
@@ -612,9 +505,6 @@ impl CustomersPage {
                 let t = design::tokens(ui);
                 let contact = contact_from_detail(&profile);
 
-                // DS-A-03 record-head: avatar + name + the contact meta
-                // line (email · phone · company · last activity — the
-                // page's conditional parts joined the lab's way).
                 ui.horizontal(|ui| {
                     design::avatar(
                         ui,
@@ -634,9 +524,6 @@ impl CustomersPage {
                 });
                 design::divider(ui);
 
-                // The lab's two-col detail block: support health +
-                // milestones on the left, interaction profile +
-                // conversations on the right.
                 ui.columns(2, |cols| {
                     health_and_counts(&mut cols[0], &health, &kind_counts);
                     milestones_ui(&mut cols[0], &milestones);
@@ -654,9 +541,6 @@ impl CustomersPage {
         self.panel_open = panel_open;
     }
 
-    /// The DS-C-01 counter pill text — the item-82 result count the
-    /// results card title used to carry: the visible range once
-    /// pagination is in play ("51-100 of 1234"), like the inbox.
     fn count_label(&self) -> String {
         if self.total > CUSTOMERS_PAGE_SIZE {
             let from = (self.page - 1) * CUSTOMERS_PAGE_SIZE + 1;
@@ -674,9 +558,6 @@ impl Default for CustomersPage {
     }
 }
 
-/// The DS-A-03 record-head meta line: email · phone · company · last
-/// activity (the lab's recordHead join; the page's conditional parts
-/// keep their old presence rules — email always renders, "—" when absent).
 fn record_meta(contact: &ContactCard) -> String {
     let mut parts = vec![contact.email.as_deref().unwrap_or("—").to_string()];
     if let Some(phone) = &contact.phone {
@@ -691,9 +572,6 @@ fn record_meta(contact: &ContactCard) -> String {
     parts.join(" · ")
 }
 
-/// The Support health card: the three health form rows, then the event
-/// mix as DS-C-23 bar rows (the lab's `.ds-bar-row` — the kind label
-/// left, the count right, accent fill between).
 fn health_and_counts(ui: &mut egui::Ui, health: &Option<Value>, counts: &[(String, i64)]) {
     let t = design::tokens(ui);
     design::card_titled(ui, "Support health", None, |ui| {
@@ -732,11 +610,6 @@ fn health_and_counts(ui: &mut egui::Ui, health: &Option<Value>, counts: &[(Strin
     });
 }
 
-/// The interaction profile card (no card title — the AI badge row is the
-/// head, like the lab): sparkles + section title + the AI mark (DC G-2,
-/// the same violet AI badge the inbox and dashboard AI surfaces carry)
-/// and the stage badge, then the profile's key: value lines and — when a
-/// recommendation is present — the Support approach block.
 fn interaction_summary(
     ui: &mut egui::Ui,
     interaction: Option<&Value>,
@@ -748,7 +621,6 @@ fn interaction_summary(
             Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
             design::section_title(ui, "Interaction profile");
             design::badge(ui, "AI", BadgeTone::Ai);
-            // A3.4: the stage badge tells the truth about which layers ran.
             if let Some(rec) = recommendation {
                 let sources = rec.get("sources").and_then(Value::as_str).unwrap_or("");
                 let tone = if sources.contains("ai") {
@@ -774,8 +646,6 @@ fn interaction_summary(
             }
             return;
         };
-        // The profile JSON carries dimension/value pairs; render whatever is
-        // present as key: value lines.
         if let Some(map) = profile.get("dimensions").and_then(Value::as_object) {
             for (dimension, value) in map {
                 ui.label(
@@ -802,8 +672,6 @@ fn interaction_summary(
                 );
             }
         }
-        // A3.4: the AI-stage support approach on top of the wired heuristic
-        // stage — how to handle this customer, from the merged card.
         if let Some(rec) = recommendation {
             ui.add_space(6.0);
             design::divider(ui);
@@ -812,8 +680,6 @@ fn interaction_summary(
     });
 }
 
-/// A3.4: the support-approach block — recommendation fields with their
-/// prompt version + model provenance, whatever is present.
 fn recommendation_block(ui: &mut egui::Ui, rec: &Value) {
     let t = design::tokens(ui);
     design::field_label(ui, "Support approach");
@@ -857,9 +723,6 @@ fn recommendation_block(ui: &mut egui::Ui, rec: &Value) {
     }
 }
 
-/// The Timeline card: the customer-event rows inside the lab's
-/// `ds-scroll-220` inner scroll (the one place the page keeps an egui
-/// ScrollArea — the DS composition specifies it).
 fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
     let t = design::tokens(ui);
     design::card_titled(ui, "Timeline", None, |ui| {
@@ -900,10 +763,6 @@ fn timeline_ui(ui: &mut egui::Ui, events: &[TimelineEvent]) {
     });
 }
 
-/// Item 56: the support-milestone timeline — SLA breaches persisted by
-/// the intelligence sweep and high-friction recomputes from the Reports
-/// Insights action. Each event's JSON payload carries its context. The
-/// empty case is the lab's in-card slim empty state (A-7 why + next step).
 fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent]) {
     let t = design::tokens(ui);
     design::card_titled(
@@ -966,8 +825,6 @@ fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent])
     );
 }
 
-/// The Conversations card: the customer-filtered inbox page (same query,
-/// same table headers and status badges as before the rebuild).
 fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationListItem]) {
     let t = design::tokens(ui);
     design::card_titled(ui, "Conversations", None, |ui| {
@@ -1002,7 +859,6 @@ fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationLis
     });
 }
 
-/// DS-C-19 initials: the first character of up to two words, uppercased.
 fn initials(name: &str) -> String {
     name.split_whitespace()
         .filter_map(|w| w.chars().next())
@@ -1011,9 +867,6 @@ fn initials(name: &str) -> String {
         .to_uppercase()
 }
 
-/// One DataTable cell: fixed width, vertically centered in the 32px row,
-/// truncated (DS-C-05 cell anatomy). `right` right-aligns the text (the
-/// mono numeral cells).
 fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, right: bool) {
     let layout = if right {
         egui::Layout::right_to_left(egui::Align::Center)
@@ -1032,7 +885,6 @@ mod tests {
 
     #[test]
     fn row_from_summary_maps_fields() {
-        // Field names follow people_store::customer_summary_row.
         let v = serde_json::json!({
             "id": 9,
             "first_name": "Kim",
@@ -1052,7 +904,6 @@ mod tests {
 
     #[test]
     fn contact_and_health_extraction() {
-        // The detail JSON nests the summary under "customer".
         let detail = serde_json::json!({
             "customer": {
                 "first_name": "Kim",
@@ -1153,10 +1004,6 @@ mod tests {
     }
 }
 
-/// Clean-audit item 82: the customers search fetched page 1 only —
-/// customer 51+ was unreachable behind the hard-coded 50-row page. The
-/// fetch now takes the pager's page (with a clamp when the data shrinks
-/// underneath).
 #[cfg(test)]
 mod batch27_audit82_tests {
     use super::*;
@@ -1205,7 +1052,6 @@ mod batch27_audit82_tests {
         page.reload_search(&db);
         assert_eq!(page.rows.len(), 50);
 
-        // The data shrinks to 12 while the user sits on page 2.
         db.with_write(|conn| {
             conn.execute("DELETE FROM customers WHERE id > 12", [])
                 .expect("delete");

@@ -1,22 +1,3 @@
-//! Hot-swappable provider cell (v1.4.0 R3, defect D2).
-//!
-//! The provider used to be built exactly once at boot from whatever
-//! credentials resolved then: saving credentials mid-session changed
-//! nothing until the next restart, which is the "restart ritual" every
-//! v1.1.x owner had to perform. The `ProviderHandle` fixes the plumbing
-//! underneath: boot wraps the chosen provider in one shared handle that
-//! (a) the sync engine, the worker host and the loopback listener all
-//! hold for the whole process, and (b) can swap its inner provider
-//! in-place when credentials change mid-session. No Arc holder ever has
-//! to be rebuilt, so activation is safe from the UI thread while a sync
-//! is mid-flight — the running engine simply sees the new provider on
-//! its next call.
-//!
-//! The watermark-integrity rules around a swap live in
-//! [`crate::sync_engine::on_provider_kind_transition`] (R2): the swap
-//! itself stays mechanism-only, the state machine policy is applied by
-//! the caller that performs the activation.
-
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -29,20 +10,13 @@ use crate::helpscout::{
     HsThread, HsUser, HsUserStatus, HsWebhookConfig, HsWorkflow, Page, ThreadCreated,
 };
 
-/// What the handle currently serves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderKind {
-    /// Live Help Scout credentials resolved; the real provider serves
-    /// every call.
     Real,
-    /// No credentials: the inert provider serves nothing, and nothing
-    /// is ever faked.
     Empty,
 }
 
 impl ProviderKind {
-    /// The `provider_kind` setting value (also what `HelpScoutProvider::kind`
-    /// reports through the handle).
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -51,15 +25,11 @@ impl ProviderKind {
         }
     }
 
-    /// Parse the stored `provider_kind` setting. `None` means the
-    /// setting has never been written (a genuinely fresh database).
     #[must_use]
     pub fn from_setting(value: Option<&str>) -> Option<Self> {
         match value {
             Some("real") => Some(Self::Real),
             Some("empty") => Some(Self::Empty),
-            // Unknown or never-written values are treated as absent;
-            // boot decides the kind from the credentials, not the row.
             _ => None,
         }
     }
@@ -68,24 +38,14 @@ impl ProviderKind {
 struct Inner {
     kind: ProviderKind,
     provider: Arc<dyn HelpScoutProvider>,
-    /// The concrete real provider when [`Inner::kind`] is `Real`
-    /// (settings and the loopback OAuth exchange need it).
     real: Option<Arc<crate::helpscout_real::RealHelpScoutProvider>>,
 }
 
-/// One shared, swappable provider for the whole process.
-///
-/// Constructed by [`crate::build_boot_services`]-equivalent boot code
-/// (see `spp_shell::build_boot_services`); every long-lived consumer
-/// (sync engine, worker manager, loopback listener, settings page) holds
-/// the same `Arc<ProviderHandle>`, so [`ProviderHandle::activate_real`]
-/// and [`ProviderHandle::deactivate`] rewire all of them at once.
 pub struct ProviderHandle {
     inner: RwLock<Inner>,
 }
 
 impl ProviderHandle {
-    /// Wrap a live provider.
     #[must_use]
     pub fn new_real(real: Arc<crate::helpscout_real::RealHelpScoutProvider>) -> Self {
         let provider: Arc<dyn HelpScoutProvider> = real.clone();
@@ -98,7 +58,6 @@ impl ProviderHandle {
         }
     }
 
-    /// Wrap the inert empty provider.
     #[must_use]
     pub fn new_empty() -> Self {
         Self {
@@ -122,38 +81,26 @@ impl ProviderHandle {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Which provider the handle currently serves.
     #[must_use]
     pub fn kind(&self) -> ProviderKind {
         self.read().kind
     }
 
-    /// True when live Help Scout credentials are active this session.
     #[must_use]
     pub fn is_real(&self) -> bool {
         self.kind() == ProviderKind::Real
     }
 
-    /// The concrete real provider, `None` while the empty provider
-    /// serves. Settings (connect test, Connection Doctor) and the
-    /// loopback OAuth exchange call this at request time, so a
-    /// mid-session activation is picked up without any rebuild.
     #[must_use]
     pub fn real(&self) -> Option<Arc<crate::helpscout_real::RealHelpScoutProvider>> {
         self.read().real.clone()
     }
 
-    /// A clone of the current provider as the trait object the engine
-    /// and workers were constructed with.
     #[must_use]
     pub fn provider(&self) -> Arc<dyn HelpScoutProvider> {
         Arc::clone(&self.read().provider)
     }
 
-    /// Swap in a freshly built real provider (credentials were saved or
-    /// changed mid-session). Returns the kind that was previously
-    /// active so the caller can apply the
-    /// [`crate::sync_engine::on_provider_kind_transition`] policy.
     pub fn activate_real(
         &self,
         real: Arc<crate::helpscout_real::RealHelpScoutProvider>,
@@ -170,8 +117,6 @@ impl ProviderHandle {
         previous
     }
 
-    /// Swap back to the inert empty provider (credentials were
-    /// cleared). Returns the previously active kind.
     pub fn deactivate(&self) -> ProviderKind {
         let previous = self.kind();
         {
@@ -185,12 +130,9 @@ impl ProviderHandle {
     }
 }
 
-// Every trait method delegates to whatever provider the handle is
-// currently serving; that is the entire point of the indirection.
 #[async_trait::async_trait]
 impl HelpScoutProvider for ProviderHandle {
     fn kind(&self) -> &'static str {
-        // Read once to avoid a torn read between slot and kind.
         self.read().kind.as_str()
     }
 
@@ -304,9 +246,6 @@ impl HelpScoutProvider for ProviderHandle {
         self.provider().get_customer(customer_id).await
     }
 
-    // Audit fix (C4): delegate the channel sub-resource fetch — without
-    // this the trait default answered Ok(None) and no customer ever got
-    // their emails/phones backfilled.
     async fn get_customer_channels(&self, customer_id: i64) -> Result<Option<HsCustomer>> {
         self.provider().get_customer_channels(customer_id).await
     }
@@ -448,10 +387,6 @@ impl HelpScoutProvider for ProviderHandle {
         self.provider().docs_configured()
     }
 
-    // Saved-reply CRUD, workflow runs and attachment downloads are
-    // enqueued by workers through the handle (operations library, post-
-    // sync attachment passes). Without these delegations the trait's
-    // rejecting defaults fired even with a live provider connected.
     async fn create_saved_reply(&self, mailbox_id: i64, name: &str, text: &str) -> Result<i64> {
         self.provider()
             .create_saved_reply(mailbox_id, name, text)
@@ -566,7 +501,6 @@ mod tests {
         let previous = handle.activate_real(real_provider(&db));
         assert_eq!(previous, ProviderKind::Empty);
 
-        // The Arc held since before the swap sees the new provider.
         assert_eq!(HelpScoutProvider::kind(provider_view.as_ref()), "real");
         assert_eq!(handle.kind(), ProviderKind::Real);
         assert!(handle.real().is_some());

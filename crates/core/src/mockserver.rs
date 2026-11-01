@@ -1,18 +1,3 @@
-//! Test-only mock HTTP/1.1 server (`#[cfg(test)]` module).
-//!
-//! Integration verification (TODO 45) runs the real client stacks —
-//! `RealHelpScoutProvider`, `SyncEngine`, `LoopbackServer`,
-//! `OpenAiCompatibleClient` — against a local in-process server instead of
-//! the remote services, so no credentials, network access, or cloud
-//! dependencies are ever required. The server deliberately mirrors the
-//! shape of `crate::loopback`'s minimal listener (one thread per
-//! connection, `Connection: close`, bounded reads) but is generic: tests
-//! install a handler closure that maps each request to a canned response,
-//! and every received request is recorded for assertions.
-//!
-//! Nothing here is compiled into release builds: the module is declared
-//! `#[cfg(test)]` in `lib.rs`.
-
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -24,13 +9,10 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// One recorded inbound request (header names lower-cased).
 #[derive(Debug, Clone)]
 pub struct MockRequest {
     pub method: String,
-    /// Path without the query string.
     pub path: String,
-    /// Raw query string (no leading `?`).
     pub query: String,
     pub headers: Vec<(String, String)>,
     pub body: String,
@@ -51,7 +33,6 @@ impl MockRequest {
         })
     }
 
-    /// Decoded `application/x-www-form-urlencoded` body pairs.
     pub fn form_pairs(&self) -> Vec<(String, String)> {
         self.body
             .split('&')
@@ -99,9 +80,6 @@ fn urldecode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Canned response body: accepts a `String`, `&str`, or `serde_json::Value`
-/// (serialized to compact JSON) so test fixtures can be written directly
-/// as `json!({...})` literals.
 #[derive(Debug, Clone)]
 pub struct MockBody(pub String);
 
@@ -123,12 +101,10 @@ impl From<serde_json::Value> for MockBody {
     }
 }
 
-/// Canned response returned by a test handler.
 #[derive(Debug, Clone)]
 pub struct MockResponse {
     pub status: u16,
     pub reason: &'static str,
-    /// Extra headers (e.g. `x-ratelimit-remaining-minute`).
     pub headers: Vec<(String, String)>,
     pub body: String,
 }
@@ -178,12 +154,8 @@ fn reason_for(status: u16) -> &'static str {
     }
 }
 
-/// Handlers are shared `Arc` closures — NOT behind a mutex — so a slow or
-/// sleeping handler (timeout tests) never blocks other connections, and
-/// concurrent connections are truly concurrent.
 pub type Handler = std::sync::Arc<dyn Fn(&MockRequest) -> MockResponse + Send + Sync>;
 
-/// Running mock server. Drop stops the accept thread.
 pub struct MockServer {
     port: u16,
     hits: Arc<Mutex<Vec<MockRequest>>>,
@@ -193,7 +165,6 @@ pub struct MockServer {
 }
 
 impl MockServer {
-    /// Bind an OS-assigned loopback port and serve `handler` until dropped.
     pub fn start(handler: Handler) -> std::io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
@@ -219,9 +190,6 @@ impl MockServer {
                                 .name("spp-mock-conn".to_string())
                                 .spawn(move || handle_conn(stream, hits, handler));
                             if spawned.is_err() {
-                                // Test failure, not production code: propagate
-                                // loudly so a resource-exhausted run fails
-                                // instead of hanging.
                                 panic!("mock server: connection thread spawn failed");
                             }
                         }
@@ -244,18 +212,15 @@ impl MockServer {
         })
     }
 
-    /// Base URL, e.g. `http://127.0.0.1:39877` (no trailing slash).
     #[must_use]
     pub fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// Every request received so far, in arrival order.
     pub fn hits(&self) -> Vec<MockRequest> {
         self.hits.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
-    /// Number of recorded requests whose method and path match.
     pub fn hit_count(&self, method: &str, path: &str) -> usize {
         self.hits()
             .iter()
@@ -263,7 +228,6 @@ impl MockServer {
             .count()
     }
 
-    /// Replace the handler (for sequential scripting mid-test).
     pub fn set_handler(&self, handler: Handler) {
         *self.handler.write().unwrap_or_else(|p| p.into_inner()) = handler;
     }
@@ -297,9 +261,6 @@ fn handle_conn(
         let mut log = hits.lock().unwrap_or_else(|p| p.into_inner());
         log.push(req.clone());
     }
-    // Snapshot the handler under a short read lock, then invoke it with NO
-    // lock held: a slow/sleeping handler must not serialize other
-    // connections (see the timeout tests).
     let handler = {
         let guard = handler.read().unwrap_or_else(|p| p.into_inner());
         std::sync::Arc::clone(&guard)
@@ -420,8 +381,6 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-/// Handler that serves fixed responses in order and repeats the last one
-/// afterwards. Used to script sequences such as `429` then `200`.
 pub fn scripted(responses: Vec<MockResponse>) -> Handler {
     let queue = Mutex::new(std::collections::VecDeque::from(responses));
     std::sync::Arc::new(move |_req: &MockRequest| {
@@ -437,12 +396,10 @@ pub fn scripted(responses: Vec<MockResponse>) -> Handler {
     })
 }
 
-/// Handler that always answers with one fixed response.
 pub fn fixed(response: MockResponse) -> Handler {
     std::sync::Arc::new(move |_req: &MockRequest| response.clone())
 }
 
-/// 404 for everything — the "server is up but has no data" baseline.
 pub fn not_found() -> Handler {
     fixed(MockResponse::json(404, r#"{"error":"not found"}"#))
 }

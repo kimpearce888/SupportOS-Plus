@@ -1,36 +1,10 @@
-//! Style lint (RS-12, Batch RS-2) — the CI gate for DC v1.0 conformance.
-//!
-//! Two rules, enforced over every `crates/app-shell/src/**/*.rs` file:
-//!
-//! 1. **No raw color construction outside the `design/` module.** Every static UI color
-//!    must be a token (`design::LIGHT`/`DARK` fields) or resolve through the
-//!    DS.TONE match arm. Raw `Color32::from_rgb/from_gray/from_rgba*/from_*_alpha`,
-//!    `Color32::BLACK/WHITE` call sites are forbidden. `Color32::TRANSPARENT` is
-//!    allowed everywhere (it is a "no fill" sentinel, not a pigment). Test
-//!    regions (`#[cfg(test)]` modules) are exempt — fixtures may use any color.
-//!
-//! 2. **No off-scale spacing.** `ui.add_space(n)`, `Margin::same(n)` and
-//!    `Margin::symmetric(h, v)` literals must belong to the DC value set
-//!    (DC §2.4 scale + the component pads frozen by the DC sheets): {2, 4, 6,
-//!    8, 10, 12, 14, 16, 18, 20, 22, 24, 32} (+ 0 for directional overrides).
-//!    The register B-3 offender values (5/7/9/11/13/… odd micro-gaps) are
-//!    therefore impossible to reintroduce.
-//!
-//! A line can opt out with a trailing `// style-lint:allow` comment; each use
-//! must be justified in review. At the time of the freeze there are **zero**
-//! opt-outs.
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const SRC_DIR: &str = "src";
-/// The token factory module — the only code allowed to construct colors.
-/// (RF-6 split `design.rs` into the `design/` module — `mod.rs` plus the
-/// extracted component files — so the exemption follows the directory.)
 const TOKEN_FACTORY_PREFIX: &str = "src/design/";
 
-/// Raw color construction patterns (RS-12 lint rule 1).
 const COLOR_PATTERNS: [&str; 7] = [
     "Color32::from_rgb(",
     "Color32::from_gray(",
@@ -41,16 +15,10 @@ const COLOR_PATTERNS: [&str; 7] = [
     "Color32::WHITE",
 ];
 
-/// The DC spacing value set (lint rule 2): the 4pt scale, the DC-frozen
-/// component pads {10, 14, 18, 22} and the DS-C-20/21/22 sheet pads
-/// {5 (saved-replies menu), 7 (cop-card rhythm), 11 (file chip),
-/// 13 (message-card bottom)} — all frozen by the DC sheets (DC §2.4 note).
 const SPACING_ALLOWLIST: [i64; 17] = [2, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24, 32];
 
-/// A finding: file, line number (1-based), the offending snippet.
 struct Finding(String, usize, String);
 
-/// Recursively collect `*.rs` files under `dir`.
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
@@ -66,15 +34,12 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Strip `#[cfg(test)] mod … { … }` regions by brace balancing, so test
-/// fixtures do not trip the color rule. Returns the line indices to skip.
 fn test_region_lines(lines: &[&str]) -> Vec<bool> {
     let mut skip = vec![false; lines.len()];
     let mut i = 0;
     while i < lines.len() {
         let trimmed = lines[i].trim_start();
         if trimmed.starts_with("#[cfg(test)]") {
-            // find the `mod X {` opener within the next few lines
             let mut j = i + 1;
             while j < lines.len() && j <= i + 4 {
                 if lines[j].contains("mod ") && lines[j].contains('{') {
@@ -111,10 +76,9 @@ fn test_region_lines(lines: &[&str]) -> Vec<bool> {
     skip
 }
 
-/// Rule 1: raw color construction outside the token factory (tests exempt).
 fn lint_colors(_file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Finding>) {
     if rel.replace('\\', "/").starts_with(TOKEN_FACTORY_PREFIX) {
-        return; // the design/ module IS the token factory
+        return;
     }
     let skip = test_region_lines(lines);
     for (idx, line) in lines.iter().enumerate() {
@@ -134,7 +98,6 @@ fn lint_colors(_file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Fin
     }
 }
 
-/// Extract integer literals following a marker, e.g. `add_space(` → `4.0`/`4`.
 fn numeric_arg(line: &str, marker: &str) -> Vec<i64> {
     let mut out = Vec::new();
     let mut rest = line;
@@ -154,8 +117,6 @@ fn numeric_arg(line: &str, marker: &str) -> Vec<i64> {
     out
 }
 
-/// Rule 2: off-scale spacing literals everywhere (tests included — the scale
-/// rule is part of the contract even in fixtures).
 fn lint_spacing(_file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Finding>) {
     for (idx, line) in lines.iter().enumerate() {
         if line.contains("style-lint:allow") {
@@ -164,7 +125,6 @@ fn lint_spacing(_file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Fi
         let mut literals = numeric_arg(line, "add_space(");
         literals.extend(numeric_arg(line, "Margin::same("));
         if let Some(after) = line.split("Margin::symmetric(").nth(1) {
-            // symmetric(h, v) — both args
             let arg_list = after.split(')').next().unwrap_or("");
             for part in arg_list.split(',') {
                 let head = part.trim().split('.').next().unwrap_or("");
@@ -243,14 +203,13 @@ fn no_raw_colors_and_no_off_scale_spacing() {
 
 #[test]
 fn lint_detects_known_bad_patterns() {
-    // Sanity: the linter must catch what it exists to catch.
     let lines = [
         "let c = egui::Color32::from_rgb(1, 2, 3);",
         "ui.add_space(9.0);",
         "egui::Margin::same(15)",
         "egui::Margin::symmetric(21, 27)",
-        "let ok = egui::Color32::TRANSPARENT;", // sentinel — allowed
-        "ui.add_space(12.0);",                  // on-scale — allowed
+        "let ok = egui::Color32::TRANSPARENT;",
+        "ui.add_space(12.0);",
     ];
     let mut violations = Vec::new();
     lint_colors(Path::new("x.rs"), "pages/x.rs", &lines, &mut violations);

@@ -23,12 +23,6 @@ pub struct CustomerMessage {
 }
 
 pub fn customer_messages(conn: &Connection, conversation_id: i64) -> Result<Vec<CustomerMessage>> {
-    // Clean-audit item 36: this window used to be the OLDEST 30 customer
-    // messages INCLUDING soft-deleted threads — a long ticket's recent
-    // context (the half that says what the customer wants now) was cut
-    // off, and deleted threads kept feeding the prompt. The window is
-    // now the NEWEST 30 live threads, presented oldest-first (the
-    // prompt's declared order).
     let mut stmt = conn.prepare(
         "SELECT id, COALESCE(body_text, '') FROM conversation_threads
          WHERE conversation_id = ?1 AND type = 'customer'
@@ -53,8 +47,6 @@ pub fn customer_messages(conn: &Connection, conversation_id: i64) -> Result<Vec<
         })
         .filter(|m| !m.text.trim().is_empty())
         .collect();
-    // Newest-first from SQL; the prompt (and the deterministic layer's
-    // `messages.first()` customer_goal) expect chronological order.
     rows.reverse();
     Ok(rows)
 }
@@ -113,9 +105,6 @@ pub fn prepare_computation(
     }))
 }
 
-/// What one extraction chat call produced — the run row's raw material
-/// for the cost ledger (clean-audit item 37: content + latency + the
-/// endpoint's token usage).
 #[derive(Debug, Clone)]
 pub struct ExtractionOutput {
     pub content: String,
@@ -132,11 +121,6 @@ pub async fn run_extraction(
     if !provider.is_available().await {
         return None;
     }
-    // Clean-audit item 35: the extraction prompt carries raw customer
-    // messages — it crosses the same prompt-redaction boundary the
-    // pipeline's chat_json uses (`redaction_enabled` setting, default
-    // on) instead of bypassing it. Emails, card numbers, phone numbers
-    // and secrets never reach the model from this path.
     let redaction_enabled =
         crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
     let (safe_prompt, findings) = crate::security::redact_text(prompt, redaction_enabled);
@@ -195,21 +179,11 @@ pub fn finish_computation(
         extracted = Some(cached_value);
         ai_run_id = Some(run_id);
     } else if let (Some(_), Some(fresh)) = (&prompt, fresh_output)
-        // Clean-audit item 34: local models happily wrap their JSON in
-        // markdown fences or surround it with prose — a strict
-        // from_str on the raw answer lost every such extraction. Parse
-        // through the pipeline's canonical fence-stripping extractor
-        // (the same one chat_json uses) before the shape validation.
         && let Some(parsed) = crate::ai_pipeline::extract_json(&fresh.content)
         && parsed
             .get("attributes")
             .is_some_and(|a| a.as_array().is_some())
     {
-        // Clean-audit item 37: the run row now lands as a completed
-        // 'attributes' run carrying the cost ledger's raw material
-        // (latency, token usage, endpoint) instead of a bare row stuck
-        // at the status column's 'queued' default, invisible to
-        // `usage_ledger`'s `WHERE status='completed'`.
         let run_id = store_extraction_run(
             conn,
             ExtractionRunRow {
@@ -361,9 +335,6 @@ fn build_extraction_user(
     parts.join("\n")
 }
 
-/// What one completed extraction run must persist (clean-audit item 37's
-/// ledger row: the hash-keyed cache columns plus the cost ledger's raw
-/// material).
 struct ExtractionRunRow<'a> {
     conversation_id: i64,
     input_hash: &'a str,
@@ -404,10 +375,6 @@ fn lookup_cached_extraction(
     input_hash: &str,
     model: &str,
 ) -> Result<Option<(i64, Value)>> {
-    // Clean-audit item 37: only completed runs are cache hits — a
-    // pre-fix row stuck at the 'queued' default is treated as a miss so
-    // the next computation re-runs and stores a proper completed row
-    // (self-healing, newest-first below finds it thereafter).
     let row: Option<(i64, String)> = conn
         .query_row(
             "SELECT id, response_json FROM ai_runs
@@ -891,11 +858,6 @@ pub fn deterministic_records(
     Ok(out)
 }
 
-/// A2 entry point: attribute extraction routed through the provider hub.
-/// With a live backend the AI layer fills intent/product/feature/issue/
-/// customer_goal/response_style; with AI disabled the deterministic
-/// layer still lands so the Attributes tab and automation conditions
-/// stay alive without any model.
 pub async fn compute_with_backend(
     conn: &mut Connection,
     backend: &crate::ai_pipeline::AiBackend,
@@ -920,7 +882,6 @@ pub async fn compute_with_backend(
             .await
         }
         crate::ai_pipeline::AiBackend::Disabled => {
-            // No model configured: deterministic-only, still a real snapshot.
             if let Some(prepared) = prepare_computation(conn, conversation_id, "", force)? {
                 finish_computation(conn, prepared, None, "", None)
             } else {

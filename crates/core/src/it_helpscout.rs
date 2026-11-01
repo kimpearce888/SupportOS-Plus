@@ -1,17 +1,3 @@
-//! Integration tests (TODO 45): `RealHelpScoutProvider` behavior against a
-//! local mock Help Scout API server.
-//!
-//! These exercise the real HTTP stack (reqwest + `ApiQueue` + rate
-//! limiter + token persistence) end-to-end over TCP against
-//! [`crate::mockserver`], with generated throwaway credentials. They do
-//! **not** touch `api.helpscout.net` — real-account verification requires
-//! external credentials and is explicitly out of scope (documented in
-//! `completed.md`).
-//!
-//! Runtime note: the slimmed tokio feature set has no `macros` feature, so
-//! tests build a current-thread runtime manually (the same pattern the
-//! shell pages use).
-
 use std::sync::Arc;
 
 use rusqlite::Connection;
@@ -31,10 +17,6 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("test runtime")
 }
 
-/// Serializes this file against the process-global master key (other test
-/// modules clear/replace it under the same lock; the OAuth flow now stores
-/// tokens in the encrypted envelope, R7/D13, so every test here needs a
-/// stable key for its whole duration).
 fn secrets_guard() -> std::sync::MutexGuard<'static, ()> {
     crate::settings::SECRETS_TEST_LOCK
         .lock()
@@ -44,15 +26,12 @@ fn secrets_guard() -> std::sync::MutexGuard<'static, ()> {
 const TEST_MASTER_KEY: [u8; 32] = [7u8; 32];
 
 fn fixture_db() -> DbHandle {
-    // In-memory databases have no key file; install the deterministic key
-    // the whole file shares (callers hold `secrets_guard` while using it).
     crate::settings::set_master_key_for_tests(TEST_MASTER_KEY);
     let mut conn = Connection::open_in_memory().expect("in-memory connection");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
     DbHandle::new(conn)
 }
 
-/// The OAuth tokens as stored by the envelope-backed `save_tokens`.
 fn envelope_tokens(db: &DbHandle) -> (Option<String>, Option<String>) {
     db.with_read(|conn| {
         let read = |key: &str| {
@@ -67,7 +46,6 @@ fn envelope_tokens(db: &DbHandle) -> (Option<String>, Option<String>) {
     })
 }
 
-/// Generated throwaway credentials pointed at the mock server.
 fn creds(mock: &MockServer) -> HsCredentials {
     HsCredentials {
         client_id: "test-client-id".into(),
@@ -84,7 +62,6 @@ fn provider(db: &DbHandle, creds: &HsCredentials) -> RealHelpScoutProvider {
     RealHelpScoutProvider::new(db.clone(), creds.clone())
 }
 
-/// Provider with a valid, non-expiring bearer token already stored.
 fn provider_with_token(db: &DbHandle, creds: &HsCredentials) -> RealHelpScoutProvider {
     let p = provider(db, creds);
     p.save_tokens("valid-token", None, Some(3_600), Some("read write"))
@@ -109,10 +86,6 @@ fn token_json(access: &str, refresh: Option<&str>, expires_in: i64) -> Value {
         "refresh_token": refresh
     })
 }
-
-// ---------------------------------------------------------------------------
-// API round-trips: the real provider parses what the wire format returns
-// ---------------------------------------------------------------------------
 
 #[test]
 fn get_me_roundtrip_sends_bearer_token() {
@@ -307,7 +280,6 @@ fn conversations_threads_and_customers_roundtrip() {
         Some("London")
     );
 
-    // 404 maps to Ok(None), not an error (deleted/merged upstream).
     let missing = rt
         .block_on(async { p.get_conversation(999).await })
         .expect("404 is not a hard error");
@@ -319,11 +291,6 @@ fn create_conversation_and_thread_roundtrips() {
     let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         match (req.method.as_str(), req.path.as_str()) {
-            // Audit fix (C1): re-pinned to the REAL create contract —
-            // POST /v2/conversations (not /v3) answers 201 with an EMPTY
-            // body and the new id in the Resource-Id header. The old mock
-            // fed a JSON body with "id"/"number"/"threads", which encoded
-            // a contract that does not exist and kept live creates broken.
             ("POST", "/v2/conversations") => {
                 MockResponse::empty(201).with_header("Resource-Id", "101")
             }
@@ -349,17 +316,12 @@ fn create_conversation_and_thread_roundtrips() {
                 subject: "New issue".into(),
                 body: "Something broke".into(),
                 tags: vec!["bug".into()],
-                // Audit fix (C1): None must default the status to "open"
-                // and the channel to "email" (the live API 400s without
-                // both top-level fields).
                 status: None,
                 channel: None,
             })
             .await
         })
         .expect("create_conversation");
-    // The real contract: id arrives via the Resource-Id header; number and
-    // thread id are unknown at create time (empty 201 body).
     assert_eq!(created.conversation_id, 101);
     assert_eq!(created.number, 0);
     assert_eq!(created.thread_id, 0);
@@ -367,7 +329,6 @@ fn create_conversation_and_thread_roundtrips() {
     assert_eq!(body["subject"], "New issue");
     assert_eq!(body["mailboxId"], 1);
     assert_eq!(body["threads"][0]["customer"]["id"], 900);
-    // Audit fix (C1): required top-level fields must be present.
     assert_eq!(body["type"], "email");
     assert_eq!(body["status"], "open");
 
@@ -445,14 +406,9 @@ fn create_conversation_and_thread_roundtrips() {
     assert_eq!(bodies[2]["value"], 42);
 }
 
-// ---------------------------------------------------------------------------
-// Pagination: v2 page numbers and v3 cursors
-// ---------------------------------------------------------------------------
-
 #[test]
 fn v2_pagination_follows_page_numbers_until_total_pages() {
     let _secrets = secrets_guard();
-    // 3 pages of tags, 2 per page, totalPages = 3.
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         let page: u32 = req
             .query_param("page")
@@ -500,8 +456,6 @@ fn v2_pagination_follows_page_numbers_until_total_pages() {
 #[test]
 fn v2_pagination_stops_on_empty_page_safely() {
     let _secrets = secrets_guard();
-    // Server claims more pages but returns an empty embedded list: the
-    // walker must terminate (empty page = stop), not loop forever.
     let mock = MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
         MockResponse::json(
             200,
@@ -563,7 +517,6 @@ fn v3_conversation_pagination_follows_hal_next_links() {
         Some("/v3/conversations?cursor=page2token")
     );
 
-    // Follow the cursor the way sync_conversations does.
     let second = runtime()
         .block_on(async {
             p.list_conversations(&ConversationQuery {
@@ -578,7 +531,6 @@ fn v3_conversation_pagination_follows_hal_next_links() {
     assert!(second.next_cursor.is_none());
     assert_eq!(second.items[0].remote_id, 103);
 
-    // The HAL href was converted to a bare path + forwarded as the cursor.
     let followed = mock
         .hits()
         .iter()
@@ -674,10 +626,6 @@ fn system_users_follows_next_links() {
     assert_eq!(users[1].remote_id, 8);
 }
 
-// ---------------------------------------------------------------------------
-// Error mapping and recovery
-// ---------------------------------------------------------------------------
-
 #[test]
 fn error_statuses_map_to_friendly_non_retryable_errors() {
     let _secrets = secrets_guard();
@@ -697,7 +645,6 @@ fn error_statuses_map_to_friendly_non_retryable_errors() {
         assert_eq!(hs.status_code, status);
         assert!(!hs.retryable, "status {status} must not be retryable");
         assert!(!hs.friendly.is_empty(), "friendly text required");
-        // The raw error keeps the request shape for diagnostics.
         assert!(
             hs.message.contains("/v2/users/me"),
             "message: {}",
@@ -709,8 +656,6 @@ fn error_statuses_map_to_friendly_non_retryable_errors() {
 #[test]
 fn server_error_5xx_is_retried_and_then_recovers() {
     let _secrets = secrets_guard();
-    // First response 503, second 200: the provider must retry once and
-    // succeed, having hit the endpoint exactly twice.
     let mock = MockServer::start(crate::mockserver::scripted(vec![
         MockResponse::json(503, r#"{"error":"maintenance"}"#),
         MockResponse::json(200, me_json().to_string()),
@@ -729,8 +674,6 @@ fn server_error_5xx_is_retried_and_then_recovers() {
 #[test]
 fn rate_limit_429_is_honored_retried_and_recorded() {
     let _secrets = secrets_guard();
-    // 429 with a 1-second retry window, then success. Also sends the
-    // x-ratelimit headers so the limiter state can be cross-checked.
     let mock = MockServer::start(crate::mockserver::scripted(vec![
         MockResponse::json(429, r#"{"error":"rate limited"}"#)
             .with_header("x-ratelimit-limit-minute", "100")
@@ -755,7 +698,6 @@ fn rate_limit_429_is_honored_retried_and_recorded() {
         "the retry must actually wait out the 1 s retry-after window"
     );
 
-    // The limiter recorded the rate-limit state it saw on the wire.
     let snapshot = p.limiter.snapshot();
     assert_eq!(snapshot["limitPerMinute"], json!(100));
     assert_eq!(snapshot["remaining"], json!(99));
@@ -775,7 +717,6 @@ fn rate_limit_headers_on_success_are_recorded() {
     runtime()
         .block_on(async { p.get_me().await })
         .expect("get_me");
-    // No headers sent: defaults stay intact and nothing panics.
     let snapshot = p.limiter.snapshot();
     assert!(snapshot["limitPerMinute"].as_i64().unwrap_or(0) > 0);
 }
@@ -783,9 +724,6 @@ fn rate_limit_headers_on_success_are_recorded() {
 #[test]
 fn unreachable_server_reports_offline_friendly_error() {
     let _secrets = secrets_guard();
-    // Bind then immediately stop a mock server to get a free port with
-    // nothing listening: the provider must fail with the offline error,
-    // not a raw transport panic.
     let dead = MockServer::start(crate::mockserver::not_found()).expect("mock server");
     let dead_url = dead.url();
     let dead_port = dead_url.rsplit(':').next().unwrap_or_default().to_string();
@@ -798,9 +736,6 @@ fn unreachable_server_reports_offline_friendly_error() {
     creds.docs_api_base = creds.api_base.clone();
     let db = fixture_db();
     let p = RealHelpScoutProvider::new(db, creds);
-    // A valid stored token: the request must actually be attempted (and
-    // fail at the transport layer) rather than being rejected up front
-    // with a 401 no-token error.
     p.save_tokens("offline-token", None, Some(3_600), None)
         .expect("seed token");
 
@@ -836,16 +771,9 @@ fn invalid_json_from_success_response_is_reported() {
     assert!(hs.friendly.contains("unexpected response format"));
 }
 
-// ---------------------------------------------------------------------------
-// OAuth: token endpoint, authorization-code exchange, refresh, revoke
-// ---------------------------------------------------------------------------
-
 #[test]
 fn client_credentials_login_exchanges_and_persists() {
     let _secrets = secrets_guard();
-    // Handler decisions are recorded via hits() and asserted afterwards —
-    // a panic inside a connection thread would only sever the socket and
-    // surface as a confusing transport error.
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         if req.path == "/v2/oauth2/token" {
             return MockResponse::json(200, token_json("cc-token", None, 7200).to_string());
@@ -887,8 +815,6 @@ fn client_credentials_login_exchanges_and_persists() {
         "token request is form-encoded"
     );
 
-    // Persisted in the envelope and visible through the status endpoint;
-    // the row itself keeps metadata only (R7/D13: no plaintext in sqlite).
     let status = p.oauth_status();
     assert_eq!(status["configured"], json!(true));
     assert_eq!(status["authenticated"], json!(true));
@@ -908,7 +834,6 @@ fn client_credentials_login_exchanges_and_persists() {
     assert_eq!(refresh_column, None, "the column must stay empty");
     assert_eq!(revoked, 0);
 
-    // The stored token is actually used for the next API call.
     let me = runtime()
         .block_on(async { p.get_me().await })
         .expect("get_me with new token");
@@ -975,9 +900,6 @@ fn authorization_code_exchange_persists_refresh_token() {
 #[test]
 fn expired_token_refreshes_via_token_endpoint_and_retries() {
     let _secrets = secrets_guard();
-    // Production refresh path: stored token is expired; the data request
-    // gets a 401; the provider refreshes via the token endpoint and the
-    // original request is retried with the fresh token.
     let token_requests = Arc::new(std::sync::Mutex::new(0usize));
     let counter = Arc::clone(&token_requests);
     let mock = MockServer::start(Arc::new(move |req: &crate::mockserver::MockRequest| {
@@ -991,7 +913,6 @@ fn expired_token_refreshes_via_token_endpoint_and_retries() {
         if req.path == "/v2/users/me" {
             let n = *counter.lock().unwrap();
             if n == 0 {
-                // No refresh yet: reject the stale token.
                 return MockResponse::json(401, r#"{"error":"invalid token"}"#);
             }
             return MockResponse::json(200, me_json().to_string());
@@ -1001,7 +922,6 @@ fn expired_token_refreshes_via_token_endpoint_and_retries() {
     .expect("mock server");
     let db = fixture_db();
     let p = provider(&db, &creds(&mock));
-    // Expired 2 minutes in the past: past the 120 s expiry margin.
     p.save_tokens("stale-token", Some("stale-refresh"), Some(-300), None)
         .expect("seed stale token");
 
@@ -1113,16 +1033,12 @@ fn revoke_clears_the_token_and_blocks_requests() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Docs API
-// ---------------------------------------------------------------------------
-
 #[test]
 fn docs_api_skipped_entirely_without_key() {
     let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::not_found()).expect("mock server");
     let db = fixture_db();
-    let p = provider_with_token(&db, &creds(&mock)); // empty docs key
+    let p = provider_with_token(&db, &creds(&mock));
 
     let cols = runtime()
         .block_on(async { p.list_doc_collections().await })
@@ -1137,11 +1053,6 @@ fn docs_api_skipped_entirely_without_key() {
 #[test]
 fn docs_api_uses_basic_auth_on_its_own_base() {
     let _secrets = secrets_guard();
-    // Audit fix (C2): re-pinned to the REAL Docs API contract — every v1
-    // list response wraps page/pages/items in a keyed envelope
-    // ({"collections":{...}}). The old mock fed a top-level {"items":...},
-    // encoding a shape the real service never returns and keeping the
-    // Help-Center sync at 0 records against production.
     let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
         200,
         json!({"collections": {"page": 1, "pages": 1, "count": 1,
@@ -1158,8 +1069,6 @@ fn docs_api_uses_basic_auth_on_its_own_base() {
         .expect("collections");
     assert_eq!(cols.len(), 1);
     assert_eq!(cols[0].name, "Docs");
-    // Audit fix (C2, live): the Docs API's ids are 24-char hex ObjectIds —
-    // the mirror must carry them verbatim (the old i64 parse zeroed them).
     assert_eq!(cols[0].remote_id, "6adf725b922c92c2dd6ce7d7");
 
     let token_req = {
@@ -1181,10 +1090,6 @@ fn docs_api_uses_basic_auth_on_its_own_base() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// HsApiError plumbing sanity (public helpers used by the shell)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn hs_status_and_error_helpers_downcast() {
     let _secrets = secrets_guard();
@@ -1200,18 +1105,11 @@ fn hs_status_and_error_helpers_downcast() {
     assert_eq!(e.to_string(), "f", "Display renders the friendly text");
 }
 
-// ---------------------------------------------------------------------------
-// v1.4.0 R4 (D7): the reply dispatch resolves the customer from the live
-// conversation when the mirror row lacks one, and repairs the mirror.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
     let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         match (req.method.as_str(), req.path.as_str()) {
-            // The dispatch's customer fallback fetches the live
-            // conversation; primaryCustomer.id is the answer.
             ("GET", "/v3/conversations/77") => MockResponse::json(
                 200,
                 json!({
@@ -1234,8 +1132,6 @@ fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
     let creds = creds(&mock);
     let provider = provider_with_token(&db, &creds);
 
-    // A mirror conversation with NO customer link — the pre-1.4.0
-    // guaranteed-400 case (D7). A customer row exists but is unlinked.
     db.with_write(|conn| {
         conn.execute(
             "INSERT INTO conversations (remote_id, number, status, mailbox_local_id,
@@ -1286,11 +1182,6 @@ fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
         db.clone(),
         Arc::new(provider),
     ));
-    // The runtime must exist (and be entered) before start_workers:
-    // start() spawns its timer tasks with tokio::spawn, which needs an
-    // ambient runtime on this thread. A current-thread runtime keeps the
-    // test in control — the spawned timers only advance while a block_on
-    // below drives the reactor.
     let rt = runtime();
     let _enter = rt.enter();
     let manager = crate::workers::start_workers(
@@ -1306,8 +1197,6 @@ fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
     );
 
     rt.block_on(manager.tick());
-    // The dispatcher may need a second tick to claim after the fallback
-    // GET; tick again to be safe.
     rt.block_on(manager.tick());
     manager.stop();
 
@@ -1360,10 +1249,6 @@ fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
          seeded customer"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Batch 15 (P2/P3): live chats, saved replies, workflows, the Resource-Id fix
-// ---------------------------------------------------------------------------
 
 #[test]
 fn chat_get_and_send_roundtrip_the_documented_wire_contract() {
@@ -1430,8 +1315,6 @@ fn chat_send_422_already_in_use_is_treated_as_delivered() {
     let db = fixture_db();
     let p = provider_with_token(&db, &creds(&mock));
 
-    // The message id is ours, so the platform's 422 means a retry after a
-    // timeout already delivered — never a double-send.
     let outcome =
         runtime().block_on(async { p.send_chat_message("chat-9", "m-uuid-2", "retry me").await });
     assert!(
@@ -1541,7 +1424,6 @@ fn create_webhook_reads_the_resource_id_header_on_the_201_answer() {
     let _secrets = secrets_guard();
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         match (req.method.as_str(), req.path.as_str()) {
-            // The documented 201: empty body, new hook id in Resource-Id.
             ("POST", "/v2/webhooks") => MockResponse::empty(201).with_header("Resource-Id", "55"),
             _ => MockResponse::json(404, json!({"message": "no route"})),
         }
@@ -1561,8 +1443,6 @@ fn create_webhook_reads_the_resource_id_header_on_the_201_answer() {
         })
         .expect("create webhook");
 
-    // Before the fix this read the (empty) body and returned 0 for every
-    // created hook, making a successful registration look like a failure.
     assert_eq!(hook_id, 55, "the Resource-Id header must be the answer");
 
     let hits = mock.hits();
@@ -1575,15 +1455,6 @@ fn create_webhook_reads_the_resource_id_header_on_the_201_answer() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Clean-audit batch 21 (items 28 and 30)
-// ---------------------------------------------------------------------------
-
-/// Audit item 28: `list_threads` used to read only page 1 of the v3
-/// threads collection and hand it to the sync's stale-thread sweep as the
-/// conversation's full thread set — every thread past page 1 was deleted
-/// from the mirror as "gone from the platform". The read now follows the
-/// HAL next link until the pages run out.
 #[test]
 fn list_threads_follows_hal_pagination_to_the_last_page() {
     let _secrets = secrets_guard();
@@ -1646,21 +1517,9 @@ fn list_threads_follows_hal_pagination_to_the_last_page() {
     assert!(page2, "the HAL next link must be followed exactly once");
 }
 
-/// Audit item 30: a retried saved-reply create re-POSTed the payload and
-/// duplicated the reply on the platform whenever the first attempt's POST
-/// had landed but the response or the post-write re-read failed. The
-/// create is now idempotent by its natural key (mailbox + name + text):
-/// the retry finds its own earlier write and skips the re-POST.
 #[test]
 fn retried_saved_reply_create_never_reposts() {
     let _secrets = secrets_guard();
-    // GET sequence on /saved-replies:
-    //   1 — attempt 1 pre-check: the mailbox holds nothing yet
-    //   2 — attempt 1 post-create re-read: 404 (a non-retryable answer,
-    //       so it surfaces through the in-client GET retry layer — the
-    //       POST landed, the job still fails and is requeued)
-    //   3 — attempt 2 pre-check: the platform now holds the twin
-    //   4 — attempt 2 post-create re-read: success, job completes
     let gets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counter = Arc::clone(&gets);
     let mock = MockServer::start(Arc::new(move |req: &crate::mockserver::MockRequest| {
@@ -1710,8 +1569,6 @@ fn retried_saved_reply_create_never_reposts() {
     })
     .expect("enqueue");
 
-    // Attempt 1: pre-check (empty) → POST lands → re-read 500s → the job
-    // is requeued as retryable.
     runtime().block_on(async { manager.tick().await });
     let posts_after_first = mock.hits().iter().filter(|h| h.method == "POST").count();
     assert_eq!(posts_after_first, 1, "the first attempt POSTs once");
@@ -1726,7 +1583,6 @@ fn retried_saved_reply_create_never_reposts() {
         .expect("job row");
     assert_eq!(status, "queued", "the failed re-read must requeue the job");
 
-    // Fast-forward past the retry backoff and run the retry.
     db.with_write(|conn| {
         conn.execute(
             "UPDATE jobs SET run_at = NULL WHERE type = 'saved_reply_write'",
@@ -1766,18 +1622,10 @@ fn retried_saved_reply_create_never_reposts() {
     );
 }
 
-/// Clean-audit batch 28, item 92: `get_rating`'s 404 mapping. The pre-fix
-/// branch matched the literal "-> 404" substring of the error's Display —
-/// but HsApiError's Display prints the FRIENDLY text, so the mapping
-/// never fired and a genuinely-absent rating surfaced as an Err (with
-/// batch 27's item 85, retried and then failed) instead of the honest
-/// Ok(None) every other 404-tolerant fetch returns.
 #[test]
 fn audit92_get_rating_maps_404_to_none_not_an_error() {
     let _secrets = secrets_guard();
     let db = fixture_db();
-    // 404 on the rating id, 400 on everything else (so a wrong-status
-    // answer cannot accidentally pass as "not found").
     let mock = MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
         if req.method == "GET" && req.path == "/v2/ratings/404" {
             MockResponse::json(404, r#"{"error":"not found"}"#)
@@ -1794,8 +1642,6 @@ fn audit92_get_rating_maps_404_to_none_not_an_error() {
         .expect("a 404 rating is Ok(None), not an error");
     assert!(gone.is_none(), "the absent rating maps to None");
 
-    // And the error path proves the mapping is not "any error is None":
-    // a 400 on the same endpoint stays an Err carrying its status.
     let err = runtime()
         .block_on(async { provider.get_rating(400).await })
         .expect_err("a hard 400 stays an error");

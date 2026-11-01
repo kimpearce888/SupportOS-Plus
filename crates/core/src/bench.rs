@@ -1,39 +1,3 @@
-//! Performance measurement harness (TODO 46).
-//!
-//! These are `#[ignore]`d measurement tests, not correctness tests: they
-//! seed a realistically large local dataset through the real sync write
-//! path (`SyncEngine::run_resource` against an in-process provider —
-//! upserts, FTS, tags, all of it), then time the operations that bound
-//! startup, sync and UI responsiveness. Run them explicitly and print
-//! the numbers:
-//!
-//! ```text
-//! cargo test -p supportos-plus-core bench -- --ignored --nocapture
-//! ```
-//!
-//! Individually:
-//! - `bench_db_operations_on_large_dataset` — the full DB suite (~1 min:
-//!   seed 5 000 customers + 3 000 conversations × 3 threads, then time
-//!   inbox pages, detail, FTS, backfill, re-walk, vector upsert/KNN).
-//! - `bench_boot_migrations_on_fresh_db` — cold vs warm `db::open` +
-//!   `apply_all`.
-//! - `bench_diagnose_write_path` — write-path isolation (raw inserts vs
-//!   `upsert_customer` vs `DbHandle::with_write`), for locating future
-//!   regressions.
-//!
-//! Process startup time and max RSS of the real binary are measured
-//! separately against the release binary and the packaged AppImage on
-//! the smoke path (`SPP_SMOKE=1`, `APPIMAGE_EXTRACT_AND_RUN=1`): wall
-//! time via repeated `time` runs, peak RSS via any getrusage-based tool
-//! (`/usr/bin/time -v` where available; a python
-//! `resource.getrusage(RUSAGE_CHILDREN)` wrapper otherwise). The numbers
-//! recorded in `completed.md` (final batch) come from these exact
-//! procedures on the development machine.
-//!
-//! Scale (a solo-support-desk "realistically large" dataset):
-//! 3 000 conversations × 3 threads, 5 000 customers, 100 tags, 50 users,
-//! 3 mailboxes, 3 000 × 384-dim vector points.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -73,8 +37,6 @@ impl Drop for TempDirGuard {
     }
 }
 
-/// Deterministic pseudo-random vector in [-1, 1] — reproducible across
-/// runs and machines.
 fn pseudo_vec(seed: u64, dim: usize) -> Vec<f32> {
     let mut state = splitmix(seed);
     (0..dim)
@@ -202,9 +164,6 @@ fn sample_customer(i: usize) -> HsCustomer {
     }
 }
 
-/// In-process provider serving the deterministic dataset — the bench
-/// measures the engine's *write path* (upserts, FTS, tags), never the
-/// network.
 struct LocalBenchProvider;
 
 #[async_trait::async_trait]
@@ -294,10 +253,6 @@ impl crate::helpscout::HelpScoutProvider for LocalBenchProvider {
         &self,
         query: &ConversationQuery,
     ) -> crate::error::Result<Page<HsConversation>> {
-        // The cursor is the HAL-style "/N" next path, mirroring the real
-        // provider's `hal_next_path` shape; strip the slash before parsing
-        // it back into a page number (the old `c.parse()` on "/N" failed
-        // and silently restarted at page 0 forever).
         let page_no: usize = query
             .cursor
             .as_deref()
@@ -403,7 +358,6 @@ impl crate::helpscout::HelpScoutProvider for LocalBenchProvider {
     }
 }
 
-/// Print a labeled timing and return elapsed + output.
 fn timeit<T>(label: &str, f: impl FnOnce() -> T) -> (std::time::Duration, T) {
     let started = Instant::now();
     let out = f();
@@ -412,10 +366,6 @@ fn timeit<T>(label: &str, f: impl FnOnce() -> T) -> (std::time::Duration, T) {
     (elapsed, out)
 }
 
-/// Diagnostic: isolate where the ingest write path spends time.
-/// (a) raw single-row INSERTs in one transaction, (b) upsert_customer
-/// directly on a connection, (c) upsert_customer through DbHandle's
-/// write guard, (d) upsert_customer through SyncEngine::lock per page.
 #[test]
 #[ignore = "diagnostic; run with --ignored --nocapture"]
 fn bench_diagnose_write_path() {
@@ -425,7 +375,6 @@ fn bench_diagnose_write_path() {
     let mut conn = crate::db::open(&db_path).expect("open");
     crate::bootstrap::apply_all(&mut conn).expect("migrations");
 
-    // (a) raw inserts, one transaction for all rows.
     {
         let tx = conn.transaction().expect("tx");
         let started = Instant::now();
@@ -445,7 +394,6 @@ fn bench_diagnose_write_path() {
         );
     }
 
-    // (b) upsert_customer directly on the connection (per-row tx).
     {
         let started = Instant::now();
         for i in 0..500 {
@@ -458,7 +406,6 @@ fn bench_diagnose_write_path() {
         );
     }
 
-    // (c) through the DbHandle write guard.
     let db = DbHandle::new(conn);
     {
         let started = Instant::now();
@@ -473,7 +420,6 @@ fn bench_diagnose_write_path() {
         );
     }
 
-    // (d) guard acquired once per 50-row page, like sync_customers.
     {
         let started = Instant::now();
         for page in 0..10 {
@@ -494,8 +440,6 @@ fn bench_diagnose_write_path() {
     }
 }
 
-/// Seed the reference data + customers + conversations through the real
-/// sync-engine write path and return the handle.
 fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
     let db_path = dir.join("bench.db");
     let mut conn = crate::db::open(&db_path).expect("open bench db");
@@ -508,7 +452,6 @@ fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
         .build()
         .expect("runtime");
 
-    // Reference data first (same order as the real initial sync).
     for resource in ["users", "teams", "mailboxes", "tags"] {
         let r = rt
             .block_on(async { engine.run_resource(resource, true).await })
@@ -520,7 +463,6 @@ fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
         );
     }
 
-    // Customers through the real ingest path.
     let (t_customers, r) = timeit("seed customers via sync write path (5000, paged)", || {
         rt.block_on(async { engine.run_resource("customers", true).await })
     });
@@ -532,7 +474,6 @@ fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
         N_CUSTOMERS as f64 / t_customers.as_secs_f64()
     );
 
-    // Conversations + threads through the real ingest path.
     let (t_convs, r) = timeit(
         "seed conversations+threads via sync write path (3000 x 3)",
         || rt.block_on(async { engine.run_resource("conversations", true).await }),
@@ -545,10 +486,6 @@ fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
         N_CONVERSATIONS as f64 / t_convs.as_secs_f64()
     );
 
-    // The app populates FTS after an initial sync via the
-    // `rebuild_search_index` worker job; mirror that exact step so the
-    // seeded data is searchable (the earlier version skipped this and the
-    // search phase found 0 hits).
     let (t_fts_build, n) = timeit(
         "post-sync FTS rebuild (rebuild_search_index job path)",
         || {
@@ -563,7 +500,6 @@ fn seeded_bench_db(dir: &std::path::Path) -> DbHandle {
     db
 }
 
-/// The full measurement suite (single `#[ignore]`d test).
 #[test]
 #[ignore = "performance measurement; run with --ignored --nocapture"]
 fn bench_db_operations_on_large_dataset() {
@@ -571,7 +507,6 @@ fn bench_db_operations_on_large_dataset() {
     let _guard = TempDirGuard(dir.clone());
     let db = seeded_bench_db(&dir);
 
-    // Scale sanity before timing anything.
     let threads: i64 = db
         .with_read(|conn| {
             conn.query_row("SELECT COUNT(*) FROM conversation_threads", [], |r| {
@@ -581,7 +516,6 @@ fn bench_db_operations_on_large_dataset() {
         .unwrap_or(-1);
     assert_eq!(threads, (N_CONVERSATIONS * THREADS_PER_CONVERSATION) as i64);
 
-    // --- Inbox queries (the UI's hot path) -------------------------------
     use crate::inbox::{InboxFilters, list_conversations};
     let (t, (items, total)) = timeit("inbox list page (50, unfiltered)", || {
         list_conversations(
@@ -645,7 +579,6 @@ fn bench_db_operations_on_large_dataset() {
     });
     assert!(t_offset.as_millis() < 5_000, "deep page: {t_offset:?}");
 
-    // --- Conversation detail (thread + customer join) ---------------------
     let detail_local_id: i64 = db
         .with_read(|conn| {
             conn.query_row(
@@ -663,7 +596,6 @@ fn bench_db_operations_on_large_dataset() {
     assert_eq!(detail.thread.len(), THREADS_PER_CONVERSATION);
     assert!(t_detail.as_millis() < 5_000, "detail query: {t_detail:?}");
 
-    // --- FTS search -------------------------------------------------------
     let (t_fts, fts_hits) = timeit("FTS search 'login' (all scopes)", || {
         crate::search::search(
             &db.write_guard(),
@@ -677,7 +609,6 @@ fn bench_db_operations_on_large_dataset() {
     assert!(fts_hits.total > 0, "seeded data must be searchable");
     assert!(t_fts.as_millis() < 5_000, "FTS search: {t_fts:?}");
 
-    // --- Post-sync full-table pass ---------------------------------------
     let (t_backfill, n) = timeit("interaction_signals::backfill_all", || {
         crate::interaction_signals::backfill_all(&db.write_guard()).expect("backfill")
     });
@@ -687,7 +618,6 @@ fn bench_db_operations_on_large_dataset() {
         "backfill must not run away: {t_backfill:?}"
     );
 
-    // --- Idempotent re-walk (incremental sync cost when nothing changed) --
     let engine = SyncEngine::new(db.clone(), Arc::new(LocalBenchProvider));
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -709,7 +639,6 @@ fn bench_db_operations_on_large_dataset() {
         "re-walk must terminate: {t_rewalk:?}"
     );
 
-    // --- Vector store -----------------------------------------------------
     let vec_dir = dir.join("vector");
     std::fs::create_dir_all(&vec_dir).expect("vec dir");
     let index = crate::vectorstore_sqlitevec::VectorIndex::new(vec_dir, true);
@@ -751,9 +680,6 @@ fn bench_db_operations_on_large_dataset() {
     assert_eq!(count, N_VECTOR_POINTS);
     assert!(t_count.as_millis() < 5_000, "count: {t_count:?}");
 
-    // --- Data scale on disk ------------------------------------------------
-    // (Process max RSS is measured for the real binary separately with
-    // /usr/bin/time -v — see completed.md for that procedure + numbers.)
     let db_bytes = std::fs::metadata(dir.join("bench.db"))
         .map(|m| m.len())
         .unwrap_or(0);
@@ -769,8 +695,6 @@ fn bench_db_operations_on_large_dataset() {
     );
 }
 
-/// Boot-migration cost on a fresh file DB (the core side of startup time;
-/// full process startup is measured against the real binary).
 #[test]
 #[ignore = "performance measurement; run with --ignored --nocapture"]
 fn bench_boot_migrations_on_fresh_db() {
@@ -783,7 +707,6 @@ fn bench_boot_migrations_on_fresh_db() {
     });
     assert!(t.as_millis() < 2_000, "boot migrations must be fast: {t:?}");
 
-    // Re-open an already-migrated DB (the normal every-boot path).
     let (t_reopen, _) = timeit("db::open on migrated DB (idempotent re-run)", || {
         let mut conn = crate::db::open(&db_path).expect("reopen");
         crate::bootstrap::apply_all(&mut conn).expect("idempotent migrations")

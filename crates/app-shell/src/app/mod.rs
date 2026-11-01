@@ -1,15 +1,3 @@
-//! The eframe shell application.
-//!
-//! `App::logic` drains the background-task bridge and marks the affected
-//! ported pages dirty (the same invalidation map the web UI used);
-//! `App::ui` renders the redesigned shadcn-style shell — full-height
-//! sidebar with grouped navigation and icons, an application header with
-//! the command-palette trigger and theme switch, and the active page —
-//! and keeps the Phase 2 shell diagnostics (theme toggle persisted in the
-//! settings table, database status, live bridge counters) on the Shell
-//! page. Global overlays: the command palette (Ctrl/Cmd+K) and the toast
-//! stack.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -52,15 +40,9 @@ use crate::task_bridge::TaskBridge;
 use crate::theme::Theme;
 use crate::toasts::Toasts;
 
-/// The root application state of the native shell.
 pub struct ShellApp {
     db: DbHandle,
-    /// Kept alive so background workers can keep emitting after the
-    /// HTTP server is replaced by in-process tasks (Phase 3+), and used
-    /// by view-side actions to emit live-update events.
     bus: EventBus,
-    /// The shared sync engine (helps the sync-health and onboarding pages
-    /// run syncs; `None` mirrors the web ServiceUnavailable response).
     sync: Option<Arc<SyncEngine>>,
     bridge: TaskBridge,
     theme: Theme,
@@ -94,26 +76,15 @@ pub struct ShellApp {
     palette: CommandPalette,
     toasts: Toasts,
     dialog: Option<ConfirmDialog>,
-    /// Clean-audit item 70: the destructive action awaiting the user's
-    /// confirmation. Armed when a page raises `NavRequest::Confirm`;
-    /// executed only when the dialog resolves `Confirmed`.
     pending_confirm: Option<DestructiveAction>,
 }
 
 impl ShellApp {
-    /// Build the shell state. Never fails: theme/DB status problems
-    /// degrade to defaults instead of refusing to start.
     #[must_use]
     pub fn new(cc: &eframe::CreationContext<'_>, options: ShellOptions) -> Self {
         Self::new_with_context(&cc.egui_ctx, options)
     }
 
-    /// The headless constructor behind [`Self::new`] (clean-audit item
-    /// 71): everything the shell builds at startup needs only an
-    /// [`egui::Context`], never the eframe window — so the SPP_SMOKE
-    /// boot check can construct the REAL shell and render real frames
-    /// without a display, and renderer regressions fail CI instead of
-    /// sailing through a smoke that returned before the shell existed.
     #[must_use]
     pub fn new_with_context(ctx: &egui::Context, options: ShellOptions) -> Self {
         design::install(ctx);
@@ -130,16 +101,8 @@ impl ShellApp {
         let sync = options.sync;
         let mut settings = SettingsPage::new();
         settings.set_backups_dir(options.data_dir.join("backups"));
-        // The workspace reset clears the vector store that lives next to
-        // the database (1.1.3).
         settings.set_data_dir(options.data_dir.clone());
-        // Worker handle for restart-on-interval-change (see save_general).
         settings.set_workers(options.workers.clone());
-        // v1.4.0 (R1/R3): the swappable provider handle replaces the
-        // boot-time real-provider snapshot. Settings activates saved
-        // credentials in-session through it and runs the Connection
-        // Doctor against whatever provider is currently live — no more
-        // "restart SupportOS+".
         if let Some(handle) = options.handle.clone() {
             settings.set_provider_handle(handle);
         }
@@ -147,12 +110,8 @@ impl ShellApp {
         settings.set_bus(options.bus.clone());
         let mut connectors = ConnectorsPage::new();
         connectors.set_data_dir(options.data_dir.clone());
-        // The knowledge import panel reads the `knowledge-import` watch
-        // folder under the data dir (route parity).
         let mut knowledge = KnowledgePage::new();
         knowledge.set_data_dir(options.data_dir);
-        // A4: the shared vector index rides into the pages that fuse
-        // FTS + sqlite-vec — the same store the workers embed into.
         let vector_index = options.vector_index.clone();
         let mut inbox = InboxPage::new();
         inbox.set_vector_index(vector_index.clone());
@@ -160,7 +119,6 @@ impl ShellApp {
         search.set_vector_index(vector_index.clone());
         let mut ai_center = AiCenterPage::new();
         ai_center.set_vector_index(vector_index.clone());
-        // `mut` is only needed by the (feature-gated) screenshot harness.
         #[cfg_attr(
             not(feature = "ui-screenshot"),
             expect(unused_mut, reason = "only mutated by the ui-screenshot harness")
@@ -208,14 +166,10 @@ impl ShellApp {
         app
     }
 
-    /// Select the active page (normally driven by the sidebar, the
-    /// palette and page navigation requests; the headless smoke harness
-    /// and the screenshot harness use it directly).
     pub fn select_page(&mut self, page: PageKey) {
         self.page = page;
     }
 
-    /// Apply an invalidation batch to the ported pages.
     fn apply_invalidations(&mut self, pages: &[PageKey]) {
         for page in pages {
             match page {
@@ -246,17 +200,10 @@ impl ShellApp {
         }
     }
 
-    /// Resolve a navigation request raised by a page or the palette.
     fn apply_nav(&mut self, nav: NavRequest) {
         match nav {
             NavRequest::InboxTile(tile) => {
                 self.page = PageKey::Inbox;
-                // Clean-audit item 142: the drill-down is a FRESH
-                // navigation (the web route defined the whole filter
-                // state) — whatever filters the user had set in the inbox
-                // bar before the tile click must not layer underneath the
-                // tile's fragment and shrink the result to a confusing
-                // subset.
                 self.inbox.bar = crate::pages::inbox::FilterBar {
                     ops: Some(tile),
                     ..crate::pages::inbox::FilterBar::default()
@@ -266,8 +213,6 @@ impl ShellApp {
             NavRequest::Page(page) => {
                 self.page = page;
             }
-            // Clean-audit item 70: arm the confirm dialog with the
-            // request's spec and remember the action to run on confirm.
             NavRequest::Confirm(request) => {
                 let dialog = request.dialog();
                 self.pending_confirm = Some(request.action);
@@ -276,10 +221,6 @@ impl ShellApp {
         }
     }
 
-    /// Clean-audit item 70: execute a CONFIRMED destructive action. The
-    /// owning page runs the write (its own state handling rides along)
-    /// and the toast records the honest outcome. Clean-audit item 140:
-    /// every destructive surface routes through here.
     fn execute_confirmed(&mut self, action: DestructiveAction) {
         let (label, verb, outcome): (&str, &str, spp_core::Result<()>) = match action {
             DestructiveAction::DeleteAutomationRule { id } => {
@@ -356,10 +297,6 @@ impl ShellApp {
     }
 
     fn shell_ui(&mut self, ui: &mut egui::Ui) {
-        // RS-20 reskin (DS "stack"): the header act rides the DS-C-11
-        // outline button (the lab's sh-theme act), the Runtime card keeps
-        // the lab's five kv rows, and the ported-pages hint carries the
-        // lab's stale-checklist tag.
         design::page_header(
             ui,
             "Shell",
@@ -427,11 +364,8 @@ impl ShellApp {
         );
     }
 
-    /// The redesigned full-height sidebar: brand, command-palette trigger,
-    /// grouped icon navigation, and the theme switch pinned to the bottom.
     fn sidebar_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
-        // Brand block.
         ui.horizontal(|ui| {
             let (id, rect) = ui.allocate_space(egui::vec2(28.0, 28.0));
             ui.painter()
@@ -459,20 +393,11 @@ impl ShellApp {
         );
         ui.add_space(10.0);
 
-        // Command-palette trigger (bordered, full width).
-        // FIND-011: toggle — with the palette open, the trigger must be
-        // able to dismiss it (open()-only could not).
         if palette_trigger(ui).clicked() {
             self.palette.toggle();
         }
         ui.add_space(12.0);
 
-        // FIND-004: the theme switch used to be pinned with a `bottom_up`
-        // layout that painted it ON TOP of the last nav rows (the scroll
-        // area claimed the full remaining height), leaving rows like
-        // "Shell" half-occluded with only a thin sliver clickable. Reserve
-        // the bottom strip FIRST so the nav scroll area never extends
-        // underneath it.
         egui::Panel::bottom("spp-sidebar-theme")
             .show_separator_line(false)
             .frame(egui::Frame::new().inner_margin(egui::Margin {
@@ -493,28 +418,13 @@ impl ShellApp {
                 }
             });
 
-        // Grouped navigation over the remaining surface (above the
-        // reserved theme strip, never underneath it).
         egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("spp-nav-scroll")
                     .show(ui, |ui| {
-                        // Audit fix (M23): the wheel did nothing over the nav
-                        // rows (only dragging the thin scrollbar moved them) —
-                        // egui's hover-path wheel handling never fires for this
-                        // ScrollArea (it lives in a CentralPanel nested inside
-                        // the sidebar Panel). While the pointer is over the
-                        // nav, feed the raw wheel delta to this area explicitly
-                        // and burn the frame's smooth delta so the same tick
-                        // cannot scroll twice.
                         if ui.rect_contains_pointer(ui.max_rect()) {
-                            // Audit fix (M23): egui 0.37 exposes the wheel
-                            // delta as `smooth_scroll_delta` (the raw wheel
-                            // state is private); reading + zeroing it here
-                            // consumes the tick so the manual scroll below
-                            // cannot double-apply.
                             let wheel_y = ui.input(|i| i.smooth_scroll_delta.y);
                             if wheel_y != 0.0 {
                                 ui.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
@@ -540,9 +450,6 @@ impl ShellApp {
             });
     }
 
-    /// The application header above the page content: command-palette
-    /// trigger and the theme switch on the right, nothing else (each page
-    /// owns its own title header).
     fn header_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -562,12 +469,8 @@ impl ShellApp {
                 .on_hover_text("command palette (Ctrl/Cmd+K)")
                 .clicked()
             {
-                // FIND-011: toggle, not open-only.
                 self.palette.toggle();
             }
-            // R8 (D10): the global freshness ring — one glance answers
-            // "is this thing alive". Click through to Sync Health for
-            // the full state machine, checkpoints and runs.
             let (tone, label) = self.freshness();
             let (fill, fg) = design::tone_colors(ui, tone);
             let freshness_btn =
@@ -591,7 +494,6 @@ impl ShellApp {
         );
     }
 
-    /// The header freshness state (R8): tone + label for the ring.
     fn freshness(&self) -> (design::BadgeTone, String) {
         if self.sync.as_ref().is_some_and(|e| e.is_running()) {
             return (design::BadgeTone::Info, "syncing…".into());
@@ -609,8 +511,6 @@ impl ShellApp {
                 } else {
                     format!("synced {}h ago", age / 3600)
                 };
-                // Fresh matches the busy poll (30 s) and the 1-minute
-                // default ceiling; anything over half an hour is stale.
                 let tone = if age <= 120 {
                     design::BadgeTone::Success
                 } else if age <= 1800 {
@@ -625,8 +525,6 @@ impl ShellApp {
 }
 
 impl eframe::App for ShellApp {
-    /// Runs before every frame — and while the window is hidden, whenever
-    /// the bridge requested a repaint. No painting is allowed here.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.logic_pass(ctx);
     }
@@ -637,14 +535,7 @@ impl eframe::App for ShellApp {
 }
 
 impl ShellApp {
-    /// The body of [`eframe::App::logic`] (shared with the headless
-    /// smoke harness, clean-audit item 71).
     pub(crate) fn logic_pass(&mut self, ctx: &egui::Context) {
-        // 1.3.0: a periodic repaint heartbeat. Everything the user does
-        // now crosses an async boundary (outbound dispatch ~2s ticks,
-        // sync progress, the 1-minute poll) — with repaints only on
-        // input, "sending…" status lines and live progress never
-        // refreshed on screen.
         ctx.request_repaint_after(std::time::Duration::from_millis(1500));
 
         let events = self.bridge.drain();
@@ -664,12 +555,6 @@ impl ShellApp {
                     self.sync_health.note_progress(p.clone());
                 }
                 spp_core::events::ServerEvent::SyncCompleted(e) => {
-                    // v1.4.0 (R5, D20): see `sync_completed_toast` — a
-                    // zero-record completion is a visible result.
-                    // Clean-audit item 23: only runs the USER asked for
-                    // toast; the adaptive auto-sync timer (~30 s busy
-                    // cadence) and the post-write mirror refreshes keep
-                    // their page invalidation without a toast per tick.
                     if let Some((kind, title, detail)) = sync_completed_toast(e) {
                         self.toasts.push(kind, title, detail);
                     }
@@ -686,9 +571,6 @@ impl ShellApp {
                                 .push(crate::toasts::ToastKind::Success, message, None);
                         }
                     } else {
-                        // The single most important toast in the app:
-                        // "it did not go through" must never be silent
-                        // again.
                         self.toasts.push(
                             crate::toasts::ToastKind::Error,
                             format!("{} failed", human_outbound_kind(&e.kind)),
@@ -696,11 +578,6 @@ impl ShellApp {
                         );
                     }
                 }
-                // R5 (D4): the first live surfacing of background
-                // failures. `outbound` is exempt from the toast — the
-                // OutboundJobFinished event for the same failure
-                // already carries the exact message — but every
-                // service still invalidates its pages below.
                 spp_core::events::ServerEvent::ErrorOccurred(e) if e.service != "outbound" => {
                     let kind = match e.severity.as_str() {
                         "warn" | "warning" => crate::toasts::ToastKind::Warning,
@@ -717,11 +594,8 @@ impl ShellApp {
         }
     }
 
-    /// The body of [`eframe::App::ui`] (shared with the headless smoke
-    /// harness, clean-audit item 71).
     pub(crate) fn ui_pass(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
-        // Full-height sidebar with the theme's elevated sidebar surface.
         egui::Panel::left("spp-nav")
             .exact_size(216.0)
             .show_separator_line(false)
@@ -737,8 +611,6 @@ impl ShellApp {
             )
             .show(ui, |ui| self.sidebar_ui(ui));
 
-        // Application header over the page area (right-side global
-        // controls + a bottom hairline).
         egui::Panel::top("spp-header")
             .exact_size(52.0)
             .show_separator_line(false)
@@ -749,7 +621,6 @@ impl ShellApp {
             )
             .show(ui, |ui| self.header_ui(ui));
 
-        // Global overlays first so they layer above the page content.
         if let Some(nav) = self.palette.ui(ui.ctx(), &self.db) {
             self.apply_nav(nav);
         }
@@ -757,15 +628,11 @@ impl ShellApp {
             let outcome = dialog.ui(ui.ctx());
             if outcome.is_done() {
                 let dialog = self.dialog.take();
-                // Clean-audit item 70: the confirmed decision executes the
-                // armed action; a cancel leaves the world untouched.
                 let action = self.pending_confirm.take();
                 if outcome == DialogOutcome::Confirmed {
                     if let Some(action) = action {
                         self.execute_confirmed(action);
                     } else if let Some(dialog) = dialog {
-                        // A dialog armed outside the item-70 mechanism (no
-                        // action) still reports its decision.
                         self.toasts
                             .push(crate::toasts::ToastKind::Info, dialog.title, None);
                     }
@@ -776,9 +643,6 @@ impl ShellApp {
         let bus = self.bus.clone();
         let sync = self.sync.clone();
         let mut nav: Option<NavRequest> = None;
-        // Every page scrolls vertically as a whole (shadcn app-body
-        // behavior) so no content is unreachable at small window sizes —
-        // except the Inbox, whose two panes manage their own scrolling.
         if self.page == PageKey::Inbox {
             egui::CentralPanel::default()
                 .frame(
@@ -864,8 +728,6 @@ impl ShellApp {
             self.apply_nav(nav);
         }
 
-        // Destructive-action confirmations arm the dialog (sample wiring:
-        // deleting an automation rule).
         self.toasts.ui(ui.ctx());
     }
 }
@@ -876,16 +738,6 @@ use chrome::{
     NAV_GROUPS, human_outbound_kind, nav_row, palette_trigger, sync_completed_toast, theme_row,
 };
 
-/// Visual verification harness (only compiled with the `ui-screenshot`
-/// feature, which no normal build enables): the shell renders one frame
-/// headless under Xvfb with software GL and eframe's `__screenshot` hook
-/// saves a PNG. Environment knobs:
-///
-/// * `SPP_SHOT_PAGE` — the page to open (any `PageKey::label`, lowercased).
-/// * `SPP_SHOT_THEME` — `light` or `dark`.
-/// * `SPP_SHOT_SEED` — `1` seeds a small screenshot-fixture dataset so
-///   pages render rows in the headless capture harness.
-/// * `SPP_SHOT_PALETTE` — `1` opens the command palette overlay.
 #[cfg(feature = "ui-screenshot")]
 impl ShellApp {
     fn apply_screenshot_env(&mut self, ctx: &egui::Context) {
@@ -917,8 +769,6 @@ impl ShellApp {
     }
 }
 
-/// Seed a compact fixture dataset so the screenshots show real rows, badges,
-/// charts and thread entries (feature-gated; never runs in normal builds).
 #[cfg(feature = "ui-screenshot")]
 fn seed_fixture_for_screenshots(conn: &mut rusqlite::Connection) -> spp_core::error::Result<()> {
     use spp_core::error::Result;
@@ -1119,8 +969,6 @@ mod headless_tests {
     use crate::ShellOptions;
     use crate::pages::ConfirmRequest;
 
-    /// A shell built exactly like `main` builds it, minus the window:
-    /// the same database, bus and boot services the real run gets.
     fn headless_shell(
         convs: Vec<crate::testsupport::ConvSeed>,
     ) -> (ShellApp, spp_core::db::DbHandle) {
@@ -1140,9 +988,6 @@ mod headless_tests {
         (ShellApp::new_with_context(&ctx, options), db)
     }
 
-    /// Clean-audit item 71: the shell constructs and renders headlessly
-    /// — the same path SPP_SMOKE drives — and every page paints a
-    /// non-empty frame.
     #[test]
     fn audit71_the_shell_renders_every_page_headlessly() {
         let (mut app, _db) = headless_shell(vec![(
@@ -1172,9 +1017,6 @@ mod headless_tests {
         }
     }
 
-    /// Clean-audit item 70, shell half: a page's Confirm request arms
-    /// the dialog WITHOUT running the action; the confirmed outcome
-    /// executes it; nothing else does.
     #[test]
     fn audit70_confirm_requests_arm_execute_and_cancel_correctly() {
         let (mut app, db) = headless_shell(Vec::new());
@@ -1202,7 +1044,6 @@ mod headless_tests {
         };
         assert_eq!(rules_now(&db), 1);
 
-        // 1. The page raises the request; the shell arms the dialog.
         app.apply_nav(NavRequest::Confirm(ConfirmRequest::delete_automation_rule(
             rule_id,
             "Escalate VIP",
@@ -1214,12 +1055,10 @@ mod headless_tests {
         );
         assert_eq!(rules_now(&db), 1, "arming the dialog deletes nothing");
 
-        // 2. A cancelled dialog leaves the rule untouched.
         let cancelled = app.pending_confirm.take();
         assert!(cancelled.is_some());
         assert_eq!(rules_now(&db), 1, "a cancelled confirmation keeps the rule");
 
-        // 3. The confirmed outcome executes the deletion.
         app.apply_nav(NavRequest::Confirm(ConfirmRequest::delete_automation_rule(
             rule_id,
             "Escalate VIP",
@@ -1230,18 +1069,13 @@ mod headless_tests {
             .expect("the action is armed again");
         app.execute_confirmed(action);
         assert_eq!(rules_now(&db), 0, "confirming deletes the rule");
-        // The outcome toast records the decision.
         assert!(!app.toasts.is_empty(), "the deletion outcome is toasted");
     }
 
-    /// Clean-audit item 142: the ops drill-down defines the WHOLE filter
-    /// state (the web route was a fresh navigation) — stale bar filters
-    /// must not layer underneath the tile fragment.
     #[test]
     fn audit142_ops_drill_down_resets_stale_bar_filters() {
         let (mut app, _db) = headless_shell(Vec::new());
 
-        // The user filtered the inbox by hand first.
         app.inbox.bar.view = Some(crate::pages::inbox::ViewFilter::Closed);
         app.inbox.bar.query = Some("stale search".into());
         app.inbox.bar.mailbox = Some(9);
@@ -1269,7 +1103,6 @@ mod tests {
 
     #[test]
     fn invalidation_batch_marks_each_page_once() {
-        // Two events that both invalidate the inbox must not double-apply.
         let events = vec![
             ServerEvent::sync_completed("incremental", 1, 0, spp_core::events::SyncTrigger::Manual),
             ServerEvent::conversation_updated(Some(1), Some(1), None, None, "sync"),
@@ -1293,8 +1126,6 @@ mod tests {
         for key in PageKey::all() {
             assert!(!key.label().is_empty());
         }
-        // The redesigned sidebar groups every page exactly once, in the
-        // canonical order.
         let mut grouped = Vec::new();
         for (_, keys) in NAV_GROUPS {
             grouped.extend_from_slice(keys);
@@ -1304,7 +1135,6 @@ mod tests {
 
     #[test]
     fn r5_d20_zero_record_syncs_and_error_runs_have_visible_outcomes() {
-        // Healthy quiet account: "up to date" is said out loud now.
         let Some((kind, title, _)) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
             kind: "incremental".into(),
             processed: 0,
@@ -1317,7 +1147,6 @@ mod tests {
         assert!(matches!(kind, crate::toasts::ToastKind::Info));
         assert!(title.contains("Up to date"), "title: {title}");
 
-        // A run that failed something says so and points at Diagnostics.
         let Some((kind, _, detail)) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
             kind: "incremental".into(),
             processed: 0,
@@ -1333,7 +1162,6 @@ mod tests {
             "must point at the record: {detail:?}"
         );
 
-        // Rows landed: the success copy is unchanged.
         let Some((kind, title, _)) = sync_completed_toast(&spp_core::events::SyncCompletedEvent {
             kind: "initial".into(),
             processed: 25_000,
@@ -1347,9 +1175,6 @@ mod tests {
         assert!(title.contains("25000"), "title: {title}");
     }
 
-    /// Clean-audit item 23: the adaptive auto-sync timer and the
-    /// post-write mirror refreshes complete constantly — they must not
-    /// toast. Same payloads, different trigger, no toast.
     #[test]
     fn audit23_auto_and_refresh_sync_completions_never_toast() {
         for trigger in [

@@ -1,22 +1,3 @@
-//! Operations Center page (port of the web `pages/operations.rs`).
-//!
-//! Redesigned with the shadcn-style design system (`crate::design`):
-//! severity-toned card tiles, a striped workload table and section cards —
-//! presentation only, all tile navigation and capacity behavior intact.
-//!
-//! Two tabs, same as the web page:
-//! * **Tiles** — the 16 operations tiles from `spp_core::operations::snapshot`
-//!   (the SQL behind `/api/operations/center`), grouped by severity. Tiles
-//!   whose web counterpart linked into the inbox raise a
-//!   [`NavRequest::InboxTile`] that the shell resolves by switching to the
-//!   inbox page with the tile's conversation filter pre-applied (the port of
-//!   `/inbox?view={tile}`).
-//! * **Workload** — `spp_core::workload::snapshot` (the `/api/operations/workload`
-//!   SQL) with the agent table, per-agent capacity +/- buttons backed by the
-//!   real capacity model (`set_capacity_model`, the `/api/operations/capacity`
-//!   route logic — the web buttons were display-only no-ops), and the
-//!   suggested-assignee list (`workload::suggested_assignees`).
-
 use eframe::egui;
 use spp_core::catalog::OperationsTileKey;
 use spp_core::db::DbHandle;
@@ -26,7 +7,6 @@ use super::{ConfirmRequest, NavRequest};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Report tabs (web: the `active_tab` signal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Tiles,
@@ -46,7 +26,6 @@ impl Tab {
     }
 }
 
-/// Tile severity band (web: `tile_severity` → `Severity`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Critical,
@@ -64,7 +43,6 @@ impl Severity {
     }
 }
 
-/// Tile label (port of the web `tile_label`).
 #[must_use]
 pub fn tile_label(tile: OperationsTileKey) -> &'static str {
     match tile {
@@ -87,7 +65,6 @@ pub fn tile_label(tile: OperationsTileKey) -> &'static str {
     }
 }
 
-/// Tile hover description (port of the web `tile_description`).
 #[must_use]
 pub fn tile_description(tile: OperationsTileKey) -> &'static str {
     match tile {
@@ -114,7 +91,6 @@ pub fn tile_description(tile: OperationsTileKey) -> &'static str {
     }
 }
 
-/// Tile severity (port of the web `tile_severity`).
 #[must_use]
 pub fn tile_severity(tile: OperationsTileKey) -> Severity {
     match tile.severity() {
@@ -124,7 +100,6 @@ pub fn tile_severity(tile: OperationsTileKey) -> Severity {
     }
 }
 
-/// Whether the tile drills into the inbox (port of `tile_inbox_link`).
 #[must_use]
 pub fn tile_drills_into_inbox(tile: OperationsTileKey) -> bool {
     matches!(
@@ -138,7 +113,6 @@ pub fn tile_drills_into_inbox(tile: OperationsTileKey) -> bool {
     )
 }
 
-/// One renderable tile: key + count resolved from the snapshot.
 #[derive(Debug, Clone, Copy)]
 pub struct TileView {
     pub key: OperationsTileKey,
@@ -146,14 +120,11 @@ pub struct TileView {
 }
 
 impl TileView {
-    /// Count display (web `TileCountView::label`; unavailable tiles render as
-    /// `–` and carry a note instead).
     fn count_label(&self) -> String {
         self.count.to_string()
     }
 }
 
-/// Group tiles by severity band (web `OperationsTileGrid`).
 #[must_use]
 pub fn group_tiles(tiles: &[TileView]) -> Vec<(Severity, Vec<TileView>)> {
     let mut out: Vec<(Severity, Vec<TileView>)> = Vec::new();
@@ -170,8 +141,6 @@ pub fn group_tiles(tiles: &[TileView]) -> Vec<(Severity, Vec<TileView>)> {
     out
 }
 
-/// Map a core snapshot into ordered tile views (every known tile key,
-/// unavailable ones dropped — the web showed them with "Not yet available").
 #[must_use]
 pub fn tiles_from_snapshot(snapshot: &spp_core::operations::OperationsSnapshot) -> Vec<TileView> {
     OperationsTileKey::ALL
@@ -184,11 +153,6 @@ pub fn tiles_from_snapshot(snapshot: &spp_core::operations::OperationsSnapshot) 
         .collect()
 }
 
-/// Adjust one agent's capacity and persist the model
-/// (the `/api/operations/capacity` route logic, in-process).
-///
-/// # Errors
-/// Propagates the store failure from `set_capacity_model`.
 pub fn adjust_capacity(
     conn: &rusqlite::Connection,
     model: &mut CapacityModel,
@@ -200,21 +164,15 @@ pub fn adjust_capacity(
     spp_core::workload::set_capacity_model(conn, model)
 }
 
-/// The interactive operations page state.
 pub struct OperationsPage {
     tab: Tab,
     snapshot: Option<spp_core::operations::OperationsSnapshot>,
     workload: Option<WorkloadSnapshot>,
     capacity: Option<CapacityModel>,
     suggestions: Vec<spp_core::workload::SuggestedAssignee>,
-    /// Clean-audit item 147: reload latch for the suggestions lane — an
-    /// empty suggestion list is a legal steady state, so "empty" can no
-    /// longer mean "re-query every frame".
     suggestions_loaded: bool,
     error: Option<String>,
     library: Option<LibraryModel>,
-    /// FIND-005: armed shell-confirm request for a destructive Library
-    /// action — raised by [`Self::ui`] at the end of the frame.
     pending_confirm: Option<ConfirmRequest>,
 }
 
@@ -234,10 +192,6 @@ impl OperationsPage {
         }
     }
 
-    /// kittest-only seam: the tiles hint and the workload card render the
-    /// snapshots' wall-clock `generated_at` (HEAD behavior, D6) — pixel
-    /// goldens freeze the stamps at a fixed instant so the suites stay
-    /// diff-locked. Compiled out of non-kittest builds.
     #[cfg(feature = "kittest-ui")]
     #[doc(hidden)]
     pub fn kittest_freeze_generated_at(&mut self) {
@@ -249,10 +203,6 @@ impl OperationsPage {
         }
     }
 
-    /// Live-update invalidation (web: `sse_refresh` version bump).
-    /// Clean-audit item 76: the Library's mirror data goes stale but the
-    /// model (and the open edit form inside it) is NOT dropped — the
-    /// reload carries the user's in-progress state forward.
     pub fn invalidate(&mut self) {
         self.snapshot = None;
         self.workload = None;
@@ -297,8 +247,6 @@ impl OperationsPage {
         }
     }
 
-    /// Render the page; returns a navigation request when a tile with an
-    /// inbox drill-down was clicked.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
@@ -312,8 +260,6 @@ impl OperationsPage {
             ),
             |_| {},
         );
-        // DS-C-09 underline tab rail — the lab's three labels, same state
-        // machine (the rail carries its own divider).
         let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
         if let Some(i) = design::tabs(
             ui,
@@ -332,7 +278,6 @@ impl OperationsPage {
             Tab::Workload => self.workload_ui(ui, db),
             Tab::Library => self.library_ui(ui, db),
         }
-        // FIND-005: raise the armed confirm request (see the field doc).
         if let Some(request) = self.pending_confirm.take() {
             return Some(NavRequest::Confirm(request));
         }
@@ -374,9 +319,6 @@ impl OperationsPage {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                     for tile in group {
-                        // The lab's tiles are DS-C-04 metric tiles: the
-                        // severity band tints the count + the 3px rail, and
-                        // the drill variant carries the lab's 'open →' line.
                         let drills = tile_drills_into_inbox(tile.key);
                         let tone = match band {
                             Severity::Critical => BadgeTone::Destructive,
@@ -392,11 +334,8 @@ impl OperationsPage {
                             drills.then_some("open →"),
                         )
                         .on_hover_text(tile_description(tile.key));
-                        if resp.clicked() && drills {
-                            // First clicked drill wins; web navigates on click.
-                            if nav.is_none() {
-                                nav = Some(NavRequest::InboxTile(tile.key.as_str().to_string()));
-                            }
+                        if resp.clicked() && drills && nav.is_none() {
+                            nav = Some(NavRequest::InboxTile(tile.key.as_str().to_string()));
                         }
                     }
                 });
@@ -428,9 +367,6 @@ impl OperationsPage {
                 workload.generated_at, workload.unassigned_work
             )),
             |ui| {
-                // Distinct id_salt: the suggestions scroll below shares the
-                // auto-id chain, and egui's id-clash debug overlay (🔥) made
-                // kittest's glyph check panic on the pre-existing clash.
                 egui::ScrollArea::vertical()
                     .id_salt("ops-workload-rows")
                     .show_rows(ui, 24.0, agents.len(), |ui, range| {
@@ -456,12 +392,6 @@ impl OperationsPage {
                                         &agent.customer_waiting_workload.to_string(),
                                     );
                                     design::td_num(ui, &agent.capacity.to_string());
-                                    // Reskin fix (presentation, the lab's quirk):
-                                    // the pre-rebuild build swapped the Load and
-                                    // Pressure values — the weighted number sat
-                                    // under 'Pressure' and the % under 'Load'.
-                                    // Labels match the values now; no data path
-                                    // changed.
                                     design::td_num(ui, &format!("{:.2}", agent.weighted_load));
                                     design::td_num(ui, &format!("{:.0}%", agent.pressure * 100.0));
                                     ui.horizontal(|ui| {
@@ -514,7 +444,6 @@ impl OperationsPage {
             },
         );
         ui.add_space(10.0);
-        // The lab's quirk receipt for the Load/Pressure presentation fix.
         design::quirk(
             ui,
             "Reskin fix (presentation): the pre-rebuild build swapped the Load/Pressure \
@@ -574,7 +503,6 @@ impl OperationsPage {
     }
 }
 
-/// One mailbox the Library tab manages (saved replies live per mailbox).
 #[derive(Debug, Clone, PartialEq)]
 struct LibraryMailbox {
     local_id: i64,
@@ -582,7 +510,6 @@ struct LibraryMailbox {
     name: String,
 }
 
-/// One saved reply row (the `saved_replies` mirror).
 #[derive(Debug, Clone, PartialEq)]
 struct SavedReplyRow {
     remote_id: i64,
@@ -592,7 +519,6 @@ struct SavedReplyRow {
     text: Option<String>,
 }
 
-/// One workflow row (the `workflows` mirror).
 #[derive(Debug, Clone, PartialEq)]
 struct WorkflowRow {
     remote_id: i64,
@@ -601,7 +527,6 @@ struct WorkflowRow {
     status: String,
 }
 
-/// The create/edit form state (`None` remote id = create).
 #[derive(Debug, Clone, PartialEq)]
 struct ReplyEdit {
     remote_id: Option<i64>,
@@ -609,10 +534,6 @@ struct ReplyEdit {
     text: String,
 }
 
-/// The P3 Library tab state: saved replies CRUD + workflows surfaced.
-/// `stale` marks mirror data that must re-read on the next render
-/// WITHOUT discarding the user's in-progress edit form (clean-audit
-/// item 76: a sync invalidation used to wipe `reply_edit` wholesale).
 struct LibraryModel {
     mailboxes: Vec<LibraryMailbox>,
     selected_mailbox: usize,
@@ -621,13 +542,9 @@ struct LibraryModel {
     workflows: Vec<WorkflowRow>,
     workflow_number: String,
     notice: Option<String>,
-    /// Mirror data is stale (an invalidation landed); re-read on the
-    /// next render, keeping the edit form and pickers.
     stale: bool,
 }
 
-/// Build the `saved_reply_write` job payload. The platform's required
-/// `name` rides in the payload; the job re-validates it before the wire.
 #[must_use]
 fn reply_write_payload(
     action: &str,
@@ -646,8 +563,6 @@ fn reply_write_payload(
     .to_string()
 }
 
-/// One queued Library action, applied after the render closures so the
-/// egui borrows stay clean.
 enum LibraryAction {
     None,
     NewReply,
@@ -666,13 +581,6 @@ enum LibraryAction {
 }
 
 impl OperationsPage {
-    /// Load the Library tab's mirror data (mailboxes, saved replies,
-    /// workflows) — presentation only; every write goes through jobs.
-    ///
-    /// Clean-audit item 76: when a previous model exists, the user's
-    /// in-progress state (the open edit form, the picked mailbox, the
-    /// typed workflow number) survives the re-read — a sync invalidation
-    /// refreshes the rows, it does not destroy the form.
     fn reload_library(&mut self, db: &DbHandle) {
         let (mailboxes, replies, workflows) = db.with_read(|conn| {
             let mailboxes: Vec<LibraryMailbox> = conn
@@ -725,10 +633,6 @@ impl OperationsPage {
                 .unwrap_or_default();
             (mailboxes, replies, workflows)
         });
-        // Clean-audit item 76: carry the user's in-progress state across
-        // the re-read — the open edit form (their typing), the picked
-        // mailbox chip, and the typed workflow number. Only the mirror
-        // rows refresh.
         let previous = self.library.take();
         let selected_mailbox = previous
             .as_ref()
@@ -748,17 +652,7 @@ impl OperationsPage {
         });
     }
 
-    /// P3: the Library tab — saved replies become manageable (create,
-    /// edit and delete go straight to the platform through the
-    /// `saved_reply_write` job; the table re-reads the platform's
-    /// post-write list when the event lands, never an optimistic local
-    /// edit), and workflows — synced all along but invisible — surface
-    /// with their type/status and a run action that resolves the
-    /// conversation number from the local mirror.
     fn library_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // Clean-audit item 76: reload when missing OR stale — a stale
-        // model re-reads its mirror rows while the edit form survives
-        // (see reload_library).
         if self.library.as_ref().is_none_or(|l| l.stale) {
             self.reload_library(db);
         }
@@ -792,7 +686,6 @@ impl OperationsPage {
 
         let mut action = LibraryAction::None;
 
-        // ---- Saved replies: CRUD straight to the platform ----
         design::section_title(ui, "Saved replies");
         if design::button(ui, "new saved reply", ButtonVariant::Primary).clicked() {
             action = LibraryAction::NewReply;
@@ -870,7 +763,6 @@ impl OperationsPage {
             .inner;
         }
 
-        // ---- Workflows: surfaced with a run action ----
         design::section_title(ui, "Workflows");
         ui.horizontal(|ui| {
             let wf_label = design::field_label(ui, "conversation #:");
@@ -913,15 +805,12 @@ impl OperationsPage {
         if wf_rows.is_empty() {
             design::hint_text(ui, "no workflows mirrored yet");
         }
-        // The lab's companion receipt: these saved replies are also
-        // insertable from the Inbox composer (the lab's R3 note).
         design::quirk(
             ui,
             "Reskin companion (R3): these saved replies are also insertable from the Inbox \
              composer — already prototyped in the Inbox After view.",
         );
 
-        // Apply the frame's action (outside the render closures).
         match action {
             LibraryAction::None => {}
             LibraryAction::NewReply => {
@@ -967,9 +856,6 @@ impl OperationsPage {
                 }
             }
             LibraryAction::DeleteReply(remote_id) => {
-                // FIND-005: the platform-side delete used to enqueue
-                // immediately — arm the shell confirm instead; the write
-                // lands only when the dialog resolves Confirmed.
                 let name = library
                     .replies
                     .iter()
@@ -1005,9 +891,6 @@ impl OperationsPage {
         }
     }
 
-    /// FIND-005: runs only after the shell dialog confirms — the
-    /// platform-side delete job is enqueued here (the removal lands when
-    /// the sync queue drains).
     pub fn delete_saved_reply(
         &mut self,
         db: &DbHandle,
@@ -1016,8 +899,6 @@ impl OperationsPage {
     ) -> spp_core::Result<()> {
         let payload = reply_write_payload("delete", mailbox_remote_id, Some(remote_id), "", "");
         let Some(library) = self.library.as_mut() else {
-            // The Library tab was left before the dialog was confirmed —
-            // nothing to delete against.
             return Err(spp_core::Error::Config(
                 "the saved-replies library is not loaded".into(),
             ));
@@ -1047,9 +928,6 @@ impl Default for OperationsPage {
     }
 }
 
-// The saved-replies edit form card (the Library tab's CRUD surface) and
-// the FIND-005 confirm plumbing live on the page impl; the tiles render
-// through design::metric_tile (DS-C-04) in `tiles_ui`.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1062,8 +940,6 @@ mod tests {
             .with_read(|conn| spp_core::operations::snapshot(conn, None))
             .expect("snapshot");
         let tiles = tiles_from_snapshot(&snapshot);
-        // Unassigned tile: the seeded conversation has an assignee, so a
-        // second conversation without one must make it count 1.
         assert!(!tiles.is_empty());
         let unassigned = tiles
             .iter()
@@ -1104,11 +980,10 @@ mod tests {
         let groups = group_tiles(&tiles);
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].0, Severity::Warning);
-        assert_eq!(groups[0].1.len(), 2); // FailedJobs + Urgent are warnings
-        assert_eq!(groups[1].0, Severity::Info); // Unassigned
+        assert_eq!(groups[0].1.len(), 2);
+        assert_eq!(groups[1].0, Severity::Info);
         assert_eq!(groups[1].1.len(), 1);
 
-        // SLA breach is the only critical tile.
         let critical = vec![TileView {
             key: OperationsTileKey::SlaBreached,
             count: 1,
@@ -1133,11 +1008,9 @@ mod tests {
             .expect("adjust up");
         assert_eq!(model.capacity_for(5), before + 2);
 
-        // Persisted: a fresh read sees the override.
         let reread = db.with_read(spp_core::workload::get_capacity_model);
         assert_eq!(reread.capacity_for(5), before + 2);
 
-        // Reload reflects the new capacity in the agent row.
         page.workload = None;
         page.ensure_workload(&db);
         let workload2 = page.workload.clone().expect("workload 2");
@@ -1203,8 +1076,6 @@ mod tests {
         assert_eq!(library.workflows.len(), 1);
         assert_eq!(library.workflows[0].kind, "manual");
 
-        // The write payload carries the platform's required fields —
-        // `name` is enforced by the platform; the job re-checks it.
         let payload = reply_write_payload("update", 3, Some(11), "Refund path v2", "<p>…</p>");
         let v: serde_json::Value = serde_json::from_str(&payload).expect("json payload");
         assert_eq!(v["action"], "update");
@@ -1212,15 +1083,12 @@ mod tests {
         assert_eq!(v["replyRemoteId"], 11);
         assert_eq!(v["name"], "Refund path v2");
 
-        // Invalidation marks the mirror data stale (clean-audit item 76:
-        // the model — and any open edit form — is no longer dropped).
         page.invalidate();
         assert!(
             page.library.as_ref().is_some_and(|l| l.stale),
             "invalidation flags the mirror rows for a re-read"
         );
 
-        // A stale model reloads on the next render.
         page.reload_library(&db);
         assert!(page.library.as_ref().is_some_and(|l| !l.stale));
         assert_eq!(
@@ -1230,9 +1098,6 @@ mod tests {
         );
     }
 
-    /// Clean-audit item 76: a sync invalidation (or any reload) must not
-    /// destroy the open Library edit form — the user's typing survives;
-    /// the mirror rows refresh underneath it.
     #[test]
     fn audit76_invalidation_keeps_the_open_library_edit_form() {
         let db = fixture(vec![]);
@@ -1253,7 +1118,6 @@ mod tests {
         let mut page = OperationsPage::new();
         page.reload_library(&db);
 
-        // The user opens the edit form and types.
         let library = page.library.as_mut().expect("library");
         library.selected_mailbox = 0;
         library.reply_edit = Some(ReplyEdit {
@@ -1263,8 +1127,6 @@ mod tests {
         });
         library.workflow_number = "778".into();
 
-        // A sync event lands: invalidate + the next library render
-        // re-reads the mirror (what library_ui does for a stale model).
         page.invalidate();
         assert!(page.library.as_ref().is_some_and(|l| l.stale));
         page.reload_library(&db);

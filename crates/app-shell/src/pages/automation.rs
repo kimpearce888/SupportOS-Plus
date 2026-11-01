@@ -1,17 +1,3 @@
-//! Automation page (port of the web `pages/automation.rs`).
-//!
-//! Redesigned with the shadcn-style design system (`crate::design`):
-//! striped rule table with chips and destructive deletes, card-wrapped
-//! approval queue, and a warning hint on the high-impact rule creator —
-//! presentation only, all rule/approval behavior intact.
-//!
-//! The rules table (name, trigger, action, enabled toggle, delete —
-//! `spp_core::automation::{list_rules,set_rule_enabled,delete_rule}`), the
-//! new-rule form (`create_rule`) with trigger/action kinds and their
-//! parameters, and the pending-approvals list (`approve`/`reject` on the
-//! `automation_approvals` table; the web page showed the same queue behind
-//! `/api/automation/rules`).
-
 use eframe::egui;
 use spp_core::automation::{Action, AutomationRule, Trigger};
 use spp_core::db::DbHandle;
@@ -20,7 +6,6 @@ use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 use crate::pages::{ConfirmRequest, NavRequest};
 
-/// Trigger kinds offered by the new-rule form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TriggerKind {
     StatusChanged,
@@ -40,7 +25,6 @@ impl TriggerKind {
     }
 }
 
-/// Action kinds offered by the new-rule form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActionKind {
     Assign,
@@ -70,7 +54,6 @@ impl ActionKind {
     }
 }
 
-/// Human-readable trigger description (web: the rule card's trigger line).
 #[must_use]
 pub fn trigger_description(trigger: &Trigger) -> String {
     match trigger {
@@ -87,7 +70,6 @@ pub fn trigger_description(trigger: &Trigger) -> String {
     }
 }
 
-/// Human-readable action description (web: the rule card's action line).
 #[must_use]
 pub fn action_description(action: &Action) -> String {
     match action {
@@ -108,7 +90,6 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
-/// One pending approval row (typed port of the approvals table).
 #[derive(Debug, Clone)]
 pub struct ApprovalRow {
     pub id: i64,
@@ -118,7 +99,6 @@ pub struct ApprovalRow {
     pub status: String,
 }
 
-/// Load pending approvals (the `/api/automation/approvals` equivalent).
 #[must_use]
 pub fn load_pending_approvals(conn: &rusqlite::Connection) -> Vec<ApprovalRow> {
     conn.prepare(
@@ -140,12 +120,8 @@ pub fn load_pending_approvals(conn: &rusqlite::Connection) -> Vec<ApprovalRow> {
     .unwrap_or_default()
 }
 
-/// The interactive automation page state.
 pub struct AutomationPage {
     rules: Vec<AutomationRule>,
-    /// Clean-audit item 147: reload latch — an empty mirror is a legal
-    /// steady state, so "list empty" can no longer mean "re-query every
-    /// frame".
     loaded: bool,
     approvals: Vec<ApprovalRow>,
     show_new_rule: bool,
@@ -186,7 +162,6 @@ impl AutomationPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.loaded = false;
         self.rules.clear();
@@ -221,7 +196,6 @@ impl AutomationPage {
         self.reload(db);
     }
 
-    /// Build the trigger from the form state.
     fn form_trigger(&self) -> Result<Trigger, String> {
         match self.trigger_kind {
             TriggerKind::StatusChanged => Ok(Trigger::StatusChanged {
@@ -240,7 +214,6 @@ impl AutomationPage {
         }
     }
 
-    /// Build the action from the form state.
     fn form_action(&self) -> Result<Action, String> {
         match self.action_kind {
             ActionKind::Assign => {
@@ -321,13 +294,6 @@ impl AutomationPage {
     }
 
     fn decide(&mut self, db: &DbHandle, approval_id: i64, approve: bool) {
-        // Clean-audit item 80: the decision is attributed to the REAL
-        // acting user — `me_remote_id` (captured at the OAuth callback)
-        // resolved through the same helper the notifications page uses.
-        // The pre-fix code hardcoded user 5, so every decision by anyone
-        // was recorded as Ada's in the approvals table. Ada remains the
-        // stand-in ONLY when no identity has been captured yet
-        // (client-credentials/demo sessions).
         let actor = db
             .with_read(spp_core::notifications::me_user_local_id)
             .ok()
@@ -346,10 +312,6 @@ impl AutomationPage {
         self.reload(db);
     }
 
-    /// Render the page. Returns a [`NavRequest::Confirm`]
-    /// (clean-audit item 70) when the user asked to delete a rule — the
-    /// shell arms its confirm dialog and the deletion runs only when
-    /// the user confirms; the button no longer deletes unconfirmed.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
@@ -380,8 +342,6 @@ impl AutomationPage {
 
         let rules = self.rules.clone();
         let mut toggled: Option<(i64, bool)> = None;
-        // Clean-audit item 70: the delete button arms the shell's confirm
-        // dialog instead of deleting immediately.
         let mut delete_requested: Option<(i64, String)> = None;
         design::card_titled(
             ui,
@@ -498,12 +458,6 @@ impl AutomationPage {
                                     .strong()
                                     .color(t.foreground),
                                 );
-                                // Reskin fix (presentation, the lab's
-                                // quirk): the row led with the raw
-                                // proposed_action_json. The human-readable
-                                // action renders first; the raw JSON is
-                                // collapsible beneath it (raw tokens stay
-                                // available, DC C-1).
                                 let human = serde_json::from_str::<spp_core::automation::Action>(
                                     &approval.proposed_action,
                                 )
@@ -530,7 +484,6 @@ impl AutomationPage {
                     });
             },
         );
-        // The lab's quirk receipt for the approvals presentation fix.
         design::quirk(
             ui,
             "Reskin fix (presentation): approval rows led with the raw \
@@ -543,10 +496,6 @@ impl AutomationPage {
         nav
     }
 
-    /// Clean-audit item 70: the execution half of a CONFIRMED delete
-    /// request. The shell calls this after the user confirmed the
-    /// dialog; errors land on the page's error banner like every other
-    /// write, and the rules table reloads.
     pub fn delete_rule_confirmed(&mut self, db: &DbHandle, id: i64) {
         let result = db.with_write(|conn| spp_core::automation::delete_rule(conn, id));
         if let Err(e) = result {
@@ -742,15 +691,10 @@ mod tests {
         let id = rule.id.unwrap_or(0);
         page.toggle_rule(&db, id, false);
         assert!(!page.rules[0].enabled);
-        // Clean-audit item 70: deletion runs through the CONFIRMED
-        // execution path (the button itself only raises the request).
         page.delete_rule_confirmed(&db, id);
         assert!(page.rules.is_empty());
     }
 
-    /// Clean-audit item 70: the delete button no longer deletes — it
-    /// asks the shell for a confirmation, and only the confirmed
-    /// execution removes the rule. Cancelling leaves the rule in place.
     #[test]
     fn audit70_delete_needs_confirmation_and_cancel_keeps_the_rule() {
         let db = fixture(Vec::new());
@@ -764,20 +708,16 @@ mod tests {
         let id = page.rules[0].id.unwrap_or(0);
         assert_eq!(page.rules.len(), 1);
 
-        // What the button raises: a Confirm request carrying the action.
         let request = ConfirmRequest::delete_automation_rule(id, "Escalate urgent");
         assert_eq!(
             request.action,
             crate::pages::DestructiveAction::DeleteAutomationRule { id }
         );
-        // The un-confirmed path (dialog cancelled): nothing is deleted.
         let rules: usize = db
             .with_read(spp_core::automation::list_rules)
             .map(|rules| rules.len())
             .unwrap_or_default();
         assert_eq!(rules, 1, "cancel keeps the rule");
-        // The confirmed path (dialog confirmed): the rule is gone and
-        // the page model reloads empty.
         page.delete_rule_confirmed(&db, id);
         assert!(page.rules.is_empty(), "confirm deletes the rule");
     }
@@ -786,18 +726,14 @@ mod tests {
     fn form_validation_rejects_empty_fields() {
         let mut page = page();
         page.new_name = "Rule".into();
-        // Tag trigger with empty tag.
         page.trigger_kind = TriggerKind::TagAdded;
         assert!(page.form_trigger().is_err());
-        // Assign action with non-numeric id.
         page.trigger_kind = TriggerKind::SlaRisk;
         page.action_kind = ActionKind::Assign;
         page.action_assignee = "ada".into();
         assert!(page.form_action().is_err());
-        // Note action with empty body.
         page.action_kind = ActionKind::SendNote;
         assert!(page.form_action().is_err());
-        // Missing rule name.
         page.new_name.clear();
         page.action_kind = ActionKind::SetPriority;
         page.action_priority = "urgent".into();
@@ -883,17 +819,11 @@ mod tests {
     }
 }
 
-/// Clean-audit item 80: approvals were attributed to hardcoded user 5 —
-/// every decision by anyone was recorded as Ada's. The decision now
-/// carries the real acting user (`me_remote_id` resolved to a local id),
-/// with Ada kept only as the no-identity stand-in.
 #[cfg(test)]
 mod batch27_audit80_tests {
     use super::*;
     use crate::testsupport::fixture;
 
-    /// Insert one rule + one pending approval row and return the
-    /// approval's id (the approvals table references the rules table).
     fn seed_approval(conn: &rusqlite::Connection) -> i64 {
         conn.execute(
             "INSERT INTO automation_rules (name, trigger_json, action_json)
@@ -923,7 +853,6 @@ mod batch27_audit80_tests {
     #[test]
     fn approvals_attribute_to_the_real_acting_user() {
         let db = fixture(Vec::new());
-        // Grace (local id 6, remote 506) is the signed-in user.
         db.with_write(|conn| {
             spp_core::settings::set_string(conn, "me_remote_id", "506").expect("me");
         });

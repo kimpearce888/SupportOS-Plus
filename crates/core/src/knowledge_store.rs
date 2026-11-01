@@ -9,15 +9,8 @@ use crate::error::{Error, Result};
 
 pub const IMPORT_DIR_NAME: &str = "knowledge-import";
 
-/// Hard cap on a single imported file, checked before the file is read into
-/// memory (migration-map row 4a). 64 MiB is ~10x a large text-heavy document.
 pub const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
-/// Hard cap on PDF input handed to the text extractor — the PDF parser is the
-/// most CPU-expensive path in the importer and must not be fed arbitrary
-/// multi-hundred-MiB payloads.
 pub const MAX_PDF_INPUT_BYTES: u64 = 32 * 1024 * 1024;
-/// Hard cap on a single decompressed DOCX zip entry (`word/document.xml`),
-/// checked against both the declared and the actually-read size.
 pub const MAX_DOCX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 
 #[must_use]
@@ -51,9 +44,6 @@ pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
             break;
         }
         start = end.saturating_sub(overlap);
-        // Backing up `overlap` bytes from a boundary-checked `end` can
-        // land inside a multibyte UTF-8 sequence; walking forward to the
-        // next boundary keeps every slice below panic-free.
         while start < bytes.len() && !clean.is_char_boundary(start) {
             start += 1;
         }
@@ -178,9 +168,6 @@ pub fn upsert_document(
     if let Some((id, existing_checksum)) = &existing
         && existing_checksum.as_deref() == Some(checksum.as_str())
     {
-        // Item 150: an unchanged re-ingest is still a sync — stamp the
-        // freshness row (last_synced_at, hash, stale cleared) so the
-        // tracked staleness sweep sees current truth.
         let _ =
             crate::intelligence_features::update_doc_freshness(conn, *id, Some(&checksum), false);
         return Ok((*id, false));
@@ -239,9 +226,6 @@ pub fn upsert_document(
     match outcome {
         Ok(id) => {
             conn.execute_batch("COMMIT")?;
-            // Item 150: the ingest is the freshness writer — every
-            // successful upsert stamps the tracked freshness row. A
-            // freshness failure must not fail the ingest itself.
             let _ = crate::intelligence_features::update_doc_freshness(
                 conn,
                 id,
@@ -393,13 +377,6 @@ pub fn freshness_report(conn: &Connection) -> Value {
                     Some(d) => d > unreviewed_days,
                 };
                 let unverified = verified_at.is_none();
-                // Audit item 123: `freshness_low_usage_days` was read and
-                // dropped — the low_usage flag fired for every unused doc,
-                // including one created five minutes ago. The setting is
-                // the grace period now: a doc counts as low-usage once it
-                // has existed at least `low_usage_days` (falling back to
-                // the update stamp when created_at is missing) and still
-                // has no recorded usage.
                 let age_days = created_at
                     .as_deref()
                     .and_then(days_since)
@@ -440,9 +417,6 @@ pub fn freshness_report(conn: &Connection) -> Value {
         .filter(|r| r.get("freshness_status").and_then(|v| v.as_str()) == Some("stale"))
         .count() as i64;
     let fresh = rows.len() as i64 - stale;
-    // K3: freshness scores every source — the help-center mirror
-    // (`docs_articles`) is scored with the same staleness threshold so a
-    // published-but-rotting article is as visible as a stale local doc.
     let help_center: Vec<Value> = conn
         .prepare(
             "SELECT a.id, a.name, a.status, a.remote_updated_at, c.name
@@ -672,8 +646,6 @@ fn import_one_file(
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "imported".to_string());
-    // Size cap before the read (row 4a): the file is fully buffered in
-    // memory, so an oversized import must fail before allocation, not after.
     let file_len = std::fs::metadata(abs)
         .map_err(|e| Error::Validation(format!("Import failed: {e}")))?
         .len();
@@ -727,11 +699,6 @@ fn import_one_file(
     Ok(out)
 }
 
-/// Route an untrusted-document parse through the sandbox when compiled
-/// with `--features sandbox` (Linux): Landlock deny-all + seccomp
-/// allow-list on a dedicated thread (see [`crate::sandbox`]). The bytes
-/// are moved in — the sandboxed parser must not touch the filesystem.
-/// Without the feature the parse runs inline, exactly as before.
 fn sandbox_parse(
     label: &'static str,
     raw: Vec<u8>,
@@ -749,7 +716,6 @@ fn sandbox_parse(
 }
 
 fn parse_pdf_text(raw: &[u8]) -> Result<String> {
-    // Input cap before the extractor runs (row 4a).
     if u64::try_from(raw.len()).unwrap_or(u64::MAX) > MAX_PDF_INPUT_BYTES {
         return Err(Error::Validation(format!(
             "PDF input is too large to parse: {} bytes \
@@ -775,7 +741,6 @@ fn parse_docx_text(raw: &[u8]) -> Result<String> {
         let document = archive
             .by_name("word/document.xml")
             .map_err(|_| docx_unavailable())?;
-        // Declared uncompressed size is checked first (row 4a) ...
         if document.size() > MAX_DOCX_ENTRY_BYTES {
             return Err(Error::Validation(format!(
                 "DOCX document entry is too large: {} bytes \
@@ -783,8 +748,6 @@ fn parse_docx_text(raw: &[u8]) -> Result<String> {
                 document.size()
             )));
         }
-        // ... but zip declarations can lie, so the read itself is bounded by
-        // take() and the produced length re-checked afterwards.
         let mut limited = document.take(MAX_DOCX_ENTRY_BYTES + 1);
         limited
             .read_to_string(&mut xml)
@@ -1025,11 +988,6 @@ pub fn html_to_text_keep_structure(html: &str) -> String {
             _ => {}
         }
     }
-    // Audit item 120: the decode order double-decoded — `&amp;` ran
-    // FIRST, so an author's literal `&amp;lt;` became `&lt;` and then
-    // decoded again into `<`; `&apos;` never decoded at all. Single-decode
-    // semantics decode every other entity first and `&amp;` LAST, so
-    // `&amp;lt;` lands as the literal text `&lt;`.
     for (entity, decoded) in [
         ("&nbsp;", " "),
         ("&lt;", "<"),
@@ -1062,12 +1020,6 @@ pub fn html_to_text_keep_structure(html: &str) -> String {
 }
 
 fn strip_tag_block(input: &str, tag: &str) -> String {
-    // Audit item 121: the haystack was lowercased with Unicode rules and
-    // then used as an OFFSET MAP over the original — but some characters
-    // (İ U+0130) expand to two chars when lowercased, so the offsets in
-    // `lower` stop matching `input` and the slicing panics or mis-slices.
-    // ASCII lowercasing is byte-for-byte 1:1, so the offsets stay valid;
-    // the tags searched here are ASCII anyway.
     let lower = input.to_ascii_lowercase();
     let open = format!("<{tag}");
     let close = format!("</{tag}>");
@@ -1090,10 +1042,6 @@ fn strip_tag_block(input: &str, tag: &str) -> String {
 }
 
 fn replace_ci(input: &str, from: &str, to: &str) -> String {
-    // Audit item 121: same offset-map hazard as strip_tag_block — the
-    // Unicode-lowercased haystack's byte offsets were applied to the
-    // original string (an İ anywhere before a match mis-sliced or
-    // panicked). ASCII lowercasing keeps the offsets 1:1.
     let lower = input.to_ascii_lowercase();
     let from_lower = from.to_ascii_lowercase();
     let mut out = String::with_capacity(input.len());
@@ -1109,8 +1057,6 @@ fn replace_ci(input: &str, from: &str, to: &str) -> String {
 }
 
 fn extract_html_title(html: &str) -> Option<String> {
-    // Audit item 121: the same offset-map hazard as the sibling helpers —
-    // ASCII lowercasing keeps the offsets 1:1 with the original.
     let lower = html.to_ascii_lowercase();
     let start = lower.find("<title>")? + "<title>".len();
     let end = lower[start..].find("</title>")? + start;
@@ -1148,7 +1094,6 @@ mod tests {
         let conn = fresh_conn();
         let data_dir = import_dir("file-cap");
         let file = data_dir.join(IMPORT_DIR_NAME).join("huge.txt");
-        // One byte over the cap; written as a single sparse-ish write.
         let payload = vec![b'a'; MAX_IMPORT_FILE_BYTES as usize + 1];
         std::fs::write(&file, &payload).expect("write huge file");
 
@@ -1156,7 +1101,6 @@ mod tests {
             .expect_err("oversized import must be rejected");
         assert!(err.to_string().contains("too large to import"), "{err}");
 
-        // Under the cap (tiny file) the same pipeline succeeds.
         let ok_file = data_dir.join(IMPORT_DIR_NAME).join("small.txt");
         std::fs::write(&ok_file, b"hello world").expect("write small file");
         let out = import_file(&conn, &data_dir, "small.txt", None, "internal")
@@ -1168,11 +1112,8 @@ mod tests {
     fn pdf_input_over_the_cap_is_rejected_before_parsing() {
         let junk = vec![b'%'; MAX_PDF_INPUT_BYTES as usize + 1];
         let err = parse_pdf_text(&junk).expect_err("oversized PDF input must be rejected");
-        // The size guard fires before the extractor: the message names the
-        // input cap, not a generic parse failure.
         assert!(err.to_string().contains("too large to parse"), "{err}");
 
-        // Small junk still reaches the parser and fails there instead.
         let err = parse_pdf_text(b"%not-a-real-pdf").expect_err("junk pdf fails");
         assert!(!err.to_string().contains("too large"), "{err}");
     }
@@ -1191,7 +1132,6 @@ mod tests {
 
     #[test]
     fn docx_text_extraction_still_works_small_entries() {
-        // Regression guard for the take() refactor: a normal document parses.
         let xml =
             "<w:document><w:body><w:p><w:r><w:t>hello docx</w:t></w:r></w:p></w:body></w:document>";
         let text = parse_docx_text(&build_docx(xml)).expect("parse small docx");
@@ -1200,9 +1140,6 @@ mod tests {
 
     #[test]
     fn docx_declared_entry_size_is_capped() {
-        // The declared uncompressed size of word/document.xml exceeds the
-        // cap, so the import is refused before the entry is decompressed.
-        // (Deflate squeezes 64 MiB of spaces down to a tiny zip.)
         let xml = " ".repeat(MAX_DOCX_ENTRY_BYTES as usize + 1);
         let zip_bytes = build_docx(&xml);
         let err = parse_docx_text(&zip_bytes).expect_err("oversized docx entry must be rejected");
@@ -1212,17 +1149,11 @@ mod tests {
     #[cfg(all(target_os = "linux", feature = "sandbox"))]
     #[test]
     fn docx_and_pdf_parse_inside_the_sandbox() {
-        // End-to-end through the same routing the import path uses: the
-        // zip container + deflate + quick-xml (docx) and the pdf error
-        // path must all work under Landlock deny-all + the seccomp
-        // allow-list.
         let xml = "<w:document><w:body><w:p><w:r><w:t>hello sandbox</w:t></w:r></w:p></w:body></w:document>";
         let text =
             sandbox_parse("docx", build_docx(xml), parse_docx_text).expect("sandboxed docx parse");
         assert!(text.contains("hello sandbox"), "{text}");
 
-        // Junk PDF: the parse fails the same way it does unsandboxed —
-        // a parser error, not a sandbox/restriction error.
         let err = sandbox_parse("pdf", vec![b'%'; 64], parse_pdf_text)
             .expect_err("junk pdf fails inside the sandbox too");
         assert!(
@@ -1233,15 +1164,6 @@ mod tests {
     }
 }
 
-// ---------------------------------------------------------------------------
-// K2: the AI article-draft review queue
-// ---------------------------------------------------------------------------
-
-/// Migration m056 (boot step 47): `article_drafts` — the K2 review queue.
-/// Every AI-drafted knowledge article lands here as `drafted` and moves to
-/// `approved` or `rejected` only by a human decision; the K3 publish path
-/// accepts approved drafts exclusively. Nothing in this table is ever
-/// visible to customers without that human click.
 pub fn apply_m056_article_drafts(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS article_drafts (
@@ -1273,7 +1195,6 @@ pub fn apply_m056_article_drafts(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// A review-queue row as the UI renders it.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ArticleDraftRow {
     pub id: i64,
@@ -1316,8 +1237,6 @@ const ARTICLE_DRAFT_COLUMNS: &str = "id, candidate_id, title, body, citations, a
     status, created_at, decided_at, publish_state, remote_article_id,
     collection_local_id, published_at, publish_error";
 
-/// Insert a freshly AI-drafted article. Called only by the AI pipeline
-/// after a successful model run; the row starts `drafted`.
 pub fn insert_article_draft(
     conn: &Connection,
     candidate_id: Option<i64>,
@@ -1341,7 +1260,6 @@ pub fn insert_article_draft(
     Ok(conn.last_insert_rowid())
 }
 
-/// The review queue: newest first, optionally narrowed to one status.
 pub fn list_article_drafts(conn: &Connection, status: Option<&str>) -> Vec<ArticleDraftRow> {
     let sql = format!(
         "SELECT {ARTICLE_DRAFT_COLUMNS} FROM article_drafts
@@ -1363,10 +1281,6 @@ pub fn article_draft_by_id(conn: &Connection, id: i64) -> Option<ArticleDraftRow
         .unwrap_or(None)
 }
 
-/// The human decision — the only way out of the queue. A draft that was
-/// already decided cannot be re-decided; a publish in flight
-/// (`draft_upserted`/`published`/`verified`) cannot be un-approved from
-/// under the publisher.
 pub fn decide_article_draft(
     conn: &Connection,
     id: i64,
@@ -1393,8 +1307,6 @@ pub fn decide_article_draft(
     article_draft_by_id(conn, id)
 }
 
-/// K3: record the publish state machine transitions. Only the worker
-/// driving the Docs API calls this.
 pub fn set_article_draft_publish_state(
     conn: &Connection,
     id: i64,
@@ -1424,8 +1336,6 @@ pub fn set_article_draft_publish_state(
     Ok(())
 }
 
-/// True when an approved draft exists for the candidate (the queue refuses
-/// duplicates so a repeated "draft article" click does not stack rows).
 #[must_use]
 pub fn article_draft_exists_for_candidate(conn: &Connection, candidate_id: i64) -> bool {
     conn.query_row(
@@ -1442,10 +1352,6 @@ pub fn article_draft_exists_for_candidate(conn: &Connection, candidate_id: i64) 
 mod batch31_tests {
     use super::*;
 
-    /// Audit item 120: `&amp;` decoded FIRST double-decoded authored text
-    /// — `&amp;lt;` became `&lt;` and then `<` — and `&apos;` never
-    /// decoded at all. Single-decode semantics land `&amp;lt;` as the
-    /// literal text `&lt;` and decode `&apos;`.
     #[test]
     fn entity_decode_is_single_pass_and_decodes_apos() {
         let out = html_to_text_keep_structure("a &amp;lt;script&amp;gt; b");
@@ -1458,11 +1364,6 @@ mod batch31_tests {
         assert_eq!(html_to_text_keep_structure("a &amp; b"), "a & b");
     }
 
-    /// Audit item 121: İ (U+0130) expands to two chars when Unicode-
-    /// lowercased, so the lowercased haystack's byte offsets stopped
-    /// matching the original and the tag stripper sliced garbage. The
-    /// helpers fold ASCII-only now — offsets stay 1:1 and the strip still
-    /// works.
     #[test]
     fn html_helpers_survive_italian_i_before_tag_blocks() {
         let html = "İstruzioni <style>body { color: red }</style> visibili";

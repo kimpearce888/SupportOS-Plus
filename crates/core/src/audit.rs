@@ -3,21 +3,8 @@ use serde_json::{Value, json};
 
 use crate::error::Result;
 
-/// Keep at most this many events; `log_event` prunes older rows so the
-/// Diagnostics page stays fast on long-running installs.
 const EVENT_LOG_CAP: i64 = 500;
 
-/// Migration m050: the diagnostics event log grows a `level` column
-/// (existing rows default to `error`) plus a level-aware index, and the
-/// retired demo-mode settings rows are dropped for good.
-///
-/// The column guarantee is shared with the runtime [`ensure_tables`] on
-/// purpose: a database whose migration history skipped or lost this step
-/// (a renumbered boot step on an upgraded install, a restored backup)
-/// must still end up with the column both [`log_event`] and
-/// [`list_recent_events`] require — without it, every write dies with
-/// "no column named level" (swallowed by the call sites' `let _ =`) and
-/// every read returns an honest-looking, permanently empty log.
 pub fn apply_m050(conn: &Connection) -> Result<()> {
     ensure_tables(conn)?;
     let retired = conn.execute(
@@ -65,13 +52,6 @@ pub fn ensure_tables(conn: &Connection) -> Result<()> {
     ensure_event_level_column(conn)
 }
 
-/// The one canonical guarantee behind the diagnostics log: the
-/// `application_errors` table carries the `level` column (`log_event`
-/// writes it, `list_recent_events` filters on it) plus its index. Runs
-/// on every log/read/clear call, so a database that reached the current
-/// version with the pre-m050 table shape — a skipped or renumbered boot
-/// step, a restored backup — self-heals here instead of failing every
-/// future write silently.
 fn ensure_event_level_column(conn: &Connection) -> Result<()> {
     let has_level: bool = {
         let mut stmt = conn.prepare("PRAGMA table_info(application_errors)")?;
@@ -203,9 +183,6 @@ fn audit_row_to_json(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let before: Option<String> = r.get(5)?;
     let after: Option<String> = r.get(6)?;
     let remote_result: Option<String> = r.get(8)?;
-    // Clean-audit item 68: a stored payload that is not valid JSON used to
-    // decode to `null` — the reader silently dropped the recorded state.
-    // Non-JSON payloads now surface verbatim as JSON strings.
     let parse_json = |s: Option<&str>| -> Option<Value> {
         s.map(|v| serde_json::from_str::<Value>(v).unwrap_or_else(|_| Value::String(v.to_string())))
     };
@@ -235,9 +212,6 @@ pub fn log_error(
     log_event(conn, "error", service, message, stack, context)
 }
 
-/// Append one event to the diagnostics log (the Diagnostics page reads
-/// it). `level` is one of `"info"`, `"warn"`, `"error"`; anything else
-/// is stored as `"error"` so a typo can never hide a failure.
 pub fn log_event(
     conn: &Connection,
     level: &str,
@@ -259,9 +233,6 @@ pub fn log_event(
         rusqlite::params![service, msg, stk, context.map(|c| c.to_string()), level],
     );
     if let Err(e) = written {
-        // The call sites swallow this error on purpose (diagnostics must
-        // never take the app down) — but a losing log has to be audible
-        // somewhere, or "the event log reports nothing" stays a mystery.
         tracing::warn!(
             error = %e,
             service,
@@ -269,7 +240,6 @@ pub fn log_event(
         );
         return Err(e.into());
     }
-    // Cap the log: newest EVENT_LOG_CAP events survive.
     let _ = conn.execute(
         "DELETE FROM application_errors WHERE id <= \
          (SELECT COALESCE(MAX(id), 0) FROM application_errors) - ?1",
@@ -278,7 +248,6 @@ pub fn log_event(
     Ok(())
 }
 
-/// One diagnostics event as the Diagnostics page shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiagEvent {
     pub id: i64,
@@ -290,9 +259,6 @@ pub struct DiagEvent {
     pub context: Option<Value>,
 }
 
-/// Newest-first slice of the diagnostics log. `level = None` returns all
-/// levels; `Some("error")` returns only errors, `Some("warn")` warnings,
-/// and so on.
 pub fn list_recent_events(
     conn: &Connection,
     limit: i64,
@@ -307,9 +273,6 @@ pub fn list_recent_events(
             .any(|n| n == "level")
     };
     if !has_level {
-        // ensure_tables just ran and self-heals the column, so this is
-        // unreachable in practice — if it ever fires, say why the log
-        // looks empty instead of returning silence.
         tracing::warn!(
             "application_errors still has no level column after ensure_tables — the diagnostics log will read empty"
         );
@@ -350,8 +313,6 @@ pub fn list_recent_events(
     Ok(out)
 }
 
-/// Delete every diagnostics event. Used by the Diagnostics page's clear
-/// button. Returns the number of rows removed.
 pub fn clear_events(conn: &Connection) -> Result<usize> {
     ensure_tables(conn)?;
     let n = conn.execute("DELETE FROM application_errors", [])?;
@@ -381,7 +342,6 @@ mod tests {
                 .any(|n| n == "level")
         };
         assert!(has_level, "m050 must add the level column");
-        // The retired demo rows are gone and cannot resurrect.
         for key in ["demo_mode", "demo_content_purged"] {
             let n: i64 = conn
                 .query_row(
@@ -408,7 +368,6 @@ mod tests {
             Some(&serde_json::json!({ "detail": "401" })),
         )
         .expect("error");
-        // Unknown level is stored as error (a typo can never hide a failure).
         log_event(&conn, "bogus", "sync", "stored as error", None, None).expect("bogus level");
 
         let all = list_recent_events(&conn, 10, None).expect("list all");
@@ -430,13 +389,11 @@ mod tests {
         assert_eq!(only_info.len(), 1);
         assert_eq!(only_info[0].message, "first sync finished");
 
-        // log_error keeps its shape and defaults to level = error.
         log_error(&conn, "sync", "legacy writer", None, None).expect("log_error");
         let errors = list_recent_events(&conn, 10, Some("error")).expect("errors");
         assert_eq!(errors.len(), 3);
         assert_eq!(errors[0].message, "legacy writer");
 
-        // Clear empties the log.
         let removed = clear_events(&conn).expect("clear");
         assert_eq!(removed, 5);
         assert!(
@@ -458,15 +415,9 @@ mod tests {
         assert_eq!(remaining[499].message, "event 100");
     }
 
-    /// Clean-audit item 68: the audit reader never dropped a stored
-    /// payload again — non-JSON `before_state`/`after_state`/
-    /// `remote_result` values surface verbatim as strings instead of
-    /// decoding to `null`.
     #[test]
     fn list_audit_surfaces_non_json_payloads_verbatim() {
         let conn = migrated();
-        // A writer that stored plain text (not JSON) in the state columns:
-        // the audit table has no CHECK constraint on these payloads.
         conn.execute(
             "INSERT INTO audit_log (timestamp, actor, action, conversation_id,
                                      before_state, after_state, remote_operation,
@@ -477,7 +428,6 @@ mod tests {
             [],
         )
         .expect("seed non-json audit row");
-        // A regular JSON row for contrast.
         audit(
             &conn,
             &AuditEntry::user("tag_added")
@@ -506,19 +456,11 @@ mod tests {
             json!("HTTP 200 (not json)"),
             "plain-text remote_result surfaces verbatim, not null"
         );
-        // The conversation filter still narrows.
         let one = list_audit(&conn, Some(7), 10).expect("list one");
         assert_eq!(one.len(), 1);
         assert_eq!(one[0]["conversation_id"], json!(7));
     }
 
-    /// The live-account failure behind "the event log reports nothing":
-    /// a database can reach the current version with the pre-m050 table
-    /// shape (a skipped or renumbered boot step, a restored backup).
-    /// ensure_tables must self-heal the column on the next call — before
-    /// the fix, every write died with "no column named level" (swallowed
-    /// by the call sites' `let _ =`) and every read returned empty, in
-    /// perfect silence, forever.
     #[test]
     fn a_pre_m050_event_log_self_heals_and_stores_events() {
         let conn = Connection::open_in_memory().expect("in-memory connection");
@@ -534,8 +476,6 @@ mod tests {
         )
         .expect("old-shape table");
 
-        // Before the fix this INSERT failed ("no column named level") and
-        // the error was swallowed — the test's expect() would have fired.
         log_event(
             &conn,
             "error",
@@ -552,7 +492,6 @@ mod tests {
         assert_eq!(events[0].message, "sync finished");
         assert_eq!(events[1].level, "error");
 
-        // The healed shape survives a clear/re-write cycle too.
         clear_events(&conn).expect("clear");
         log_event(&conn, "warn", "webhook", "still writable", None, None).expect("post-clear");
         assert_eq!(list_recent_events(&conn, 10, None).expect("list").len(), 1);

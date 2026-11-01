@@ -46,13 +46,6 @@ pub fn content_hash(text: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-// Clean-audit item 152: the dead embedding-cache runner surface is
-// gone — `embed_with_cache` (with its private `lookup_cache`/
-// `store_cache` helpers and `MAX_EMBED_RETRIES`) had zero callers, as
-// did the `count_cache_entries` / `trim_cache_per_model` /
-// `clear_cache` maintenance trio. The live embed pass writes the same
-// `ai_runs` ledger rows directly (batch 23 put every run there).
-
 pub const EMBED_PASS_LIMIT: i64 = 60;
 
 fn is_js_whitespace(c: char) -> bool {
@@ -132,11 +125,6 @@ fn last_index_of_dot_space(units: &[u16], from: usize) -> Option<usize> {
     None
 }
 
-/// Chunk a conversation for the A4 retrieval spine (idempotent: the
-/// conversation's rows are rebuilt each call). Returns the number of chunks
-/// written — callers use it to decide whether an embedding pass is worth
-/// enqueuing. `thread` chunks carry the full transcript; a closed conversation
-/// also gets a `resolution` chunk with the final published reply.
 pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<usize> {
     struct ConvRow {
         number: i64,
@@ -205,10 +193,6 @@ pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<usi
         vec![full]
     };
 
-    // A4: resolved conversations carry a resolution-excerpt chunk — the last
-    // published reply before closure, labeled so retrieval can prefer it for
-    // "how was this solved" queries. Only one kind per row: `thread` or
-    // `resolution` (m055).
     let resolution_chunk = conv
         .closed_at
         .as_deref()
@@ -251,11 +235,6 @@ pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<usi
     Ok(chunks.len())
 }
 
-/// The A4 resolution excerpt: the last published reply of a closed
-/// conversation, prefixed with a self-locating header so semantic hits on
-/// "how was this resolved" land on it. `None` when the conversation has no
-/// published reply text to excerpt (nothing fabricated — an unresolved or
-/// empty thread simply gets no resolution chunk).
 fn resolution_excerpt(conn: &Connection, conversation_id: i64, header: &str) -> Option<String> {
     let raw: Option<(Option<String>, Option<String>)> = conn
         .query_row(
@@ -284,14 +263,6 @@ fn resolution_excerpt(conn: &Connection, conversation_id: i64, header: &str) -> 
     ))
 }
 
-// ---------------------------------------------------------------------------
-// Migration m055: conversation_chunks.chunk_kind (A4 retrieval spine)
-// ---------------------------------------------------------------------------
-
-/// Migration m055 (boot step 46): `conversation_chunks` gains `chunk_kind`
-/// ('thread' | 'resolution') so the A4 retrieval spine can prefer resolution
-/// excerpts for "how was this solved" queries. Existing rows are all thread
-/// content and keep the 'thread' default.
 pub fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "conversation_chunks")? {
         return Ok(());
@@ -315,11 +286,6 @@ pub fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Migration m061 (boot step 52, clean-audit item 100): `knowledge_chunks`
-/// gains the `embedding_attempts` counter its two sibling tables already
-/// carry. Without it the family's failure lane could never observe an
-/// attempts cap — a chunk the embedding backend kept rejecting was
-/// re-selected and re-attempted on every embed pass, forever.
 pub fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "knowledge_chunks")? {
         return Ok(());
@@ -393,15 +359,9 @@ pub struct LmStudioEmbeddingSettings {
     pub base_url: String,
     pub embedding_model: Option<String>,
     pub timeout_ms: u64,
-    /// Envelope-stored BYOK key for cloud embedding endpoints (A4).
     pub api_key: Option<String>,
 }
 
-/// Resolve the embedding endpoint. A4 order of precedence: the hub **Embed
-/// role** first (endpoint base URL + role model + envelope key), then the
-/// legacy `lmstudio_*`/AI-status settings as the pre-hub fallback. Cloud
-/// embeddings are an explicit opt-in (D-a): they only happen when the user
-/// routed the Embed role to a cloud endpoint in the AI Center.
 pub fn lm_studio_embedding_settings(conn: &Connection) -> Result<LmStudioEmbeddingSettings> {
     let timeout_ms = u64::try_from(
         crate::settings::get_i64(conn, "lmstudio_timeout_ms", 120_000).unwrap_or(120_000),
@@ -535,10 +495,6 @@ fn embed_texts_blocking(
         .map_err(|_| Error::Config("LM Studio embedding worker thread panicked".into()))?
 }
 
-/// Embed a single query text (A4 retrieval spine: fused search + evidence
-/// semantic hits). `Ok(None)` is the honest no-endpoint answer — when no
-/// embedding model is routed (Embed role unset and no legacy config) callers
-/// stay BM25-only instead of inventing vectors.
 pub fn embed_query_text_blocking(conn: &Connection, text: &str) -> Result<Option<Vec<f32>>> {
     let settings = lm_studio_embedding_settings(conn)?;
     let Some(model) = settings.embedding_model else {
@@ -567,8 +523,6 @@ struct PendingChunk {
     number: Option<i64>,
 }
 
-/// Payload `entity_type` value stored in the vector store for chunks of the
-/// given chunk table name.
 #[must_use]
 pub fn entity_type_for(table: &str) -> &'static str {
     match table {
@@ -631,9 +585,6 @@ fn list_pending_chunks(conn: &Connection, table: &str) -> Result<Vec<PendingChun
 }
 
 fn mark_chunk_failed(conn: &Connection, table: &str, chunk_id: i64) -> Result<()> {
-    // Clean-audit item 100: every family counts its attempts — the
-    // knowledge_chunks lane used to reset only its state, so a failing
-    // chunk was retried on every pass without ever approaching a cap.
     conn.execute(
         &format!(
             "UPDATE {table} SET embedding_state = 'failed',
@@ -644,15 +595,6 @@ fn mark_chunk_failed(conn: &Connection, table: &str, chunk_id: i64) -> Result<()
     Ok(())
 }
 
-/// Clean-audit item 60: sweep the vector store's `table` family for points
-/// whose backing chunk row no longer exists. Re-chunk lanes
-/// (`rechunk_conversation`, `rechunk_doc_article`, the knowledge
-/// re-import/delete) replace chunk rows in bulk with NEW ids and none of
-/// them could reach a store handle — the orphaned old points kept serving
-/// their stale text snapshots in every semantic search (or, for families
-/// that re-verify the chunk, crowding the dense top-k). The sweep runs from
-/// the embed pipeline, which holds both the main database (the live chunk
-/// ids) and the store.
 fn prune_orphaned_vectors(
     conn: &Connection,
     table: &str,
@@ -673,9 +615,6 @@ fn prune_orphaned_vectors(
     };
     let live_point_ids: Vec<i64> = live_chunk_ids
         .iter()
-        // A chunk id that cannot map into its family's point-id band never
-        // produced a point (the upsert fails loudly on those), so leaving
-        // it out of the live set is correct.
         .filter_map(|chunk_id| namespaced_chunk_point_id(entity_type, *chunk_id).ok())
         .collect();
     if let Some(removed) = index.prune_orphaned_points(entity_type, &live_point_ids)
@@ -695,15 +634,7 @@ fn embed_pending_chunks(
     table: &str,
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
-    // Audit item 21: run the one-time point-id-schema migration before
-    // the pending list is read, so freshly reset chunks are picked up in
-    // this same pass.
     ensure_vector_id_schema_v2(conn, qdrant)?;
-    // Clean-audit item 60: sweep this family's orphaned vector points —
-    // chunks deleted or re-chunked out from under the store (a re-chunk
-    // hands every chunk a NEW id, so the old points kept matching with
-    // their stale text snapshots forever). Runs before the pending check
-    // so pure deletions (nothing left to embed) are still swept.
     prune_orphaned_vectors(conn, table, qdrant);
     let pending = list_pending_chunks(conn, table)?;
     if pending.is_empty() {
@@ -737,15 +668,6 @@ fn embed_pending_chunks(
     };
 
     if table == "knowledge_chunks" {
-        // Clean-audit item 46: the qdrant lane used to gate the whole
-        // batch on the FIRST vector being non-empty, then upserted every
-        // pending chunk — substituting an empty vector for any chunk the
-        // model skipped — and stamped the entire batch 'indexed'. One
-        // empty vector poisoned the batch: a zero-dim point landed in the
-        // store and its chunk was marked done, never retried. The batch
-        // is now partitioned per chunk: only chunks with a real vector
-        // are upserted and marked 'indexed'; chunks the model left
-        // empty are marked 'failed' and stay in the retry pipeline.
         if qdrant_connected {
             let mut points: Vec<crate::vectorstore_sqlitevec::VectorPoint> = Vec::new();
             let mut indexed_ids: Vec<i64> = Vec::new();
@@ -822,17 +744,6 @@ fn embed_pending_chunks(
     Ok(embedded)
 }
 
-/// Clean-audit item 21: the vector store's point-id space is namespaced
-/// per chunk family (knowledge/docs/conversation) now. Databases whose
-/// chunks were embedded before that carry colliding, silently overwritten
-/// vectors — unrecoverable, since the overwritten family's embedding was
-/// never re-read. One time only (marker setting `vector_id_schema`), the
-/// shared collection is dropped and every chunk is reset to
-/// `not_indexed` so the normal pending pipeline re-embeds the corpus
-/// under collision-free ids. The migration runs only when the vector
-/// store is actually live (enabled and openable); a disabled index
-/// re-checks on the first pass after it is re-enabled, so pre-v2 vectors
-/// can never survive into the namespaced era.
 fn ensure_vector_id_schema_v2(
     conn: &Connection,
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
@@ -859,9 +770,6 @@ fn ensure_vector_id_schema_v2(
         [],
     )?;
     crate::settings::set_i64(conn, "vector_id_schema", VERSION)?;
-    // Restart the re-embed pipeline for every family: this pass covers
-    // its own table, the queued jobs cover the other two (a no-op pass
-    // when nothing is pending — the normal guard rails apply).
     for kind in [
         "embed_knowledge_chunks",
         "embed_docs_chunks",
@@ -901,9 +809,6 @@ fn vector_point(
             .insert("number".to_string(), chunk.number.into());
     }
     Ok(crate::vectorstore_sqlitevec::VectorPoint {
-        // Audit item 21: namespaced by family, so knowledge/docs/
-        // conversation chunks can never land on the same point id in
-        // the single shared collection.
         id: crate::vectorstore_sqlitevec::namespaced_chunk_point_id(entity_type, chunk.id)?,
         vector: vector.to_vec(),
         payload,
@@ -966,9 +871,6 @@ mod batch20_audit21_tests {
         dir
     }
 
-    /// A pre-v2 database: chunks already 'indexed' (their vectors lived in
-    /// the shared collection under colliding raw per-table ids) and a
-    /// live vector collection holding a stale point.
     fn pre_v2_db() -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -1015,16 +917,11 @@ mod batch20_audit21_tests {
         conn
     }
 
-    /// Audit item 21: the first embed pass on a pre-v2 database drops the
-    /// colliding collection, resets every chunk family to `not_indexed`
-    /// (attempt counters included), restarts the re-embed pipeline for all
-    /// three families, and stamps the marker so it never runs twice.
     #[test]
     fn audit21_migration_drops_resets_and_stamps_once() {
         let conn = pre_v2_db();
         let dir = temp_data_dir("migrate");
         let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
-        // Pre-v2 vectors exist in the shared collection.
         assert!(index.ensure_collection(2));
         assert!(index.upsert(&[crate::vectorstore_sqlitevec::VectorPoint {
             id: 1,
@@ -1033,8 +930,6 @@ mod batch20_audit21_tests {
         }]));
         assert_eq!(index.try_point_count().expect("count"), Some(1));
 
-        // No embedding model is routed, so the pass embeds nothing — but
-        // the migration still runs first.
         embed_pending_knowledge(&conn, Some(&index)).expect("embed pass");
 
         assert_eq!(
@@ -1083,7 +978,6 @@ mod batch20_audit21_tests {
             .expect("job count");
         assert_eq!(queued, 3, "the re-embed pipeline restarts for every family");
 
-        // Second pass: the marker holds — no further reset or enqueue.
         conn.execute(
             "UPDATE knowledge_chunks SET embedding_state = 'indexed'",
             [],
@@ -1100,9 +994,6 @@ mod batch20_audit21_tests {
         assert_eq!(state, "indexed", "the migration must not run a second time");
     }
 
-    /// Audit item 21: a disabled vector index never stamps the marker —
-    /// so pre-v2 vectors cannot survive into the namespaced era by way of
-    /// a disable/enable cycle; the migration re-checks once it matters.
     #[test]
     fn audit21_disabled_index_does_not_stamp_the_marker() {
         let conn = pre_v2_db();
@@ -1175,8 +1066,6 @@ mod batch13_a4_tests {
             .collect()
     }
 
-    /// A4: a closed conversation carries exactly one `resolution` chunk whose
-    /// content is the final published reply, plus the `thread` chunks.
     #[test]
     fn closed_conversation_gains_resolution_chunk() {
         let (conn, conv) = db_with_conversation("closed", Some("2026-10-20T12:00:00Z"));
@@ -1204,8 +1093,6 @@ mod batch13_a4_tests {
         );
     }
 
-    /// A4: an open conversation gets no resolution chunk — nothing is
-    /// fabricated for unresolved threads.
     #[test]
     fn open_conversation_has_no_resolution_chunk() {
         let (conn, conv) = db_with_conversation("active", None);
@@ -1217,8 +1104,6 @@ mod batch13_a4_tests {
         );
     }
 
-    /// A4 (m055): chunking is idempotent — re-running replaces the rows
-    /// instead of duplicating them.
     #[test]
     fn chunking_is_idempotent() {
         let (conn, conv) = db_with_conversation("closed", Some("2026-10-20T12:00:00Z"));
@@ -1254,10 +1139,6 @@ mod batch24_audit46_tests {
         dir
     }
 
-    /// Two pending knowledge chunks. The embedding endpoint is a mock that
-    /// answers `power-cycle` texts with an empty vector and everything else
-    /// with a healthy 2-dim vector — the batch is answered per input, so
-    /// the test does not depend on row order.
     fn db_with_two_pending_chunks() -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -1316,11 +1197,6 @@ mod batch24_audit46_tests {
         })
     }
 
-    /// Clean-audit item 46: one empty vector no longer poisons the
-    /// knowledge batch. The chunk the model skipped is marked 'failed'
-    /// (staying in the retry pipeline) instead of riding the batch into
-    /// the store as an empty point stamped 'indexed'; the healthy chunks
-    /// are upserted and marked 'indexed'.
     #[test]
     fn audit46_empty_vector_does_not_poison_the_batch() {
         let conn = db_with_two_pending_chunks();
@@ -1358,9 +1234,6 @@ mod batch24_audit46_tests {
         );
     }
 
-    /// Clean-audit item 46, all-empty corner: when the model returns
-    /// nothing usable for any chunk, nothing is upserted and every chunk
-    /// is marked 'failed' for retry.
     #[test]
     fn audit46_all_empty_batch_upserts_nothing() {
         let conn = db_with_two_pending_chunks();
@@ -1392,7 +1265,6 @@ mod batch24_audit46_tests {
             )
             .expect("failed count");
         assert_eq!(failed, 2, "both chunks stay in the retry pipeline");
-        // No point was upserted, so no collection is created either.
         assert!(
             matches!(index.try_point_count().expect("count"), None | Some(0)),
             "the store stays empty"
@@ -1432,8 +1304,6 @@ mod batch29_audit100_tests {
         conn
     }
 
-    /// Clean-audit item 100: boot step m061 gives knowledge_chunks the
-    /// embedding_attempts column its sibling tables already had.
     #[test]
     fn audit100_knowledge_chunks_gain_the_attempts_column() {
         let conn = db_with_knowledge_chunks();
@@ -1447,23 +1317,18 @@ mod batch29_audit100_tests {
             .expect("pragma")
             > 0;
         assert!(has, "m061 must add the attempts column at boot");
-        // Idempotent: a second apply is a no-op.
         apply_m061_knowledge_chunk_attempts(&conn).expect("re-apply");
     }
 
-    /// Clean-audit item 100: a chunk at the five-attempt cap is no longer
-    /// selected for embedding — the pre-fix lane re-selected it forever.
     #[test]
     fn audit100_capped_chunks_leave_the_pending_queue() {
         let conn = db_with_knowledge_chunks();
-        // Both chunks start at attempts 0 and ARE pending.
         assert_eq!(
             list_pending_chunks(&conn, "knowledge_chunks")
                 .expect("pending")
                 .len(),
             2
         );
-        // Exhaust one chunk's budget: it must drop out of the queue.
         let capped_id: i64 = conn
             .query_row(
                 "SELECT id FROM knowledge_chunks WHERE chunk_index = 0",
@@ -1484,9 +1349,6 @@ mod batch29_audit100_tests {
         );
     }
 
-    /// Clean-audit item 100: failing a knowledge chunk now counts the
-    /// attempt (the pre-fix branch reset only its state, so the counter
-    /// never moved and no cap was ever reachable).
     #[test]
     fn audit100_failures_count_attempts() {
         let conn = db_with_knowledge_chunks();

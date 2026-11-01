@@ -39,10 +39,3 @@ pub fn apply_m014(conn: &Connection) -> Result<()> {
     let _ = conn.execute("UPDATE app_state SET schema_version = 14 WHERE id = 1", []);
     Ok(())
 }
-
-// 1.4.0 R7 (D14): the legacy interaction-signals CRUD that used to live
-// here (SignalKey, record/get/count/confirm, derive_signal) was removed —
-// it had zero production callers since the interaction profile moved to
-// `interaction_engine`/`interaction_current` over the `interaction_profile`
-// tables. The constants above stay live (the engine reads them); the
-// `interaction_signals` table remains as inert schema (created by m014).

@@ -1,31 +1,9 @@
-//! Outbound job dispatch — the missing half of the composer pipeline.
-//!
-//! Since the Phase 4 cutover the reply/note/status/assign path was
-//! enqueue-only: the composer inserted a row into `outbound_jobs` and
-//! nothing ever picked it up, so user actions never reached Help Scout
-//! while the UI reported green success ("Reply queued as job #N"). This
-//! module is the dispatcher the cutover lost: `WorkerManager` claims
-//! queued rows every tick, performs the live provider call, records the
-//! attempt, and either confirms (then pulls the remote truth back into
-//! the mirror) or retries with exponential backoff.
-//!
-//! Status lifecycle:
-//! `queued` → `sending` → `confirmed` (terminal success)
-//!                     ↘ `queued` (retryable failure, `updated_at` holds
-//!                        the next-run gate: claim only picks rows whose
-//!                        `updated_at <= now`)
-//!                     ↘ `failed` (terminal failure: non-retryable error,
-//!                        or retries exhausted)
-
 use rusqlite::{Connection, params};
 
 use crate::error::Result;
 
-/// Claim/execute budget per worker tick. User actions are low-volume and
-/// deserve priority over background job kinds.
 pub const OUTBOUND_BATCH_PER_TICK: usize = 4;
 
-/// Default retry budget for outbound writes (mirrors the jobs table).
 pub const OUTBOUND_MAX_ATTEMPTS: i64 = 3;
 
 #[derive(Debug, Clone)]
@@ -38,9 +16,6 @@ pub struct OutboundJob {
     pub max_attempts: i64,
 }
 
-/// Transactionally claim the oldest runnable outbound job (queued, past
-/// its backoff gate), marking it `sending`. Returns `None` when nothing
-/// is runnable — the common case.
 pub fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
     let tx = conn.transaction()?;
     let row: Option<(i64, String, Option<i64>, String, i64, i64)> = {
@@ -84,8 +59,6 @@ pub fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
     }))
 }
 
-/// Mark a job as delivered: status `confirmed`, attempts bumped, the
-/// provider result retained for the Diagnostics view.
 pub fn mark_confirmed(conn: &Connection, id: i64, remote_result: &str) -> Result<()> {
     conn.execute(
         "UPDATE outbound_jobs
@@ -98,12 +71,6 @@ pub fn mark_confirmed(conn: &Connection, id: i64, remote_result: &str) -> Result
     Ok(())
 }
 
-/// Mark an attempt as failed. Retryable failures re-queue with an
-/// exponential backoff gate on `updated_at` (5s << attempt, capped at 5
-/// minutes); exhausted or permanent failures land in `failed` with the
-/// error text the UI surfaces verbatim.
-///
-/// Returns whether the job will be retried.
 pub fn mark_failed(conn: &Connection, id: i64, error: &str, retryable: bool) -> Result<bool> {
     let error: String = error.chars().take(1000).collect();
     let row: Option<(i64, i64)> = conn
@@ -141,8 +108,6 @@ pub fn mark_failed(conn: &Connection, id: i64, error: &str, retryable: bool) -> 
     Ok(will_retry)
 }
 
-/// Boot recovery: a crash mid-send leaves rows stuck in `sending`
-/// forever. Re-queue them so the dispatcher can finish the user's work.
 pub fn recover_stale_sending(conn: &Connection) -> Result<usize> {
     let n = conn.execute(
         "UPDATE outbound_jobs SET status = 'queued', updated_at = datetime('now')
@@ -159,7 +124,6 @@ pub fn recover_stale_sending(conn: &Connection) -> Result<usize> {
     Ok(n)
 }
 
-/// Queue counters for the Diagnostics page.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct OutboundStats {
     pub queued: i64,
@@ -188,9 +152,6 @@ pub fn stats(conn: &Connection) -> OutboundStats {
     .unwrap_or_default()
 }
 
-/// The latest outbound job for a conversation — the inbox derives its
-/// honest per-conversation status line ("delivered ✓" / "sending…" /
-/// "failed: …") from this row.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LatestOutbound {
     pub kind: String,
@@ -217,10 +178,6 @@ pub fn latest_for_conversation(conn: &Connection, conversation_id: i64) -> Optio
     .ok()
 }
 
-/// Migration m051 (schema v42): the outbound queue becomes a real
-/// dispatch lane — retries get a budget, rows stuck mid-send by an older
-/// crash are re-queued, and installs on the old 5-minute default move to
-/// the 1-minute poll so "real-time" means what it says.
 pub fn apply_m051(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "UPDATE outbound_jobs SET max_attempts = 3
@@ -271,7 +228,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "sending");
-        // A row mid-send is not claimable again.
         assert!(
             claim_next(&mut guard).expect("claim").is_none(),
             "a sending row must not be claimable"
@@ -387,7 +343,6 @@ mod tests {
     fn stats_and_latest_for_conversation_read_the_queue() {
         let handle = db();
         let conn = handle.write_guard();
-        // outbound_jobs.conversation_id has an FK to conversations(id).
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, status)
              VALUES (700, 7, 'queue test', 'active')",

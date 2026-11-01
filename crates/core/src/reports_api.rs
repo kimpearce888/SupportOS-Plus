@@ -1,20 +1,8 @@
-//! K5: the Help Scout Reports API — a table-driven registry of the 33 GET
-//! endpoints (per the 2026-10-21 platform research), capability detection
-//! so Standard plans get one honest sentence instead of empty charts
-//! (decisions D-c, D-g), and a small cache the fetch job fills and the
-//! Reports page renders.
-//!
-//! Nothing here fabricates report data: the cache is written only from real
-//! provider responses, and the capability verdict drives every UI claim.
-
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 use crate::error::Result;
 
-/// Migration m058 (boot step 49): the fetched-report cache. One row per
-/// report key; overwritten on every successful fetch so the UI never shows
-/// a stale range silently (the row carries its own start/end).
 pub fn apply_m058_hs_report_cache(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS hs_report_cache (
@@ -54,8 +42,6 @@ impl ReportFamily {
     }
 }
 
-/// One Reports API GET endpoint. The registry is the full documented
-/// inventory (research §5, 2026-10-21): 33 endpoints, all Plus/Pro-only.
 #[derive(Debug, Clone, Copy)]
 pub struct ReportSpec {
     pub key: &'static str,
@@ -75,14 +61,6 @@ macro_rules! spec {
     };
 }
 
-/// The documented Reports API GET-endpoint count. The docs sitemap
-/// advertises "33 report endpoint pages", but one of those pages is the
-/// reports index itself. The verified 2026-10-21 research table carries
-/// 30 rows, two of which hold a pair of endpoints each
-/// (`conversations/new` and its drilldown; `user/happiness` and
-/// `user/ratings`), which yields 32 unique GET paths. The registry below
-/// is that complete documented inventory, so K5's "the 33 GET endpoints"
-/// renders as: every endpoint the platform documents.
 pub const REPORT_COUNT: usize = 32;
 
 pub const REPORTS: [ReportSpec; REPORT_COUNT] = [
@@ -250,13 +228,6 @@ pub fn report_spec(key: &str) -> Option<ReportSpec> {
     REPORTS.iter().find(|r| r.key == key).copied()
 }
 
-// ---------------------------------------------------------------------------
-// Capability detection
-// ---------------------------------------------------------------------------
-
-/// The one-sentence honest states the UI renders. `PlanBlocked` covers the
-/// 403 the Reports API answers on Standard plans (and the 403 a user
-/// without report permission gets — the sentence is honest for both).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportsCapability {
     Unknown,
@@ -286,7 +257,6 @@ impl ReportsCapability {
         }
     }
 
-    /// The honest sentence the Reports page shows instead of empty charts.
     #[must_use]
     pub fn banner(self) -> &'static str {
         match self {
@@ -327,18 +297,10 @@ pub fn set_capability(conn: &Connection, capability: ReportsCapability) -> Resul
     Ok(())
 }
 
-/// Credential changes invalidate the probe: the capability is only valid
-/// for the account it was probed against. Called from the credential
-/// save/activation path.
 pub fn reset_capability(conn: &Connection) {
     let _ = crate::settings::set_string(conn, CAPABILITY_KEY, "unknown");
 }
 
-/// Classify a provider fetch error into a capability transition. 403 is
-/// the plan/permission wall; 401 means the probe could not authenticate
-/// (stays Unknown, retried on the next fetch); network errors stay Unknown
-/// too. Only a definitive 403 (or 200-series success handled by the
-/// caller) writes a verdict.
 #[must_use]
 pub fn classify_fetch_error(status_code: u16) -> Option<ReportsCapability> {
     match status_code {
@@ -347,10 +309,6 @@ pub fn classify_fetch_error(status_code: u16) -> Option<ReportsCapability> {
         _ => None,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Cache
-// ---------------------------------------------------------------------------
 
 pub fn cache_report(
     conn: &Connection,
@@ -377,7 +335,6 @@ pub fn cache_report(
     Ok(())
 }
 
-/// The cached fetch for one report key.
 #[must_use]
 pub fn cached_report(
     conn: &Connection,
@@ -399,7 +356,6 @@ pub fn cached_report(
     .ok()
 }
 
-/// All cached rows (key, fetched_at) so the UI can badge freshness.
 #[must_use]
 pub fn cached_report_keys(conn: &Connection) -> Vec<(String, String)> {
     conn.prepare("SELECT report_key, fetched_at FROM hs_report_cache ORDER BY report_key")
@@ -410,10 +366,6 @@ pub fn cached_report_keys(conn: &Connection) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// Flatten a Reports API response into label/value rows the generic
-/// renderer can draw: the `current` and `previous` summary objects, the
-/// `deltas` object, and any `top` arrays are walked one level deep.
-/// Numbers are formatted as-is (SQL-side facts are not recomputed here).
 #[must_use]
 pub fn flatten_report(data: &Value) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
@@ -437,8 +389,6 @@ pub fn flatten_report(data: &Value) -> Vec<(String, String)> {
     push_object("previous", &data["previous"], &mut out);
     push_object("delta", &data["deltas"], &mut out);
     if out.is_empty() {
-        // Reports without the current/previous envelope (drilldowns, lists)
-        // still render: walk the top level one deep.
         push_object("", data, &mut out);
     }
     out
@@ -457,7 +407,6 @@ mod tests {
     #[test]
     fn registry_covers_all_documented_endpoints() {
         assert_eq!(REPORTS.len(), 32);
-        // Unique keys, unique paths, every path under /v2/reports/.
         let mut keys = std::collections::HashSet::new();
         let mut paths = std::collections::HashSet::new();
         for r in REPORTS.iter() {
@@ -465,7 +414,6 @@ mod tests {
             assert!(paths.insert(r.path), "duplicate path {}", r.path);
             assert!(r.path.starts_with("/v2/reports/"), "bad path {}", r.path);
         }
-        // Spot-check the headline families the Reports page renders first.
         assert_eq!(
             report_spec("happiness").expect("happiness").path,
             "/v2/reports/happiness"
@@ -493,7 +441,6 @@ mod tests {
         );
         reset_capability(&conn);
         assert_eq!(get_capability(&conn), ReportsCapability::Unknown);
-        // Classification: only 403 and 2xx are verdicts.
         assert_eq!(
             classify_fetch_error(403),
             Some(ReportsCapability::PlanBlocked)
@@ -527,7 +474,6 @@ mod tests {
         assert!(labels.contains(&"previous totalConversations"));
         assert!(labels.contains(&"delta totalConversations"));
 
-        // A second write overwrites (no stale rows accumulate).
         cache_report(
             &conn,
             "conversations",

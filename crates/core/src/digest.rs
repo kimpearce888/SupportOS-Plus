@@ -1,24 +1,9 @@
-//! K4: the weekly AI digest — deterministic facts, honest anomalies, an
-//! AI-written narrative when a backend is routed, archived and searchable.
-//!
-//! Everything numeric in a digest is computed by SQL here and handed to the
-//! model as authoritative facts (`ai_prompts::build_weekly_digest_user` —
-//! the same contract as `report_narrative`): the model may summarize, never
-//! recalculate. When no backend is routed the digest is still archived as
-//! `facts_only` — the deterministic half is useful on its own and the UI
-//! offers the narrative on demand.
-
 use chrono::Utc;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 use crate::error::Result;
 
-/// Migration m057 (boot step 48): the digest archive. `facts` is the
-/// authoritative computed JSON; `narrative` is the AI text (NULL when the
-/// digest was stored facts-only). `status` is `complete` (facts + AI
-/// narrative), `facts_only` (no routed backend at generation time) or
-/// `failed` (the model run errored; the facts remain).
 pub fn apply_m057_ai_digests(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ai_digests (
@@ -40,7 +25,6 @@ pub fn apply_m057_ai_digests(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// A digest archive row.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DigestRow {
     pub id: i64,
@@ -72,7 +56,6 @@ fn digest_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DigestRow> {
 const DIGEST_COLUMNS: &str =
     "id, period_start, period_end, trigger_kind, facts, narrative, ai_run_id, status, created_at";
 
-/// Everything a new archive row needs (`store_digest` input).
 pub struct NewDraft<'a> {
     pub period_start: &'a str,
     pub period_end: &'a str,
@@ -83,7 +66,6 @@ pub struct NewDraft<'a> {
     pub status: &'a str,
 }
 
-/// Archive a digest. Returns the row id.
 pub fn store_digest(conn: &Connection, draft: &NewDraft<'_>) -> Result<i64> {
     conn.execute(
         "INSERT INTO ai_digests
@@ -102,9 +84,6 @@ pub fn store_digest(conn: &Connection, draft: &NewDraft<'_>) -> Result<i64> {
     Ok(conn.last_insert_rowid())
 }
 
-/// The archive, newest first. `query` (optional, case-insensitive
-/// substring) searches both the narrative and the raw facts JSON — a
-/// digest mentioning "export failures" is findable either way.
 pub fn list_digests(conn: &Connection, query: Option<&str>, limit: i64) -> Vec<DigestRow> {
     conn.prepare(&format!(
         "SELECT {DIGEST_COLUMNS} FROM ai_digests
@@ -139,10 +118,6 @@ pub fn latest_digest_created_at(conn: &Connection) -> Option<String> {
     )
     .ok()
 }
-
-// ---------------------------------------------------------------------------
-// Fact collection (all SQL, all honest)
-// ---------------------------------------------------------------------------
 
 fn day_bounds(days: i64) -> (String, String) {
     let end = Utc::now();
@@ -210,11 +185,6 @@ fn volume_facts(conn: &Connection, start: &str, end: &str, prev_start: &str) -> 
     })
 }
 
-/// Deterministic anomaly detection: any day whose new-conversation count is
-/// more than `2 sigma` above the period mean (and at least 3 conversations)
-/// is reported, plus a backlog jump of more than 50% week-over-week with an
-/// absolute floor. Anomalies are facts, not predictions — the digest
-/// narrative receives them pre-computed.
 fn anomaly_facts(conn: &Connection, start: &str, end: &str) -> Value {
     let per_day: Vec<(String, i64)> = conn
         .prepare(
@@ -262,16 +232,6 @@ fn anomaly_facts(conn: &Connection, start: &str, end: &str) -> Value {
         .unwrap_or(0);
     let backlog_week_ago: i64 = conn
         .query_row(
-            // Clean-audit item 55: the backlog "a week ago" must count
-            // what was open AT that moment, not what is open NOW. The
-            // pre-fix query filtered on the CURRENT status, so every
-            // ticket that was open a week ago and got closed during the
-            // period vanished from the baseline — the week-over-week
-            // comparison then flagged false "backlog jumps" whenever old
-            // tickets were simply worked down. Honest baseline: the
-            // conversation existed before the period start, was not
-            // deleted, and was open at the start — either still open
-            // now, or closed at/after the period start.
             "SELECT COUNT(*) FROM conversations
               WHERE COALESCE(remote_created_at, created_at) < ?1
                 AND deleted_at IS NULL
@@ -298,8 +258,6 @@ fn anomaly_facts(conn: &Connection, start: &str, end: &str) -> Value {
 }
 
 fn topic_facts(conn: &Connection) -> Value {
-    // Top issue clusters (A2) when any exist, plus top tags as the
-    // deterministic fallback view. Both are read from the local mirror.
     let clusters: Vec<Value> = conn
         .prepare(
             "SELECT label, conversation_count FROM issue_clusters
@@ -334,9 +292,6 @@ fn topic_facts(conn: &Connection) -> Value {
     json!({ "top_issue_clusters": clusters, "top_tags": tags })
 }
 
-/// Sentiment trend from the latest completed ticket-analysis run per
-/// conversation (A1's extraction). Conversations without an analysis run
-/// are simply not counted — no sentiment is invented.
 fn sentiment_facts(conn: &Connection, start: &str, end: &str) -> Value {
     let rows: Vec<String> = conn
         .prepare(
@@ -381,12 +336,6 @@ fn sentiment_facts(conn: &Connection, start: &str, end: &str) -> Value {
 fn workload_facts(conn: &Connection, start: &str, end: &str) -> Value {
     let replies_per_user: Vec<Value> = conn
         .prepare(
-            // Audit fix (H5): agent replies are type 'message' authored by a
-            // user on the real API — 'reply' never occurs live. Also: the
-            // join referenced conversation_threads.user_local_id, a column
-            // that does not exist (the query silently prepared-failed and
-            // always rendered an empty leaderboard). Authorship resolves
-            // through from_email instead.
             "SELECT COALESCE(NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), ''), th.from_name, 'Unknown'),
                     COUNT(*) AS replies
                FROM conversation_threads th
@@ -448,14 +397,6 @@ fn happiness_facts(conn: &Connection, start: &str, end: &str) -> Value {
     })
 }
 
-/// "What changed": new gap candidates and new/updated knowledge since the
-/// previous archived digest (or the whole period for the first digest).
-/// Every comparison goes through `datetime()` — it normalizes both the
-/// ISO-T and space-separated formats the schema mixes. Audit item 108:
-/// the two doc queries compared raw strings, so a stored space-format
-/// stamp (`2026-10-20 11:30:00`) sorted before the ISO-T `since` bound
-/// on the same day (`2026-10-20T10:00:00.000Z`, because ` ` < `T`) and
-/// a same-day-later update silently fell out of the digest counts.
 fn change_facts(conn: &Connection, start: &str) -> Value {
     let since = latest_digest_created_at(conn).unwrap_or_else(|| start.to_string());
     let new_gaps: Vec<Value> = conn
@@ -506,8 +447,6 @@ fn change_facts(conn: &Connection, start: &str) -> Value {
     })
 }
 
-/// Assemble the full deterministic fact pack for the digest. Every number
-/// is SQL-computed from the local mirror; nothing is estimated.
 pub fn collect_facts(conn: &Connection, days: i64) -> (Value, String, String) {
     let days = days.clamp(1, 90);
     let (start, end) = day_bounds(days);
@@ -578,8 +517,6 @@ mod tests {
                 .contains("export")
         );
 
-        // Search hits the narrative; a second, facts-only digest is found
-        // through its facts JSON instead.
         assert_eq!(list_digests(&conn, Some("export fail"), 10).len(), 1);
         store_digest(
             &conn,
@@ -602,13 +539,6 @@ mod tests {
     #[test]
     fn facts_collect_volume_anomaly_and_happiness() {
         let conn = db();
-        // Six days of quiet volume plus one loud day (10x the rest) — the
-        // spike detector must flag exactly that day. All seeds are
-        // relative to *now* because the collection window is. The loud
-        // day seeds at *now* itself, not a fixed 09:00 wall-clock: before
-        // 09:00 UTC a fixed hour lands in the future, outside the
-        // collection window, and the test flakes (observed 2026-10-23
-        // 00:18 UTC during batch 22's verification).
         let day_iso = |days_back: i64| {
             (chrono::Utc::now() - chrono::Duration::try_days(days_back).unwrap_or_default())
                 .format("%Y-%m-%dT09:00:00.000Z")
@@ -646,7 +576,6 @@ mod tests {
         );
         assert_eq!(facts["happiness"]["great"], 1);
         assert_eq!(facts["happiness"]["not_good"], 1);
-        // A conversation far outside the window never counts.
         let _ = seed_conversation(&conn, 999, "2020-09-01T09:00:00.000Z", "active");
         let (facts2, _, _) = collect_facts(&conn, 7);
         assert_eq!(facts2["volume"]["new_conversations"], 16);
@@ -667,11 +596,6 @@ mod tests {
     }
 }
 
-/// Clean-audit item 55: the backlog-jump baseline must be the backlog AS
-/// IT WAS a week ago. The pre-fix query counted only currently-open old
-/// tickets, so every ticket closed during the period vanished from the
-/// baseline — a team that worked down old tickets with flat volume got
-/// told its backlog "jumped" 50%+.
 #[cfg(test)]
 mod batch24_audit55_tests {
     use super::*;
@@ -719,24 +643,16 @@ mod batch24_audit55_tests {
         .expect("conversation");
     }
 
-    /// The false-positive shape: a week ago 12 tickets were open; during
-    /// the week 9 of them were closed and 9 new ones arrived (volume
-    /// flat, backlog flat at 12). The pre-fix baseline only saw the 3
-    /// still-open old tickets (3 < 12 + 6 → "jump from 3 to 12") and the
-    /// digest claimed a >50% backlog jump that never happened.
     #[test]
     fn audit55_worked_down_backlog_is_not_a_jump() {
         let conn = db();
         let b = bounds();
-        // 12 old tickets: 3 still open, 9 closed mid-period (they WERE
-        // open a week ago).
         for i in 0..3 {
             insert(&conn, 100 + i, OLD, "active", None);
         }
         for i in 0..9 {
             insert(&conn, 200 + i, OLD, "closed", Some(&b.mid));
         }
-        // 9 new tickets during the period, still open.
         for i in 0..9 {
             insert(&conn, 300 + i, &b.mid, "active", None);
         }
@@ -748,8 +664,6 @@ mod batch24_audit55_tests {
         );
     }
 
-    /// The control: a genuine jump still fires — 10 old tickets still
-    /// open, 6 new during the period (16 > 10 + 5).
     #[test]
     fn audit55_genuine_backlog_jump_still_fires() {
         let conn = db();
@@ -770,15 +684,11 @@ mod batch24_audit55_tests {
         assert_eq!(jump["to"], json!(16));
     }
 
-    /// Tickets closed BEFORE the period are honestly excluded from the
-    /// week-ago baseline (they were not open then either).
     #[test]
     fn audit55_previously_closed_tickets_stay_excluded() {
         let conn = db();
         let b = bounds();
         let older_close = "2025-12-01T00:00:00.000Z";
-        // 10 old open + 4 closed long before the period + 6 new open:
-        // baseline must be 10, not 14.
         for i in 0..10 {
             insert(&conn, 600 + i, OLD, "active", None);
         }
@@ -802,11 +712,6 @@ mod batch24_audit55_tests {
 mod batch30_tests {
     use super::*;
 
-    /// Audit item 108: the two doc queries compared raw strings against
-    /// the ISO-T `since` bound, so a stored space-format stamp later on
-    /// the same day sorted BEFORE the bound (`' ' < 'T'`) and silently
-    /// fell out of the digest's change facts. All three comparisons
-    /// normalize through datetime() now.
     #[test]
     fn change_facts_counts_space_format_docs_after_iso_t_since() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -814,8 +719,6 @@ mod batch30_tests {
 
         conn.execute("INSERT INTO knowledge_sources (name) VALUES ('src')", [])
             .expect("source");
-        // Same-day updates in the space format the local writers emit:
-        // 11:30 is AFTER the 10:00 ISO-T bound, 09:00 is before it.
         conn.execute(
             "INSERT INTO knowledge_documents (source_id, title, updated_at)
              VALUES (1, 'doc updated later same day', '2026-10-20 11:30:00')",

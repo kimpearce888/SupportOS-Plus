@@ -192,17 +192,9 @@ pub struct ParsedMention {
 }
 
 fn is_token_char(c: char) -> bool {
-    // Clean-audit item 62: scan_for_mentions tokenizes on the regex `\w`
-    // (Unicode), but this scanner used to accept ASCII only — a username
-    // like "josé" or "见" could be recorded as a raw mention by the scan
-    // side while never resolving to a notification here. The token charset
-    // is now Unicode (the '.' and '-' extensions stay: the directory's
-    // user keys include dotted full names like "jane.doe").
     c.is_alphanumeric() || c == '.' || c == '_' || c == '-'
 }
 
-/// The `[\w-]` run `scan_for_mentions`'s team regex consumes after the
-/// `team:` prefix (Unicode word characters plus dash).
 fn is_team_prefix_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '-'
 }
@@ -232,20 +224,10 @@ pub fn parse_mentions(body: &str, directory: &MentionDirectory) -> Result<Vec<Pa
     while let Some(found) = body[search_from..].find('@') {
         let at = search_from + found;
         let after_at = at + 1;
-        // Clean-audit item 62: an '@' glued to a word character is not a
-        // mention — "support@jane" inside an email address used to fire a
-        // mention for user "jane" here while scan_for_mentions (which
-        // checks the preceding character) correctly ignored it.
         if is_preceded_by_word_char(body, at) {
             search_from = after_at;
             continue;
         }
-        // Clean-audit item 62: the `@team:name` prefixed form — the ONLY
-        // team form scan_for_mentions recognizes (its `@team:([\w-]{1,64})`
-        // regex). This scanner used to drop it silently: the token stopped
-        // at the colon and the bare-name window below never matches a
-        // "team:…" candidate, so every @team: mention displayed in the
-        // thread's mentions_json produced no notification.
         if body[after_at..].starts_with("team:") {
             let run_start = after_at + "team:".len();
             let run: String = body[run_start..]
@@ -264,8 +246,6 @@ pub fn parse_mentions(body: &str, directory: &MentionDirectory) -> Result<Vec<Pa
                         display: run.clone(),
                     });
                 }
-                // Consume the whole prefixed run either way — with or
-                // without a resolvable team, this was a team mention.
                 search_from = run_start + run.len();
                 continue;
             }
@@ -279,9 +259,6 @@ pub fn parse_mentions(body: &str, directory: &MentionDirectory) -> Result<Vec<Pa
             continue;
         }
         let lower = token.to_lowercase();
-        // Clean-audit item 62: scan_for_mentions never resolves a bare
-        // "@team" as a USER mention (the word belongs to the prefixed team
-        // form); mirror that here.
         if lower != "team"
             && let Some(uid) = directory.user_by_name.get(&lower)
         {
@@ -357,25 +334,16 @@ pub fn team_members(conn: &Connection, team_local_id: i64) -> Result<Vec<i64>> {
     Ok(rows)
 }
 
-/// Clean-audit batch 25 (item 62): parse_mentions must agree with
-/// scan_for_mentions on WHAT is a mention — the pre-fix parser was
-/// ASCII-only (Unicode usernames never resolved) and had no left boundary
-/// (emails fired mentions); it also dropped the `@team:name` prefixed form
-/// the scanner records.
 #[cfg(test)]
 mod batch25_item62_tests {
     use super::*;
 
     fn directory() -> MentionDirectory {
         let mut dir = MentionDirectory::default();
-        // José — a user whose name needs a non-ASCII token char.
         dir.user_by_name.insert("josé".into(), 1);
         dir.display_by_user.insert(1, "José García".into());
-        // A dotted full name (the directory's derived candidate keys).
         dir.user_by_name.insert("jane.doe".into(), 2);
         dir.display_by_user.insert(2, "Jane Doe".into());
-        // A user literally named "team" — the scanner never resolves a
-        // bare @team as a user.
         dir.user_by_name.insert("team".into(), 3);
         dir.display_by_user.insert(3, "Team User".into());
         dir.team_by_name.insert("billing".into(), 10);
@@ -387,9 +355,6 @@ mod batch25_item62_tests {
     fn unicode_usernames_resolve_like_the_scanner_records_them() {
         let dir = directory();
         let mentions = parse_mentions("ping @josé please", &dir).expect("parse");
-        // Pre-fix: the token stopped at 'é' (ASCII-only charset), the
-        // lookup for "jos" failed, and the mention the scanner recorded
-        // never became a notification.
         assert_eq!(
             mentions.len(),
             1,
@@ -402,7 +367,6 @@ mod batch25_item62_tests {
     #[test]
     fn a_mention_glued_to_a_word_character_is_not_a_mention() {
         let dir = directory();
-        // Pre-fix: "support@jane.doe" fired a user mention for Jane.
         let mentions =
             parse_mentions("contact support@jane.doe or @jane.doe directly", &dir).expect("parse");
         assert_eq!(
@@ -416,9 +380,6 @@ mod batch25_item62_tests {
     #[test]
     fn the_team_prefixed_form_resolves_to_the_team() {
         let dir = directory();
-        // Pre-fix: the token stopped at ':' and the bare-name window never
-        // matched a "team:…" candidate — the scanner recorded
-        // "@team:billing" in mentions_json while nobody was notified.
         let mentions = parse_mentions("escalating @team:billing now", &dir).expect("parse");
         assert_eq!(
             mentions.len(),
@@ -428,8 +389,6 @@ mod batch25_item62_tests {
         assert_eq!(mentions[0].team_local_id, Some(10));
         assert_eq!(mentions[0].user_local_id, None);
 
-        // Dashed team names ride the [\w-] run exactly like the scanner's
-        // regex.
         let mentions = parse_mentions("@team:tier-2 over", &dir).expect("parse");
         assert_eq!(mentions[0].team_local_id, Some(11), "dashed name");
     }
@@ -437,9 +396,6 @@ mod batch25_item62_tests {
     #[test]
     fn the_team_prefixed_form_consumes_the_whole_run() {
         let dir = directory();
-        // An unresolvable team must not leak its tail into another
-        // mention: "@team:nobody @josé" — after consuming "team:nobody",
-        // the next '@' is José's.
         let mentions = parse_mentions("@team:nobody @josé", &dir).expect("parse");
         assert_eq!(
             mentions.len(),
@@ -452,8 +408,6 @@ mod batch25_item62_tests {
     #[test]
     fn a_bare_team_word_is_not_a_user_mention() {
         let dir = directory();
-        // The scanner excludes username "team"; the parser mirrors that
-        // even though a user named "team" exists in the directory.
         let mentions = parse_mentions("standup @team now", &dir).expect("parse");
         assert!(
             mentions.iter().all(|m| m.user_local_id.is_none()),
@@ -464,8 +418,6 @@ mod batch25_item62_tests {
     #[test]
     fn the_scanner_and_parser_agree_on_plain_bodies() {
         let dir = directory();
-        // The same body through both scanners: everything the scanner
-        // records, the parser resolves.
         let body = "hey @josé and @team:billing — email me at x@jane.doe";
         let scanned = scan_for_mentions(body).expect("scan");
         let parsed = parse_mentions(body, &dir).expect("parse");

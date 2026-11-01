@@ -1,21 +1,3 @@
-//! Connectors page (port of the web `pages/connectors.rs`).
-//!
-//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
-//! conformed lab's `connectors` sheet (DS "stack" archetype): the result
-//! count rides the header as the DS-C-01 counter pill (A-6); the table's
-//! health cell renders the lab's dot + badge pair; the kind/last cells
-//! ride the muted mono role; the rows/refresh/delete triple collapses to
-//! refresh + delete per the lab's A-5 receipt (the connector chip already
-//! opens the rows viewer — no workflow step is lost, the lab documents
-//! exactly this) and the receipt rides beneath the table. Presentation
-//! only — refresh behavior intact.
-//!
-//! Connector table (`connectors::list` — `/api/connectors`), a rows viewer
-//! for the selected connector (`connectors::list_rows` —
-//! `/api/connectors/{id}/rows`), the create form (`connectors::create`),
-//! delete, and the refresh action (`connectors::refresh`, the route logic
-//! without the HTTP hop, run on a background thread).
-
 use std::path::PathBuf;
 
 use eframe::egui;
@@ -25,7 +7,6 @@ use super::{ConfirmRequest, NavRequest, i64_field, opt_str_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Connector kinds offered by the create form (web: kind select).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Http,
@@ -50,7 +31,6 @@ impl Kind {
     }
 }
 
-/// Badge color for the health column (web: `health_badge_class`).
 #[must_use]
 pub fn health_color(health: &str) -> egui::Color32 {
     match health {
@@ -61,8 +41,6 @@ pub fn health_color(health: &str) -> egui::Color32 {
     }
 }
 
-/// Health → badge tone for the redesigned table (the badge equivalent
-/// of [`health_color`]; display text stays the raw health value).
 fn health_tone(health: &str) -> BadgeTone {
     match health {
         "ok" => BadgeTone::Success,
@@ -72,7 +50,6 @@ fn health_tone(health: &str) -> BadgeTone {
     }
 }
 
-/// The interactive connectors page state.
 pub struct ConnectorsPage {
     connectors: Vec<serde_json::Value>,
     selected: Option<i64>,
@@ -89,9 +66,6 @@ pub struct ConnectorsPage {
     message: Option<String>,
     error: Option<String>,
     data_dir: Option<PathBuf>,
-    /// Clean-audit item 147: reload latch — an empty mirror is a legal
-    /// steady state, so "list empty" can no longer mean "re-query every
-    /// frame".
     loaded: bool,
 }
 
@@ -118,12 +92,10 @@ impl ConnectorsPage {
         }
     }
 
-    /// Data directory for file-kind connectors (set by the shell at boot).
     pub fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = Some(data_dir);
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.loaded = false;
         self.connectors.clear();
@@ -184,8 +156,6 @@ impl ConnectorsPage {
             self.error = Some("name required".into());
             return;
         }
-        // FIND-009: invalid input used to silently become the 3600 default
-        // (`parse().unwrap_or(3600).clamp(60, 86400)`). Report it instead.
         let refresh_seconds: i64 = match self.new_refresh_seconds.trim().parse::<i64>() {
             Ok(v) if (60..=86_400).contains(&v) => v,
             _ => {
@@ -228,8 +198,6 @@ impl ConnectorsPage {
         }
     }
 
-    /// Delete a connector (runs on shell confirmation only — clean-audit
-    /// item 140). Returns the core outcome for the shell's toast.
     pub fn delete(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::connectors::delete(conn, id));
         match &result {
@@ -246,8 +214,6 @@ impl ConnectorsPage {
         result.map(|_| ())
     }
 
-    /// Refresh one connector on a background thread (the async route
-    /// handler, minus HTTP).
     pub fn refresh(&mut self, db: &DbHandle, id: i64) {
         let db = db.clone();
         let data_dir = self.data_dir.clone().unwrap_or_else(std::env::temp_dir);
@@ -267,9 +233,6 @@ impl ConnectorsPage {
         self.message = Some("refresh started".into());
     }
 
-    /// Render the page. Returns a confirm request when the user asked to
-    /// delete a connector (clean-audit item 140 — the delete itself runs
-    /// only after the shell dialog confirms).
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
@@ -286,7 +249,6 @@ impl ConnectorsPage {
                 {
                     self.show_new = !self.show_new;
                 }
-                // A-6: the result count beside the header actions.
                 design::page_counter(ui, &format!("{} connectors", self.connectors.len()));
             },
         );
@@ -329,8 +291,6 @@ impl ConnectorsPage {
                                 picked = Some(id);
                             }
                             ui.monospace(egui::RichText::new(kind).color(t.muted_foreground));
-                            // The lab's health cell: the DS-C-06 state dot
-                            // + the raw-token badge.
                             ui.horizontal(|ui| {
                                 design::status_dot(ui, health_tone(&health), false);
                                 design::badge(ui, &health, health_tone(&health));
@@ -363,9 +323,6 @@ impl ConnectorsPage {
                     },
                 );
             });
-        // The lab's A-5 receipt: the rows/refresh/delete triple collapsed
-        // to refresh + delete — the connector chip opens the rows viewer
-        // below (no workflow step lost).
         design::quirk(
             ui,
             "A-5 (DS-0): the rows/refresh/delete triple collapsed to refresh \
@@ -379,8 +336,6 @@ impl ConnectorsPage {
         if let Some(id) = refreshed {
             self.refresh(db, id);
         }
-        // Clean-audit item 140: the delete arms the shell dialog instead
-        // of running unconfirmed.
         let nav = deleted
             .map(|(id, name)| NavRequest::Confirm(ConfirmRequest::delete_connector(id, &name)));
 
@@ -441,8 +396,6 @@ impl ConnectorsPage {
     fn new_connector_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card(ui, |ui| {
             design::section_title(ui, "New Connector");
-            // Every input binds its visible label (RS-18 wave-wide a11y
-            // rule — egui never reads a preceding label on its own).
             design::form_grid(ui, "connector-new", |ui| {
                 let name_label = design::field_label(ui, "name:");
                 ui.add_sized(
@@ -544,7 +497,6 @@ mod tests {
         page.create(&db);
         assert!(page.error.is_none());
 
-        // The successful create clears the form; retype the same name.
         page.new_name = "Same".into();
         page.create(&db);
         let error = page.error.clone().expect("duplicate rejected");

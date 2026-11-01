@@ -1219,10 +1219,6 @@ mod batch30_tests {
         )
     }
 
-    /// Audit item 114: every operator ran the same unanchored
-    /// `LIKE %@{domain}%` — `example.com.au` matched an `example.com`
-    /// filter and `not_equals` returned the equals set. The domain part
-    /// is now extracted and each operator applies to it.
     #[test]
     fn email_domain_filter_honors_the_operator_and_anchors_the_tail() {
         let conn = db();
@@ -1244,17 +1240,13 @@ mod batch30_tests {
             v
         };
 
-        // equals: the domain part must equal the value exactly — the .au
-        // address no longer matches, and neither does the subdomain.
         assert_eq!(
             sorted(contact_ids(&conn, "email_domain", "equals", "example.com")),
             vec![exact],
             "exact domain match: user@example.com only"
         );
-        // The unanchored pre-fix bug: admin@example.com.au must NOT match.
         assert!(!contact_ids(&conn, "email_domain", "equals", "example.com").contains(&tld));
 
-        // ends_with: subdomains included (their domain ends with the value).
         assert_eq!(
             sorted(contact_ids(
                 &conn,
@@ -1265,8 +1257,6 @@ mod batch30_tests {
             sorted(vec![exact, sub]),
         );
 
-        // contains: substring semantics on the domain part — the .au
-        // domain contains "example.com".
         assert_eq!(
             sorted(contact_ids(
                 &conn,
@@ -1277,16 +1267,11 @@ mod batch30_tests {
             sorted(vec![exact, sub, tld]),
         );
 
-        // starts_with: "ex" prefixes "example.com" and "example.com.au",
-        // but not the subdomain "mail.example.com".
         assert_eq!(
             sorted(contact_ids(&conn, "email_domain", "starts_with", "ex")),
             sorted(vec![exact, tld]),
         );
 
-        // not_equals: everyone whose domain is not exactly example.com —
-        // the .au address, the subdomain, the other org, and the customer
-        // with no email at all.
         assert_eq!(
             sorted(contact_ids(
                 &conn,
@@ -1298,8 +1283,6 @@ mod batch30_tests {
             "customers without the exact domain match, including the one with no email"
         );
 
-        // is_empty / is_not_empty: previously unreachable — the op was
-        // ignored and the LIKE ran instead.
         assert_eq!(
             contact_ids(&conn, "email_domain", "is_empty", ""),
             vec![no_email]

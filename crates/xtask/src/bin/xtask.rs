@@ -11,34 +11,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Run the native shell (egui) in debug mode.
     Dev,
     Lint,
     VerifyIcons,
-    /// Build the release shell and pack it into a type-2 AppImage.
     Package {
-        /// Output directory (default: target/appimage).
         #[arg(long, default_value = "target/appimage")]
         out: String,
-        /// Path to an existing appimagetool (downloaded when absent).
         #[arg(long, env = "APPIMAGETOOL")]
         appimagetool: Option<String>,
-        /// Skip the cargo release build (the binary already exists).
         #[arg(long)]
         skip_build: bool,
-        /// Extra arguments forwarded to `cargo build`.
         #[arg(last = true)]
         args: Vec<String>,
     },
-    /// Build the release shell and pack it into a .deb package.
     Deb {
-        /// Output directory (default: target/deb).
         #[arg(long, default_value = "target/deb")]
         out: String,
-        /// Skip the cargo release build (the binary already exists).
         #[arg(long)]
         skip_build: bool,
-        /// Extra arguments forwarded to `cargo build`.
         #[arg(last = true)]
         args: Vec<String>,
     },
@@ -62,12 +52,9 @@ enum Cmd {
         #[arg(long, default_value_t = default_db_path_str())]
         db: String,
     },
-    /// Count vector-store chunks and evaluate the D4 sqlite-vec gate (< 100k = GO).
     VectorCount {
-        /// App data directory hosting the sqlite-vec vector store.
         #[arg(long, default_value_t = default_data_dir_str())]
         data_dir: String,
-        /// Optional SQLite database path for a chunk-row cross-check.
         #[arg(long)]
         db: Option<String>,
     },
@@ -159,8 +146,6 @@ fn run_package(
     skip_build: bool,
     extra_args: &[String],
 ) -> anyhow::Result<()> {
-    // Row 7: the Tauri bundler (deb/msi/nsis/dmg/app) is gone; the Linux
-    // desktop artifact is a single type-2 AppImage via appimagetool.
     let out = spp_xtask::package::package(spp_xtask::package::PackageOptions {
         workspace_root: workspace_root(),
         out_dir: workspace_root().join(out_dir),
@@ -173,8 +158,6 @@ fn run_package(
 }
 
 fn run_deb(out_dir: &str, skip_build: bool, extra_args: &[String]) -> anyhow::Result<()> {
-    // Debian policy naming: <package>_<version>_<arch>.deb, produced by
-    // `dpkg-deb --root-owner-group` from the staged tree.
     let out = spp_xtask::package::package_deb(spp_xtask::package::DebOptions {
         workspace_root: workspace_root(),
         out_dir: workspace_root().join(out_dir),
@@ -245,11 +228,6 @@ fn default_data_dir_str() -> String {
         .into_owned()
 }
 
-/// Audit (low): the db-ops subcommands used to default to
-/// `./data/supportos.db`, while the app creates `supportos-plus.db`
-/// (config::DB_FILE_NAME) inside its default data dir — every default-path
-/// migrate/backup/restore/healthcheck quietly targeted a file the app
-/// never uses. One shared resolver keeps both on the same source of truth.
 fn default_db_path_str() -> String {
     std::path::Path::new(&default_data_dir_str())
         .join(spp_core::config::DB_FILE_NAME)

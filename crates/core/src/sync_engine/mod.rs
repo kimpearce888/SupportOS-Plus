@@ -11,13 +11,6 @@ use crate::helpscout::{
 };
 use crate::mirror;
 
-// Removed from the sweep by design (R6, honest stubs):
-//   chats, attachments, ratings — Help Scout exposes no list endpoints for
-//   Beacon chats (id-only, `GET /v2/chats/{id}`) or ratings (id-only,
-// `GET /v2/ratings/{id}`); they arrive through webhooks and are fetched by
-// id. Attachment metadata rows are hydrated during thread ingestion and
-// downloads go through the `download_recent_attachments` job, so a sweep
-// stage for them is a no-op by definition.
 mod loops;
 
 pub const INITIAL_SYNC_ORDER: [&str; 19] = [
@@ -82,17 +75,9 @@ pub struct ReconciliationResult {
 }
 
 fn now_iso() -> String {
-    // Help Scout's list endpoints reject RFC 3339 with sub-second precision
-    // or a +00:00 offset ("Invalid date - expected ISO 8601 format
-    // (yyyy-MM-dd'T'HH:mm:ss'Z')"). Format exactly as the API demands.
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// Clears the engine's `running` flag when dropped — panic-safe, unlike
-/// the manual trailing store it replaces. A panic between the
-/// `compare_exchange` and the end of the run used to leave
-/// `running == true` forever, after which every trigger answered
-/// "A sync is already running" and the shell showed a phantom sync.
 struct RunningGuard<'a>(&'a AtomicBool);
 
 impl Drop for RunningGuard<'_> {
@@ -101,12 +86,6 @@ impl Drop for RunningGuard<'_> {
     }
 }
 
-/// Boot recovery for a state machine stranded mid-flight: if the app
-/// died during an initial/backfill sync, `sync_state` stays
-/// `INITIALIZING`/`BACKFILLING` forever and the auto-sync timer skips
-/// itself for eternity (workers.rs reads the state before every tick).
-/// Recovery rule: any finished run on record means the account has data
-/// → `CATCHING_UP` (incremental); otherwise → `NEW` (initial again).
 pub fn recover_interrupted_state(conn: &Connection) -> bool {
     let state = get_state(conn);
     if state != "INITIALIZING" && state != "BACKFILLING" {
@@ -134,16 +113,6 @@ pub fn recover_interrupted_state(conn: &Connection) -> bool {
     true
 }
 
-/// Close the `sync_runs` rows the same unclean shutdown strands. A run
-/// killed mid-flight keeps its row in `INITIALIZING`/`BACKFILLING`
-/// forever — one machine collected seventeen of them, so the Sync
-/// reports list read as if nothing ever finished. Called at worker
-/// start only (no sync can be running yet), so every unfinished row is
-/// by definition an orphan from a dead process; the row the *current*
-/// engine is about to create is written afterwards, fresh.
-///
-/// # Errors
-/// Propagates the sqlite write failure (the caller logs it and moves on).
 pub fn cancel_orphaned_runs(conn: &Connection) -> Result<usize> {
     let n = conn.execute(
         "UPDATE sync_runs SET state = 'CANCELLED', finished_at = datetime('now') \
@@ -163,24 +132,6 @@ pub fn cancel_orphaned_runs(conn: &Connection) -> Result<usize> {
     Ok(n)
 }
 
-/// R2 (D1): the watermark-integrity policy for a provider transition.
-///
-/// Called exactly once per boot (and once per in-session activation)
-/// with the kind that was active *before* the change and the kind that
-/// is active now:
-///
-/// * `empty → real`: the previous session ran against the inert
-///   provider. Any `LIVE`/`CATCHING_UP` state and every checkpoint it
-///   stamped describe a zero-record account, so the engine forgets
-///   them: `sync_state` resets to `NEW` and the full initial sync runs
-///   on the next tick. Without this, a pre-1.4.0 install that was
-///   poisoned while disconnected would stay "up to date" forever.
-/// * `real → empty`: informational only; the mirror is preserved and
-///   the R2 engine guard stops the empty provider from advancing
-///   anything.
-/// * same-kind transitions: no-op.
-///
-/// Returns the state the machine ended in (for tests and diagnostics).
 pub fn on_provider_kind_transition(
     conn: &Connection,
     previous: Option<&str>,
@@ -324,9 +275,6 @@ pub fn record_failure(conn: &Connection, resource: &str, error: &str, records_fa
            last_error = excluded.last_error, retry_count = retry_count + 1, status = 'error'",
         params![resource, records_failed, clipped],
     );
-    // 1.2.0: every resource failure also lands in the Diagnostics log
-    // (application_errors) so the user can see *why* nothing is syncing
-    // from Settings → Diagnostics instead of a stdout log they never see.
     let _ = crate::audit::log_event(
         conn,
         "error",
@@ -360,7 +308,6 @@ pub fn get_incremental_since(
         .flatten()?;
     let t = chrono::DateTime::parse_from_rfc3339(last.as_deref().unwrap_or_default()).ok()?;
     let shifted = t - chrono::Duration::minutes(overlap_minutes);
-    // Same format contract as now_iso(): seconds precision, literal Z.
     Some(shifted.format("%Y-%m-%dT%H:%M:%SZ").to_string())
 }
 
@@ -374,8 +321,6 @@ pub fn last_successful_sync(conn: &Connection) -> Option<String> {
     .flatten()
 }
 
-/// How long ago the last successful sync completed, in whole seconds
-/// (R8 freshness ring). `None` means "never synced".
 #[must_use]
 pub fn last_sync_age_seconds(conn: &Connection) -> Option<i64> {
     let last = last_successful_sync(conn)?;
@@ -403,9 +348,6 @@ pub fn set_cursor(conn: &Connection, resource: &str, cursor: Option<&str>) {
     );
 }
 
-/// Audit fix (C2, live): Docs API ids are 24-char hex ObjectIds — the
-/// docs mirror's `remote_id` columns store them as TEXT (SQLite is
-/// dynamically typed; the INTEGER affinity keeps legacy integer rows too).
 pub fn local_id_str(conn: &Connection, table: &str, remote_id: &str) -> Option<i64> {
     conn.query_row(
         &format!("SELECT id FROM {table} WHERE remote_id = ?1"),
@@ -538,15 +480,6 @@ pub fn upsert_workflow(conn: &Connection, w: &crate::helpscout::HsWorkflow) -> R
     Ok(())
 }
 
-/// Clean-audit item 91: platform-side deletions propagate. These mirrors
-/// are full-list resources — a row whose remote id is absent from the
-/// platform's (complete, successfully fetched) list was deleted up there,
-/// so it is stamped deleted locally instead of serving it forever. The
-/// empty list is deliberately NOT a wipe signal (a degraded or
-/// permission-downgraded answer must not blank the mirror); a genuinely
-/// emptied platform leaves stale rows until the resource returns data.
-/// Soft-deleted rows come back to life on the next listing (the upserts
-/// clear `deleted_at`).
 fn prune_missing_rows(conn: &Connection, table: &str, seen: &[i64]) -> Result<u64> {
     if seen.is_empty() {
         return Ok(0);
@@ -735,8 +668,6 @@ fn rechunk_doc_article(
     Ok(())
 }
 
-/// C1: hex SHA-256 of the thread's serialized content — see
-/// `upsert_thread`.
 fn sha256_hex(data: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(data);
@@ -744,11 +675,6 @@ fn sha256_hex(data: &[u8]) -> String {
 }
 
 fn upsert_thread(conn: &Connection, conversation_local: i64, t: &HsThread) -> Result<()> {
-    // C1: content hash of the ingested thread, written on insert AND on
-    // every in-place re-sync update (edited body, state flip, moved
-    // conversation). The analysis-cache signature folds these hashes
-    // in, so an in-place edit invalidates cached analyses instead of
-    // serving stale ones forever.
     let raw_json_hash = sha256_hex(serde_json::to_string(t).unwrap_or_default().as_bytes());
     let from_type: &str = if t.created_by_customer_id.is_some() {
         "customer"
@@ -1024,10 +950,6 @@ impl SyncEngine {
         }
     }
 
-    /// Emit an [`crate::events::ServerEvent::ErrorOccurred`] to the bus
-    /// (v1.4.0 R5, D4): background failures used to land only in the
-    /// Diagnostics log, so a failing sync or a dead resource looked
-    /// exactly like a healthy quiet one everywhere else.
     fn emit_error(
         &self,
         severity: &str,
@@ -1046,16 +968,6 @@ impl SyncEngine {
         }
     }
 
-    /// R2 (D1): every sync entry point refuses to run against the empty
-    /// provider. Before this guard, a fresh install without credentials
-    /// ran "successful" zero-record syncs every minute: checkpoints
-    /// stamped forward, `sync_state` flipped to LIVE, and when real
-    /// credentials finally arrived the engine believed the account was
-    /// already synchronized and only pulled a ten-minute incremental
-    /// window — the entire history never arrived. The guard keeps that
-    /// poisoning from ever starting, and the transition policy in
-    /// [`on_provider_kind_transition`] repairs a state that already
-    /// carries poisoned watermarks (a pre-1.4.0 install).
     fn guard_provider_connected(&self) -> Result<()> {
         if self.provider.kind() == "empty" {
             return Err(Error::Other(
@@ -1068,12 +980,6 @@ impl SyncEngine {
         Ok(())
     }
 
-    /// Mid-run progress heartbeat. Before 1.3.0 the engine was silent
-    /// until the very end of a run: pages cached their snapshots, so a
-    /// multi-hour initial sync looked like a dead "in progress" list
-    /// even while rows landed. Every event triggers a repaint through
-    /// the bridge, so Sync Health now shows live X-of-Y progress and
-    /// the inbox streams conversations in as they ingest.
     fn emit_progress(
         &self,
         stage: &str,
@@ -1117,13 +1023,6 @@ impl SyncEngine {
         }
     }
 
-    /// Refresh ONLY the Help Center mirror (collections + articles) —
-    /// the Knowledge page's "Sync Help Center now" button runs this
-    /// instead of a full engine pass. Emits `SyncCompleted("docs", ...)`
-    /// so the page reloads itself when the articles land.
-    ///
-    /// `trigger` (audit item 23) says who started the run; the shell only
-    /// toasts completions the user asked for.
     pub async fn sync_docs_only(
         &self,
         trigger: crate::events::SyncTrigger,
@@ -1141,10 +1040,6 @@ impl SyncEngine {
             let conn = self.lock();
             start_run(&conn, "docs")?
         };
-        // R5 (D15): a missing Docs API key used to degrade to a silent
-        // empty Help Center (one buried warn in the log). Say it live on
-        // the bus instead so the Knowledge page banner and a toast can
-        // explain the zeros.
         if !self.provider.docs_configured() {
             self.emit_error(
                 "warn",
@@ -1228,9 +1123,6 @@ impl SyncEngine {
         Ok(results)
     }
 
-    /// Backfill threads for conversations whose thread list is empty
-    /// locally (crashed run, hard rate limit mid-walk). Bounded per pass;
-    /// the next pass continues where this one stopped.
     async fn sync_missing_threads(&self) -> Result<ResourceSyncResult> {
         let resource = "threads".to_string();
         let candidates: Vec<(i64, i64)> = {
@@ -1266,13 +1158,6 @@ impl SyncEngine {
                     soft_delete_by_remote_id(&conn, remote)?;
                 }
                 Err(e) => {
-                    // A single unreachable conversation must not fail the
-                    // pass — but it must be COUNTED (clean-audit item 89:
-                    // the pre-fix pass hardcoded failed: 0 with error: None,
-                    // so the caller's record_success stamped 'ok' over the
-                    // per-row record_failure and the run's error count
-                    // never saw these). The resource-level bookkeeping in
-                    // the caller records the summarized failure once.
                     failed += 1;
                     tracing::warn!(
                         conversation_remote = remote,
@@ -1293,9 +1178,6 @@ impl SyncEngine {
         })
     }
 
-    /// `trigger` (audit item 23) says who started the run — the shell's
-    /// completion toast only fires for user-initiated runs, so the
-    /// adaptive auto-sync timer no longer toasts ~once a minute.
     pub async fn initial_sync(
         &self,
         trigger: crate::events::SyncTrigger,
@@ -1315,22 +1197,12 @@ impl SyncEngine {
             set_state(&conn, "INITIALIZING");
             start_run(&conn, "initial")?
         };
-        // 1.7.3: the initial pull's long stages (customers, conversations)
-        // used to run in total terminal silence — the run-row counter only
-        // moves when a whole resource completes — so a healthy crawl looked
-        // exactly like a frozen one and the app kept getting closed mid-run
-        // (nine INITIALIZING runs on one machine, four at the identical
-        // record count). Every resource now announces itself, and the two
-        // multi-minute crawls emit a heartbeat every few hundred records.
         tracing::info!(
             resources = INITIAL_SYNC_ORDER.len(),
             "initial pull started — long stages emit a heartbeat every few hundred records and can take an hour or more on large accounts; leave the app running until 'Initial sync finished' appears"
         );
         let mut results: Vec<ResourceSyncResult> = Vec::new();
         let outcome: Result<()> = async {
-            // R5 (D15): same honest docs-key warning as the docs-only
-            // pass, so the first full sync explains an empty Help Center
-            // instead of silently mirroring zero articles.
             if !self.provider.docs_configured() {
                 self.emit_error(
                     "warn",
@@ -1444,9 +1316,6 @@ impl SyncEngine {
                         },
                     );
                 }
-                // Live progress: one event per resource so Sync Health and
-                // the inbox track the run instead of freezing on a stale
-                // snapshot until the terminal event.
                 self.emit_progress(
                     &stage,
                     results.len() as u32,
@@ -1459,16 +1328,6 @@ impl SyncEngine {
             let failed = results.iter().filter(|r| r.error.is_some()).count() as i64;
             {
                 let conn = self.lock();
-                // Clean-audit item 88: a cancelled initial sync used to fall
-                // through to the same verdict as a completed one — a
-                // mid-run cancel with zero resource errors was stamped
-                // LIVE (and the run row "finished, LIVE"), so the
-                // auto-sync timer never re-ran the initial pass and the
-                // thread-less conversations the cancel stranded were
-                // never backfilled. A cancelled run now records the
-                // partial truth: the mirror is CATCHING_UP (incrementals
-                // — which run the threads backfill too — drain it), and
-                // the run row says CANCELLED.
                 let new_state = if cancelled {
                     "CATCHING_UP"
                 } else if failed == 0 {
@@ -1506,11 +1365,6 @@ impl SyncEngine {
                 if n > 0 {
                     tracing::debug!(conversations = n, "interaction snapshots built");
                 }
-                // Audit fix (C3): the FTS corpus was NEVER built in production
-                // — a `rebuild_search_index` handler existed but nothing ever
-                // enqueued it, so Search stayed at 0 hits forever against a
-                // real account (fts_conversations = 0 rows after 2h of live
-                // syncing). Queue the rebuild after every initial pass.
                 if !cancelled {
                     let already: bool = conn
                         .query_row(
@@ -1569,9 +1423,6 @@ impl SyncEngine {
         Ok(results)
     }
 
-    /// `trigger` (audit item 23) says who started the run — the shell's
-    /// completion toast only fires for user-initiated runs, so the
-    /// adaptive auto-sync timer no longer toasts ~once a minute.
     pub async fn incremental_sync(
         &self,
         trigger: crate::events::SyncTrigger,
@@ -1595,8 +1446,6 @@ impl SyncEngine {
         };
         let mut results: Vec<ResourceSyncResult> = Vec::new();
         let outcome: Result<()> = async {
-            // +3 beyond the reference set: customers, conversations, and
-            // the threads backfill (clean-audit item 88 — see below).
             let total = INCREMENTAL_REFERENCE_ORDER.len() as u32 + 3;
             for resource in INCREMENTAL_REFERENCE_ORDER {
                 if self.cancelled() {
@@ -1648,13 +1497,6 @@ impl SyncEngine {
                 );
             }
             {
-                // Clean-audit item 88: the threads backfill used to run
-                // only inside the initial sync — a cancelled or crashed
-                // first run left its thread-less conversations stranded
-                // forever, because nothing ever re-ran the bounded pass.
-                // It now rides every incremental too, so the backlog
-                // drains at the sync cadence (200 conversations/pass,
-                // same bound as the initial path).
                 let r = self.sync_missing_threads().await;
                 let stage_records = r.as_ref().map_or(0, |x| x.processed).max(0) as u32;
                 let _ = self.finish_resource("threads", r, &mut results);
@@ -1688,10 +1530,6 @@ impl SyncEngine {
             let processed: i64 = results.iter().map(|r| r.processed).sum();
             {
                 let conn = self.lock();
-                // Audit fix (C3): incremental passes change conversations and
-                // threads too — keep the FTS corpus fresh after every pass
-                // (the per-conversation index-at-ingest below covers most of
-                // it; this sweep is the safety net for gap-filling).
                 let already: bool = conn
                     .query_row(
                         "SELECT 1 FROM jobs WHERE type = 'rebuild_search_index'
@@ -1789,8 +1627,6 @@ mod tests {
     fn orphaned_run_rows_are_cancelled_after_an_unclean_shutdown() {
         let db = temp_db();
         db.with_write(|conn| {
-            // Two zombies (a killed initial and a killed incremental) and
-            // one finished run for contrast.
             let a = start_run(conn, "initial").expect("run a");
             let _b = start_run(conn, "incremental").expect("run b");
             let _c = start_run(conn, "incremental").expect("run c");
@@ -1826,8 +1662,6 @@ mod tests {
             assert!(states[1].2.is_some(), "zombies get a finished_at");
             assert_eq!(states[2].1, "CANCELLED");
 
-            // Idempotent: a second sweep has nothing left to close, and
-            // the closure was announced in the diagnostics event log.
             assert_eq!(cancel_orphaned_runs(conn).expect("sweep again"), 0);
             let events = crate::audit::list_recent_events(conn, 10, Some("info")).expect("events");
             assert!(
@@ -1843,7 +1677,6 @@ mod tests {
     #[test]
     fn r2_engine_refuses_every_sync_against_the_empty_provider() {
         let db = temp_db();
-        // Poison the state the way a pre-1.4.0 install would have been.
         db.with_write(|conn| {
             set_state(conn, "LIVE");
         });
@@ -1871,8 +1704,6 @@ mod tests {
         );
         assert!(rt.block_on(engine.reconcile()).is_err());
 
-        // The poisoned state and the checkpoints are untouched by the
-        // refusals: no run rows, no watermark movement.
         let (state, runs, checkpoints) = db.with_read(|conn| {
             (
                 get_state(conn),
@@ -1936,8 +1767,6 @@ mod r8_freshness_tests {
         conn
     }
 
-    /// R8 (D10): the header ring's data source — an ok checkpoint stamps
-    /// a fresh age, a database with none reports "never".
     #[test]
     fn last_sync_age_reflects_the_newest_ok_checkpoint() {
         let conn = temp_conn();
@@ -1959,7 +1788,6 @@ mod r8_freshness_tests {
             "a just-stamped checkpoint is at most 2 s old: {age}"
         );
 
-        // A second, older checkpoint must not win the MAX().
         let older = (chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339();
         conn.execute(
             "INSERT INTO sync_checkpoints (resource, status, last_success_at)

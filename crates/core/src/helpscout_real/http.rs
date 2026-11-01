@@ -47,10 +47,6 @@ impl RealHelpScoutProvider {
         .into())
     }
 
-    /// K3: the Docs API write path - POST/PUT with a JSON body under the
-    /// same Basic-auth envelope and error mapping as the GET side. A 2xx
-    /// with an empty body (204) is `Ok(Value::Null)`; the caller decides
-    /// what a missing payload means.
     pub(super) async fn docs_request_send(
         &self,
         method: &str,
@@ -120,12 +116,9 @@ impl RealHelpScoutProvider {
         .into())
     }
 
-    /// Map a Docs API article value onto the mirror struct (shared by the
-    /// K3 verify fetch; the list path keeps its ref-merge mapping).
     pub(super) fn doc_article_from_value(remote_id: String, article: &Value) -> HsDocArticle {
         HsDocArticle {
             remote_id,
-            // Audit fix (C2, live): Docs ids are hex ObjectIds — read as strings.
             collection_id: article["collectionId"]
                 .as_str()
                 .unwrap_or_default()
@@ -151,12 +144,6 @@ impl RealHelpScoutProvider {
             ensure_account_row(&conn);
             token_row(&conn)
         };
-        // 1.2.0: credentials alone are enough to connect. When no token
-        // exists yet (or the stored one is empty), sign in with the
-        // client-credentials grant instead of failing with a bare 401 —
-        // before this, a user who saved their Client ID/Secret but never
-        // pressed Connect saw every API call fail and nothing arrive
-        // from the account.
         let Some(row) = row else {
             return match self.client_credentials_login_if_configured().await {
                 Ok(token) => Ok(token),
@@ -179,9 +166,6 @@ impl RealHelpScoutProvider {
             .into());
         }
         if row.access_token.as_deref().unwrap_or("").is_empty() {
-            // A stored row without a usable access token: the OAuth flow
-            // was started but never completed. The client-credentials
-            // grant can still connect the account.
             return match self.client_credentials_login_if_configured().await {
                 Ok(token) => Ok(token),
                 Err(_) => Err(HsApiError {
@@ -208,20 +192,12 @@ impl RealHelpScoutProvider {
         {
             return Ok(token);
         }
-        // The refresh grant failed (or the token came from the
-        // client-credentials grant, which has no refresh token):
-        // re-login with the stored credentials keeps long-running
-        // installs connected instead of decaying into 401s after two days.
         if let Ok(token) = self.client_credentials_login_if_configured().await {
             return Ok(token);
         }
         Ok(row.access_token.unwrap_or_default())
     }
 
-    /// Sign in with the client-credentials grant when a Client ID/Secret
-    /// pair is stored; `Err` when credentials are incomplete (the caller
-    /// decides how to surface that). Successes and failures are recorded
-    /// in the Diagnostics log so the connection is observable.
     async fn client_credentials_login_if_configured(&self) -> Result<String> {
         if !self.credentials.is_configured() {
             return Err(crate::error::Error::Config(
@@ -307,21 +283,10 @@ impl RealHelpScoutProvider {
         let expires_iso = expires_at.to_rfc3339();
         let conn = self.conn_lock();
         ensure_account_row(&conn);
-        // 1.4.0 R7 (D13): tokens are sealed into the AES-256-GCM envelope —
-        // the plaintext never enters the database. The row keeps metadata
-        // only (grant shape, expiry, scope, revoked). A refresh grant without
-        // a new refresh token preserves the stored one (COALESCE semantics).
         crate::settings::set_secret(&conn, SECRET_OAUTH_ACCESS, access_token.as_bytes())?;
         if let Some(refresh) = refresh_token.filter(|r| !r.is_empty()) {
             crate::settings::set_secret(&conn, SECRET_OAUTH_REFRESH, refresh.as_bytes())?;
         }
-        // The migrations schema pins `id INTEGER PRIMARY KEY CHECK (id = 1)`,
-        // so the row id must be supplied explicitly as 1. Without it, SQLite
-        // evaluates the CHECK on the auto-assigned rowid (2 for the second
-        // save) *before* the ON CONFLICT(account) arbitration runs, and every
-        // token refresh fails with "CHECK constraint failed: id = 1"
-        // (inherited from the original codebase; caught by the mock-server
-        // integration tests in it_helpscout.rs).
         conn.execute(
             "INSERT INTO oauth_tokens (id, account, access_token, refresh_token, token_type, expires_at, obtained_at, scope, revoked)
              VALUES (1, 'default', '', NULL, 'bearer', ?1, datetime('now'), ?2, 0)
@@ -378,8 +343,6 @@ impl RealHelpScoutProvider {
     pub fn revoke(&self) -> Result<()> {
         let conn = self.conn_lock();
         ensure_account_row(&conn);
-        // The tokens leave the envelope entirely — revocation must not leave
-        // readable material behind (R7/D13).
         let _ = crate::settings::delete_secret(&conn, SECRET_OAUTH_ACCESS);
         let _ = crate::settings::delete_secret(&conn, SECRET_OAUTH_REFRESH);
         conn.execute(
@@ -434,15 +397,6 @@ impl RealHelpScoutProvider {
         body: Option<Value>,
         retries_left: u32,
     ) -> Result<Value> {
-        // A3/B2: replay safety. Requests that converge to the same result
-        // when replayed (GET/PUT/PATCH/DELETE — reads and full-replace or
-        // single-op updates in the Help Scout API) may be auto-retried
-        // after an ambiguous outcome. POSTs here create resources (reply
-        // threads, notes, conversations, saved replies): a replayed POST
-        // can double-deliver, so an ambiguous POST failure must surface
-        // instead of being silently retried here AND re-queued by the job
-        // layer — the customer could otherwise receive the same reply
-        // twice.
         let idempotent = !method.eq_ignore_ascii_case("POST");
         let token = self.access_token().await?;
         let url = format!("{}{path}", self.api_base);
@@ -464,12 +418,6 @@ impl RealHelpScoutProvider {
             Ok(r) => r,
             Err(e) => {
                 let msg = e.to_string();
-                // A3/B2: connect-phase failures (DNS, refused, TLS
-                // handshake) provably never reached the server — always
-                // safe to replay. Anything else (read timeout after the
-                // request went out, broken pipe mid-body) is ambiguous for
-                // creates: the server may have processed the request, so
-                // a POST is never replayed in-client.
                 let never_delivered = e.is_connect();
                 if retries_left > 0 && (never_delivered || idempotent) {
                     tokio::time::sleep(Duration::from_millis(1_500)).await;
@@ -484,9 +432,6 @@ impl RealHelpScoutProvider {
                     } else {
                         "Delivery could not be confirmed - the request was NOT re-sent automatically to avoid duplicates. Check the conversation on the platform before retrying.".into()
                     },
-                    // A3/B2: only provably-undelivered failures (and
-                    // replay-safe methods) may be re-queued by the job
-                    // layer; ambiguous create failures must not.
                     retryable: never_delivered || idempotent,
                 }
                 .into());
@@ -548,10 +493,6 @@ impl RealHelpScoutProvider {
         }
 
         if status == 429 {
-            // Audit (low): the ceiling used to be 60s — a genuine
-            // `Retry-After: 240` was ignored and the request retried early
-            // (then 429'd again). Honor the header up to a still-bounded
-            // 5 minutes.
             let retry_after = retry_after_hdr.filter(|s| *s > 0).unwrap_or(30).min(300);
             self.limiter.record_error_429(Some(retry_after));
             if retries_left > 0 {
@@ -563,19 +504,12 @@ impl RealHelpScoutProvider {
             }
         }
 
-        // A3/B2: 5xx answers are ambiguous for creates (the server may
-        // have persisted and failed answering) — only replay-safe methods
-        // retry in-client here; a POST surfaces to the job layer as a
-        // non-retryable, honestly-described failure.
         if is_retryable(status) && retries_left > 0 && status != 429 && idempotent {
             tokio::time::sleep(Duration::from_secs(2)).await;
             return Box::pin(self.request_inner(path, method, body, retries_left - 1)).await;
         }
 
         if (200..300).contains(&status) {
-            // Thread-creating endpoints answer 201 with an empty body and
-            // the new resource id in the Resource-Id header. Surface it as
-            // `resourceId` so callers do not read a phantom 0.
             let resource_id = res
                 .headers()
                 .get("resource-id")
@@ -609,19 +543,11 @@ impl RealHelpScoutProvider {
         }
 
         let body_text = res.text().await.unwrap_or_default();
-        // 4,000 chars: webhook-registration rejections carry the whole
-        // accepted-events catalogue (~900 chars) and the health check
-        // reads it back out of `message` to self-heal the subscription.
-        // The user-facing `friendly` stays at 300.
         let detail: String = body_text.chars().take(4_000).collect();
         Err(HsApiError {
             status_code: status,
             message: format!("Help Scout {method} {path} -> {status}: {detail}"),
             friendly: friendly_error(status, &body_text, method),
-            // A3/B2: `retryable` means "provably safe to re-execute".
-            // 429 is never processed (safe); the retryable 5xx family is
-            // only safe to requeue for replay-safe methods — for creates
-            // it stays false so nothing blindly re-POSTs.
             retryable: is_retryable(status)
                 && (status == 429 || idempotent)
                 && !matches!(status, 400 | 401 | 403 | 404 | 409 | 412 | 413 | 415 | 423),

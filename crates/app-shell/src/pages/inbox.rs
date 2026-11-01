@@ -1,25 +1,3 @@
-//! Inbox page (port of the web `pages/inbox.rs`).
-//!
-//! The list and detail read through the typed core functions
-//! (`spp_core::inbox::list_conversations` / `get_conversation`) — the exact
-//! same queries the `/api/conversations` routes serve — so the native page
-//! shows precisely what the web page showed, without the HTTP hop.
-//!
-//! Mutations are **local-first through the durable outbound pipeline**:
-//! the HTTP ops (`op_send_reply`, `op_add_note`, `op_change_status`,
-//! `op_assign`) enqueue an `outbound_jobs` row and then call the live
-//! provider. The native port reproduces the enqueue side exactly (same
-//! kinds, payloads, and the `reply:{remote}:{send|draft}:{sha}` duplicate
-//! key) and applies the local row changes through the typed
-//! `spp_core::ticket_ops` executor, so the UI stays consistent while the
-//! queued jobs are executed by the sync/worker infrastructure that lands
-//! with the loopback-listener batch. Notes additionally create mention
-//! notifications synchronously (the same `Mentioned` records the
-//! notification sweep creates for synced notes).
-//!
-//! The composer keeps the web features: reply/internal-note tabs, cc/bcc,
-//! Ctrl+Enter send, and the `@`-mention autocomplete popup.
-
 use eframe::egui;
 use rusqlite::Connection;
 use serde_json::json;
@@ -40,7 +18,6 @@ use crate::mention_popup::{
     Directory, apply_completion, caret_query, char_index_to_byte, filter_matches,
 };
 
-/// Conversation status views offered by the filter bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewFilter {
     All,
@@ -71,7 +48,6 @@ impl ViewFilter {
     }
 }
 
-/// Editable filter-bar state (the web page's URL query params).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FilterBar {
     pub view: Option<ViewFilter>,
@@ -80,23 +56,11 @@ pub struct FilterBar {
     pub tag: Option<String>,
     pub query: Option<String>,
     pub number: Option<i64>,
-    /// Operations-tile drill-down (`unassigned`, `customer_waiting`, …).
-    /// The web operations tiles linked `/inbox?view={tile}` which the route
-    /// read as a status filter (a dead-end query); the port applies the
-    /// tile's real conversation fragment instead — the same SQL the
-    /// `/api/conversations?ops=` path compiles.
     pub ops: Option<String>,
 }
 
-/// Rows per inbox page (clean-audit item 78: the list was hard-capped
-/// at 50 with no pagination — conversation 51+ was unreachable; the cap
-/// is now a page size with prev/next controls under the list).
 pub const INBOX_PAGE_SIZE: u32 = 50;
 
-/// Parse the `#` number-filter field ("#778", "778", " 778 " → 778;
-/// anything non-numeric → None). Clean-audit item 143: the leading `#`
-/// the field's own hint suggests used to fail the parse and the number
-/// filter silently dropped.
 #[must_use]
 pub fn parse_number_entry(text: &str) -> Option<i64> {
     text.trim()
@@ -106,11 +70,6 @@ pub fn parse_number_entry(text: &str) -> Option<i64> {
         .ok()
 }
 
-/// Map the filter bar to the core `InboxFilters`.
-///
-/// The operations-tile fragment needs the waiting-threshold setting, so
-/// the bar compiles against a connection (same as the HTTP route).
-/// `page` is the 0-based list page (item 78).
 #[must_use]
 pub fn filters_from_bar(bar: &FilterBar, page: u32, conn: &rusqlite::Connection) -> InboxFilters {
     let mut filters = InboxFilters {
@@ -145,15 +104,12 @@ pub fn filters_from_bar(bar: &FilterBar, page: u32, conn: &rusqlite::Connection)
     filters
 }
 
-/// Composer mode (web: reply vs internal note tabs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComposerMode {
     Reply,
     Note,
 }
 
-/// Duplicate-send key: `reply:{remote_id}:{send|draft}:{sha256(text)[..24]}`
-/// — identical to the HTTP `op_send_reply` key.
 #[must_use]
 pub fn reply_key(remote_id: i64, draft: bool, text: &str) -> String {
     let digest = Sha256::digest(text.as_bytes());
@@ -165,9 +121,6 @@ pub fn reply_key(remote_id: i64, draft: bool, text: &str) -> String {
     )
 }
 
-/// Outcome of a composer/action submit, surfaced in the status line.
-/// 1.3.0: `Rejected` no longer masquerades as success — the caller styles
-/// it red and keeps the composer text instead of wiping it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionOutcome {
     Success(String),
@@ -187,7 +140,6 @@ impl ActionOutcome {
     }
 }
 
-/// Users available for assignment: `(id, display name)`.
 #[must_use]
 pub fn assignable_users(conn: &Connection) -> Vec<(i64, String)> {
     conn.prepare("SELECT id, first_name || ' ' || last_name FROM users ORDER BY id")
@@ -202,7 +154,6 @@ pub fn assignable_users(conn: &Connection) -> Vec<(i64, String)> {
         .unwrap_or_default()
 }
 
-/// Tags offered by the tag filter.
 #[must_use]
 pub fn tag_names(conn: &Connection) -> Vec<String> {
     conn.prepare("SELECT name FROM tags ORDER BY name")
@@ -213,7 +164,6 @@ pub fn tag_names(conn: &Connection) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Insert a local note thread row (the row sync would bring back).
 fn insert_local_note(
     conn: &Connection,
     conversation_id: i64,
@@ -230,11 +180,6 @@ fn insert_local_note(
     Ok(conn.last_insert_rowid())
 }
 
-/// Queue an outbound job, returning its id (mirrors the HTTP ops).
-/// v1.4.0 (R4, D8): the enqueue is now a real `Result` — an INSERT
-/// failure used to return job id `0` while the composer reported
-/// success, so a reply could evaporate between the composer and the
-/// dispatcher. The caller renders the error and keeps the typed text.
 fn queue_job(
     conn: &Connection,
     kind: &str,
@@ -244,8 +189,6 @@ fn queue_job(
 ) -> Result<i64, String> {
     let id = create_outbound_job_keyed(conn, kind, payload, conversation_id, idempotency_key)
         .map_err(|e| e.to_string())?;
-    // Jobs are born "queued"; "sending" marks a provider call in flight,
-    // which only the worker/loopback batch will set.
     set_outbound_status(conn, id, "queued", None);
     Ok(id)
 }
@@ -258,10 +201,6 @@ fn guard_eval_mode(conn: &Connection) -> Result<(), String> {
     }
 }
 
-/// True when boot resolved real Help Scout credentials (boot writes the
-/// `provider_kind` setting; tests default to real). When false, every
-/// submit is rejected up front — before 1.3.0 the action silently
-/// queued into a dispatcher that did not exist and reported success.
 fn provider_connected(conn: &Connection) -> bool {
     spp_core::settings::get_string(conn, "provider_kind")
         .ok()
@@ -280,7 +219,6 @@ fn emit_updated(bus: &EventBus, conversation_id: i64, number: i64) {
     ));
 }
 
-/// The interactive inbox page state.
 pub struct InboxPage {
     pub bar: FilterBar,
     view_pick: ViewFilter,
@@ -291,8 +229,6 @@ pub struct InboxPage {
     number_edit: String,
     list: Vec<ConversationListItem>,
     total: u32,
-    /// Clean-audit item 78: the 0-based list page the pager is on
-    /// (filters reset it to 0; the pager moves it).
     page: u32,
     selected: Option<i64>,
     detail: Option<ConversationDetail>,
@@ -302,9 +238,6 @@ pub struct InboxPage {
     composer_bcc: String,
     mention_active: usize,
     mention_caret: usize,
-    /// Clean-audit item 136: last frame's composer focus, read BEFORE
-    /// the TextEdit renders so the open mention popup can consume the
-    /// arrow keys ahead of it.
     composer_focused: bool,
     users: Vec<(i64, String)>,
     mailboxes: Vec<(i64, String)>,
@@ -312,89 +245,35 @@ pub struct InboxPage {
     directory: Directory,
     status: Option<String>,
     assign_pick: Option<i64>,
-    /// v1.4.0 (R5, D16): a failed detail load used to vanish via `.ok()`
-    /// and render an empty pane; the exact error now shows in place of
-    /// the thread so the user knows what broke.
     detail_error: Option<String>,
-    /// Honest status of the user's last outbound action for this
-    /// conversation, derived from the outbound queue on every detail
-    /// reload: "Sending…", "Reply delivered", "Send failed: …".
     outbound_note: Option<(String, bool)>,
     status_message: Option<String>,
     status_is_error: bool,
-    /// Audit fix (M22): wall-clock stamp captured whenever a transient
-    /// status line is set, so a stale line (e.g. "Refreshing from Help
-    /// Scout…" after the refresh finished, or an old validation error)
-    /// expires on its own instead of sitting on screen until the user's
-    /// next action replaces it.
     status_message_at: Option<std::time::Instant>,
-    /// Copilot side panel (1.3.0): local analysis + similar issues +
-    /// suggested reply + related articles + customer history.
     copilot_open: bool,
     copilot: Option<spp_core::ai_local::CopilotReport>,
     copilot_error: Option<String>,
-    /// A2 triage-on-arrival chips (intent/urgency/sentiment/topic with
-    /// confidence, editable): attribute-backed rows from ai_attributes,
-    /// with the deterministic local analysis filling display-only gaps.
     triage: Vec<TriageChip>,
-    /// A2 "know before you reply" briefing: the customer's durable facts.
     briefing: Vec<spp_core::ai_prompts::MemoryEntry>,
-    /// The triage chip currently open for correction (A2).
     editing_chip: Option<spp_core::catalog::AiAttributeKey>,
-    /// Shared vector index (A4): lets the copilot panel's similar-issues
-    /// lane fuse FTS + sqlite-vec hits with real "semantic match" reasons.
     vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
-    /// A3: the in-flight composer-AI job the page polls every frame
-    /// (rewrite / translate / coaching review / QA AI layer). Cleared
-    /// once the job reaches a terminal state.
     pending_ai: Option<PendingComposerAi>,
-    /// A3: the persisted coaching review for the selected conversation
-    /// (`coaching_reviews` via `coaching::get`) — advisory, never blocks
-    /// a send.
     coaching_review: Option<serde_json::Value>,
-    /// A3: post-resolution QA for the selected conversation (the
-    /// deterministic layer + the on-demand AI layer when run).
     qa_review: Option<serde_json::Value>,
-    /// A3: the translate-target picker (language code).
     translate_lang: String,
-    /// A6: provenance of the AI draft currently sitting in the composer
-    /// — (ai_drafts id, original text) — so accept, edit-distance and
-    /// reject feedback record against the real row.
     inserted_draft: Option<(i64, String)>,
-    /// Cached per-view conversation totals (All/Active/Pending/Closed)
-    /// for the DS-A-05 views rail. Refreshed on list reloads — never per
-    /// frame.
     view_counts: [u32; 4],
-    /// Whether the advanced filter picks (mailbox/channel/tag) are shown
-    /// in the list head.
     show_filters: bool,
-    /// Mirror saved replies (name, insertable text) for the composer
-    /// menu (DS-C-21 tool chip).
     saved_replies: Vec<(String, String)>,
-    /// Whether the composer holds a saved draft (drives the DS-C-21
-    /// "draft saved" flag; the stash itself is clean-audit item 79).
     draft_saved: bool,
-    // ---- A5 inbox assistant (copilot chat scoped to this conversation) ----
-    /// The conversation's newest copilot session id.
     assistant_session: Option<i64>,
-    /// The assistant message log for the selected conversation.
     assistant_messages: Vec<serde_json::Value>,
-    /// The question being typed into the assistant.
     assistant_input: String,
-    /// The in-flight copilot_chat job id (polled each frame).
     assistant_pending: Option<i64>,
-    /// Last assistant error (job failure text, verbatim).
     assistant_error: Option<String>,
-    /// Clean-audit item 79: per-conversation composer drafts. Clicking
-    /// another row used to wipe the typed reply silently — the composer
-    /// state (body/cc/bcc/mode + AI-draft provenance) now travels with
-    /// its conversation and is restored on reselect. A successful submit
-    /// drops the stash (the text was sent); the stash never outlives the
-    /// session.
     drafts: std::collections::HashMap<i64, StashedDraft>,
 }
 
-/// One stashed composer draft (clean-audit item 79).
 #[derive(Debug, Clone)]
 struct StashedDraft {
     mode: ComposerMode,
@@ -404,15 +283,6 @@ struct StashedDraft {
     inserted_draft: Option<(i64, String)>,
 }
 
-/// One in-flight composer-AI job the inbox polls (A3/A6). Jobs carry
-/// their results in durable rows (`ai_runs` response JSON or
-/// `coaching_reviews` / `post_resolution_qa`), so the poll only needs the
-/// job row's terminal state — never a fabricated interim value.
-///
-/// `origin_body` is the composer text at enqueue time (clean-audit item
-/// 73): a rewrite/translate result may only replace the composer when
-/// the user typed nothing while the job ran — in-flight edits are never
-/// clobbered by a finishing transform.
 #[derive(Debug, Clone)]
 struct PendingComposerAi {
     job_id: i64,
@@ -421,8 +291,6 @@ struct PendingComposerAi {
     origin_body: String,
 }
 
-/// One editable triage chip (A2). Attribute-backed chips open a vocab
-/// row on click and write a human-sourced ai_attributes row.
 #[derive(Clone)]
 struct TriageChip {
     key: spp_core::catalog::AiAttributeKey,
@@ -430,7 +298,6 @@ struct TriageChip {
     value: String,
     confidence: String,
     source: String,
-    /// Heuristic-only chips (no attribute backing) are display-only.
     editable: bool,
 }
 
@@ -493,8 +360,6 @@ impl InboxPage {
         }
     }
 
-    /// A4: receive the shared vector index (the same store the workers
-    /// embed into) so the copilot panel can fuse FTS + sqlite-vec.
     pub fn set_vector_index(
         &mut self,
         index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
@@ -502,15 +367,6 @@ impl InboxPage {
         self.vector_index = index;
     }
 
-    /// Live-update invalidation: clear the cached list; the detail is
-    /// reloaded (selection preserved) on the next frame. Before 1.3.0
-    /// this nulled the open conversation on every sync event, so the
-    /// pane flashed to "Select a conversation" right after sending.
-    /// Clean-audit item 137: the filter/assign refs (users, mailboxes,
-    /// tags, the mention directory) loaded once per session — new
-    /// teammates, mailboxes and tags a sync brought in never reached the
-    /// dropdowns until restart. Invalidation clears the refs caches too;
-    /// the next frame's empty-gate reloads them.
     pub fn invalidate(&mut self) {
         self.list.clear();
         self.detail = None;
@@ -551,11 +407,6 @@ impl InboxPage {
         });
         match result {
             Ok((items, total)) => {
-                // Clean-audit item 78: a page past the last one (the data
-                // shrank underneath — deletions, a narrowing sync) falls
-                // back to the last page that still holds rows instead of
-                // rendering an empty dead end. One recursive step: the
-                // clamped page always has rows.
                 if items.is_empty() && self.page > 0 && total > 0 {
                     self.page = (total - 1) / INBOX_PAGE_SIZE;
                     return self.reload_list(db);
@@ -566,17 +417,12 @@ impl InboxPage {
             }
             Err(e) => self.status = Some(e.to_string()),
         }
-        // The views-rail counts ride along with every list reload (the
-        // same interaction points) — never per frame.
         self.refresh_view_counts(db);
     }
 
     fn reload_detail(&mut self, db: &DbHandle) {
         let id = self.selected;
         let detail = id.map(|id| db.with_read(|conn| spp_core::inbox::get_conversation(conn, id)));
-        // v1.4.0 (R5, D16): `.and_then(|result| result.ok()).flatten()`
-        // swallowed every database error here, so a failed thread load
-        // looked exactly like "no conversation selected".
         match detail {
             Some(Ok(Some(loaded))) => {
                 self.detail = Some(loaded);
@@ -642,10 +488,6 @@ impl InboxPage {
                 }
                 None => {}
             }
-            // A3: coaching review + post-resolution QA ride the same reload
-            // (both are persisted rows keyed by conversation; QA computes
-            // its deterministic layer lazily on first read of a closed
-            // conversation).
             let (coaching, qa, assistant) = db.with_read(|conn| {
                 let coaching = spp_core::coaching::get(conn, id).ok().flatten();
                 let status: Option<String> = conn
@@ -667,7 +509,6 @@ impl InboxPage {
                 } else {
                     None
                 };
-                // A5: the conversation's newest copilot session + log.
                 let session: Option<i64> = conn
                     .query_row(
                         "SELECT id FROM copilot_sessions WHERE conversation_id = ?1
@@ -688,10 +529,6 @@ impl InboxPage {
         }
     }
 
-    /// A2: load the triage chips and the "know before you reply" briefing
-    /// for the selected conversation. ai_attributes rows lead (AI or
-    /// human-sourced, confidence attached); the deterministic local
-    /// analysis fills display-only gaps.
     fn reload_triage(&mut self, db: &DbHandle) {
         let Some(id) = self.selected else {
             self.triage.clear();
@@ -730,8 +567,6 @@ impl InboxPage {
                 editable: true,
             }
         };
-        // Attribute-backed chips (editable): intent, urgency, frustration,
-        // escalation, issue cluster.
         if let Some((value, confidence, source)) = value_of("intent") {
             chips.push(attribute_chip(
                 spp_core::catalog::AiAttributeKey::Intent,
@@ -772,8 +607,6 @@ impl InboxPage {
                 source,
             ));
         }
-        // Display-only heuristic chips where no attribute exists yet:
-        // sentiment comes from the deterministic local analysis.
         if value_of("sentiment").is_none()
             && let Some(sentiment) = heuristic
                 .map(|h| h.sentiment.clone())
@@ -796,12 +629,8 @@ impl InboxPage {
             .unwrap_or_default();
     }
 
-    /// A2: apply a human correction from the vocab popup.
     fn override_chip_value(&mut self, db: &DbHandle, chip: &TriageChip, value: &str) {
         if value.is_empty() {
-            // "unknown": supersede the current row with the catalog's
-            // unknown marker so the chip disappears from the header until
-            // the next extraction repopulates it.
             let Some(id) = self.selected else { return };
             db.with_write(|conn| {
                 let _ = conn.execute(
@@ -816,9 +645,6 @@ impl InboxPage {
         self.override_chip(db, chip, value);
     }
 
-    /// A2: apply a human correction to a triage chip — supersedes the
-    /// current ai_attributes row with a human-sourced one (confidence
-    /// high, source human; automation rules read the same table).
     fn override_chip(&mut self, db: &DbHandle, chip: &TriageChip, value: &str) {
         let Some(id) = self.selected else {
             return;
@@ -840,15 +666,7 @@ impl InboxPage {
         self.reload_triage(db);
     }
 
-    /// Select a conversation and load its detail.
     pub fn select(&mut self, db: &DbHandle, id: i64) {
-        // Clean-audit item 79: the outgoing conversation's typed draft is
-        // stashed, not wiped — peeking at another row loses nothing, and
-        // reselecting restores the text exactly (body/cc/bcc/mode + the
-        // AI-draft provenance, so accept/edit-distance feedback still
-        // records against the real row). Clicking the row that is
-        // ALREADY open touches the composer not at all — typing
-        // continues.
         let switching = self.selected != Some(id);
         if switching && let Some(prev) = self.selected {
             self.drafts.insert(
@@ -871,8 +689,6 @@ impl InboxPage {
                 self.composer_bcc = stash.bcc;
                 self.inserted_draft = stash.inserted_draft;
             } else {
-                // No stash: the incoming conversation starts from the
-                // default composer (reply mode, clean fields).
                 self.composer_mode = ComposerMode::Reply;
                 self.composer_body.clear();
                 self.composer_cc.clear();
@@ -882,9 +698,6 @@ impl InboxPage {
         }
         self.status_message = None;
         self.status_message_at = None;
-        // A3/A6: per-conversation AI state resets with the selection —
-        // pending jobs and cards belong to the previous conversation,
-        // never the new one.
         self.pending_ai = None;
         self.coaching_review = None;
         self.qa_review = None;
@@ -896,22 +709,6 @@ impl InboxPage {
         self.reload_detail(db);
     }
 
-    /// Clean-audit item 135: the AI-draft provenance dies with the draft
-    /// — any composer content that did not come from the inserted draft
-    /// (or an edit of it) must not be recorded as an acceptance of that
-    /// draft row.
-    ///
-    /// The copilot suggested reply is not an `ai_drafts` row, so it
-    /// carries no provenance of its own — and it REPLACES whatever sat in
-    /// the composer, killing any inserted draft's claim on the text. That
-    /// insert site applies the rule with field writes (`report` borrows
-    /// `self.copilot` across the render closure, so a `&mut self` helper
-    /// cannot be called there); the note-mode and wipe rules live in the
-    /// helpers below.
-    /// Clean-audit item 135: an internal note is not the customer reply
-    /// the draft was generated for, and `submit_composer` records the
-    /// acceptance in whichever mode is active — switching to note mode
-    /// therefore spends the provenance.
     pub fn set_composer_mode(&mut self, mode: ComposerMode) {
         if mode == ComposerMode::Note {
             self.inserted_draft = None;
@@ -919,10 +716,6 @@ impl InboxPage {
         self.composer_mode = mode;
     }
 
-    /// Clean-audit item 135: an edit that WIPES the composer abandons
-    /// the inserted draft — keeping the provenance would record a
-    /// phantom acceptance for whatever the user types next. Edits that
-    /// keep text keep the provenance (the edit distance is the metric).
     pub fn composer_edited(&mut self, body: String) {
         if body.trim().is_empty() {
             self.inserted_draft = None;
@@ -930,9 +723,6 @@ impl InboxPage {
         self.composer_body = body;
     }
 
-    /// Submit the composer (reply or note). The job is dispatched to
-    /// Help Scout by the outbound worker within ~2 seconds; the status
-    /// line then reflects the real delivery result.
     pub fn submit_composer(&mut self, db: &DbHandle, bus: &EventBus) -> ActionOutcome {
         let body = self.composer_body.trim().to_string();
         if body.is_empty() {
@@ -954,9 +744,6 @@ impl InboxPage {
         };
         match &outcome {
             ActionOutcome::Success(msg) => {
-                // A6 feedback loop: sending with an inserted AI draft records
-                // accept + edit-distance against the real ai_drafts row —
-                // the edit-rate in the AI usage dashboard becomes real.
                 if let Some((draft_id, original)) = self.inserted_draft.take() {
                     let sent = body.clone();
                     let recorded = db.with_write(|conn| {
@@ -975,16 +762,10 @@ impl InboxPage {
                 self.composer_body.clear();
                 self.composer_cc.clear();
                 self.composer_bcc.clear();
-                // Clean-audit item 79: the sent conversation's stash is
-                // spent — reselecting starts from a clean composer
-                // instead of resurrecting the reply that already went
-                // out.
                 if let Some(id) = self.selected {
                     self.drafts.remove(&id);
                 }
             }
-            // Rejections keep the typed text (the user fixes the problem
-            // and re-sends; wiping the composer destroyed their work).
             ActionOutcome::Rejected(msg) => {
                 self.set_status_message(msg, true);
             }
@@ -994,17 +775,12 @@ impl InboxPage {
         outcome
     }
 
-    /// Audit fix (M22): every transient status line carries its set-time
-    /// so rendering can expire it (see [`Self::expire_status_message`]).
     fn set_status_message(&mut self, message: impl Into<String>, is_error: bool) {
         self.status_message = Some(message.into());
         self.status_is_error = is_error;
         self.status_message_at = Some(std::time::Instant::now());
     }
 
-    /// Audit fix (M22): a status line older than the TTL is dropped
-    /// before rendering — completed one-shot notes never outlive their
-    /// moment.
     fn expire_status_message(&mut self) {
         const STATUS_MESSAGE_TTL: std::time::Duration = std::time::Duration::from_secs(45);
         if let Some(set_at) = self.status_message_at
@@ -1015,7 +791,6 @@ impl InboxPage {
         }
     }
 
-    /// Change the conversation status (local write + queued remote job).
     pub fn change_status(&mut self, db: &DbHandle, bus: &EventBus, status: &str) -> ActionOutcome {
         let Some(detail) = self.detail.clone() else {
             return ActionOutcome::Rejected("No conversation selected.".into());
@@ -1039,7 +814,6 @@ impl InboxPage {
         outcome
     }
 
-    /// Assign the conversation (local write + queued remote job).
     pub fn assign(&mut self, db: &DbHandle, bus: &EventBus, user_id: Option<i64>) -> ActionOutcome {
         let Some(detail) = self.detail.clone() else {
             return ActionOutcome::Rejected("No conversation selected.".into());
@@ -1063,9 +837,6 @@ impl InboxPage {
         outcome
     }
 
-    /// Render the page. `engine` powers the "Sync now" header action
-    /// (a real incremental pull from Help Scout — before 1.3.0 no page
-    /// except Sync Health could touch the network).
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1079,23 +850,13 @@ impl InboxPage {
         if self.list.is_empty() {
             self.reload_list(db);
         }
-        // Invalidation cleared the detail: reload it (selection kept) so
-        // the open conversation survives sync events instead of
-        // vanishing behind "Select a conversation".
         if self.selected.is_some() && self.detail.is_none() {
             self.reload_detail(db);
         }
-        // A3: resolve in-flight composer-AI jobs (rewrite / translate /
-        // coaching / QA) — results land in durable rows, the poll just
-        // moves them into the page state.
         self.poll_pending_ai(db);
-        // A5: the conversation-scoped assistant poll.
         self.poll_assistant(db);
 
         let t = design::tokens(ui);
-        // Top-of-page status: list-load errors and the honest
-        // provider-not-connected note keep their full-width slots above
-        // the workspace.
         if let Some(err) = &self.status {
             design::error_text(ui, &format!("error: {err}"));
         }
@@ -1106,8 +867,6 @@ impl InboxPage {
                  Settings (Help Scout tab), press connect, and this inbox fills automatically.",
             );
         }
-        // Operations-tile drill-down chip (the Operations page lands here
-        // with the tile fragment pre-applied).
         if let Some(ops) = self.bar.ops.clone() {
             ui.horizontal(|ui| {
                 let (id, rect) = ui.allocate_space(egui::vec2(16.0, 16.0));
@@ -1135,11 +894,6 @@ impl InboxPage {
             ui.add_space(design::scale::space::SP1);
         }
 
-        // DS-A-05 inbox workspace — views rail → conversation list →
-        // reader → copilot. No page header here by design: the audit
-        // records the inbox with zero page-heads (the workspace IS the
-        // page). Sync + reset live in the list head (A-8: sync is a
-        // button + an honest status line).
         let detail = self.detail.clone();
 
         egui::Panel::left("inbox-views")
@@ -1192,9 +946,6 @@ impl InboxPage {
                 });
         }
         if detail.is_some() {
-            // The composer is pinned under the reader (DS-A-05): a bottom
-            // panel shown after the side panels only spans the reader
-            // column, and its height hugs the composer content.
             egui::Panel::bottom("inbox-composer")
                 .frame(
                     egui::Frame::new()
@@ -1228,9 +979,6 @@ impl InboxPage {
             });
     }
 
-    /// DS-A-05 views rail: the inbox view switcher with per-view counts
-    /// (cached — refreshed on list reloads, never per frame) and the one
-    /// honest keyboard hint.
     fn views_rail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         ui.label(
             egui::RichText::new("INBOX VIEWS")
@@ -1249,15 +997,8 @@ impl InboxPage {
             }
         }
         ui.add_space(design::scale::space::SP1);
-        // RS-4-6 (G4-rejection fix): the keyboard hint moved to the
-        // composer foot (design::composer) — next to the send button it
-        // describes, not in the views rail where nothing sends.
     }
 
-    /// The conversation list pane (DS-A-05): head (view title + the honest
-    /// visible-range subtitle), the FilterBar (A-2: one primary apply),
-    /// reset + sync (A-8), the rows, and the pager under the 50-row cap
-    /// (clean-audit item 78).
     #[allow(clippy::too_many_lines)]
     fn list_ui(
         &mut self,
@@ -1266,8 +1007,6 @@ impl InboxPage {
         engine: Option<&std::sync::Arc<SyncEngine>>,
     ) {
         let t = design::tokens(ui);
-        // Head: the view name + the visible-range subtitle (clean-audit
-        // item 78: "51-100 of 1234", never "50 of 1234").
         ui.label(
             egui::RichText::new(self.view_pick.label())
                 .size(design::scale::text::SECTION)
@@ -1284,8 +1023,6 @@ impl InboxPage {
         design::hint_text(ui, &subtitle);
         ui.add_space(design::scale::space::SP1);
 
-        // FilterBar (DS-C-10 / A-2): search + number + the disclosed
-        // mailbox/channel/tag picks, ONE primary apply.
         let mut apply_entered = false;
         let apply = design::filter_bar(
             ui,
@@ -1375,7 +1112,6 @@ impl InboxPage {
             "apply",
         );
 
-        // Tools row: the filter disclosure + reset + sync (A-8).
         ui.horizontal(|ui| {
             if design::button(
                 ui,
@@ -1406,8 +1142,6 @@ impl InboxPage {
                 .clicked()
                     && let Some(engine) = engine
                 {
-                    // R8 (D6): a click during a running sync is answered,
-                    // not swallowed — the toast reports the outcome.
                     if !crate::pages::sync_health::spawn_sync_action(
                         db,
                         engine,
@@ -1442,7 +1176,6 @@ impl InboxPage {
         }
         ui.add_space(design::scale::space::SP2);
 
-        // Rows.
         let mut clicked: Option<i64> = None;
         egui::ScrollArea::vertical()
             .id_salt("inbox-list-scroll")
@@ -1459,9 +1192,6 @@ impl InboxPage {
                 for item in self.list.clone() {
                     let selected = self.selected == Some(item.id);
                     let row_id = egui::Id::unique(("inbox-row", item.id));
-                    // Hover state comes from the previous frame's response
-                    // — this frame's interact does not exist yet when the
-                    // fill is painted.
                     let hovered = ui.ctx().read_response(row_id).is_some_and(|r| r.hovered());
                     let fill = if selected {
                         t.selection
@@ -1481,7 +1211,6 @@ impl InboxPage {
                         .inner_margin(egui::Margin::same(8))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
-                            // L1: customer + time.
                             ui.horizontal(|ui| {
                                 ui.add(
                                     egui::Label::new(
@@ -1511,7 +1240,6 @@ impl InboxPage {
                                     },
                                 );
                             });
-                            // L2: subject.
                             ui.add(
                                 egui::Label::new(
                                     egui::RichText::new(&subject)
@@ -1520,7 +1248,6 @@ impl InboxPage {
                                 )
                                 .truncate(),
                             );
-                            // L3: assignee + status badge (DS.TONE only).
                             ui.horizontal(|ui| {
                                 let assignee_label = item.assignee_name.clone().or_else(|| {
                                     item.assigned_team_name
@@ -1557,8 +1284,6 @@ impl InboxPage {
         if let Some(id) = clicked {
             self.select(db, id);
         }
-        // Pager under the list — the 50-row cap is a page size, not a
-        // dead end (clean-audit item 78).
         let pages = self.total.div_ceil(INBOX_PAGE_SIZE);
         let delta = design::pager(ui, self.page, pages);
         if delta != 0
@@ -1570,9 +1295,6 @@ impl InboxPage {
         }
     }
 
-    /// One merged filter apply — search + number + mailbox/channel/tag —
-    /// the same bar fields the old pair of buttons each filled, now
-    /// through the single primary apply (A-2).
     fn apply_filters(&mut self, db: &DbHandle) {
         let trimmed = self.search_edit.trim();
         self.bar.query = if trimmed.is_empty() {
@@ -1588,15 +1310,13 @@ impl InboxPage {
         self.reload_list(db);
     }
 
-    /// Per-view totals for the views rail (DS-A-05). Runs on list reloads
-    /// (interactions, sync events) — never per frame.
     fn refresh_view_counts(&mut self, db: &DbHandle) {
         for (slot, view) in self.view_counts.iter_mut().zip(ViewFilter::ALL) {
             let mut bar = self.bar.clone();
             bar.view = Some(view);
             let filters = db.with_read(|conn| {
                 let mut f = filters_from_bar(&bar, 0, conn);
-                f.limit = Some(1); // only the COUNT total matters here
+                f.limit = Some(1);
                 f
             });
             *slot = db
@@ -1607,9 +1327,6 @@ impl InboxPage {
         }
     }
 
-    /// The reader pane (DS-A-05): pinned head (avatar + subject + status +
-    /// actions) above the scroll of the action bar, triage chips, the
-    /// briefing card, the thread message cards, and the QA/coaching cards.
     fn reader_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1618,8 +1335,6 @@ impl InboxPage {
         detail: Option<ConversationDetail>,
     ) {
         let Some(detail) = detail else {
-            // R5 (D16): a load failure is not "nothing selected" — say
-            // what broke so the user can act on it.
             if let Some(err) = &self.detail_error {
                 design::empty_state(
                     ui,
@@ -1652,14 +1367,10 @@ impl InboxPage {
                 }
                 self.thread_ui(ui, &detail);
                 ui.add_space(design::scale::space::SP2);
-                // A3: post-resolution QA for closed conversations — the
-                // deterministic checks surfaced with their honest
-                // disclaimers, plus the on-demand AI layer.
                 if let Some(qa) = self.qa_review.clone() {
                     self.qa_card_ui(ui, db, &qa, detail.id);
                     ui.add_space(design::scale::space::SP2);
                 }
-                // A3: the persisted draft review — advisory only.
                 if let Some(review) = self.coaching_review.clone() {
                     self.coaching_review_ui(ui, &review);
                     ui.add_space(design::scale::space::SP2);
@@ -1667,8 +1378,6 @@ impl InboxPage {
             });
     }
 
-    /// DS-A-05 reader head: avatar + subject + customer meta + status
-    /// badge + copilot toggle + refresh (A-4: one detail header).
     fn reader_head_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, detail: &ConversationDetail) {
         let name = detail
             .customer_name
@@ -1696,8 +1405,6 @@ impl InboxPage {
                     .size(design::scale::text::SECTION)
                     .strong(),
                 );
-                // Audit fix (M25): the <email> part only renders when an
-                // email exists.
                 let who = match detail.customer_email.as_deref() {
                     Some(email) if !email.trim().is_empty() => {
                         format!(
@@ -1751,9 +1458,6 @@ impl InboxPage {
         });
     }
 
-    /// The action bar: status chips, assignment, and the honest outcome
-    /// lines (local action result + the real delivery state from the
-    /// outbound queue). Applied locally AND dispatched to Help Scout.
     fn action_bar_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1787,10 +1491,6 @@ impl InboxPage {
                     .unwrap_or_else(|| "unassigned".into());
                 egui::ComboBox::from_id_salt("inbox-assign")
                     .width(200.0)
-                    // Clean-audit item 33: a team assignment is its own
-                    // state — "team: Billing" — never "unassigned", and
-                    // never a user name that happens to share the team's
-                    // platform id.
                     .selected_text(assign_label.clone())
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.assign_pick, None, "unassigned");
@@ -1800,9 +1500,6 @@ impl InboxPage {
                     })
                     .response
                     .widget_info(|| {
-                        // The visible "assign:" label is a separate widget,
-                        // so the combo button must carry the name itself or
-                        // kittest's a11y check trips on an unlabeled node.
                         egui::WidgetInfo::labeled(
                             egui::Role::Button,
                             ui.is_enabled(),
@@ -1813,12 +1510,6 @@ impl InboxPage {
                     self.assign(db, bus, self.assign_pick);
                 }
             });
-            // Honest outcome lines: the local action result, then the
-            // real delivery state from the outbound queue (sending →
-            // delivered / failed) — never a green "queued" that goes
-            // nowhere (the 1.2.0 lie).
-            // Audit fix (M22): drop a status line past its TTL before
-            // rendering so finished notes don't stick around forever.
             self.expire_status_message();
             if let Some(msg) = &self.status_message {
                 if self.status_is_error {
@@ -1837,10 +1528,6 @@ impl InboxPage {
         });
     }
 
-    /// A2 triage-on-arrival: intent/urgency/sentiment/topic chips with
-    /// confidence, editable where attribute-backed (click to correct —
-    /// the override lands in ai_attributes with source "human" and the
-    /// automation rules read the same rows).
     fn triage_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         if self.triage.is_empty() {
             return;
@@ -1881,7 +1568,6 @@ impl InboxPage {
                 }
             }
         });
-        // The inline vocab row for the chip being corrected.
         if let Some(key) = self.editing_chip {
             let chip = self.triage.iter().find(|c| c.key == key).cloned();
             if let Some(chip) = chip {
@@ -1908,9 +1594,6 @@ impl InboxPage {
         ui.add_space(design::scale::space::CLUSTER);
     }
 
-    /// A2 "know before you reply" — the customer's durable facts, the
-    /// same quarantine-filtered rows the evidence pack feeds on. G-2:
-    /// the AI badge is violet.
     fn briefing_ui(&self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
         design::card_titled(
@@ -1933,10 +1616,6 @@ impl InboxPage {
         );
     }
 
-    /// The Copilot side panel (DS-A-05 4th pane): local analysis, similar
-    /// issues, suggested reply, LM Studio draft, and the
-    /// conversation-scoped assistant chat — zero configuration, LM Studio
-    /// passes offered on top when a provider is configured.
     #[allow(clippy::too_many_lines)]
     fn copilot_pane_ui(
         &mut self,
@@ -1944,7 +1623,6 @@ impl InboxPage {
         db: &DbHandle,
         detail: Option<&ConversationDetail>,
     ) {
-        // Head.
         ui.horizontal(|ui| {
             Icon::Sparkles.show(ui, 14.0, design::tokens(ui).ai);
             ui.vertical(|ui| {
@@ -1985,7 +1663,6 @@ impl InboxPage {
                 };
                 let a = &report.analysis;
 
-                // Signal chips.
                 design::card_titled(ui, "Signals", None, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         design::badge(ui, &a.intent, design::BadgeTone::Info);
@@ -2016,10 +1693,6 @@ impl InboxPage {
                 });
                 ui.add_space(design::scale::space::SP2);
 
-                // Summary: what the customer needs + open questions.
-                // RS-4-4 (G4-rejection fix): line text passes through
-                // break_long_tokens so an unbreakable token can never
-                // overflow the card or the panel.
                 if !a.summary.is_empty() || !a.questions.is_empty() {
                     design::card_titled(ui, "Summary", None, |ui| {
                         for line in &a.summary {
@@ -2061,17 +1734,12 @@ impl InboxPage {
                 );
                 ui.add_space(design::scale::space::SP1);
 
-                // Similar past issues ("have we seen this before?").
                 if report.similar.is_empty() {
                     design::hint_text(ui, "No similar past conversations found yet.");
                 } else {
                     design::card_titled(ui, "Similar past issues", None, |ui| {
                         for s in report.similar.iter().take(3) {
                             ui.horizontal(|ui| {
-                                // RS-4-4 (G4-rejection fix): a horizontal
-                                // row lays its children out in Extend mode
-                                // (egui never wraps there) — a long subject
-                                // would overflow the pane. Rows truncate.
                                 ui.add(
                                     egui::Label::new(
                                         egui::RichText::new(format!(
@@ -2084,8 +1752,6 @@ impl InboxPage {
                                     )
                                     .truncate(),
                                 );
-                                // The similarity score is AI-derived —
-                                // G-2: violet.
                                 design::badge(
                                     ui,
                                     &format!("{}%", (s.score * 100.0) as u32),
@@ -2116,7 +1782,6 @@ impl InboxPage {
                     ui.add_space(design::scale::space::SP2);
                 }
 
-                // Related Help Center / knowledge articles.
                 if !report.articles.is_empty() {
                     design::card_titled(ui, "Relevant help articles", None, |ui| {
                         for art in report.articles.iter().take(3) {
@@ -2134,7 +1799,6 @@ impl InboxPage {
                     ui.add_space(design::scale::space::SP2);
                 }
 
-                // Suggested reply (evidence-grounded, editable in composer).
                 if design::cop_suggest(
                     ui,
                     "Suggested reply",
@@ -2143,17 +1807,12 @@ impl InboxPage {
                 )
                 .is_some()
                 {
-                    // Clean-audit item 135: the suggested reply is not a
-                    // drafts row — replacing the composer content with it
-                    // kills any inserted draft's provenance.
                     self.composer_mode = ComposerMode::Reply;
                     self.inserted_draft = None;
                     self.composer_body = report.suggested_reply.clone();
                     self.draft_saved = false;
                 }
                 ui.add_space(design::scale::space::SP2);
-                // Surface the latest LM Studio draft (if any) below the
-                // local one.
                 if let Some((draft_id, draft, model)) =
                     db.with_read(|conn| spp_core::ai_local::latest_ai_draft_row(conn, detail.id))
                 {
@@ -2165,17 +1824,11 @@ impl InboxPage {
                     ) {
                         Some(0) => {
                             self.composer_mode = ComposerMode::Reply;
-                            // A6: track provenance so the send path
-                            // records accept + edit distance against
-                            // this row.
                             self.inserted_draft = Some((draft_id, draft.clone()));
                             self.composer_body = draft.clone();
                             self.draft_saved = false;
                         }
                         Some(1) => {
-                            // A6: an explicit reject closes the loop for
-                            // drafts the agent never sends (state +
-                            // zero-edit feedback).
                             let rejected = db.with_write(|conn| {
                                 spp_core::ai_pipeline::record_feedback(
                                     conn, draft_id, &draft, &draft, false,
@@ -2206,9 +1859,6 @@ impl InboxPage {
                         design::badge(ui, "in composer", BadgeTone::Info);
                     }
                 }
-                // A5: the inbox assistant — the same 22-tool copilot
-                // agent scoped to this conversation. Turns run as worker
-                // jobs; answers cite the mirror rows the tools returned.
                 ui.add_space(design::scale::space::SP2);
                 design::divider(ui);
                 design::section_title(ui, "Ask the assistant");
@@ -2253,8 +1903,6 @@ impl InboxPage {
                                         .get("content")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("");
-                                    // DS-C-22 chat bubbles: assistant =
-                                    // violet, user = neutral right row.
                                     design::cop_chat(ui, role == "assistant", content);
                                 }
                             });
@@ -2308,7 +1956,6 @@ impl InboxPage {
                             }
                         }
                     });
-                    // Starter questions grounded in this conversation.
                     let starters = db
                         .with_read(|conn| spp_core::copilot::starter_questions(conn, detail.id));
                     if !starters.is_empty() {
@@ -2328,9 +1975,6 @@ impl InboxPage {
             });
     }
 
-    /// Composer "insert AI draft" (DS-C-21 tool chip): the newest LM
-    /// Studio draft with provenance when one exists, else the copilot
-    /// suggested reply (no provenance — not an ai_drafts row).
     fn insert_ai_draft(&mut self, db: &DbHandle, conversation_id: i64) {
         self.composer_mode = ComposerMode::Reply;
         if let Some((draft_id, draft, _model)) =
@@ -2344,8 +1988,6 @@ impl InboxPage {
                 self.set_status_message("The copilot has no suggested reply yet.", false);
                 return;
             }
-            // Clean-audit item 135: the suggested reply is not a drafts
-            // row — replacing the composer kills any provenance.
             self.inserted_draft = None;
             self.composer_body = text;
             self.set_status_message("Suggested reply inserted — review before sending.", false);
@@ -2358,9 +2000,6 @@ impl InboxPage {
         self.draft_saved = false;
     }
 
-    /// Queue a composer-AI job and start polling it (A3). The payload is
-    /// built by the caller; the worker's feature/role re-checks stay
-    /// authoritative.
     fn enqueue_composer_ai(
         &mut self,
         db: &DbHandle,
@@ -2377,9 +2016,6 @@ impl InboxPage {
                     job_id,
                     kind,
                     conversation_id,
-                    // Clean-audit item 73: what the composer held when the
-                    // transform was queued — the result may only land if
-                    // the user typed nothing since.
                     origin_body: self.composer_body.clone(),
                 });
                 self.set_status_message(
@@ -2393,17 +2029,6 @@ impl InboxPage {
         }
     }
 
-    /// Poll the in-flight composer-AI job (A3): completed jobs move their
-    /// durable results into page state; failed jobs surface their exact
-    /// error; running/queued jobs keep the working note.
-    ///
-    /// Clean-audit item 24: the rewrite/translate branch reads the job's
-    /// OWN `jobs.result` row. The old query scraped the newest matching
-    /// `ai_runs` row (`ORDER BY id DESC LIMIT 1`, any conversation via
-    /// `conversation_id IS NULL`) — a stale or foreign historical run
-    /// filled the composer, cache-hit translations (which write no run
-    /// row at all) picked an older run's text, and feature-off paths
-    /// claimed "Composer updated" with somebody else's output.
     fn poll_pending_ai(&mut self, db: &DbHandle) {
         let Some(p) = self.pending_ai.clone() else {
             return;
@@ -2423,12 +2048,6 @@ impl InboxPage {
                 self.pending_ai = None;
                 match p.kind {
                     "rewrite_composer" | "translate_composer" => {
-                        // This job's own output — never a neighbouring or
-                        // historical run's (audit item 24)...
-                        // and never over typing made in flight (audit item
-                        // 73): the result only replaces the composer when
-                        // the text still equals what the transform was
-                        // queued from.
                         if self.composer_body != p.origin_body {
                             self.set_status_message(
                                 "Transform finished, but you edited the draft while it ran — \
@@ -2486,7 +2105,6 @@ impl InboxPage {
         }
     }
 
-    /// A5: poll the conversation-scoped assistant chat job.
     fn poll_assistant(&mut self, db: &DbHandle) {
         let Some(job_id) = self.assistant_pending else {
             return;
@@ -2534,10 +2152,6 @@ impl InboxPage {
         }
     }
 
-    /// The thread timeline as DS-C-20 message cards with day dividers.
-    /// Real Help Scout thread types map onto the four authorship roles
-    /// (G-2: notes amber, AI violet); the colors come only from the role
-    /// table.
     fn thread_ui(&mut self, ui: &mut egui::Ui, detail: &ConversationDetail) {
         if detail.thread.is_empty() {
             design::empty_state_slim(
@@ -2575,9 +2189,6 @@ impl InboxPage {
         }
     }
 
-    /// The pinned composer pane (DS-C-21): AI transform chips, the widget
-    /// composer (Reply|Note tabs, saved replies, AI insert, Ctrl+Enter),
-    /// reply addressing, and the mention popup anchored to the caret.
     #[allow(clippy::too_many_lines)]
     fn composer_pane_ui(
         &mut self,
@@ -2586,10 +2197,6 @@ impl InboxPage {
         bus: &EventBus,
         detail: &ConversationDetail,
     ) {
-        // A3: the composer AI menu — pre-send review (deterministic + AI
-        // layer), rewrites and translation. All transforms replace the
-        // composer text only after the user sees the result; nothing is
-        // sent automatically.
         let conv_id = detail.id;
         let busy = self.pending_ai.is_some();
         ui.horizontal_wrapped(|ui| {
@@ -2678,11 +2285,6 @@ impl InboxPage {
         });
         ui.add_space(design::scale::space::SP1);
 
-        // Clean-audit item 136: while the mention popup is open it owns
-        // the arrow keys — the highlight moves. The keys are consumed
-        // BEFORE the composer renders: an un-consumed ArrowDown would
-        // move the caret, change the @-query and close the popup on the
-        // very first press.
         let mention_len = caret_query(&self.composer_body, self.mention_caret)
             .map_or(0, |(q, _)| filter_matches(&self.directory, &q).len());
         if mention_len > 0 && self.composer_focused {
@@ -2696,7 +2298,6 @@ impl InboxPage {
             }
         }
 
-        // DS-C-21 composer (pure UI — the acts come back to the page).
         let saved_reply_names: Vec<String> = self
             .saved_replies
             .iter()
@@ -2736,9 +2337,6 @@ impl InboxPage {
             }
             Some(ComposerAct::AiInsert) => self.insert_ai_draft(db, conv_id),
             None => {
-                // The widget owns the field: write the draft back through
-                // the same helper the old TextEdit path used (provenance
-                // + stash semantics unchanged).
                 if state.draft != self.composer_body {
                     self.mention_active = 0;
                     let body = state.draft.clone();
@@ -2748,10 +2346,6 @@ impl InboxPage {
             }
         }
 
-        // Reply addressing. RS-4-5 (G4-rejection fix): the inputs span the
-        // composer width like every other composer row — the fixed
-        // half-width slots left dead space beside them and read as a
-        // layout bug against the full-width textarea above.
         if self.composer_mode == ComposerMode::Reply {
             ui.horizontal(|ui| {
                 let mut cc = self.composer_cc.clone();
@@ -2772,7 +2366,6 @@ impl InboxPage {
             });
         }
 
-        // Mention popup (anchored to the composer caret).
         let body = self.composer_body.clone();
         if let Some((query, start)) = caret_query(&body, self.mention_caret) {
             let matches = filter_matches(&self.directory, &query);
@@ -2810,9 +2403,6 @@ impl InboxPage {
 }
 
 impl InboxPage {
-    /// A3: the coaching review card — the 9 deterministic checks + AI layer
-    /// of the persisted `coaching_reviews` row. Advisory only: it never
-    /// blocks a send and says so.
     fn coaching_review_ui(&mut self, ui: &mut egui::Ui, review: &serde_json::Value) {
         let summary = review.get("summary").cloned().unwrap_or_default();
         let flagged = summary.get("flagged").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -2845,7 +2435,6 @@ impl InboxPage {
                                 "AI layer: {}",
                                 ai.get("model").and_then(|m| m.as_str()).unwrap_or("routed")
                             ),
-                            // G-2: AI identity is always violet.
                             BadgeTone::Ai,
                         );
                     } else {
@@ -2901,9 +2490,6 @@ impl InboxPage {
         );
     }
 
-    /// A3: the post-resolution QA card for closed conversations —
-    /// deterministic checks with their honest disclaimers, the AI layer
-    /// when it has run, and the on-demand "Run AI review" button.
     fn qa_card_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -2959,7 +2545,6 @@ impl InboxPage {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if has_ai {
-                        // G-2: AI identity is always violet.
                         design::badge(ui, "AI review: present", BadgeTone::Ai);
                     } else if ai_available {
                         if busy {
@@ -3019,24 +2604,14 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
-/// Compact an ISO timestamp (`2026-10-19T22:26:10.207Z`) to
-/// `2026-10-19 22:26` for the narrow list rows.
 fn compact_time(iso: &str) -> String {
     let mut out = iso.replacen('T', " ", 1);
     out.truncate(out.len().min(16));
     out
 }
 
-/// Render rich-text spans inside a message card body (links, emphasis,
-/// code, quotes; heading levels map onto the DC type roles — no free
-/// sizes).
 fn render_rich_spans(ui: &mut egui::Ui, spans: &[spp_core::richtext::Span]) {
     for span in spans {
-        // RS-4-3 (G4-rejection fix): egui never breaks a token by default,
-        // so one long URL (Help Scout note bodies carry them) forced the
-        // reader's scroll content wider than its viewport and every card
-        // painted over the copilot panel. Zero-width break opportunities
-        // cap any token's unbroken run; the text itself is unchanged.
         let mut rich = egui::RichText::new(spp_core::richtext::break_long_tokens(&span.text, 40));
         let style = &span.style;
         if style.bold {
@@ -3073,10 +2648,6 @@ fn render_rich_spans(ui: &mut egui::Ui, spans: &[spp_core::richtext::Span]) {
     }
 }
 
-/// DS-C-20 role mapping for the real Help Scout thread types (audit fix
-/// H6: customer/message/note/chat/phone/lineitem + ai* — the legacy mock
-/// types keep their chips). The surface/hairline/avatar colors come ONLY
-/// from the role table; the optional label keeps the honest thread kind.
 fn message_role_of(thread_type: &str) -> (MessageRole, Option<&'static str>) {
     match thread_type {
         "customer" | "customer_message" => (MessageRole::Customer, None),
@@ -3085,14 +2656,10 @@ fn message_role_of(thread_type: &str) -> (MessageRole, Option<&'static str>) {
         "chat" => (MessageRole::Customer, Some("Chat")),
         "phone" => (MessageRole::Agent, Some("Phone")),
         kind if kind.starts_with("ai") => (MessageRole::Ai, Some("AI")),
-        // `lineitem` and anything unknown stay on the neutral agent
-        // surface with an honest "Other" label.
         _ => (MessageRole::Agent, Some("Other")),
     }
 }
 
-/// Mirror saved replies (name, insertable text) for the composer menu —
-/// the Help Scout saved-replies rows the sync pipeline fills.
 fn saved_reply_list(conn: &rusqlite::Connection) -> Vec<(String, String)> {
     let Ok(mut stmt) = conn.prepare(
         "SELECT name, COALESCE(NULLIF(text, ''), NULLIF(chat_text, ''), preview, name)
@@ -3111,8 +2678,6 @@ fn saved_reply_list(conn: &rusqlite::Connection) -> Vec<(String, String)> {
     }
 }
 
-/// Submit a customer reply: durable outbound job with duplicate-send
-/// protection (see module docs).
 pub fn submit_reply(
     db: &DbHandle,
     bus: &EventBus,
@@ -3151,11 +2716,6 @@ pub fn submit_reply(
                 "This exact reply was already sent (duplicate-send protection).".to_string(),
             );
         }
-        // v1.4.0 (R4, D9): a sent reply moves the conversation to the
-        // configured status (default `pending`, decision D-b). Before
-        // this, replies never carried statusAfter and the conversation
-        // stayed in whatever status it was in — the "status never
-        // changes" complaint.
         let status_after = conn
             .query_row(
                 "SELECT value FROM application_settings WHERE key = 'reply_status_after'",
@@ -3168,14 +2728,8 @@ pub fn submit_reply(
             .trim_matches('"')
             .to_string();
         let status_after = match status_after.as_str() {
-            // Audit item 25: Help Scout's own status vocabulary is
-            // open/pending/closed — `waiting` never existed there, so a
-            // reply configured with it was rejected on the wire. `open`
-            // is the real "await agent" status; a stored legacy `waiting`
-            // maps onto it.
             "open" | "waiting" => json!("open"),
             "keep" => serde_json::Value::Null,
-            // default: pending (await customer) — Help Scout semantics
             _ => json!("pending"),
         };
         let job_id = queue_job(
@@ -3219,8 +2773,6 @@ pub fn submit_reply(
     }
 }
 
-/// Submit an internal note: local thread row + mention notifications +
-/// durable outbound job (see module docs).
 pub fn submit_note(
     db: &DbHandle,
     bus: &EventBus,
@@ -3234,8 +2786,6 @@ pub fn submit_note(
         }
         let thread_id =
             insert_local_note(conn, detail.id, body, None).map_err(|e| e.to_string())?;
-        // Mention notifications (same records the sweep creates for synced
-        // notes), deduplicated by thread id + target.
         if let Ok(directory) = spp_core::mentions::build_mention_directory(conn)
             && let Ok(mentions) = spp_core::mentions::parse_mentions(body, &directory)
         {
@@ -3297,8 +2847,6 @@ pub fn submit_note(
     }
 }
 
-/// Shared mutation path: typed local write + queued remote job + audit +
-/// live-update event.
 fn mutate(
     db: &DbHandle,
     bus: &EventBus,
@@ -3371,7 +2919,6 @@ mod tests {
     #[test]
     fn ops_tile_filter_drills_into_unassigned_conversations() {
         let db = fixture(vec![seeded().0]);
-        // Seed an unassigned conversation for the drill to find.
         db.with_write(|conn| {
             crate::testsupport::seed_conversation(conn, 2, "Orphan", "active", "email", 1, 0, 10);
         });
@@ -3388,7 +2935,6 @@ mod tests {
         assert_eq!(total, 1, "only the unassigned conversation matches");
         assert_eq!(items[0].id, 2);
 
-        // Unknown tile keys must not smuggle SQL into the where clause.
         let bad = FilterBar {
             ops: Some("' OR 1=1 --".into()),
             ..FilterBar::default()
@@ -3399,7 +2945,6 @@ mod tests {
 
     #[test]
     fn reply_key_matches_op_send_reply_format() {
-        // Format contract: reply:{remote}:{send|draft}:{24 hex chars}.
         let key = reply_key(1234, false, "hello");
         assert!(key.starts_with("reply:1234:send:"));
         assert_eq!(key.len(), "reply:1234:send:".len() + 24);
@@ -3441,11 +2986,9 @@ mod tests {
         assert_eq!(key, expected_key);
         assert!(payload.contains("here is the fix"));
 
-        // Same text again → duplicate-send protection.
         let second = submit_reply(&db, &bus, &detail, "here is the fix", "", "");
         assert!(matches!(second, ActionOutcome::Rejected(m) if m.contains("duplicate")));
 
-        // Different text → new job.
         let third = submit_reply(&db, &bus, &detail, "different text", "", "");
         assert!(matches!(third, ActionOutcome::Success(_)));
     }
@@ -3464,7 +3007,6 @@ mod tests {
         assert!(matches!(outcome, ActionOutcome::Success(_)));
 
         db.with_read(|conn| {
-            // Local thread row exists and is visible in the detail.
             let detail = spp_core::inbox::get_conversation(conn, 1)
                 .expect("detail")
                 .expect("conversation");
@@ -3472,7 +3014,6 @@ mod tests {
             assert_eq!(detail.thread[0].thread_type, "note");
             assert_eq!(detail.thread[0].body.as_deref(), Some("fyi @ada please check"));
 
-            // Outbound job queued.
             let (kind,): (String,) = conn
                 .query_row(
                     "SELECT kind FROM outbound_jobs ORDER BY id DESC LIMIT 1",
@@ -3482,7 +3023,6 @@ mod tests {
                 .expect("job");
             assert_eq!(kind, "create_note");
 
-            // Mention notification for Ada (user 5), deduped by thread.
             let mentions: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM notifications WHERE type = 'mentioned' AND target_user_id = 5",
@@ -3493,8 +3033,6 @@ mod tests {
             assert_eq!(mentions, 1);
         });
 
-        // The bus got a ConversationUpdated event for the live update
-        // (rx subscribed before the action above).
         let mut saw_update = false;
         while let Ok(event) = rx.try_recv() {
             if matches!(event, spp_core::events::ServerEvent::ConversationUpdated(_)) {
@@ -3588,8 +3126,6 @@ mod tests {
 
     #[test]
     fn r4_d9_reply_carries_the_configured_status_after() {
-        // Default (decision D-b): pending — a sent reply moves the
-        // conversation to "awaiting the customer" like Help Scout itself.
         let db = fixture(vec![seeded().0]);
         let bus = EventBus::new(8);
         let detail = db
@@ -3613,8 +3149,6 @@ mod tests {
             "D9: the default reply statusAfter is pending"
         );
 
-        // The "keep" setting restores the pre-1.4.0 behavior: no status
-        // transition on send.
         db.with_write(|conn| spp_core::settings::set_string(conn, "reply_status_after", "keep"))
             .expect("set keep");
         let outcome = submit_reply(&db, &bus, &detail, "keep setting text", "", "");
@@ -3636,9 +3170,6 @@ mod tests {
 
     #[test]
     fn r4_d8_a_failed_enqueue_is_rejected_instead_of_faking_success() {
-        // Break the queue so the INSERT fails; the composer must say so
-        // and the typed text must survive (pre-1.4.0: job id 0 + a green
-        // "accepted" while the reply evaporated).
         let db = fixture(vec![seeded().0]);
         let bus = EventBus::new(8);
         let detail = db
@@ -3661,15 +3192,9 @@ mod tests {
         }
     }
 
-    /// Clean-audit item 24: the composer poll reads THIS job's `jobs.result`
-    /// row. The old query scraped the newest matching `ai_runs` row (any
-    /// conversation, any session) — a foreign historical run filled the
-    /// composer and claimed "Composer updated by the AI transform."
     #[test]
     fn audit24_poll_fills_the_composer_from_the_jobs_own_result() {
         let db = fixture(vec![seeded().0]);
-        // The bait: a newer, foreign, GLOBAL draft_rewrite run that the old
-        // newest-run scrape would have picked.
         db.with_write(|conn| {
             conn.execute(
                 "INSERT INTO ai_runs (type, conversation_id, status, model, prompt_version,
@@ -3682,7 +3207,6 @@ mod tests {
             )
             .expect("foreign run");
         });
-        // This job's own pinned result.
         let job_id = db.with_write(|conn| {
             spp_core::jobs::enqueue_on(conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue")
         });
@@ -3709,8 +3233,6 @@ mod tests {
         assert!(page.pending_ai.is_none(), "the poll resolves the job");
         assert!(!page.status_is_error, "a real result is a success");
 
-        // A completed job with NO result (feature off / cache hit that wrote
-        // nothing) says so honestly instead of falling back to ai_runs.
         let job_id2 = db.with_write(|conn| {
             spp_core::jobs::enqueue_on(conn, "ai", "translate_composer", "{}", 3, 2)
                 .expect("enqueue")
@@ -3737,10 +3259,6 @@ mod tests {
         assert!(page.status_is_error, "the honest no-result message shows");
     }
 
-    /// Clean-audit item 73: a finishing rewrite/translate must not
-    /// clobber typing made while the job ran. The result lands only when
-    /// the composer still holds the text the transform was queued from;
-    /// an in-flight edit keeps the user's text and says so.
     #[test]
     fn audit73_transform_completion_never_overwrites_in_flight_typing() {
         let db = fixture(vec![seeded().0]);
@@ -3756,7 +3274,6 @@ mod tests {
             .expect("complete with result")
         });
 
-        // The user typed while the transform was running.
         let mut page = InboxPage {
             pending_ai: Some(PendingComposerAi {
                 job_id,
@@ -3782,7 +3299,6 @@ mod tests {
         );
         assert!(!page.status_is_error, "keeping the edit is not an error");
 
-        // The untouched path still lands the result (audit item 24 intact).
         let job_id2 = db.with_write(|conn| {
             spp_core::jobs::enqueue_on(conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue")
         });
@@ -3808,9 +3324,6 @@ mod tests {
         );
     }
 
-    /// Clean-audit item 25: `open` is the platform's own await-agent status
-    /// and rides the wire; the legacy phantom `waiting` maps onto it —
-    /// never onto a status Help Scout would reject.
     #[test]
     fn audit25_open_is_the_await_agent_status_and_legacy_waiting_maps_to_it() {
         let db = fixture(vec![seeded().0]);
@@ -3842,7 +3355,6 @@ mod tests {
             "the await-agent status must be the platform's own `open`"
         );
 
-        // A stored legacy "waiting" must never reach the wire.
         db.with_write(|conn| spp_core::settings::set_string(conn, "reply_status_after", "waiting"))
             .expect("set legacy waiting");
         let parsed = status_after_for("legacy waiting text");
@@ -3853,17 +3365,12 @@ mod tests {
     }
 }
 
-/// Clean-audit item 78: the inbox list was hard-capped at 50 rows with
-/// no pagination — conversation 51+ was unreachable. The cap is now a
-/// page size with offset paging (and a clamp when the data shrinks
-/// underneath the current page).
 #[cfg(test)]
 mod batch27_audit78_tests {
     use super::*;
     use crate::testsupport::{fixture, seed_conversation};
 
     fn seed_many(conn: &mut rusqlite::Connection) {
-        // 55 conversations: page 0 holds 50, page 1 holds 5.
         for i in 1..=55i64 {
             seed_conversation(conn, i, &format!("conv {i}"), "active", "email", 1, 5, 9);
         }
@@ -3882,12 +3389,10 @@ mod batch27_audit78_tests {
             page.list.iter().map(|i| i.id).collect();
         assert_eq!(page_zero_ids.len(), 50, "no duplicates within page 0");
 
-        // The pager advances: page 1 holds the remaining 5 rows.
         page.page = 1;
         page.reload_list(&db);
         assert_eq!(page.list.len(), 5, "page 1 holds the rest");
         assert_eq!(page.total, 55, "the total is page-independent");
-        // The two pages together cover every conversation exactly once.
         let mut seen = page_zero_ids;
         for item in &page.list {
             assert!(seen.insert(item.id), "no row appears on two pages");
@@ -3913,8 +3418,6 @@ mod batch27_audit78_tests {
         page.reload_list(&db);
         assert_eq!(page.list.len(), 50);
 
-        // The data shrinks to 60 rows... then to 12 while the user sits
-        // on page 1 (offset 50 > 12 rows): the reload clamps to page 0.
         db.with_write(|conn| {
             conn.execute("DELETE FROM conversations WHERE id > 12", [])
                 .expect("delete");
@@ -3926,9 +3429,6 @@ mod batch27_audit78_tests {
     }
 }
 
-/// Clean-audit item 79: clicking another row used to wipe the typed
-/// reply draft silently — the composer state now travels with its
-/// conversation and is restored on reselect.
 #[cfg(test)]
 mod batch27_audit79_tests {
     use super::*;
@@ -3947,7 +3447,6 @@ mod batch27_audit79_tests {
         page.composer_body = "typed but unsent reply".into();
         page.composer_cc = "cc@example.com".into();
 
-        // The user peeks at the other row.
         page.select(&db, 2);
         assert_eq!(page.composer_body, "", "the incoming row starts clean");
         assert_eq!(
@@ -3956,7 +3455,6 @@ mod batch27_audit79_tests {
             "the incoming row starts in reply mode"
         );
 
-        // Coming back: the draft is exactly where they left it.
         page.select(&db, 1);
         assert_eq!(page.composer_body, "typed but unsent reply");
         assert_eq!(page.composer_cc, "cc@example.com");
@@ -3978,10 +3476,6 @@ mod batch27_audit79_tests {
     }
 }
 
-/// Clean-audit item 137: the filter/assign refs (users, mailboxes, tags,
-/// the mention directory) loaded once per session — a sync bringing new
-/// tags never reached the dropdowns until restart. Invalidation clears
-/// the refs caches and the next frame's empty-gate reloads them.
 #[cfg(test)]
 mod batch33_audit137_tests {
     use super::*;
@@ -3996,12 +3490,8 @@ mod batch33_audit137_tests {
         assert!(!page.mailboxes.is_empty(), "refs load with the page");
         assert!(page.tags.is_empty(), "no tags seeded yet");
 
-        // A sync lands a new tag...
         db.with_write(|conn| crate::testsupport::seed_tag(conn, 1, "billing"));
 
-        // ...before the fix, only a restart surfaced it (the empty-gate
-        // never fired again). Invalidation must clear the caches and the
-        // reload must pick the new tag up.
         page.invalidate();
         assert!(
             page.mailboxes.is_empty(),
@@ -4016,9 +3506,6 @@ mod batch33_audit137_tests {
     }
 }
 
-/// Clean-audit item 143: the `#` field's own hint suggests "#778", but
-/// the leading hash used to fail the parse and the number filter
-/// silently dropped.
 #[cfg(test)]
 mod batch33_audit143_tests {
     use super::*;

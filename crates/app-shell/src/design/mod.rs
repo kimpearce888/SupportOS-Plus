@@ -1,85 +1,30 @@
-//! The SupportOS+ design system: a centralized, shadcn/ui-inspired token
-//! and component library for the native egui shell.
-//!
-//! The redesign keeps the pinned eframe/egui 0.37 stack (decision D1) and
-//! adds zero new dependencies: [`egui-shadcn` was evaluated but targets
-//! egui 0.33, and downgrading egui is out of scope]. Instead this module
-//! installs two complete, deliberately-styled zinc themes (light + dark)
-//! on the egui context and exposes a small family of reusable components
-//! — buttons, cards, badges, chips, tables, page headers, empty states —
-//! that every page shares, so styling stays centralized.
-//!
-//! ## Color tokens
-//! [`Tokens`] carries the shadcn zinc palette per mode: background,
-//! foreground, card, popover, primary, secondary, muted, accent,
-//! destructive, success, warning, info, border, input and ring — with
-//! hand-checked WCAG AA contrast (see the tests at the bottom).
-//!
-//! ## Typography
-//! Text styles carry the DC §2.5 type roles: Heading 22, Body 13.5,
-//! Button/controls 13, Monospace 12.5, Small 12 (egui embeds Ubuntu Light).
-//!
-//! ## Components
-//! Every interactive component draws a visible keyboard focus ring in
-//! the theme's ring color, and hover/press feedback through a tonal
-//! overlay so solid variants (primary/destructive) respond like their
-//! web counterparts.
-//!
-//! ## Design Contract v1.0 (RS-12 token port)
-//! Token VALUES are frozen 1:1 from **DC v1.0** (`docs/audit/design-contract-v1.md`,
-//! extracted from the owner-approved conformed lab at `af5bc2a`): one DC token =
-//! one constant here, DS.TONE = the one [`status_tone`] match arm, and the
-//! spacing/type/radius scales live in [`scale`]. Pin tests assert the freeze;
-//! `tests/style_lint.rs` forbids raw `Color32` construction outside this file and
-//! off-scale spacing literals. The keyboard focus ring ([`Tokens::ring`]) is an
-//! a11y affordance carried over from the pre-port shell — not a DC token.
-
 use eframe::egui;
 
 use crate::icons::Icon;
 
-// ---------------------------------------------------------------------------
-// Semantic tokens (shadcn/ui zinc palette)
-// ---------------------------------------------------------------------------
-
-/// The complete semantic palette for one mode (light or dark).
 mod controls;
 use controls::chip_impl;
 pub use controls::{card, card_titled, hint_text, pager, section_title};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Tokens {
-    /// Central panel / window background.
     pub background: egui::Color32,
-    /// Elevated sidebar background.
     pub sidebar: egui::Color32,
-    /// Card and popover background.
     pub card: egui::Color32,
-    /// Card & control borders.
     pub border: egui::Color32,
-    /// Slightly stronger border used on hover.
     pub border_strong: egui::Color32,
-    /// Default foreground (text).
     pub foreground: egui::Color32,
-    /// Muted surface (chips, secondary fills).
     pub muted: egui::Color32,
-    /// Muted foreground (secondary text).
     pub muted_foreground: egui::Color32,
-    /// Hover surface for ghost controls.
     pub accent: egui::Color32,
-    /// Primary (default) button fill.
     pub primary: egui::Color32,
-    /// Text/icons on primary fills.
     pub primary_foreground: egui::Color32,
     /// Text on AI-solid fills (`#ffffff`, DC DS-C-11 `ai`).
     pub on_ai: egui::Color32,
-    /// Secondary button fill.
     pub secondary: egui::Color32,
     pub secondary_foreground: egui::Color32,
-    /// Destructive button fill.
     pub destructive: egui::Color32,
     pub destructive_foreground: egui::Color32,
-    /// Success/warning/info/destructive badge fills and text.
     pub success: egui::Color32,
     pub success_soft: egui::Color32,
     pub success_foreground: egui::Color32,
@@ -90,43 +35,24 @@ pub struct Tokens {
     pub info_soft: egui::Color32,
     pub info_foreground: egui::Color32,
     pub destructive_soft: egui::Color32,
-    /// Destructive text on soft fills (AA-checked, red-700/-400).
     pub destructive_text: egui::Color32,
-    /// Keyboard focus ring color.
     pub ring: egui::Color32,
-    /// Selected row/chip fill (lists, sidebar).
     pub selection: egui::Color32,
     pub selection_foreground: egui::Color32,
-    /// Input/text-edit background.
     pub input: egui::Color32,
-    /// Striping color for tables (barely off the background).
     pub faint: egui::Color32,
-    /// Hyperlink color.
     pub hyperlink: egui::Color32,
-    /// Chart accent (line/bars).
     pub chart_accent: egui::Color32,
-    /// Chart accent 2 (secondary series).
     pub chart_accent_2: egui::Color32,
-    /// Hover overlay tint (dark theme lightens dark surfaces).
     pub hover_tint: egui::Color32,
-    // --- DC v1.0 additions (RS-12 token port; docs/audit/design-contract-v1.md §2) ---
-    /// AI identity — solid violet (AI badges, AI buttons, chart accent).
     pub ai: egui::Color32,
-    /// AI tint surface (AI message cards, copilot cards, AI chips).
     pub ai_soft: egui::Color32,
-    /// AI text on tint surfaces; also the hyperlink token (`--ds-link`).
     pub ai_foreground: egui::Color32,
-    /// AI hairline (AI message cards, copilot cards).
     pub ai_border: egui::Color32,
-    /// Agent-authored message surface (`--ds-agent-bg`).
     pub agent_surface: egui::Color32,
-    /// Agent-authored message hairline (`--ds-agent-border`).
     pub agent_border: egui::Color32,
-    /// Warning hairline (warn callouts, internal-note cards).
     pub warning_border: egui::Color32,
-    /// Text on neutral tinted pills/badges (`--ds-neutral-fg`).
     pub neutral_foreground: egui::Color32,
-    /// DC e2 elevation shadow (drawers, dialogs, toasts) — black @ 0.14.
     pub shadow: egui::Color32,
     /// DetailPanel/dialog scrim — black @ 0.28 (DC §3 DS-C-16).
     pub scrim: egui::Color32,
@@ -136,74 +62,71 @@ const fn rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
     egui::Color32::from_rgb(r, g, b)
 }
 
-/// DC v1.0 light mode (port of `ds.css` `body[data-theme="light"]`).
 pub const LIGHT: Tokens = Tokens {
-    background: rgb(244, 244, 245), // --ds-bg #f4f4f5
-    sidebar: rgb(250, 250, 250),    // --ds-surface-2 #fafafa
+    background: rgb(244, 244, 245),
+    sidebar: rgb(250, 250, 250),
     card: rgb(255, 255, 255),
-    border: rgb(228, 228, 231),           // zinc-200
-    border_strong: rgb(212, 212, 216),    // zinc-300
-    foreground: rgb(9, 9, 11),            // zinc-950
-    muted: rgb(244, 244, 245),            // zinc-100
-    muted_foreground: rgb(113, 113, 122), // zinc-500
+    border: rgb(228, 228, 231),
+    border_strong: rgb(212, 212, 216),
+    foreground: rgb(9, 9, 11),
+    muted: rgb(244, 244, 245),
+    muted_foreground: rgb(113, 113, 122),
     accent: rgb(244, 244, 245),
-    primary: rgb(24, 24, 27), // zinc-900
+    primary: rgb(24, 24, 27),
     primary_foreground: rgb(250, 250, 250),
     on_ai: rgb(255, 255, 255),
     secondary: rgb(244, 244, 245),
     secondary_foreground: rgb(24, 24, 27),
-    destructive: rgb(220, 38, 38), // red-600
+    destructive: rgb(220, 38, 38),
     destructive_foreground: rgb(255, 255, 255),
-    success: rgb(22, 163, 74),        // green-600
-    success_soft: rgb(240, 253, 244), // green-50
+    success: rgb(22, 163, 74),
+    success_soft: rgb(240, 253, 244),
     success_foreground: rgb(21, 128, 61),
-    warning: rgb(217, 119, 6),        // amber-600
-    warning_soft: rgb(255, 251, 235), // amber-50
+    warning: rgb(217, 119, 6),
+    warning_soft: rgb(255, 251, 235),
     warning_foreground: rgb(180, 83, 9),
-    info: rgb(37, 99, 235),        // blue-600
-    info_soft: rgb(239, 246, 255), // blue-50
+    info: rgb(37, 99, 235),
+    info_soft: rgb(239, 246, 255),
     info_foreground: rgb(29, 78, 216),
-    destructive_soft: rgb(254, 226, 226), // red-100
-    destructive_text: rgb(185, 28, 28),   // red-700
+    destructive_soft: rgb(254, 226, 226),
+    destructive_text: rgb(185, 28, 28),
     ring: rgb(24, 24, 27),
-    selection: rgb(244, 244, 245), // = neutral-bg (DS selected row)
+    selection: rgb(244, 244, 245),
     selection_foreground: rgb(24, 24, 27),
-    input: rgb(255, 255, 255),       // --ds-input
-    faint: rgb(250, 250, 250),       // --ds-surface-2
-    hyperlink: rgb(109, 40, 217),    // --ds-link = --ds-ai-fg
-    chart_accent: rgb(124, 58, 237), // lab bars/lines draw in --ds-ai
+    input: rgb(255, 255, 255),
+    faint: rgb(250, 250, 250),
+    hyperlink: rgb(109, 40, 217),
+    chart_accent: rgb(124, 58, 237),
     chart_accent_2: rgb(24, 24, 27),
     hover_tint: rgb(9, 9, 11),
-    // DC additions (light):
-    ai: rgb(124, 58, 237),               // --ds-ai #7c3aed
-    ai_soft: rgb(245, 243, 255),         // --ds-ai-bg #f5f3ff
-    ai_foreground: rgb(109, 40, 217),    // --ds-ai-fg #6d28d9
-    ai_border: rgb(221, 214, 254),       // --ds-ai-border #ddd6fe
-    agent_surface: rgb(250, 250, 250),   // --ds-agent-bg #fafafa
-    agent_border: rgb(228, 228, 231),    // --ds-agent-border #e4e4e7
-    warning_border: rgb(253, 230, 138),  // --ds-warning-border #fde68a
-    neutral_foreground: rgb(63, 63, 70), // --ds-neutral-fg #3f3f46
-    shadow: egui::Color32::from_rgba_premultiplied(0, 0, 0, 36), // e2 rgba(0,0,0,0.14)
-    scrim: egui::Color32::from_rgba_premultiplied(0, 0, 0, 71), // rgba(0,0,0,0.28)
+    ai: rgb(124, 58, 237),
+    ai_soft: rgb(245, 243, 255),
+    ai_foreground: rgb(109, 40, 217),
+    ai_border: rgb(221, 214, 254),
+    agent_surface: rgb(250, 250, 250),
+    agent_border: rgb(228, 228, 231),
+    warning_border: rgb(253, 230, 138),
+    neutral_foreground: rgb(63, 63, 70),
+    shadow: egui::Color32::from_rgba_premultiplied(0, 0, 0, 36),
+    scrim: egui::Color32::from_rgba_premultiplied(0, 0, 0, 71),
 };
 
-/// DC v1.0 dark mode (port of `ds.css` `body[data-theme="dark"]`).
 pub const DARK: Tokens = Tokens {
-    background: rgb(9, 9, 11), // zinc-950
+    background: rgb(9, 9, 11),
     sidebar: rgb(12, 12, 14),
-    card: rgb(24, 24, 27),          // zinc-900
-    border: rgb(39, 39, 42),        // zinc-800
-    border_strong: rgb(63, 63, 70), // zinc-700
-    foreground: rgb(250, 250, 250), // zinc-50
+    card: rgb(24, 24, 27),
+    border: rgb(39, 39, 42),
+    border_strong: rgb(63, 63, 70),
+    foreground: rgb(250, 250, 250),
     muted: rgb(39, 39, 42),
-    muted_foreground: rgb(161, 161, 170), // zinc-400
+    muted_foreground: rgb(161, 161, 170),
     accent: rgb(39, 39, 42),
     primary: rgb(250, 250, 250),
     primary_foreground: rgb(24, 24, 27),
     on_ai: rgb(255, 255, 255),
     secondary: rgb(39, 39, 42),
     secondary_foreground: rgb(250, 250, 250),
-    destructive: rgb(185, 28, 28), // red-700 (readable on zinc-900)
+    destructive: rgb(185, 28, 28),
     destructive_foreground: rgb(250, 250, 250),
     success: rgb(34, 197, 94),
     success_soft: rgb(10, 44, 26),
@@ -215,30 +138,28 @@ pub const DARK: Tokens = Tokens {
     info_soft: rgb(23, 37, 84),
     info_foreground: rgb(96, 165, 250),
     destructive_soft: rgb(69, 26, 26),
-    destructive_text: rgb(248, 113, 113), // red-400
+    destructive_text: rgb(248, 113, 113),
     ring: rgb(212, 212, 216),
     selection: rgb(39, 39, 42),
     selection_foreground: rgb(250, 250, 250),
     input: rgb(12, 12, 14),
-    faint: rgb(12, 12, 14),           // --ds-surface-2 #0c0c0e
-    hyperlink: rgb(196, 181, 253),    // --ds-ai-fg dark
-    chart_accent: rgb(167, 139, 250), // --ds-ai dark
+    faint: rgb(12, 12, 14),
+    hyperlink: rgb(196, 181, 253),
+    chart_accent: rgb(167, 139, 250),
     chart_accent_2: rgb(250, 250, 250),
     hover_tint: rgb(250, 250, 250),
-    // DC additions (dark):
-    ai: rgb(167, 139, 250),                 // --ds-ai #a78bfa
-    ai_soft: rgb(36, 29, 59),               // --ds-ai-bg #241d3b
-    ai_foreground: rgb(196, 181, 253),      // --ds-ai-fg #c4b5fd
-    ai_border: rgb(70, 58, 112),            // --ds-ai-border #463a70
-    agent_surface: rgb(29, 29, 33),         // --ds-agent-bg #1d1d21
-    agent_border: rgb(44, 44, 49),          // --ds-agent-border #2c2c31
-    warning_border: rgb(87, 67, 26),        // --ds-warning-border #57431a
-    neutral_foreground: rgb(212, 212, 216), // --ds-neutral-fg #d4d4d8
+    ai: rgb(167, 139, 250),
+    ai_soft: rgb(36, 29, 59),
+    ai_foreground: rgb(196, 181, 253),
+    ai_border: rgb(70, 58, 112),
+    agent_surface: rgb(29, 29, 33),
+    agent_border: rgb(44, 44, 49),
+    warning_border: rgb(87, 67, 26),
+    neutral_foreground: rgb(212, 212, 216),
     shadow: egui::Color32::from_rgba_premultiplied(0, 0, 0, 36),
     scrim: egui::Color32::from_rgba_premultiplied(0, 0, 0, 71),
 };
 
-/// The tokens of the theme the `ui` is currently rendering with.
 #[must_use]
 pub fn tokens(ui: &egui::Ui) -> &'static Tokens {
     if ui.visuals().dark_mode {
@@ -248,8 +169,6 @@ pub fn tokens(ui: &egui::Ui) -> &'static Tokens {
     }
 }
 
-/// The tokens of the context's active theme — for call sites that build a
-/// frame from a `Context` before any `Ui` exists (palette/dialog windows).
 #[must_use]
 pub fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
     if ctx.theme() == egui::Theme::Dark {
@@ -259,17 +178,7 @@ pub fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
     }
 }
 
-// ---------------------------------------------------------------------------
-// DC v1.0 scales (§2.4–2.6) — the only spacing/type/radius values allowed
-// ---------------------------------------------------------------------------
-
-/// Design Contract scales. Pages size and position everything through these;
-/// off-scale literals are caught by the style lint (`tests/style_lint.rs`).
-/// The 4pt rule (DC §2.4): micro gaps sp-1..sp-7; `CLUSTER` (6px) only inside
-/// control clusters; the `PAD_*` values are component pads frozen by the DC
-/// sheets (the approved lab values, not free-form choices).
 pub mod scale {
-    /// 4pt spacing scale (DC §2.4).
     pub mod space {
         pub const SP1: f32 = 4.0;
         pub const SP2: f32 = 8.0;
@@ -278,7 +187,6 @@ pub mod scale {
         pub const SP5: f32 = 20.0;
         pub const SP6: f32 = 24.0;
         pub const SP7: f32 = 32.0;
-        /// Allowed only inside control clusters (DC §2.4).
         pub const CLUSTER: f32 = 6.0;
         /// Card header vertical pad (DC §3 DS-C-02, `11px 14px`).
         pub const PAD_CARD_V: f32 = 11.0;
@@ -290,10 +198,8 @@ pub mod scale {
         pub const PAD_TOOL: f32 = 10.0;
         /// Reader pane horizontal pad (DC §4 DS-A-05, `18px 22px`).
         pub const PAD_READER_X: f32 = 22.0;
-        /// Reader pane vertical pad.
         pub const PAD_READER_V: f32 = 18.0;
     }
-    /// Type roles (DC §2.5). `*_HALF` carries the lab's 11.5/12.5 steps.
     pub mod text {
         pub const META: f32 = 11.0;
         pub const META_HALF: f32 = 11.5;
@@ -308,7 +214,6 @@ pub mod scale {
         pub const STAT_BIG: f32 = 26.0;
         pub const TITLE: f32 = 22.0;
     }
-    /// Corner radii (DC §2.6).
     pub mod radius {
         pub const SM: f32 = 6.0;
         pub const MD: f32 = 8.0;
@@ -317,16 +222,8 @@ pub mod scale {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Theme installation
-// ---------------------------------------------------------------------------
-
-/// Install the design system on a context: fonts, spacing, and the full
-/// light and dark visuals (both, so the theme switch is instant and
-/// system-theme drift cannot fall back to egui defaults).
 pub fn install(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
-    // Modern desktop type scale on the embedded Ubuntu-Light/Hack stack.
     use egui::FontFamily::{Monospace, Proportional};
     use egui::TextStyle::{Body, Button, Heading, Monospace as MonoStyle, Small};
     fonts
@@ -335,7 +232,6 @@ pub fn install(ctx: &egui::Context) {
         .expect("proportional family")
         .push("Hack".into());
     let mut text_styles = egui::Style::default().text_styles;
-    // DC §2.5 type roles: title 22 · body 13.5 · controls 13 · mono 12.5 · small 12.
     text_styles.insert(Heading, egui::FontId::new(scale::text::TITLE, Proportional));
     text_styles.insert(Body, egui::FontId::new(scale::text::BODY, Proportional));
     text_styles.insert(
@@ -364,7 +260,6 @@ pub fn install(ctx: &egui::Context) {
     ctx.set_visuals_of(egui::Theme::Dark, dark_visuals());
 }
 
-/// Full zinc-light visuals.
 #[must_use]
 pub fn light_visuals() -> egui::Visuals {
     let mut v = egui::Visuals::light();
@@ -404,7 +299,6 @@ pub fn light_visuals() -> egui::Visuals {
     v
 }
 
-/// Full zinc-dark visuals.
 #[must_use]
 pub fn dark_visuals() -> egui::Visuals {
     let mut v = egui::Visuals::dark();
@@ -469,17 +363,12 @@ fn shadow(blur: u8, alpha: u8) -> egui::Shadow {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Components: buttons
-// ---------------------------------------------------------------------------
-
 /// Button variants (DC: DS-C-11 — primary / outline / ghost / danger / text / ai).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ButtonVariant {
     /// Solid primary (DS-C-11 `primary`).
     #[default]
     Primary,
-    /// Muted surface fill (legacy secondary; reads as a quiet outline).
     Secondary,
     /// Bordered, no fill (DS-C-11 `outline`).
     Outline,
@@ -493,12 +382,10 @@ pub enum ButtonVariant {
     Ai,
 }
 
-/// A shadcn-style button with hover/press feedback and a focus ring.
 pub fn button(ui: &mut egui::Ui, text: &str, variant: ButtonVariant) -> egui::Response {
     button_impl(ui, text, None, variant)
 }
 
-/// A shadcn-style button with a leading icon.
 pub fn button_with_icon(
     ui: &mut egui::Ui,
     icon: Icon,
@@ -508,7 +395,6 @@ pub fn button_with_icon(
     button_impl(ui, text, Some(icon), variant)
 }
 
-/// An icon-only shadcn-style button (ghost or outline) with a tooltip.
 pub fn icon_button(
     ui: &mut egui::Ui,
     icon: Icon,
@@ -565,8 +451,6 @@ fn button_impl(
     let t = tokens(ui);
     let (fill, fg, stroke) = variant_look(t, variant);
     // DS-C-11 anatomy, drawn manually so the icon zone is exact: 32px
-    // height, r-md corners, 14px side padding, 13px icon + 5px gap, 13px
-    // control text.
     let galley = egui::WidgetText::from(
         egui::RichText::new(text)
             .color(fg)
@@ -635,11 +519,7 @@ fn variant_look(
     }
 }
 
-/// Tonal hover/press overlay painted above the solid button so explicit
-/// fills still respond like their shadcn counterparts (primary/90 etc.).
 fn hover_overlay(ui: &mut egui::Ui, response: &egui::Response, t: &Tokens, variant: ButtonVariant) {
-    // In light mode everything darkens on hover; in dark mode light fills
-    // darken and dark fills lighten. Destructive always darkens slightly.
     let light_mode = !ui.visuals().dark_mode;
     let darken = match variant {
         ButtonVariant::Primary => true,
@@ -648,8 +528,6 @@ fn hover_overlay(ui: &mut egui::Ui, response: &egui::Response, t: &Tokens, varia
         ButtonVariant::Text => light_mode,
         ButtonVariant::Ai => true,
     };
-    // The tint darkens a light surface and vice versa; black when the
-    // dark theme needs to darken its (light) primary fill.
     let tint = if darken && light_mode {
         LIGHT.hover_tint
     } else if darken {
@@ -670,7 +548,6 @@ fn hover_overlay(ui: &mut egui::Ui, response: &egui::Response, t: &Tokens, varia
     }
 }
 
-/// Draw the keyboard focus ring around a focused response's rect.
 fn focus_feedback(ui: &mut egui::Ui, response: &egui::Response) {
     if response.has_focus() {
         let t = tokens(ui);
@@ -683,11 +560,6 @@ fn focus_feedback(ui: &mut egui::Ui, response: &egui::Response) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Components: chips, badges, status pills
-// ---------------------------------------------------------------------------
-
-/// Semantic badge tones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BadgeTone {
     Neutral,
@@ -695,20 +567,13 @@ pub enum BadgeTone {
     Warning,
     Destructive,
     Info,
-    /// AI identity (DC G-2: AI is always violet).
     Ai,
 }
 
-/// A small status badge (soft fill + colored text), shadcn Badge style.
-/// The (fill, foreground) pair a tone paints with — shared by badges and
-/// the header freshness pill so they can never drift apart.
 pub fn tone_colors(ui: &egui::Ui, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
     tone_colors_of(tokens(ui), tone)
 }
 
-/// Theme-independent core of [`tone_colors`] — (fill, foreground) per tone
-/// (DC §5 + §2.3); shared by badges, dots, tiles and bands so they cannot
-/// drift apart.
 pub fn tone_colors_of(t: &Tokens, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
     match tone {
         BadgeTone::Neutral => (t.muted, t.neutral_foreground),
@@ -753,12 +618,8 @@ pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
     response
 }
 
-/// DC §5 DS.TONE — the ONLY status → tone map in the product (one match arm;
-/// `docs/audit/design-contract-v1.md`). Adding a status = adding a row here
-/// first, then a DC row; pages alias raw data tokens onto these keys.
 pub fn status_tone(status: &str) -> (BadgeTone, &'static str) {
     match status {
-        // conversation lifecycle
         "open" => (BadgeTone::Info, "Open"),
         "pending" => (BadgeTone::Warning, "Pending"),
         "waiting" => (BadgeTone::Warning, "Waiting"),
@@ -766,16 +627,13 @@ pub fn status_tone(status: &str) -> (BadgeTone, &'static str) {
         "closed" => (BadgeTone::Neutral, "Closed"),
         "spam" => (BadgeTone::Destructive, "Spam"),
         "active" => (BadgeTone::Info, "Active"),
-        // knowledge / articles
         "published" => (BadgeTone::Success, "Published"),
         "draft" => (BadgeTone::Neutral, "Draft"),
         "internal" => (BadgeTone::Info, "Internal"),
-        // incident severity (bands)
         "critical" => (BadgeTone::Destructive, "Critical"),
         "high" => (BadgeTone::Warning, "High"),
         "medium" => (BadgeTone::Info, "Medium"),
         "low" => (BadgeTone::Neutral, "Low"),
-        // health / sync
         "ok" => (BadgeTone::Success, "OK"),
         "healthy" => (BadgeTone::Success, "Healthy"),
         "live" => (BadgeTone::Success, "Live"),
@@ -783,7 +641,6 @@ pub fn status_tone(status: &str) -> (BadgeTone, &'static str) {
         "error" => (BadgeTone::Destructive, "Error"),
         "syncing" => (BadgeTone::Info, "Syncing"),
         "catching_up" => (BadgeTone::Info, "Catching up"),
-        // authorship roles
         "ai" => (BadgeTone::Ai, "AI"),
         "note" => (BadgeTone::Warning, "Internal note"),
         "customer" => (BadgeTone::Neutral, "Customer"),
@@ -792,19 +649,14 @@ pub fn status_tone(status: &str) -> (BadgeTone, &'static str) {
     }
 }
 
-/// A selectable filter chip (shadcn Tabs/Toggle feel): full pill hitbox,
-/// selected state uses the theme selection colors.
 pub fn chip(ui: &mut egui::Ui, selected: bool, text: &str) -> egui::Response {
     chip_impl(ui, selected, text, None)
 }
 
-/// A selectable filter chip with a leading icon.
 pub fn chip_with_icon(ui: &mut egui::Ui, selected: bool, icon: Icon, text: &str) -> egui::Response {
     chip_impl(ui, selected, text, Some(icon))
 }
 
-/// The standard page header: page title, optional subtitle, right-side
-/// actions, and breathing room before the content.
 pub fn page_header(
     ui: &mut egui::Ui,
     title: &str,
@@ -857,8 +709,6 @@ pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&st
 }
 
 /// DC: DS-C-24 console hero — the mono engine state (the lab's 17px),
-/// the muted description line, and the right cluster (actions/badges),
-/// on the shared card frame. Used by the console pages (sync health).
 pub fn hero(ui: &mut egui::Ui, state: &str, sub: &str, right: impl FnOnce(&mut egui::Ui)) {
     card(ui, |ui| {
         ui.horizontal(|ui| {
@@ -880,7 +730,6 @@ pub fn hero(ui: &mut egui::Ui, state: &str, sub: &str, right: impl FnOnce(&mut e
 }
 
 /// DC: DS-C-01 PageHeader counter pill (`.ds-counter`) — counts live here,
-/// never in card titles (register A-6).
 pub fn page_counter(ui: &mut egui::Ui, text: &str) {
     let t = tokens(ui);
     let galley = egui::WidgetText::from(
@@ -909,9 +758,6 @@ pub fn page_counter(ui: &mut egui::Ui, text: &str) {
 }
 
 /// DC: DS-A-05 views-rail row — one inbox view: full-width label with the
-/// count right; the selected view carries the selection fill. The rail
-/// switcher of the inbox workspace (counts live beside the view, register
-/// A-6: counts never sit in titles).
 pub fn view_item(ui: &mut egui::Ui, label: &str, count: u32, selected: bool) -> egui::Response {
     let t = tokens(ui);
     let (rect, resp) =
@@ -956,9 +802,6 @@ pub fn view_item(ui: &mut egui::Ui, label: &str, count: u32, selected: bool) -> 
     resp
 }
 
-/// The solid status color for a tone — dots, tile bands, level insets.
-/// Derived from the same DS.TONE table as [`tone_colors_of`] (DC G-2:
-/// one meaning, one color, everywhere).
 pub fn tone_solid(t: &Tokens, tone: BadgeTone) -> egui::Color32 {
     match tone {
         BadgeTone::Neutral => t.border_strong,
@@ -971,7 +814,6 @@ pub fn tone_solid(t: &Tokens, tone: BadgeTone) -> egui::Color32 {
 }
 
 /// DC: DS-C-06 StatusDot — the 8px (11px big) tone dot bound to DS.TONE;
-/// the same tone its badge would render, never a new color.
 pub fn status_dot(ui: &mut egui::Ui, tone: BadgeTone, big: bool) {
     let t = tokens(ui);
     let d = if big { 11.0 } else { 8.0 };
@@ -983,7 +825,6 @@ pub fn status_dot(ui: &mut egui::Ui, tone: BadgeTone, big: bool) {
 }
 
 /// One underline tab row (DS-C-09 anatomy); returns a globally-indexed
-/// click. Used by [`tabs`] and [`tab_groups`].
 fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Option<usize> {
     let t = tokens(ui);
     let mut clicked = None;
@@ -1016,7 +857,6 @@ fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Op
                 },
             );
             if on {
-                // 2px primary underline, 10px inset, riding the rail below.
                 ui.painter().rect_filled(
                     egui::Rect::from_min_max(
                         egui::pos2(rect.min.x + 10.0, rect.max.y - 3.0),
@@ -1038,7 +878,6 @@ fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Op
 }
 
 /// DC: DS-C-09 Tabs (underline) — active = 500 text + 2px primary underline
-/// on a full-width hairline rail. Returns the index clicked this frame.
 pub fn tabs(ui: &mut egui::Ui, items: &[&str], active: usize) -> Option<usize> {
     let clicked = tabs_row(ui, items, active, 0);
     divider(ui);
@@ -1047,7 +886,6 @@ pub fn tabs(ui: &mut egui::Ui, items: &[&str], active: usize) -> Option<usize> {
 }
 
 /// DC: DS-C-09 grouped variant — labeled tab groups with a global index
-/// (the reports pattern). One rail at the end.
 pub fn tab_groups(ui: &mut egui::Ui, groups: &[(&str, &[&str])], active: usize) -> Option<usize> {
     let t = tokens(ui);
     let mut clicked = None;
@@ -1075,8 +913,6 @@ pub fn tab_groups(ui: &mut egui::Ui, groups: &[(&str, &[&str])], active: usize) 
 }
 
 /// DC: DS-C-10 FilterBar — filters left (inputs/combos), context and
-/// exactly ONE primary apply right (register A-2). Returns the apply
-/// response (clicked/pressed this frame).
 pub fn filter_bar<R>(
     ui: &mut egui::Ui,
     filters: impl FnOnce(&mut egui::Ui) -> R,
@@ -1092,7 +928,6 @@ pub fn filter_bar<R>(
     .inner
 }
 
-/// A centered empty state: icon, title, muted hint.
 pub fn empty_state(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) {
     let t = tokens(ui);
     ui.vertical_centered(|ui| {
@@ -1113,7 +948,6 @@ pub fn empty_state(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) {
     });
 }
 
-/// A striped data table with muted headers, the shared shadcn look.
 pub fn table<R>(
     ui: &mut egui::Ui,
     id: &str,
@@ -1142,7 +976,6 @@ pub fn table<R>(
     })
 }
 
-/// Numeric/monospace right-aligned table cell.
 pub fn td_num(ui: &mut egui::Ui, text: &str) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.monospace(egui::RichText::new(text).color(tokens(ui).foreground));
@@ -1150,9 +983,6 @@ pub fn td_num(ui: &mut egui::Ui, text: &str) {
 }
 
 /// DC: DS-C-05 DataTable — bordered r-lg wrap, uppercase muted header on
-/// surface-2, **virtualized**: only visible rows are laid out (egui gap:
-/// header letter-spacing 0.04em is not reproducible — DC exception E-2).
-/// `row` is called once per visible row index per frame.
 pub fn data_table(
     ui: &mut egui::Ui,
     id: &str,
@@ -1166,7 +996,6 @@ pub fn data_table(
         .stroke(egui::Stroke::new(1.0, t.border))
         .corner_radius(egui::CornerRadius::same(10))
         .show(ui, |ui| {
-            // Pinned header: 11px uppercase muted on surface-2.
             egui::Frame::new()
                 .fill(t.sidebar)
                 .corner_radius(egui::CornerRadius {
@@ -1207,8 +1036,6 @@ pub fn data_table(
 }
 
 /// DC: DS-C-04 MetricTile — horizontal count + label tile; `band` tints
-/// the count and the 3px left rail via DS.TONE; `drill` makes it a
-/// clickable drill-down (hover border-strong). Returns the response.
 pub fn metric_tile(
     ui: &mut egui::Ui,
     count: &str,
@@ -1242,9 +1069,6 @@ pub fn metric_tile(
         f32::INFINITY,
         egui::TextStyle::Body,
     );
-    // The lab's drill variant carries a second muted line ('open →' on the
-    // operations console) and grows by its height; plain tiles keep the
-    // 40px single row.
     let drill_h = drill_line.map(|l| {
         egui::WidgetText::from(egui::RichText::new(l).small().color(t.muted_foreground))
             .into_galley(
@@ -1327,11 +1151,6 @@ pub fn metric_tile(
 }
 
 /// DC: DS-C-23 bar row (folded helper) — the lab's `.ds-bar-row`: a fixed
-/// label column (140px, 120px `slim`), a 14px rounded track on the neutral
-/// fill, the value right; the fill draws in the chart accent (`--ds-ai`)
-/// at 0.8 opacity, floored at 3% so near-zero values stay visible (the
-/// lab's `Math.max(3, v / max * 100)`). Static rows — label and value are
-/// real labels so the numbers stay in the accessibility tree.
 pub fn bar_row(ui: &mut egui::Ui, label: &str, value: i64, max: i64, slim: bool) {
     let t = tokens(ui);
     let label_w = if slim { 120.0 } else { 140.0 };
@@ -1374,7 +1193,6 @@ pub fn bar_row(ui: &mut egui::Ui, label: &str, value: i64, max: i64, slim: bool)
     });
 }
 
-/// Aligned two-column form grid (labels left, controls right).
 pub fn form_grid<R>(
     ui: &mut egui::Ui,
     id: &str,
@@ -1386,10 +1204,6 @@ pub fn form_grid<R>(
         .show(ui, add_contents)
 }
 
-/// A muted 13px form field label. Returns the label's response so a
-/// following input can bind it via `Response::labelled_by` — the a11y
-/// check needs every TextInput named, and egui never reads a preceding
-/// label on its own.
 pub fn field_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.label(
         egui::RichText::new(text)
@@ -1398,7 +1212,6 @@ pub fn field_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     )
 }
 
-/// Success inline feedback text.
 pub fn success_text(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
@@ -1407,7 +1220,6 @@ pub fn success_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// Error inline feedback text.
 pub fn error_text(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
@@ -1416,7 +1228,6 @@ pub fn error_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// A subtle full-width divider using the theme border color.
 pub fn divider(ui: &mut egui::Ui) {
     let t = tokens(ui);
     let width = ui.available_width();
@@ -1426,12 +1237,9 @@ pub fn divider(ui: &mut egui::Ui) {
     let _ = id;
 }
 
-// ---------------------------------------------------------------------------
 // Components: feedback set (DC: DS-C-14/15/16/19 — R2b, RS-14)
-// ---------------------------------------------------------------------------
 
 /// DC: DS-C-14 EmptyState (slim variant) — 120px centered column for inline
-/// panes; the full variant is [`empty_state`].
 pub fn empty_state_slim(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) {
     let t = tokens(ui);
     ui.vertical_centered(|ui| {
@@ -1449,7 +1257,6 @@ pub fn empty_state_slim(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) 
 }
 
 /// DC: DS-C-14 EmptyState with the A-7 next-step CTA — every empty state
-/// says why + what to do; the CTA returns `true` on click.
 pub fn empty_state_cta(
     ui: &mut egui::Ui,
     icon: Icon,
@@ -1481,7 +1288,6 @@ pub fn empty_state_cta(
 }
 
 /// DC: DS-C-15 Callout — in-card context note (register B-1 role: never a
-/// page banner, never an action result). `warn` and `err` tint via DS.TONE.
 pub fn callout(ui: &mut egui::Ui, role: CalloutRole, text: &str) {
     let t = tokens(ui);
     let (bg, fg, border) = match role {
@@ -1513,16 +1319,12 @@ pub fn callout(ui: &mut egui::Ui, role: CalloutRole, text: &str) {
 /// DC: DS-C-15 callout roles (fixed by register B-1 — pick by role).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalloutRole {
-    /// In-card context (neutral tint).
     Neutral,
-    /// Caution context (warning tint + hairline).
     Warn,
-    /// Failure context (danger tint).
     Err,
 }
 
 /// DC: DS-C-15 status-line — the action-result role (register B-1/A-8):
-/// "syncing… → up to date / error". `ok` picks the tone.
 pub fn status_line(ui: &mut egui::Ui, ok: bool, text: &str) {
     let t = tokens(ui);
     ui.label(
@@ -1537,7 +1339,6 @@ pub fn status_line(ui: &mut egui::Ui, ok: bool, text: &str) {
 }
 
 /// DC: DS-C-15 quirk — the receipt-cited quirk footnote (dashed border,
-/// muted); data-layer quirks stay visible, never faked fixed (DC C-1).
 pub fn quirk(ui: &mut egui::Ui, text: &str) {
     let t = tokens(ui);
     egui::Frame::new()
@@ -1545,8 +1346,6 @@ pub fn quirk(ui: &mut egui::Ui, text: &str) {
         .corner_radius(egui::CornerRadius::same(8))
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
-            // egui gap (DC E-2): no dashed strokes — the quirk keeps the
-            // dashed-border look via the muted fill + strong hairline.
             ui.painter().rect_stroke(
                 ui.max_rect(),
                 egui::CornerRadius::same(8),
@@ -1562,7 +1361,6 @@ pub fn quirk(ui: &mut egui::Ui, text: &str) {
 }
 
 /// DC: DS-C-19 Avatar — initials in a role-tinted circle (lg 34 / md 28 /
-/// sm 16). `role` picks the fill from the same DS.TONE table.
 pub fn avatar(ui: &mut egui::Ui, size: AvatarSize, initials: &str, role: BadgeTone) {
     let t = tokens(ui);
     let d = match size {
@@ -1599,16 +1397,12 @@ pub fn avatar(ui: &mut egui::Ui, size: AvatarSize, initials: &str, role: BadgeTo
 /// DC: DS-C-19 avatar sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AvatarSize {
-    /// 34px — record headers, reader head.
     Lg,
-    /// 28px — message cards.
     Md,
-    /// 16px — inline rows.
     Sm,
 }
 
 /// DC: DS-C-19 Assignee — sm avatar + name, or the dashed "unassigned"
-/// pill (register A-5 row-anatomy rule).
 pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
     match name {
         Some(n) => {
@@ -1631,8 +1425,6 @@ pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
         }
         None => {
             let t = tokens(ui);
-            // egui gap (DC E-2): no dashed strokes — italic + hairline carry
-            // the DS "dashed unassigned" affordance.
             let text = egui::RichText::new("unassigned")
                 .size(scale::text::META_HALF)
                 .italics()
@@ -1663,20 +1455,13 @@ pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
 }
 
 /// DC: DS-C-16 armed ConfirmDialog rule (register A-5) — a destructive row
-/// action is a danger button that must be armed: the first click swaps the
-/// label to the explicit confirmation; a second click confirms, Esc or a
-/// click elsewhere disarms. Returns `true` exactly on the confirming click.
 pub fn armed_danger_button(ui: &mut egui::Ui, id: &str, label: &str, confirm_label: &str) -> bool {
     let armed_id = egui::Id::unique(("spp-armed", id));
-    // The arm timestamp (frame index) guards against the auto-Id collision
-    // at the shared rect: the release that armed the button must never
-    // complete as a click on the danger button that replaces it.
     let armed_frame = ui.ctx().data(|d| d.get_temp::<u64>(armed_id)).unwrap_or(0);
     let armed = armed_frame > 0;
     if armed {
         let settle = ui.ctx().cumulative_frame_nr() > armed_frame + 1;
         let confirm = settle && button(ui, confirm_label, ButtonVariant::Destructive).clicked();
-        // Esc or clicking anything else disarms.
         let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
         if esc || confirm {
             ui.ctx().data_mut(|d| d.insert_temp(armed_id, 0_u64));
@@ -1691,9 +1476,6 @@ pub fn armed_danger_button(ui: &mut egui::Ui, id: &str, label: &str, confirm_lab
 }
 
 /// DC: DS-C-16 DetailPanel — the right sheet (420px, surface, left
-/// hairline) over a scrim; Esc closes; body scrolls; `header` renders
-/// next to the title. Register A-1: list rows open this, never a
-/// full-page replace.
 pub fn detail_panel(
     ctx: &egui::Context,
     id: &str,
@@ -1711,7 +1493,6 @@ pub fn detail_panel(
     }
     let t = tokens_for(ctx);
     let screen = ctx.input(|i| i.viewport_rect());
-    // Scrim captures clicks; clicking it closes the panel.
     let scrim = egui::Area::new(egui::Id::unique(("spp-scrim", id)))
         .order(egui::Order::Middle)
         .anchor(egui::Align2::LEFT_TOP, egui::vec2(0.0, 0.0))
@@ -1741,7 +1522,6 @@ pub fn detail_panel(
                     ui.set_width(width);
                     ui.set_min_height(screen.height());
                     ui.vertical(|ui| {
-                        // Header row: title + actions + close.
                         ui.horizontal(|ui| {
                             ui.add_space(scale::space::SP4);
                             ui.label(egui::RichText::new(title).size(scale::text::LEAD).strong());
@@ -1779,7 +1559,6 @@ pub fn detail_panel(
 }
 
 /// DC: DS-C-13 form row — one label + control pair on the 220px grid
-/// (label left via [`field_label`], control right).
 pub fn form_row(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.set_min_width(ui.available_width());
@@ -1794,12 +1573,9 @@ pub fn form_row(ui: &mut egui::Ui, label: &str, control: impl FnOnce(&mut egui::
     });
 }
 
-// ---------------------------------------------------------------------------
 // Components: inbox identity set (DC: DS-C-20/21/22 — R2c, RS-15)
-// ---------------------------------------------------------------------------
 
 /// DC: DS-C-20 message authorship roles — the surface, hairline and avatar
-/// fill come from this table; nothing else may color a message card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageRole {
     Customer,
@@ -1809,11 +1585,6 @@ pub enum MessageRole {
 }
 
 /// DC: DS-C-20 Message Card (role-typed) — r-xl card, md role avatar +
-/// 13.5px name + 11.5px role label + right time, 14px body, footer actions.
-/// G-2: AI is always violet; notes are always amber.
-///
-/// The plain-text form; [`message_card_with`] carries a rich body closure
-/// and an optional role-label override (same anatomy, same colors).
 pub fn message_card<R>(
     ui: &mut egui::Ui,
     role: MessageRole,
@@ -1841,9 +1612,6 @@ pub fn message_card<R>(
 }
 
 /// DC: DS-C-20 Message Card, rich-body form. `role_label` overrides the
-/// fixed per-role label (the thread types carry Chat/Phone/Other entries
-/// that are not one of the four roles); the surface/hairline/avatar colors
-/// still come ONLY from the role table.
 pub fn message_card_with<B, A, R>(
     ui: &mut egui::Ui,
     role: MessageRole,
@@ -1875,7 +1643,6 @@ pub fn message_card_with<B, A, R>(
         })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            // Head: avatar + name + role + time.
             ui.horizontal(|ui| {
                 let (av_role, av_bg, av_fg) = match role {
                     MessageRole::Customer => (BadgeTone::Neutral, t.muted, t.muted_foreground),
@@ -1956,7 +1723,6 @@ pub fn day_divider(ui: &mut egui::Ui, label: &str) {
 }
 
 /// DC: DS-C-20 quoted-history collapse — "N earlier messages" toggle above
-/// the quoted items; `open` is owned by the caller (draft-safe).
 pub fn quoted_history(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -1992,7 +1758,6 @@ pub fn quoted_history(
 }
 
 /// DC: DS-C-20 attachment chip — file icon + name + 11px size inside a
-/// 32px r-md bordered chip; transparent on AI/note surfaces.
 pub fn file_chip(ui: &mut egui::Ui, icon: Icon, name: &str, size: &str) -> egui::Response {
     let t = tokens(ui);
     ui.horizontal(|ui| {
@@ -2040,18 +1805,12 @@ pub enum ComposerMode {
 /// DC: DS-C-21 composer actions the caller must apply.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComposerAct {
-    /// Send the draft in the given mode (Ctrl+Enter also sends).
     Send(ComposerMode, String),
-    /// Insert a saved reply by index (menu pick).
     SavedReply(usize),
-    /// Insert the AI-drafted reply.
     AiInsert,
 }
 
 /// DC: DS-C-21 Composer — Reply|Note tabs, tool chips (saved replies menu,
-/// AI insert), textarea (note mode = amber surface), context foot + send
-/// (Ctrl+Enter shortcut handled by the caller via [`ComposerAct::Send`]),
-/// draft-saved flag. Pure UI: nothing sends by itself.
 pub fn composer(
     ui: &mut egui::Ui,
     id_salt: &str,
@@ -2098,7 +1857,6 @@ pub fn composer(
         }
     });
 
-    // Tool chips row.
     ui.horizontal(|ui| {
         let menu_id = egui::Id::unique(("spp-sr-menu", id_salt));
         if button_with_icon(ui, Icon::Mail, "saved replies", ButtonVariant::Outline).clicked() {
@@ -2163,18 +1921,11 @@ pub fn composer(
     } else {
         edit
     };
-    // Caret/focus are surfaced for callers that anchor follow-up UI to the
-    // text (the inbox mention popup anchors to the caret).
     let out = edit.show(ui);
     state.focused = out.response.has_focus();
     state.caret = out.cursor_range.map(|range| range.primary.index.0);
 
-    // Foot: context + send.
     ui.horizontal(|ui| {
-        // RS-4-6 (G4-rejection fix): the keyboard shortcut hint lives next
-        // to the button it describes (it previously sat in the inbox
-        // views rail, where nothing sends). Truncate keeps the foot
-        // overflow-free at narrow reader widths.
         let context = if note {
             "note — visible to teammates only · Ctrl+Enter sends"
         } else {
@@ -2235,33 +1986,23 @@ pub fn composer(
 }
 
 /// DC: DS-C-21 composer state (mode + draft + draft-saved flag). The
-/// `caret`/`focused` fields are widget OUTPUTS — [`composer`] fills them
-/// every frame so callers can anchor follow-up UI to the text.
 #[derive(Debug, Clone, Default)]
 pub struct ComposerState {
-    /// Reply or Note.
     pub mode: ComposerMode,
-    /// The editable draft.
     pub draft: String,
     /// Whether a draft has been saved (flag fades in per DS-C-21).
     pub draft_saved: bool,
-    /// Output: the text cursor as a CHAR index into `draft` (None when the
-    /// field has no cursor this frame).
     pub caret: Option<usize>,
-    /// Output: whether the text field held keyboard focus this frame.
     pub focused: bool,
 }
 
 impl ComposerState {
-    /// A fresh Reply composer.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
 /// DC: DS-C-22 copilot suggest card — AI-violet surface, AI-fg title,
-/// bullet list, action row. The 5-second AI-identification pre-check
-/// target (violet + AI badge alone identify it).
 pub fn cop_suggest(
     ui: &mut egui::Ui,
     title: &str,
@@ -2295,13 +2036,6 @@ pub fn cop_suggest(
                         t.border_strong,
                     );
                     ui.add_space(12.0);
-                    // RS-4-4 (G4-rejection root cause): a `ui.horizontal`
-                    // lays widgets out in Extend mode — egui never wraps
-                    // text there, so one multi-line suggested reply laid
-                    // itself out at its full single-line width, blew the
-                    // frame rect past the window edge, and squeezed the
-                    // whole copilot panel to a sliver. Wrap explicitly and
-                    // break any unbreakable token.
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(spp_core::richtext::break_long_tokens(bullet, 40))
@@ -2327,7 +2061,6 @@ pub fn cop_suggest(
 }
 
 /// DC: DS-C-22 copilot similar-question row — 12.5px question + 11.5px
-/// resolution preview under a top hairline; click opens it.
 pub fn cop_similar(ui: &mut egui::Ui, question: &str, resolution: &str) -> egui::Response {
     let t = tokens(ui);
     ui.add_space(2.0);
@@ -2364,7 +2097,6 @@ pub fn cop_similar(ui: &mut egui::Ui, question: &str, resolution: &str) -> egui:
 }
 
 /// DC: DS-C-22 copilot chat bubble — assistant = AI-violet surface,
-/// user = neutral, right-aligned row.
 pub fn cop_chat(ui: &mut egui::Ui, assistant: bool, text: &str) {
     let t = tokens(ui);
     let (bg, border) = if assistant {
@@ -2412,7 +2144,6 @@ pub fn cop_chat(ui: &mut egui::Ui, assistant: bool, text: &str) {
 mod tests {
     use super::*;
 
-    /// WCAG relative luminance.
     fn luminance(c: egui::Color32) -> f64 {
         fn channel(v: u8) -> f64 {
             let s = f64::from(v) / 255.0;
@@ -2436,11 +2167,6 @@ mod tests {
     fn body_text_meets_aa_in_both_themes() {
         assert!(contrast(LIGHT.foreground, LIGHT.background) >= 7.0);
         assert!(contrast(DARK.foreground, DARK.background) >= 7.0);
-        // text-2 on the canvas (`--ds-text-2` on `--ds-bg`): DC-frozen pair,
-        // owner-approved via G1. 4.11:1 in light (AA for the meta/secondary
-        // roles it fills), so the assert pins the DC truth rather than the
-        // old white-canvas 4.5; on cards (`surface`, the dominant text-2
-        // surface) the pair still clears 4.5 and is asserted below.
         assert!(contrast(LIGHT.muted_foreground, LIGHT.background) >= 4.0);
         assert!(contrast(LIGHT.muted_foreground, LIGHT.card) >= 4.5);
         assert!(contrast(DARK.muted_foreground, DARK.background) >= 4.5);
@@ -2495,16 +2221,14 @@ mod tests {
 
     #[test]
     fn dc_v1_token_values_are_frozen() {
-        // RS-12: the token VALUES are pinned 1:1 to DC §2
-        // (docs/audit/design-contract-v1.md, ported from ds.css).
-        assert_eq!(LIGHT.background, rgb(244, 244, 245)); // --ds-bg #f4f4f5
+        assert_eq!(LIGHT.background, rgb(244, 244, 245));
         assert_eq!(DARK.background, rgb(9, 9, 11));
-        assert_eq!(LIGHT.card, rgb(255, 255, 255)); // --ds-surface
+        assert_eq!(LIGHT.card, rgb(255, 255, 255));
         assert_eq!(DARK.card, rgb(24, 24, 27));
-        assert_eq!(LIGHT.sidebar, rgb(250, 250, 250)); // --ds-surface-2
+        assert_eq!(LIGHT.sidebar, rgb(250, 250, 250));
         assert_eq!(DARK.sidebar, rgb(12, 12, 14));
         assert_eq!(DARK.faint, rgb(12, 12, 14));
-        assert_eq!(LIGHT.ai, rgb(124, 58, 237)); // --ds-ai #7c3aed
+        assert_eq!(LIGHT.ai, rgb(124, 58, 237));
         assert_eq!(DARK.ai, rgb(167, 139, 250));
         assert_eq!(LIGHT.on_ai, rgb(255, 255, 255));
         assert_eq!(DARK.on_ai, rgb(255, 255, 255));
@@ -2522,17 +2246,17 @@ mod tests {
         assert_eq!(DARK.warning_border, rgb(87, 67, 26));
         assert_eq!(LIGHT.neutral_foreground, rgb(63, 63, 70));
         assert_eq!(DARK.neutral_foreground, rgb(212, 212, 216));
-        assert_eq!(LIGHT.hyperlink, LIGHT.ai_foreground); // --ds-link = ai-fg
+        assert_eq!(LIGHT.hyperlink, LIGHT.ai_foreground);
         assert_eq!(DARK.hyperlink, DARK.ai_foreground);
-        assert_eq!(LIGHT.chart_accent, LIGHT.ai); // lab charts draw in violet
+        assert_eq!(LIGHT.chart_accent, LIGHT.ai);
         assert_eq!(DARK.chart_accent, DARK.ai);
         assert_eq!(
             LIGHT.shadow,
-            egui::Color32::from_rgba_premultiplied(0, 0, 0, 36) // e2 rgba(0,0,0,0.14)
+            egui::Color32::from_rgba_premultiplied(0, 0, 0, 36)
         );
         assert_eq!(
             LIGHT.scrim,
-            egui::Color32::from_rgba_premultiplied(0, 0, 0, 71) // rgba(0,0,0,0.28)
+            egui::Color32::from_rgba_premultiplied(0, 0, 0, 71)
         );
     }
 
@@ -2561,7 +2285,6 @@ mod tests {
 
     #[test]
     fn dc_v1_tone_table_is_complete() {
-        // Every DC §5 status resolves through the one match arm.
         for status in [
             "open",
             "pending",
@@ -2608,7 +2331,6 @@ mod tests {
     fn visuals_install_and_render_smoke() {
         let ctx = egui::Context::default();
         install(&ctx);
-        // Both themes carry our panel fill.
         let light_panel = ctx.style_of(egui::Theme::Light).visuals.panel_fill;
         let dark_panel = ctx.style_of(egui::Theme::Dark).visuals.panel_fill;
         assert_eq!(light_panel, LIGHT.background);

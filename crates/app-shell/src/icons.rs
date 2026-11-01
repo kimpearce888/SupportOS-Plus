@@ -1,30 +1,11 @@
-//! Lucide-style stroke icon family for the SupportOS+ design system.
-//!
-//! The redesign calls for professional icons from one consistent icon
-//! family, without adding a runtime dependency (the egui-embedded fonts
-//! only ship five brand glyphs). Instead of a font, every icon is drawn
-//! with the egui painter on a 24x24 design grid scaled into the target
-//! rectangle: a 2px round-capped stroke, the same geometry style, and the
-//! current foreground color for every glyph. That keeps the whole family
-//! visually consistent in both themes at any size and needs no new crate.
-//!
-//! The geometry is a light port of the shapes of the ISC-licensed Lucide
-//! icon set (https://lucide.dev), reduced to the handful of glyphs the
-//! shell needs and adapted to hand-sampled polylines, circles and
-//! rounded rects.
-
 use eframe::egui;
 
-/// Stroke width on the 24-grid (Lucide uses 2).
 const DESIGN_STROKE: f32 = 2.0;
 
-/// A uniform (x, y) point on the 24-grid.
 type P = [f32; 2];
 
-/// One icon of the family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
-    // Navigation / pages.
     Dashboard,
     Inbox,
     Activity,
@@ -46,7 +27,6 @@ pub enum Icon {
     Sliders,
     Compass,
     Terminal,
-    // Header / controls.
     Sun,
     Moon,
     Check,
@@ -71,8 +51,6 @@ pub enum Icon {
 }
 
 impl Icon {
-    /// The sidebar icon for a page key (shared by the shell and the
-    /// command-palette-like surfaces).
     #[must_use]
     pub fn for_page(key: crate::pages::PageKey) -> Self {
         use crate::pages::PageKey as K;
@@ -103,7 +81,6 @@ impl Icon {
         }
     }
 
-    /// Allocate a `size` x `size` square and paint the icon in `color`.
     pub fn show(self, ui: &mut egui::Ui, size: f32, color: egui::Color32) -> egui::Response {
         let (id, rect) = ui.allocate_space(egui::vec2(size, size));
         self.paint_at(ui.painter(), rect, color);
@@ -112,10 +89,7 @@ impl Icon {
         response
     }
 
-    /// Paint the icon into an explicit rect (caller owns layout).
     pub fn paint_at(self, painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
-        // Uniform scale from the 24-grid into the rect, keeping the
-        // stroke proportional so icons stay crisp at any size.
         let side = rect.width().min(rect.height());
         let scale = side / 24.0;
         let origin = rect.center() - egui::vec2(12.0 * scale, 12.0 * scale);
@@ -129,7 +103,6 @@ impl Icon {
     }
 }
 
-/// Painting helper holding the grid transform for one icon.
 struct Paint<'p> {
     painter: &'p egui::Painter,
     scale: f32,
@@ -149,7 +122,6 @@ impl Paint<'_> {
         egui::Stroke::new(DESIGN_STROKE * self.scale, self.color)
     }
 
-    /// A polyline through the given grid points (not closed).
     fn line(&self, pts: &[P]) {
         if pts.len() >= 2 {
             self.painter.add(egui::Shape::line(
@@ -159,7 +131,6 @@ impl Paint<'_> {
         }
     }
 
-    /// A closed, stroked (optionally filled) polygon.
     fn poly(&self, pts: &[P], fill: bool) {
         let points: Vec<egui::Pos2> = pts.iter().map(|p| self.pt(*p)).collect();
         if fill {
@@ -195,7 +166,6 @@ impl Paint<'_> {
         );
     }
 
-    /// Sample a quadratic bezier polyline.
     fn quad(&self, p0: P, p1: P, p2: P) -> Vec<P> {
         let mut pts = vec![p0];
         for i in 1..=10u16 {
@@ -218,7 +188,6 @@ impl Paint<'_> {
                 self.rect(3.0, 15.5, 7.5, 5.5, 1.5);
             }
             Icon::Inbox => {
-                // Tray: a rounded open-top box.
                 let mut tray = vec![[3.0, 19.5], [3.0, 5.5]];
                 tray.extend(self.quad([3.0, 4.0], [4.0, 3.0], [5.5, 3.0]));
                 tray.push([18.5, 3.0]);
@@ -228,7 +197,6 @@ impl Paint<'_> {
                 tray.push([5.5, 21.0]);
                 tray.extend(self.quad([4.0, 21.0], [3.0, 20.0], [3.0, 19.5]));
                 self.line(&tray);
-                // Fold + contents line.
                 self.line(&[
                     [3.0, 13.0],
                     [8.0, 13.0],
@@ -250,27 +218,22 @@ impl Paint<'_> {
             }
             Icon::Users => {
                 self.circle([9.0, 8.0], 3.6);
-                // Shoulders of the front person.
                 let mut s = self.quad([2.5, 20.5], [2.5, 15.0], [9.0, 15.0]);
                 s.extend(self.quad([15.5, 15.0], [15.5, 20.5], [15.5, 20.5]));
                 self.line(&s);
-                // Back person: head + partial shoulder.
                 self.circle([17.2, 9.2], 2.8);
                 let mut b = self.quad([17.2, 14.8], [15.0, 15.0], [13.5, 15.8]);
                 b.push([13.5, 20.5]);
                 self.line(&b);
             }
             Icon::Building => {
-                // Main tower.
                 let mut t = vec![[4.5, 21.0], [4.5, 4.0]];
                 t.extend(self.quad([4.5, 3.0], [5.0, 3.0], [5.5, 3.0]));
                 t.push([13.5, 3.0]);
                 t.extend(self.quad([14.5, 3.0], [14.5, 4.0], [14.5, 4.0]));
                 t.push([14.5, 21.0]);
                 self.line(&t);
-                // Wing.
                 self.line(&[[14.5, 9.0], [18.5, 9.0], [18.5, 21.0]]);
-                // Windows.
                 for (wx, wy) in [
                     (7.0, 7.0),
                     (11.0, 7.0),
@@ -283,13 +246,10 @@ impl Paint<'_> {
                 ] {
                     self.dot([wx, wy], 0.6);
                 }
-                // Door.
                 self.line(&[[7.0, 21.0], [12.0, 21.0]]);
             }
             Icon::BookOpen => {
-                // Spine.
                 self.line(&[[12.0, 6.0], [12.0, 20.0]]);
-                // Left page.
                 let mut l = vec![[12.0, 6.0]];
                 l.extend(self.quad([12.0, 6.0], [8.0, 4.0], [4.0, 4.0]));
                 l.extend(self.quad([3.0, 4.0], [3.0, 5.0], [3.0, 5.0]));
@@ -297,7 +257,6 @@ impl Paint<'_> {
                 l.extend(self.quad([3.0, 19.0], [4.0, 19.0], [4.0, 19.0]));
                 l.extend(self.quad([6.0, 19.0], [10.0, 17.5], [12.0, 20.0]));
                 self.line(&l);
-                // Right page (mirror).
                 let mut r = vec![[12.0, 6.0]];
                 r.extend(self.quad([12.0, 6.0], [16.0, 4.0], [20.0, 4.0]));
                 r.extend(self.quad([21.0, 4.0], [21.0, 5.0], [21.0, 5.0]));
@@ -372,14 +331,12 @@ impl Paint<'_> {
                     &[[3.0, 11.0], [20.5, 4.0], [20.5, 18.0], [3.0, 11.0]],
                     false,
                 );
-                // Handle.
                 let mut mouth = self.quad([5.2, 12.0], [5.0, 17.5], [7.5, 19.8]);
                 self.line(&mouth);
                 mouth.clear();
                 self.line(&[[7.5, 19.8], [7.5, 20.5]]);
             }
             Icon::Bell => {
-                // Dome.
                 let mut dome = self.quad([6.0, 10.0], [6.0, 3.5], [12.0, 3.5]);
                 dome.extend(self.quad([12.0, 3.5], [18.0, 3.5], [18.0, 10.0]));
                 dome.push([18.0, 15.5]);
@@ -387,7 +344,6 @@ impl Paint<'_> {
                 dome.push([3.5, 19.5]);
                 dome.extend(self.quad([3.5, 19.5], [4.4, 17.0], [6.0, 15.5]));
                 self.line(&dome);
-                // Clapper.
                 let mut clap = self.quad([9.4, 19.5], [9.8, 21.6], [12.0, 21.6]);
                 clap.extend(self.quad([14.2, 21.6], [14.6, 19.5], [14.6, 19.5]));
                 self.line(&clap);
@@ -406,7 +362,6 @@ impl Paint<'_> {
             Icon::Plug => {
                 self.line(&[[9.5, 2.5], [9.5, 7.5]]);
                 self.line(&[[14.5, 2.5], [14.5, 7.5]]);
-                // Body.
                 let mut body = vec![[7.0, 7.5], [17.0, 7.5]];
                 body.extend(self.quad([17.0, 13.5], [12.0, 16.5], [7.0, 13.5]));
                 body.push([7.0, 7.5]);
@@ -421,7 +376,6 @@ impl Paint<'_> {
                 heart.extend(self.quad([14.0, 6.0], [17.5, 4.0], [20.0, 10.5]));
                 heart.extend(self.quad([20.0, 15.0], [12.0, 20.5], [12.0, 20.5]));
                 self.line(&heart);
-                // Pulse.
                 self.line(&[
                     [6.5, 12.0],
                     [9.5, 12.0],
@@ -435,8 +389,6 @@ impl Paint<'_> {
                 self.line(&[[3.5, 6.0], [20.5, 6.0]]);
                 self.line(&[[3.5, 12.0], [20.5, 12.0]]);
                 self.line(&[[3.5, 18.0], [20.5, 18.0]]);
-                // Knobs (filled with the panel gap color would need a hole;
-                // small filled dots read as knobs).
                 self.dot([16.0, 6.0], 1.6);
                 self.dot([8.0, 12.0], 1.6);
                 self.dot([13.5, 18.0], 1.6);
@@ -505,7 +457,6 @@ impl Paint<'_> {
                 self.line(&[[10.3, 13.4], [21.0, 3.0]]);
             }
             Icon::Refresh => {
-                // Almost a full circle, with an arrowhead at the top.
                 let mut pts = Vec::new();
                 let (cx, cy, r) = (12.0f32, 12.0f32, 8.0f32);
                 for i in 0..=26u16 {

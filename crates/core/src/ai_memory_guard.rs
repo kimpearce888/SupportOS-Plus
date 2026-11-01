@@ -1,10 +1,3 @@
-//! AI memory quarantine guard (promoted from the retired axum
-//! `http/routes/memory.rs` at the Phase 4 cutover).
-//!
-//! Personality, temperament, and mental-health adjacent memory entries are
-//! quarantined: they never feed AI prompts or surface in tool results.
-//! Pure string logic — the AI tools and the memory routes share it.
-
 const QUARANTINE_WORDS: [&str; 16] = [
     "personality",
     "temperament",
@@ -110,7 +103,6 @@ mod tests {
             Some("patient has a diagnosis of ...")
         ));
         assert!(is_quarantined("psychological profile", None));
-        // Word-boundary matching: "custom" must not trip "autis".
         assert!(!is_quarantined("custom", None));
     }
 
@@ -118,7 +110,6 @@ mod tests {
     fn ordinary_entries_pass() {
         assert!(!is_quarantined("plan", Some("annual plan")));
         assert!(!is_quarantined("email", Some("kim@example.com")));
-        // IQ is a case-sensitive whole word.
         assert!(is_quarantined("notes", Some("IQ test result")));
         assert!(!is_quarantined("notes", Some("iq test result")));
     }

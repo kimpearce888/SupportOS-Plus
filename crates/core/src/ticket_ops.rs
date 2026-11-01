@@ -104,13 +104,6 @@ pub fn execute(conn: &mut Connection, op: &TicketOperation) -> Result<OperationR
     }
 }
 
-/// Audit item 20: `activity_events.conversation_id` is a LOCAL-id
-/// column — `rebuild_all` and the by-local-id derived-columns reader
-/// both key it on `conversations.id`. The execute_* paths used to insert
-/// the REMOTE id there (and then derive the response state from the
-/// wrong event set), silently wiping the derived timestamps on every
-/// user action. Resolve the local id once; every event insert and the
-/// derived-columns refresh go through it.
 fn conversation_local_id(conn: &Connection, remote_id: i64) -> Option<i64> {
     conn.query_row(
         "SELECT id FROM conversations WHERE remote_id = ?1",
@@ -289,9 +282,6 @@ fn execute_add_note(
     })
 }
 
-/// Clean-audit batch 19 (item 20): activity events are keyed by the LOCAL
-/// conversation id, and user actions no longer wipe the derived
-/// response-state columns.
 #[cfg(test)]
 mod batch19_tests {
     use super::*;
@@ -303,8 +293,6 @@ mod batch19_tests {
         DbHandle::new(conn)
     }
 
-    /// Seeds one conversation (local id returned) with a pre-existing
-    /// customer activity event, as `rebuild_all` would have written it.
     fn seed(conn: &Connection) -> i64 {
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status)
@@ -367,7 +355,6 @@ mod batch19_tests {
         let db = db();
         db.with_write(|c| {
             let local = seed(c);
-            // Derive the columns from the seeded customer event first.
             crate::activity::update_derived_columns_by_local_id(c, local).expect("derive baseline");
             execute(
                 c,

@@ -1,24 +1,3 @@
-//! RS-18 — DS-A-02 issue-radar goldens (wave B).
-//!
-//! The lab reference lives at `mockups/design-lab/goldens/v4/{light,dark}/issue-radar-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real page: the PageHeader with the lab's three
-//! outline actions, the DS-C-09 tab rail, and the per-tab block stack —
-//! alerts + the DS-C-15 quirk + SLA callouts, cluster cards, gap
-//! candidates with the approve/armed-reject acts, known-issue cards) over
-//! a seeded database; the side-by-side review against the lab is the G3
-//! evidence pack.
-//!
-//! Determinism note: the seed helpers below write **fixed timestamps**.
-//! The SLA fixtures pin conversation/thread times to 2026-01-12 with a
-//! 24h/72h config — nine months stale, so every monitored conversation is
-//! deterministically `breached` (never wall-clock dependent). Gap
-//! candidates pin created/updated so the kind ordering is stable.
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_issue_radar_page`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -28,23 +7,12 @@ use spp_core::db::DbHandle;
 use spp_shell::design;
 use spp_shell::pages::issue_radar::IssueRadarPage;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct IssueRadarPageState {
     installed: bool,
     page: IssueRadarPage,
     db: DbHandle,
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic fixture (fixed timestamps; mirrors the lab's radar fixture)
-// ---------------------------------------------------------------------------
-
-/// Bootstrap an in-memory database (all migrations) and seed the issue
-/// radar fixture into it. Two clusters (Login loop rising with three
-/// conversations, Export failures new with two) derive the two radar
-/// alerts exactly like the lab's; the SLA card breaches on the pinned
-/// old timestamps; two known issues and three gap candidates (open /
-/// approved / rejected) fill the remaining tabs.
 fn seeded_page() -> (IssueRadarPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
@@ -52,12 +20,6 @@ fn seeded_page() -> (IssueRadarPage, DbHandle) {
     seed_customer(&conn, 9, 909, "Kim", "Pearce", "kim@example.test");
     seed_customer(&conn, 11, 911, "Nabin", "Sayeed", "nabin@example.test");
 
-    // #501/#505 feed the SLA breach card (lab rows); #5033/#5021 are the
-    // gap candidate's example conversations; #5040 rides the Login loop.
-    // The monitored rows ride `datetime('now', '-7 days')` — the radar and
-    // the SLA math both compare against the wall clock, so the fixture
-    // pins its offsets relative to `now` and the rendered state (two
-    // alerts, three breaches) is stable on every run.
     seed_conversation(
         &conn,
         1,
@@ -103,9 +65,6 @@ fn seeded_page() -> (IssueRadarPage, DbHandle) {
         9,
         "datetime('now', '-7 days')",
     );
-    // The Login loop's previous-window members (15–28 days back) make the
-    // cluster's derived trend `rising` rather than `new` (item 54's
-    // precedence: previous = 0 reads as new).
     seed_conversation(
         &conn,
         6,
@@ -125,12 +84,6 @@ fn seeded_page() -> (IssueRadarPage, DbHandle) {
         "datetime('now', '-21 days')",
     );
 
-    // The SLA machinery builds its own schema lazily — touch it once so
-    // the threads/monitored rows below can be inserted, then pin the
-    // config and one stale customer thread per monitored conversation.
-    // The business-hours row is the monitor gate (effective_config reads
-    // mailbox_business_hours): a 24/72h target over an always-open window
-    // makes the week-old conversations deterministically breached.
     let _ = spp_core::sla::sla_alerts(&conn);
     conn.execute(
         "INSERT INTO mailbox_business_hours (mailbox_local_id, timezone, days, start_minute,
@@ -157,10 +110,6 @@ fn seeded_page() -> (IssueRadarPage, DbHandle) {
         .expect("customer thread");
     }
 
-    // Two clusters — the lab's Login loop (rising, five conversations:
-    // three recent + two previous-window) and Export failures (new, two
-    // recent). The radar derives the trend from the conversation windows
-    // itself (the stored trend column feeds only the cluster card badge).
     conn.execute(
         "INSERT INTO issue_clusters (name, title, summary, category, trend,
              conversation_count, customer_count, first_seen_at, last_seen_at)
@@ -180,8 +129,6 @@ fn seeded_page() -> (IssueRadarPage, DbHandle) {
         .expect("cluster link");
     }
 
-    // Two known issues (the lab's Login loop with a workaround, and one
-    // monitoring row); counts refresh from the real links.
     conn.execute(
         "INSERT INTO known_issues (name, status, title, symptoms, workaround, provenance,
              created_at, last_seen_at)
@@ -204,8 +151,6 @@ fn seeded_page() -> (IssueRadarPage, DbHandle) {
     }
     spp_core::intelligence_features::refresh_known_issue_counts(&conn, 1).expect("refresh counts");
 
-    // Three gap candidates across the lab's two kinds and all three
-    // decision states; evidence ids resolve to the seeded numbers.
     conn.execute(
         "INSERT INTO knowledge_gap_candidates (kind, query_text, occurrence_count,
              evidence_conversation_ids, related_document_ids, detail, status,
@@ -253,9 +198,6 @@ fn seed_customer(
     .expect("customer");
 }
 
-/// One conversation row; `at_sql` is a raw SQL expression for the time
-/// columns (a quoted ISO stamp or `datetime('now', '-N days')`) so the
-/// fixture can pin both wall-clock-independent and window-relative rows.
 fn seed_conversation(
     conn: &rusqlite::Connection,
     id: i64,
@@ -279,12 +221,6 @@ fn seed_conversation(
     .expect("conversation");
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens + the Gaps-tab interaction
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light and lock it as
-/// `{name}.png` under `tests/snapshots/`.
 fn render_issue_radar_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -342,10 +278,6 @@ fn r3_issue_radar_page_800_dark() {
     render_issue_radar_page(true, 800.0, "r3_issue_radar_page_800_dark");
 }
 
-/// The tab-switch interaction: clicking the DS-C-09 `Gaps` tab through the
-/// a11y tree shows the deterministic candidates card with its count /
-/// status badges, the examples line, and the one-click approve next to the
-/// armed danger reject (A-5). Snapshot the tab.
 #[test]
 fn r3_issue_radar_gaps_tab_light() {
     let (page, db) = seeded_page();
@@ -372,9 +304,7 @@ fn r3_issue_radar_gaps_tab_light() {
         .expect("the Gaps tab")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the tab frame
-    // The tab switched: the candidates' approve act is in the tree, and
-    // the a11y check (still ON) validates the tab's controls.
+    h.run_steps(2);
     assert!(
         h.query_by_label("approve").is_some(),
         "the Gaps tab must show the candidates' approve act"

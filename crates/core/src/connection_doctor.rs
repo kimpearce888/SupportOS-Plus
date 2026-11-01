@@ -1,28 +1,10 @@
-//! Connection Doctor (v1.4.0 R1, defect D3).
-//!
-//! Five sequential checks with per-step results and remedies, run from
-//! Settings and after every credential change. Each step names exactly
-//! what failed in plain language, so an owner never has to guess which
-//! link in the chain broke: the network, the credentials, the token
-//! exchange, the API identity, the mailboxes, or the rate-limit budget.
-//!
-//! The doctor deliberately stops at the first hard failure: when
-//! Help Scout is unreachable, "get token" would only re-report the same
-//! network error with a less helpful label. Every step that *does* run
-//! records what it saw, so the rendered report is complete evidence of
-//! the chain up to the break.
-
 use crate::helpscout::HelpScoutProvider as _;
 use crate::helpscout_real::RealHelpScoutProvider;
 
-/// Outcome of one doctor step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DoctorStatus {
-    /// The check succeeded; `detail` carries what it saw.
     Pass,
-    /// The check failed; `detail` says why, `remedy` says what to do.
     Fail,
-    /// The check succeeded with a caveat worth stating.
     Warn,
 }
 
@@ -37,16 +19,11 @@ impl DoctorStatus {
     }
 }
 
-/// One Connection Doctor step: what was checked, what happened, and the
-/// remedy when it failed.
 #[derive(Debug, Clone)]
 pub struct DoctorStep {
-    /// Short step name, e.g. "reach api.helpscout.net".
     pub name: String,
     pub status: DoctorStatus,
-    /// What the step observed, in plain language.
     pub detail: String,
-    /// What to do about a failure (empty on pass).
     pub remedy: String,
 }
 
@@ -79,24 +56,11 @@ impl DoctorStep {
     }
 }
 
-/// Run the five checks against a live provider.
-///
-/// 1. **Reach** — an unauthenticated `GET /v2/users/me` must produce any
-///    HTTP response (a 401 proves the server is reachable).
-/// 2. **Token** — the client-credentials grant must succeed (the
-///    platform's exact rejection message is preserved).
-/// 3. **Identity** — `GET /v2/users/me` with the token must return the
-///    connected user.
-/// 4. **Mailboxes** — the mailbox list must be readable.
-/// 5. **Rate limit** — the headers Help Scout last reported (limit and
-///    remaining) are shown, with a note that they populate only after
-///    the first authenticated call of this session.
 pub async fn run_doctor(provider: &RealHelpScoutProvider) -> Vec<DoctorStep> {
     let mut steps: Vec<DoctorStep> = Vec::with_capacity(5);
     let creds = &provider.credentials;
     let api_base = creds.api_base.trim_end_matches('/').to_string();
 
-    // 1. Reach the API host.
     let client = provider.http_client();
     let reach = client
         .get(format!("{api_base}/v2/users/me"))
@@ -114,8 +78,6 @@ pub async fn run_doctor(provider: &RealHelpScoutProvider) -> Vec<DoctorStep> {
                     ),
                 ));
             } else {
-                // Any HTTP response still proves reachability; anything
-                // other than 401 is worth showing verbatim.
                 steps.push(DoctorStep::warn(
                     "reach the Help Scout API",
                     format!("{api_base} answered HTTP {status} (reachable; 401 was expected)."),
@@ -133,7 +95,6 @@ pub async fn run_doctor(provider: &RealHelpScoutProvider) -> Vec<DoctorStep> {
         }
     }
 
-    // 2. Obtain a token with the client-credentials grant.
     match provider.client_credentials_login().await {
         Ok(_) => {
             steps.push(DoctorStep::pass(
@@ -151,7 +112,6 @@ pub async fn run_doctor(provider: &RealHelpScoutProvider) -> Vec<DoctorStep> {
         }
     }
 
-    // 3. Read the connected identity.
     match provider.get_me().await {
         Ok(me) => {
             let name = format!(
@@ -184,7 +144,6 @@ pub async fn run_doctor(provider: &RealHelpScoutProvider) -> Vec<DoctorStep> {
         }
     }
 
-    // 4. List mailboxes.
     match provider.list_mailboxes().await {
         Ok(mailboxes) if mailboxes.is_empty() => {
             steps.push(DoctorStep::warn(
@@ -208,7 +167,6 @@ pub async fn run_doctor(provider: &RealHelpScoutProvider) -> Vec<DoctorStep> {
         }
     }
 
-    // 5. Show the rate-limit picture from the responses so far.
     let snap = provider.rate_limit_snapshot();
     let limit = snap.limit_per_minute;
     match snap.remaining {
@@ -280,7 +238,6 @@ mod tests {
     #[test]
     fn unreachable_api_stops_the_doctor_at_step_one() {
         let db = db();
-        // Nothing listens on this loopback port.
         let provider = provider_for(&db, "http://127.0.0.1:1".to_string());
         let steps = runtime().block_on(run_doctor(&provider));
         assert_eq!(steps.len(), 1, "the doctor stops after a hard failure");
@@ -309,8 +266,6 @@ mod tests {
             }
         });
         let server = MockServer::start(std::sync::Arc::new(move |req: &MockRequest| {
-            // Step 1 probes without credentials (expects 401); step 3
-            // arrives with the Bearer token the step-2 grant stored.
             if req.method == "GET" && req.path == "/v2/users/me" {
                 return if req.header("authorization").is_some() {
                     MockResponse::json(200, me.clone())

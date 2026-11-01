@@ -1,15 +1,3 @@
-//! Integration tests (TODO 45): LM Studio / OpenAI-compatible client
-//! against a local mock model server.
-//!
-//! No local model server runs in this development environment (probed
-//! 127.0.0.1:1234, :11434, :8080 — all refused), so **actual model
-//! inference is not tested here and is never claimed**. What is verified
-//! against the mock server is everything around the inference:
-//! request/response wire format, model listing, availability probing,
-//! timeouts, HTTP error reporting, and recovery after failures. A live
-//! round-trip test exists but is `#[ignore]`d and only runs when
-//! `SPP_LM_STUDIO_URL` points at a real server (see `live_*` below).
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,10 +32,6 @@ fn user_message(content: &str) -> ChatMessage {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Inference round-trips against the mock server
-// ---------------------------------------------------------------------------
-
 #[test]
 fn chat_roundtrip_against_mock_server() {
     let mock =
@@ -73,7 +57,6 @@ fn chat_roundtrip_against_mock_server() {
     assert_eq!(usage.total_tokens, 46);
     assert_eq!(usage.completion_tokens, 34);
 
-    // The request body carried the model and the messages.
     let req = mock.hits().first().cloned().expect("request recorded");
     let body: serde_json::Value = serde_json::from_str(&req.body).expect("request json");
     assert_eq!(body["model"], "test-model");
@@ -91,8 +74,6 @@ fn chat_roundtrip_against_mock_server() {
 fn chat_with_opts_roundtrip_json_mode_and_usage() {
     let mock =
         crate::mockserver::MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
-            // Sleep past one millisecond so the measured latency is
-            // deterministically non-zero.
             std::thread::sleep(std::time::Duration::from_millis(2));
             crate::mockserver::MockResponse::json(200, chat_body(r#"{"answer": 42}"#))
         }))
@@ -251,10 +232,6 @@ fn embed_roundtrip_against_mock_server() {
     assert_eq!(body["input"], "hello");
 }
 
-// ---------------------------------------------------------------------------
-// Availability probing and error reporting
-// ---------------------------------------------------------------------------
-
 #[test]
 fn availability_probe_reflects_server_state() {
     let mock =
@@ -268,7 +245,6 @@ fn availability_probe_reflects_server_state() {
         "a healthy server must report available"
     );
 
-    // Deterministic dead port: bind, note the port, drop the listener.
     let dead =
         crate::mockserver::MockServer::start(crate::mockserver::not_found()).expect("mock server");
     let dead_port: u16 = dead
@@ -322,7 +298,6 @@ fn server_error_surfaces_http_status_and_body() {
 
 #[test]
 fn connection_refused_reports_cleanly_and_client_recovers() {
-    // Reserve then abandon a port so nothing listens on it.
     let dead =
         crate::mockserver::MockServer::start(crate::mockserver::not_found()).expect("mock server");
     let dead_port: u16 = dead
@@ -344,16 +319,11 @@ fn connection_refused_reports_cleanly_and_client_recovers() {
         msg.contains("LM Studio chat failed"),
         "a clean, labeled error: {msg}"
     );
-    // A transport error must not poison the client: the same instance
-    // works against a healthy server afterwards.
     let mock =
         crate::mockserver::MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
             crate::mockserver::MockResponse::json(200, chat_body("recovered"))
         }))
         .expect("mock server");
-    // Cannot repoint the base URL of a built client; the recovery claim is
-    // exercised through a fresh client below, plus is_available on the
-    // failed one.
     assert!(!runtime().block_on(async {
         use crate::ai_provider::LocalAiProvider as _;
         LmStudioProvider::with_client(OpenAiCompatibleClient::new(format!(
@@ -371,9 +341,6 @@ fn connection_refused_reports_cleanly_and_client_recovers() {
 
 #[test]
 fn timeout_is_reported_and_does_not_leak_into_later_calls() {
-    // The server sleeps past the client timeout for the first request,
-    // then answers normally: the client must surface a timeout error and
-    // the server keeps serving later requests.
     let slow_yet = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let flag = std::sync::Arc::clone(&slow_yet);
     let mock = crate::mockserver::MockServer::start(Arc::new(
@@ -424,24 +391,6 @@ fn malformed_success_body_is_a_parse_error() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Live server (never run automatically — no model server exists here)
-// ---------------------------------------------------------------------------
-
-/// Live round-trip against a real LM Studio instance. Not part of the
-/// normal suite: no model server exists in the development environment,
-/// so this test would be red by construction. Run it only against a real
-/// server:
-///
-/// ```text
-/// SPP_LM_STUDIO_URL=http://127.0.0.1:1234 \
-///   cargo test -p supportos-plus-core it_lm_studio::live -- --ignored --nocapture
-/// ```
-///
-/// It performs a real inference round-trip and asserts only what a real
-/// server guarantees (non-empty content, model id, availability). It is
-/// never executed in CI and no result of it is claimed anywhere unless
-/// its output was actually observed.
 #[test]
 #[ignore = "requires a running local model server; set SPP_LM_STUDIO_URL"]
 fn live_roundtrip_when_server_provided() {

@@ -206,125 +206,76 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m047_conversations_reference_shape",
         apply: crate::mirror_parity::apply_m047,
     },
-    // The webhook_events schema used to be re-ensured on every insert; it
-    // now lives here, in its own numbered step (migration-map row 6).
     BootStep {
         version: 39,
         label: "m048_webhook_events_schema",
         apply: crate::webhook::apply_m048_webhook_events,
     },
-    // The secrets table gets its first writer: the plaintext webhook_secret
-    // moves out of application_settings into the encrypted envelope
-    // (migration-map row 13). Requires settings::init_master_key to have run
-    // (see the app shell); skips with a warning otherwise.
     BootStep {
         version: 40,
         label: "m049_secret_envelope",
         apply: crate::settings::apply_m049_secret_envelope,
     },
-    // The diagnostics event log gains a level column (info/warn/error)
-    // so the Diagnostics page can show and filter reports, and the
-    // retired demo-mode settings rows are dropped for good.
     BootStep {
         version: 41,
         label: "m050_diagnostics_log",
         apply: crate::audit::apply_m050,
     },
-    // 1.3.0: the outbound lane becomes a real dispatcher (replies/notes/
-    // status changes/assignments actually reach Help Scout). Existing
-    // rows get a retry budget, rows stuck mid-send by an older crash are
-    // re-queued, and installs sitting on the old 5-minute default poll
-    // move to 1 minute.
     BootStep {
         version: 42,
         label: "m051_outbound_dispatch",
         apply: crate::outbound::apply_m051,
     },
-    // 1.4.0 R6: the sweep's silent no-op stages are gone (chats/attachments/
-    // ratings have no list endpoints on the platform; report_data never had
-    // a fetcher). Their stale checkpoint rows are dropped so Sync Health
-    // stops rendering stages that can never run again.
     BootStep {
         version: 43,
         label: "m052_sweep_stage_cleanup",
         apply: crate::sync_schema::apply_m052,
     },
-    // 1.4.0 R7 (D13): the OAuth access/refresh tokens move out of the
-    // plaintext `oauth_tokens` columns into the AES-256-GCM envelope; the
-    // row keeps metadata only. Skips (unstamped) until a master key exists.
     BootStep {
         version: 44,
         label: "m053_oauth_token_envelope",
         apply: crate::helpscout_real::apply_m053_oauth_token_envelope,
     },
-    // 1.4.0 A1: ai_runs gains endpoint_id so the provider hub's cost
-    // ledger can price every completed run against the endpoint that
-    // served it.
     BootStep {
         version: 45,
         label: "m054_ai_runs_endpoint",
         apply: crate::ai_hub::apply_m054_ai_runs_endpoint,
     },
-    // Batch 13 A4: conversation_chunks gains chunk_kind ('thread' |
-    // 'resolution') so the retrieval spine can prefer resolution excerpts.
     BootStep {
         version: 46,
         label: "m055_chunk_kind",
         apply: crate::embeddings::apply_m055_chunk_kind,
     },
-    // Batch 14 K2: the AI article-draft review queue.
     BootStep {
         version: 47,
         label: "m056_article_drafts",
         apply: crate::knowledge_store::apply_m056_article_drafts,
     },
-    // Batch 14 K4: the weekly AI digest archive.
     BootStep {
         version: 48,
         label: "m057_ai_digests",
         apply: crate::digest::apply_m057_ai_digests,
     },
-    // Batch 14 K5: the fetched Help Scout report cache.
     BootStep {
         version: 49,
         label: "m058_hs_report_cache",
         apply: crate::reports_api::apply_m058_hs_report_cache,
     },
-    // Batch 15 P2: the live Beacon chat mirror — chats arrive through the
-    // five beacon.chat.* webhook events (the platform has no list
-    // endpoint), so the mirror keeps even ended chats.
     BootStep {
         version: 50,
         label: "m059_beacon_chats",
         apply: crate::chats::apply_m059_beacon_chats,
     },
-    // Clean-audit item 57: the automation once-guard's memory. The newest
-    // customer thread id a conversation has already fired triggers for, so
-    // `new_conversation` fires at most once per conversation and
-    // `customer_reply` at most once per customer thread — the pre-fix code
-    // fired BOTH on every customer-latest sync.
     BootStep {
         version: 51,
         label: "m060_automation_once_guard",
         apply: crate::automation::apply_m060_automation_once_guard,
     },
-    // Clean-audit item 100: knowledge_chunks gains the embedding_attempts
-    // counter its sibling chunk tables already carry, so the family's
-    // failure lane observes the same five-attempt cap instead of retrying
-    // a doomed chunk on every embed pass forever.
     BootStep {
         version: 52,
         label: "m061_knowledge_chunk_attempts",
         apply: crate::embeddings::apply_m061_knowledge_chunk_attempts,
     },
-    // Audit fix (C4 follow-up): customer_chats was originally delivered by
-    // editing the already-applied m039 in place. Databases that had run the
-    // released 1.7.3 recorded version 52, so every later boot skipped m039
-    // and the customer chat-channel mirror never existed on upgraded
-    // installs — the first chat-channel sync failed with "no such table".
-    // m062 re-issues the same idempotent CREATE: a no-op where the current
-    // m039 already made the table (fresh installs), the only creator where
-    // it did not (1.7.3 → 1.8.0 upgrades).
     BootStep {
         version: 53,
         label: "m062_customer_chats_upgrade_guard",
@@ -343,16 +294,6 @@ fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {
             label = step.label,
             "applying migration"
         );
-        // Foreign-key enforcement is suspended while a step runs. Several
-        // steps rebuild tables by dropping and renaming them, and SQLite's
-        // live enforcement cannot survive that dance: immediate cascade
-        // actions fire against rows that are about to come back under the
-        // rebuilt table, and the deferred-violation counter never forgets
-        // a violation that the rename has long since repaired (the 1.1.x
-        // "migration 36 failed" boot failures on real 0.2.x data).
-        // Integrity is enforced instead by an explicit PRAGMA
-        // foreign_key_check sweep below, inside the same transaction: a
-        // step that would commit dangling references rolls back whole.
         conn.pragma_update(None, "foreign_keys", "OFF")?;
         let applied = apply_one_step(conn, step);
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -361,7 +302,6 @@ fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {
     Ok(())
 }
 
-/// Run one boot step in its own transaction, verified foreign-key clean.
 fn apply_one_step(conn: &mut Connection, step: &BootStep) -> Result<()> {
     let tx = conn.transaction()?;
     (step.apply)(&tx).map_err(|e| crate::error::Error::Migration {
@@ -398,11 +338,6 @@ fn apply_one_step(conn: &mut Connection, step: &BootStep) -> Result<()> {
 
 pub fn apply_all(conn: &mut Connection) -> Result<()> {
     crate::db::ensure_migrations_table(conn)?;
-    // The secrets master key is anchored next to the database file and must
-    // exist before the migration steps run: m049 seals the legacy plaintext
-    // webhook_secret into the encrypted envelope. In-memory databases (tests,
-    // tooling) have no file to anchor a key next to; m049 then skips with a
-    // warning and tests install a key explicitly where needed.
     if let Some(db_path) = crate::db::db_file_path(conn) {
         let key_path = db_path
             .parent()

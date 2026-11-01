@@ -234,14 +234,6 @@ pub fn apply_m039(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Audit fix (C4 follow-up): `customer_chats` was originally delivered by
-/// editing the already-applied m039 in place. Databases that had run the
-/// released 1.7.3 recorded migration version 52, so every later boot
-/// skipped m039 and the chat-channel mirror never existed on upgraded
-/// installs — the first customer chat-channel sync failed with
-/// "no such table". This step re-issues the same idempotent CREATE: a
-/// no-op where the current m039 already made the table (fresh
-/// databases) and the only creator where it did not (1.7.3 upgrades).
 pub fn apply_m062_customer_chats(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS customer_chats (
@@ -259,10 +251,6 @@ pub fn apply_m062_customer_chats(conn: &Connection) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// Simulates a 1.7.3-era database: `customers` exists, `customer_chats`
-    /// does not (the table reached the source by editing the already-applied
-    /// m039, so a version-52 database never creates it). m062 must create a
-    /// usable table there.
     #[test]
     fn audit_m062_creates_the_table_where_the_revised_m039_never_ran() {
         let conn = Connection::open_in_memory().unwrap();
@@ -284,8 +272,6 @@ mod tests {
         .expect("table created by m062 must be usable");
     }
 
-    /// Fresh-database path: the current m039 already created the table;
-    /// m062 must be a harmless no-op that preserves existing rows.
     #[test]
     fn audit_m062_is_a_noop_when_the_table_already_exists() {
         let conn = Connection::open_in_memory().unwrap();

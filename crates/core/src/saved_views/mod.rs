@@ -696,22 +696,14 @@ mod batch31_tests {
             .collect()
     }
 
-    /// Audit item 119: the Rust side folded the filter value with Unicode
-    /// rules while SQL LOWER folds ASCII only — a non-ASCII filter value
-    /// produced a parameter the SQL side could never match. Both sides
-    /// fold ASCII-only now, so a stored non-ASCII tag matches its own
-    /// uppercase spelling, and ASCII tags stay case-insensitive.
     #[test]
     fn tag_filter_folds_consistently_with_sql() {
         let conn = db();
         let ascii = seed_tagged(&conn, 1, "electronics");
         let accent = seed_tagged(&conn, 2, "ÉCLAIR");
 
-        // ASCII: case-insensitive both pre- and post-fix.
         assert_eq!(tag_where(&conn, &["ELECTRONICS"]), vec![ascii]);
 
-        // Non-ASCII: pre-fix the Rust fold rewrote É→é and SQL LOWER left
-        // the stored É — the stored tag could never match its own name.
         assert_eq!(tag_where(&conn, &["ÉCLAIR"]), vec![accent]);
     }
 
@@ -742,9 +734,6 @@ mod batch31_tests {
             rusqlite::params![customer, def, value],
         )
         .expect("property");
-        // CustomerProperty fragments run on the conversations surface
-        // (cp.customer_id = c.customer_local_id), so each customer gets a
-        // conversation to match on.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status, customer_local_id)
              VALUES (?1, ?1, 'prop conv', 'p', 'active', ?2)",
@@ -789,9 +778,6 @@ mod batch31_tests {
             .collect()
     }
 
-    /// Audit item 122: `CAST(cp.value AS REAL)` turned any non-numeric
-    /// text into 0.0, so "N/A" satisfied every `lt` comparison against a
-    /// positive threshold. Only numeric values participate now.
     #[test]
     fn numeric_property_filter_ignores_non_numeric_text() {
         let conn = db();

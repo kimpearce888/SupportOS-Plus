@@ -239,13 +239,6 @@ pub fn search_knowledge_raw(
         fts_query(query)
     };
     let vis_sql = visibility.map_or("", |_| "AND f.visibility = ?2");
-    // Clean-audit item 58: `fts_knowledge` holds one row PER CHUNK, so a
-    // multi-chunk document matched on several chunks used to flood the
-    // LIMIT with copies of itself (a 10-chunk document was "half" of a
-    // LIMIT 20 result) while single-chunk documents were pushed out. The
-    // rows are consumed rank-ordered and deduped per document — the best
-    // (lowest-rank) chunk speaks for its document — until `limit` DISTINCT
-    // documents have been collected.
     let sql = format!(
         "SELECT f.document_id, f.title, snippet(fts_knowledge, 1, '[', ']', '…', 14) AS snippet, f.visibility
            FROM fts_knowledge f WHERE fts_knowledge MATCH ?1 {vis_sql} ORDER BY rank"

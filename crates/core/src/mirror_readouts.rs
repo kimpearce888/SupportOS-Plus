@@ -203,10 +203,6 @@ pub fn saved_replies(conn: &Connection, q: Option<&str>) -> Result<Vec<Value>> {
     ensure_tables(conn)?;
     let base_sql = "SELECT id, remote_id, mailbox_local_id, name, preview, text, chat_text FROM saved_replies WHERE deleted_at IS NULL";
     if let Some(q) = q.filter(|s| !s.is_empty()) {
-        // Clean-audit item 83: the search text is a LITERAL — the
-        // pattern body is escaped and the ESCAPE clause declared (the
-        // pre-fix query had neither, so `%`/`_` in the input acted as
-        // wildcards over the mirror).
         let like = crate::search::escape_like(q);
         let mut stmt = conn.prepare(&format!(
             "{base_sql} AND lower(name) LIKE '%' || lower(?1) || '%' ESCAPE '\\' ORDER BY name"
@@ -232,9 +228,6 @@ fn reply_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     }))
 }
 
-/// Clean-audit item 83: the saved-replies mirror search had neither an
-/// ESCAPE clause nor escaping — `%`/`_` in the input acted as wildcards
-/// over the mirror.
 #[cfg(test)]
 mod batch27_audit83_tests {
     use super::*;

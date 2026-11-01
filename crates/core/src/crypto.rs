@@ -1,28 +1,16 @@
-//! Shared envelope cryptography: scrypt key derivation and AES-256-GCM.
-//!
-//! Every encrypted artifact in SupportOS++ (`.sosync` backups, settings
-//! exports, sync bundles) derives its key the same way and seals payloads
-//! with the same cipher. Only the *envelope layout* differs between formats,
-//! so the primitives live here once.
-
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use scrypt::scrypt;
 
 use crate::error::{Error, Result};
 
-/// Salt length in bytes.
 pub const SALT_LEN: usize = 16;
-/// AES-GCM nonce (IV) length in bytes.
 pub const NONCE_LEN: usize = 12;
-/// AES-256 key length in bytes.
 pub const KEY_LEN: usize = 32;
 
 const SCRYPT_R: u32 = 8;
 const SCRYPT_P: u32 = 1;
 
-/// Derives a 32-byte AES-256 key from `password` and `salt` using scrypt
-/// with work factor `log_n` (so `n = 2^log_n`), `r = 8`, `p = 1`.
 pub fn derive_key(password: &[u8], salt: &[u8], log_n: u8) -> Result<[u8; KEY_LEN]> {
     let params = scrypt::Params::new(log_n, SCRYPT_R, SCRYPT_P)
         .map_err(|e| Error::Config(format!("invalid scrypt params: {e}")))?;
@@ -32,18 +20,12 @@ pub fn derive_key(password: &[u8], salt: &[u8], log_n: u8) -> Result<[u8; KEY_LE
     Ok(key)
 }
 
-/// Generates a fresh random salt.
 pub fn random_salt() -> [u8; SALT_LEN] {
     let mut salt = [0u8; SALT_LEN];
     rand::fill(&mut salt[..]);
     salt
 }
 
-/// Persists a raw master key to `path`, creating the parent directory if
-/// needed and restricting file permissions to owner-only (0600 on unix).
-///
-/// Refuses to clobber an existing file: keys are created once and must never
-/// silently rotate, or every stored secret would become undecryptable.
 pub fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()> {
     if path.exists() {
         return Err(Error::Config(format!(
@@ -74,13 +56,6 @@ pub fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()>
     Ok(())
 }
 
-/// Audit fix (M12): restrict `path` to owner-only (0600 on unix; no-op
-/// elsewhere). Backup copies, plaintext snapshots/temps and JSON/CSV
-/// exports used to inherit the umask (0644 on default systems) and were
-/// world-readable on multi-user machines — only `secrets.key` was created
-/// with restrictive permissions. Best-effort: a failed chmod is swallowed,
-/// because losing an already-written artifact over a permission oddity
-/// (e.g. a foreign filesystem) would be worse than the exposure.
 pub fn restrict_permissions(path: &std::path::Path) {
     #[cfg(unix)]
     {
@@ -93,8 +68,6 @@ pub fn restrict_permissions(path: &std::path::Path) {
     }
 }
 
-/// Encrypts `plaintext` under `key` with a freshly generated nonce.
-/// Returns `(nonce, ciphertext)` — the caller stores both in its envelope.
 pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<([u8; NONCE_LEN], Vec<u8>)> {
     let mut nonce = [0u8; NONCE_LEN];
     rand::fill(&mut nonce[..]);
@@ -104,10 +77,6 @@ pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<([u8; NONCE_LEN]
     Ok((nonce, ciphertext))
 }
 
-/// Decrypts `ciphertext` with `key` and `nonce`.
-///
-/// Fails if the password-derived key is wrong or the data is corrupt; the
-/// caller maps that onto its user-facing message.
 pub fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
     let nonce: [u8; NONCE_LEN] = nonce
         .try_into()
@@ -121,7 +90,6 @@ fn cipher(key: &[u8; KEY_LEN]) -> Aes256Gcm {
     Aes256Gcm::new(&Key::<Aes256Gcm>::from(*key))
 }
 
-/// Lowercase hex encoding of `bytes` — e.g. for SHA-256 fingerprints.
 pub fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes

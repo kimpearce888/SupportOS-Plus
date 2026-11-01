@@ -1,29 +1,16 @@
-//! Theme persistence in the core `settings` table (plan: app-shell).
-//!
-//! The old webview UI kept its theme in browser localStorage, which does
-//! not exist in a native shell. Per decision D5 there is no migration:
-//! the setting starts at the default and the user re-picks it; the value
-//! lives in the `settings` table so it survives restarts.
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 
-/// UI theme choice persisted under [`Theme::SETTING_KEY`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Theme {
-    /// Light visuals (default; matches the old API's `default: "light"`).
     #[default]
     Light,
-    /// Dark visuals.
     Dark,
 }
 
 impl Theme {
-    /// Settings-table key holding `"light"` or `"dark"`.
     pub const SETTING_KEY: &'static str = "theme";
 
-    /// Map a stored setting value to a theme; anything unknown (including
-    /// a missing value) falls back to the default.
     #[must_use]
     pub fn from_setting_value(value: Option<&str>) -> Self {
         match value {
@@ -32,7 +19,6 @@ impl Theme {
         }
     }
 
-    /// The value stored for this theme.
     #[must_use]
     pub fn setting_value(self) -> &'static str {
         match self {
@@ -41,7 +27,6 @@ impl Theme {
         }
     }
 
-    /// Load the theme from the `settings` table (default on any error).
     #[must_use]
     pub fn load(db: &DbHandle) -> Self {
         let stored: Option<String> = db.with_read(|conn| {
@@ -52,10 +37,6 @@ impl Theme {
         Self::from_setting_value(stored.as_deref())
     }
 
-    /// Persist the theme to the `settings` table.
-    ///
-    /// # Errors
-    /// Propagates SQLite errors from the settings write.
     pub fn store(self, db: &DbHandle) -> spp_core::error::Result<()> {
         db.with_write(|conn| {
             spp_core::settings::set_string(conn, Self::SETTING_KEY, self.setting_value())
@@ -70,10 +51,6 @@ impl Theme {
         }
     }
 
-    /// Apply the theme to an egui context: selects the stored mode. The
-    /// full shadcn-style zinc visuals for both modes are installed once at
-    /// shell boot by [`crate::design::install`]; this only switches between
-    /// the two pre-styled themes.
     pub fn apply(self, ctx: &egui::Context) {
         ctx.set_theme(match self {
             Self::Light => egui::Theme::Light,
@@ -81,7 +58,6 @@ impl Theme {
         });
     }
 
-    /// Short label for UI display.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {

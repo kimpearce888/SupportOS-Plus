@@ -1,6 +1,5 @@
 use super::*;
 
-/// Human label for an outbound job kind (toast copy).
 pub(super) fn human_outbound_kind(kind: &str) -> &str {
     match kind {
         "create_reply" => "Reply",
@@ -11,14 +10,6 @@ pub(super) fn human_outbound_kind(kind: &str) -> &str {
     }
 }
 
-/// v1.4.0 (R5, D20): map a finished sync to its toast. A zero-record
-/// completion is a *visible* result now — "up to date, nothing new" —
-/// where it used to be indistinguishable from a dead connection.
-///
-/// Clean-audit item 23: `None` means "say nothing" — auto-sync timer
-/// runs and post-write mirror refreshes complete every few seconds and
-/// are not user-visible outcomes. Only manual runs (buttons,
-/// activation, the enqueued initial-sync job) produce a toast.
 #[must_use]
 pub(super) fn sync_completed_toast(
     e: &spp_core::events::SyncCompletedEvent,
@@ -56,8 +47,6 @@ pub(super) fn sync_completed_toast(
     }
 }
 
-/// Sidebar navigation groups (the web nav order, partitioned into labeled
-/// sections: work queues first, reference pages last).
 pub(super) const NAV_GROUPS: &[(&str, &[PageKey])] = &[
     (
         "Workspace",
@@ -105,17 +94,6 @@ pub(super) const NAV_GROUPS: &[(&str, &[PageKey])] = &[
     ),
 ];
 
-/// One full-width sidebar navigation row with a leading icon.
-///
-/// DEFECT-01 (qa-audit/20261019T050847Z): with plain `selectable_label`
-/// rows, the four shortest labels (Inbox, Reports, Search, Shell) only
-/// accepted clicks in a left sliver of the painted row while hover
-/// feedback spanned the label — egui 0.37's atom layout decoupled the
-/// click-acceptance rect from the painted row on short galleys. Rows are
-/// now hand-allocated: the sensed rect is exactly the full-width row we
-/// paint, so click and hover geometry cannot diverge, whatever the label
-/// length. The row paints the shadcn-style active/hover surfaces and the
-/// button role is preserved for assistive technologies.
 pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool {
     let selected = current == key;
     let t = design::tokens(ui);
@@ -184,7 +162,6 @@ pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool
     response.clicked()
 }
 
-/// The sidebar's full-width command-palette trigger row (bordered).
 pub(super) fn palette_trigger(ui: &mut egui::Ui) -> egui::Response {
     let t = design::tokens(ui);
     let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 34.0));
@@ -256,7 +233,6 @@ pub(super) fn palette_trigger(ui: &mut egui::Ui) -> egui::Response {
     response
 }
 
-/// The sidebar's bottom theme-switch row (sun/moon icon + label).
 pub(super) fn theme_row(ui: &mut egui::Ui, next: Theme) -> bool {
     let t = design::tokens(ui);
     let (icon, label) = match next {

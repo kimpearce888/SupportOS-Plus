@@ -22,14 +22,7 @@ pub struct LmStudioProvider {
 }
 
 impl LmStudioProvider {
-    // Clean-audit item 152: the `new` / `with_base_url` constructors and
-    // the `Default` impl are gone — zero callers anywhere. The provider is
-    // built through `with_client` (the hub hands out configured clients,
-    // ai_attributes.rs) or `with_base_url_and_timeout` (the integration
-    // tests).
     #[must_use]
-    /// Wrap an existing client (the provider hub hands out clients that
-    /// already carry the endpoint base URL, timeout and optional API key).
     pub fn with_client(client: OpenAiCompatibleClient) -> Self {
         Self { client }
     }
@@ -51,10 +44,6 @@ impl LocalAiProvider for LmStudioProvider {
         self.client.chat(model, messages).await
     }
 
-    // Clean-audit item 34: JSON-expecting callers (the attribute
-    // extraction) ride the same structured lane the pipeline's chat_json
-    // uses — json_mode + deterministic temperature — instead of a plain
-    // chat whose answer is free to arrive wrapped in fences or prose.
     async fn chat_structured(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse> {
         let res = self
             .client
@@ -128,9 +117,6 @@ impl OpenAiCompatibleClient {
     }
 
     pub async fn is_available(&self) -> bool {
-        // D1: probes must authenticate exactly like chat/embed — keyed
-        // (BYOK cloud) endpoints 401 the unauthenticated GET and showed
-        // "offline" while the same endpoint served real calls.
         let mut req = self.http.get(format!("{}/models", self.base_url));
         if let Some(ref key) = self.api_key {
             req = req.bearer_auth(key);
@@ -142,7 +128,6 @@ impl OpenAiCompatibleClient {
     }
 
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        // D1: same authentication as chat/embed — see `is_available`.
         let mut req = self.http.get(format!("{}/models", self.base_url));
         if let Some(ref key) = self.api_key {
             req = req.bearer_auth(key);
@@ -430,8 +415,6 @@ pub struct ChatOptsResult {
     pub model: String,
     pub latency_ms: u64,
     pub tool_calls: Vec<ToolCall>,
-    /// Token usage as reported by the endpoint (A1 cost ledger); `None`
-    /// when the endpoint does not report usage.
     pub usage: Option<crate::ai_provider::TokenUsage>,
 }
 
@@ -524,12 +507,6 @@ pub struct OpenAiUsage {
     pub total_tokens: u64,
 }
 
-/// Clean-audit item 101: a well-formed JSON 200 whose choices are empty
-/// (or whose single choice carries `content: null`) used to surface as a
-/// SUCCESSFUL completion whose content was the literal string "Unknown" —
-/// which downstream lanes then persisted as if the model had written it.
-/// The parse now refuses such a body: a response with no readable content
-/// is a labeled error, never fabricated text.
 pub fn parse_chat_response(resp: ChatCompletionResponse) -> Result<ChatResponse> {
     let Some(first) = resp.choices.first() else {
         return Err(Error::Config(
@@ -620,10 +597,6 @@ mod batch29_audit101_tests {
         }
     }
 
-    /// Clean-audit item 101: a well-formed JSON 200 with no choices must
-    /// surface as a labeled parse error — the pre-fix lane returned a
-    /// SUCCESSFUL completion whose content was the literal string
-    /// "Unknown", which downstream persisted as model output.
     #[test]
     fn audit101_empty_choices_are_rejected_not_fabricated() {
         let empty = ChatCompletionResponse {

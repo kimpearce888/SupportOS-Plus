@@ -1,20 +1,3 @@
-//! Background worker host — the Phase 4 cutover gap fix.
-//!
-//! Pre-cutover, the axum HTTP server started the core [`WorkerManager`]
-//! (job drain, webhook drain, embedding pass, maintenance, sweeps). The
-//! cutover deleted that server and its replacement — the minimal loopback
-//! listener — never pulled the workers up, so those background timers only
-//! ran inside tests. This module restores the behavior on the native
-//! shell: a dedicated OS thread hosts a fixed 2-worker-thread tokio
-//! runtime (plan row 12: "2-thread runtime") that owns the
-//! [`WorkerManager`] for the whole process lifetime.
-//!
-//! The host is owned by `main` (not by `ShellApp`) so the library — and
-//! therefore every page test — keeps running without background timers.
-//! The settings page receives an optional handle so it can restart the
-//! timers when the sync interval changes, mirroring the old
-//! `PUT /api/settings` behavior (`workers.stop(); workers.start();`).
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -24,34 +7,18 @@ use spp_core::helpscout::HelpScoutProvider;
 use spp_core::sync_engine::SyncEngine;
 use spp_core::workers::WorkerManager;
 
-/// Fixed size of the background runtime (plan row 12). Two worker threads
-/// cover the overlapping long-poll timers (sync + connector refresh) while
-/// keeping the idle footprint minimal on desktop machines.
 const WORKER_THREADS: usize = 2;
 
-/// How long `start` waits for the worker thread to report readiness.
 const STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Running [`WorkerManager`] plus the thread/runtime that drives it.
-///
-/// Dropping the host stops the manager and joins the runtime thread.
 pub struct WorkersHost {
     manager: Arc<WorkerManager>,
-    /// Handle onto the dedicated runtime: `restart` re-arms the timers
-    /// there because `WorkerManager::start` uses `tokio::spawn`, which
-    /// needs a runtime context (the settings page runs on the UI thread).
     runtime_handle: tokio::runtime::Handle,
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl WorkersHost {
-    /// Start the dedicated runtime thread and the background workers on
-    /// it. Blocks until the manager reports itself running (or the thread
-    /// fails to come up).
-    ///
-    /// # Errors
-    /// Returns an error when the thread or the runtime cannot be created.
     pub fn start(
         db: DbHandle,
         engine: Option<Arc<SyncEngine>>,
@@ -75,7 +42,6 @@ impl WorkersHost {
                     Ok(runtime) => runtime,
                     Err(e) => {
                         tracing::error!(error = %e, "failed to build the background worker runtime");
-                        // Dropping ready_tx makes `start` fail instead of hanging.
                         return;
                     }
                 };
@@ -90,8 +56,6 @@ impl WorkersHost {
                         vector_index,
                     );
                     let _ = ready_tx.send((manager.clone(), runtime_handle));
-                    // Park until the host is dropped, then stop the
-                    // manager before the runtime is torn down.
                     let _ = shutdown_rx.await;
                     manager.stop();
                 });
@@ -104,10 +68,6 @@ impl WorkersHost {
         let (manager, runtime_handle) = match ready_rx.recv_timeout(STARTUP_TIMEOUT) {
             Ok(pair) => pair,
             Err(_) => {
-                // The thread died (runtime build failure logged above) or
-                // never reported readiness in time. Release the park first
-                // so the thread can finish its current step and exit;
-                // otherwise join() would deadlock on the parked future.
                 drop(shutdown_tx);
                 let _ = thread.join();
                 return Err(spp_core::error::Error::Config(
@@ -123,19 +83,13 @@ impl WorkersHost {
         })
     }
 
-    /// The running manager (for status surfaces).
     #[must_use]
     pub fn manager(&self) -> &Arc<WorkerManager> {
         &self.manager
     }
 
-    /// Stop and immediately restart the timers, re-reading interval
-    /// settings from the database — the old settings-route behavior for a
-    /// changed sync interval. The restart is spawned onto the worker
-    /// runtime because `WorkerManager::start` needs a runtime context.
     pub fn restart(&self) {
         let manager = Arc::clone(&self.manager);
-        // The restart task detaches: it only re-arms timers and returns.
         std::mem::drop(self.runtime_handle.spawn(async move {
             manager.stop();
             manager.start();

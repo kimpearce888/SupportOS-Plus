@@ -1,33 +1,3 @@
-//! RS-18 — DS reports-page goldens (wave B).
-//!
-//! The lab reference lives at `mockups/design-lab/goldens/v4/{light,dark}/reports-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real `ReportsPage`: the PageHeader with the range
-//! chips + sync composite, the DS-C-09 grouped tab rail (the lab's three
-//! groups over the same eleven labels), the Overview statGrid + per-day
-//! chart card, and the lab's block stacks behind the other tabs) over a
-//! seeded mirror; the side-by-side review against the lab is the G3
-//! evidence pack.
-//!
-//! Determinism note (RS-4-11 clock seam): every window and seed derives
-//! from ONE pinned anchor (`anchor()` — 2026-01-15T12:00Z) via the anchored
-//! variants (`iso_days_ago_at` / `now_iso_millis_at`): the seeds are fixed
-//! offsets from that anchor — day-granular dates with pinned times-of-day —
-//! and the page's `today` is pinned to the same instant, so the metric
-//! values, the daily point count AND the rendered date texts (the chart
-//! card's range subtitle, the builder's date inputs) are constant forever.
-//! The old wall-clock behavior drifted those glyphs ~70-85 px at every UTC
-//! midnight; the seam removed it at the source and the pixel budgets with it.
-//!
-//! The interaction golden exercises the DS-C-09 rail's real state change:
-//! a `Builder` click lands on the report-builder surface (definition form
-//! with the widget_info'd metric/dimension combos, the saved-report row
-//! with its outline load + danger delete, and the run hint).
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_reports_page`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -37,23 +7,14 @@ use spp_core::db::DbHandle;
 use spp_shell::design;
 use spp_shell::pages::reports::ReportsPage;
 
-// The pinned-anchor helper (RS-4-11 clock seam) builds its instant through
-// chrono's TimeZone trait.
 use chrono::TimeZone;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct ReportsPageState {
     installed: bool,
     page: ReportsPage,
     db: DbHandle,
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic fixture (fixed day offsets with pinned times)
-// ---------------------------------------------------------------------------
-
-/// The fixed anchor every window and seed derives from (RS-4-11 clock
-/// seam — see the suite's determinism note).
 fn anchor() -> chrono::DateTime<chrono::Utc> {
     chrono::Utc
         .with_ymd_and_hms(2026, 1, 15, 12, 0, 0)
@@ -61,7 +22,6 @@ fn anchor() -> chrono::DateTime<chrono::Utc> {
         .expect("fixed anchor")
 }
 
-/// `days_ago` days before the pinned anchor, at a pinned UTC time-of-day.
 fn stamp(days_ago: i64, time: &str) -> String {
     let date = spp_core::business_hours::iso_days_ago_at(days_ago, anchor())
         .split_once('T')
@@ -71,13 +31,6 @@ fn stamp(days_ago: i64, time: &str) -> String {
     format!("{date}T{time}Z")
 }
 
-/// Bootstrap an in-memory database (all migrations) and seed the reports
-/// fixture: two mailboxes, two customers, six conversations across
-/// channels/statuses/days, published customer/reply threads (deterministic
-/// first-response and resolution minutes under a pinned 24/7 business-hours
-/// window), one rating of each kind with comments, friction scores, one
-/// saved report row and one graph node — the rows the page's reload reads
-/// on first paint.
 fn seeded_page() -> (ReportsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
@@ -176,8 +129,6 @@ fn seeded_page() -> (ReportsPage, DbHandle) {
         None,
     );
 
-    // Customer messages + replies: the SLA per-mailbox first-response rows
-    // (the DS-C-23 bar list) and the QA/deterministic surfaces read these.
     seed_thread(
         &conn,
         1,
@@ -202,8 +153,6 @@ fn seeded_page() -> (ReportsPage, DbHandle) {
         &stamp(1, "08:10:00.000"),
     );
 
-    // One rating of each kind, all inside the range, with comments (the
-    // Happiness table renders the Great link and the Not-good badge).
     seed_rating(
         &conn,
         1,
@@ -220,7 +169,6 @@ fn seeded_page() -> (ReportsPage, DbHandle) {
         &stamp(1, "08:30:00.000"),
     );
 
-    // Friction scores (the Insights effort table + the health-facts count).
     conn.execute(
         "INSERT INTO friction_scores (conversation_id, effort_score, factors_json, created_at)
          VALUES (2, 7.5, '{\"message_count\":12,\"resolution_hours\":48.0,\"reopen_count\":1,\"escalated\":1}', ?1),
@@ -229,9 +177,6 @@ fn seeded_page() -> (ReportsPage, DbHandle) {
     )
     .expect("friction scores");
 
-    // One saved report (the Builder tab's saved row: outline load + danger
-    // delete with the shell confirm arm) and one graph node (the Insights
-    // node table's inspect act).
     conn.execute(
         "INSERT INTO report_definitions (name, config, created_at, updated_at)
          VALUES ('Weekly volume', '{}', ?1, ?1)",
@@ -245,17 +190,11 @@ fn seeded_page() -> (ReportsPage, DbHandle) {
     )
     .expect("graph node");
 
-    // RS-4-11 clock seam: the page's windows and the builder's date
-    // inputs derive from the same fixed anchor the seeds use — the
-    // rendered dates are constant text, so the goldens lock byte-exact
-    // with zero pixel budget.
     let mut page = ReportsPage::new();
     page.pin_today(anchor());
     (page, DbHandle::new(conn))
 }
 
-/// One conversation row (created == updated == `created`; `closed` pins
-/// `closed_at`; `assignee_id` 0 seeds the NULL assignee).
 #[allow(clippy::too_many_arguments)]
 fn seed_conversation(
     conn: &rusqlite::Connection,
@@ -294,8 +233,6 @@ fn seed_conversation(
     .expect("conversation");
 }
 
-/// One published thread entry (the shape the replies-sent and first-response
-/// queries read).
 fn seed_thread(
     conn: &rusqlite::Connection,
     conversation_id: i64,
@@ -312,7 +249,6 @@ fn seed_thread(
     .expect("thread");
 }
 
-/// One rating with its comment at a fixed `remote_created_at`.
 fn seed_rating(
     conn: &rusqlite::Connection,
     conversation_id: i64,
@@ -328,12 +264,6 @@ fn seed_rating(
     .expect("rating");
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens + the Builder-tab interaction
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light and lock it as
-/// `{name}.png` under `tests/snapshots/`.
 fn render_reports_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -391,10 +321,6 @@ fn r3_reports_page_800_dark() {
     render_reports_page(true, 800.0, "r3_reports_page_800_dark");
 }
 
-/// The DS-C-09 rail interaction: clicking the `Builder` tab through the
-/// a11y tree lands on the report-builder surface — the definition form
-/// (with its widget_info'd metric/dimension combos), the saved-report row
-/// (outline load + danger delete) and the run hint. Snapshot the tab.
 #[test]
 fn r3_reports_builder_tab_light() {
     let (page, db) = seeded_page();
@@ -421,16 +347,10 @@ fn r3_reports_builder_tab_light() {
         .expect("the Builder tab")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the tab frame
-    // The tab switched: the builder's primary act is in the tree, and the
-    // a11y check (still ON) validates the form's controls.
+    h.run_steps(2);
     assert!(
         h.query_by_label("Run report").is_some(),
         "the Builder tab must show the report definition's Run report act"
     );
-    // RS-4-11: the builder's date inputs derive from the pinned anchor
-    // (see `anchor()`) — byte-exact, no pixel budget; the old
-    // max_failed_pixels(120) absorbed the midnight drift of the rolling
-    // wall-clock window, which no longer exists.
     h.snapshot("r3_reports_builder_tab_light");
 }

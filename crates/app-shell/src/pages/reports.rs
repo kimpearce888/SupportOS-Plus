@@ -1,12 +1,3 @@
-//! Reports page (port of the web `pages/reports.rs`).
-//!
-//! Tabs: overview (dashboard facts + per-day chart), SLA (typed
-//! `spp_core::sla::sla_report` tables + per-mailbox bar chart), why
-//! contacting, top questions, and issue radar — the same data the
-//! `/api/reports/*` routes serve, computed in-process via the promoted
-//! `*_impl` helpers. Charts render with the shell's native painter
-//! (see `crate::chart`; egui_plot does not build against egui 0.37 yet).
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::sla::SlaReport;
@@ -17,7 +8,6 @@ use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 use crate::pages::dashboard::{DashboardData, DashboardScope, load_dashboard};
 
-/// Report tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Overview,
@@ -29,11 +19,7 @@ pub enum Tab {
     Digest,
     Happiness,
     HelpScout,
-    /// Item 56: the report builder (metric × dimension over the catalog,
-    /// filters, comparison, saved-report CRUD).
     Builder,
-    /// Item 56: the dashboard/insights surface (health facts,
-    /// effectiveness, friction, graph nodes).
     Insights,
 }
 
@@ -69,8 +55,6 @@ impl Tab {
     }
 }
 
-/// Chart points for the SLA per-mailbox first-response averages:
-/// `(x = mailbox index, y = avg business minutes)`.
 #[must_use]
 pub fn sla_first_response_bars(report: &SlaReport) -> Vec<chart::Point> {
     report
@@ -82,49 +66,32 @@ pub fn sla_first_response_bars(report: &SlaReport) -> Vec<chart::Point> {
         .collect()
 }
 
-/// The interactive reports page state.
 pub struct ReportsPage {
-    /// R8 (D5): outcome note for the page's "Sync now" action — the
-    /// completion itself is reported by the global sync toast.
     pub sync_note: String,
-    /// FIND-005: armed shell-confirm request for a destructive action —
-    /// raised by [`Self::ui`] at the end of the frame (the click happens
-    /// inside nested render closures).
     pending_confirm: Option<ConfirmRequest>,
 
     tab: Tab,
     days: i64,
-    /// RS-4-11 clock seam: the instant the page's windows and builder date
-    /// inputs derive from. `None` (production) = the wall clock; tests pin
-    /// a fixed instant so the rendered dates are constant text.
     today: Option<chrono::DateTime<chrono::Utc>>,
     overview: Option<DashboardData>,
     sla: Option<SlaReport>,
     why_contacting: Vec<serde_json::Value>,
     top_questions: Vec<serde_json::Value>,
     radar: Vec<serde_json::Value>,
-    /// A3.3: post-resolution QA aggregates (`quality::qa_overview`).
     quality: Option<serde_json::Value>,
-    /// A3.3: recent closed conversations with their QA rows.
     quality_rows: Vec<serde_json::Value>,
-    // K4: the digest archive.
     digests: Vec<spp_core::digest::DigestRow>,
     digest_search: String,
     digest_pick: Option<i64>,
-    // P1: the local happiness readout.
     happiness: Option<serde_json::Value>,
-    // K5: cached Help Scout report fetches + the capability verdict.
     hs_capability: spp_core::reports_api::ReportsCapability,
     hs_cached: Vec<(&'static str, &'static str, String, serde_json::Value)>,
     hs_pick: usize,
-    // Item 150: the persisted breach tracking (the intelligence sweep's
-    // sla_breaches rows) + the per-mailbox tracking-threshold editor.
     tracked_breaches: u32,
     sla_cfg_pick: Option<i64>,
     sla_cfg_fr: String,
     sla_cfg_res: String,
     sla_cfg_note: Option<(bool, String)>,
-    // Item 56: the report builder.
     b_metric: usize,
     b_dimension: usize,
     b_from: String,
@@ -146,7 +113,6 @@ pub struct ReportsPage {
     b_saved: Vec<spp_core::reports::SavedReport>,
     b_save_name: String,
     b_note: Option<(bool, String)>,
-    // Item 56: the insights surface.
     i_health: Option<spp_core::reports::HealthFacts>,
     i_effectiveness: Option<spp_core::reports::EffectivenessReport>,
     i_high_friction: u32,
@@ -233,7 +199,6 @@ impl ReportsPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.overview = None;
         self.sla = None;
@@ -244,11 +209,7 @@ impl ReportsPage {
         self.happiness = None;
         self.hs_capability = spp_core::reports_api::ReportsCapability::Unknown;
         self.hs_cached.clear();
-        // Item 150: the tracked breach count reloads; the threshold editor
-        // keeps its state.
         self.tracked_breaches = 0;
-        // Item 56: the builder outcome describes the previous mirror
-        // snapshot — clear it; the saved list + insights data reload.
         self.b_outcome = None;
         self.b_saved.clear();
         self.i_health = None;
@@ -260,8 +221,6 @@ impl ReportsPage {
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        // RS-4-11 clock seam: the windows derive from the pinned anchor when
-        // one is set; production leaves it `None` (wall clock).
         let now = self.today.unwrap_or_else(chrono::Utc::now);
         let from = spp_core::business_hours::iso_days_ago_at(self.days, now);
         let to = spp_core::business_hours::now_iso_millis_at(now);
@@ -279,8 +238,6 @@ impl ReportsPage {
                 spp_core::analytics::why_contacting_impl(conn, self.days),
                 spp_core::analytics::top_questions_impl(conn, self.days),
                 spp_core::analytics::issue_radar_impl(conn),
-                // A3.3: the deterministic QA aggregates + the most recent
-                // closed conversations' QA cards (computed lazily).
                 Some(spp_core::quality::qa_overview(conn)),
                 {
                     let ids: Vec<i64> = conn
@@ -330,7 +287,6 @@ impl ReportsPage {
                         )
                     })
                     .collect(),
-                // Item 150: the persisted breach log's size.
                 spp_core::intelligence_features::count_sla_breaches(conn).unwrap_or(0),
             )
         });
@@ -339,7 +295,6 @@ impl ReportsPage {
         self.hs_capability = capability;
         self.hs_cached = hs_cached;
         self.tracked_breaches = tracked;
-        // Item 56: saved reports + the insights surface read in one pass.
         let (saved, health, effectiveness, high_friction, friction_top, graph_nodes) = db
             .with_read(|conn| {
                 (
@@ -387,7 +342,6 @@ impl ReportsPage {
         }
     }
 
-    /// Render the page.
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -414,10 +368,6 @@ impl ReportsPage {
                     )
                     .clicked()
                 {
-                    // R8 (D5): this used to be a local-only "Reload" that silently
-                    // re-read sqlite and looked like a refresh. It now performs a
-                    // real scoped fetch and reports the outcome; the invalidation
-                    // below re-reads whatever arrives.
                     match engine {
                         Some(engine) => {
                             if crate::pages::sync_health::spawn_sync_action(
@@ -445,8 +395,6 @@ impl ReportsPage {
                 }
             },
         );
-        // DS-C-09 grouped tab rail — the lab's three groups over the same
-        // eleven labels and the same global-index state machine.
         let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
         if let Some(clicked) = design::tab_groups(
             ui,
@@ -479,7 +427,6 @@ impl ReportsPage {
             Tab::Builder => self.builder_ui(ui, db),
             Tab::Insights => self.insights_ui(ui, db),
         }
-        // FIND-005: raise the armed confirm request (see the field doc).
         if let Some(request) = self.pending_confirm.take() {
             return Some(NavRequest::Confirm(request));
         }
@@ -521,10 +468,6 @@ impl ReportsPage {
                 }
             });
         ui.add_space(4.0);
-        // R6 honesty: these rating counts mirror what Help Scout pushes to us
-        // (satisfaction.ratings webhook events). Help Scout has no list-ratings
-        // API to poll, and its own happiness *reports* need a Plus/Pro plan —
-        // neither is silently pretended away here.
         ui.label(
             egui::RichText::new(
                 "Ratings come from the satisfaction webhook; Help Scout's own \
@@ -579,9 +522,6 @@ impl ReportsPage {
             ui.add_space(8.0);
         }
 
-        // The lab's first SLA card is the DS-C-23 bar-row list (a real
-        // label/value per mailbox in the a11y tree, slim tracks) — the
-        // painter bar chart it replaces kept no per-mailbox text.
         let bars: Vec<(&str, i64)> = report
             .mailboxes
             .iter()
@@ -663,11 +603,6 @@ impl ReportsPage {
             );
         });
 
-        // Item 150: the persisted breach tracking — the intelligence sweep
-        // stores the live SLA verdicts here (deduped per conversation +
-        // kind), and mailboxes WITHOUT business-hours config are tracked
-        // coarsely against the thresholds edited below (the sla_configs
-        // write API, previously dead).
         let mailboxes: Vec<(i64, String)> = report
             .mailboxes
             .iter()
@@ -742,8 +677,6 @@ impl ReportsPage {
         );
     }
 
-    /// Item 150: selecting a mailbox loads its current tracking
-    /// thresholds (or the schema defaults when unset) into the editor.
     fn pick_sla_cfg_mailbox(&mut self, db: &DbHandle, mailbox_id: i64) {
         self.sla_cfg_pick = Some(mailbox_id);
         self.sla_cfg_note = None;
@@ -764,10 +697,6 @@ impl ReportsPage {
         }
     }
 
-    /// Item 150: save the per-mailbox tracking thresholds through the
-    /// core write API (set_sla_config), then run the coarse tracker for
-    /// the unmonitored mailboxes so the recorded count reflects the new
-    /// thresholds immediately.
     fn save_sla_cfg(&mut self, db: &DbHandle) {
         let Some(mailbox_id) = self.sla_cfg_pick else {
             self.sla_cfg_note = Some((false, "pick a mailbox first".into()));
@@ -801,14 +730,6 @@ impl ReportsPage {
         }
     }
 
-    // ------------------------------------------------------------------
-    // Item 56: the Builder tab — the report-builder surface, previously
-    // computed but never rendered, is live here: catalog-driven
-    // metric × dimension, the filter set, comparison, sort, limit, and
-    // the saved-report CRUD over report_definitions.
-    // ------------------------------------------------------------------
-
-    /// The form's current config. Err carries the validation message.
     fn build_config(&self) -> std::result::Result<spp_core::reports::ReportBuilderConfig, String> {
         let metric = spp_core::catalog::ReportMetricKey::ALL
             .get(self.b_metric)
@@ -1025,13 +946,7 @@ impl ReportsPage {
                         if design::button(ui, "load", ButtonVariant::Outline).clicked() {
                             self.load_saved_report(&saved.config);
                         }
-                        // The lab's saved rows pair the outline load with a
-                        // danger delete (the arm stays the shell's confirm
-                        // dialog — FIND-005).
                         if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
-                            // FIND-005: the delete used to run immediately —
-                            // arm the shell confirm instead (it executes only
-                            // when the dialog resolves Confirmed).
                             self.pending_confirm =
                                 Some(ConfirmRequest::delete_saved_report(saved.id, &saved.name));
                         }
@@ -1105,8 +1020,6 @@ impl ReportsPage {
         }
     }
 
-    /// Metric values render by their catalog format (counts as integers,
-    /// rates as percentages, durations with their unit).
     fn format_metric_value(format: spp_core::catalog::reporting::MetricFormat, v: f64) -> String {
         use spp_core::catalog::reporting::MetricFormat;
         match format {
@@ -1201,8 +1114,6 @@ impl ReportsPage {
         }
     }
 
-    /// FIND-005: runs only after the shell dialog confirms; keeps the
-    /// Builder-tab note behavior and reports the outcome to the shell.
     pub fn delete_saved_report(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         match db.with_write(|conn| spp_core::reports::delete_saved_report(conn, id)) {
             Ok(true) => {
@@ -1222,12 +1133,6 @@ impl ReportsPage {
             }
         }
     }
-
-    // ------------------------------------------------------------------
-    // Item 56: the Insights tab — health facts (dashboard metrics composed
-    // with the friction count), the QA effectiveness report, the friction
-    // stack with a bounded recompute action, and the graph-node surface.
-    // ------------------------------------------------------------------
 
     fn insights_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let health = self.i_health.clone();
@@ -1505,8 +1410,6 @@ impl ReportsPage {
         );
     }
 
-    /// Item 56: add a graph node through the core write API (the kind is
-    /// validated there against the closed catalog).
     fn add_graph_node_action(&mut self, db: &DbHandle) {
         let Some(kind) = spp_core::catalog::GraphNodeKind::ALL
             .get(self.i_g_kind)
@@ -1556,8 +1459,6 @@ impl ReportsPage {
         }
     }
 
-    /// Item 56: inspect a node — get_graph_node for the stored row and
-    /// get_graph_neighbors for the live human edges touching its entity.
     fn inspect_graph_node(&mut self, db: &DbHandle, node_id: Option<i64>) {
         let Some(node_id) = node_id else {
             return;
@@ -1580,8 +1481,6 @@ impl ReportsPage {
             .unwrap_or_default();
     }
 
-    /// Item 56: refresh the node list (after an add) keeping the current
-    /// selection's neighbors consistent.
     fn refresh_graph(&mut self, db: &DbHandle) {
         let pick = self.i_graph_pick;
         self.i_graph_nodes = db
@@ -1592,12 +1491,6 @@ impl ReportsPage {
         }
     }
 
-    /// A3.3: the Quality tab — post-resolution QA aggregates plus the most
-    /// recent closed conversations' deterministic QA cards. Computed
-    /// locally from the mirror; the per-conversation AI layer stays on the
-    /// inbox detail.
-    /// K4: the weekly AI digest archive — on-demand generation, search,
-    /// and the selected digest's narrative + facts + anomalies.
     fn digest_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::hint_text(
             ui,
@@ -1671,12 +1564,6 @@ impl ReportsPage {
                 selected,
                 &format!(
                     "{} — {}",
-                    // Clean-audit item 127: the cap must be `min`, not
-                    // `max` — `16.max(len)` sliced a short stamp at byte
-                    // 16 (panic on out-of-bounds) and a long stamp at the
-                    // full length (the truncation never happened). Take
-                    // the first 16 characters, or the whole stamp when
-                    // shorter.
                     &digest.created_at[..16.min(digest.created_at.len())],
                     status_chip
                 ),
@@ -1765,9 +1652,6 @@ impl ReportsPage {
         );
     }
 
-    /// P1: the happiness tab — local CSAT from webhook ratings (always
-    /// truthful, empty means "none received"), with the honest source
-    /// note; Plus/Pro users see remote happiness in the Help Scout tab.
     fn happiness_ui(&mut self, ui: &mut egui::Ui) {
         let Some(data) = &self.happiness else {
             ui.spinner();
@@ -1851,8 +1735,6 @@ impl ReportsPage {
         );
     }
 
-    /// K5: the Help Scout Reports API tab — the 32-endpoint registry behind
-    /// capability detection; Standard plans get the one honest sentence.
     fn help_scout_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let banner = self.hs_capability.banner();
         if !banner.is_empty() {
@@ -1884,9 +1766,6 @@ impl ReportsPage {
                 })
                 .response
                 .widget_info(|| {
-                    // The visible "report picker" has no text label of its
-                    // own — the combo button carries the name or kittest's
-                    // a11y check trips on an unlabeled node.
                     egui::WidgetInfo::labeled(
                         egui::Role::Button,
                         ui.is_enabled(),
@@ -2021,8 +1900,6 @@ impl ReportsPage {
                             let id = row.get("conversation_id").and_then(|v| v.as_i64());
                             let det = row.get("deterministic").cloned().unwrap_or_default();
                             ui.horizontal(|ui| {
-                                // Clean-audit item 128: `id` is an Option —
-                                // the Debug format rendered `#Some(42)`.
                                 ui.monospace(match id {
                                     Some(n) => format!("#{n}"),
                                     None => "#?".to_string(),
@@ -2090,8 +1967,6 @@ impl ReportsPage {
                 }
             },
         );
-        // The lab's DS-C-15 quirk receipt — the raw severity token stays
-        // visible (DC C-1) and the current engine never emits 'high'.
         design::quirk(
             ui,
             "Reskin honesty: this tab's badge is always 'medium'/Warning in the current build \
@@ -2139,12 +2014,6 @@ impl Default for ReportsPage {
 }
 
 impl ReportsPage {
-    /// RS-4-11 clock seam: pin the instant the page's windows and builder
-    /// date inputs derive from. Tests call this with a fixed anchor so the
-    /// rendered dates are constant; production never pins (the wall clock
-    /// rules). Re-seeds the builder date inputs from the anchor — they are
-    /// construction-time state, so pinning after construction must refresh
-    /// them for the pin to be visible.
     pub fn pin_today(&mut self, today: chrono::DateTime<chrono::Utc>) {
         self.today = Some(today);
         self.b_from = spp_core::business_hours::iso_days_ago_at(30, today)
@@ -2155,13 +2024,11 @@ impl ReportsPage {
             .get(..10)
             .unwrap_or("2100-01-01")
             .to_string();
-        self.overview = None; // the next reload runs through the anchor
+        self.overview = None;
     }
 }
 
-/// Extra constructor used by the reports page.
 impl DashboardScope {
-    /// Scope with only the day range set.
     #[must_use]
     pub fn days(days: i64) -> Self {
         Self {
@@ -2190,7 +2057,6 @@ mod tests {
             )
             .expect("sla report")
         });
-        // Two seeded mailboxes, no business-hours config rows yet.
         assert!(report.mailboxes.len() >= 2);
         assert!(report.range.from.starts_with("20"));
 
@@ -2211,7 +2077,6 @@ mod tests {
         assert_eq!(page.radar.len(), 0);
         assert!(page.sla.is_some());
 
-        // Day range switch reloads.
         page.days = 7;
         page.reload(&db);
         assert_eq!(page.overview.expect("overview 2").new_conversations, 1);
@@ -2219,15 +2084,11 @@ mod tests {
 
     #[test]
     fn why_contacting_rows_have_category_shape() {
-        // The list renderer reads `category` rows; a synthetic row maps.
         let row = serde_json::json!({ "category": "billing", "count": 3 });
         assert_eq!(i64_field(&row, "count"), 3);
         assert_eq!(str_field(&row, "category"), "billing");
     }
 
-    /// Item 56: the builder form's config builds, runs through
-    /// run_builder_report, saves, lists, loads back into the form, and
-    /// deletes — the full Builder-tab path over a real fixture DB.
     #[test]
     fn builder_tab_run_save_load_delete_round_trip() {
         let db = fixture(Vec::new());
@@ -2241,7 +2102,6 @@ mod tests {
         );
         assert_eq!(page.b_saved.len(), 1);
 
-        // Loading restores the form fields from the stored JSON.
         let config_json = page.b_saved[0].config.clone();
         page.b_metric = 3;
         page.b_from = "2000-01-01".into();
@@ -2249,7 +2109,6 @@ mod tests {
         assert_eq!(page.b_metric, 0, "the saved metric is restored");
         assert!(page.b_note.as_ref().expect("note").0);
 
-        // Running the loaded config produces an outcome with notes.
         let config = page.build_config().expect("config");
         let outcome = db
             .with_read(|conn| spp_core::reports::run_builder_report(conn, &config))
@@ -2259,8 +2118,6 @@ mod tests {
         assert!(page.b_saved.is_empty(), "deleted");
     }
 
-    /// Item 56: the builder form validates its inputs instead of sending
-    /// garbage to the core (bad ids / bad limit / short dates are errors).
     #[test]
     fn builder_form_validates_inputs() {
         let mut page = ReportsPage::new();
@@ -2276,9 +2133,6 @@ mod tests {
         assert!(page.build_config().is_ok());
     }
 
-    /// Item 56: the Insights tab's data loads with the page — health
-    /// facts, effectiveness, friction, and the graph-node list all come
-    /// from the reload pass.
     #[test]
     fn insights_tab_loads_surface_data() {
         let db = fixture(Vec::new());
@@ -2287,8 +2141,7 @@ mod tests {
         assert!(page.i_health.is_some(), "health facts loaded");
         assert!(page.i_effectiveness.is_some(), "effectiveness loaded");
 
-        // The graph-node surface round-trips through the page action.
-        page.i_g_kind = 8; // Campaign — any catalog kind
+        page.i_g_kind = 8;
         page.i_g_label = "Spring push".into();
         page.add_graph_node_action(&db);
         assert!(page.i_note.as_ref().expect("note").0, "node added");
@@ -2297,7 +2150,6 @@ mod tests {
         assert_eq!(node.kind, "campaign");
         assert_eq!(node.label.as_deref(), Some("Spring push"));
 
-        // Invalid JSON properties are rejected before any write.
         page.i_g_label = "bad".into();
         page.i_g_props = "{not json".into();
         page.add_graph_node_action(&db);

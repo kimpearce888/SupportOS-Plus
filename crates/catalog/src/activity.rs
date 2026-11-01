@@ -68,10 +68,6 @@ pub enum DateMode {
     LastWeek,
     ThisMonth,
     LastMonth,
-    // Audit (low): `rename_all = "snake_case"` renders `Last24h` as
-    // `last24h` (digits get no underscore) while the wire/API name — and the
-    // manual `as_str()` below — say `last_24h`. Explicit renames keep serde
-    // round-trips on the same vocabulary as the rest of the app.
     #[serde(rename = "last_24h")]
     Last24h,
     #[serde(rename = "last_48h")]

@@ -419,12 +419,6 @@ pub fn validate_properties(
             "number" => value.as_f64().is_some_and(f64::is_finite),
             "date" => value.as_str().is_some_and(valid_iso_date),
             "boolean" => value.is_boolean(),
-            // Clean-audit item 27 (legacy aliases): the shell's type
-            // builder used to offer `checkbox` and `url`, which this
-            // matcher rejected as unknown — types built with them could
-            // never hold an object. The builder now offers only the
-            // canonical vocabulary above; these aliases keep types that
-            // were already created with the phantom names usable.
             "checkbox" => value.is_boolean(),
             "url" => value.as_str().is_some_and(|s| s.chars().count() <= 300),
             "select" => value.as_str().is_some_and(|s| {
@@ -448,11 +442,6 @@ pub fn validate_properties(
 }
 
 fn valid_iso_date(s: &str) -> bool {
-    // Audit item 121: the prefix was sliced at raw BYTE offset 10, so a
-    // value with any multi-byte character in its first ten bytes panicked
-    // ("byte index 10 is not a char boundary"). The prefix is taken by
-    // CHARACTER count now; the year/month/day checks below reject any
-    // non-ASCII residue anyway.
     let date: String = s.chars().take(10).collect();
     if s.chars().count() < 10 {
         return false;
@@ -580,15 +569,6 @@ pub fn patch_object(
                 .as_object()
                 .cloned()
                 .unwrap_or_default();
-            // Clean-audit item 61: keys whose fields were since REMOVED from
-            // the type must not brick every future patch. The pre-fix merge
-            // carried them into validate_properties, which rejects unknown
-            // keys — so the moment a type lost a field, every existing
-            // object still storing that field's value could no longer be
-            // patched AT ALL (even for unrelated keys). Stale stored keys
-            // are dropped here; the patch input itself is still validated
-            // strictly (setting a field the type does not have stays an
-            // error).
             let live_fields: std::collections::HashSet<&str> =
                 type_detail.fields.iter().map(|f| f.key.as_str()).collect();
             merged.retain(|key, _| live_fields.contains(key.as_str()));
@@ -953,11 +933,6 @@ mod batch21_audit27_tests {
         }
     }
 
-    /// Audit item 27: the shell's type builder offered `checkbox` and
-    /// `url`, which validate_properties rejected as unknown field types —
-    /// types built with them could never hold an object. The builder now
-    /// offers the canonical vocabulary, and these legacy aliases keep
-    /// pre-existing types working.
     #[test]
     fn audit27_legacy_checkbox_and_url_field_types_accept_objects() {
         let conn = conn();
@@ -977,8 +952,6 @@ mod batch21_audit27_tests {
         assert!(object_id > 0);
     }
 
-    /// The aliases validate like their canonical equivalents: a string in
-    /// a legacy checkbox field is still a type error, not a silent pass.
     #[test]
     fn audit27_legacy_aliases_still_reject_wrong_value_types() {
         let conn = conn();
@@ -1000,8 +973,6 @@ mod batch21_audit27_tests {
         );
     }
 
-    /// Unknown field types outside the legacy aliases are still refused —
-    /// the alias list must not become a catch-all.
     #[test]
     fn audit27_unknown_field_types_are_still_rejected() {
         let conn = conn();
@@ -1019,11 +990,6 @@ mod batch21_audit27_tests {
     }
 }
 
-/// Clean-audit batch 25 (item 61): removing a type field must not brick
-/// property updates of existing objects — the pre-fix `patch_object`
-/// merged the object's STORED properties into the validation, and any key
-/// whose field had since been removed from the type failed the whole patch
-/// with "Unrecognized key" forever.
 #[cfg(test)]
 mod batch25_item61_tests {
     use super::*;
@@ -1061,7 +1027,6 @@ mod batch25_item61_tests {
         let object_id = create_object(&conn, type_id, "Order 7", &properties, &[])
             .expect("object with both fields");
 
-        // The owner removes the `insured` field from the type.
         patch_type(
             &conn,
             type_id,
@@ -1071,9 +1036,6 @@ mod batch25_item61_tests {
         )
         .expect("field removed from the type");
 
-        // Pre-fix: this patch of the UNRELATED `carrier` key failed with
-        // "Unrecognized key: insured" — the stored stale value poisoned
-        // every future update of the object.
         let mut patch = Map::new();
         patch.insert("carrier".into(), Value::String("UPS".into()));
         let updated = patch_object(&conn, object_id, None, Some(&patch), None)
@@ -1123,8 +1085,6 @@ mod batch25_item61_tests {
         properties.insert("carrier".into(), Value::String("DHL".into()));
         let object_id = create_object(&conn, type_id, "Order", &properties, &[]).expect("object");
 
-        // The strictness for the PATCH INPUT itself is untouched: you
-        // cannot set a field the type does not have.
         let mut patch = Map::new();
         patch.insert("carrier".into(), Value::String("UPS".into()));
         patch.insert("telepathy".into(), Value::String("no".into()));
@@ -1141,15 +1101,11 @@ mod batch25_item61_tests {
 mod batch31_tests {
     use super::*;
 
-    /// Audit item 121: the date prefix was sliced at raw byte offset 10 —
-    /// any multi-byte character in the first ten bytes panicked. The
-    /// prefix is character-based now.
     #[test]
     fn valid_iso_date_survives_multibyte_prefixes() {
         assert!(valid_iso_date("2024-01-15"));
         assert!(!valid_iso_date("2024-1-5"));
         assert!(!valid_iso_date("2024/01/15"));
-        // Four 3-byte ideographs then a date: the byte-slice panic shape.
         assert!(
             !valid_iso_date("日日日日2024-01-15"),
             "rejects, never panics"

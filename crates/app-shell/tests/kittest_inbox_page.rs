@@ -1,22 +1,3 @@
-//! RS-16 — R3 Inbox pilot: real-page goldens at the RS-10 lab widths
-//! (1440/1024/800 × 900), light + dark.
-//!
-//! The lab reference lives at `mockups/design-lab/goldens/v4/{light,dark}/inbox-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real `InboxPage`: views rail, conversation list,
-//! reader and composer over a seeded database); the side-by-side review
-//! against the lab is the G3 evidence pack.
-//!
-//! Determinism note: the seed helpers below write **fixed timestamps**
-//! instead of `strftime('now')` — the page renders `compact_time` into the
-//! list rows and the thread day divider, so wall-clock seeds would diff on
-//! every re-run. (`spp_shell::testsupport` is `#[cfg(test)]`-gated and not
-//! visible to integration tests anyway; the SQL here mirrors it.)
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_inbox_page`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -26,7 +7,6 @@ use spp_core::event_bus::EventBus;
 use spp_shell::design;
 use spp_shell::pages::inbox::InboxPage;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct InboxPageState {
     installed: bool,
     page: InboxPage,
@@ -34,21 +14,12 @@ struct InboxPageState {
     bus: EventBus,
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic fixture (fixed timestamps; mirrors testsupport's seeds)
-// ---------------------------------------------------------------------------
-
-/// Bootstrap an in-memory database (all migrations) and seed the inbox
-/// fixture into it.
 fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
     seed_users(&conn);
     seed_mailboxes(&conn);
     seed_customers(&conn);
-    // Six conversations across mailboxes/channels/statuses/assignees so the
-    // views rail counts, list rows and reader all carry real signal. The
-    // distinct fixed `updated_at` values pin the list order deterministically.
     seed_conversation(
         &conn,
         1,
@@ -115,9 +86,6 @@ fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
         9,
         "2026-02-14T08:12:00.000Z",
     );
-    // Every conversation gets one customer entry; the SELECTED conversation
-    // (1) gets the rich role-typed thread the DS-C-20 reader must show:
-    // customer → agent reply → internal note → AI draft.
     for (id, at) in [
         (2i64, "2026-02-16T09:50:00.000Z"),
         (3, "2026-02-16T09:29:00.000Z"),
@@ -166,7 +134,6 @@ fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
         "Likely the v2 export path — flagged for the data track.",
         "2026-02-16T09:46:00.000Z",
     );
-    // `ai_*` thread types map onto the AI role (violet card + AI badge).
     seed_thread(
         &conn,
         1,
@@ -179,9 +146,6 @@ fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
     );
 
     let db = DbHandle::new(conn);
-    // Select the rich conversation through the public API (`select` sets the
-    // private selection AND loads the detail; the list fills on the page's
-    // first `ui` frame through its empty-gate reload).
     let mut page = InboxPage::new();
     page.select(&db, 1);
     (page, db, EventBus::new(8))
@@ -224,9 +188,6 @@ fn seed_customers(conn: &rusqlite::Connection) {
     .expect("customer emails");
 }
 
-/// One conversation row with fixed timestamps (created == updated == `at`):
-/// same columns the sync pipeline fills, so the page exercises its real
-/// queries. An `assignee_id` of 0 seeds an unassigned row.
 #[allow(clippy::too_many_arguments)]
 fn seed_conversation(
     conn: &rusqlite::Connection,
@@ -265,9 +226,6 @@ fn seed_conversation(
     .expect("conversation");
 }
 
-/// One thread entry with a fixed timestamp and an explicit authorship
-/// (`from_type` is the actor fallback the reader shows when no creator id
-/// resolves — the `ai_draft` row leans on it for the "Support AI" label).
 #[allow(clippy::too_many_arguments)]
 fn seed_thread(
     conn: &rusqlite::Connection,
@@ -296,17 +254,8 @@ fn seed_thread(
     .expect("thread");
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light and lock it as
-/// `{name}.png` under `tests/snapshots/`.
 fn render_inbox_page(dark: bool, width: f32, name: &str) {
     let (page, db, bus) = seeded_page();
-    // The page's assign ComboBox (inbox.rs) carries a programmatic label
-    // ("assign: …" via widget_info, RS-16 a11y pass), so kittest's
-    // end-of-run a11y check holds on the real page and stays ON here.
     let mut h = Harness::builder()
         .with_size(egui::vec2(width, 900.0))
         .with_theme(if dark {

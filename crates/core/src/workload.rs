@@ -6,14 +6,6 @@ use crate::interaction_signals::round2;
 
 pub const CAPACITY_WINDOW_DAYS: i64 = 7;
 
-// Audit (low): `AgentWorkload`/`TeamWorkload` + `agent_workload`/`team_workload`
-// used to live here — dead since introduction (zero call sites) and carrying a
-// latent id-domain bug (`assignee_local_id = ?1` fed a *remote* id). Removed
-// rather than fixed so the latent trap can't be picked up by future callers;
-// the live per-agent numbers the Operations page shows come from
-// `snapshot()` + `suggested_assignees()`, which join users on local ids
-// correctly.
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapacityMetrics {
     pub incoming_7d: u32,

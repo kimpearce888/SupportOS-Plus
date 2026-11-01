@@ -785,13 +785,6 @@ pub fn subgraph_json(
     let mut seen: std::collections::HashSet<String> =
         std::collections::HashSet::from([node_key(&seed_json)]);
     let mut edges: Vec<Value> = Vec::new();
-    // Audit item 118: a mutual link is two graph_edges rows (A→B and
-    // B→A), and "both" expansion returns both — so every node's
-    // expansion pushed the same logical link again, and expanding the far
-    // node pushed it twice more. Edges are deduped by their canonical
-    // unordered (relation, node-pair) key, so a mutual link renders once
-    // regardless of how many expansions return it; genuinely distinct
-    // relations between the same pair stay distinct.
     let mut edge_keys: std::collections::HashSet<(String, String, String)> =
         std::collections::HashSet::new();
     let edge_key = |e: &Value| -> (String, String, String) {
@@ -874,10 +867,6 @@ mod batch31_tests {
     use super::*;
     use rusqlite::Connection;
 
-    /// Audit item 118: a mutual link is two graph_edges rows, and both
-    /// directions of "both" expansion return them — the subgraph pushed
-    /// the same logical link once per expansion (and twice more when the
-    /// far node expanded). The canonical unordered key renders it once.
     #[test]
     fn subgraph_renders_a_mutual_link_once() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -890,9 +879,8 @@ mod batch31_tests {
             )
             .expect("conversation");
         }
-        let a: i64 = conn.last_insert_rowid(); // id 2
-        let b = a - 1; // id 1
-        // The mutual pair: A→B and B→A.
+        let a: i64 = conn.last_insert_rowid();
+        let b = a - 1;
         conn.execute(
             "INSERT INTO graph_edges (source_kind, source_local_id, target_kind, target_local_id, relation)
              VALUES ('conversation', ?1, 'conversation', ?2, 'related_to')",
@@ -915,7 +903,6 @@ mod batch31_tests {
             1,
             "one mutual link, not one per direction per expansion: {edges:?}"
         );
-        // The far node is still discovered.
         let nodes = g["nodes"].as_array().expect("nodes");
         assert_eq!(nodes.len(), 2, "both endpoints present");
     }

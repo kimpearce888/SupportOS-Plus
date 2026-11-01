@@ -1,17 +1,3 @@
-//! Ported pages: dashboard, inbox, customers, knowledge/docs, reports,
-//! operations, and the remaining Phase 3 surface (ai center, automation,
-//! connectors, custom objects, incidents, issue radar, notifications,
-//! onboarding, organizations, outreach, search, settings, support graph,
-//! sync health) plus the shell-level surfaces (command palette, overlays,
-//! toasts).
-//!
-//! Each page owns a typed model (queries run against the local database
-//! through [`spp_core`] functions and small typed SQL ports of the axum
-//! route handlers) plus an egui view. Live updates follow the same
-//! invalidation semantics as the web UI: a [`ServerEvent`] marks affected
-//! pages dirty, and the next frame re-queries them
-//! (port of `queries::keys_for_event` from the web crate).
-
 pub mod ai_center;
 pub mod automation;
 pub mod connectors;
@@ -37,61 +23,53 @@ pub mod sync_health;
 
 use spp_core::events::ServerEvent;
 
-/// A destructive action that must run only after the user confirms it
-/// in the shell's dialog (clean-audit item 70: the `ConfirmDialog`
-/// machinery existed and rendered, but nothing ever armed it — every
-/// destructive action ran unconfirmed). Pages raise a
-/// [`NavRequest::Confirm`] carrying one of these; the shell shows the
-/// dialog and executes the action only on `DialogOutcome::Confirmed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DestructiveAction {
-    /// Delete an automation rule by row id (the item-70 sample wiring).
-    DeleteAutomationRule { id: i64 },
-    /// Delete a knowledge document by row id (clean-audit item 140).
-    DeleteKnowledgeDoc { id: i64 },
-    /// Delete a custom-object TYPE (and its records) by row id.
-    DeleteCustomType { id: i64 },
-    /// Delete one custom-object record by row id.
-    DeleteCustomObject { id: i64 },
-    /// Delete a data-tools connector by row id.
-    DeleteConnector { id: i64 },
-    /// Delete an outreach segment by row id.
-    DeleteSegment { id: i64 },
-    /// Clear the diagnostics event log (every stored event).
+    DeleteAutomationRule {
+        id: i64,
+    },
+    DeleteKnowledgeDoc {
+        id: i64,
+    },
+    DeleteCustomType {
+        id: i64,
+    },
+    DeleteCustomObject {
+        id: i64,
+    },
+    DeleteConnector {
+        id: i64,
+    },
+    DeleteSegment {
+        id: i64,
+    },
     ClearDiagnosticsLog,
-    /// Delete a saved Builder report by row id (FIND-005).
-    DeleteSavedReport { id: i64 },
-    /// Remove a customer from the do-not-contact list (FIND-005).
-    RemoveFromDnc { customer_id: i64 },
-    /// Discard a campaign's remaining queued sends (FIND-005).
-    CancelCampaignRemaining { id: i64 },
-    /// Disable every AI feature via the global kill switch (FIND-005).
+    DeleteSavedReport {
+        id: i64,
+    },
+    RemoveFromDnc {
+        customer_id: i64,
+    },
+    CancelCampaignRemaining {
+        id: i64,
+    },
     DisableAllAi,
-    /// Delete a Help Scout saved reply (platform-side sync write) (FIND-005).
     DeleteSavedReply {
         mailbox_remote_id: i64,
         remote_id: i64,
     },
 }
 
-/// A request to arm the shell-level confirmation dialog for a
-/// [`DestructiveAction`] (clean-audit item 70).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmRequest {
-    /// Dialog title (e.g. "Delete automation rule?").
     pub title: String,
-    /// What the action does, phrased for confirmation.
     pub message: String,
-    /// Confirm-button label (e.g. "Delete").
     pub confirm_label: String,
-    /// Destructive styling for the confirm button.
     pub danger: bool,
-    /// The action that runs when the user confirms.
     pub action: DestructiveAction,
 }
 
 impl ConfirmRequest {
-    /// Confirmation for deleting an automation rule.
     #[must_use]
     pub fn delete_automation_rule(id: i64, name: &str) -> Self {
         Self {
@@ -105,7 +83,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for deleting a knowledge document (clean-audit item 140).
     #[must_use]
     pub fn delete_knowledge_doc(id: i64, title: &str) -> Self {
         Self {
@@ -120,7 +97,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for deleting a custom-object type (clean-audit item 140).
     #[must_use]
     pub fn delete_custom_type(id: i64, name: &str) -> Self {
         Self {
@@ -135,7 +111,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for deleting one custom-object record (item 140).
     #[must_use]
     pub fn delete_custom_object(id: i64, name: &str) -> Self {
         Self {
@@ -149,7 +124,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for deleting a data-tools connector (item 140).
     #[must_use]
     pub fn delete_connector(id: i64, name: &str) -> Self {
         Self {
@@ -164,7 +138,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for deleting an outreach segment (item 140).
     #[must_use]
     pub fn delete_segment(id: i64, name: &str) -> Self {
         Self {
@@ -179,7 +152,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for clearing the diagnostics event log (item 140).
     #[must_use]
     pub fn clear_diagnostics_log(count: usize) -> Self {
         Self {
@@ -193,7 +165,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for deleting a saved Builder report (FIND-005).
     #[must_use]
     pub fn delete_saved_report(id: i64, name: &str) -> Self {
         Self {
@@ -205,8 +176,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for removing a customer from the do-not-contact list
-    /// (FIND-005) — they become contactable by campaigns again.
     #[must_use]
     pub fn remove_from_dnc(customer_id: i64) -> Self {
         Self {
@@ -218,8 +187,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for discarding a campaign's remaining queued sends
-    /// (FIND-005).
     #[must_use]
     pub fn cancel_campaign_remaining(id: i64, name: &str) -> Self {
         Self {
@@ -234,8 +201,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for the global AI kill switch (FIND-005) — one click
-    /// used to disable every AI feature and endpoint call at once.
     #[must_use]
     pub fn disable_all_ai() -> Self {
         Self {
@@ -249,8 +214,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// Confirmation for deleting a Help Scout saved reply (FIND-005) — the
-    /// platform-side delete lands when the sync queue drains.
     #[must_use]
     pub fn delete_saved_reply(mailbox_remote_id: i64, remote_id: i64, name: &str) -> Self {
         Self {
@@ -267,7 +230,6 @@ impl ConfirmRequest {
         }
     }
 
-    /// The dialog the shell shows for this request.
     #[must_use]
     pub fn dialog(&self) -> crate::overlays::ConfirmDialog {
         let mut dialog =
@@ -280,30 +242,19 @@ impl ConfirmRequest {
     }
 }
 
-/// A cross-page navigation request raised by a page view (port of the
-/// web router links that jumped between pages, e.g. an operations tile
-/// linking `/inbox?view={tile}`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NavRequest {
-    /// Open the inbox filtered by an operations tile key (`unassigned`, …).
     InboxTile(String),
-    /// Open a specific page.
     Page(PageKey),
-    /// Arm the shell's confirm dialog for a destructive action
-    /// (clean-audit item 70) — the action runs only on confirmation.
     Confirm(ConfirmRequest),
 }
 
-/// A navigable page of the shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageKey {
-    /// Shell diagnostics (theme, database status) — the Phase 2 surface.
     Shell,
     Dashboard,
     Diagnostics,
     Inbox,
-    /// P2 (batch 15): live Beacon chats — the webhook-fed mirror and the
-    /// assigned-agent message send.
     LiveChats,
     Customers,
     Knowledge,
@@ -326,7 +277,6 @@ pub enum PageKey {
 }
 
 impl PageKey {
-    /// Sidebar label.
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
@@ -356,8 +306,6 @@ impl PageKey {
         }
     }
 
-    /// Sidebar order (port of the web nav: work queues first, reference
-    /// pages last).
     #[must_use]
     pub fn all() -> [Self; 23] {
         [
@@ -408,17 +356,11 @@ mod tests {
         ));
         assert!(pages.contains(&PageKey::Dashboard));
         assert!(pages.contains(&PageKey::Inbox));
-        // v1.4.0: Knowledge is part of the sync-complete set regardless
-        // of row count — its Help Center model is cheap to re-read and
-        // used to sit stale after a docs-only pass with 0 changes.
         assert!(pages.contains(&PageKey::Knowledge));
     }
 
     #[test]
     fn r5_every_cacheable_page_is_invalidated_by_something() {
-        // D19 regression test: every page key (except the cacheless
-        // Shell diagnostics page) must appear in at least one event's
-        // invalidation set.
         let mut covered: Vec<PageKey> = Vec::new();
         let probes = vec![
             ServerEvent::sync_completed("incremental", 0, 0, spp_core::events::SyncTrigger::Auto),
@@ -443,7 +385,7 @@ mod tests {
         }
         for key in PageKey::all() {
             if key == PageKey::Shell {
-                continue; // no cached model
+                continue;
             }
             assert!(
                 covered.contains(&key),
@@ -490,9 +432,6 @@ mod tests {
         assert_eq!(opt_str_field(&v, "name").as_deref(), Some("Kim"));
     }
 
-    /// Clean-audit item 70: pages can ask the shell to confirm a
-    /// destructive action, and the request carries everything the
-    /// dialog needs (title, message, danger, and the action itself).
     #[test]
     fn confirm_requests_carry_the_dialog_spec_and_action() {
         let request = ConfirmRequest::delete_automation_rule(7, "Escalate VIP");
@@ -508,7 +447,6 @@ mod tests {
         assert!(dialog.danger);
         assert_eq!(dialog.title, request.title);
         assert_eq!(dialog.confirm_label, "Delete rule");
-        // The request rides NavRequest so pages can return it from ui().
         let nav = NavRequest::Confirm(request);
         let NavRequest::Confirm(inner) = &nav else {
             panic!("the Confirm variant must pattern-match");

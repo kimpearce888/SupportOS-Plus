@@ -38,10 +38,3 @@ pub fn apply_m026_to_m027(conn: &Connection) -> Result<()> {
     conn.execute_batch(M026_TO_M027_SQL)?;
     Ok(())
 }
-
-// Clean-audit item 156: the `data_tools` runtime below the migration is
-// gone — zero callers anywhere. The custom-object CRUD is duplicated
-// (and owned) by `custom_objects.rs`, the connector CRUD by
-// `connectors.rs`, and the backup/settings export-import path by
-// `backup_service.rs` + `data_reset.rs`; this module's copies drifted
-// from the live schemas and were never wired into the shell.

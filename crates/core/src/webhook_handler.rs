@@ -5,17 +5,10 @@ use crate::webhook;
 
 #[derive(Debug, PartialEq)]
 pub enum WebhookProcessResult {
-    Accepted {
-        row_id: i64,
-    },
-    Duplicate {
-        row_id: i64,
-    },
+    Accepted { row_id: i64 },
+    Duplicate { row_id: i64 },
     SignatureInvalid,
     BadRequest,
-    /// No webhook secret is configured. Unsigned events are always
-    /// hard-rejected (migration-map row 1): accepting them would let
-    /// anyone with loopback access inject fake Help Scout events.
     SecretNotConfigured,
 }
 
@@ -45,9 +38,6 @@ pub fn process_webhook(
     }
 
     let raw = String::from_utf8_lossy(body).into_owned();
-    // Audit fix (M8): heal rows stranded in 'processing' by a crash
-    // between the processing mark and the terminal write, before inserting
-    // the new event.
     if let Err(e) = webhook::recover_stale_webhook_events(conn) {
         tracing::warn!(error = %e, "failed to recover stale webhook events");
     }
@@ -59,11 +49,6 @@ pub fn process_webhook(
         }
     };
     if duplicate {
-        // Audit fix (M8): the old code stamped the ORIGINAL row
-        // 'duplicate' — overwriting 'pending' or 'failed'-with-retries-left
-        // and declaring the event handled while Help Scout was still
-        // retrying it. The original's processing state is left untouched;
-        // the delivery simply answers as a duplicate.
         return WebhookProcessResult::Duplicate { row_id };
     }
 
@@ -159,15 +144,6 @@ pub fn process_event(conn: &Connection, row_id: i64, event_type: &str, raw: &str
         "user.status.changed" => {
             enqueued = Some(("sync_user_statuses", serde_json::json!({})));
         }
-        // P2: the beacon.chat.* events are the only push path for live
-        // chats — Help Scout exposes no chat list endpoint — so they
-        // ingest the chat payload straight into the mirror (m059). A chat
-        // is not a conversation: the mirror keeps even ended chats,
-        // because the platform stops serving them once they collapse into
-        // a conversation. Since 2026-10 the platform only delivers
-        // created and customer.replied (agent.replied / assigned / ended
-        // were retired from the enum); the arms stay so a manual
-        // subscription still ingests.
         "beacon.chat.created"
         | "beacon.chat.customer.replied"
         | "beacon.chat.agent.replied"
@@ -238,8 +214,6 @@ mod tests {
     use rusqlite::Connection;
 
     fn fresh_conn() -> Connection {
-        // The data path no longer self-ensures schema (row 6): tests open the
-        // database the way the app does — through the full migration runner.
         let mut conn = Connection::open_in_memory().expect("in-memory connection");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
         conn
@@ -270,7 +244,6 @@ mod tests {
             .expect("event row");
         assert_eq!(state, "processed");
 
-        // convo.created with objectID enqueues a sync job
         let jobs: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM jobs WHERE type = 'sync_conversation'",
@@ -323,8 +296,6 @@ mod tests {
         let result = process_webhook(&conn, b"", br#"{"id":1}"#, None, "convo.created");
         assert!(matches!(result, WebhookProcessResult::SecretNotConfigured));
 
-        // A provided (unverifiable) signature does not rescue an unconfigured
-        // secret: there is nothing to verify it against.
         let result = process_webhook(
             &conn,
             b"",
@@ -419,7 +390,6 @@ mod tests {
             )
             .expect("event row");
         assert_eq!(state, "failed");
-        // Nothing was mirrored from an id-less payload.
         let mirrored: i64 = conn
             .query_row("SELECT COUNT(*) FROM beacon_chats", [], |r| r.get(0))
             .expect("mirror readable");

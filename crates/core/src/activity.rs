@@ -197,12 +197,6 @@ fn derive_mirror_event(t: &MirrorThread) -> Option<(String, String, Option<i64>)
     }
 }
 
-/// Audit item 20: this is the ONLY derived-columns entry point.
-/// `activity_events.conversation_id` is keyed on the LOCAL
-/// `conversations.id` (see `rebuild_all`); the old remote-id-keyed
-/// twin computed the response state from the wrong event set and
-/// wiped the derived timestamps on every user action — removed. All
-/// callers resolve the local id first (see ticket_ops).
 pub fn update_derived_columns_by_local_id(conn: &Connection, conv_local: i64) -> Result<()> {
     let status: Option<String> = conn
         .query_row(

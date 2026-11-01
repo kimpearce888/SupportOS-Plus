@@ -189,9 +189,6 @@ mod tests {
         conn
     }
 
-    /// Item 151: the write API round-trips through get_ai_status — the
-    /// AI Center panel's Save path writes exactly these setters, and
-    /// the pipeline's pre-hub fallback reads exactly get_ai_status.
     #[test]
     fn setters_round_trip_through_get_ai_status() {
         let conn = db();
@@ -217,8 +214,6 @@ mod tests {
         assert!(!ai_features_enabled(&status));
     }
 
-    /// ai_features_enabled is the ready indicator the AI Center panel
-    /// renders — it requires BOTH an explicit provider and a chat model.
     #[test]
     fn ai_features_enabled_requires_provider_and_chat_model() {
         let mut status = AiStatus::default();

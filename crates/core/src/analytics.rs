@@ -1,12 +1,3 @@
-//! Analytics view data (promoted from the retired axum
-//! `http/routes/analytics.rs` at the Phase 4 cutover).
-//!
-//! Pure `&Connection` computations the native shell renders directly,
-//! without an HTTP round-trip: why-contacting categories, top questions,
-//! and the issue-radar alert engine (cluster trends, high-volume
-//! questions, rating correlations, and the derived extensions —
-//! reappearing issues, customer concentration, spiking clusters).
-
 use serde_json::{Value, json};
 
 pub fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
@@ -51,7 +42,6 @@ pub fn why_contacting_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value>
     out
 }
 
-/// HTTP round-trip (pure `&Connection` computation, no axum types).
 pub fn top_questions_impl(conn: &rusqlite::Connection, days: i64) -> Vec<Value> {
     let mut out: Vec<Value> = grouped_questions(conn, days)
         .into_iter()
@@ -106,8 +96,6 @@ struct RadarCluster {
     trend: &'static str,
 }
 
-/// Per-customer repeat facts for the repeated-unresolved extension:
-/// `(contact count, first julian day, last julian day, conversation ids)`.
 type CustomerRepeat = (usize, f64, f64, Vec<i64>);
 
 struct ConvFacts {
@@ -137,8 +125,6 @@ fn radar_alert(
     })
 }
 
-/// The issue-radar alert engine: cluster trends, high-volume questions,
-/// rating correlations, and the derived extensions.
 pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
     let mut alerts: Vec<Value> = Vec::new();
     let clusters = radar_clusters(conn);
@@ -209,12 +195,6 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
         }
     }
 
-    // Audit item 111: the LIMIT 1000 silently truncated the sample the
-    // alert's claim is built on — 2,500 escalated tickets reported as
-    // "1000 escalated tickets", and older not-good ratings dropped out
-    // of the rating overlap. Both caps are gone so the counts match the
-    // claims; the tables are local and the queries are bounded by the
-    // 30-day window.
     let escalated: Vec<i64> = conn
         .prepare(
             "SELECT c.id FROM conversations c
@@ -243,8 +223,6 @@ pub fn issue_radar_impl(conn: &rusqlite::Connection) -> Vec<Value> {
         ));
     }
 
-    // Audit item 111: no silent LIMIT 2000 — the rating_correlated
-    // overlap must see every not-good rating, not just the newest 2000.
     let bad_ids: std::collections::HashSet<i64> = conn
         .prepare(
             "SELECT r.conversation_id FROM ratings r
@@ -378,12 +356,6 @@ fn radar_clusters(conn: &rusqlite::Connection) -> Vec<RadarCluster> {
                 f.jd.is_some_and(|d| now_jd - d > 14.0 && now_jd - d <= 28.0)
             })
             .count();
-        // Clean-audit item 54: "new" must be checked before "rising". The
-        // pre-fix precedence tested the rising band first, and a brand-new
-        // cluster (previous = 0, recent >= 3) always satisfied
-        // `recent > 0 * 1.3` — so every genuinely new cluster with three
-        // or more conversations was reported as "rising" and "new" was
-        // unreachable exactly where it matters most.
         let trend = if previous == 0 && recent > 0 {
             "new"
         } else if (recent as f64) > previous as f64 * 1.3 && recent >= 3 {
@@ -492,13 +464,6 @@ fn radar_extensions(conn: &rusqlite::Connection, clusters: &[RadarCluster]) -> V
 
         let customers: std::collections::HashSet<i64> =
             convs.iter().filter_map(|f| f.customer_id).collect();
-        // Audit item 112: conversations whose grouping key is NULL can
-        // never concentrate, but they were counted in the denominator —
-        // inflating the customer ratio (unattributed imports made the
-        // alert fire on imaginary concentration) and diluting the inbox
-        // ratio (silently suppressing real single-inbox concentration).
-        // Both checks now run over the attributed subset only, and the
-        // claim texts report the attributed totals.
         let attributed: Vec<&ConvFacts> = convs
             .iter()
             .copied()
@@ -731,14 +696,6 @@ mod batch24_audit54_tests {
     use rusqlite::Connection;
     use rusqlite::params;
 
-    /// Four clusters covering every trend band:
-    /// - "brand-new": 4 conversations in the last 14 days, none in the
-    ///   14-28 day window — the shape the pre-fix precedence reported as
-    ///   "rising" (recent > 0 * 1.3 always holds), leaving "new"
-    ///   unreachable for any cluster with recent >= 3.
-    /// - "growing": 5 previous, 8 recent — the rising band.
-    /// - "shrinking": 10 previous, 3 recent — the falling band.
-    /// - "flat": 5 previous, 5 recent — stable.
     fn db_with_trend_clusters() -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -748,8 +705,6 @@ mod batch24_audit54_tests {
             ("shrinking", 10, 3),
             ("flat", 5, 5),
         ];
-        // Conversation numbers are globally unique — one running counter
-        // across the whole fixture.
         let mut number = 9000_i64;
         for (name, previous, recent) in cases {
             conn.execute(
@@ -801,19 +756,12 @@ mod batch24_audit54_tests {
             .trend
     }
 
-    /// Clean-audit item 54: a cluster whose conversations all fall inside
-    /// the recent window (previous = 0, recent >= 3) is "new" — not
-    /// "rising", which the pre-fix precedence reported because the rising
-    /// band was tested first and `recent > 0 * 1.3` always holds.
     #[test]
     fn audit54_new_cluster_with_three_recent_is_new() {
         let conn = db_with_trend_clusters();
         assert_eq!(trend_of(&conn, "brand-new"), "new");
     }
 
-    /// Clean-audit item 54: the other bands keep their meanings —
-    /// growth on an established cluster is still "rising", decline
-    /// still "falling", and no significant change still "stable".
     #[test]
     fn audit54_established_clusters_keep_their_bands() {
         let conn = db_with_trend_clusters();
@@ -822,9 +770,6 @@ mod batch24_audit54_tests {
         assert_eq!(trend_of(&conn, "flat"), "stable");
     }
 
-    /// Clean-audit item 54: a small new cluster (previous = 0,
-    /// recent < 3) was "new" even pre-fix — pinned so the reorder does
-    /// not disturb it.
     #[test]
     fn audit54_small_new_cluster_stays_new() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -885,13 +830,9 @@ mod batch30_tests {
         .expect("member");
     }
 
-    /// Audit item 112: NULL-mailbox conversations diluted the inbox
-    /// concentration denominator — 4 of 7 (0.57) suppressed an alert that
-    /// is really 4 of 4 attributed conversations in one inbox (1.0).
     #[test]
     fn inbox_concentration_ignores_unattributed_conversations() {
         let conn = db();
-        // Real parent rows: customer_local_id / mailbox_local_id are FKs.
         conn.execute(
             "INSERT INTO mailboxes (remote_id, name) VALUES (1, 'Support')",
             [],
@@ -939,10 +880,6 @@ mod batch30_tests {
         );
     }
 
-    /// Audit item 112, the other direction: unattributed conversations
-    /// inflated the customer concentration denominator — 2 attributed
-    /// conversations (2 customers) plus 4 unattributed fired a false
-    /// "6 conversations from 2 customers" alert pre-fix.
     #[test]
     fn customer_concentration_ignores_unattributed_conversations() {
         let conn = db();
@@ -978,8 +915,6 @@ mod batch30_tests {
         );
     }
 
-    /// Audit item 111: the escalation alert's claim counted a silently
-    /// LIMIT-capped sample — 1001 escalated tickets reported as "1000".
     #[test]
     fn escalation_alert_claims_the_real_count() {
         let conn = db();

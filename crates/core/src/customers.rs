@@ -121,10 +121,6 @@ pub fn search_customers(
     limit: Option<u32>,
 ) -> Result<Vec<Customer>> {
     let limit = limit.unwrap_or(20).min(100);
-    // Clean-audit item 83: the search text is a LITERAL — the pattern
-    // body is escaped so `%`/`_` the user typed match themselves and a
-    // trailing `\` cannot escape the wrapping percent (the ESCAPE
-    // clause was already declared but the input was never escaped).
     let q = format!("%{}%", crate::search::escape_like(query));
     let mut stmt = conn.prepare(
         "SELECT id, remote_id, first_name, last_name, email, organization,
@@ -157,10 +153,6 @@ pub fn search_customers(
     items
 }
 
-/// Clean-audit item 83: `search_customers` interpolated raw query text
-/// into the LIKE pattern despite the declared `ESCAPE '\'` clause —
-/// `%`/`_` acted as wildcards and a trailing `\` escaped the wrapping
-/// percent.
 #[cfg(test)]
 mod batch27_audit83_tests {
     use super::*;

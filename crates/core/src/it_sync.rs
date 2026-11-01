@@ -1,15 +1,3 @@
-//! Integration tests (TODO 45): `SyncEngine` round-trips against a local
-//! mock Help Scout API server.
-//!
-//! One realistic fixture dataset (two mailboxes, three customers, three
-//! conversations with threads, paged tags, teams, workflows, user
-//! statuses…) is served over TCP by [`crate::mockserver`]; the engine's
-//! `initial_sync`, `incremental_sync` and `sync_single_conversation` run
-//! exactly as in production (same `RealHelpScoutProvider`, same
-//! `ApiQueue`, same DB write path through `DbHandle`), and the resulting
-//! mirror tables are asserted row-by-row. No credentials and no network
-//! access to Help Scout are involved.
-
 use std::sync::Arc;
 
 use rusqlite::Connection;
@@ -33,8 +21,6 @@ fn fixture_db() -> DbHandle {
     DbHandle::new(conn)
 }
 
-/// The mutable bits of the fixture: the conversation list the mock serves
-/// (incremental sync tests change it mid-test).
 struct Fixture {
     conversations: Vec<Value>,
     threads: std::collections::HashMap<i64, Vec<Value>>,
@@ -93,8 +79,6 @@ fn user_status_json(remote: i64) -> Value {
     })
 }
 
-/// Serve the full fixture dataset. Conversation page 2 is keyed by the
-/// `cursor=p2` query parameter; tags are two pages.
 fn fixture_handler(fix: &Fixture) -> crate::mockserver::Handler {
     let conversations = fix.conversations.clone();
     let threads = fix.threads.clone();
@@ -224,7 +208,6 @@ fn fixture_handler(fix: &Fixture) -> crate::mockserver::Handler {
                 MockResponse::json(200, json!({"_embedded": {"threads": list}}))
             }
             ("GET", p) if p.starts_with("/v3/conversations/") => {
-                // Single-conversation fetch (sync_single_conversation).
                 let conv: i64 = p
                     .trim_start_matches("/v3/conversations/")
                     .parse()
@@ -276,11 +259,6 @@ fn count(db: &DbHandle, sql: &str) -> i64 {
         .unwrap_or(-1)
 }
 
-/// Hold the process-global secrets lock for the test's duration and
-/// install the deterministic master key (same value/convention as
-/// `it_loopback`) — the engine helper seeds OAuth tokens through the
-/// encrypted envelope, which needs the key. Filtered runs (a single
-/// test) cannot rely on another module having installed it first.
 fn install_master_key() -> std::sync::MutexGuard<'static, ()> {
     let guard = crate::settings::SECRETS_TEST_LOCK
         .lock()
@@ -288,8 +266,6 @@ fn install_master_key() -> std::sync::MutexGuard<'static, ()> {
     crate::settings::set_master_key_for_tests([7u8; 32]);
     guard
 }
-
-// ---------------------------------------------------------------------------
 
 #[test]
 fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
@@ -308,7 +284,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
         })
         .expect("initial_sync");
 
-    // Every resource completed without an error.
     let failed: Vec<String> = results
         .iter()
         .filter(|r| r.error.is_some())
@@ -317,7 +292,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     assert!(failed.is_empty(), "failed resources: {failed:?}");
     assert_eq!(results.len(), crate::sync_engine::INITIAL_SYNC_ORDER.len());
 
-    // Reference data.
     assert_eq!(count(&db, "SELECT COUNT(*) FROM accounts"), 1);
     assert_eq!(
         count(&db, "SELECT COUNT(*) FROM users"),
@@ -348,7 +322,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     assert_eq!(count(&db, "SELECT COUNT(*) FROM saved_replies"), 1);
     assert_eq!(count(&db, "SELECT COUNT(*) FROM workflows"), 2);
 
-    // Customer cursor pagination walked both pages.
     assert_eq!(count(&db, "SELECT COUNT(*) FROM customers"), 3);
     let ann_email: String = db
         .with_read(|conn| {
@@ -361,8 +334,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
         .unwrap_or_default();
     assert_eq!(ann_email, "Ann@example.com");
 
-    // Conversations + threads (both the "conversations" and "threads"
-    // resources walk the same pages; upserts are idempotent).
     assert_eq!(count(&db, "SELECT COUNT(*) FROM conversations"), 3);
     assert_eq!(count(&db, "SELECT COUNT(*) FROM conversation_threads"), 4);
     let thread_body: String = db
@@ -376,7 +347,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
         .unwrap_or_default();
     assert_eq!(thread_body, "I cannot log in");
 
-    // Conversation tags landed through the join table.
     let mut tag_names: Vec<String> = db.with_read(|conn| {
         let mut stmt = conn
             .prepare(
@@ -396,10 +366,8 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     tag_names.sort();
     assert_eq!(tag_names, vec!["login".to_string(), "urgent".to_string()]);
 
-    // User statuses were fetched for every synced user.
     assert_eq!(count(&db, "SELECT COUNT(*) FROM user_statuses"), 3);
 
-    // Sync state machine + run bookkeeping.
     assert_eq!(crate::sync_engine::get_state(&db.write_guard()), "LIVE");
     let (run_state, finished_at, errors): (String, Option<String>, i64) = db
         .with_read(|conn| {
@@ -414,9 +382,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     assert!(finished_at.is_some(), "the run must be marked finished");
     assert_eq!(errors, 0);
 
-    // Checkpoint bookkeeping recorded a success per resource (R6: the
-    // order no longer carries chats/attachments/ratings — no list endpoints
-    // exist on the platform — so every stage in the sweep must succeed).
     let checkpointed: i64 = count(
         &db,
         "SELECT COUNT(*) FROM sync_checkpoints WHERE last_success_at IS NOT NULL",
@@ -427,8 +392,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
         "checkpoints recorded: {checkpointed}"
     );
 
-    // The sync_completed event was broadcast — with the trigger the
-    // caller passed (audit item 23: manual runs are the toastable ones).
     let mut saw_sync_completed = false;
     while let Ok(event) = rx.try_recv() {
         if let crate::events::ServerEvent::SyncCompleted(e) = event {
@@ -442,7 +405,6 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     }
     assert!(saw_sync_completed, "sync_completed must be broadcast");
 
-    // The mock only ever saw authenticated requests.
     for hit in mock.hits() {
         assert_eq!(
             hit.header("authorization"),
@@ -496,7 +458,6 @@ fn sync_single_conversation_updates_and_soft_deletes() {
     let db = fixture_db();
     let engine = engine(&db, &mock);
 
-    // Bring one conversation in.
     let ok = runtime()
         .block_on(async { engine.sync_single_conversation(101).await })
         .expect("sync_single_conversation");
@@ -504,7 +465,6 @@ fn sync_single_conversation_updates_and_soft_deletes() {
     assert_eq!(count(&db, "SELECT COUNT(*) FROM conversations"), 1);
     assert_eq!(count(&db, "SELECT COUNT(*) FROM conversation_threads"), 2);
 
-    // 404 upstream: soft delete, not an error.
     mock.set_handler(Arc::new(|req: &MockRequest| {
         if req.path == "/v3/conversations/101" {
             return MockResponse::json(404, r#"{"error":"gone"}"#);
@@ -545,7 +505,6 @@ fn incremental_sync_picks_up_changed_conversations() {
         })
         .expect("initial sync");
 
-    // The customer asks for an update upstream: subject + a new thread.
     fix.conversations[0]["subject"] = json!("Login broken — URGENT");
     fix.threads.get_mut(&101).unwrap().push(json!({
         "id": 505, "type": "customer", "status": "active", "state": "published",
@@ -595,8 +554,6 @@ fn hard_upstream_failure_is_reported_not_swallowed() {
     let db = fixture_db();
     let engine = engine(&db, &mock);
 
-    // Every endpoint now rejects the request with a hard, non-retryable
-    // 400: the run must surface an error, not pretend success.
     mock.set_handler(crate::mockserver::fixed(MockResponse::json(
         400,
         r#"{"error":"bad request"}"#,
@@ -618,22 +575,10 @@ fn hard_upstream_failure_is_reported_not_swallowed() {
         "a hard upstream failure must be reported in the resource result"
     );
 
-    // And the state machine degraded to ERROR, not LIVE.
     let state = crate::sync_engine::get_state(&db.write_guard());
     assert_eq!(state, "ERROR");
 }
 
-// ---------------------------------------------------------------------------
-// Clean-audit batch 28 (items 88/89/91)
-// ---------------------------------------------------------------------------
-
-/// A handler over the FULL fixture whose conversations LIST endpoint
-/// reports nothing modified (an empty page, no cursor): a realistic
-/// incremental pass where the overlap window sees no changes. The
-/// conversations pass is a no-op, which isolates whatever else the
-/// engine does in an incremental run (the threads backfill). Single-
-/// conversation fetches still serve the fixture — the backfill needs
-/// them.
 fn quiet_conversations(fix: &Fixture) -> crate::mockserver::Handler {
     let inner = fixture_handler(fix);
     Arc::new(move |req: &MockRequest| {
@@ -647,10 +592,6 @@ fn quiet_conversations(fix: &Fixture) -> crate::mockserver::Handler {
     })
 }
 
-/// Clean-audit item 88: a cancelled initial sync is not a LIVE mirror.
-/// The pre-fix completion path stamped the state machine LIVE (and the
-/// run row "finished, LIVE") whenever the completed resources had no
-/// errors — a mid-run cancel sailed straight through it.
 #[test]
 fn audit88_cancelled_initial_sync_is_not_live() {
     use std::sync::mpsc;
@@ -658,11 +599,6 @@ fn audit88_cancelled_initial_sync_is_not_live() {
     let _secrets = install_master_key();
     let fix = Fixture::new();
     let inner = fixture_handler(&fix);
-    // The tags first-page fetch (page=1 — Mailbox API 2.0 pagination is
-    // 1-based) blocks until the test has armed the cancellation: the
-    // engine finishes the tags resource, then the loop
-    // sees `cancelled` at the next resource and breaks partway — the
-    // deterministic equivalent of a user hitting Stop mid-sync.
     let (signal_tx, signal_rx) = mpsc::channel::<()>();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let release_rx = std::sync::Mutex::new(release_rx);
@@ -690,8 +626,6 @@ fn audit88_cancelled_initial_sync_is_not_live() {
                 .initial_sync(crate::events::SyncTrigger::Manual)
                 .await
         });
-        // Poll for the signal while yielding to the spawned task — a
-        // blocking std recv would starve this single-threaded runtime.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             if signal_rx.try_recv().is_ok() {
@@ -733,8 +667,6 @@ fn audit88_cancelled_initial_sync_is_not_live() {
     });
     assert_eq!(run_state, "CANCELLED", "the run row records the cancel");
 
-    // And the recovery rule counts a CANCELLED run as "the account has
-    // data" (CATCHING_UP), not "start over".
     db.with_write(|conn| {
         crate::sync_engine::set_state(conn, "INITIALIZING");
     });
@@ -747,14 +679,9 @@ fn audit88_cancelled_initial_sync_is_not_live() {
     );
 }
 
-/// Clean-audit item 88: the threads backfill re-runs on incrementals.
-/// The initial sync lands conversation 102 thread-less (its thread page
-/// came back empty — a rate-limited moment); the pre-fix engine never
-/// re-ran the backfill, so the conversation stayed thread-less forever.
 #[test]
 fn audit88_incremental_runs_the_threads_backfill() {
     let _secrets = install_master_key();
-    // Phase 1: the initial sync with 102's thread list empty.
     let mut fix = Fixture::new();
     fix.threads.remove(&102);
     let mock = mock_with_fixture(&fix);
@@ -784,7 +711,6 @@ fn audit88_incremental_runs_the_threads_backfill() {
         "the initial sync itself succeeded (its threads pass was clean)"
     );
 
-    // Phase 2: the transient rate limit is gone; nothing else changed.
     let full = Fixture::new();
     mock.set_handler(quiet_conversations(&full));
     runtime()
@@ -811,9 +737,6 @@ fn audit88_incremental_runs_the_threads_backfill() {
     );
 }
 
-/// Clean-audit item 89: the threads pass counts unreachable conversations.
-/// The pre-fix pass hardcoded failed: 0 with error: None, so the caller's
-/// record_success stamped the checkpoint 'ok' right over the failure.
 #[test]
 fn audit89_threads_backfill_counts_unreachable_conversations() {
     let _secrets = install_master_key();
@@ -830,9 +753,6 @@ fn audit89_threads_backfill_counts_unreachable_conversations() {
         })
         .expect("initial sync");
 
-    // A crash between the two halves of the initial sync left conv 102's
-    // threads gone from the mirror (they exist platform-side); now the
-    // re-fetch hard-fails with a non-retryable 400.
     db.with_write(|conn| {
         conn.execute(
             "DELETE FROM conversation_threads
@@ -871,8 +791,6 @@ fn audit89_threads_backfill_counts_unreachable_conversations() {
         "the resource carries the summarized failure"
     );
 
-    // The checkpoint records the failure — record_success no longer
-    // stamps 'ok' over it.
     let (status, last_error): (String, Option<String>) = db.with_read(|conn| {
         conn.query_row(
             "SELECT status, last_error FROM sync_checkpoints WHERE resource = 'threads'",
@@ -890,10 +808,6 @@ fn audit89_threads_backfill_counts_unreachable_conversations() {
     );
 }
 
-/// Clean-audit item 91: platform-side deletions propagate to the mirror.
-/// Saved replies, workflows and organizations are full-list resources —
-/// a row absent from the platform's list was deleted up there, and the
-/// pre-fix sync upserted forever without ever noticing.
 #[test]
 fn audit91_platform_deletions_propagate_and_restore() {
     let _secrets = install_master_key();
@@ -909,7 +823,6 @@ fn audit91_platform_deletions_propagate_and_restore() {
                 .await
         })
         .expect("initial sync");
-    // Baseline: workflows 71+72, saved reply 51, organization 5 — all live.
     let deleted_count = |table: &str| -> i64 {
         db.with_read(|conn| {
             conn.query_row(
@@ -924,8 +837,6 @@ fn audit91_platform_deletions_propagate_and_restore() {
     assert_eq!(deleted_count("saved_replies"), 0);
     assert_eq!(deleted_count("organizations"), 0);
 
-    // The platform deletes workflow 72, saved reply 51 and organization 5
-    // (replacements 52 and 6 arrive in the same listings).
     let quiet = quiet_conversations(&Fixture::new());
     let thinned: crate::mockserver::Handler = Arc::new(move |req: &MockRequest| {
         if req.method == "GET" && req.path == "/v2/workflows" {
@@ -990,7 +901,6 @@ fn audit91_platform_deletions_propagate_and_restore() {
     });
     assert_eq!(live_workflow, 1, "the surviving workflow stays live");
 
-    // The readers these mirrors feed only serve non-deleted rows.
     let visible_replies: i64 = db.with_read(|conn| {
         conn.query_row(
             "SELECT COUNT(*) FROM saved_replies WHERE deleted_at IS NULL",
@@ -1001,9 +911,6 @@ fn audit91_platform_deletions_propagate_and_restore() {
     });
     assert_eq!(visible_replies, 1, "only replacement reply 52 is visible");
 
-    // Restoration: the platform un-deletes (the original fixture returns;
-    // replacements 52/6 disappear and take the deleted slot instead).
-    // A listed row must come back to life.
     mock.set_handler(quiet_conversations(&Fixture::new()));
     runtime()
         .block_on(async {
@@ -1047,9 +954,6 @@ fn audit91_platform_deletions_propagate_and_restore() {
     );
 }
 
-/// Clean-audit item 91, guard rail: an empty platform listing is NOT a
-/// wipe signal — a degraded or permission-downgraded answer must not
-/// blank the mirror.
 #[test]
 fn audit91_empty_listing_never_wipes_the_mirror() {
     let _secrets = install_master_key();

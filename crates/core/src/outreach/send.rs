@@ -1,11 +1,4 @@
 use super::*;
-/// Audit item 17: the send loop does network I/O between the pick and the
-/// outcome write, so a crash (or a second worker) would re-pick the same
-/// 'queued' rows and send duplicate emails. Claim each picked row by
-/// moving it to the 'sending' state before it leaves the database guard;
-/// a row whose claim UPDATE changed nothing was raced away and is simply
-/// not sent. Rows stranded in 'sending' by a crash are recovered by the
-/// reconcile sweep's staleness arm (mirror probe, then bounded requeue).
 fn pick_batch(conn: &Connection, campaign_id: i64) -> Vec<BatchRow> {
     let mut stmt = match conn.prepare(
         "SELECT id, customer_local_id, customer_remote_id, email, snapshot, attempts
@@ -100,16 +93,6 @@ fn record_outcome(
         ],
     );
 
-    // Audit item 16: every recorded outcome is a spent attempt. The
-    // recipient row's `attempts` is the counter `classify_error` and the
-    // exhaustion backstop read; without this increment it stayed 0
-    // forever, so 429/5xx answers were retryable without limit and the
-    // same stuck recipients filled every batch (infinite retry storm
-    // + head-of-line block).
-    //
-    // Audit item 17: `updated_at` is the claim/staleness clock the
-    // reconcile sweep reads (a claimed row that never finished is
-    // re-queued only once it is provably stale).
     let _ = match outcome {
         SendOutcome::Sent { remote_id, number } => conn.execute(
             "UPDATE outreach_recipients
@@ -165,11 +148,6 @@ fn datetime_now() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// Audit item 17: `updated_at` on outreach_recipients is the claim and
-/// staleness clock. Databases created before this batch lack the column
-/// (the reconcile sweep's stale-state query referenced it and silently
-/// no-opped), so it is ensured lazily at the top of every campaign batch
-/// run — the same self-healing pattern `ensure_main_rule_columns` uses.
 pub(super) fn ensure_recipient_updated_at(conn: &Connection) -> Result<()> {
     let exists: bool = conn
         .query_row(
@@ -179,11 +157,6 @@ pub(super) fn ensure_recipient_updated_at(conn: &Connection) -> Result<()> {
         )
         .unwrap_or(false);
     if !exists {
-        // ALTER TABLE ADD COLUMN only accepts CONSTANT defaults — SQLite
-        // rejects the expression default (`DEFAULT (strftime(...))`) the
-        // schema used at CREATE time. Add the column nullable and backfill
-        // the clock from each row's created_at, which is the correct
-        // zero-point for staleness accounting.
         conn.execute_batch(
             "ALTER TABLE outreach_recipients ADD COLUMN updated_at TEXT;
              UPDATE outreach_recipients
@@ -201,12 +174,6 @@ pub async fn send_batch(
 ) -> serde_json::Value {
     let (campaign, mailbox_local_id, tags, subject, body, batch) = {
         let c = conn.write_guard();
-        // Audit items 16 + 17: self-heal before every batch. Ensure the
-        // claim/staleness clock column, then run the reconcile sweep —
-        // crash-stranded 'sending' rows are recovered (mirror probe →
-        // 'sent', or bounded requeue) and ambiguous 'unknown' rows are
-        // resolved against the platform mirror BEFORE anything new is
-        // picked, so no send is retried blindly.
         if let Err(e) = ensure_recipient_updated_at(&c) {
             log_event(
                 &c,
@@ -216,9 +183,6 @@ pub async fn send_batch(
                 Some(&e.to_string()),
             );
         }
-        // Recovery only — the continuation/completion logic stays with
-        // finalize_if_drained at the end of the batch, so this can never
-        // double-enqueue the next batch job.
         let _ = reconcile_recipient_states(&c, campaign_id);
         let _ = skip_ineligible_recipients(&c, campaign_id);
         let Some(camp) = get_outreach_campaign(&c, campaign_id).unwrap_or_default() else {
@@ -251,10 +215,6 @@ pub async fn send_batch(
     }
 
     let Some(mailbox_local_id) = mailbox_local_id else {
-        // Scoped: the writer guard must be dropped before
-        // finalize_if_drained re-acquires the lane (let-else keeps
-        // bindings alive until the block ends, and holding the guard
-        // across the call self-deadlocks the same-thread mutex).
         {
             let c = conn.write_guard();
             for row in &batch {
@@ -273,12 +233,6 @@ pub async fn send_batch(
         return finalize_if_drained(conn, campaign_id);
     };
 
-    // Audit item 15: the campaign stores the LOCAL mirror row id of the
-    // mailbox, but the platform's `mailboxId` must be the REMOTE Help
-    // Scout mailbox id — the local row id (1, 2, ...) is not a valid
-    // mailbox on the account, so every send failed. Resolve the remote
-    // id once per batch; a mailbox that never synced is a permanent,
-    // honestly-reported failure for the whole batch.
     let mailbox_remote_id: Option<i64> = {
         let c = conn.write_guard();
         c.query_row(
@@ -289,7 +243,6 @@ pub async fn send_batch(
         .ok()
     };
     let Some(mailbox_remote_id) = mailbox_remote_id else {
-        // Scoped the same way: drop the writer lane before finalizing.
         {
             let c = conn.write_guard();
             for row in &batch {
@@ -357,9 +310,6 @@ pub async fn send_batch(
             subject: r_subject,
             body: r_body,
             tags: tags.clone(),
-            // Audit fix (C1): the live API only accepts open|pending|closed|spam
-            // for a created conversation — "active" is a folder label, not a
-            // status, and would 400. None = the provider's "open" default.
             status: None,
             channel: None,
         };

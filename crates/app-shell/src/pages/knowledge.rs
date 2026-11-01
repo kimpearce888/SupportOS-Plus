@@ -1,20 +1,3 @@
-//! Knowledge & docs pages (port of the web `pages/knowledge.rs` and
-//! `pages/docs.rs`).
-//!
-//! Presentational pass (shadcn redesign): this page renders through the
-//! shared design system in `crate::design`; the queries, state, and
-//! behavior are unchanged.
-//!
-//! The knowledge tabs (documents / sources / freshness) read and act
-//! through `spp_core::knowledge_store` directly. The help-center docs tab
-//! ports the `/api/docs/*` route SQL as typed queries (collections, stats,
-//! article list with collection/status filters, FTS search using the same
-//! tokenizer the route uses, and the article reader). The import panel
-//! ports the web `ImportKnowledgeModal`: paste-import plus the
-//! `knowledge-import` watch folder, with the route's embeddings-job and
-//! audit side effects — reaching this panel is also what makes the
-//! pdf/docx parse sandbox live in the shipped binary.
-
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
@@ -27,7 +10,6 @@ use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Importable visibility values (route parity).
 const VISIBILITIES: [(&str, &str); 2] = [
     ("internal_only", "internal-only (never in customer drafts)"),
     (
@@ -36,14 +18,6 @@ const VISIBILITIES: [(&str, &str); 2] = [
     ),
 ];
 
-/// Import one file from the `knowledge-import` watch folder (port of
-/// `POST /api/knowledge/import-file`): the core import plus the route's
-/// side effects — an embeddings backfill job and a `knowledge_imported`
-/// audit entry.
-///
-/// # Errors
-/// Propagates the core `import_file` failures (path outside the watch
-/// folder, missing file, unsupported type, oversized input).
 pub fn run_file_import(db: &DbHandle, data_dir: &Path, file: &str) -> spp_core::Result<usize> {
     db.with_write(|conn| {
         let results =
@@ -53,11 +27,6 @@ pub fn run_file_import(db: &DbHandle, data_dir: &Path, file: &str) -> spp_core::
     })
 }
 
-/// Paste-import one Markdown document (port of `POST /api/knowledge/import`).
-///
-/// # Errors
-/// `Validation` when the title/content is blank or the visibility is
-/// unknown; otherwise the core `import_manual` failure.
 pub fn run_manual_import(
     db: &DbHandle,
     source_name: &str,
@@ -94,9 +63,6 @@ pub fn run_manual_import(
     })
 }
 
-/// Route-parity side effects after a successful import: enqueue the
-/// embeddings backfill and write the audit row. Fire-and-forget exactly
-/// like the original routes (`let _ = ...`).
 fn post_import_side_effects(conn: &Connection, results: &[Value], mode: &str) {
     let _ = spp_core::jobs::enqueue_on(conn, "embeddings", "embed_knowledge_chunks", "{}", 4, 2);
     let after = serde_json::json!({
@@ -118,7 +84,6 @@ fn post_import_side_effects(conn: &Connection, results: &[Value], mode: &str) {
     );
 }
 
-/// Which tab is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Documents,
@@ -148,7 +113,6 @@ impl Tab {
     }
 }
 
-/// Help-center stats (port of the `/api/docs/stats` SQL).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DocsStats {
     pub collections: i64,
@@ -160,7 +124,6 @@ pub struct DocsStats {
     pub last_synced: Option<String>,
 }
 
-/// Load help-center stats.
 #[must_use]
 pub fn docs_stats(conn: &Connection) -> DocsStats {
     conn.query_row(
@@ -187,7 +150,6 @@ pub fn docs_stats(conn: &Connection) -> DocsStats {
     .unwrap_or_default()
 }
 
-/// Help-center collections: `(id, name)`.
 #[must_use]
 pub fn docs_collections(conn: &Connection) -> Vec<(i64, String)> {
     conn.prepare("SELECT id, name FROM docs_collections ORDER BY name")
@@ -198,7 +160,6 @@ pub fn docs_collections(conn: &Connection) -> Vec<(i64, String)> {
         .unwrap_or_default()
 }
 
-/// Help-center article summary row.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DocArticle {
     pub id: i64,
@@ -211,7 +172,6 @@ pub struct DocArticle {
     pub updated_at: Option<String>,
 }
 
-/// Search filter for the article list.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DocsFilter {
     pub collection: Option<i64>,
@@ -238,9 +198,6 @@ fn article_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DocArticle> {
     })
 }
 
-/// Article ids matching an FTS query (port of the route's `fts_doc_ranks`):
-/// tokenize with the core tokenizer, quote each token as a prefix term,
-/// return ids in rank order.
 #[must_use]
 pub fn fts_article_ids(conn: &Connection, q: &str) -> Vec<i64> {
     let tokens = spp_core::search::tokenize(q, 2, 8);
@@ -265,7 +222,6 @@ pub fn fts_article_ids(conn: &Connection, q: &str) -> Vec<i64> {
         .unwrap_or_default()
 }
 
-/// List articles with the filter applied (FTS query narrows by id set).
 #[must_use]
 pub fn list_articles(conn: &Connection, filter: &DocsFilter) -> Vec<DocArticle> {
     let fts_ids = filter
@@ -315,7 +271,6 @@ pub fn list_articles(conn: &Connection, filter: &DocsFilter) -> Vec<DocArticle> 
         .unwrap_or_default()
 }
 
-/// Full article (summary + body text) for the reader.
 #[must_use]
 pub fn article_detail(conn: &Connection, id: i64) -> Option<(DocArticle, String)> {
     let sql = format!("{ARTICLE_SELECT} WHERE a.id = ?1");
@@ -333,20 +288,13 @@ pub fn article_detail(conn: &Connection, id: i64) -> Option<(DocArticle, String)
     Some((summary, text.unwrap_or_default()))
 }
 
-/// Import-panel state (port of the web `ImportKnowledgeModal`).
 #[derive(Debug, Default)]
 pub struct ImportPanel {
-    /// Paste-import fields.
     title: String,
     content: String,
-    /// Defaults to the route's "Manual import" when left blank.
     source_name: String,
-    /// One of the [`VISIBILITIES`] values.
     visibility: String,
-    /// Watch-folder listing; `None` until the panel is first opened
-    /// (the modal fetched `/api/knowledge/importable` on open).
     files: Option<Vec<String>>,
-    /// The watch-folder path, for display.
     import_dir: Option<String>,
 }
 
@@ -359,7 +307,6 @@ impl ImportPanel {
     }
 }
 
-/// The interactive knowledge page state.
 pub struct KnowledgePage {
     tab: Tab,
     documents: Vec<Value>,
@@ -378,14 +325,11 @@ pub struct KnowledgePage {
     error: Option<String>,
     data_dir: Option<PathBuf>,
     import: ImportPanel,
-    // K2: the AI article-draft review queue.
     drafts: Vec<spp_core::knowledge_store::ArticleDraftRow>,
     gaps: Vec<(i64, String)>,
     draft_pick: Option<i64>,
     gap_pick: Option<i64>,
     publish_collection_pick: Option<i64>,
-    // Item 150: the tracked knowledge gaps (zero-hit searches) and the
-    // tracked stale-doc count from the intelligence freshness sweep.
     query_gaps: Vec<(String, i64)>,
     stale_docs_tracked: u32,
 }
@@ -421,14 +365,10 @@ impl KnowledgePage {
         }
     }
 
-    /// Install the data directory (the import panel needs it for the
-    /// `knowledge-import` watch folder). Mirrors the other path-consuming
-    /// pages (`settings.set_backups_dir`, `connectors.set_data_dir`).
     pub fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = Some(data_dir);
     }
 
-    /// (Re-)load the watch-folder listing (the modal's on-open fetch).
     fn reload_importable(&mut self) {
         let Some(dir) = self.data_dir.clone() else {
             return;
@@ -442,7 +382,6 @@ impl KnowledgePage {
         self.import.import_dir = v.get("dir").and_then(Value::as_str).map(str::to_string);
     }
 
-    /// Import one file from the watch folder and refresh the page state.
     pub fn import_file_action(&mut self, db: &DbHandle, file: &str) {
         let Some(dir) = self.data_dir.clone() else {
             self.error = Some("Import is unavailable (no data directory).".to_string());
@@ -459,7 +398,6 @@ impl KnowledgePage {
         self.reload_importable();
     }
 
-    /// Paste-import the edited document and refresh the page state.
     pub fn manual_import_action(&mut self, db: &DbHandle) {
         match run_manual_import(
             db,
@@ -479,7 +417,6 @@ impl KnowledgePage {
         }
     }
 
-    /// Live-update invalidation (incremental sync with rows → docs reload).
     pub fn invalidate(&mut self) {
         self.documents.clear();
         self.sources.clear();
@@ -513,7 +450,6 @@ impl KnowledgePage {
         let (articles, query_gaps, stale) = db.with_read(|conn| {
             (
                 list_articles(conn, &self.filter),
-                // Item 150: the tracked zero-hit queries, best-hit order.
                 spp_core::intelligence_features::list_knowledge_gaps(conn, 10).unwrap_or_default(),
                 spp_core::intelligence_features::count_stale_docs(conn).unwrap_or(0),
             )
@@ -523,7 +459,6 @@ impl KnowledgePage {
         self.stale_docs_tracked = stale;
     }
 
-    /// Mark a knowledge document reviewed/verified (freshness actions).
     pub fn mark_reviewed(&mut self, db: &DbHandle, id: i64) {
         let ok = db.with_read(|conn| spp_core::knowledge_store::mark_reviewed(conn, id));
         self.status_message = Some(match ok {
@@ -534,7 +469,6 @@ impl KnowledgePage {
         self.documents.clear();
     }
 
-    /// Mark a knowledge document verified (freshness actions).
     pub fn mark_verified(&mut self, db: &DbHandle, id: i64) {
         let ok = db.with_read(|conn| spp_core::knowledge_store::mark_verified(conn, id));
         self.status_message = Some(match ok {
@@ -545,20 +479,10 @@ impl KnowledgePage {
         self.documents.clear();
     }
 
-    /// Delete a knowledge document (runs on shell confirmation only —
-    /// clean-audit item 140). Returns the core outcome so the shell's
-    /// toast reports the truth; the pre-fix `unwrap_or(false)` swallow
-    /// is gone with it.
     pub fn delete_document(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         db.with_write(|conn| {
             let removed = spp_core::knowledge_store::delete_document(conn, id)?;
             if removed {
-                // Clean-audit item 60: the delete hard-deletes the
-                // document's chunk rows, orphaning their vector points
-                // (which keep matching with their stale text snapshots).
-                // Nothing is pending to embed, so the orphan sweep rides
-                // an explicit embed pass — fire-and-forget like the
-                // import side effects.
                 let _ = spp_core::jobs::enqueue_on(
                     conn,
                     "embeddings",
@@ -575,9 +499,6 @@ impl KnowledgePage {
         Ok(())
     }
 
-    /// The import panel (web `ImportKnowledgeModal`): paste-import plus
-    /// the watch folder. Deferred actions keep the immediate-mode borrows
-    /// sound.
     fn import_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let mut file_action: Option<String> = None;
         let mut manual_submit = false;
@@ -678,18 +599,11 @@ impl KnowledgePage {
         }
     }
 
-    /// Open the help-center article reader.
     pub fn open_article(&mut self, db: &DbHandle, id: i64) {
         self.reader = Some(id);
         self.reader_text = db.with_read(|conn| article_detail(conn, id));
     }
 
-    /// Render the page. `engine` powers the "Sync Help Center now"
-    /// action (a real Docs API v1 pull — before 1.3.0 the page had no
-    /// way to fetch and the /v2/ endpoint paths it used did not exist).
-    /// Returns a confirm request when the user asked to delete a
-    /// document (clean-audit item 140 — the delete runs only after the
-    /// shell dialog confirms).
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -716,14 +630,6 @@ impl KnowledgePage {
                 }
             },
         );
-        // Missing Docs API key = the Help Center tab can never fill.
-        // Say so, and how to fix it, instead of an unexplained empty tab.
-        // Audit (C2 residue): this used to read the plain `docs_api_key`
-        // setting — a key nothing ever writes (the real one lives in the
-        // encrypted envelope under `helpscout_docs_api_key`, with the
-        // HELPSCOUT_DOCS_API_KEY env var as the provider's fallback) — so
-        // the banner showed even while sync was working. Ask the same
-        // question the provider's resolve() does: envelope first, then env.
         let docs_key_missing = db.with_read(|conn| {
             spp_core::settings::get_secret(conn, spp_core::helpscout_real::SECRET_DOCS_API_KEY)
                 .ok()
@@ -739,8 +645,6 @@ impl KnowledgePage {
                  → Docs API). Add it in Settings → Help Scout, then press \"Sync Help Center now\".",
             );
         }
-        // DS-C-09 underline tab rail — the lab's five labels, same state
-        // machine (the rail carries its own divider).
         let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
         if let Some(i) = design::tabs(
             ui,
@@ -778,8 +682,6 @@ impl KnowledgePage {
         }
     }
 
-    /// The Documents tab. Returns a confirm request when the user asked
-    /// to delete a document (clean-audit item 140).
     fn documents_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         if self.documents.is_empty() {
             self.reload_all(db);
@@ -799,7 +701,6 @@ impl KnowledgePage {
             );
             return None;
         }
-        // Actions are deferred out of the borrow of `self.documents`.
         let mut action: Option<(i64, String, &str)> = None;
         egui::ScrollArea::vertical().show_rows(ui, 24.0, self.documents.len(), |ui, range| {
             design::table(
@@ -848,8 +749,6 @@ impl KnowledgePage {
             match what {
                 "reviewed" => self.mark_reviewed(db, id),
                 "verify" => self.mark_verified(db, id),
-                // Clean-audit item 140: arming the dialog replaces the
-                // unconfirmed delete.
                 _ => {
                     return Some(NavRequest::Confirm(ConfirmRequest::delete_knowledge_doc(
                         id, &title,
@@ -910,7 +809,6 @@ impl KnowledgePage {
         });
     }
 
-    /// K2: load the review queue and the requestable open gaps.
     fn reload_drafts(&mut self, db: &DbHandle) {
         let (drafts, gaps) = db.with_read(|conn| {
             let gaps: Vec<(i64, String)> = conn
@@ -932,10 +830,6 @@ impl KnowledgePage {
         self.gaps = gaps;
     }
 
-    /// K2: the AI article-draft review queue — the human gate between the
-    /// gap pipeline and the Docs API publish path (K3). Nothing leaves
-    /// this table without an explicit Approve, and nothing publishes
-    /// without an explicit publish click on an approved draft.
     fn drafts_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         if self.drafts.is_empty() && self.gaps.is_empty() {
             self.reload_drafts(db);
@@ -947,7 +841,6 @@ impl KnowledgePage {
         );
         ui.add_space(8.0);
 
-        // --- Request a draft from an open gap ---
         if !self.gaps.is_empty() {
             design::card_titled(ui, "Draft an article from a gap", None, |ui| {
                 let gap_label = self
@@ -1017,7 +910,6 @@ impl KnowledgePage {
             return;
         }
 
-        // --- The queue list ---
         let mut reloaded = false;
         for draft in &self.drafts {
             let selected = self.draft_pick == Some(draft.id);
@@ -1045,10 +937,6 @@ impl KnowledgePage {
                     ui.label(
                         egui::RichText::new(format!("{} — {}", draft.id, draft.title)).strong(),
                     );
-                    // The lab's row anatomy: the status and the publish
-                    // state ride DS.TONE badges (approved/rejected tinted,
-                    // awaiting review neutral, publish failures destructive;
-                    // the raw tokens stay visible, DC C-1).
                     match draft.status.as_str() {
                         "approved" => {
                             design::badge(ui, status_chip, BadgeTone::Success);
@@ -1078,7 +966,6 @@ impl KnowledgePage {
         }
         ui.add_space(8.0);
 
-        // --- The reader + decisions ---
         let Some(pick) = self.draft_pick else {
             return;
         };
@@ -1130,7 +1017,7 @@ impl KnowledgePage {
                                     .small()
                                     .color(ui.visuals().weak_text_color()),
                                 );
-                                ui.add_space(4.0); /* DC sp-1 (B-3 normalization, RS-12) */
+                                ui.add_space(4.0);
                             }
                         },
                     );
@@ -1407,17 +1294,10 @@ impl KnowledgePage {
                 self.filter.collection = self.collection_pick;
                 self.filter.status = self.status_pick.clone();
                 self.reload_docs(db);
-                // Item 150: a non-blank search that returns nothing is a
-                // knowledge gap — record it (deduped by the core writer)
-                // so the tracked gaps list can drive new articles.
                 if self.filter.query.is_some()
                     && self.articles.is_empty()
                     && let Some(q) = self.filter.query.clone()
                 {
-                    // FIND-007: the write used to be fire-and-forget
-                    // (`let _ = …`) — a read-looking control silently
-                    // recorded rows. Surface it via the page's standard
-                    // status message.
                     let recorded = db
                         .with_write(|conn| {
                             spp_core::intelligence_features::record_knowledge_gap(conn, &q)
@@ -1434,9 +1314,6 @@ impl KnowledgePage {
         });
         design::divider(ui);
 
-        // Item 150: the tracked knowledge gaps — every zero-hit search
-        // gains a row, and the stale count comes from the freshness rows
-        // the ingest stamps and the intelligence sweep maintains.
         if !self.query_gaps.is_empty() || self.stale_docs_tracked > 0 {
             design::card_titled(
                 ui,
@@ -1641,9 +1518,7 @@ mod tests {
             assert_eq!(articles.len(), 1);
             assert_eq!(articles[0].name, "Export guide");
 
-            // No match → empty list, not an error.
             assert!(fts_article_ids(conn, "zzzz-nothing").is_empty());
-            // Too-short tokens are dropped by the tokenizer (min 2 chars).
             assert!(fts_article_ids(conn, "e").is_empty());
         });
     }
@@ -1686,15 +1561,12 @@ mod tests {
 
         page.mark_reviewed(&db, doc_id);
         page.reload_all(&db);
-        // Freshness report now classifies the reviewed document.
         assert!(page.freshness.is_some());
 
         let _ = page.delete_document(&db, doc_id);
         page.reload_all(&db);
         assert!(page.documents.is_empty());
     }
-
-    // --- Import panel (web ImportKnowledgeModal port) ---
 
     fn temp_data_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -1724,7 +1596,6 @@ mod tests {
         assert_eq!(str_field(&documents[0], "title"), "note");
         assert_eq!(str_field(&documents[0], "visibility"), "internal_only");
 
-        // Route-parity side effects: embeddings backfill job + audit row.
         let (job, audit) = db.with_read(|conn| {
             let job = conn
                 .query_row(
@@ -1766,7 +1637,6 @@ mod tests {
         let db = empty_db();
         let dir = temp_data_dir("manual");
 
-        // Route parity: blank title/content rejected; visibility validated.
         assert!(run_manual_import(&db, "", "", "content", "internal_only").is_err());
         assert!(run_manual_import(&db, "", "t", " ", "internal_only").is_err());
         assert!(run_manual_import(&db, "", "t", "c", "secret").is_err());
@@ -1785,11 +1655,10 @@ mod tests {
         assert_eq!(documents.len(), 1);
         assert_eq!(str_field(&documents[0], "title"), "Escalation guide");
         assert_eq!(str_field(&documents[0], "visibility"), "customer_safe");
-        // Blank source name fell back to the route default.
         let sources = db.with_read(spp_core::knowledge_store::list_sources);
         let names: Vec<String> = sources.iter().map(|s| str_field(s, "name")).collect();
         assert!(names.iter().any(|n| n == "Manual import"), "{names:?}");
-        let _ = dir; // temp dir unused beyond scoping
+        let _ = dir;
     }
 
     #[test]
@@ -1833,7 +1702,6 @@ mod tests {
         page.reload_all(&db);
         assert_eq!(page.documents.len(), 1);
 
-        // Error path surfaces as the page error, not a crash.
         page.import_file_action(&db, "../escape.md");
         assert!(page.error.is_some_and(|e| e.contains("knowledge-import")));
     }

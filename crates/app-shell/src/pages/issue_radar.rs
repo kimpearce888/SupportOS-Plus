@@ -1,27 +1,3 @@
-//! Issue Radar page (port of the web `pages/issue_radar.rs`).
-//!
-//! RS-18 (wave B) rebuild on **Design Contract v1.0 archetype DS-A-02** —
-//! the dashboard/stack recipe (docs/audit/design-contract-v1.md §4):
-//! PageHeader (the lab's three outline actions in the right cluster) →
-//! DS-C-09 underline tabs → per-tab block stack of DS cards. The
-//! conformed lab reference is `mockups/design-lab/pages-ds.js`
-//! (`DS.definePage("issue-radar", …)`).
-//!
-//! Queries, state, and behavior are unchanged (decisions.md D6:
-//! presentation only). **Alerts** still reads `issue_radar_impl`
-//! (`/api/reports/issue-radar`) plus `sla::sla_alerts`
-//! (`/api/issues/sla-alerts` — SLA rows render through the DS-C-15
-//! callout roles: breached → Err, at-risk → Warn, exactly the lab's
-//! mapping); **Clusters** still reads the issue-cluster table
-//! (`/api/issues/clusters`) with conversation ids; **Gaps** still runs
-//! the deterministic K1 pipeline (`quality::gap_report`) with the same
-//! approve/reject writes — the reject act now follows the lab's armed
-//! two-click form (DS-C-16/A-5 armed danger), approve stays one click;
-//! **Known issues** still reads `/api/issues/known` plus the create form
-//! (the create route's validation and inserts, in-process). The lab's
-//! receipt-cited quirk about the raw severity tokens renders on the
-//! Alerts tab (DS-C-15 quirk — data-layer quirks stay visible, DC C-1).
-
 use eframe::egui;
 use rusqlite::Connection;
 use spp_core::db::DbHandle;
@@ -30,7 +6,6 @@ use super::str_field;
 use crate::design::{self, BadgeTone, ButtonVariant, CalloutRole};
 use crate::icons::Icon;
 
-/// Page tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Alerts,
@@ -63,7 +38,6 @@ impl Tab {
     }
 }
 
-/// One issue cluster row (typed port of `/api/issues/clusters`).
 #[derive(Debug, Clone, Default)]
 pub struct ClusterRow {
     pub id: i64,
@@ -76,7 +50,6 @@ pub struct ClusterRow {
     pub conversation_ids: Vec<i64>,
 }
 
-/// Load the cluster list.
 #[must_use]
 pub fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
     conn.prepare(
@@ -108,7 +81,6 @@ pub fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
     .unwrap_or_default()
 }
 
-/// One known-issue row (typed port of `/api/issues/known`).
 #[derive(Debug, Clone, Default)]
 pub struct KnownIssueRow {
     pub id: i64,
@@ -119,7 +91,6 @@ pub struct KnownIssueRow {
     pub workaround: Option<String>,
 }
 
-/// Load the known-issue list.
 #[must_use]
 pub fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
     conn.prepare(
@@ -143,16 +114,6 @@ pub fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
     .unwrap_or_default()
 }
 
-/// Create a known issue (the create route's insert + link + refresh
-/// sequence, in-process).
-///
-/// Clean-audit item 81: conversation ids are validated against the
-/// conversations table INSIDE the transaction — a dangling id gains no
-/// link row (the pre-fix code inserted links for nonexistent
-/// conversations, and `refresh_known_issue_counts` then counted them).
-///
-/// # Errors
-/// Propagates SQL failures.
 pub fn create_known_issue(
     conn: &mut Connection,
     title: &str,
@@ -169,9 +130,6 @@ pub fn create_known_issue(
     )?;
     let id = tx.last_insert_rowid();
     for conv_id in conversation_ids {
-        // Item 81: the link materializes only when the conversation
-        // exists — the INSERT selects from conversations itself, so a
-        // dangling id inserts zero rows instead of a dead link.
         tx.execute(
             "INSERT OR IGNORE INTO known_issue_links (known_issue_id, conversation_id, link_type)
              SELECT ?1, c.id, 'human' FROM conversations c WHERE c.id = ?2",
@@ -183,14 +141,12 @@ pub fn create_known_issue(
     Ok(id)
 }
 
-/// The interactive issue radar page state.
 pub struct IssueRadarPage {
     tab: Tab,
     radar: Vec<serde_json::Value>,
     sla: Option<spp_core::sla::SlaAlerts>,
     clusters: Vec<ClusterRow>,
     known: Vec<KnownIssueRow>,
-    /// K1: the gap-detection report (deterministic candidates).
     gaps: serde_json::Value,
     show_new: bool,
     new_title: String,
@@ -199,14 +155,8 @@ pub struct IssueRadarPage {
     new_status: String,
     new_conversation_ids: String,
     error: Option<String>,
-    /// A2: outcome note for the manual clustering trigger.
     notice: Option<String>,
-    /// FIND-008: failed `ai` jobs used to land only in the jobs table with
-    /// no signal on this page; the header badges the count instead.
     failed_ai_jobs: i64,
-    /// Audit fix (M21): stamp of the last full reload attempt — if any
-    /// read errors, `sla` stays None and the whole radar (five analytics
-    /// queries) used to re-run on the UI thread every rendered frame.
     reload_at: Option<std::time::Instant>,
 }
 
@@ -233,14 +183,12 @@ impl IssueRadarPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.radar.clear();
         self.sla = None;
         self.clusters.clear();
         self.known.clear();
         self.gaps = serde_json::Value::Null;
-        // Audit fix (M21): an explicit invalidation reloads next frame.
         self.reload_at = None;
     }
 
@@ -258,7 +206,6 @@ impl IssueRadarPage {
                 spp_core::sla::sla_alerts(conn).ok(),
                 load_clusters(conn),
                 load_known(conn),
-                // K1: the deterministic gap pipeline's current report.
                 spp_core::quality::gap_report(conn),
                 failed_ai_jobs,
             )
@@ -272,9 +219,6 @@ impl IssueRadarPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        // Audit fix (M21): reload at most once per second while a read
-        // keeps failing (a None `sla` used to trigger the full radar
-        // reload every rendered frame).
         if self.sla.is_none() && self.reload_at.is_none_or(|t| t.elapsed().as_secs() >= 1) {
             self.reload_at = Some(std::time::Instant::now());
             self.reload(db);
@@ -287,10 +231,6 @@ impl IssueRadarPage {
             self.error = Some("Title is required (max 300 characters).".into());
             return;
         }
-        // Clean-audit item 81: parse, dedupe (order-preserving) and
-        // validate the ids against the conversations table — dangling
-        // ids are reported to the user instead of silently gaining
-        // link rows that counted toward the issue.
         let mut parsed: Vec<i64> = Vec::new();
         for id in self
             .new_conversation_ids
@@ -362,7 +302,6 @@ impl IssueRadarPage {
         }
     }
 
-    /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
@@ -371,9 +310,6 @@ impl IssueRadarPage {
             "Issue Radar",
             Some("AI-derived alerts, clusters, and known issues"),
             |ui| {
-                // A2: the clustering pipeline is real now — one click runs
-                // it on demand (a daily maintenance trigger also exists),
-                // and a reload refetches whatever has landed.
                 if crate::design::button(ui, "Cluster now", crate::design::ButtonVariant::Outline)
                     .on_hover_text(
                         "group the last 14 days of conversations into issue clusters \
@@ -391,8 +327,6 @@ impl IssueRadarPage {
                                 .into(),
                         );
                     } else {
-                        // FIND-008: the enqueue result used to be discarded
-                        // (`let _ = …`) — surface success and failure alike.
                         match db.with_write(|conn| {
                             spp_core::jobs::enqueue_on(conn, "ai", "cluster_issues", "{}", 3, 2)
                         }) {
@@ -421,8 +355,6 @@ impl IssueRadarPage {
                     self.reload(db);
                     self.notice = None;
                 }
-                // K1: the deterministic gap pipeline on demand — the daily
-                // maintenance trigger also enqueues it.
                 if crate::design::button(ui, "Detect gaps now", crate::design::ButtonVariant::Outline)
                     .on_hover_text(
                         "rebuild friction findings and 'asked often, documented nowhere' gap candidates \
@@ -440,7 +372,6 @@ impl IssueRadarPage {
                                 .into(),
                         );
                     } else {
-                        // FIND-008: surface the enqueue result here too.
                         match db
                             .with_write(|conn| {
                                 spp_core::jobs::enqueue_on(
@@ -469,8 +400,6 @@ impl IssueRadarPage {
                 }
             },
         );
-        // FIND-008: failed `ai` jobs used to be visible only in the jobs
-        // table — badge the count here so failures surface on the page.
         if self.failed_ai_jobs > 0 {
             design::error_text(
                 ui,
@@ -485,8 +414,6 @@ impl IssueRadarPage {
             crate::design::hint_text(ui, note);
         }
 
-        // DS-C-09 Tabs (the lab's DS.tab rail replaces the chip row; the
-        // tab labels and set are unchanged).
         let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
         if let Some(i) = design::tabs(ui, &labels, self.tab.index()) {
             self.tab = Tab::from_index(i);
@@ -503,10 +430,6 @@ impl IssueRadarPage {
         }
     }
 
-    /// K1: the Gaps tab — "asked often, documented nowhere" topics with
-    /// counts and examples, plus friction-derived kinds, all deterministic.
-    /// Every candidate carries approve/reject (a human decides; approving
-    /// marks the candidate only — nothing is published automatically).
     fn gaps_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let report = self.gaps.clone();
         if report.is_null() {
@@ -514,7 +437,6 @@ impl IssueRadarPage {
             return;
         }
         let totals = report.get("totals").cloned().unwrap_or_default();
-        // The lab's ds-chip-row of decision totals.
         ui.horizontal(|ui| {
             design::badge(
                 ui,
@@ -598,10 +520,6 @@ impl IssueRadarPage {
             });
     }
 
-    /// K1: one gap candidate row — the question/topic, its occurrence count,
-    /// example conversations, the deterministic explanation, and the
-    /// approve/reject decision buttons (the lab's approve is one click;
-    /// reject arms first — DS-C-16/A-5).
     fn gap_candidate_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -632,7 +550,6 @@ impl IssueRadarPage {
             })
             .unwrap_or_default();
         let t = design::tokens(ui);
-        // The lab's ds-tool-row: count badge, strong query, status badge.
         ui.horizontal(|ui| {
             design::badge(ui, &format!("{count}×"), BadgeTone::Warning);
             ui.label(
@@ -651,8 +568,6 @@ impl IssueRadarPage {
         if !explanation.is_empty() {
             design::hint_text(ui, explanation);
         }
-        // Example conversations: local ids -> numbers for display (the
-        // lab's single "examples:" hint line).
         let examples: Vec<i64> = candidate
             .get("evidence_conversation_ids")
             .and_then(|v| v.as_array())
@@ -691,10 +606,6 @@ impl IssueRadarPage {
                         self.error = Some("approve failed — see Diagnostics.".into());
                     }
                 }
-                // A-5: the destructive act arms first — one click shows
-                // "confirm reject?", the second click (or Esc elsewhere)
-                // completes it. The decision write is unchanged. The id is
-                // the candidate's own — it is unique in the report.
                 let reject_id = format!("gap-reject-{id}");
                 if design::armed_danger_button(ui, &reject_id, "reject", "confirm reject?") {
                     let decided = db
@@ -753,9 +664,6 @@ impl IssueRadarPage {
                 }
             },
         );
-        // DS-C-15 quirk (DC C-1): the raw severity tokens are the engine's
-        // own strings, and non-critical keeps the Warning tone — the lab
-        // keeps that honesty note visible on this tab.
         design::quirk(
             ui,
             "Raw severity tokens (critical/warning/info) — the engine's own \
@@ -797,8 +705,6 @@ impl IssueRadarPage {
                                     alert.mailbox_name,
                                     state
                                 );
-                                // The lab's DS.callout roles: breached →
-                                // err, at-risk → warn.
                                 if state == "breached" {
                                     design::callout(ui, CalloutRole::Err, &line);
                                 } else {
@@ -827,8 +733,6 @@ impl IssueRadarPage {
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for cluster in &clusters {
-                // The lab's card: title in the card head, then the trend
-                // badge, the counts line and the summary as the body.
                 design::card_titled(ui, &cluster.title, None, |ui| {
                     if let Some(trend) = &cluster.trend {
                         let tone = if trend == "rising" || trend == "new" {
@@ -878,8 +782,6 @@ impl IssueRadarPage {
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for issue in &known {
-                // The lab's card: title in the head, then the status badge,
-                // the conversation count, the symptoms and the workaround.
                 design::card_titled(ui, &issue.title, None, |ui| {
                     let t = design::tokens(ui);
                     ui.horizontal(|ui| {
@@ -930,9 +832,6 @@ impl IssueRadarPage {
                     })
                     .response
                     .widget_info(|| {
-                        // The visible "status:" label is a separate widget,
-                        // so the combo button carries the name itself or
-                        // kittest's a11y check trips on an unlabeled node.
                         egui::WidgetInfo::labeled(
                             egui::Role::Button,
                             ui.is_enabled(),
@@ -1080,11 +979,6 @@ mod tests {
     }
 }
 
-/// Clean-audit item 81: known-issue links accepted dangling conversation
-/// ids and counted them — a link to a nonexistent conversation gained a
-/// row and inflated `conversation_count`. Links now materialize only
-/// for existing conversations, counts join the conversations table, and
-/// the create form tells the user which ids were skipped.
 #[cfg(test)]
 mod batch27_audit81_tests {
     use super::*;
@@ -1109,7 +1003,7 @@ mod batch27_audit81_tests {
                 None,
                 None,
                 "investigating",
-                &[1, 99, 100], // 99/100 do not exist
+                &[1, 99, 100],
             )
             .expect("known issue")
         });
@@ -1136,8 +1030,6 @@ mod batch27_audit81_tests {
     #[test]
     fn pre_fix_dangling_links_no_longer_count() {
         let db = fixture(Vec::new());
-        // A pre-fix database: a known issue with two link rows, one of
-        // them dangling (conversation 99 never existed).
         db.with_write(|conn| {
             conn.execute(
                 "INSERT INTO known_issues (name, status, title, provenance)
@@ -1176,7 +1068,6 @@ mod batch27_audit81_tests {
         )]);
         let mut page = IssueRadarPage::new();
         page.new_title = "Login loop".into();
-        // 1 exists; 7 does not; 1 repeated must dedupe.
         page.new_conversation_ids = "1, 7, 1".into();
         page.create(&db);
 

@@ -1,26 +1,13 @@
-//! Test support: an in-memory bootstrapped database plus deterministic seed
-//! helpers used by the page model tests.
-//!
-//! The seeds write directly through the same tables the sync pipeline
-//! fills (`conversations`, `conversation_threads`, `ratings`, …), so the
-//! page models exercise their real queries.
-
-#![allow(dead_code)] // test helpers are used inconsistently across modules
+#![allow(dead_code)]
 
 use spp_core::db::DbHandle;
 
-/// Open an in-memory database with all boot migrations applied.
 pub fn empty_db() -> DbHandle {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
     DbHandle::new(conn)
 }
 
-/// Install a process-global secrets master key for envelope tests.
-/// In-memory databases never get one from bootstrap by design, so page
-/// tests that touch the encrypted envelope call this first. The key
-/// file is created and removed immediately; the key lives in the
-/// process for the rest of the test run.
 pub fn install_master_key() {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -35,8 +22,6 @@ pub fn install_master_key() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// A conversation seed row:
-/// `(marker, local_id, subject, status, channel, mailbox_id, assignee_id, customer_id)`.
 pub type ConvSeed = (
     &'static str,
     i64,
@@ -48,8 +33,6 @@ pub type ConvSeed = (
     i64,
 );
 
-/// Fixture database with users, mailboxes, customers and the given
-/// conversations (all created "now", assigned, not deleted).
 pub fn fixture(convs: Vec<ConvSeed>) -> DbHandle {
     let db = empty_db();
     db.with_write(|conn| {
@@ -65,7 +48,6 @@ pub fn fixture(convs: Vec<ConvSeed>) -> DbHandle {
     db
 }
 
-/// Two users: Ada (id 5, mention `ada`) and Grace (id 6).
 pub fn seed_users(conn: &rusqlite::Connection) {
     conn.execute(
         "INSERT INTO users (id, remote_id, first_name, last_name, email, mention)
@@ -76,7 +58,6 @@ pub fn seed_users(conn: &rusqlite::Connection) {
     .expect("users");
 }
 
-/// Two mailboxes: Support (1) and Billing (2).
 pub fn seed_mailboxes(conn: &rusqlite::Connection) {
     conn.execute(
         "INSERT INTO mailboxes (id, remote_id, name, email)
@@ -87,9 +68,6 @@ pub fn seed_mailboxes(conn: &rusqlite::Connection) {
     .expect("mailboxes");
 }
 
-/// Two customers: Kim (id 9) and Ada C. (id 10), each with a primary
-/// `customer_emails` row (the store the segment engine and outreach
-/// validation read).
 pub fn seed_customers(conn: &rusqlite::Connection) {
     conn.execute(
         "INSERT INTO customers (id, remote_id, first_name, last_name, email)
@@ -107,10 +85,6 @@ pub fn seed_customers(conn: &rusqlite::Connection) {
     .expect("customer emails");
 }
 
-/// Insert one conversation with now-relative timestamps (so day-range
-/// queries always include the seeded rows). An `assignee_id` of 0 seeds
-/// an unassigned conversation (NULL assignee, matching the operations
-/// tiles' `assignee_local_id IS NULL` predicate).
 #[allow(clippy::too_many_arguments)]
 pub fn seed_conversation(
     conn: &rusqlite::Connection,
@@ -152,7 +126,6 @@ pub fn seed_conversation(
     .expect("conversation");
 }
 
-/// Insert a thread entry for a conversation (now-relative timestamp).
 pub fn seed_thread(conn: &rusqlite::Connection, conversation_id: i64, kind: &str, body: &str) {
     conn.execute(
         "INSERT INTO conversation_threads (conversation_id, type, body_text, from_type, state,
@@ -164,7 +137,6 @@ pub fn seed_thread(conn: &rusqlite::Connection, conversation_id: i64, kind: &str
     .expect("thread");
 }
 
-/// Insert a rating for a conversation (now-relative timestamp).
 pub fn seed_rating(conn: &rusqlite::Connection, conversation_id: i64, rating: &str) {
     conn.execute(
         "INSERT INTO ratings (conversation_id, rating, remote_created_at)
@@ -174,7 +146,6 @@ pub fn seed_rating(conn: &rusqlite::Connection, conversation_id: i64, rating: &s
     .expect("rating");
 }
 
-/// Insert a tag and attach it to a conversation.
 pub fn seed_tag(conn: &rusqlite::Connection, conversation_id: i64, name: &str) {
     let tag_id: i64 = conn
         .query_row(
@@ -190,7 +161,6 @@ pub fn seed_tag(conn: &rusqlite::Connection, conversation_id: i64, name: &str) {
     .expect("conversation tag");
 }
 
-/// Insert a help-center collection + article; returns the article id.
 pub fn seed_doc_article(
     conn: &rusqlite::Connection,
     collection_id: i64,

@@ -1,49 +1,24 @@
-//! HTML → styled-span conversion for the native UI (decision D1).
-//!
-//! The port replaces Leptos/WASM HTML rendering with `egui` styled text.
-//! This module is the toolkit-agnostic seam: it sanitizes HTML with
-//! `ammonia` and converts it into [`Span`]s — plain text plus a
-//! presentation-neutral [`SpanStyle`] — which the UI layer maps onto its
-//! text engine. Unknown or hostile markup degrades to plain text
-//! (plain-text fallback per the risk register).
-//!
-//! Newline policy: line breaks live only in *separator* spans
-//! (default-styled `"\n"` / `"\n\n"`), never inside styled text runs, so
-//! renderers can split spans on newlines without splitting styles.
-
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 
-/// Presentation-neutral inline styling extracted from HTML.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpanStyle {
-    /// `<b>`, `<strong>`, headings render bold at the UI layer's discretion.
     pub bold: bool,
-    /// `<i>`, `<em>`.
     pub italic: bool,
-    /// `<u>`.
     pub underline: bool,
-    /// `<s>`, `<del>`, `<strike>`.
     pub strikethrough: bool,
-    /// Monospace: inline `<code>` or block `<pre>`.
     pub code: bool,
-    /// Indented quotation block (`<blockquote>`).
     pub quote: bool,
-    /// Heading level `1..=6` when the span came from `<h1>`..`<h6>`.
     pub heading: Option<u8>,
-    /// Resolved `href` of a surrounding `<a>`.
     pub link: Option<String>,
 }
 
-/// A run of text sharing one [`SpanStyle`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Span {
-    /// The text content (never contains separator newlines).
     pub text: String,
-    /// The style applied to the whole run.
     pub style: SpanStyle,
 }
 
@@ -63,46 +38,20 @@ impl Span {
     }
 }
 
-/// Convert (possibly untrusted) HTML into styled spans.
-///
-/// The input is sanitized first: disallowed tags are dropped (scripty
-/// tags together with their content), URLs are scheme-checked, and only
-/// the formatting subset understood by this module survives. Anything the
-/// sanitizer keeps but the parser does not recognize is rendered as
-/// plain text.
 pub fn html_to_spans(html: &str) -> Vec<Span> {
     let clean = sanitize(html);
     Parser::new(&clean).run()
 }
 
-/// Plain-text projection of (possibly untrusted) HTML: the same
-/// sanitizer + parser pipeline as [`html_to_spans`], joined back into one
-/// string. `<br>` becomes `\n`, block boundaries `\n\n` — exactly what the
-/// spans carry — so a caller that cannot render styled spans (the local
-/// copilot analyzer building its extractive summary) still sees the text
-/// the reader would show and never leaks raw markup (`<br>`, `<p>`) into
-/// the UI (G4-rejection fix RS-4-1/RS-4-2: the owner's live data carries
-/// Help Scout HTML, and the analyzer previously sliced it verbatim).
 pub fn strip_html(html: &str) -> String {
     html_to_spans(html)
         .iter()
         .map(|s| s.text.as_str())
         .collect::<String>()
-        // Lazy separators can leave edge newlines (a leading `<br>`); a
-        // plain-text projection carries none of that framing.
         .trim()
         .to_string()
 }
 
-/// Zero-width-space break opportunities inside tokens longer than `max`
-/// characters, so the text engine can wrap them.
-///
-/// egui wraps at word boundaries and never breaks a token by default, so a
-/// single long URL forced whole lines — and any card sized to the line —
-/// wider than their viewport, painting over neighbouring panels (the
-/// G4-rejection overlap; RS-4-1/RS-4-3). U+200B is a UAX #14 break
-/// opportunity and renders zero-width. Whitespace resets the run; `max` of
-/// 0 (or a string with no such token) returns the text unchanged.
 pub fn break_long_tokens(s: &str, max: usize) -> String {
     if max == 0 {
         return s.to_string();
@@ -169,16 +118,6 @@ fn sanitize(html: &str) -> String {
     builder
         .tags(tags)
         .tag_attributes(tag_attributes)
-        // Clean-audit item 63: `rm_tags` removes tags from the ALLOWLIST —
-        // a no-op for tags that were never allowed. The intent (per this
-        // function's own doc comment: "scripty tags together with their
-        // content") is `clean_content_tags`: the tag AND its entire subtree
-        // are removed. The pre-fix behavior stripped only the tags
-        // themselves, so the text inside `<title>`, `<textarea>`,
-        // `<noscript>`, … leaked into the rendered spans as visible text
-        // (a page's `<title>` showed up in a thread body). `ammonia`
-        // defaults clean the content of script/style; this list adds the
-        // rest of the scripty family to it.
         .add_clean_content_tags([
             "title", "textarea", "noscript", "iframe", "object", "embed", "svg", "math", "form",
             "input", "button", "select", "option", "template",
@@ -196,13 +135,10 @@ struct ListState {
 struct Parser<'a> {
     reader: Reader<&'a [u8]>,
     style: SpanStyle,
-    /// Style snapshots for balanced nesting (`<b><i>…</i></b>`).
     stack: Vec<SpanStyle>,
     buf: String,
-    /// Lazy block separator: number of newlines owed before the next text.
     pending_sep: usize,
     list_stack: Vec<ListState>,
-    /// Inside `<pre>`: keep source whitespace verbatim.
     preserve_ws: bool,
     out: Vec<Span>,
 }
@@ -256,7 +192,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Event::Eof) => break,
                 Ok(_) => {}
-                Err(_) => break, // malformed input: keep what we have (fallback)
+                Err(_) => break,
             }
         }
         self.flush();
@@ -347,7 +283,6 @@ impl<'a> Parser<'a> {
             }
             "br" => self.line_break(),
             _ => {
-                // Unknown (but sanitized-in) tag: transparent container.
                 self.stack.push(self.style.clone());
             }
         }
@@ -402,7 +337,7 @@ impl<'a> Parser<'a> {
     fn block_sep(&mut self, newlines: usize) {
         self.flush();
         if self.out.is_empty() && self.buf.is_empty() {
-            return; // document start: never emit a leading separator
+            return;
         }
         self.pending_sep = self.pending_sep.max(newlines);
     }
@@ -416,8 +351,6 @@ impl<'a> Parser<'a> {
         if collapsed.is_empty() {
             return;
         }
-        // Whitespace-only text between blocks (or at the document start)
-        // is redundant: the block separator already provides the break.
         if collapsed.chars().all(char::is_whitespace)
             && self.buf.is_empty()
             && (self.pending_sep > 0 || self.out.is_empty())
@@ -450,7 +383,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Collapse HTML whitespace runs (space, tab, CR, LF) to single spaces.
 fn collapse_ws(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_ws = false;
@@ -471,7 +403,6 @@ fn collapse_ws(text: &str) -> String {
     out
 }
 
-/// Decode the XML/HTML entities ammonia leaves behind in text content.
 fn decode_entity(name: &str) -> Option<char> {
     match name {
         "amp" => Some('&'),
@@ -746,12 +677,6 @@ mod tests {
         assert_eq!(spans, vec![Span::styled("only", SpanStyle::default())]);
     }
 
-    /// Clean-audit item 63: `rm_tags` is ammonia's ALLOWLIST-removal API —
-    /// a no-op for tags that were never allowed. The pre-fix sanitize kept
-    /// leaking the CONTENT of `<title>`, `<textarea>`, `<noscript>`, … as
-    /// visible text (only the tags themselves were stripped). The fix routes
-    /// the scripty family through `clean_content_tags`, whose entire subtree
-    /// ammonia removes.
     #[test]
     fn audit63_title_and_textarea_content_no_longer_leaks_visible() {
         fn plain_text(html: &str) -> String {
@@ -778,14 +703,11 @@ mod tests {
             !plain_text("<p>ok</p><select><option>opt</option></select>").contains("opt"),
             "select/option content is dropped with the subtree"
         );
-        // The surrounding legitimate content survives.
         assert!(
             plain_text("<p>ok</p><textarea>draft</textarea><p>after</p>").contains("after"),
             "content after the dropped subtree survives"
         );
     }
-
-    // ---- RS-4-1: strip_html + break_long_tokens (G4-rejection fixes) ----
 
     #[test]
     fn strip_html_plain_text_passes_through() {
@@ -796,8 +718,6 @@ mod tests {
     #[test]
     fn strip_html_blocks_and_breaks_become_newlines() {
         assert_eq!(strip_html("<p>one</p><p>two</p>"), "one\n\ntwo");
-        // Consecutive `<br>`s are one lazy separator (the parser's shipped
-        // semantics); the projection only guarantees markup-free text.
         assert_eq!(
             strip_html("Hey there,<br><br>Thanks so much"),
             "Hey there,\nThanks so much"
@@ -806,7 +726,6 @@ mod tests {
 
     #[test]
     fn strip_html_never_leaks_markup_or_script_content() {
-        // The exact live-data shape from the owner's G4 screenshot.
         let out = strip_html("<br><br>When I opened the link in a private Safari tab");
         assert_eq!(out, "When I opened the link in a private Safari tab");
         assert!(!out.contains('<'), "no angle bracket may survive: {out:?}");
@@ -836,9 +755,7 @@ mod tests {
         let s = "a".repeat(100);
         let broken = break_long_tokens(&s, 40);
         assert_eq!(broken.chars().filter(|c| *c == '\u{200b}').count(), 2);
-        // Removing the break opportunities restores the input.
         assert_eq!(broken.replace('\u{200b}', ""), s);
-        // No unbroken run exceeds max.
         for run in broken.split('\u{200b}') {
             assert!(run.chars().count() <= 40);
         }
@@ -850,7 +767,6 @@ mod tests {
         let broken = break_long_tokens(url, 40);
         assert!(broken.contains('\u{200b}'));
         assert_eq!(broken.replace('\u{200b}', ""), url);
-        // Whitespace and short neighbours stay untouched.
         let line = format!("see {url} today");
         let broken = break_long_tokens(&line, 40);
         assert_eq!(broken.replace('\u{200b}', ""), line);

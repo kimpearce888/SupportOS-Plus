@@ -20,12 +20,6 @@ pub struct CopilotResult {
     pub terminated_by_bound: bool,
 }
 
-// Clean-audit item 152: the copilot helper surface (`truncate_result`,
-// `should_stop`, `validate_tool_allowed`, `tool_allowlist`, and the
-// three constant accessors) is gone — every one had zero production
-// callers. The live chat loop reads the same constants directly and
-// truncates tool results by characters inline (the item-121 fix).
-
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
@@ -176,12 +170,6 @@ pub async fn chat(
     let mut rounds: u32 = 0;
     let mut answer: Option<String> = None;
     let mut model = String::from("unknown");
-    // Clean-audit item 43: the copilot run used to be completed without
-    // token usage or endpoint — every copilot chat was invisible to the
-    // cost ledger (`usage_ledger` prices `ai_runs.token_usage` by
-    // `ai_runs.endpoint_id`). Usage is accumulated across every chat
-    // round (tool rounds + the final answer) and the run row now
-    // carries both.
     let mut usage_total: Option<crate::ai_provider::TokenUsage> = None;
 
     let (client, backend_model, endpoint_id) = match backend {
@@ -238,12 +226,6 @@ pub async fn chat(
             });
             for tc in res.tool_calls.iter() {
                 if executed.len() >= MAX_TOOL_CALLS as usize {
-                    // Clean-audit item 44: every assistant tool_call must
-                    // carry a matching tool response — strict
-                    // OpenAI-compatible servers reject the follow-up
-                    // request with a 400 when a tool_call id dangles.
-                    // The un-executed calls now get an explicit
-                    // budget-refusal result instead of silence.
                     messages.push(CopilotWireMessage {
                         role: "tool".into(),
                         content: "Tool budget reached - this call was not executed. Answer from the evidence you already have.".into(),
@@ -625,11 +607,6 @@ fn insert_message(
     tool_calls: i64,
     latency_ms: Option<i64>,
 ) -> Value {
-    // Clean-audit item 45: the INSERT failure used to be swallowed and
-    // `last_insert_rowid()` echoed the id of whatever row was last
-    // inserted on this connection — the response presented a stale id
-    // pointing at a different message. A failed insert now reports a
-    // null id and the error text instead of a fabricated one.
     let inserted = conn.execute(
         "INSERT INTO copilot_messages (session_id, role, content, citations, tool_name, tool_calls, latency_ms)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -797,9 +774,6 @@ mod batch23_audit_tests {
             .expect("runtime")
     }
 
-    /// Item 45: a failed INSERT reports a null id and the error — the
-    /// pre-fix code echoed `last_insert_rowid()`, presenting the id of
-    /// whatever row was last inserted as the new message.
     #[test]
     fn insert_message_reports_null_id_on_failure() {
         let conn = db();
@@ -811,13 +785,10 @@ mod batch23_audit_tests {
         .expect("session");
         let sid = conn.last_insert_rowid();
 
-        // Happy path: the id is the row just inserted.
         let ok = insert_message(&conn, sid, "user", "hello", "[]", None, 0, None);
         assert_eq!(ok["id"].as_i64(), Some(conn.last_insert_rowid()));
         assert!(ok["persist_error"].is_null(), "{ok}");
 
-        // Failure path: the table is gone, the INSERT fails — the id must
-        // be null, never a stale rowid.
         conn.execute("DROP TABLE copilot_messages", [])
             .expect("drop");
         let failed = insert_message(&conn, sid, "user", "hello", "[]", None, 0, None);
@@ -833,14 +804,9 @@ mod batch23_audit_tests {
         );
     }
 
-    /// Item 43: the copilot run lands in the cost ledger with its token
-    /// usage and endpoint — usage accumulated across the tool round AND
-    /// the final answer round.
     #[test]
     fn copilot_chat_records_usage_and_endpoint_in_the_ledger() {
         let conn = db();
-        // Round 1: one tool call (usage 10/5/15). Round 2: the answer
-        // (usage 7/3/10) — the run must total 17/8/25.
         let mock = crate::mockserver::MockServer::start(crate::mockserver::scripted(vec![
             chat_body(
                 None,
@@ -888,7 +854,6 @@ mod batch23_audit_tests {
             "usage accumulated across both rounds: {usage}"
         );
 
-        // The ledger sees the row with its tokens.
         let ledger = crate::ai_hub::usage_ledger(&conn, 7).expect("ledger");
         let row = ledger
             .iter()
@@ -899,14 +864,9 @@ mod batch23_audit_tests {
         assert_eq!(row.runs, 1);
     }
 
-    /// Item 44: when the tool budget cuts a round short, every assistant
-    /// tool_call id still carries a matching tool response — strict
-    /// OpenAI-compatible servers 400 the follow-up request otherwise.
     #[test]
     fn tool_budget_refusal_answers_every_dangling_tool_call_id() {
         let conn = db();
-        // Round 1 asks for 10 tool calls at once; the budget is
-        // MAX_TOOL_CALLS (8), so 8 run and 2 must be refused explicitly.
         let calls: Vec<serde_json::Value> = (1..=10)
             .map(|i| tool_call(&format!("call_{i}"), "search_conversations"))
             .collect();
@@ -937,8 +897,6 @@ mod batch23_audit_tests {
             "the budget held at 8 executed calls"
         );
 
-        // The follow-up request (mock hit #2) must pair every assistant
-        // tool_call id with a tool-role response.
         let body: serde_json::Value =
             serde_json::from_str(&mock.hits()[1].body).expect("follow-up request json");
         let messages = body["messages"].as_array().expect("messages");
@@ -966,7 +924,6 @@ mod batch23_audit_tests {
                 "tool_call {id} must carry a tool response (no dangling ids)"
             );
         }
-        // The two refused calls say so in plain words.
         let refusals: Vec<&str> = messages
             .iter()
             .filter(|m| m["role"] == "tool")
@@ -985,11 +942,6 @@ mod batch23_audit_tests {
 mod batch31_tests {
     use super::*;
 
-    // Audit item 121: the tool-result truncation cap sliced at a raw BYTE
-    // offset — an é landing across the cap's byte index panicked. The cap
-    // counts characters now. (Clean-audit item 152 removed the standalone
-    // `truncate_result` helper; this regression pins the live chat-loop
-    // truncation, which is the only place the cap runs.)
     #[test]
     fn tool_result_cap_truncates_by_characters() {
         let output = "a".repeat(3999) + "é" + &"b".repeat(20);

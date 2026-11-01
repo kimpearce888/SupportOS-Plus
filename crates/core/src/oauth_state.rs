@@ -2,11 +2,6 @@ use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
 
-/// Clean-audit item 93: how long a single-use OAuth state stays valid.
-/// The browser flow takes seconds; ten minutes covers a slow login.
-/// After that the state is dead whether or not it was consumed — an
-/// unconsumed state issued weeks ago must not remain redeemable, and a
-/// consumed one is history, not data.
 pub const STATE_TTL_SECONDS: i64 = 600;
 
 pub fn ensure_oauth_states_table(conn: &Connection) -> Result<()> {
@@ -40,19 +35,8 @@ pub fn issue_state(conn: &Connection, redirect_uri: &str, scope: Option<&str>) -
     Ok(state)
 }
 
-/// Consume a single-use state. The state must exist, be unconsumed, AND
-/// be fresh: `created_at` within [`STATE_TTL_SECONDS`] (clean-audit item
-/// 93 — the pre-fix table kept unconsumed states valid forever, so a
-/// state leaked or replayed weeks later still redeemed; the callback's
-/// "it may have expired" message was a promise nothing enforced).
 pub fn consume_state(conn: &Connection, state: &str) -> Result<()> {
     ensure_oauth_states_table(conn)?;
-    // Audit (low): this used to be SELECT-then-UPDATE — a second callback
-    // racing the first could pass the EXISTS check before either consumed
-    // the row (TOCTOU; bounded in practice by Help Scout single-use codes,
-    // but the fix is one statement). The UPDATE now carries the full
-    // unconsumed+fresh predicate and `changes()` is the verdict, so
-    // exactly one caller can ever consume a state.
     let consumed = conn.execute(
         "UPDATE oauth_states
          SET consumed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -76,10 +60,6 @@ pub fn redirect_uri_for(conn: &Connection, state: &str) -> Result<Option<String>
     Ok(v)
 }
 
-/// Sweep dead states: consumed ones older than the TTL, and UNCONSUMED
-/// ones older than the TTL too (an abandoned authorization flow's state
-/// is dead — it must expire, not linger redeemable forever; clean-audit
-/// item 93). Returns the number of rows removed.
 pub fn sweep_states(conn: &Connection) -> Result<u32> {
     ensure_oauth_states_table(conn)?;
     let rows = conn.execute(

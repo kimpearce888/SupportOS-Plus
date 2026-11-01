@@ -1,19 +1,3 @@
-//! Search page (port of the web `pages/search.rs`).
-//!
-//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
-//! conformed lab's `search` sheet (DS "stack" archetype): the toolbar
-//! keeps the lab's input + one primary apply, the clear act rides the
-//! lab's text button, the empty state carries the lab's Try-"export" CTA,
-//! and hit cards adopt the lab's anatomy — scope badge + mono strong
-//! title + muted subtitle row, the why badges on their own chip row, the
-//! snippet hint last. The queries, state, and behavior are unchanged.
-//!
-//! One input, scope selector (`all` / `tickets` / `knowledge` /
-//! `customers`), and the hit list from `spp_core::search::search` —
-//! the FTS5 engine behind `/api/search` (the route's semantic re-ranking
-//! for embeddings is skipped in-process the same way the web page degrades
-//! when LM Studio is offline; `used_semantic` reflects it).
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::search::{SearchFilters, SearchResponse};
@@ -21,7 +5,6 @@ use spp_core::search::{SearchFilters, SearchResponse};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Search scopes (web: the scope radio group).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     All,
@@ -52,7 +35,6 @@ impl Scope {
     }
 }
 
-/// The interactive search page state.
 pub struct SearchPage {
     query_edit: String,
     query: String,
@@ -60,7 +42,6 @@ pub struct SearchPage {
     status_filter: Option<String>,
     response: Option<SearchResponse>,
     error: Option<String>,
-    /// Shared vector index (A4): the fused search's dense lane.
     vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
 }
 
@@ -78,8 +59,6 @@ impl SearchPage {
         }
     }
 
-    /// A4: receive the shared vector index so search can fuse BM25 +
-    /// sqlite-vec hits instead of the hardcoded FTS-only mode.
     pub fn set_vector_index(
         &mut self,
         index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
@@ -87,7 +66,6 @@ impl SearchPage {
         self.vector_index = index;
     }
 
-    /// Live-update invalidation (web: the search version key).
     pub fn invalidate(&mut self) {
         if self.query.is_empty() {
             return;
@@ -125,15 +103,11 @@ impl SearchPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        // Clean-audit item 147: the trim guard — a whitespace-only query
-        // can never produce a response (reload early-returns), so without
-        // the trim this lane re-ran the (no-op) reload every frame.
         if self.response.is_none() && self.error.is_none() && !self.query.trim().is_empty() {
             self.reload(db);
         }
     }
 
-    /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
@@ -188,8 +162,6 @@ impl SearchPage {
         }
         let Some(response) = &self.response else {
             if self.query.is_empty() {
-                // The lab's empty state: the Try-"export" CTA fills the
-                // query and runs the search (the se-demo act).
                 if design::empty_state_cta(
                     ui,
                     Icon::Search,
@@ -223,8 +195,6 @@ impl SearchPage {
                 }
             ),
         );
-        // A4: the honest mode line — which lanes actually ran, and why the
-        // semantic lane was skipped when it was.
         if let Some(note) = &response.mode_note {
             design::hint_text(ui, note);
         }
@@ -240,9 +210,6 @@ impl SearchPage {
         let hits = response.hits.clone();
         egui::ScrollArea::vertical().show(ui, |ui| {
             for hit in &hits {
-                // The lab's hit card: scope badge + mono strong title +
-                // muted subtitle on the toolbar row, the why badges on
-                // their own chip row, the snippet hint last.
                 design::card(ui, |ui| {
                     ui.horizontal(|ui| {
                         design::badge(ui, hit.scope.as_str(), BadgeTone::Neutral);
@@ -259,8 +226,6 @@ impl SearchPage {
                             );
                         }
                     });
-                    // A4: real lane provenance — "keyword match",
-                    // "semantic match", "recent".
                     if !hit.why.is_empty() {
                         ui.horizontal(|ui| {
                             for reason in &hit.why {
@@ -296,8 +261,6 @@ mod tests {
     use super::*;
     use crate::testsupport::fixture;
 
-    /// Seed one knowledge document + chunk (the store behind the search
-    /// page's knowledge scope) and rebuild the FTS indexes.
     fn seed_knowledge_doc(conn: &rusqlite::Connection) {
         conn.execute(
             "INSERT INTO knowledge_sources (id, name, kind) VALUES (1, 'guide', 'file')",
@@ -331,9 +294,6 @@ mod tests {
             5,
             9,
         )]);
-        // Direct table writes bypass the sync path that maintains the FTS
-        // indexes, so rebuild them before searching (same as the sync
-        // pipeline does after an upsert).
         db.with_write(|conn| spp_core::search::rebuild_indexes(conn))
             .expect("rebuild");
         let mut page = SearchPage::new();

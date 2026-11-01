@@ -1,37 +1,22 @@
-//! Modal overlays (port of the web `components/overlays.rs`).
-//!
-//! The web stack had two overlays: `Modal` (a titled dialog that closes on
-//! Escape/backdrop click) and `ConfirmDialog` (a Modal with a message plus
-//! Cancel/Confirm actions, optionally danger-styled). The egui port models
-//! the dialog as a value the shell holds and renders with
-//! [`ConfirmDialog::ui`]; Escape and Cancel both map to
-//! [`DialogOutcome::Cancelled`].
-
 use eframe::egui;
 
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
-/// What the user did with a dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogOutcome {
-    /// Still open — render again next frame.
     Open,
-    /// Confirm clicked.
     Confirmed,
-    /// Cancel clicked, Escape pressed, or the window closed.
     Cancelled,
 }
 
 impl DialogOutcome {
-    /// Whether the dialog should be dropped now.
     #[must_use]
     pub fn is_done(self) -> bool {
         !matches!(self, Self::Open)
     }
 }
 
-/// A confirm dialog request (port of `ConfirmDialog`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmDialog {
     pub title: String,
@@ -41,7 +26,6 @@ pub struct ConfirmDialog {
 }
 
 impl ConfirmDialog {
-    /// Build a dialog with the web defaults (`Confirm` label, not danger).
     #[must_use]
     pub fn new(title: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -52,21 +36,18 @@ impl ConfirmDialog {
         }
     }
 
-    /// Set the confirm button label.
     #[must_use]
     pub fn confirm_label(mut self, label: impl Into<String>) -> Self {
         self.confirm_label = label.into();
         self
     }
 
-    /// Mark the confirm action as destructive (red button).
     #[must_use]
     pub fn danger(mut self) -> Self {
         self.danger = true;
         self
     }
 
-    /// Render the dialog.
     pub fn ui(&mut self, ctx: &egui::Context) -> DialogOutcome {
         let mut outcome = DialogOutcome::Open;
         let mut open = true;
@@ -89,11 +70,10 @@ impl ConfirmDialog {
                         offset: [0, 8],
                         blur: 32,
                         spread: 0,
-                        color: t.shadow, // DC e2 (RS-12 token port)
+                        color: t.shadow,
                     }),
             )
             .show(ctx, |ui| {
-                // Header: title + close affordance.
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(self.title.as_str())
@@ -136,11 +116,10 @@ impl ConfirmDialog {
         if close_clicked {
             open = false;
         }
-        if !open || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            // Window close button / Escape cancel, never confirm.
-            if outcome == DialogOutcome::Open {
-                outcome = DialogOutcome::Cancelled;
-            }
+        if (!open || ctx.input(|i| i.key_pressed(egui::Key::Escape)))
+            && outcome == DialogOutcome::Open
+        {
+            outcome = DialogOutcome::Cancelled;
         }
         outcome
     }
@@ -170,7 +149,6 @@ mod tests {
         assert!(!DialogOutcome::Open.is_done());
         assert!(DialogOutcome::Confirmed.is_done());
         assert!(DialogOutcome::Cancelled.is_done());
-        // Cancel and confirm are distinguishable.
         assert_ne!(DialogOutcome::Confirmed, DialogOutcome::Cancelled);
     }
 }

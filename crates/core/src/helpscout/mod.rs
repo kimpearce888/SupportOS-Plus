@@ -89,9 +89,6 @@ pub struct HsCustomer {
 }
 
 impl HsCustomer {
-    /// An all-empty customer shell — every field unset. Used to assemble
-    /// channel-only results (see `get_customer_channels`) without repeating
-    /// twenty `None`s.
     #[must_use]
     pub fn placeholder() -> Self {
         Self {
@@ -120,11 +117,6 @@ impl HsCustomer {
         }
     }
 
-    /// True when no contact channels are embedded in the payload. The real
-    /// Help Scout API NEVER embeds them (they live behind per-customer
-    /// sub-resources — see `HelpScoutProvider::get_customer_channels`), so
-    /// an all-empty result on a freshly fetched customer means the channels
-    /// must be fetched separately, not that the customer has none.
     #[must_use]
     pub fn channels_all_empty(&self) -> bool {
         self.emails.is_empty()
@@ -151,8 +143,6 @@ pub struct HsCustomerPhone {
     pub kind: Option<String>,
 }
 
-/// Live-API audit fix (C4): Help Scout stores customer chat handles behind
-/// the `/v2/customers/{id}/chats` sub-resource; they never appear embedded.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsCustomerChat {
     #[serde(default)]
@@ -269,8 +259,6 @@ pub struct HsBeaconChat {
     pub updated_at: Option<String>,
 }
 
-/// P2: one participant of a live Beacon chat (customer or assignee) —
-/// the Chat API carries people as compact objects with split names.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsChatParticipant {
     pub remote_id: i64,
@@ -283,7 +271,6 @@ pub struct HsChatParticipant {
 }
 
 impl HsChatParticipant {
-    /// Display name: "First Last", falling back to the email, then the id.
     #[must_use]
     pub fn name(&self) -> String {
         let full = [self.first.as_deref(), self.last.as_deref()]
@@ -301,14 +288,8 @@ impl HsChatParticipant {
     }
 }
 
-/// P2: one live Beacon chat, as the Chat API and the five
-/// `beacon.chat.*` webhook events carry it. Chat ids are **UUID
-/// strings**, unlike every numeric id the Inbox API uses, and a chat is
-/// not a conversation: Help Scout creates the conversation when the chat
-/// *ends*, and `GET /v2/chats/{id}` answers 404 from then on.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsChat {
-    /// The platform's own UUID string (never ours).
     pub id: String,
     #[serde(default)]
     pub beacon_id: Option<String>,
@@ -318,7 +299,6 @@ pub struct HsChat {
     pub customer: Option<HsChatParticipant>,
     #[serde(default)]
     pub assignee: Option<HsChatParticipant>,
-    /// `open` or `ended`.
     #[serde(default)]
     pub state: String,
     #[serde(default)]
@@ -327,20 +307,12 @@ pub struct HsChat {
     pub created_at: Option<String>,
     #[serde(default)]
     pub ended_at: Option<String>,
-    /// The conversation the chat collapsed into once ended (parsed from
-    /// `conversationId` / `conversation.id` when the platform sends it).
     #[serde(default)]
     pub conversation_remote_id: Option<i64>,
-    /// The embedded event/message list: `GET /v2/chats/{id}` embeds
-    /// events, webhook payloads carry the newest state. Kept raw — the
-    /// mirror ingests them defensively and stores what is there.
     #[serde(default)]
     pub events: Vec<serde_json::Value>,
 }
 
-/// P2: one `beacon.chat.*` webhook event, parsed: the event name plus
-/// the chat object it carries (the five events are the platform's only
-/// push path — there is no chat list endpoint).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsChatEvent {
     pub event_type: String,
@@ -349,10 +321,6 @@ pub struct HsChatEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsDocArticle {
-    /// Audit fix (C2, live): Docs API ids are 24-char hex ObjectIds
-    /// ("6adf725b922c92c2dd6ce7d7") — the old i64 parsing turned every id
-    /// into 0, so category/article URLs hit `/0/` and the API answered
-    /// 400 "ECMA 262 regex does not match 0".
     pub remote_id: String,
     pub collection_id: String,
     #[serde(default)]
@@ -391,16 +359,11 @@ pub struct HsReportRow {
     pub data: serde_json::Value,
 }
 
-/// K3: the article draft the review queue publishes through the Docs API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DocArticleDraftInput {
-    /// The Docs API collection the article belongs to (24-char hex ObjectId).
     pub collection_id: String,
     pub name: String,
-    /// Markdown body (published as the article `text`).
     pub text: String,
-    /// When set, the linked article is updated (PUT /v1/articles/{id}/drafts);
-    /// when absent a new `notpublished` article is created (POST /v1/articles).
     pub remote_id: Option<String>,
     pub slug: Option<String>,
 }
@@ -537,7 +500,6 @@ pub struct HsUserStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsDocCollection {
-    /// Audit fix (C2, live): 24-char hex ObjectId, see HsDocArticle.
     pub remote_id: String,
     pub slug: Option<String>,
     pub name: String,
@@ -551,7 +513,6 @@ pub struct HsDocCollection {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HsDocCategory {
-    /// Audit fix (C2, live): 24-char hex ObjectId, see HsDocArticle.
     pub remote_id: String,
     pub collection_id: String,
     pub slug: Option<String>,
@@ -605,12 +566,6 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(None)
     }
 
-    /// K5: fetch one Reports API endpoint (registry key from
-    /// `reports_api::REPORTS`) for a date range. `Ok(None)` means the
-    /// connection has no report data to offer (not connected, or the
-    /// endpoint returned nothing); a plan/permission wall surfaces as the
-    /// provider's API error so the caller can classify it (403 = plan
-    /// blocked) instead of silently rendering zeros.
     async fn get_report(
         &self,
         _key: &str,
@@ -632,17 +587,12 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// P3: create a saved reply on the platform
-    /// (POST /v2/mailboxes/{id}/saved-replies — the platform's required
-    /// `name` is enforced there, `text` is HTML). The default rejects: a
-    /// connection without a Help Scout link never pretends to write.
     async fn create_saved_reply(&self, _mailbox_id: i64, _name: &str, _text: &str) -> Result<i64> {
         Err(crate::error::Error::Other(
             "saved reply writes require the real provider".into(),
         ))
     }
 
-    /// P3: update a saved reply (PUT /v2/mailboxes/{id}/saved-replies/{id}).
     async fn update_saved_reply(
         &self,
         _mailbox_id: i64,
@@ -655,8 +605,6 @@ pub trait HelpScoutProvider: Send + Sync {
         ))
     }
 
-    /// P3: soft-delete a saved reply
-    /// (DELETE /v2/mailboxes/{id}/saved-replies/{id}).
     async fn delete_saved_reply(&self, _mailbox_id: i64, _saved_reply_id: i64) -> Result<()> {
         Err(crate::error::Error::Other(
             "saved reply writes require the real provider".into(),
@@ -689,22 +637,10 @@ pub trait HelpScoutProvider: Send + Sync {
         ))
     }
 
-    /// P2: fetch one live chat by its UUID (`GET /v2/chats/{id}` — embeds
-    /// the event list). `Ok(None)` is the honest answer for a chat that
-    /// has collapsed into a conversation (the platform answers 404 from
-    /// then on); the default covers every connection without the Chat
-    /// API.
     async fn get_chat(&self, _chat_id: &str) -> Result<Option<HsChat>> {
         Ok(None)
     }
 
-    /// P2: send a live chat message
-    /// (PUT /v2/chats/{id}/messages/{uuid}). The message id is ours, so
-    /// a retry after a timeout can never double-send — the platform's
-    /// 422 "id value is already in use" answer is treated as delivered
-    /// (the real provider does exactly that). Only the assigned agent
-    /// may message: an unassigned chat is accepted by the send itself, a
-    /// chat held by someone else answers 400 with its reason.
     async fn send_chat_message(
         &self,
         _chat_id: &str,
@@ -740,12 +676,6 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(None)
     }
 
-    /// Live-API audit fix (C4): Help Scout NEVER embeds customer contact
-    /// channels in the customer payload — emails/phones/chats/websites/social
-    /// profiles live behind per-customer sub-resources
-    /// (`GET /v2/customers/{id}/emails|phones|chats|websites|social-profiles`).
-    /// Returns the fetched channels; the default (mock providers without the
-    /// endpoints) reports none so callers keep their existing behavior.
     async fn get_customer_channels(&self, _customer_id: i64) -> Result<Option<HsCustomer>> {
         Ok(None)
     }
@@ -770,19 +700,10 @@ pub trait HelpScoutProvider: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// K3 verify + targeted re-sync: one full article by remote id. `None`
-    /// when the article is unreachable (the caller decides whether that is
-    /// an error); the default covers every connection without Docs write
-    /// access.
     async fn get_doc_article(&self, _remote_id: String) -> Result<Option<HsDocArticle>> {
         Ok(None)
     }
 
-    /// K3: upsert the draft into the Docs API — create a new `notpublished`
-    /// article (POST /v1/articles?reload=true) or update the linked
-    /// article's draft copy (PUT /v1/articles/{id}/drafts). Returns the
-    /// remote article id. The default rejects: a connection without the
-    /// Docs API never pretends to publish.
     async fn upsert_doc_article_draft(&self, _input: &DocArticleDraftInput) -> Result<String> {
         Err(Error::Config(
             "Docs API publishing is unavailable on this connection - no Docs API key is \
@@ -791,7 +712,6 @@ pub trait HelpScoutProvider: Send + Sync {
         ))
     }
 
-    /// K3: publish the article with its final text (PUT /v1/articles/{id}).
     async fn publish_doc_article(
         &self,
         _remote_id: String,
@@ -837,11 +757,6 @@ pub trait HelpScoutProvider: Send + Sync {
 
     fn reset(&self) {}
 
-    /// Whether a Docs API key is configured for Help Center sync
-    /// (v1.4.0 R5, D15): lets the sync engine surface "Help Center
-    /// sync is idle: no Docs API key" to the UI instead of silently
-    /// mirroring an empty Help Center. The real provider overrides
-    /// with the actual key state.
     fn docs_configured(&self) -> bool {
         true
     }
@@ -952,8 +867,6 @@ pub struct CreateThreadInput {
     pub bcc: Vec<String>,
     pub status_after: Option<String>,
     pub assign_to: Option<i64>,
-    /// Remote customer id — the POST /reply body requires a `customer`
-    /// object (Help Scout rejects the request without it).
     pub customer_id: Option<i64>,
 }
 
@@ -971,10 +884,6 @@ pub struct CreateConversationInput {
     pub body: String,
     pub tags: Vec<String>,
     pub status: Option<String>,
-    /// Live-API audit fix (C1): the real POST /v2/conversations REQUIRES a
-    /// top-level `type` (the channel: email|chat|phone) — it answers
-    /// `400 {"path":"type","message":"must not be null"}` without one.
-    /// `None` means the default channel, email.
     pub channel: Option<String>,
 }
 
@@ -1002,7 +911,6 @@ mod batch20_audit25_tests {
     use super::inert::EmptyHelpScoutProvider;
     use super::*;
 
-    /// Seed one conversation into the inert world and return the provider.
     fn provider_with_conversation() -> EmptyHelpScoutProvider {
         let provider = EmptyHelpScoutProvider::new();
         {
@@ -1044,10 +952,6 @@ mod batch20_audit25_tests {
             .clone()
     }
 
-    /// Clean-audit item 25: the loopback world speaks the platform's
-    /// vocabulary. `open` (the real v2 await-agent status) and the legacy
-    /// phantom `waiting` both land on the world's `active` — never an
-    /// unknown status string the mirror cannot reason about.
     #[test]
     fn audit25_loopback_maps_open_and_legacy_waiting_onto_active() {
         let provider = provider_with_conversation();

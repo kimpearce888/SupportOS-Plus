@@ -209,10 +209,6 @@ pub fn now_iso_millis() -> String {
     now_iso_millis_at(Utc::now())
 }
 
-/// The anchored variant of [`now_iso_millis`]: the same stamp derived from a
-/// caller-supplied `now` instead of the wall clock (the RS-4-11 clock seam —
-/// production passes the wall clock, tests pin a fixed instant so the
-/// rendered windows are constant text).
 #[must_use]
 pub fn now_iso_millis_at(now: chrono::DateTime<Utc>) -> String {
     now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
@@ -223,8 +219,6 @@ pub fn iso_days_ago(days: i64) -> String {
     iso_days_ago_at(days, Utc::now())
 }
 
-/// The anchored variant of [`iso_days_ago`]: `days` before the supplied
-/// `now` instead of before the wall clock (the RS-4-11 clock seam).
 #[must_use]
 pub fn iso_days_ago_at(days: i64, now: chrono::DateTime<Utc>) -> String {
     let ts = now.timestamp_millis() - days * 86_400_000;
@@ -234,9 +228,6 @@ pub fn iso_days_ago_at(days: i64, now: chrono::DateTime<Utc>) -> String {
         .unwrap_or_else(|| now.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())
 }
 
-/// Canonical wall-clock ISO timestamp (millis precision, Z suffix) — the
-/// output of both historical idioms (`format("%Y-%m-%dT%H:%M:%S%.3fZ")`
-/// and `to_rfc3339_opts(SecondsFormat::Millis, true)`) is byte-identical.
 pub(crate) fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
@@ -256,8 +247,6 @@ mod tests {
 
     #[test]
     fn anchored_variants_match_the_wall_clock_shape() {
-        // RS-4-11 clock seam: the anchored variants must produce exactly the
-        // format the wall-clock fns produce, shifted to the supplied `now`.
         let now = Utc
             .with_ymd_and_hms(2026, 1, 15, 12, 0, 0)
             .single()
@@ -269,8 +258,6 @@ mod tests {
             "30 days before the anchor"
         );
         assert_eq!(iso_days_ago_at(0, now), now_iso_millis_at(now));
-        // The anchored fn equals the wall-clock fn evaluated at the same
-        // instant (iso_days_ago is the delegation).
         assert_eq!(iso_days_ago_at(7, now), {
             let ts = now.timestamp_millis() - 7 * 86_400_000;
             Utc.timestamp_millis_opt(ts)
@@ -292,7 +279,6 @@ mod tests {
     #[test]
     fn business_minutes_inside_one_workday() {
         let cfg = nine_to_five_utc();
-        // Wednesday 2024-06-05, 10:00 -> 12:00 UTC = 120 business minutes
         let minutes =
             business_minutes_between("2024-06-05T10:00:00Z", "2024-06-05T12:00:00Z", &cfg).unwrap();
         assert!((minutes - 120.0).abs() < 1e-9);
@@ -301,7 +287,6 @@ mod tests {
     #[test]
     fn business_minutes_exclude_nights_and_weekends() {
         let cfg = nine_to_five_utc();
-        // Friday 2024-06-07 17:00 UTC -> Monday 2024-06-10 09:00 UTC = 0 minutes
         let minutes =
             business_minutes_between("2024-06-07T17:00:00Z", "2024-06-10T09:00:00Z", &cfg).unwrap();
         assert!((minutes - 0.0).abs() < 1e-9);
@@ -310,7 +295,6 @@ mod tests {
     #[test]
     fn business_minutes_spanning_whole_workday() {
         let cfg = nine_to_five_utc();
-        // Monday 09:00 -> Tuesday 09:00 UTC = 480 minutes (one full day 09-17)
         let minutes =
             business_minutes_between("2024-06-03T09:00:00Z", "2024-06-04T09:00:00Z", &cfg).unwrap();
         assert!((minutes - 480.0).abs() < 1e-9);
@@ -340,8 +324,6 @@ mod tests {
         assert!((minutes.unwrap() - 90.0).abs() < 1e-9);
     }
 
-    // --- edge cases added in Batch 2 (characterization) ---
-
     fn all_day_every_day(tz: &str) -> BusinessHoursConfig {
         BusinessHoursConfig {
             timezone: tz.to_string(),
@@ -355,22 +337,18 @@ mod tests {
     fn parse_instant_accepts_supported_formats() {
         let midnight = parse_instant_ms("2024-06-05").expect("date-only");
         assert_eq!(midnight, parse_instant_ms("2024-06-05T00:00:00Z").unwrap());
-        // RFC 3339 with an explicit offset is normalized to UTC
         assert_eq!(
             parse_instant_ms("2024-06-05T10:00:00+02:00").unwrap(),
             parse_instant_ms("2024-06-05T08:00:00Z").unwrap()
         );
-        // space-separated naive timestamps are treated as UTC
         assert_eq!(
             parse_instant_ms("2024-06-05 10:00:00").unwrap(),
             parse_instant_ms("2024-06-05T10:00:00").unwrap()
         );
-        // leading/trailing whitespace is trimmed
         assert_eq!(
             parse_instant_ms("  2024-06-05T10:00:00Z  ").unwrap(),
             parse_instant_ms("2024-06-05T10:00:00Z").unwrap()
         );
-        // fractional seconds are preserved
         assert_eq!(
             parse_instant_ms("2024-06-05T10:00:00.250Z").unwrap(),
             parse_instant_ms("2024-06-05T10:00:00Z").unwrap() + 250
@@ -396,15 +374,12 @@ mod tests {
     #[test]
     fn fully_outside_hours_weekend_is_zero_not_none() {
         let cfg = nine_to_five_utc();
-        // Saturday 10:00 -> Sunday 10:00 UTC has no business window at all
         let v = business_minutes_between("2024-06-08T10:00:00Z", "2024-06-09T10:00:00Z", &cfg);
         assert_eq!(v, Some(0.0));
     }
 
     #[test]
     fn overnight_window_config_is_currently_unsupported() {
-        // Characterizes CURRENT behavior: end <= start yields None, so 20:00->04:00
-        // overnight windows are rejected rather than wrapped.
         let cfg = BusinessHoursConfig {
             timezone: "UTC".to_string(),
             days: vec![0, 1, 2, 3, 4, 5, 6],
@@ -433,7 +408,6 @@ mod tests {
 
     #[test]
     fn out_of_range_day_entries_are_dropped() {
-        // days = [6 (Sat), 7 (invalid), -1 (invalid)]: only Saturday stays active
         let cfg = BusinessHoursConfig {
             timezone: "UTC".to_string(),
             days: vec![6, 7, -1],
@@ -446,22 +420,18 @@ mod tests {
 
     #[test]
     fn start_minute_below_zero_is_clamped() {
-        // start_minute -60 clamps to 0, so the window is 00:00..02:00
         let cfg = BusinessHoursConfig {
             timezone: "UTC".to_string(),
             days: vec![0, 1, 2, 3, 4, 5, 6],
             start_minute: -60,
             end_minute: 120,
         };
-        // Wed 23:30 -> Thu 01:00 overlaps only Thu 00:00..01:00 = 60 minutes
         let v = business_minutes_between("2024-06-05T23:30:00Z", "2024-06-06T01:00:00Z", &cfg);
         assert!((v.unwrap() - 60.0).abs() < 1e-9);
     }
 
     #[test]
     fn dst_transitions_count_real_elapsed_minutes() {
-        // 24h window in America/New_York across the DST boundaries:
-        // 2024-03-10 (spring forward) has 23 real hours, 2024-11-03 (fall back) has 25.
         let cfg = all_day_every_day("America/New_York");
         let spring = business_minutes_between("2024-03-10T05:00:00Z", "2024-03-11T04:00:00Z", &cfg);
         assert!((spring.unwrap() - 1380.0).abs() < 1e-6);
@@ -471,7 +441,6 @@ mod tests {
 
     #[test]
     fn non_utc_timezone_windows_follow_local_time() {
-        // Asia/Dhaka is UTC+6 with no DST: 09:00..17:00 local == 03:00..11:00 UTC
         let cfg = BusinessHoursConfig {
             timezone: "Asia/Dhaka".to_string(),
             days: vec![0, 1, 2, 3, 4, 5, 6],
@@ -485,10 +454,8 @@ mod tests {
     #[test]
     fn spans_over_400_days_are_rejected() {
         let cfg = all_day_every_day("UTC");
-        // exactly 400 days is still computed (2024 is a leap year: 366 + 34 days)
         let exact = business_minutes_between("2024-01-01T00:00:00Z", "2025-02-04T00:00:00Z", &cfg);
         assert!((exact.unwrap() - 400.0 * 1440.0).abs() < 1e-6);
-        // one day more is rejected
         let over = business_minutes_between("2024-01-01T00:00:00Z", "2025-02-05T00:00:00Z", &cfg);
         assert!(over.is_none());
     }

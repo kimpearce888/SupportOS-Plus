@@ -25,10 +25,6 @@ pub const HS_DOCS_API_BASE: &str = "https://docsapi.helpscout.net";
 pub const HS_AUTHORIZE_URL: &str =
     "https://secure.helpscout.net/authentication/authorizeClientApplication";
 
-/// Upper bound of full-article fetches per collection per sync pass.
-/// The Docs API v1 list endpoint returns refs without content; each
-/// article body costs one GET (Docs API budget: 2000-4000 req / 10 min
-/// per account, shared with the Help Scout admin UI).
 const DOC_ARTICLE_FETCH_CAP: usize = 500;
 
 #[derive(Debug, Clone)]
@@ -162,8 +158,6 @@ impl HsRateLimiter {
         limiter
     }
 
-    /// Current limit state (v1.4.0 R1: Connection Doctor step 5).
-    /// Named distinctly from [`Self::snapshot`] (the JSON status view).
     #[must_use]
     pub fn rate_limit_state(&self) -> RateLimitState {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).clone()
@@ -313,11 +307,6 @@ struct TokenRow {
     revoked: bool,
 }
 
-/// Reads the OAuth session row. Tokens come from the encrypted envelope
-/// (R7/D13); the pre-1.4.0 plaintext columns are consulted only as a
-/// legacy fallback for databases migrated before a master key existed
-/// (m053 scrubs them the moment a key is available, so the fallback is
-/// transitional by design).
 fn token_row(conn: &Connection) -> Option<TokenRow> {
     let (access_column, refresh_column, expires_at, revoked): (
         Option<String>,
@@ -352,14 +341,10 @@ fn token_row(conn: &Connection) -> Option<TokenRow> {
     })
 }
 
-/// Whether a usable, non-revoked OAuth session exists. Envelope-backed;
-/// the legacy column fallback keeps pre-migration installs honest.
 pub fn has_stored_tokens(conn: &Connection) -> Result<bool> {
     if !crate::sync_schema::table_exists(conn, "oauth_tokens")? {
         return Ok(false);
     }
-    // Older databases (pre account-column) get the column lazily here, the
-    // same way the token writers have always done it.
     ensure_account_row(conn);
     let revoked: i64 = conn
         .query_row(
@@ -385,8 +370,6 @@ pub struct HsCredentials {
     pub docs_api_base: String,
 }
 
-// Audit (low): the derived `Debug` carried every credential verbatim.
-// Same masking contract as `EnvHelpScout`: presence and length only.
 impl core::fmt::Debug for HsCredentials {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("HsCredentials")
@@ -410,29 +393,18 @@ impl core::fmt::Debug for HsCredentials {
     }
 }
 
-/// Envelope keys for the credentials stored by the in-app settings form
-/// (1.1.3). The webhook secret deliberately reuses the pre-existing
-/// `webhook_secret` key so the loopback webhook route's
-/// environment-then-envelope resolution picks it up unchanged.
 pub const SECRET_CLIENT_ID: &str = "helpscout_client_id";
 pub const SECRET_CLIENT_SECRET: &str = "helpscout_client_secret";
 pub const SECRET_DOCS_API_KEY: &str = "helpscout_docs_api_key";
 pub const SECRET_WEBHOOK: &str = "webhook_secret";
-/// 1.4.0 R7 (D13): the OAuth session tokens live in the encrypted envelope
-/// too. The `oauth_tokens` row keeps only non-secret metadata (expiry, scope,
-/// grant times, revoked flag); its token columns are permanently empty.
 pub const SECRET_OAUTH_ACCESS: &str = "helpscout_oauth_access_token";
 pub const SECRET_OAUTH_REFRESH: &str = "helpscout_oauth_refresh_token";
 
-/// Where a credential value came from — for the settings-page badges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CredentialSource {
-    /// No value from any source.
     #[default]
     NotSet,
-    /// Set in the process environment (overrides the stored value).
     Environment,
-    /// Stored by the in-app form (encrypted envelope).
     AppSettings,
 }
 
@@ -452,7 +424,6 @@ impl CredentialSource {
     }
 }
 
-/// Per-field credential sources for the settings badges.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CredentialSources {
     pub client_id: CredentialSource,
@@ -461,8 +432,6 @@ pub struct CredentialSources {
     pub docs_api_key: CredentialSource,
 }
 
-/// Per-field merge of an environment value with the stored envelope
-/// value: environment wins (CI, power users), envelope fills the gaps.
 fn merge_field(env_value: String, stored: Option<Vec<u8>>) -> (String, CredentialSource) {
     if !env_value.trim().is_empty() {
         return (env_value, CredentialSource::Environment);
@@ -490,15 +459,8 @@ impl HsCredentials {
         }
     }
 
-    /// The credentials stored by the in-app settings form (encrypted
-    /// envelope); environment-only fields are left empty. A missing
-    /// master key degrades to empty values (reads are best-effort).
     #[must_use]
     pub fn from_envelope(conn: &Connection) -> Self {
-        // Audit (low): a corrupt/undecryptable envelope used to read as
-        // "not set" with no trace in the logs. The best-effort empty-value
-        // degradation is intentional (reads must not fail boot), but the
-        // reason now lands in the log instead of vanishing.
         let read = |key: &str| match crate::settings::get_secret(conn, key) {
             Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
             Ok(None) => String::new(),
@@ -516,17 +478,11 @@ impl HsCredentials {
         }
     }
 
-    /// Resolve the credentials per field: environment first, then the
-    /// encrypted envelope. This is what boot and the settings page use
-    /// since 1.1.3 — credentials entered in the app work without any
-    /// environment variables.
     #[must_use]
     pub fn resolve(conn: &Connection) -> (Self, CredentialSources) {
         Self::resolve_with(&Self::from_env(), conn)
     }
 
-    /// Testable core of [`Self::resolve`]: merge `env` with whatever is
-    /// stored in the envelope.
     #[must_use]
     pub fn resolve_with(env: &Self, conn: &Connection) -> (Self, CredentialSources) {
         let read = |key: &str| crate::settings::get_secret(conn, key).ok().flatten();
@@ -556,13 +512,6 @@ impl HsCredentials {
         )
     }
 
-    /// Store the non-empty credential fields in the encrypted envelope.
-    /// An empty field leaves any previously stored value untouched, so
-    /// the form can save just one value without re-typing the rest.
-    ///
-    /// # Errors
-    /// Fails when the secrets master key is not initialized (in-memory
-    /// test databases) or the write fails.
     pub fn store_in_envelope(
         conn: &Connection,
         client_id: &str,
@@ -586,18 +535,10 @@ impl HsCredentials {
         if !docs_api_key.trim().is_empty() {
             crate::settings::set_secret(conn, SECRET_DOCS_API_KEY, docs_api_key.trim().as_bytes())?;
         }
-        // K5: new credentials invalidate the Reports API capability probe.
         crate::reports_api::reset_capability(conn);
         Ok(())
     }
 
-    /// Remove every credential stored by the form (the clear button).
-    /// The connection tokens are deliberately untouched (disconnect owns
-    /// them; demo mode no longer exists since 1.2.0).
-    ///
-    /// # Errors
-    /// Fails when a delete fails (the master key is not needed to
-    /// delete).
     pub fn clear_envelope(conn: &Connection) -> crate::error::Result<usize> {
         let mut removed = 0;
         for key in [
@@ -608,7 +549,6 @@ impl HsCredentials {
         ] {
             removed += usize::from(crate::settings::delete_secret(conn, key)?);
         }
-        // K5: disconnecting invalidates the Reports API capability probe.
         crate::reports_api::reset_capability(conn);
         Ok(removed)
     }
@@ -631,13 +571,6 @@ fn base64_of(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
 }
 
-/// The API concurrency a new provider should start at (audit item 31).
-///
-/// Precedence: the stored `api_concurrency` setting (written by the
-/// Settings form, range 1..=8) over the `SYNC_API_CONCURRENCY` env
-/// default. A stored value below 1 clamps to 1; a missing or unparsable
-/// stored value falls back to the env default (the legacy behavior —
-/// `DEFAULT_CONCURRENCY` — whenever the env var is unset).
 fn stored_api_concurrency(db: &crate::db::DbHandle) -> usize {
     let env_default = crate::config::load_env_config().sync.api_concurrency.max(1) as usize;
     let stored = db.with_read(|conn| {
@@ -649,11 +582,7 @@ fn stored_api_concurrency(db: &crate::db::DbHandle) -> usize {
     });
     match stored {
         Ok(n) if n >= 1 => n as usize,
-        // Stored 0 or negative (only reachable by hand-editing the
-        // settings table — the form clamps to 1..=8): run serialized,
-        // never wide-open.
         Ok(_) => 1,
-        // Unparsable stored value: fall back to the env default.
         Err(_) => env_default,
     }
 }
@@ -682,8 +611,6 @@ pub struct RealHelpScoutProvider {
     pub limiter: Arc<HsRateLimiter>,
     pub queue: Arc<ApiQueue>,
     docs_queue: Arc<ApiQueue>,
-    /// One-shot guard so the missing-Docs-key warning is logged once
-    /// per process, not once per resource.
     missing_docs_key_warned: std::sync::atomic::AtomicBool,
 }
 
@@ -691,31 +618,11 @@ impl RealHelpScoutProvider {
     #[must_use]
     pub fn new(db: crate::db::DbHandle, credentials: HsCredentials) -> Self {
         let limiter = Arc::new(HsRateLimiter::new(Some(db.clone())));
-        // Audit item 31: the `api_concurrency` setting was parsed and
-        // saved but never applied — every provider ran the hard-coded
-        // default forever, boot or mid-session activation alike.
-        // Resolve it at construction (stored setting over the
-        // SYNC_API_CONCURRENCY env default) so every construction path
-        // starts at the configured width.
         let concurrency = stored_api_concurrency(&db);
         let queue = ApiQueue::new(Arc::clone(&limiter), concurrency);
-        // Audit fix (M9): both the Mailbox and the Docs limiter used to
-        // persist to the SAME hs_rate_limit row (id = 1), so Connection
-        // Doctor / Settings displayed whichever limiter happened to write
-        // last. The Docs API has no separately surfaced state anywhere in
-        // the UI — keep its limiter in-memory only (send-side enforcement
-        // is unaffected) so the shared row carries only the Mailbox API's
-        // last-reported budget.
         let docs_queue = ApiQueue::new(Arc::new(HsRateLimiter::new(None)), concurrency);
         Self {
             client: reqwest::Client::builder()
-                // Audit fix (M5): the client used to follow redirects, which
-                // turned Help Scout's 301 "conversation merged" answer into
-                // a silent 200 for the TARGET conversation — merged originals
-                // were re-ingested as their target and stayed stale forever,
-                // and the 301 handler in request_inner was dead code. With
-                // redirects surfaced, sync_engine's merged_or_gone branch
-                // (301) finally runs and the mirror marks them honestly.
                 .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_secs(60))
                 .build()
@@ -730,35 +637,21 @@ impl RealHelpScoutProvider {
         }
     }
 
-    /// Resize both API queues' concurrency limit live (audit item 31:
-    /// previously only the conversations queue was resizable — and
-    /// nothing ever called this — while the docs queue ran at the
-    /// hard-coded default forever). Values below 1 clamp to 1.
     pub fn set_api_concurrency(&self, n: usize) {
         self.queue.set_concurrency(n);
         self.docs_queue.set_concurrency(n);
     }
 
-    /// The concurrency limit both queues currently run at (audit item
-    /// 31 observability: settings saves can assert the live value
-    /// moved instead of trusting the write).
     #[must_use]
     pub fn api_concurrency(&self) -> usize {
         self.queue.concurrency()
     }
 
-    /// A fresh handle to the provider's HTTP client (v1.4.0 R1: the
-    /// Connection Doctor runs its reachability probe outside the API
-    /// queue on the same client configuration). `reqwest::Client` is
-    /// internally Arc'd, so the clone is cheap.
     #[must_use]
     pub fn http_client(&self) -> reqwest::Client {
         self.client.clone()
     }
 
-    /// The current rate-limit picture (v1.4.0 R1: the Connection
-    /// Doctor's step 5 shows what Help Scout last reported instead of
-    /// guessing).
     #[must_use]
     pub fn rate_limit_snapshot(&self) -> RateLimitState {
         self.limiter.rate_limit_state()
@@ -768,9 +661,6 @@ impl RealHelpScoutProvider {
         self.db.write_guard()
     }
 
-    /// Surface the missing-Docs-key state once per process so the
-    /// Diagnostics page and the logs explain the empty Help Center tab
-    /// instead of leaving the user guessing.
     fn log_missing_docs_key(&self) {
         if !self
             .missing_docs_key_warned
@@ -797,10 +687,6 @@ impl RealHelpScoutProvider {
             return Ok(Value::Null);
         }
         let path = path.to_string();
-        // Audit fix (M4): Docs GETs never retried 429/503 and never backed
-        // off — a single rate-limit blip failed the whole docs pass. Retry
-        // the same throttled lane a bounded number of times with escalating
-        // waits before giving up.
         let mut attempt = 0u32;
         loop {
             attempt += 1;
@@ -830,14 +716,6 @@ impl RealHelpScoutProvider {
 
     fn map_conversation(v: &Value) -> HsConversation {
         let assignee_type = v["assignee"]["type"].as_str().map(|s| s.to_string());
-        // Clean-audit item 33: a team-typed assignee is a TEAM id — it
-        // must never land in the user-assignee slot (team 42 and user 42
-        // are different platform objects; writing the team id there made
-        // team-assigned conversations either look unassigned — the id
-        // matches no user — or assigned to the WRONG user on an id
-        // collision). The user slot stays empty for team assignments;
-        // `assigned_team_id` carries the team, and the sync writes it to
-        // `conversations.assigned_team_local_id`.
         let assignee_is_team = assignee_type.as_deref() == Some("team");
         HsConversation {
             remote_id: v["id"].as_i64().unwrap_or(0),
@@ -934,9 +812,6 @@ impl RealHelpScoutProvider {
             location: v["location"].as_str().map(|s| s.to_string()),
             emails,
             phones,
-            // Audit fix (C4): chat handles ride the same embed-or-subresource
-            // contract as emails/phones (mock embeds `chatHandles`, the real
-            // API serves GET /v2/customers/{id}/chats).
             chats: v["chatHandles"]
                 .as_array()
                 .or_else(|| v["chats"].as_array())
@@ -991,8 +866,6 @@ impl RealHelpScoutProvider {
 
     fn map_thread(v: &Value, conversation_id: i64) -> HsThread {
         let recipients = |key: &str| -> Vec<crate::helpscout::HsThreadRecipient> {
-            // Real payloads carry plain email strings in `to`/`cc`; the mock
-            // (and older shape) used {id, email} objects. Accept both.
             v[key]
                 .as_array()
                 .map(|a| {
@@ -1034,10 +907,6 @@ impl RealHelpScoutProvider {
             status: v["status"].as_str().map(|s| s.to_string()),
             state: v["state"].as_str().map(|s| s.to_string()),
             body: v["body"].as_str().map(|s| s.to_string()),
-            // Live API (v2 + v3) carries a single polymorphic `createdBy`
-            // object: {id, type: "customer"|"user", ...}. The historical
-            // `createdByCustomer`/`createdByUser` keys never appear in real
-            // payloads, which marked every thread `system_user`.
             created_by_customer_id: if v["createdBy"]["type"].as_str() == Some("customer") {
                 v["createdBy"]["id"].as_i64()
             } else {
@@ -1093,9 +962,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_mailboxes(&self) -> Result<Vec<HsMailbox>> {
-        // Audit fix (M10): was a single-page read — mailboxes beyond page 1
-        // (51+) were silently invisible. The generic HAL paginator caps at
-        // 1,000 pages like every other v2 list.
         self.list_all_v2("/v2/mailboxes", "mailboxes", Self::map_mailbox)
             .await
     }
@@ -1187,11 +1053,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_beacon_chats(&self) -> Result<Vec<HsBeaconChat>> {
-        // Honest stub (R6): Help Scout's Mailbox API exposes chats by id only
-        // (`GET /v2/chats/{id}`); there is no list endpoint. Chats arrive
-        // through `beacon.chat.*` webhooks and are then fetched individually.
-        // Returning an empty list here would silently pretend the platform
-        // has none.
         Err(Error::Other(
             "Help Scout exposes no list endpoint for chats: they arrive via \
              beacon.chat webhooks and are fetched by id"
@@ -1210,11 +1071,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_ratings(&self) -> Result<Vec<HsRating>> {
-        // Honest stub (R6): the Mailbox API offers `GET /v2/ratings/{id}` only
-        // — there is no list-ratings endpoint. Ratings arrive via the
-        // `satisfaction.ratings` webhook (fetched by id through the same
-        // webhook job) or via the happiness reports, which require a
-        // Plus/Pro plan (see K5/P1 for the reports path).
         Err(Error::Other(
             "Help Scout exposes no list endpoint for ratings: they arrive via \
              the satisfaction.ratings webhook and are fetched by id; the \
@@ -1235,15 +1091,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         {
             Ok(v) => v,
             Err(e) => {
-                // Clean-audit item 92: the pre-fix branch matched the
-                // literal "-> 404" substring of the error's Display —
-                // but HsApiError's Display prints the FRIENDLY text
-                // ("Help Scout reports this record no longer exists…"),
-                // so the mapping never fired and a genuinely-absent
-                // rating surfaced as an error (retried, then failed)
-                // instead of the honest Ok(None). is_not_found checks
-                // the structured status code like every other 404-tolerant
-                // fetch in this file.
                 if is_not_found(&e) {
                     return Ok(None);
                 }
@@ -1285,10 +1132,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         }))
     }
 
-    /// K5: fetch one Reports API endpoint from the registry. Errors carry
-    /// the HTTP status (HsApiError) so the caller can classify a 403 plan
-    /// wall; `Ok(None)` is reserved for "this connection offers no report
-    /// data" (empty provider, handled by the trait default).
     async fn get_report(&self, key: &str, start: &str, end: &str) -> Result<Option<HsReportRow>> {
         let Some(spec) = crate::reports_api::report_spec(key) else {
             return Err(Error::Config(format!(
@@ -1311,8 +1154,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         }))
     }
 
-    /// K3: one full article by remote id (Docs API GET /v1/articles/{id})
-    /// for the publish-verify re-sync.
     async fn get_doc_article(&self, remote_id: String) -> Result<Option<HsDocArticle>> {
         if self.credentials.docs_api_key.is_empty() {
             return Ok(None);
@@ -1327,10 +1168,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         Ok(Some(Self::doc_article_from_value(remote_id, &article)))
     }
 
-    /// K3: upsert the review-queue draft into the Docs API. Creates a new
-    /// `notpublished` article (POST /v1/articles?reload=true returns the
-    /// created article) or updates the linked article's draft copy
-    /// (PUT /v1/articles/{id}/drafts). Returns the remote article id.
     async fn upsert_doc_article_draft(
         &self,
         input: &crate::helpscout::DocArticleDraftInput,
@@ -1363,7 +1200,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         let v = self
             .docs_request_send("POST", "/v1/articles?reload=true", Some(body))
             .await?;
-        // Audit fix (C2, live): the created article's id is a hex ObjectId string.
         let id = v["article"]["id"]
             .as_str()
             .or_else(|| v["id"].as_str())
@@ -1383,8 +1219,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         Ok(id)
     }
 
-    /// K3: publish the article with its final, human-approved text
-    /// (PUT /v1/articles/{id}; status published makes it live).
     async fn publish_doc_article(&self, remote_id: String, name: &str, text: &str) -> Result<()> {
         if self.credentials.docs_api_key.is_empty() {
             return Err(Error::Config(
@@ -1427,11 +1261,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_saved_replies(&self, mailbox_id: i64) -> Result<Vec<HsSavedReply>> {
-        // Clean-audit item 91: this listing feeds the deletion sweep (a
-        // saved reply absent from the complete list is deleted
-        // platform-side), so it must walk EVERY page — a mailbox holding
-        // more replies than one v2 page would otherwise get its
-        // later-page replies falsely pruned.
         self.list_all_v2(
             &format!("/v2/mailboxes/{mailbox_id}/saved-replies"),
             "savedReplies",
@@ -1501,8 +1330,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_webhooks(&self) -> Result<Vec<HsWebhookConfig>> {
-        // Audit fix (M10): paginate — a single GET hid hooks on page 2+
-        // from both health classification and manual management.
         let mut out: Vec<HsWebhookConfig> = Vec::new();
         let mut page_no: u32 = 1;
         loop {
@@ -1556,10 +1383,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 Some(json!({ "url": url, "events": events, "secret": secret, "label": label })),
             )
             .await?;
-        // The 201 answer carries the new hook's id in the Resource-Id
-        // header (the body is empty); request_inner surfaces it as
-        // `resourceId`. Reading the body first returned 0 for every
-        // created hook — the registration then looked like a failure.
         Ok(v["resourceId"]
             .as_i64()
             .or_else(|| v["id"].as_i64())
@@ -1585,9 +1408,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         match res {
             Ok(v) => Ok(crate::chats::parse_chat_object(&v)),
             Err(e) => {
-                // A chat that has collapsed into a conversation is gone
-                // from the Chat API — the mirror keeps the webhook's last
-                // word, and this fetch honestly reports it ended.
                 if is_not_found(&e) {
                     return Ok(None);
                 }
@@ -1608,11 +1428,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         match res {
             Ok(_) => Ok(()),
             Err(e) => {
-                // The message id is ours, so the platform's 422 "id value
-                // is already in use" answer means a retry after a
-                // timeout already delivered — treated as success, never
-                // a double-send. A 400 (someone else's chat) keeps its
-                // platform reason for the caller to surface.
                 if let crate::error::Error::Other(boxed) = &e
                     && boxed
                         .downcast_ref::<HsApiError>()
@@ -1626,8 +1441,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_customer_property_definitions(&self) -> Result<Vec<HsPropertyDef>> {
-        // Audit fix (M10): paginate — the single read hid definitions on
-        // page 2+ and left the matching custom fields unmapped forever.
         let mut out: Vec<HsPropertyDef> = Vec::new();
         let mut page_no: u32 = 1;
         loop {
@@ -1659,11 +1472,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_organization_property_definitions(&self) -> Result<Vec<HsPropertyDef>> {
-        // The endpoint is not part of the published Mailbox API 2.0 and
-        // answers 404 on accounts where it does not exist — a missing
-        // definition list is legal (organization custom fields simply
-        // stay unmapped), so a 404 degrades to an empty list instead of
-        // painting an ERROR into the sync log on every account.
         match self
             .request("/v2/organization-properties", "GET", None)
             .await
@@ -1704,18 +1512,8 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_threads(&self, conversation_id: i64) -> Result<Vec<HsThread>> {
-        // Clean-audit item 28: the v3 threads collection is paginated, and
-        // the old single-page read treated page 1 as the conversation's
-        // full thread set — the sync's stale-thread sweep then deleted
-        // every thread past page 1 as "gone from the platform" on every
-        // re-ingest. Follow the HAL next link (the same loop
-        // `list_system_users` uses) until the pages run out.
         let mut out: Vec<HsThread> = Vec::new();
         let mut path = format!("/v3/conversations/{conversation_id}/threads");
-        // 1.7.3: belt-and-braces page cap — a looping/patchwork HAL next
-        // link must never turn one conversation's thread walk into an
-        // endless request stream. 200 pages ≈ thousands of threads on one
-        // conversation; far past anything real.
         let mut pages = 0u32;
         loop {
             pages += 1;
@@ -1755,10 +1553,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         match res {
             Ok(v) => {
                 let mut c = Self::map_customer(&v);
-                // Audit fix (C4): the real API never embeds contact channels;
-                // a customer fetched here would look email-less and block
-                // Outreach ("No usable email address on file"). Fetch the
-                // sub-resources whenever the payload carries none.
                 if c.channels_all_empty()
                     && let Some(ch) = self.get_customer_channels(customer_id).await?
                 {
@@ -1780,11 +1574,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn get_customer_channels(&self, customer_id: i64) -> Result<Option<HsCustomer>> {
-        // Audit fix (C4): Help Scout stores contact channels behind
-        // per-customer sub-resources the old code never called:
-        //   GET /v2/customers/{id}/emails|phones|chats|websites|social-profiles
-        // each answering HAL {"_embedded":{"emails":[...]}} (404 when the
-        // customer has none of that kind — degrade to empty, not an error).
         let mut emails: Vec<Value> = Vec::new();
         let mut phones: Vec<Value> = Vec::new();
         let mut chats: Vec<Value> = Vec::new();
@@ -1815,8 +1604,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                         _ => social = arr,
                     }
                 }
-                // A customer without any of this sub-resource answers 404 —
-                // that is "none", not a failure.
                 Err(e) if is_not_found(&e) => {}
                 Err(e) => return Err(e),
             }
@@ -1898,7 +1685,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             out.extend(embedded.iter().map(Self::map_user));
             match hal_next_path(&v) {
                 Some(next) if n > 0 => {
-                    // 1.7.3: same page-cap insurance as list_threads.
                     if pages >= 50 {
                         tracing::warn!(pages, "system-users pagination cap reached");
                         break;
@@ -1912,9 +1698,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
     }
 
     async fn list_doc_collections(&self) -> Result<Vec<HsDocCollection>> {
-        // The Docs API is v1-only (docsapi.helpscout.net/v1/...); the
-        // pre-1.3.0 /v2/ paths 404'd on every request, so the KB never
-        // filled even with a valid key.
         if self.credentials.docs_api_key.is_empty() {
             self.log_missing_docs_key();
             return Ok(Vec::new());
@@ -1925,10 +1708,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             let v = self
                 .docs_request(&format!("/v1/collections?page={page}"))
                 .await?;
-            // Audit fix (C2): the real Docs API wraps every list response
-            // in a keyed envelope — {"collections":{"page":..,"pages":..,
-            // "items":[..]}} — reading the top-level "items" matched
-            // nothing and every pass silently synced 0 collections.
             let (items, pages) = docs_list(&v, "collections");
             if items.is_empty() {
                 break;
@@ -1964,9 +1743,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                     "/v1/collections/{collection_id}/categories?page={page}"
                 ))
                 .await?;
-            // Audit fix (C2): same keyed envelope as collections —
-            // {"categories":{...items:[...]}}. Top-level reads matched
-            // nothing and categories never synced.
             let (items, pages) = docs_list(&v, "categories");
             if items.is_empty() {
                 break;
@@ -1993,9 +1769,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             self.log_missing_docs_key();
             return Ok(Vec::new());
         }
-        // v1 list: {"articles":{"page","pages","count","items":[refs without
-        // text]}} — the audit-fix (C2) envelope unwrap; the legacy mock's
-        // top-level shape still parses via docs_list's fallback.
         let mut refs: Vec<(String, Value)> = Vec::new();
         let mut page = 1u32;
         loop {
@@ -2023,13 +1796,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             }
             page += 1;
         }
-        // Audit fix (M3): the cap always kept the same FIRST 500 refs —
-        // articles 501+ never synced once, and the "the remainder syncs
-        // next pass" log line was false. Now unchanged articles (the stored
-        // row's remote_updated_at matches the list ref's modifiedDate) are
-        // skipped without consuming the cap, and the cap is spent on
-        // not-yet-synced / changed articles FIRST, so every pass advances
-        // the frontier instead of re-fetching the same head of the list.
         let mut changed: Vec<(String, Value)> = Vec::new();
         let mut unchanged_count = 0usize;
         {
@@ -2070,13 +1836,11 @@ impl HelpScoutProvider for RealHelpScoutProvider {
             );
             refs.truncate(DOC_ARTICLE_FETCH_CAP);
         }
-        // Each ref needs its own GET for the article text (no bulk endpoint).
         let mut out: Vec<HsDocArticle> = Vec::new();
         for (id, r) in &refs {
             let full = match self.docs_request(&format!("/v1/articles/{id}")).await {
                 Ok(v) => v["article"].clone(),
                 Err(e) => {
-                    // One unreachable article must not sink the collection.
                     tracing::warn!(article = id, error = %e, "Docs article fetch failed");
                     r.clone()
                 }
@@ -2109,8 +1873,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
 
     async fn create_reply_thread(&self, input: CreateThreadInput) -> Result<ThreadCreated> {
         let mut body = json!({ "text": input.text, "draft": input.draft });
-        // The Mailbox API requires the customer being replied to on the
-        // POST /reply body — a request without it is a guaranteed 400.
         if let Some(customer_id) = input.customer_id {
             body["customer"] = json!({ "id": customer_id });
         }
@@ -2134,8 +1896,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
                 PRIORITY_USER_SEND,
             )
             .await?;
-        // 201 responses carry the new thread id in the Resource-Id header
-        // (the body is empty); request_inner injects it as `resourceId`.
         Ok(ThreadCreated {
             thread_id: res["resourceId"]
                 .as_i64()
@@ -2227,10 +1987,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         if !input.tags.is_empty() {
             threads[0]["tags"] = json!(input.tags);
         }
-        // Audit fix (C1): the real API rejects creates without a top-level
-        // `type` (channel) and `status` — live it answers
-        // 400 {"path":"type","message":"must not be null"},{"path":"status",...}.
-        // Channel defaults to email, status to open; both are configurable.
         let mut body = json!({
             "type": input.channel.as_deref().unwrap_or("email"),
             "status": input.status.as_deref().unwrap_or("open"),
@@ -2242,11 +1998,6 @@ impl HelpScoutProvider for RealHelpScoutProvider {
         if !input.tags.is_empty() {
             body["tags"] = json!(input.tags);
         }
-        // Live-API check (2026-10): POST is only served on /v2/conversations —
-        // /v3/conversations answers "does not support HTTP method POST [GET]".
-        // Creates answer 201 with an EMPTY body and the new id in the
-        // Resource-Id header; request_inner surfaces that header as
-        // `resourceId`, so read it there (res["id"] is always absent).
         let res = self
             .request_pri("/v2/conversations", "POST", Some(body), PRIORITY_USER_SEND)
             .await?;
@@ -2464,18 +2215,6 @@ impl RealHelpScoutProvider {
         }
     }
 
-    /// Walk every page of a v2 list endpoint.
-    ///
-    /// Mailbox API 2.0 pagination is 1-BASED: the first page is page 1
-    /// (the docs default), and `page.number` echoes the fetched page.
-    /// The loop therefore starts at 1 and stops once the page just
-    /// fetched is the last one (`number >= total_pages`). The first
-    /// request used to send `page=0`, which Help Scout rejects with
-    /// `Bad request — path:page, "Not a number - expected non-negative
-    /// integer", rejectedValue:"0"` — so users, tags, organizations,
-    /// workflows and saved replies never synced a single row, while
-    /// conversations and customers (HAL next-link pagination, no page
-    /// parameter) kept working and masked the failure.
     async fn list_all_v2<T>(
         &self,
         base: &str,
@@ -2509,12 +2248,6 @@ impl RealHelpScoutProvider {
     }
 }
 
-/// Audit fix (C2): unwrap the real Docs API list envelope.
-/// The Docs API answers {"<key>":{"page":..,"pages":..,"items":[..]}} for
-/// every list endpoint (collections / categories / articles); the app used
-/// to read a top-level "items" that never exists, so every Docs pass
-/// silently synced 0 records. Falls back to the legacy top-level shape so
-/// the historical mock contract keeps working.
 fn docs_list(v: &Value, key: &str) -> (Vec<Value>, u64) {
     let scope = v.get(key).filter(|s| s.is_object()).unwrap_or(v);
     let items = scope["items"].as_array().cloned().unwrap_or_default();
@@ -2611,15 +2344,12 @@ mod credentials_tests {
 
     #[test]
     fn credentials_envelope_lifecycle() {
-        // The master-key holder is process-global and tests run in
-        // parallel threads; the lock serializes every test that flips it.
         let _key_guard = crate::settings::SECRETS_TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         install_key();
         let conn = migrated_conn();
 
-        // 1. Nothing stored anywhere: every field NotSet, unconfigured.
         let env_none = HsCredentials::default();
         let (resolved, sources) = HsCredentials::resolve_with(&env_none, &conn);
         assert!(!resolved.is_configured());
@@ -2628,7 +2358,6 @@ mod credentials_tests {
         assert_eq!(sources.webhook_secret, CredentialSource::NotSet);
         assert_eq!(sources.docs_api_key, CredentialSource::NotSet);
 
-        // 2. Store: empty fields are skipped, the rest become AppSettings.
         HsCredentials::store_in_envelope(&conn, "cid-1", "csecret-1", "wh-1", "").expect("store");
         let (r2, s2) = HsCredentials::resolve_with(&env_none, &conn);
         assert!(r2.is_configured());
@@ -2641,7 +2370,6 @@ mod credentials_tests {
         assert_eq!(s2.webhook_secret, CredentialSource::AppSettings);
         assert_eq!(s2.docs_api_key, CredentialSource::NotSet);
 
-        // The plaintext never enters the secrets table.
         let blob: Vec<u8> = conn
             .query_row(
                 "SELECT value FROM secrets WHERE key = 'helpscout_client_secret'",
@@ -2651,7 +2379,6 @@ mod credentials_tests {
             .expect("blob");
         assert!(!blob.windows(8).any(|w| w == b"csecret-1"));
 
-        // 3. Environment wins per field; the envelope fills the rest.
         let env_some = HsCredentials {
             client_id: "env-cid".into(),
             webhook_secret: "env-wh".into(),
@@ -2665,7 +2392,6 @@ mod credentials_tests {
         assert_eq!(s3.client_secret, CredentialSource::AppSettings);
         assert_eq!(r3.client_secret, "csecret-1");
 
-        // 4. Clear removes everything that was stored.
         let removed = HsCredentials::clear_envelope(&conn).expect("clear");
         assert_eq!(
             removed, 3,
@@ -2678,9 +2404,6 @@ mod credentials_tests {
         assert_eq!(s4.webhook_secret, CredentialSource::NotSet);
     }
 
-    /// Audit (low): `HsCredentials` used to derive `Debug` with every
-    /// credential in the clear. Presence and length stay diagnosable;
-    /// the values themselves must never reach a formatter.
     #[test]
     fn debug_output_never_contains_credential_values() {
         let creds = HsCredentials {
@@ -2712,9 +2435,6 @@ mod r6_honest_stub_tests {
             .expect("runtime")
     }
 
-    /// R6 (D11): the real provider must not silently return empty lists for
-    /// resources the platform cannot list. Ratings and Beacon chats have no
-    /// list endpoints in Mailbox API 2.0; every caller deserves the truth.
     #[test]
     fn list_ratings_and_chats_state_the_platform_reality() {
         let conn = Connection::open_in_memory().expect("db");
@@ -2740,12 +2460,6 @@ mod r6_honest_stub_tests {
     }
 }
 
-/// Migration m053 (boot step, R7/D13): seals pre-1.4.0 plaintext OAuth
-/// tokens into the encrypted envelope and scrubs the `oauth_tokens`
-/// columns. Skipped with a warning when no master key is available (e.g.
-/// in-memory tooling databases) — `token_row` falls back to the columns
-/// until a boot with a key completes the migration, and the next boot
-/// re-runs this step because it never stamped on failure.
 pub fn apply_m053_oauth_token_envelope(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "oauth_tokens")? {
         return Ok(());
@@ -2793,8 +2507,6 @@ mod r7_token_envelope_tests {
         let mut conn = Connection::open_in_memory().expect("in-memory db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
         ensure_account_row(&conn);
-        // A pre-1.4.0 install: the row exists and the tokens sit in the
-        // plaintext columns exactly the way save_tokens used to leave them.
         conn.execute(
             "INSERT INTO oauth_tokens (id, account, access_token, refresh_token, token_type, revoked)
              VALUES (1, 'default', 'legacy-plain', 'legacy-refresh', 'bearer', 0)",
@@ -2804,8 +2516,6 @@ mod r7_token_envelope_tests {
         conn
     }
 
-    /// R7/D13: the migration seals pre-1.4.0 plaintext tokens into the
-    /// envelope and scrubs the columns the moment a master key exists.
     #[test]
     fn m053_seals_legacy_plaintext_tokens_and_scrubs_the_row() {
         let _g = crate::settings::SECRETS_TEST_LOCK
@@ -2833,12 +2543,9 @@ mod r7_token_envelope_tests {
             .expect("row");
         assert_eq!(column_access, "", "m053 must scrub the plaintext column");
         assert_eq!(column_refresh, None, "m053 must scrub the plaintext column");
-        // The envelope-backed reader sees the same session as before.
         assert!(has_stored_tokens(&conn).expect("probe"));
     }
 
-    /// Without a master key the migration must not run half-way: the legacy
-    /// tokens stay readable through the fallback reader until a keyed boot.
     #[test]
     fn m053_without_a_key_leaves_the_legacy_row_intact() {
         let _g = crate::settings::SECRETS_TEST_LOCK
@@ -2865,10 +2572,6 @@ mod r7_token_envelope_tests {
     }
 }
 
-/// Clean-audit batch 22 (items 31 + 33): the `api_concurrency` setting
-/// reaches the provider's queues (it was parsed, saved, and applied
-/// nowhere), and a team-typed assignee never lands in the user-assignee
-/// slot while `assigned_team_id` finally gets consumed.
 #[cfg(test)]
 mod batch22_audit_tests {
     use super::*;
@@ -2887,12 +2590,8 @@ mod batch22_audit_tests {
         RealHelpScoutProvider::new(crate::db::DbHandle::new(conn), HsCredentials::default())
     }
 
-    /// Item 31: the stored setting reaches BOTH queues at construction —
-    /// the conversations queue and the docs queue used to run at the
-    // hard-coded default forever, no matter what the form saved.
     #[test]
     fn api_concurrency_setting_reaches_both_provider_queues() {
-        // Unset: the historical default.
         let p = provider_with(migrated_conn(), None);
         assert_eq!(p.api_concurrency(), DEFAULT_CONCURRENCY);
         assert_eq!(
@@ -2901,7 +2600,6 @@ mod batch22_audit_tests {
             "the docs queue follows the same default"
         );
 
-        // Stored 5: both queues start at 5.
         let p = provider_with(migrated_conn(), Some(5));
         assert_eq!(p.api_concurrency(), 5);
         assert_eq!(
@@ -2910,7 +2608,6 @@ mod batch22_audit_tests {
             "the docs queue follows the setting"
         );
 
-        // A live resize reaches both queues, not just the main one.
         p.set_api_concurrency(3);
         assert_eq!(p.api_concurrency(), 3);
         assert_eq!(
@@ -2919,11 +2616,9 @@ mod batch22_audit_tests {
             "the live resize covers the docs queue"
         );
 
-        // Stored 0 (hand-edited settings table): serialized, never 0.
         let p = provider_with(migrated_conn(), Some(0));
         assert_eq!(p.api_concurrency(), 1, "stored 0 clamps to 1");
 
-        // Unparsable stored value: falls back to the env default.
         let conn = migrated_conn();
         crate::settings::set_string(&conn, "api_concurrency", "not-a-number").expect("garbage");
         let p =
@@ -2935,13 +2630,8 @@ mod batch22_audit_tests {
         );
     }
 
-    /// Item 33: a team-typed assignee is a TEAM id — the user slot stays
-    /// empty and the team id rides `assigned_team_id`; a user-typed
-    /// assignee keeps the user slot; `assignedTeam` alongside a user
-    /// assignee fills the team field without touching the user slot.
     #[test]
     fn map_conversation_keeps_team_ids_out_of_the_user_slot() {
-        // Team assignment: assignee {id: 42, type: "team"}.
         let team_assigned = serde_json::json!({
             "id": 101, "number": 7, "status": "active", "mailboxId": 1,
             "assignee": {"id": 42, "type": "team"},
@@ -2956,7 +2646,6 @@ mod batch22_audit_tests {
             "the team id rides its own field"
         );
 
-        // User assignment: assignee {id: 55, type: "user"}.
         let user_assigned = serde_json::json!({
             "id": 102, "number": 8, "status": "active", "mailboxId": 1,
             "assignee": {"id": 55, "type": "user"},
@@ -2966,8 +2655,6 @@ mod batch22_audit_tests {
         assert_eq!(c.assignee_id, Some(55));
         assert_eq!(c.assigned_team_id, None);
 
-        // User assignee + a separate assignedTeam: both slots hold their
-        // own id — neither leaks into the other.
         let both = serde_json::json!({
             "id": 103, "number": 9, "status": "active", "mailboxId": 1,
             "assignee": {"id": 55, "type": "user"},
@@ -2978,7 +2665,6 @@ mod batch22_audit_tests {
         assert_eq!(c.assignee_id, Some(55));
         assert_eq!(c.assigned_team_id, Some(42));
 
-        // assignedTeam alone (no assignee): team field only.
         let team_only = serde_json::json!({
             "id": 104, "number": 10, "status": "active", "mailboxId": 1,
             "assignedTeam": {"id": 77},

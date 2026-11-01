@@ -39,10 +39,6 @@ pub struct InertWorld {
 }
 
 impl EmptyHelpScoutProvider {
-    /// Build the inert provider boot uses when no Help Scout
-    /// credentials are configured: every read returns the empty
-    /// world, and every operation that could create state is
-    /// rejected (nothing is simulated).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -62,7 +58,6 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
     }
 
     fn docs_configured(&self) -> bool {
-        // No credentials resolved: no Docs key, no Help Center sync.
         false
     }
 
@@ -410,12 +405,6 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
         conv.updated_at = Some(now);
         if !input.draft {
             conv.status = match input.status_after.as_deref() {
-                // Audit item 25: `open` is the v2 status the real provider
-                // accepts; this loopback world models it as v1 `active`
-                // (the same status its list_conversations "open" filter
-                // already matches). `waiting` was never a status in
-                // either vocabulary and now maps to `active` too, so a
-                // legacy stored setting cannot poison the mirror.
                 Some("open" | "waiting") => "active".into(),
                 Some("active" | "closed" | "pending" | "spam") => input
                     .status_after
@@ -690,11 +679,6 @@ impl HelpScoutProvider for EmptyHelpScoutProvider {
         let Some(att) = att else {
             return Ok(None);
         };
-        // R7 (D14) honesty: the inert world carries attachment *metadata*
-        // but there are no bytes behind it. Earlier revisions fabricated a
-        // "Simulated attachment content..." body here, which could be
-        // persisted to disk as if it were a real download. The empty
-        // provider refuses instead; real bytes come from the real provider.
         let _ = att;
         Err(crate::error::Error::Config(
             "the empty provider has no attachment bytes to download; connect Help Scout \

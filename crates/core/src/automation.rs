@@ -297,15 +297,6 @@ pub fn ensure_main_rule_columns(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "automation_runs", "detail", "TEXT")
 }
 
-/// Migration m060 (boot step 51, clean-audit item 57): `conversations` gains
-/// `automation_last_customer_thread_id` — the id of the customer thread whose
-/// trigger firing the conversation has already consumed. The pre-fix
-/// `on_conversation_changed` fired BOTH the `new_conversation` and
-/// `customer_reply` triggers on every customer-latest sync (a reply re-sent
-/// the "new conversation" auto-ack; a tag change re-fired both). The column
-/// is the once-guard's memory: the newest customer thread fires
-/// `new_conversation` the first time it is ever seen for the conversation and
-/// `customer_reply` afterwards, at most once per thread.
 pub fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> {
     add_column_if_missing(
         conn,
@@ -315,19 +306,6 @@ pub fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> {
     )
 }
 
-/// The once-guard decision for `on_conversation_changed` (clean-audit
-/// item 57): given the conversation's already-consumed customer thread id
-/// (`conversations.automation_last_customer_thread_id`) and the newest
-/// non-deleted customer thread the change delivered, decide which trigger —
-/// if any — this change should fire.
-///
-/// * `None` customer thread — nothing customer-flavored happened: no trigger.
-/// * the newest customer thread was already consumed — a re-sync, a tag
-///   change, a status flip: no trigger (the pre-fix code re-fired BOTH
-///   triggers on every one of these).
-/// * the first customer thread ever seen for the conversation:
-///   `new_conversation`, once per conversation.
-/// * a later customer thread: `customer_reply`, once per thread.
 #[must_use]
 pub fn customer_thread_trigger_decision(
     last_fired: Option<i64>,
@@ -426,15 +404,6 @@ fn read_rule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RuleRow> {
     ))
 }
 
-/// Audit item 18: the trigger column carries TWO generations of shapes.
-/// The modern engine stores a JSON string ("customer_reply"); the
-/// UI's rule form (a port of the web prototype) still serializes the M007
-/// tagged enum ({"kind":"tag_added","tag":"x"}) via `create_rule`.
-/// The engine previously demanded the string shape and errored on every
-/// UI-created rule, and one failed rule aborted `list_rule_records` —
-/// so the whole automation engine silently never ran. Accept both
-/// shapes: the string as-is, the legacy enum mapped to its kind name
-/// (status_changed / tag_added / sla_risk).
 fn parse_trigger_json(raw: &str) -> Result<String> {
     if let Ok(s) = serde_json::from_str::<String>(raw) {
         return Ok(s);
@@ -489,12 +458,6 @@ pub fn list_rule_records(conn: &Connection) -> Result<Vec<RuleRecord>> {
     let rows = stmt
         .query_map([], read_rule_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    // Audit item 18: one malformed rule must never take the whole engine
-    // down. `list_rule_records` previously propagated the first parse
-    // error, and the fire sites swallow errors with `let _ =` — every
-    // trigger evaluation died silently on a single poisoned row. Skip
-    // the row with a warning instead; the strict `get_rule_record` still
-    // surfaces the corruption to the editor UI.
     Ok(rows
         .into_iter()
         .filter_map(|r| match parse_rule_record(r) {
@@ -647,13 +610,6 @@ fn execute_non_destructive(
                 if !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
                     tags.push(tag.to_string());
                     crate::conversation_ops::write_conversation_tags(conn, conversation_id, &tags);
-                    // Audit item 19: the local mirror write is only half the
-                    // action. The manual inbox path queues an outbound push
-                    // after its typed local write; the automation path wrote
-                    // the mirror and stopped, so the next sync reverted the
-                    // tag. Queue the same outbound push the inbox uses (the
-                    // worker resolves the remote conversation id, pushes,
-                    // and pulls the platform truth back into the mirror).
                     crate::conversation_ops::create_outbound_job_keyed(
                         conn,
                         "update_tags",
@@ -692,7 +648,6 @@ pub fn execute_approved_action(
         .get("params")
         .cloned()
         .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-    // A1: automation's AI passes run on the Classify role.
     let ai_enabled = !matches!(
         crate::ai_hub::backend_for_role(conn, crate::ai_hub::AiRole::Classify),
         crate::ai_pipeline::AiBackend::Disabled
@@ -709,10 +664,6 @@ pub fn execute_approved_action(
             let Some(conversation_remote_id) = remote else {
                 return Ok(false);
             };
-            // Hoisted so the outbound enqueue below can carry it: the
-            // local mirror write and the platform push must agree on the
-            // assignee (the outbound worker resolves the remote user id
-            // and honestly fails for unsynced users).
             let assignee_local_id: Option<i64> = if kind == "set_status" {
                 None
             } else {
@@ -750,15 +701,6 @@ pub fn execute_approved_action(
             };
             match crate::ticket_ops::execute(conn, &op) {
                 Ok(crate::ticket_ops::OperationResult::Success { .. }) => {
-                    // Audit item 19: an approved write action must reach
-                    // Help Scout. The typed local write alone was silently
-                    // reverted by the next sync — the manual inbox path
-                    // queues an outbound push after the same local write,
-                    // and this is that queue entry: the worker resolves
-                    // the remote conversation id, pushes the change, and
-                    // pulls the platform truth back into the mirror.
-                    // A failed enqueue propagates so the approval job
-                    // retries instead of reporting a silent half-action.
                     let (job_kind, payload, key) = if kind == "set_status" {
                         (
                             "update_status",
@@ -919,8 +861,6 @@ fn condition_matches(
             match operator {
                 "contains" => subject.contains(&value),
                 "equals" => subject == value,
-                // The UI accepts not_equals for every field; treating it
-                // as equality fired rules on exactly the excluded value.
                 "not_equals" => subject != value,
                 _ => false,
             }
@@ -938,8 +878,6 @@ fn condition_matches(
             match operator {
                 "contains" => tags.split(',').any(|t| t.contains(&value)),
                 "equals" => tags.split(',').any(|t| t.trim() == value),
-                // "no tag equals the value": `any` here would fire on the
-                // first non-matching tag instead.
                 "not_equals" => tags.split(',').all(|t| t.trim() != value),
                 _ => false,
             }
@@ -1081,7 +1019,6 @@ pub fn fire_trigger_for_conversation(
     let attributes = current_attributes(conn, conversation_id);
     let verification = latest_verification(conn, conversation_id);
     let write_enabled = crate::settings::get_bool(conn, "automation_write_actions_enabled", false)?;
-    // A1: automation's AI passes run on the Classify role.
     let ai_enabled = !matches!(
         crate::ai_hub::backend_for_role(conn, crate::ai_hub::AiRole::Classify),
         crate::ai_pipeline::AiBackend::Disabled
@@ -1235,9 +1172,6 @@ pub fn fire_trigger_for_conversation(
     Ok(runs)
 }
 
-/// Clean-audit batch 19 (items 18 + 19): UI-created rules must not poison
-/// the engine's trigger deserialization, and approved write actions must
-/// reach the platform through the outbound push the manual inbox uses.
 #[cfg(test)]
 mod batch19_tests {
     use super::*;
@@ -1297,8 +1231,6 @@ mod batch19_tests {
         let conversation = db.with_write(|c| seed_conversation(c));
         db.with_write(|c| {
             crate::settings::set_bool(c, "automation_enabled", true).expect("enable");
-            // A real action so the engine records the run ("manual_review_queue"
-            // is the cheapest non-destructive kind — no AI, no approval).
             c.execute(
                 "INSERT INTO automation_rules (name, trigger_json, action_json, enabled, conditions)
                  VALUES ('healthy', '\"customer_reply\"',
@@ -1309,17 +1241,12 @@ mod batch19_tests {
             insert_rule(c, "poison", "this is not valid json {{{");
         });
 
-        // Pre-fix this call returned Err (list_rule_records propagated the
-        // poisoned row) and every fire site swallowed it with `let _ =` —
-        // automation silently never ran. Now the healthy rule is evaluated.
         let runs =
             db.with_write(|c| fire_trigger_for_conversation(c, "customer_reply", conversation));
         assert!(
             runs.is_ok(),
             "one malformed rule must not abort the engine: {runs:?}"
         );
-        // The healthy record ran through the pipeline (recorded, whatever
-        // its outcome); the poisoned row was skipped with a warning.
         let names: Vec<String> = db.with_read(|c| {
             let mut stmt = c
                 .prepare(
@@ -1484,11 +1411,6 @@ mod batch19_tests {
     }
 }
 
-/// Clean-audit batch 25 (item 57): the `new_conversation` /
-/// `customer_reply` trigger pair carries a once-guard — the pre-fix
-/// `on_conversation_changed` fired BOTH triggers on every customer-latest
-/// sync, so a customer's reply re-ran "new conversation" rules (auto-acks
-/// re-sent) and a tag change re-fired the pair.
 #[cfg(test)]
 mod batch25_item57_tests {
     use super::*;
@@ -1551,7 +1473,6 @@ mod batch25_item57_tests {
             has_column(&conn),
             "the once-guard column exists after bootstrap"
         );
-        // Idempotent on re-run (fresh DBs and upgraded DBs converge).
         apply_m060_automation_once_guard(&conn).expect("second apply is a no-op");
         assert!(has_column(&conn));
     }

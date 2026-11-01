@@ -403,8 +403,6 @@ impl<'a> SegmentEngine<'a> {
                 }
             }
             "email_domain" => {
-                // is_empty / is_not_empty are about email presence, not any
-                // particular domain — they must answer without a value.
                 match op.as_str() {
                     "is_empty" => {
                         return self.ids(
@@ -427,13 +425,6 @@ impl<'a> SegmentEngine<'a> {
                 if domain.is_empty() {
                     return Vec::new();
                 }
-                // Audit item 114: the operator was ignored and the match
-                // was unanchored at the tail — every op ran the same
-                // `LIKE %@{domain}%`, so `user@example.com.au` matched an
-                // `example.com` filter, and `not_equals`/`ends_with`
-                // returned the same rows as `equals`. The domain part of
-                // each stored address is now extracted and the standard
-                // operator set applies to it.
                 const DOMAIN_EXPR: &str = "LOWER(SUBSTR(ce.value, INSTR(ce.value, '@') + 1))";
                 match op.as_str() {
                     "equals" => self.ids(

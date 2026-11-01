@@ -1,25 +1,3 @@
-//! RS-19 — DS custom-objects goldens (wave C).
-//!
-//! The lab reference lives at `mockups/design-lab/goldens/v4/{light,dark}/custom-objects-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real `CustomObjectsPage`: the PageHeader with the
-//! lab's counter pill beside the New Type primary, the Types rail with the
-//! confirm-armed deletes, and the selected type's object pane with the
-//! lab's section-title + counter row, the FilterBar search, the kv-row
-//! object cards and the New object form) over a seeded mirror; the
-//! side-by-side review against the lab is the G3 evidence pack.
-//!
-//! The page opens on its unselected state (HEAD behavior — the right pane
-//! populates when the user picks a type), so the goldens click the first
-//! type chip through the a11y tree before locking the populated pane,
-//! exactly what a user's first visit does (the customers precedent).
-//! The interaction golden opens the New Type builder (the lab's header
-//! act) and locks the form card with its chips, inputs and create act.
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_custom_objects_page`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -30,19 +8,12 @@ use spp_core::db::DbHandle;
 use spp_shell::design;
 use spp_shell::pages::custom_objects::CustomObjectsPage;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct CustomObjectsPageState {
     installed: bool,
     page: CustomObjectsPage,
     db: DbHandle,
 }
 
-/// Bootstrap an in-memory database and seed the custom-objects fixture:
-/// the conformed lab fixture (`mockups/design-lab/data.js` →
-/// `PAGES["custom-objects"]`) — a "Warranty Claims" type (sku text,
-/// qty number, in_stock boolean, unit_cost number) holding two objects
-/// whose properties mix strings with real JSON scalars, plus an empty
-/// "Rmas" type so the rail shows a zero-count chip.
 fn seeded_page() -> (CustomObjectsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
@@ -117,13 +88,6 @@ fn seeded_page() -> (CustomObjectsPage, DbHandle) {
     (CustomObjectsPage::new(), DbHandle::new(conn))
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens + the New Type interaction
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light, pick the
-/// first type (the user's first act; the lab's `sel: 0` state) and lock
-/// the populated page as `{name}.png` under `tests/snapshots/`.
 fn render_custom_objects_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -186,9 +150,6 @@ fn r3_custom_objects_page_800_dark() {
     render_custom_objects_page(true, 800.0, "r3_custom_objects_page_800_dark");
 }
 
-/// The lab's header act: clicking `New Type` opens the type-builder card
-/// with its name/description inputs, the per-field key/label/type-chip
-/// rows and the create act. Snapshot the form state.
 #[test]
 fn r3_custom_objects_new_type_light() {
     let (page, db) = seeded_page();
@@ -215,9 +176,7 @@ fn r3_custom_objects_new_type_light() {
         .expect("the New Type act")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the form frame
-    // The form opened: the create act is in the tree, and the a11y check
-    // (still ON) validates the form's controls.
+    h.run_steps(2);
     assert!(
         h.get_all_by_label("create type").next().is_some(),
         "the New Type form must show the create type act"

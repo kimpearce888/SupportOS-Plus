@@ -14,22 +14,12 @@ pub struct RatingReceivedEvent {
     pub at: String,
 }
 
-/// What started a sync run (clean-audit item 23): the completed event
-/// used to be indistinguishable between the user's button press and the
-/// ~30-second adaptive auto-sync timer, so the app toasted "sync
-/// finished" roughly once a minute forever. Emitters must say who asked
-/// for the run; the toast lane only fires for [`SyncTrigger::Manual`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncTrigger {
-    /// A user action asked for the run (Sync Now buttons, activation,
-    /// onboarding, the enqueued initial-sync job).
     #[default]
     Manual,
-    /// The adaptive background timer fired on its own.
     Auto,
-    /// Not a real sync at all — a post-write mirror re-read nudging the
-    /// UI to refresh (saved-reply writes, webhook health checks).
     Refresh,
 }
 
@@ -50,8 +40,6 @@ pub struct SyncCompletedEvent {
     pub kind: String,
     pub processed: u32,
     pub errors: u32,
-    /// Who asked for the run (audit item 23). Defaults to `manual` when
-    /// absent so old serialized payloads keep their visible outcome.
     #[serde(default)]
     pub trigger: SyncTrigger,
     pub at: String,
@@ -106,28 +94,17 @@ pub struct ErrorOccurredEvent {
     pub at: String,
 }
 
-/// Mid-run sync progress: emitted per resource (and per page of
-/// conversations) so the UI can show a live "X of Y" instead of one
-/// terminal event at the end of a multi-hour run (the 1.2.0 freeze).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncProgressEvent {
-    /// Resource or stage label ("conversations", "customers", …).
     pub stage: String,
-    /// Resources completed so far in this run.
     pub done: u32,
-    /// Total resources planned for this run.
     pub total: u32,
-    /// Cumulative records processed so far.
     pub processed: u64,
-    /// Records in the just-completed stage (0 for a pure heartbeat).
     pub stage_records: u32,
     pub at: String,
 }
 
-/// An outbound job (reply / note / status change / assignment) reached a
-/// terminal state. Success means the Help Scout API accepted the write —
-/// the very thing that never happened before 1.3.0.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OutboundJobFinishedEvent {
@@ -355,17 +332,10 @@ impl ServerEvent {
     }
 }
 
-// Clean-audit item 148: the `EventEmitter` trait (and its only impl on
-// [`crate::event_bus::EventBus`]) is gone — every emitter calls the bus's
-// inherent `emit` directly, so the trait was a second, never-used way to
-// do the same thing.
 #[cfg(test)]
 mod batch20_audit23_tests {
     use super::*;
 
-    /// Audit item 23: the trigger is part of the event. Manual runs are
-    /// the toastable ones; auto timer ticks and post-write refreshes say
-    /// who they are on the wire.
     #[test]
     fn audit23_sync_completed_carries_and_roundtrips_the_trigger() {
         for trigger in [SyncTrigger::Manual, SyncTrigger::Auto, SyncTrigger::Refresh] {
@@ -376,7 +346,6 @@ mod batch20_audit23_tests {
             assert_eq!(e.trigger, trigger);
             assert_eq!(e.trigger.as_str(), trigger.as_str());
 
-            // The wire JSON speaks camelCase strings and round-trips.
             let json = serde_json::to_string(e).expect("serialize");
             assert!(
                 json.contains(&format!("\"trigger\":\"{}\"", trigger.as_str())),
@@ -388,9 +357,6 @@ mod batch20_audit23_tests {
         }
     }
 
-    /// Audit item 23: payloads serialized before the field existed (no
-    /// `trigger` key) deserialize to `manual` — old records keep their
-    /// visible outcome instead of failing the whole event.
     #[test]
     fn audit23_legacy_payload_without_trigger_defaults_to_manual() {
         let legacy = r#"{"kind":"initial","processed":25,"errors":0,"at":"2026-01-01T00:00:00Z"}"#;

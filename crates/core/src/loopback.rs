@@ -1,24 +1,3 @@
-//! Minimal loopback HTTP listener — webhook ingress and the OAuth callback
-//! only (migration-map row: "minimal loopback listener").
-//!
-//! After the Phase 4 cutover the full axum router is gone; the shell still
-//! needs two inbound HTTP endpoints that cannot exist inside the egui
-//! process:
-//!
-//! * `POST /webhook` — Help Scout event ingress. Signature verification,
-//!   persistence, deduplication and job enqueueing are the exact
-//!   [`crate::webhook_handler::process_webhook`] pipeline the axum route
-//!   used, with the same status-code mapping.
-//! * `GET /oauth/callback` — the browser lands here after the Help Scout
-//!   authorization screen. The `state` parameter is validated against the
-//!   single-use [`crate::oauth_state`] table, the code is exchanged, and
-//!   the result is a tiny human-readable HTML page (the browser cannot
-//!   render egui).
-//!
-//! The listener binds `127.0.0.1` only, speaks just enough HTTP/1.1 for
-//! those two routes, and rejects everything else. Requests are capped in
-//! size so a stray local process cannot balloon memory.
-
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,21 +12,13 @@ use crate::helpscout_real::HsCredentials;
 use crate::provider_handle::ProviderHandle;
 use crate::webhook_handler::{self, WebhookProcessResult};
 
-/// The port the process's loopback listener actually bound, recorded once
-/// at boot (FIND-001). `None` while no listener is running — the UI reads
-/// this to surface the listener state instead of leaving a webhook/OAuth
-/// outage log-only.
 static BOUND_PORT: OnceLock<u16> = OnceLock::new();
 
-/// The port the loopback listener actually bound this boot (`None` when
-/// it is not running).
 #[must_use]
 pub fn bound_port() -> Option<u16> {
     BOUND_PORT.get().copied()
 }
 
-/// Record the bound listener port (called by the shell at boot; the first
-/// successful bind wins).
 pub fn record_bound_port(port: u16) {
     let _ = BOUND_PORT.set(port);
 }
@@ -57,15 +28,11 @@ const MAX_BODY_BYTES: usize = 1024 * 1024;
 const MAX_HEADERS: usize = 64;
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Parsed inbound request (just enough HTTP/1.1 for the two routes).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub method: String,
-    /// Path without the query string, e.g. `/webhook`.
     pub path: String,
-    /// Raw query string (no leading `?`), possibly empty.
     pub query: String,
-    /// Lower-cased header names with their values.
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
 }
@@ -80,7 +47,6 @@ impl Request {
     }
 }
 
-/// Outbound response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
     pub status: u16,
@@ -133,20 +99,12 @@ impl Response {
     }
 }
 
-/// Everything the request handler needs.
 pub struct LoopbackCtx {
     pub db: DbHandle,
-    /// The port THIS listener is bound to — the OAuth callback verifies
-    /// the redeemed state's redirect URI points here (clean-audit item 93:
-    /// the stored redirect_uri was written but never checked, so a state
-    /// issued for one loopback port redeemed fine on any other).
     pub port: u16,
-    /// OAuth completion path; `None` when this session has no live
-    /// Help Scout provider (no credentials at boot).
     pub oauth: Option<Arc<dyn OAuthCompletion>>,
 }
 
-/// Identity returned by a successful OAuth code exchange.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectedIdentity {
     pub name: String,
@@ -154,21 +112,10 @@ pub struct ConnectedIdentity {
     pub remote_id: i64,
 }
 
-/// The OAuth half of the callback flow — exchange the code and fetch the
-/// connected user — behind a trait so the HTTP layer is unit-testable
-/// without Help Scout on the other end.
 pub trait OAuthCompletion: Send + Sync {
     fn complete(&self, code: &str) -> std::result::Result<ConnectedIdentity, String>;
 }
 
-/// Production [`OAuthCompletion`] over the live provider: runs the two
-/// async calls on a throwaway current-thread runtime (the listener thread
-/// owns no reactor).
-///
-/// v1.4.0 (R3): holds the shared [`ProviderHandle`] instead of a
-/// boot-time snapshot, so a browser authorization that lands after a
-/// mid-session credential activation completes against the *current*
-/// provider instead of the stale one boot captured.
 struct RealOAuthCompletion {
     handle: Arc<ProviderHandle>,
 }
@@ -213,28 +160,16 @@ impl OAuthCompletion for RealOAuthCompletion {
     }
 }
 
-/// Issue a fresh single-use OAuth state and return the full authorization
-/// URL the user should open in a browser.
-///
-/// The state is recorded in the [`crate::oauth_state`] table and consumed
-/// exactly once by [`handle_callback`].
 pub fn begin_oauth(
     db: &DbHandle,
     credentials: &HsCredentials,
     redirect_uri: &str,
 ) -> Result<String> {
-    // Clean-audit item 93: the TTL sweeper was written and never wired —
-    // oauth_states grew forever and unconsumed states stayed redeemable
-    // for the process's lifetime. Every new authorization sweeps the dead
-    // ones (consumed-old and abandoned-old alike) before issuing.
     let _ = db.with_write(|conn| crate::oauth_state::sweep_states(conn));
     let state = db.with_write(|conn| crate::oauth_state::issue_state(conn, redirect_uri, None))?;
     Ok(credentials.authorize_url(&state))
 }
 
-/// Derive the listener port from a `http://localhost:PORT/...` or
-/// `http://127.0.0.1:PORT/...` redirect URI. Returns `None` for anything
-/// else (remote hosts, https, missing port).
 #[must_use]
 pub fn port_from_redirect_uri(redirect_uri: &str) -> Option<u16> {
     let url = url::Url::parse(redirect_uri).ok()?;
@@ -244,18 +179,6 @@ pub fn port_from_redirect_uri(redirect_uri: &str) -> Option<u16> {
     }
 }
 
-/// Whether the SupportOS+ loopback listener really answers on `port`
-/// (1.1.4). The settings page calls this before offering the OAuth
-/// flow: in 1.1.3 the browser flow silently dead-ended when the
-/// listener could not bind (another program held the port) — the
-/// connect button must explain the problem instead.
-///
-/// This is stronger than "something listens": it speaks one `GET
-/// /healthz` request and checks the listener identifies itself as
-/// `supportos-loopback`, so a foreign program squatting on the port
-/// (a dev server on 3000 is the classic case) is caught too. The
-/// answer arrives in milliseconds from our own listener; a silent
-/// squatter costs the 2-second read timeout once, on button click.
 #[must_use]
 pub fn listener_answers(port: u16) -> bool {
     let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
@@ -276,8 +199,6 @@ pub fn listener_answers(port: u16) -> bool {
     String::from_utf8_lossy(&buf[..n]).contains("supportos-loopback")
 }
 
-/// Dispatch one parsed request. Pure apart from the database and the
-/// optional OAuth completion — fully unit-testable.
 pub fn handle_request(req: &Request, ctx: &LoopbackCtx) -> Response {
     match (req.method.as_str(), req.path.as_str()) {
         ("POST", "/webhook") => handle_webhook(req, ctx),
@@ -302,23 +223,12 @@ pub fn handle_request(req: &Request, ctx: &LoopbackCtx) -> Response {
     }
 }
 
-/// Webhook ingress: resolve the secret (env override first, then the
-/// encrypted envelope), verify, persist, and map the outcome onto the same
-/// status codes the axum route used.
 fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
-    // Secret resolution order mirrors the old HTTP route: env override
-    // first (CI / tests), then the encrypted envelope. An empty result is
-    // a hard reject inside process_webhook: without a secret anyone with
-    // loopback access could inject fake Help Scout events.
     let secret = std::env::var("HELPSCOUT_WEBHOOK_SECRET")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| {
             ctx.db.with_read(|conn| {
-                // Audit (low): a corrupt/undecryptable envelope used to
-                // collapse to "no secret" silently — which then hard-rejects
-                // every delivery. That rejection is the designed safe-fail,
-                // but the root cause now warns instead of vanishing.
                 match crate::settings::get_secret(conn, "webhook_secret") {
                     Ok(bytes) => bytes
                         .map(|b| String::from_utf8_lossy(&b).into_owned())
@@ -338,11 +248,6 @@ fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
     let signature = req.header("x-helpscout-signature");
     let event_type = req.header("x-helpscout-event").unwrap_or("unknown");
 
-    // Audit item 32: registration caps the secret at the platform's 40
-    // characters — verification must resolve through the same canonical
-    // `effective_secret`, or any secret longer than the cap fails every
-    // signature check (the platform signs with the truncation) until ten
-    // discards deactivate the hook.
     let secret = crate::webhook::effective_secret(&secret);
 
     let result = ctx.db.with_write(|conn| {
@@ -412,9 +317,6 @@ fn page(title: &str, body_inner: &str) -> String {
 }
 
 fn fail_page(message: &str) -> Response {
-    // Audit (low): the failure pages used to return HTTP 200 — a monitor
-    // or browser extension keying on status could not tell a failed
-    // connect from a successful one. The page text is unchanged.
     Response::html(
         400,
         "Bad Request",
@@ -429,10 +331,6 @@ fn fail_page(message: &str) -> Response {
     )
 }
 
-/// OAuth callback: validate the single-use state, exchange the code, show
-/// a result page. Semantics ported from the old axum route, with the state
-/// moving from the single-slot `application_settings` hack to the
-/// dedicated single-use `oauth_states` table.
 fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
     let query: Vec<(String, String)> = url::form_urlencoded::parse(req.query.as_bytes())
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
@@ -477,13 +375,6 @@ fn handle_callback(req: &Request, ctx: &LoopbackCtx) -> Response {
         );
     }
 
-    // Clean-audit item 93: the redirect-URI verifier. The state was
-    // issued for one specific redirect (host:port recorded at issue
-    // time); the callback must land on the SAME listener. A state
-    // recorded for a different port — an old port from a previous
-    // session with an OS-assigned listener, or another local program
-    // redeeming a state it captured — is rejected before the code is
-    // exchanged.
     let redirect_ok =
         ctx.db.with_read(
             |conn| match crate::oauth_state::redirect_uri_for(conn, state_param) {
@@ -575,7 +466,6 @@ fn store_me_remote_id(conn: &Connection, remote_id: i64) {
     );
 }
 
-/// Running loopback listener. Dropping it stops the accept thread.
 pub struct LoopbackServer {
     port: u16,
     shutdown: Arc<AtomicBool>,
@@ -583,9 +473,6 @@ pub struct LoopbackServer {
 }
 
 impl LoopbackServer {
-    /// Bind `127.0.0.1:port` (port 0 = OS-assigned; see [`Self::port`])
-    /// and start serving. Only the two documented routes exist; everything
-    /// else is rejected.
     pub fn start(db: DbHandle, handle: Arc<ProviderHandle>, port: u16) -> std::io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         let bound_port = listener.local_addr()?.port();
@@ -609,23 +496,18 @@ impl LoopbackServer {
         })
     }
 
-    /// The bound port (useful when started on an OS-assigned port).
     #[must_use]
     pub fn port(&self) -> u16 {
         self.port
     }
 
-    /// Base URL of the listener, e.g. `http://127.0.0.1:39877/`.
     #[must_use]
     pub fn base_url(&self) -> String {
         format!("http://127.0.0.1:{}/", self.port)
     }
 
-    /// Stop the accept thread. Idempotent; also runs on drop.
     pub fn stop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
-        // Unblocks the accept() call: a connect-and-drop is the portable
-        // way without platform-specific socket APIs.
         if self.port > 0 {
             let _ = std::net::TcpStream::connect(("127.0.0.1", self.port));
         }
@@ -648,11 +530,6 @@ fn serve(listener: TcpListener, ctx: Arc<LoopbackCtx>, shutdown: Arc<AtomicBool>
                 if shutdown.load(Ordering::SeqCst) {
                     break;
                 }
-                // One thread per connection: the OAuth code exchange can
-                // take seconds, and webhook bursts must not queue behind
-                // it. On thread-spawn failure (resource exhaustion) the
-                // connection is dropped — the webhook sender retries, and
-                // the browser shows its own error.
                 let spawned = std::thread::Builder::new()
                     .name("spp-loopback-conn".to_string())
                     .spawn({
@@ -688,7 +565,7 @@ fn handle_connection(stream: &mut TcpStream, ctx: &LoopbackCtx) -> std::io::Resu
     let _ = stream.set_write_timeout(Some(READ_TIMEOUT));
     let req = match read_request(stream)? {
         Some(req) => req,
-        None => return Ok(()), // closed before sending anything
+        None => return Ok(()),
     };
     let response = handle_request(&req, ctx);
     stream.write_all(&response.serialize())?;
@@ -697,9 +574,6 @@ fn handle_connection(stream: &mut TcpStream, ctx: &LoopbackCtx) -> std::io::Resu
     Ok(())
 }
 
-/// Read and parse one HTTP/1.1 request. `Ok(None)` = peer closed cleanly
-/// before the header block. Oversized or malformed input is an error; the
-/// caller drops the connection.
 fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
     let mut chunk = [0u8; 2048];
@@ -751,7 +625,7 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
             ));
         }
         let Some((name, value)) = line.split_once(':') else {
-            continue; // tolerate junk lines, like most minimal servers
+            continue;
         };
         headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
     }
@@ -812,8 +686,6 @@ mod tests {
         DbHandle::new(conn)
     }
 
-    /// Install the secrets master key for tests that store/read a webhook
-    /// secret (in-memory databases have no key file to anchor one next to).
     fn install_master_key() {
         let key_path =
             std::env::temp_dir().join(format!("spp-loopback-test-key-{}.key", std::process::id()));
@@ -836,7 +708,6 @@ mod tests {
         }
     }
 
-    /// Canned OAuth completion for tests.
     struct FakeOAuth {
         result: Option<ConnectedIdentity>,
     }
@@ -852,8 +723,6 @@ mod tests {
     fn ctx(oauth: Option<FakeOAuth>) -> LoopbackCtx {
         LoopbackCtx {
             db: fixture_db(),
-            // Port 1 matches the "http://127.0.0.1:1/" redirect URIs the
-            // callback tests issue their states with.
             port: 1,
             oauth: oauth.map(|f| Arc::new(f) as Arc<dyn OAuthCompletion>),
         }
@@ -862,8 +731,6 @@ mod tests {
     fn body_str(r: &Response) -> String {
         String::from_utf8_lossy(&r.body).into_owned()
     }
-
-    // --- routing ---
 
     #[test]
     fn unknown_paths_and_methods_are_rejected() {
@@ -890,8 +757,6 @@ mod tests {
         assert!(body_str(&r).contains("/webhook"));
     }
 
-    // --- webhook route ---
-
     #[test]
     fn webhook_maps_result_status_codes() {
         let c = ctx(None);
@@ -917,7 +782,6 @@ mod tests {
         assert_eq!(r.status, 200);
         assert_eq!(body_str(&r), "{\"received\":true}");
 
-        // Duplicate of the same body: still 200, flagged.
         let r = handle_request(
             &request(
                 "POST",
@@ -968,8 +832,6 @@ mod tests {
         );
         assert_eq!(r.status, 401);
 
-        // No secret configured: hard reject (a fresh database
-        // without the secret, same request shape).
         let c = ctx(None);
         let r = handle_request(
             &request(
@@ -998,14 +860,9 @@ mod tests {
         assert_eq!(r.status, 400);
     }
 
-    // --- OAuth callback route ---
-
     #[test]
     fn callback_without_oauth_explains_the_real_state() {
-        // No live provider in this session (no credentials at boot, or
-        // credentials saved after boot): the page must describe that
-        // real state instead of a made-up one.
-        let c = ctx(None); // oauth = None
+        let c = ctx(None);
         let r = handle_request(
             &request("GET", "/oauth/callback?code=1&state=2", &[], b""),
             &c,
@@ -1061,14 +918,12 @@ mod tests {
                 remote_id: 7,
             }),
         }));
-        // No state was ever issued.
         let r = handle_request(
             &request("GET", "/oauth/callback?code=1&state=deadbeef", &[], b""),
             &c,
         );
         assert!(body_str(&r).contains("did not match"));
 
-        // Issue a state, consume it once successfully, then replay it.
         let state = c
             .db
             .with_write(|conn| crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/", None))
@@ -1139,8 +994,6 @@ mod tests {
         assert!(body_str(&r).contains("exchange failed"));
     }
 
-    // --- helpers ---
-
     #[test]
     fn port_from_redirect_uri_extracts_loopback_ports() {
         assert_eq!(
@@ -1174,7 +1027,6 @@ mod tests {
 
     #[test]
     fn listener_answers_only_for_the_real_loopback_server() {
-        // Our listener: identifies itself on /healthz.
         let db = fixture_db();
         let mut server = LoopbackServer::start(
             db,
@@ -1188,8 +1040,6 @@ mod tests {
         );
         server.stop();
 
-        // A foreign silent program holding the port (the 1.1.3 dead-end:
-        // connect() succeeds, the OAuth flow does not) must NOT count.
         let squatter = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind squatter");
         let squatter_port = squatter.local_addr().expect("addr").port();
         assert!(
@@ -1198,17 +1048,12 @@ mod tests {
         );
         drop(squatter);
 
-        // Nothing listening at all.
         let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind probe");
         let closed_port = probe.local_addr().expect("addr").port();
         drop(probe);
         assert!(!listener_answers(closed_port), "a closed port must fail");
     }
 
-    /// Clean-audit batch 28 (item 93): the OAuth state TTL and the
-    /// redirect-URI verifier — the sweeper and the recorded redirect_uri
-    /// existed but nothing ever called either, so states never expired and
-    /// the callback never checked where the flow started.
     mod batch28_oauth_tests {
         use super::*;
 
@@ -1232,8 +1077,6 @@ mod tests {
 
         fn backdate_state(db: &DbHandle, state: &str, hours: i64) {
             db.with_write(|conn| {
-                // Age BOTH clocks: an unconsumed state dies of old
-                // created_at, a consumed one of old consumed_at.
                 conn.execute(
                     "UPDATE oauth_states
                     SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?2),
@@ -1246,8 +1089,6 @@ mod tests {
             });
         }
 
-        /// A state issued for listener port 2 must not redeem on listener
-        /// port 1 — the recorded redirect URI is now actually verified.
         #[test]
         fn audit93_callback_rejects_a_state_issued_for_another_port() {
             let c = ctx_on_port(good_oauth(), 1);
@@ -1268,7 +1109,6 @@ mod tests {
                 "the code must not be exchanged on a mismatch"
             );
 
-            // The state stays consumed (single-use burned) even on mismatch.
             let again = handle_request(&request("GET", &target, &[], b""), &c);
             assert!(
                 body_str(&again).contains("did not match"),
@@ -1276,12 +1116,9 @@ mod tests {
             );
         }
 
-        /// A state older than the TTL is dead whether or not it was consumed
-        /// — the "may have expired" message finally tells the truth.
         #[test]
         fn audit93_stale_states_expire() {
             let c = ctx_on_port(good_oauth(), 1);
-            // Unconsumed but issued an hour ago: rejected.
             let stale =
                 c.db.with_write(|conn| {
                     crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/oauth/callback", None)
@@ -1295,8 +1132,6 @@ mod tests {
                 "an expired state is rejected like an unknown one"
             );
 
-            // Fresh state on the right port: still accepted (the TTL does not
-            // break the happy path).
             let fresh =
                 c.db.with_write(|conn| {
                     crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/oauth/callback", None)
@@ -1310,13 +1145,9 @@ mod tests {
             );
         }
 
-        /// The TTL sweeper runs (wired into begin_oauth) and removes both
-        /// consumed-old and abandoned-old states.
         #[test]
         fn audit93_sweep_states_runs_on_every_new_authorization() {
             let c = ctx_on_port(None, 1);
-            // Seed the graveyard: a consumed-old state, an abandoned-old
-            // state, and (after the sweep) the fresh one.
             let consumed =
                 c.db.with_write(|conn| {
                     crate::oauth_state::issue_state(conn, "http://127.0.0.1:1/oauth/callback", None)
@@ -1364,11 +1195,6 @@ mod tests {
     }
 }
 
-/// Clean-audit item 32: the loopback verifies signatures with the same
-/// canonical `effective_secret` registration uses — a stored secret over
-/// the platform's 40-character cap verifies against its truncation
-/// (what the platform actually signs with), never against the full string
-/// that no registration ever held.
 #[cfg(test)]
 mod batch22_audit32_tests {
     use super::*;
@@ -1406,9 +1232,6 @@ mod batch22_audit32_tests {
             std::env::temp_dir().join(format!("spp-loopback-b22-key-{}.key", std::process::id()));
         crate::settings::init_master_key(&key_path).expect("init master key");
 
-        // A 60-character secret — over the platform's 40-char cap. The
-        // health check registers the hook with the first 40 characters,
-        // so the platform signs deliveries with the truncation.
         let long_secret: String = "s".repeat(60);
         c.db.with_write(|conn| {
             crate::settings::set_secret(conn, "webhook_secret", long_secret.as_bytes())
@@ -1419,7 +1242,6 @@ mod batch22_audit32_tests {
         let effective = crate::webhook::effective_secret(&long_secret);
         assert_eq!(effective.chars().count(), 40, "the cap applied");
 
-        // Signed with the truncation (what the platform holds): accepted.
         let good_sig = crate::webhook::compute_signature(effective.as_bytes(), body);
         let r = handle_request(
             &request(
@@ -1438,10 +1260,6 @@ mod batch22_audit32_tests {
             "the pre-fix loopback rejected exactly this delivery (verify-full vs register-capped)"
         );
 
-        // Signed with the FULL stored secret — a signature no platform
-        // registration can ever produce for this account: still rejected,
-        // proving the verification boundary is the canonical truncation,
-        // not the raw stored value.
         let wrong_sig = crate::webhook::compute_signature(long_secret.as_bytes(), body);
         let r = handle_request(
             &request(
@@ -1457,7 +1275,6 @@ mod batch22_audit32_tests {
         );
         assert_eq!(r.status, 401, "the full-secret signature never verified");
 
-        // Cleanup: drop the key file so parallel tests don't reuse it.
         let _ = std::fs::remove_file(&key_path);
     }
 }

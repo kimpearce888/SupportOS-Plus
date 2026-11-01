@@ -57,8 +57,6 @@ pub enum AiBackend {
     LmStudio {
         client: OpenAiCompatibleClient,
         model: Option<String>,
-        /// Which provider-hub endpoint served this backend (A1 cost
-        /// ledger); `None` for the legacy pre-hub fallback backend.
         endpoint_id: Option<String>,
     },
     Disabled,
@@ -100,8 +98,6 @@ impl AiBackend {
         }
     }
 
-    /// The provider-hub endpoint serving this backend, when routed
-    /// through the hub (A1 cost ledger attribution).
     #[must_use]
     pub fn endpoint_id(&self) -> Option<&str> {
         match self {
@@ -197,7 +193,6 @@ pub struct ChatJsonResult {
     pub raw: Option<String>,
     pub latency_ms: u64,
     pub model: String,
-    /// Token usage reported by the endpoint (A1 cost ledger).
     pub usage: Option<crate::ai_provider::TokenUsage>,
 }
 
@@ -371,8 +366,6 @@ pub fn complete_run(
     complete_run_with_usage(conn, id, output, latency_ms, None, None)
 }
 
-/// Complete a run and persist its token usage + endpoint (the A1 cost
-/// ledger's raw material: `ai_runs.token_usage` and `ai_runs.endpoint_id`).
 pub fn complete_run_with_usage(
     conn: &Connection,
     id: i64,
@@ -455,12 +448,6 @@ pub fn get_analysis_signature(conn: &Connection, conversation_id: i64) -> String
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap_or((0, 0));
-    // C1: fold EVERY live thread's content hash into the signature, not
-    // just the newest row's — an in-place edit to any thread (body edit,
-    // state flip re-synced through `upsert_thread`) must invalidate the
-    // cached analysis. Rows synced before the hash writer existed
-    // contribute an empty string, which keeps the signature deterministic
-    // for pre-fix data (one honest re-analysis after upgrade).
     let mut hasher = Sha256::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT COALESCE(raw_json_hash, '') FROM conversation_threads
@@ -596,9 +583,6 @@ pub fn save_analysis(
     Ok(())
 }
 
-/// The `ai_sources` rows a completed run stored (clean-audit item 38:
-/// a cache hit must serve the hash-matched run's OWN sources, not the
-/// newest conversation's).
 fn sources_for_run(conn: &Connection, run_id: i64) -> Result<Vec<AiSourceRef>> {
     let mut stmt = conn.prepare(
         "SELECT source_type, source_id, title, relevance, visibility, timestamp
@@ -897,20 +881,6 @@ pub async fn analyze_ticket(
             &hash,
             PROMPT_VERSIONS_TICKET_ANALYSIS,
         )
-        // Clean-audit item 38: the cache-hit path used to pair the
-        // hash-matched run's id with `get_latest_analysis`'s NEWEST
-        // analysis for the conversation — once the conversation had
-        // evolved and its content reverted (or a force re-run had stored
-        // a newer run), the served analysis came from a different, newer
-        // run while its provenance pointed at the older hash-matched
-        // one. The cache now serves exactly the hash-matched run's own
-        // output and sources; an unparseable cached row degrades to a
-        // fresh computation instead of serving mismatched data.
-        // Clean-audit item 96 adds the content gate: a cached run whose
-        // output parses into an EMPTY analysis (the pre-fix pipeline
-        // accepted and cached `{}` answers) degrades to a fresh
-        // computation too, so the bad row ages out instead of being
-        // served forever.
         && let Some(cached_json) = serde_json::from_str::<serde_json::Value>(&cached.output).ok()
         && let Some(analysis) = parse_ticket_analysis(Some(&cached_json))
         && analysis_has_core_content(&analysis)
@@ -952,10 +922,6 @@ pub async fn analyze_ticket(
     {
         Ok(r) => r,
         Err(e) => {
-            // 1.3.0: a transport failure (LM Studio not running, model
-            // name typo, timeout) used to propagate with `?` BEFORE the
-            // run was marked failed — the ai_runs row stayed "running"
-            // forever and the AI Center rendered it with a green badge.
             let _ = fail_run(
                 conn,
                 run_id,
@@ -978,12 +944,6 @@ pub async fn analyze_ticket(
             ));
         }
     };
-    // Clean-audit item 96: `parse_ticket_analysis` happily parses an
-    // empty `{}` into an all-empty analysis, so a model answer with no
-    // usable field was COMPLETED and CACHED — and then served from the
-    // cache forever. The eval gate (ai_eval.rs) already rejected the
-    // same output ("at least one non-empty core field"); the pipeline
-    // now enforces the identical gate before anything is persisted.
     if !analysis_has_core_content(&analysis) {
         let _ = fail_run(
             conn,
@@ -1016,11 +976,6 @@ pub async fn analyze_ticket(
     })
 }
 
-/// Clean-audit item 96: the content gate the golden eval already
-/// enforced (`ai_eval.rs`: "at least one non-empty core field") — now
-/// applied by the analysis pipeline itself. A parseable-but-empty
-/// analysis (`{}`) is not a usable answer; it must not be completed,
-/// cached, or served.
 fn analysis_has_core_content(a: &TicketAnalysis) -> bool {
     [
         a.summary.as_deref(),
@@ -1148,18 +1103,9 @@ pub async fn generate_draft(
         .and_then(|j| {
             j.get("draft")
                 .and_then(|d| d.as_str())
-                // A bare JSON string IS the draft (a model that answered
-                // with one quoted string).
                 .or_else(|| j.as_str())
         })
         .map(|s| s.to_string());
-    // Clean-audit item 39: the fallback used to store `res.raw`
-    // whenever the "draft" key was missing — if the model answered with
-    // a JSON envelope under a different key (or wrong value type), the
-    // customer-facing draft BECAME the raw envelope itself. The raw
-    // text is now only accepted when NO parseable JSON exists at all
-    // (a plain-prose answer); a parsed envelope without a usable draft
-    // fails loudly instead of silently storing the envelope.
     let draft_text = match json_draft {
         Some(t) if !t.trim().is_empty() => t.trim().to_string(),
         _ if res.json.is_none() => match res.raw.as_deref().map(str::trim) {
@@ -1335,8 +1281,6 @@ fn parse_draft_verification(json: Option<&serde_json::Value>) -> DraftVerificati
     }
 }
 
-/// The shared rewrite-instruction map (composer AI menu + stored-draft
-/// rewrite both speak it).
 #[must_use]
 pub fn rewrite_instruction(instruction: &str) -> &'static str {
     match instruction {
@@ -1352,12 +1296,6 @@ pub fn rewrite_instruction(instruction: &str) -> &'static str {
     }
 }
 
-/// Clean-audit item 97: the rewrite lanes carry agent-typed draft text —
-/// quotes of customer-supplied card numbers, secrets and keys included —
-/// across the model boundary. They now cross the same prompt-redaction
-/// boundary as every other lane (`redaction_enabled`, default on)
-/// instead of bypassing it: the model sees placeholders, and any
-/// findings are logged for the operator.
 fn redact_for_model(conn: &Connection, text: &str) -> String {
     let enabled = crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
     let (safe, findings) = crate::security::redact_text(text, enabled);
@@ -1371,12 +1309,6 @@ fn redact_for_model(conn: &Connection, text: &str) -> String {
     safe
 }
 
-/// A3 composer rewrite: the raw composer text variant of [`rewrite_draft`].
-///
-/// Works on whatever the composer holds (not just stored ai_drafts rows) so
-/// the pre-send menu can transform any draft, and — unlike the stored-draft
-/// path — records an `ai_runs` row (kind `draft_rewrite`, with usage +
-/// endpoint) so the A6 usage dashboard sees every rewrite.
 pub async fn rewrite_composer_text(
     conn: &Connection,
     backend: &AiBackend,
@@ -1395,8 +1327,6 @@ pub async fn rewrite_composer_text(
         AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
         AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
     };
-    // Clean-audit item 97: the raw composer text (often quoting customer
-    // PII) crosses the redaction boundary before it reaches the model.
     let safe_text = redact_for_model(conn, text);
     let messages = vec![
         ChatMessage {
@@ -1475,9 +1405,6 @@ pub async fn rewrite_draft(
         AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
         AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
     };
-    // Clean-audit item 97: the stored draft crosses the same redaction
-    // boundary as the composer variant — a draft quoting a customer's
-    // card number or API key must not reach the model verbatim.
     let safe_content = redact_for_model(conn, &draft.content);
     let messages = vec![
         ChatMessage {
@@ -1636,12 +1563,6 @@ pub struct ClusterOut {
     pub conversation_ids: Vec<i64>,
 }
 
-/// Clean-audit item 42: the clustering prompt used to include EVERY
-/// conversation in the window — at volume (a busy week of thousands of
-/// tickets) the list blew the model's context window and the whole run
-/// failed. The list is capped to the NEWEST conversations of the window
-/// and the prompt says the cap out loud so the model does not treat the
-/// sample as the population.
 const CLUSTER_PROMPT_CONVERSATION_CAP: usize = 250;
 
 pub async fn cluster_issues(
@@ -1687,8 +1608,6 @@ pub async fn cluster_issues(
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
         .filter_map(|r| r.ok())
         .collect();
-    // The prompt presents the sample in stable number order (the SQL
-    // above picked the newest first).
     conversations.sort_by_key(|(_, c)| c.number);
     if conversations.len() < 3 {
         return Ok(Vec::new());
@@ -1943,8 +1862,6 @@ mod batch13_a3_a6_tests {
         conn
     }
 
-    /// A3: the composer rewrite refuses honestly without a backend instead of
-    /// inventing a transform, and records no run.
     #[test]
     fn rewrite_composer_text_refuses_without_backend() {
         let conn = db();
@@ -1976,8 +1893,6 @@ mod batch13_a3_a6_tests {
         assert_eq!(runs, 0, "no run row for a refused rewrite");
     }
 
-    /// A6: record_feedback computes the real edit distance and the draft
-    /// state advances — the edit-rate the usage dashboard renders is real.
     #[test]
     fn record_feedback_computes_edit_distance() {
         let conn = db();
@@ -2019,20 +1934,6 @@ mod batch13_a3_a6_tests {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Batch 14 — K2 article drafting, K4 weekly digest
-// ---------------------------------------------------------------------------
-
-/// K2: draft a knowledge-base article for a gap candidate from its best
-/// resolutions. The draft lands in the review queue (`article_drafts`,
-/// status `drafted`) — nothing is published, nothing touches the Docs API;
-/// a human decision is the only way forward. Returns the new queue row id.
-///
-/// Honest refusals (no error rows, no queue entries):
-/// - unknown candidate id, or a queue row already exists for it;
-/// - no closed-with-published-reply evidence → there is nothing grounded
-///   to draft from (an article without resolutions would be invention);
-/// - no routed Draft backend → the same honest setup error as the composer.
 pub async fn draft_article(
     conn: &Connection,
     backend: &AiBackend,
@@ -2068,9 +1969,6 @@ pub async fn draft_article(
             false,
         ));
     }
-    // The backend check precedes the run row (and follows the data-truth
-    // checks): a refused (unrouted) job must leave no trace in the ledger —
-    // the composer rewrite contract.
     if matches!(backend, AiBackend::Disabled) {
         return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false));
     }
@@ -2135,11 +2033,6 @@ pub async fn draft_article(
     Ok(draft_id)
 }
 
-/// K4: generate and archive one digest. Facts are always collected and
-/// stored (the deterministic half is useful alone); the AI narrative is
-/// written when the Summarize backend is routed, otherwise the digest is
-/// archived `facts_only` and the UI offers the narrative on demand.
-/// Returns the digest row id.
 pub async fn weekly_digest(
     conn: &Connection,
     backend: &AiBackend,
@@ -2183,15 +2076,6 @@ pub async fn weekly_digest(
                                 .map(|r| r.trim().to_string())
                                 .filter(|r| !r.is_empty())
                         });
-                    // Clean-audit item 95: the pre-fix path completed the
-                    // ledger row FIRST (complete_run_with_usage) and only
-                    // then decided whether the narrative was usable — so
-                    // a model answer with no narrative left an ai_runs
-                    // row saying "completed" while the digest row said
-                    // "failed" (and the cost ledger priced a success that
-                    // never happened). The verdict now decides the
-                    // ledger: a usable narrative completes the run, an
-                    // unusable one fails it.
                     match narrative {
                         Some(n) if !n.trim().is_empty() => {
                             let _ = complete_run_with_usage(
@@ -2275,8 +2159,6 @@ mod batch14_k2_k4_tests {
         conn.last_insert_rowid()
     }
 
-    /// K2: the honest refusals — unknown candidate, no grounded evidence,
-    /// disabled backend — never touch the queue or the run table.
     #[test]
     fn draft_article_refuses_honestly() {
         let conn = db();
@@ -2285,7 +2167,6 @@ mod batch14_k2_k4_tests {
             .build()
             .expect("runtime");
 
-        // Unknown candidate.
         let err = rt
             .block_on(draft_article(&conn, &AiBackend::Disabled, 4242))
             .expect_err("unknown candidate");
@@ -2295,7 +2176,6 @@ mod batch14_k2_k4_tests {
             err_message = err.message
         );
 
-        // Real candidate but no backend routed.
         let candidate = seed_candidate_with_resolution(&conn);
         let err = rt
             .block_on(draft_article(&conn, &AiBackend::Disabled, candidate))
@@ -2314,8 +2194,6 @@ mod batch14_k2_k4_tests {
             .unwrap_or(0);
         assert_eq!(runs, 0, "no run row for a refused draft");
 
-        // A candidate whose evidence has no closed conversations with
-        // published replies has nothing grounded to draft from.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status, remote_created_at)
              VALUES (702, 702, 'Still open', 'p', 'active', '2026-10-20T08:00:00.000Z')",
@@ -2342,8 +2220,6 @@ mod batch14_k2_k4_tests {
         );
     }
 
-    /// K4: a disabled backend still archives the digest facts-only; a
-    /// digest with a narrative is complete. Both are searchable.
     #[test]
     fn weekly_digest_archives_facts_without_backend() {
         let conn = db();
@@ -2360,7 +2236,6 @@ mod batch14_k2_k4_tests {
         assert_eq!(row.trigger_kind, "manual");
         assert!(row.facts["volume"]["new_conversations"].is_number());
         assert!(row.facts["what_changed"]["new_gap_candidates"].is_array());
-        // The archive is searchable through the facts JSON.
         assert_eq!(
             crate::digest::list_digests(&conn, Some("deterministic digest facts"), 5).len(),
             1
@@ -2440,16 +2315,12 @@ mod batch23_audit_tests {
         run_id
     }
 
-    /// Item 38: a cache hit serves the hash-matched run's OWN analysis
-    /// and sources — not the newest conversation analysis under the
-    /// hash-matched run's id.
     #[test]
     fn cache_hit_serves_the_hash_matched_runs_own_analysis() {
         let conn = db();
         let conv = seed_conversation(&conn);
         let hash = input_hash(conv, &get_analysis_signature(&conn, conv));
 
-        // Run A: the hash-matched (older) run, its own analysis + source.
         let run_a = seed_run(
             &conn,
             conv,
@@ -2458,7 +2329,6 @@ mod batch23_audit_tests {
             "A: the invite bounces",
             Some("A-source"),
         );
-        // Run B: a newer run under a stale hash, a DIFFERENT analysis, its own source.
         let _run_b = seed_run(
             &conn,
             conv,
@@ -2503,9 +2373,6 @@ mod batch23_audit_tests {
         assert_eq!(outcome.sources[0].title, "A-source");
     }
 
-    /// Item 39: the draft fallback no longer stores the raw JSON envelope
-    /// as the draft — an envelope without a usable draft field fails
-    /// loudly, and a plain-prose answer still becomes the draft.
     #[test]
     fn draft_fallback_no_longer_stores_the_raw_json_envelope() {
         fn chat_body(content: &str) -> crate::mockserver::MockResponse {
@@ -2522,8 +2389,6 @@ mod batch23_audit_tests {
             )
         }
 
-        // Case 1: the model answers with a JSON envelope under a wrong
-        // key — the pre-fix code stored the whole envelope as the draft.
         {
             let conn = db();
             let conv = seed_conversation(&conn);
@@ -2578,8 +2443,6 @@ mod batch23_audit_tests {
             assert_eq!(drafts, 0, "no draft row stores the envelope");
         }
 
-        // Case 2: a plain-prose answer (no JSON anywhere) still becomes
-        // the draft — that is the legitimate raw fallback.
         {
             let conn = db();
             let conv = seed_conversation(&conn);
@@ -2629,22 +2492,15 @@ mod batch23_audit_tests {
         }
     }
 
-    /// Item 40: the interaction-strategy prompt block renders real
-    /// strategy data — the stored recommendation (or the deterministic
-    /// heuristic), the customer's preferences, and what they already
-    /// provided — instead of a hard-coded None that left the whole
-    /// section unreachable.
     #[test]
     fn interaction_strategy_block_renders_real_strategy_data() {
         let conn = db();
-        // A conversation with no stored interaction data: no block.
         let bare = seed_conversation(&conn);
         assert!(
             build_interaction_strategy_block(&conn, bare).is_none(),
             "no stored signals - no block, honestly"
         );
 
-        // A customer + a conversation with stored interaction signals.
         conn.execute(
             "INSERT INTO customers (remote_id, first_name, last_name) VALUES (81, 'Ada', 'Lovelace')",
             [],
@@ -2697,8 +2553,6 @@ mod batch23_audit_tests {
             None,
         )
         .expect("current interaction");
-        // No AI recommendation stored: the deterministic heuristic must
-        // carry the block.
         let block =
             build_interaction_strategy_block(&conn, bare).expect("the heuristic carries the block");
         assert!(
@@ -2718,7 +2572,6 @@ mod batch23_audit_tests {
             "the instruction not to re-ask is present: {block}"
         );
 
-        // With a stored AI recommendation, its tone and strategy render.
         crate::interaction_engine::save_recommendation(
             &conn,
             bare,
@@ -2754,8 +2607,6 @@ mod batch23_audit_tests {
         );
     }
 
-    /// Item 42: the cluster prompt declares the sample cap when the
-    /// window holds more conversations than the prompt can carry.
     #[test]
     fn issue_cluster_prompt_declares_the_sample_cap() {
         let sample = vec![
@@ -2786,9 +2637,6 @@ mod batch23_audit_tests {
     }
 }
 
-/// Clean-audit batch 28 (items 95/96): the weekly-digest ledger verdict
-/// matching the narrative outcome, and the empty `{}` analysis rejected
-/// instead of accepted-and-cached.
 #[cfg(test)]
 mod batch28_ai_tests {
     use super::*;
@@ -2865,11 +2713,6 @@ mod batch28_ai_tests {
         .expect("run row")
     }
 
-    /// Item 96: a model answer of `{}` parses into an all-empty analysis
-    /// — the pre-fix pipeline completed AND cached it, and the cache
-    /// served the empty analysis forever (the eval gate already rejected
-    /// the same output). The pipeline now fails the run and caches
-    /// nothing.
     #[test]
     fn audit96_empty_analysis_object_is_rejected_not_cached() {
         let conn = db();
@@ -2883,7 +2726,6 @@ mod batch28_ai_tests {
         ]))
         .expect("mock");
 
-        // First attempt: the empty object is rejected, the run fails.
         let err = rt()
             .block_on(analyze_ticket(&conn, &backend(&mock), None, conv, false))
             .expect_err("an all-empty analysis is not a usable answer");
@@ -2899,9 +2741,6 @@ mod batch28_ai_tests {
             "the failure reason is honest: {error}"
         );
 
-        // Second attempt with a real answer succeeds — the rejected
-        // answer was never cached (a cache hit would have served the
-        // empty analysis again without touching the mock).
         let outcome = rt()
             .block_on(analyze_ticket(&conn, &backend(&mock), None, conv, false))
             .expect("a content-bearing analysis is accepted");
@@ -2914,16 +2753,10 @@ mod batch28_ai_tests {
         assert_eq!(status, "completed", "the good answer completes its run");
     }
 
-    /// Item 96, cache path: a completed row whose stored output parses
-    /// into an EMPTY analysis (written by the pre-fix pipeline) no longer
-    /// satisfies the cache — the conversation degrades to a fresh
-    /// computation instead of serving the empty analysis forever.
     #[test]
     fn audit96_cached_empty_analysis_degrades_to_fresh_computation() {
         let conn = db();
         let conv = seed_conversation(&conn);
-        // A pre-fix database: a completed, hash-matched run whose output
-        // is exactly the empty object.
         let signature = get_analysis_signature(&conn, conv);
         let hash = input_hash(conv, &signature);
         conn.execute(
@@ -2955,13 +2788,8 @@ mod batch28_ai_tests {
         );
     }
 
-    /// Item 95: the digest's ledger row matches the narrative verdict.
-    /// A model answer with no usable narrative used to COMPLETE the
-    /// ai_runs row (and price it in the cost ledger) while the digest
-    /// row said "failed" — the verdict now decides the ledger.
     #[test]
     fn audit95_weekly_digest_ledger_matches_the_narrative_verdict() {
-        // Case A: the model returns an empty answer — no narrative.
         {
             let conn = db();
             let mock =
@@ -2982,7 +2810,6 @@ mod batch28_ai_tests {
             );
         }
 
-        // Case B: a real narrative completes both rows.
         {
             let conn = db();
             let mock =
@@ -3012,11 +2839,6 @@ mod batch28_ai_tests {
 mod batch29_audit97_tests {
     use super::*;
 
-    /// Clean-audit item 97: both rewrite paths (the composer variant and
-    /// the stored-draft variant) must cross the same redaction boundary
-    /// every other lane uses — a draft quoting a customer's card number
-    /// reaches the model as a placeholder, never as raw digits. The
-    /// `redaction_enabled` setting stays the switch.
     #[test]
     fn audit97_rewrite_prompt_is_redacted() {
         let mut conn = rusqlite::Connection::open_in_memory().expect("db");
@@ -3035,8 +2857,6 @@ mod batch29_audit97_tests {
             !safe.contains("4111 1111 1111 1111"),
             "raw card digits are forbidden in the rewrite prompt: {safe}"
         );
-        // The rewrite instruction map and the redacted text compose the
-        // user message on both paths.
         let user = format!(
             "{}\n\nReply to rewrite:\n\"\"\"\n{}\n\"\"\"",
             rewrite_instruction("warmer"),
@@ -3045,7 +2865,6 @@ mod batch29_audit97_tests {
         assert!(user.contains("[REDACTED-CARD]"));
         assert!(user.starts_with("Rewrite the reply with a warmer"));
 
-        // The setting is the switch: redaction off passes the text through.
         crate::settings::set_bool(&conn, "redaction_enabled", false).expect("setting");
         assert_eq!(redact_for_model(&conn, draft), draft);
     }

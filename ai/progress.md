@@ -806,3 +806,108 @@ per plan.md (opens on the owner's `continue`): Batch RF-11 — comment
 deletion (LAST), then FINISH.
 
 
+
+## Batch RF-11 — comment deletion (items RF-11-1..RF-11-10)
+
+**Batch RF-11 (items RF-11-1..RF-11-10)** — active, moved from plan.md per Rule 2
+(2026-11-01). Source: plan.md RF-11 (LAST batch of the program order): "All
+comments deleted in one final wave (module docs, item docs, inline); rustfmt +
+full gates after." Census at open (RF-11-1) selected the ten deletion waves
+below; every wave = one module group stripped + compiled + gated.
+
+1. **RF-11-1 (census + protection contract)** — Rust-lexer census of all four
+   crates: **11,929 comment lines** (11,927 line comments + 2 block comments —
+   pages/ai_center.rs:742 and pages/knowledge.rs:1133 `/* DC sp-1 */`;
+   zero `/**`/`/*!` doc blocks) ≈ 693 KB. Protection rules recorded at open:
+   (a) the stripper is a real lexer (strings, raw strings, byte strings, char
+   literals, lifetimes, nested block comments) — comment-like sequences inside
+   string literals (SQL `--`, `https://`, security.rs's CSS `/*…*/` prose) are
+   structurally unreachable; (b) **gate-locked keeps**: every DS-id-bearing
+   comment line in `design/mod.rs` (58 lines) stays byte-identical so
+   gate_traceability's "20 design.rs DC tags valid" output is unchanged;
+   (c) `missing_docs` probe (rustc -D warnings on the core/catalog attr pair):
+   the later `#![allow(..., missing_docs)]` overrides the earlier
+   `#![warn(..., missing_docs)]` — doc deletion fires zero missing_docs
+   warnings, **zero lib.rs attribute edits needed**; (d) `style-lint:allow`
+   opt-outs: zero exist (nothing to preserve); (e) `#[doc(hidden)]`
+   (pages/operations.rs:242) is an attribute, not a comment — stays.
+2. **RF-11-2 (core root wave 1)** — 41 alphabetical files activity.rs→inbox.rs
+   (~1,950 comment lines; heaviest: loopback 181, webhook_health 177,
+   vectorstore_sqlitevec 158, it_helpscout 145, embeddings 136). Includes the
+   NO-TOUCH members `ai_center.rs`, `db.rs` — **comment-only edits** (the
+   RF-8 record: "intelligence.rs:46 comment … dies at RF-11" fixes the
+   program's intent: NO-TOUCH = zero semantic/code edits, comments die with
+   the batch; non-comment bytes stay byte-identical).
+3. **RF-11-3 (core root wave 2)** — the remaining 42 root files
+   (~1,945 lines; maintenance.rs, response_state_sql.rs — the other root
+   NO-TOUCH members, comment-only).
+4. **RF-11-4 (core subdirs wave 1)** — workers/ (556), helpscout_real/ (314),
+   ai_pipeline/ (180), sync_engine/ (228) — the four heaviest subtrees.
+5. **RF-11-5 (core subdirs wave 2)** — all remaining subdirs incl.
+   `migrations/` (NO-TOUCH `migrations/intelligence.rs` comment-only; the
+   MIGRATIONS SQL string contents — including `--` sequences inside the
+   strings — byte-identical, migration-SQL red line untouched), outreach/,
+   quality/, search/, reports/, people_store/, saved_views/, segment/,
+   support_graph/, coaching/ and siblings.
+6. **RF-11-6 (catalog + xtask)** — catalog/src (9 lines, 2 files) +
+   xtask/src incl. bin/ (265 lines: package 229, lib 10, icons 4, bin 22).
+7. **RF-11-7 (app-shell root + app/)** — 15 root files (732; palette 130,
+   lib 113, toasts 62, chart 53, main 51) + app/ (198: mod 174, chrome 24).
+8. **RF-11-8 (app-shell pages/)** — 21 page files (~2,962 lines; inbox 513,
+   settings 360, ai_center 197 …) — the pages/ DC sp-1 block comments die
+   here (gate_traceability does not read pages/).
+9. **RF-11-9 (design/ + external test suites)** — design/mod.rs (389) with
+   the 58 DS-id lines byte-identical (RF-11-1 rule b; everything else in the
+   file deleted), design/controls.rs (13); then crates/app-shell/tests/
+   (24 kittest suites + style_lint.rs, ~1,210 lines) — CI-lane suites,
+   comment-only edits, compile-checked via `--all-targets`, goldens
+   unaffected (comments never render).
+10. **RF-11-10 (closing gate)** — `cargo fmt --all` (apply + re-check),
+    `cargo check --workspace --all-targets`, clippy `--workspace
+    --all-targets -D warnings`, gate_traceability (must print the identical
+    "23 routes / 20 DC tags / 27 ids" line), gate_no_simulation,
+    verify-icons, **style_lint explicit (RF-6 lesson)**, core lib
+    `--test-threads=1` (495/0/4ig), app-shell lib (237/0), xtask (11/0),
+    doc-tests (0/0), kittest 24 suites = CI lane; diff proof that zero
+    string-literal bytes changed (SQL/prompt/URL lines); ai records synced;
+    single commit; push.
+
+Batch verification (Rule 5, before any item completes): the table above is
+the gate list; every row must be green with numbers recorded in this file
+before the batch moves to completed.md.
+
+Batch verification results (all green): fmt clean (applied + re-checked
+after the last content edit — the stripper's line removals and the four
+collapse sites reflowed); cargo check --workspace --all-targets 0 errors;
+clippy `--workspace --all-targets -D warnings` 0 (after 4 disclosed
+collapse fixes, see below); gate_traceability OK — **identical output
+line**: 23 routes / 20 DC tags / 27 ids, alias declared True (the 58
+DS-id lines kept byte-identical); gate_no_simulation clean; verify-icons
+clean; style_lint 2 passed / 0 failed (explicit — RF-6 lesson); core lib
+495 passed / 0 failed / 4 ignored (--test-threads=1, 353.10s — the full
+suite incl. the collapsed people_store path executes); app-shell lib
+237/0 (204.41s); xtask 11/0; doc-tests 0/0 (all four crates); kittest 24
+suites = CI lane. Structural proofs: string-literal multiset identity
+verified for all 179 changed .rs files against HEAD (0 failures — SQL,
+prompts, URLs, UI strings byte-identical); residual census = exactly 58
+comment lines, all in design/mod.rs, all DS-id-bearing; NO-TOUCH five =
+pure deletions only (0 insertions: ai_center −5, db −80, maintenance
+−10, migrations/intelligence −6, response_state_sql 0 comments),
+including the RF-8-recorded intelligence.rs:46 comment death.
+
+Disclosed deviation (the batch's only non-comment code bytes): clippy's
+`collapsible_if` is comment-aware — 11,929 deleted comments exposed four
+latently-collapsible `if`s the intervening comments had been suppressing:
+people_store/mod.rs:706 (collapsed by hand per the machine suggestion),
+overlays.rs:119, pages/operations.rs:337, pages/settings.rs:810 (applied
+via `cargo clippy --fix` machine suggestions, then fmt-reflowed). All
+four are compiler-suggested, zero-behavior-change restructures, proven
+by the full suite (495 + 237 + 11). Scope: .rs files only — harness
+(scripts/*.py, ci.yml), Cargo.toml, and ai/*.md records keep their
+comments; kittest/style_lint suites included (comments never render;
+compile-checked via --all-targets, goldens unaffected).
+
+Batch RF-11 completed and moved to `completed.md` (2026-11-01): the
+comment-free tree — 11,871 comment lines deleted, 58 gate-locked DS-id
+lines kept. Next per plan.md (opens on the owner's `continue`): FINISH —
+rollback instructions + the known-bugs list carried verbatim.

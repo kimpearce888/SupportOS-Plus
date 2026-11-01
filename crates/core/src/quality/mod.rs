@@ -298,9 +298,6 @@ fn knowledge_hits(conn: &Connection, question: &str) -> i64 {
     if knowledge > 0 {
         return knowledge;
     }
-    // K1: the Help Scout Docs mirror counts as documentation too — a
-    // question the help center already answers is not an
-    // "asked often, documented nowhere" gap.
     conn.query_row(
         "SELECT COUNT(*) FROM docs_fts WHERE docs_fts MATCH ?1",
         params![tokens],
@@ -321,18 +318,6 @@ fn closest_document(conn: &Connection, question: &str) -> Option<(i64, String, S
     .ok()
 }
 
-/// Audit item 14: count asking conversations that showed real
-/// clarification / follow-up friction. The wired writer of that signal
-/// is the interaction engine's `client_support_outcomes` table (real
-/// `follow_up_count` / `clarification_count` columns, written on every
-/// customer reply and baseline rebuild). The previous query joined
-/// `friction_scores` — a table whose only writer
-/// (`reports::compute_friction`) has no runtime caller and serializes
-/// different JSON keys — through a remote-id join, so the count was
-/// always zero and the "repeated_question_unsolved" gap could never
-/// fire. Both sides of this count now speak LOCAL conversation ids
-/// (`ai_runs.conversation_id` and `client_support_outcomes` are both
-/// local), so no namespace translation is needed at all.
 fn friction_among(conn: &Connection, conversation_ids: &[i64]) -> usize {
     if conversation_ids.is_empty() {
         return 0;
@@ -1049,15 +1034,6 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
             })
             .unwrap_or_default();
         if related.len() >= 2 {
-            // Clean-audit item 52: this used to join the conversation's
-            // tags to THEMSELVES (ct1 and ct2 were both constrained to the
-            // current conversation), so the "shared" tag was just an
-            // arbitrary tag of the current conversation — the message
-            // could name a tag none of the related conversations carry.
-            // The query now returns a tag that exists on the current
-            // conversation AND on at least one related conversation of
-            // the same customer (same 90-day window and liveness rules
-            // as the related list above).
             let shared_tag: Option<String> = conn
                 .query_row(
                     "SELECT tg.name FROM tags tg
@@ -1408,13 +1384,6 @@ pub fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) -> Opti
                 if history_complete { "" } else { " (pre-sync history unknown)" })
         ]
     });
-    // Audit item 12: the >=20h maintenance rebuild (workers.rs calls
-    // rebuild_qa for every closed conversation) used to DELETE the whole
-    // row and re-INSERT only the deterministic half — wiping the stored
-    // AI layer (ai / ai_run_id / recomputed_at) on every sweep, which is
-    // permanent whenever the AI stage cannot re-run. Update the
-    // deterministic layer in place instead; only insert when the row
-    // does not exist yet, and never touch the AI-checked columns.
     let updated = conn.execute(
         "UPDATE post_resolution_qa SET deterministic = ?2, computed_at = datetime('now')
          WHERE conversation_id = ?1",
@@ -1523,8 +1492,6 @@ mod batch13_k1_tests {
     use super::*;
     use rusqlite::Connection;
 
-    /// Seed a conversation with a completed ticket_analysis run whose
-    /// `primary_question` is what the gap pipeline groups on.
     fn db_with_question(question: &str) -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -1557,9 +1524,6 @@ mod batch13_k1_tests {
             .unwrap_or_default()
     }
 
-    /// K1: "asked often, documented nowhere" — a repeated question with zero
-    /// coverage in the knowledge base AND the help-center mirror becomes an
-    /// uncovered-gap candidate.
     #[test]
     fn repeated_uncovered_question_becomes_gap() {
         let conn = db_with_question("how do I rotate the gateway keys");
@@ -1572,8 +1536,6 @@ mod batch13_k1_tests {
         );
     }
 
-    /// K1: a question the help center already answers is NOT a gap — the
-    /// docs_fts mirror counts as documentation (the coverage extension).
     #[test]
     fn docs_mirror_counts_as_documented() {
         let conn = db_with_question("how do I reach the control port");
@@ -1608,8 +1570,6 @@ mod batch13_k1_tests {
         );
     }
 
-    /// K1: friction findings are deterministic and idempotent per
-    /// conversation+kind (UNIQUE dedupe).
     #[test]
     fn friction_rebuild_is_deterministic_and_deduped() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -1621,8 +1581,6 @@ mod batch13_k1_tests {
         )
         .expect("conversation");
         let conv = conn.last_insert_rowid();
-        // Two customer threads repeating the same 7-word span — the
-        // repeated_customer_explanations detector fires across threads.
         for body in [
             "The export keeps failing every single night and nothing helps.",
             "Again today: the export keeps failing every single night.",
@@ -1646,8 +1604,6 @@ mod batch13_k1_tests {
             rows_first >= 1,
             "findings persist for the agent tool to read"
         );
-        // UNIQUE(conversation, kind) makes the rebuild idempotent: the row
-        // count must not grow on a second pass.
         let (_, found_second) = rebuild_friction(&conn);
         assert!(found_second >= 1, "the findings are still detected");
         let rows_second: i64 = conn
@@ -1657,13 +1613,6 @@ mod batch13_k1_tests {
     }
 }
 
-// ---------------------------------------------------------------------------
-// K2: best-resolution evidence for AI article drafting
-// ---------------------------------------------------------------------------
-
-/// One resolution citation: the closed conversation, its number/subject,
-/// and the excerpt of the final published agent reply (the same excerpt
-/// logic the A4 retrieval spine stores as a `resolution` chunk).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ResolutionCitation {
     pub conversation_local_id: i64,
@@ -1673,10 +1622,6 @@ pub struct ResolutionCitation {
     pub excerpt: String,
 }
 
-/// The "best resolutions" a K2 article draft is grounded in: among the
-/// evidence conversations, the ones that are closed and carry a published
-/// reply, newest closure first, capped at `limit`. Conversations without a
-/// published reply are skipped — nothing is excerpted from open threads.
 pub fn best_resolutions(
     conn: &Connection,
     conversation_ids: &[i64],
@@ -1726,9 +1671,6 @@ pub fn best_resolutions(
     out
 }
 
-/// The final published reply of a closed conversation, text-stripped and
-/// capped — the shared excerpt logic with `embeddings::resolution_excerpt`
-/// (kept local here so quality has no dependency on the chunker).
 fn resolution_excerpt_of(conn: &Connection, conversation_id: i64) -> String {
     let raw: Option<(Option<String>, Option<String>)> = conn
         .query_row(
@@ -1796,7 +1738,6 @@ mod k2_tests {
         let conn = db();
         let first = seed_closed_with_reply(&conn, 101, 2);
         let second = seed_closed_with_reply(&conn, 102, 1);
-        // An active conversation with a reply must be skipped entirely.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status, remote_created_at)
              VALUES (103, 103, 'Still open', 'p', 'active', '2026-10-20T08:00:00.000Z')",
@@ -1813,14 +1754,12 @@ mod k2_tests {
 
         let cites = best_resolutions(&conn, &[first, second, open, 999_999], 5);
         assert_eq!(cites.len(), 2, "only the two closed conversations");
-        // Newest closure first.
         assert_eq!(cites[0].number, 102);
         assert_eq!(cites[1].number, 101);
         assert!(
             cites[0].excerpt.contains("nightly profile"),
             "the final published reply is the excerpt"
         );
-        // The limit caps the list.
         assert_eq!(best_resolutions(&conn, &[first], 1).len(), 1);
         assert!(best_resolutions(&conn, &[], 5).is_empty());
     }
@@ -1841,16 +1780,11 @@ mod k2_tests {
     }
 }
 
-/// Clean-audit batch 18 (audit items 12 and 14): the QA rebuild must
-/// not wipe stored AI layers, and the "repeated_question_unsolved" gap
-/// must actually fire on real interaction-engine data.
 #[cfg(test)]
 mod batch18_tests {
     use super::*;
     use rusqlite::Connection;
 
-    /// Two closed conversations whose latest ticket_analysis carries the
-    /// same primary_question — the input shape of the gap pipeline.
     fn db_with_question(question: &str) -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -1926,11 +1860,6 @@ mod batch18_tests {
         .expect("outcome");
     }
 
-    /// Audit item 14, positive case: the question is documented (so the
-    /// UNCOVERED arm is skipped), but every asking conversation kept
-    /// showing follow-up / clarification friction in the interaction
-    /// engine — the live data path the gap arm now reads — so the
-    /// "repeated_question_unsolved" candidate must fire.
     #[test]
     fn repeated_unsolved_question_becomes_gap_on_real_interaction_data() {
         let conn = db_with_question("how do I rotate the gateway keys");
@@ -1946,10 +1875,6 @@ mod batch18_tests {
         );
     }
 
-    /// Audit item 14, negative control: a documented question whose
-    /// askers all resolved cleanly (no follow-ups, no clarifications)
-    /// must NOT become an "unsolved" gap — the answer demonstrably
-    /// solved it.
     #[test]
     fn cleanly_resolved_repeated_questions_stay_out_of_the_unsolved_gap() {
         let conn = db_with_question("how do I rotate the gateway keys");
@@ -1965,10 +1890,6 @@ mod batch18_tests {
         );
     }
 
-    /// Audit item 12: the >=20h maintenance rebuild recomputes the
-    /// deterministic QA layer for every closed conversation — it must
-    /// UPDATE in place instead of wiping the row, so a stored AI layer
-    /// survives the sweep (the AI stage is on-demand only).
     #[test]
     fn qa_recompute_preserves_the_stored_ai_layer() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -1993,7 +1914,6 @@ mod batch18_tests {
         }
 
         compute_qa_deterministic(&conn, conv).expect("first compute");
-        // An AI layer stored by an earlier on-demand check:
         conn.execute(
             "UPDATE post_resolution_qa
                 SET ai = '{\"answered\":\"yes\"}', ai_run_id = 42,
@@ -2003,7 +1923,6 @@ mod batch18_tests {
         )
         .expect("seed ai layer");
 
-        // The >=20h sweep recomputes the deterministic layer:
         compute_qa_deterministic(&conn, conv).expect("second compute");
 
         let (rows, ai, ai_run_id, recomputed): (i64, Option<String>, Option<i64>, Option<String>) =
@@ -2023,7 +1942,6 @@ mod batch18_tests {
         assert_eq!(ai_run_id, Some(42));
         assert_eq!(recomputed.as_deref(), Some("2026-01-02T00:00:00Z"));
 
-        // The deterministic half was refreshed in place:
         let (det, computed_at): (String, Option<String>) = conn
             .query_row(
                 "SELECT deterministic, computed_at FROM post_resolution_qa
@@ -2036,8 +1954,6 @@ mod batch18_tests {
         assert!(computed_at.is_some());
     }
 
-    /// Audit item 12, fresh-row path: a conversation without a QA row
-    /// still gets one on first compute.
     #[test]
     fn qa_compute_still_inserts_when_the_row_is_missing() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -2073,14 +1989,6 @@ mod batch24_audit52_tests {
     use super::*;
     use rusqlite::Connection;
 
-    /// A customer with a current conversation and two recent related
-    /// conversations. The current conversation carries two tags —
-    /// "aaa-current-only" (on nothing else) and "shared-billing" (also on
-    /// both related conversations). The pre-fix query returned an
-    /// arbitrary tag of the current conversation (the self-join had no
-    /// cross-conversation constraint), so "aaa-current-only" — the
-    /// alphabetically first, never shared — could be presented as the
-    /// shared tag.
     fn db_with_shared_tag_pattern() -> (Connection, i64) {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
@@ -2140,9 +2048,6 @@ mod batch24_audit52_tests {
         (conn, current)
     }
 
-    /// Clean-audit item 52: the tag named by the
-    /// repeated_unresolved_interactions detail must be shared with the
-    /// related conversations — never a current-conversation-only tag.
     #[test]
     fn audit52_shared_tag_is_shared_with_related_conversations() {
         let (conn, current) = db_with_shared_tag_pattern();
@@ -2162,15 +2067,9 @@ mod batch24_audit52_tests {
         );
     }
 
-    /// Clean-audit item 52, degenerate corner: when the related
-    /// conversations exist but the current conversation carries no tag,
-    /// no tag is named (the related list is empty, so the finding itself
-    /// does not fire — but the shared-tag lookup must not invent one).
     #[test]
     fn audit52_no_tag_is_named_when_nothing_is_shared() {
         let (conn, _current) = db_with_shared_tag_pattern();
-        // Strip every tag from the current conversation: the related
-        // query now finds nothing, and the finding must not fire at all.
         conn.execute(
             "DELETE FROM conversation_tags WHERE conversation_id = (
                  SELECT id FROM conversations WHERE number = 9001)",

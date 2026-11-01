@@ -568,9 +568,6 @@ mod a2_wiring_tests {
         conn
     }
 
-    /// A2: with no model at all, the deterministic layer still lands the
-    /// snapshot — the Attributes tab and automation conditions go live
-    /// without any endpoint configured.
     #[test]
     fn compute_with_disabled_backend_lands_deterministic_attributes() {
         let mut conn = db_with_conversation();
@@ -601,8 +598,6 @@ mod a2_wiring_tests {
         assert!(has("escalation_signal"));
     }
 
-    /// A2: a human correction supersedes the machine row — the chip editor
-    /// and automation conditions read the corrected value.
     #[test]
     fn human_override_supersedes_the_machine_row() {
         let mut conn = db_with_conversation();
@@ -641,10 +636,6 @@ mod a2_wiring_tests {
     }
 }
 
-/// Clean-audit batch 22 (items 34-35): the attribute extraction parses
-/// raw model output without the pipeline's fence-stripping extractor, and
-/// its prompt — raw customer messages — bypassed the prompt-redaction
-/// boundary every other AI path crosses.
 #[cfg(test)]
 mod batch22_audit_tests {
     use super::extraction::{
@@ -681,9 +672,6 @@ mod batch22_audit_tests {
             .expect("conv id")
     }
 
-    /// Item 34: a fenced answer and a prose-wrapped answer both parse —
-    /// the strict `serde_json::from_str` on the raw string used to drop
-    /// every such extraction (and never even stored the run).
     #[test]
     fn fenced_and_prose_wrapped_extraction_outputs_are_parsed() {
         for (label, raw) in [
@@ -749,8 +737,6 @@ mod batch22_audit_tests {
         }
     }
 
-    /// A recording provider for the redaction-boundary test: counts which
-    /// chat lane was used and captures exactly what the model received.
     struct RecordingProvider {
         seen: std::sync::Mutex<Vec<crate::ai_provider::ChatMessage>>,
         structured_calls: std::sync::atomic::AtomicUsize,
@@ -824,10 +810,6 @@ mod batch22_audit_tests {
         }
     }
 
-    /// Item 35: the extraction prompt carries raw customer messages —
-    /// boundary-covered PII (card numbers, credentials) must never reach
-    /// the model, and the boundary honors the `redaction_enabled`
-    /// setting like every other AI path.
     #[test]
     fn run_extraction_crosses_the_redaction_boundary() {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -837,7 +819,6 @@ mod batch22_audit_tests {
         let prompt = "Customer wrote: my card 4111 1111 1111 1111 was charged twice \
                       and my password: hunter2secret, the export is broken.";
 
-        // Default: redaction on — the model sees placeholders, not PII.
         {
             let conn = db_with_conversation();
             let provider = RecordingProvider::new();
@@ -878,7 +859,6 @@ mod batch22_audit_tests {
             );
         }
 
-        // The setting is the switch: redaction off passes the text through.
         {
             let conn = db_with_conversation();
             crate::settings::set_bool(&conn, "redaction_enabled", false).expect("setting");
@@ -929,15 +909,10 @@ mod batch23_audit_tests {
         conn.last_insert_rowid()
     }
 
-    /// Item 36: the extraction window is the NEWEST 30 live customer
-    /// messages, oldest-first — soft-deleted threads and whitespace-only
-    /// bodies are excluded, and the recent context is no longer cut off
-    /// in favor of the OLDEST 30.
     #[test]
     fn customer_messages_takes_newest_30_and_skips_soft_deleted() {
         let conn = db();
         let conv = seed_conversation(&conn);
-        // 32 live messages, numbered by timestamp.
         let mut oldest_id = 0;
         for i in 1..=32 {
             let id = add_customer_message(
@@ -950,7 +925,6 @@ mod batch23_audit_tests {
                 oldest_id = id;
             }
         }
-        // A soft-deleted thread newer than everything.
         let deleted = add_customer_message(
             &conn,
             conv,
@@ -962,17 +936,14 @@ mod batch23_audit_tests {
             rusqlite::params![deleted],
         )
         .expect("soft delete");
-        // A whitespace-only body, also newest.
         add_customer_message(&conn, conv, "   \n\t ", "2026-10-41T10:00:00Z");
 
         let messages = customer_messages(&conn, conv).expect("messages");
         assert_eq!(messages.len(), 30, "exactly the newest 30 live messages");
-        // Chronological order (the prompt's declared order).
         let ids: Vec<i64> = messages.iter().map(|m| m.thread_local_id).collect();
         let mut sorted = ids.clone();
         sorted.sort();
         assert_eq!(ids, sorted, "presented oldest-first");
-        // The window is messages 3..=32 (newest 30), not 1..=30.
         assert!(
             messages.iter().any(|m| m.text.contains("live message 32")),
             "the newest message is included: {:?}",
@@ -994,9 +965,6 @@ mod batch23_audit_tests {
         );
     }
 
-    /// Item 37: a fresh extraction lands as a COMPLETED 'attributes' run
-    /// carrying the cost ledger's raw material (latency, token usage,
-    /// endpoint) — `usage_ledger`'s `WHERE status='completed'` sees it.
     #[test]
     fn extraction_run_lands_completed_in_the_cost_ledger() {
         let mut conn = db();
@@ -1070,7 +1038,6 @@ mod batch23_audit_tests {
         );
         assert_eq!(row.5, Some(conv), "the run is pinned to its conversation");
 
-        // The ledger itself sees the run (tokens attributed, feature row).
         let ledger = crate::ai_hub::usage_ledger(&conn, 7).expect("ledger");
         let row = ledger
             .iter()
@@ -1081,9 +1048,6 @@ mod batch23_audit_tests {
         assert_eq!(row.runs, 1);
     }
 
-    /// Item 37 (self-heal): a pre-fix row stuck at the 'queued' default
-    /// with the same hash is NOT a cache hit — the next computation
-    /// re-runs and stores a proper completed row.
     #[test]
     fn stuck_queued_extraction_rows_self_heal() {
         let mut conn = db();
@@ -1095,13 +1059,11 @@ mod batch23_audit_tests {
             "2026-10-01T10:00:00Z",
         );
 
-        // Discover the hash the old writer would have used.
         let prepared = prepare_computation(&conn, conv, "test-model", true)
             .expect("prepared")
             .expect("exists");
         let hash = prepared.input_hash.clone();
 
-        // The pre-fix row: bare columns, status defaults to 'queued'.
         conn.execute(
             "INSERT INTO ai_runs (input_hash, prompt_version, model, response_json)
              VALUES (?1, ?2, ?3, ?4)",
@@ -1114,7 +1076,6 @@ mod batch23_audit_tests {
         )
         .expect("stuck row");
 
-        // force=false: the queued row must not serve as a cache hit.
         let next = prepare_computation(&conn, conv, "test-model", false)
             .expect("prepared")
             .expect("exists");
@@ -1123,7 +1084,6 @@ mod batch23_audit_tests {
             "a stuck 'queued' row is a cache miss, not a hit"
         );
 
-        // Completing the recomputation stores a proper completed row...
         finish_computation(
             &mut conn,
             next,
@@ -1138,7 +1098,6 @@ mod batch23_audit_tests {
         .expect("finish")
         .expect("snapshot");
 
-        // ...and only the completed row is a hit from now on.
         let after = prepare_computation(&conn, conv, "test-model", false)
             .expect("prepared")
             .expect("exists");

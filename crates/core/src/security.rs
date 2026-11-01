@@ -108,18 +108,9 @@ pub fn sanitize_thread_html(dirty: &str) -> String {
             if value.is_empty() {
                 return None;
             }
-            // Clean-audit item 50: the blocklist must see through CSS-level
-            // obfuscation. It used to run on the raw attribute value, so a
-            // comment inside a keyword (`ur/*x*/l(`) or a backslash escape
-            // (`\75 rl(`) sailed past it while the CSS engine still read
-            // `url(`. The list now runs on the decoded form of everything
-            // that can survive the 2000-char clip; the original clipped
-            // value is kept only when the decoded form is clean.
             let clip: String = value.chars().take(2000).collect();
             let decoded = match normalize_css_for_blocklist(&clip) {
                 Some(d) => d,
-                // Still escaping after the decode bound — adversarial
-                // layering, not a legitimate stylesheet.
                 None => return None,
             };
             if dangerous_css.is_match(&decoded) {
@@ -141,16 +132,6 @@ pub fn sanitize_thread_html(dirty: &str) -> String {
     builder.clean(&pre).to_string()
 }
 
-/// Clean-audit item 50: decode CSS-level obfuscation so the
-/// dangerous-CSS blocklist cannot be bypassed. CSS comments (`/*…*/`)
-/// may appear between any two tokens — `ur/*x*/l(` still means `url(` —
-/// and backslash escapes spell any character: `\75 rl(` is `url(`,
-/// `behavior\3a` is `behavior:`. Comments are stripped first, then
-/// escapes are decoded to a fixpoint. `None` means the value was still
-/// carrying escapes after [`CSS_DECODE_PASSES`] productive rounds —
-/// impossible for a legitimate stylesheet (each productive round strictly
-/// shortens the value) and a sign of layered-escape evasion, so the
-/// caller rejects the attribute outright.
 fn normalize_css_for_blocklist(value: &str) -> Option<String> {
     const CSS_DECODE_PASSES: usize = 64;
     let comment_re = Regex::new(r"(?s)/\*.*?\*/").expect("static css comment regex");
@@ -167,7 +148,6 @@ fn normalize_css_for_blocklist(value: &str) -> Option<String> {
                 let body = &m[1..];
                 let hex: String = body.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
                 if hex.is_empty() {
-                    // `\<char>`: the character itself.
                     return body
                         .chars()
                         .next()
@@ -182,8 +162,6 @@ fn normalize_css_for_blocklist(value: &str) -> Option<String> {
             })
             .into_owned();
         if next == current {
-            // No decodable escape left (a lone trailing backslash can
-            // hide nothing) — the blocklist runs on what we have.
             return Some(current);
         }
         current = next;
@@ -576,12 +554,6 @@ pub fn validate_ssrf_full(raw_url: &str) -> crate::error::Result<()> {
     Ok(())
 }
 
-/// Clean-audit item 51: the async twin of [`validate_ssrf_full`]. The
-/// sync version blocks the thread on getaddrinfo — correct on worker
-/// threads, catastrophic on an async executor (a slow resolver stalls
-/// every task on that worker). Async callers must use this variant: the
-/// literal checks stay inline (pure CPU, no I/O) and the DNS resolution
-/// runs on the blocking pool via [`check_url_resolved`].
 pub async fn validate_ssrf_full_async(raw_url: &str) -> crate::error::Result<()> {
     let result = check_url_resolved(raw_url).await;
     if result.ok {
@@ -675,16 +647,12 @@ pub fn redact_text(text: &str, enabled: bool) -> (String, Vec<Value>) {
 mod batch24_audit50_tests {
     use super::*;
 
-    /// The sanitized output of a `<span style="…">` must not carry the
-    /// dangerous construct — the attribute is dropped entirely on a hit.
     fn style_survives(style: &str) -> bool {
         let dirty = format!(r#"<span style="{style}">hi</span>"#);
         let clean = sanitize_thread_html(&dirty);
         clean.contains("style=")
     }
 
-    /// Clean-audit item 50: CSS comments between tokens must not hide
-    /// blocklisted constructs from the filter (`ur/*x*/l(` is `url(`).
     #[test]
     fn audit50_comment_bypass_is_blocked() {
         assert!(
@@ -705,8 +673,6 @@ mod batch24_audit50_tests {
         );
     }
 
-    /// Clean-audit item 50: backslash escapes must not hide blocklisted
-    /// constructs (`\75 rl(` is `url(`, `behavior\3a` is `behavior:`).
     #[test]
     fn audit50_css_escape_bypass_is_blocked() {
         assert!(
@@ -731,17 +697,12 @@ mod batch24_audit50_tests {
         );
     }
 
-    /// Clean-audit item 50: layered escapes (`\5c` decodes to a literal
-    /// backslash, building the next escape layer) must not outlast the
-    /// decoder — the attribute is rejected once the bound is hit.
     #[test]
     fn audit50_layered_escape_bypass_is_blocked() {
-        // `\5c\75 rl(` decodes in two rounds: `\` + `url(` → `url(`.
         assert!(
             !style_survives("background: \\5c\\75 rl(javascript:alert(1))"),
             "layered escapes resolving to 'url(' must be blocked"
         );
-        // Deep layering beyond the decode bound is rejected outright.
         let mut deep = String::from("background: ");
         for _ in 0..80 {
             deep.push_str("\\5c");
@@ -753,8 +714,6 @@ mod batch24_audit50_tests {
         );
     }
 
-    /// Clean-audit item 50: legitimate styling — including legitimate
-    /// escape usage such as `content: "\2014"` — still survives.
     #[test]
     fn audit50_benign_styles_survive() {
         assert!(style_survives("color: red; font-size: 12px"));
@@ -765,8 +724,6 @@ mod batch24_audit50_tests {
         ));
     }
 
-    /// Clean-audit item 50, unit level: the decoder resolves comments,
-    /// escapes, and layering to what a CSS engine would read.
     #[test]
     fn audit50_normalize_decodes_the_css_engine_view() {
         assert_eq!(
@@ -783,8 +740,6 @@ mod batch24_audit50_tests {
         );
         assert_eq!(
             normalize_css_for_blocklist("behavior\\3a x").as_deref(),
-            // CSS consumes the single space after a hex escape, so
-            // `\3a x` is `:x` — exactly what the engine reads.
             Some("behavior:x")
         );
         assert_eq!(
@@ -809,9 +764,6 @@ mod batch24_audit51_tests {
             .expect("test runtime")
     }
 
-    /// Clean-audit item 51: the async guard refuses loopback/private
-    /// literals and non-http schemes without any DNS round-trip
-    /// (deterministic, offline) — same verdicts as the sync guard.
     #[test]
     fn audit51_async_guard_refuses_internal_literals() {
         let rt = rt();
@@ -830,8 +782,6 @@ mod batch24_audit51_tests {
         });
     }
 
-    /// Clean-audit item 51: a public IPv4 literal passes without DNS
-    /// (deterministic, offline) — identical verdict to the sync guard.
     #[test]
     fn audit51_async_guard_accepts_public_literal() {
         let rt = rt();
@@ -842,9 +792,6 @@ mod batch24_audit51_tests {
         });
     }
 
-    /// Clean-audit item 51: the connector validation — an async fn that
-    /// used to call the blocking sync guard on the executor — now runs
-    /// the off-thread guard end to end.
     #[test]
     fn audit51_connector_validation_runs_the_async_guard() {
         let rt = rt();

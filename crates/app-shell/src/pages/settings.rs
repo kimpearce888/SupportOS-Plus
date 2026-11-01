@@ -1,14 +1,3 @@
-//! Settings page (port of the web `pages/settings.rs`).
-//!
-//! Tabs (web: `SettingsTab`): Synchronization & AI (the
-//! `application_settings` keys behind `/api/settings`), Help Scout
-//! connection (OAuth status/disconnect/connect — the loopback listener
-//! serves the callback), LM Studio (the `/api/settings/lmstudio` keys),
-//! Vector index (the sqlite-vec store, decision D4), Business hours (the
-//! `mailbox_business_hours` table behind `/api/settings/business-hours`),
-//! and Backups & export (`backup_service::{backup,list_backups,restore,
-//! export_json,export_conversations_csv}` — the `/api/backups/*` routes).
-
 use std::path::PathBuf;
 
 use eframe::egui;
@@ -18,7 +7,6 @@ use super::{i64_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// Page tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     General,
@@ -51,7 +39,6 @@ impl Tab {
     }
 }
 
-/// General settings model (typed port of `/api/settings`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeneralSettings {
     pub sync_interval_minutes: i64,
@@ -64,14 +51,6 @@ pub struct GeneralSettings {
     pub automation_write_actions_enabled: bool,
     pub attachment_auto_download: bool,
     pub automatic_reply_sending: bool,
-    /// v1.4.0 (R4, D9): the status a conversation moves to when a reply
-    /// is sent (decision D-b). `pending` matches Help Scout semantics
-    /// (awaiting the customer), `open` is the platform's own status for
-    /// "await agent" (clean-audit item 25: the pre-fix dropdown offered
-    /// `waiting`, which is in neither Help Scout's nor the loopback
-    /// provider's status vocabulary — every send with it configured was
-    /// rejected by the platform), `keep` leaves the status untouched
-    /// (the pre-1.4.0 behavior).
     pub reply_status_after: String,
     pub log_level: String,
     pub agent_language: String,
@@ -98,7 +77,6 @@ impl Default for GeneralSettings {
 }
 
 impl GeneralSettings {
-    /// Load from the settings table (the route's defaults).
     #[must_use]
     pub fn load(conn: &rusqlite::Connection) -> Self {
         let defaults = Self::default();
@@ -147,8 +125,6 @@ impl GeneralSettings {
                 defaults.automation_write_actions_enabled,
             )
             .unwrap_or(defaults.automation_write_actions_enabled),
-            // `qdrant_enabled` is owned by the Vector-index tab (clean-audit
-            // item 139) — the General form neither loads nor saves it.
             attachment_auto_download: spp_core::settings::get_bool(
                 conn,
                 "attachment_auto_download",
@@ -165,9 +141,6 @@ impl GeneralSettings {
                 .ok()
                 .flatten()
                 .map(|v| match v.as_str() {
-                    // Audit item 25: `waiting` was never a platform status —
-                    // map the stored legacy value onto the real one so old
-                    // installs stop sending it.
                     "waiting" => "open".to_string(),
                     "pending" | "open" | "keep" => v,
                     _ => defaults.reply_status_after.clone(),
@@ -184,10 +157,6 @@ impl GeneralSettings {
         }
     }
 
-    /// Persist (the update route's writes).
-    ///
-    /// # Errors
-    /// Propagates the settings-table write failure.
     pub fn save(&self, conn: &rusqlite::Connection) -> spp_core::Result<()> {
         spp_core::settings::set_i64(conn, "sync_interval_minutes", self.sync_interval_minutes)?;
         spp_core::settings::set_i64(conn, "api_concurrency", self.api_concurrency)?;
@@ -209,9 +178,6 @@ impl GeneralSettings {
             "automation_write_actions_enabled",
             self.automation_write_actions_enabled,
         )?;
-        // `qdrant_enabled` is owned by the Vector-index tab (clean-audit
-        // item 139: the setting had no control anywhere; the General
-        // form's blind save would have clobbered the tab's toggle).
         spp_core::settings::set_bool(
             conn,
             "attachment_auto_download",
@@ -229,24 +195,14 @@ impl GeneralSettings {
     }
 }
 
-/// Help Scout connection status (port of `/api/oauth/status` read side).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HelpScoutStatus {
     pub configured: bool,
-    /// OAuth client credentials are available — from the environment or
-    /// the in-app form — so the OAuth connect flow can start.
     pub credentials: bool,
-    /// Per-field credential source for the form badges (1.1.3):
-    /// environment, app settings, or not set.
     pub sources: spp_core::helpscout_real::CredentialSources,
-    /// The redirect URI this instance expects (1.1.4): it must exactly
-    /// match the callback URL registered on the Help Scout custom app,
-    /// and the loopback listener binds its port — so the UI must show
-    /// it next to the connect button.
     pub redirect_uri: String,
 }
 
-/// Load the connection status from the local mirror.
 #[must_use]
 pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
     let tokens: i64 = conn
@@ -266,7 +222,6 @@ pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
     }
 }
 
-/// Business-hours row (typed port of `/api/settings/business-hours`).
 #[derive(Debug, Clone)]
 pub struct BusinessHoursRow {
     pub mailbox_id: i64,
@@ -280,11 +235,8 @@ pub struct BusinessHoursRow {
     pub resolution_target_min: i64,
 }
 
-/// A stored business-hours config row:
-/// `(timezone, days, start_minute, end_minute, first response target, resolution target)`.
 type HoursConfigRow = (String, String, i64, i64, Option<i64>, Option<i64>);
 
-/// Load business-hours rows for every mailbox.
 #[must_use]
 pub fn load_business_hours(conn: &rusqlite::Connection) -> Vec<BusinessHoursRow> {
     let mut rows: std::collections::HashMap<i64, HoursConfigRow> = std::collections::HashMap::new();
@@ -341,15 +293,7 @@ pub fn load_business_hours(conn: &rusqlite::Connection) -> Vec<BusinessHoursRow>
         .collect()
 }
 
-/// Parse the free-text `days` field ("1,2,3" or "1, 2, 3") into the
-/// normalized JSON list the SLA layer reads. Every token must be a
-/// weekday number (0=Sun…6=Sat), deduped and sorted, and at least one
-/// day must remain (clean-audit item 141: the raw string used to save
-/// verbatim, and anything it could not parse silently meant "the default
-/// schedule" on the SLA side).
 fn parse_weekdays(raw: &str) -> spp_core::Result<String> {
-    // Accept both the editor's plain "1,2,3" and the JSON "[1,2,3]" the
-    // form pre-fills from the stored row.
     let trimmed = raw.trim();
     let inner = trimmed
         .strip_prefix('[')
@@ -386,11 +330,6 @@ fn parse_weekdays(raw: &str) -> spp_core::Result<String> {
     })
 }
 
-/// Save one mailbox's business hours (the set route's upsert).
-///
-/// # Errors
-/// Propagates SQL failures, an invalid timezone, or an invalid weekday
-/// list.
 pub fn save_business_hours(
     conn: &rusqlite::Connection,
     row: &BusinessHoursRow,
@@ -428,86 +367,44 @@ pub fn save_business_hours(
     Ok(())
 }
 
-/// The interactive settings page state.
 pub struct SettingsPage {
     tab: Tab,
     general: Option<GeneralSettings>,
-    /// Clean-audit item 77: the last PERSISTED snapshot of the General
-    /// form. The form is dirty when it differs from this snapshot — and
-    /// a dirty form is user state: `reload` keeps it instead of
-    /// re-reading persisted values over unsaved edits (a sync
-    /// invalidation used to drop the form wholesale and the next
-    /// render's reload silently reverted whatever the user was typing).
     general_persisted: Option<GeneralSettings>,
-    /// Clean-audit item 77: an invalidation is pending its mirror
-    /// refresh (the mirrors re-read on the next render without ever
-    /// clobbering the form).
     stale: bool,
     helpscout: Option<HelpScoutStatus>,
     authorize_url: Option<String>,
-    /// Help Scout credential form (1.1.3). The three secrets render as
-    /// password fields; `hs_show_secrets` toggles the mask.
     hs_client_id: String,
     hs_client_secret: String,
     hs_webhook_secret: String,
     hs_docs_api_key: String,
     hs_form_loaded: bool,
     hs_show_secrets: bool,
-    /// P4: the public relay URL the webhook health check re-registers to.
     webhook_public_url: String,
-    /// Mirrors the relay URL field's one-time load (like `hs_form_loaded`).
     wh_loaded: bool,
-    /// The last webhook health check outcome (P4), re-read on invalidation.
     wh_outcome: Option<spp_core::webhook_health::WebhookHealthOutcome>,
-    /// Application data directory: the demo purge clears the vector
-    /// store that lives next to the database.
     data_dir: Option<PathBuf>,
-    /// Two-step confirmation state for the demo purge.
     purge_armed: bool,
-    /// Two-step confirmation state for backup restores (audit item
-    /// 11): holds the backup file path awaiting the second click.
     restore_armed: Option<String>,
-    /// The swappable provider handle (v1.4.0 R3): credential saves and
-    /// clears activate/deactivate the provider through it in-session.
-    /// `None` in tests that exercise the page without boot services.
     provider: Option<std::sync::Arc<spp_core::provider_handle::ProviderHandle>>,
-    /// The shared sync engine — after an in-session activation the
-    /// initial sync is kicked directly through it (no restart, no
-    /// waiting for the auto-sync timer).
     engine: Option<std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
-    /// Event bus handle for connect-failure events (R5/D4).
     bus: Option<spp_core::event_bus::EventBus>,
-    /// In-flight client-credentials connect (1.1.4): the detached
-    /// thread writes its outcome here; the UI polls it each frame.
     hs_connect_result: std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>,
-    /// Mirrors `hs_connect_result` being in flight (UI-thread state).
     hs_connecting: bool,
-    /// In-flight Connection Doctor run (R1): the detached thread writes
-    /// the five steps here; the UI polls every frame while visible.
     doctor_result:
         std::sync::Arc<std::sync::Mutex<Option<Vec<spp_core::connection_doctor::DoctorStep>>>>,
-    /// Mirrors `doctor_result` being in flight (UI-thread state).
     doctor_running: bool,
-    /// The latest completed doctor report, kept until the next run.
     doctor_steps: Vec<spp_core::connection_doctor::DoctorStep>,
     lmstudio_base_url: String,
     lmstudio_chat_model: String,
     lmstudio_embedding_model: String,
-    /// Cached sqlite-vec store path shown on the Vector index tab.
     vector_store_path: String,
     hours: Vec<BusinessHoursRow>,
     hours_edit: Option<BusinessHoursRow>,
     backups: Vec<serde_json::Value>,
     backups_dir: Option<PathBuf>,
-    /// Background worker host: restarts the timers when the sync
-    /// interval changes (the old settings-route behavior). Absent in
-    /// tests, where background timers must not run.
     workers: Option<std::sync::Arc<crate::workers_host::WorkersHost>>,
-    /// R7 version transparency: the detached release-check thread writes
-    /// its outcome here; the UI polls each frame. Strictly user-initiated
-    /// — the app never phones home on its own.
     update_result: std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>,
-    /// Mirrors `update_result` being in flight (UI-thread state).
     update_running: bool,
     message: Option<String>,
     error: Option<String>,
@@ -559,18 +456,14 @@ impl SettingsPage {
         }
     }
 
-    /// Application data directory (set by the shell at boot; the demo
-    /// purge needs it to clear the vector store).
     pub fn set_data_dir(&mut self, dir: PathBuf) {
         self.data_dir = Some(dir);
     }
 
-    /// Backups directory (set by the shell at boot).
     pub fn set_backups_dir(&mut self, dir: PathBuf) {
         self.backups_dir = Some(dir);
     }
 
-    /// Install the background worker host (restart-on-interval-change).
     pub fn set_workers(
         &mut self,
         workers: Option<std::sync::Arc<crate::workers_host::WorkersHost>>,
@@ -578,11 +471,6 @@ impl SettingsPage {
         self.workers = workers;
     }
 
-    /// Install the swappable provider handle (v1.4.0 R3, replaces the
-    /// boot-time real-provider snapshot): saving credentials activates
-    /// the provider through it immediately — the restart ritual is
-    /// gone — and the Connection Doctor runs against whatever provider
-    /// is currently live.
     pub fn set_provider_handle(
         &mut self,
         handle: std::sync::Arc<spp_core::provider_handle::ProviderHandle>,
@@ -590,8 +478,6 @@ impl SettingsPage {
         self.provider = Some(handle);
     }
 
-    /// Install the shared sync engine (the activation path kicks the
-    /// initial sync through it).
     pub fn set_sync_engine(
         &mut self,
         engine: Option<std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
@@ -599,21 +485,11 @@ impl SettingsPage {
         self.engine = engine;
     }
 
-    /// Install the event bus (connect failures emit live errors, R5/D4).
     pub fn set_bus(&mut self, bus: spp_core::event_bus::EventBus) {
         self.bus = Some(bus);
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
-        // Clean-audit item 77: the pre-fix invalidation dropped the
-        // General form (`general = None`), so the next render's reload
-        // silently re-read the persisted values over unsaved edits — a
-        // sync landing while the user typed lost their changes. The
-        // form is user state now: invalidation only marks the page
-        // stale; the mirrors (connection status, business hours,
-        // backups) re-read on the next render, and the dirty guard in
-        // `reload` keeps the form.
         self.stale = true;
         self.helpscout = None;
         self.hours.clear();
@@ -628,10 +504,6 @@ impl SettingsPage {
                 load_business_hours(conn),
             )
         });
-        // Clean-audit item 77: a dirty General form (one that differs
-        // from the last persisted snapshot) is user state — keep it and
-        // its snapshot; only a clean or absent form takes the fresh
-        // read. Every mirror below refreshes unconditionally.
         let dirty = self
             .general
             .as_ref()
@@ -642,8 +514,6 @@ impl SettingsPage {
         }
         self.helpscout = Some(helpscout);
         self.hours = hours;
-        // Prefill the credential form once from the envelope (like the
-        // LM Studio fields); after that the fields belong to the user.
         if !self.hs_form_loaded {
             let stored = db.with_read(spp_core::helpscout_real::HsCredentials::from_envelope);
             self.hs_client_id = stored.client_id;
@@ -652,7 +522,6 @@ impl SettingsPage {
             self.hs_docs_api_key = stored.docs_api_key;
             self.hs_form_loaded = true;
         }
-        // P4: the relay URL form + the last health outcome.
         if !self.wh_loaded {
             self.webhook_public_url = db.with_read(|conn| {
                 spp_core::settings::get_string(conn, "webhook_public_url")
@@ -699,9 +568,6 @@ impl SettingsPage {
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        // Clean-audit item 77: a pending invalidation refreshes the
-        // mirrors too, not just a first load (the form survives either
-        // way — see the dirty guard in `reload`).
         if self.general.is_none() || self.stale {
             self.reload(db);
             self.stale = false;
@@ -712,20 +578,11 @@ impl SettingsPage {
         let Some(general) = self.general.clone() else {
             return;
         };
-        // The workers arm the auto-sync timer from this setting at start;
-        // capture the pre-save value so a change can restart the timers
-        // (mirrors the old PUT /api/settings stop/start behavior).
         let interval_before = db.with_read(|conn| {
             spp_core::settings::get_i64(conn, "sync_interval_minutes", 1).unwrap_or(1)
         });
-        // Audit item 31: `api_concurrency` was parsed and saved but never
-        // applied — capture the pre-save value so a change reaches the
-        // live provider's queues in-session instead of waiting for a
-        // restart that never mattered.
         let concurrency_before = db
             .with_read(|conn| spp_core::settings::get_i64(conn, "api_concurrency", 2).unwrap_or(2));
-        // Clean-audit item 138: same for `log_level` — the saved row
-        // reaches the live tracing filter instead of sitting unread.
         let level_before = db
             .with_read(|conn| {
                 spp_core::settings::get_string(conn, "log_level")
@@ -738,10 +595,6 @@ impl SettingsPage {
         let result = db.with_write(|conn| general.save(conn));
         match result {
             Ok(()) => {
-                // Clean-audit item 77: the saved form is the new
-                // persisted snapshot — the form reads clean from here
-                // on (until edited again), so a later invalidation or
-                // reload may take fresh reads without losing anything.
                 self.general_persisted = Some(general.clone());
                 if interval_before != general.sync_interval_minutes
                     && let Some(workers) = self.workers.clone()
@@ -797,9 +650,6 @@ impl SettingsPage {
     }
 
     fn disconnect_helpscout(&mut self, db: &DbHandle) {
-        // The route revoked remotely first; the local effect is dropping the
-        // stored tokens. 1.4.0 (R7/D13): the tokens live in the encrypted
-        // envelope, so both the envelope entries and the metadata row go.
         db.with_write(|conn| {
             let _ = spp_core::settings::delete_secret(
                 conn,
@@ -815,12 +665,6 @@ impl SettingsPage {
         self.reload(db);
     }
 
-    /// Save the credential form (1.1.3): non-empty fields are stored in
-    /// the encrypted envelope. v1.4.0 (R3, D2): the saved credentials
-    /// activate the provider **immediately, in-session** — no restart —
-    /// the Connection Doctor runs against the fresh connection, and the
-    /// first sync starts right away (initial when the state machine was
-    /// reset by an empty session, R2).
     fn save_helpscout_credentials(&mut self, db: &DbHandle) {
         let (cid, cs, ws, dk) = (
             self.hs_client_id.trim().to_string(),
@@ -834,10 +678,6 @@ impl SettingsPage {
         });
         match result {
             Ok(()) => {
-                // Audit item 32: the platform caps webhook secrets at 40
-                // characters — registration and signature verification both
-                // use the truncation, so say it out loud when the form
-                // stored more than the platform will keep.
                 let secret_note = if ws.chars().count() > spp_core::webhook::SECRET_CAP {
                     format!(
                         " (note: the platform caps webhook secrets at {} characters — \
@@ -851,8 +691,6 @@ impl SettingsPage {
                 self.message = Some(format!(
                     "credentials stored (encrypted) — activating the connection now…{secret_note}"
                 ));
-                // The three secret fields do not linger on screen after a
-                // successful save; the client id stays for reference.
                 self.hs_client_secret.clear();
                 self.hs_webhook_secret.clear();
                 self.hs_docs_api_key.clear();
@@ -863,18 +701,8 @@ impl SettingsPage {
         self.reload(db);
     }
 
-    /// v1.4.0 (R3): rebuild the real provider from the resolved
-    /// credentials and swap it into the shared handle; apply the R2
-    /// transition policy; run the Connection Doctor; kick the sync.
-    /// Called after every credential save. When the resolved
-    /// credentials are incomplete (the form left both id and secret
-    /// blank on a clean install), nothing activates — the stored
-    /// envelope is unchanged.
     fn activate_saved_credentials(&mut self, db: &DbHandle) {
         let Some(handle) = self.provider.clone() else {
-            // Bare pages (unit tests) carry no handle; the message the
-            // caller set already tells the truth about the stored state,
-            // and the next real boot activates the credentials.
             return;
         };
         let (credentials, _) = db.with_read(spp_core::helpscout_real::HsCredentials::resolve);
@@ -903,9 +731,6 @@ impl SettingsPage {
                 None,
             );
         });
-        // Side effects (doctor + sync kick) run when the page is wired
-        // into the live shell (a bus is installed); bare test pages skip
-        // them so no network is ever touched from a unit test.
         if self.bus.is_some() {
             self.message = Some(
                 "credentials active — running the Connection Doctor and starting the sync…".into(),
@@ -915,10 +740,6 @@ impl SettingsPage {
         }
     }
 
-    /// Kick the first sync after an in-session activation (R3): the
-    /// engine decides initial vs incremental from the state machine
-    /// (R2 resets it to NEW when the previous session was poisoned),
-    /// and the "already running" error is the healthy overlap case.
     fn kick_sync_after_activation(&mut self, db: &DbHandle) {
         let Some(engine) = self.engine.clone() else {
             return;
@@ -957,8 +778,6 @@ impl SettingsPage {
         }
     }
 
-    /// Run the Connection Doctor (R1) in a detached thread against the
-    /// currently live provider; the UI polls `doctor_result`.
     fn run_connection_doctor(&mut self) {
         let Some(handle) = self.provider.clone() else {
             self.error = Some("the provider handle is not available (test session)".into());
@@ -991,21 +810,18 @@ impl SettingsPage {
                         if let Some(step) = steps
                             .iter()
                             .find(|s| s.status == spp_core::connection_doctor::DoctorStatus::Fail)
+                            && let Some(bus) = &bus
                         {
-                            // R5 (D4): a failing step is a live error, not
-                            // just a form detail.
-                            if let Some(bus) = &bus {
-                                spp_core::event_bus::notify_error(
-                                    bus,
-                                    "error",
-                                    &format!(
-                                        "Connection check failed: {} — {}",
-                                        step.name, step.detail
-                                    ),
-                                    "connect",
-                                    None,
-                                );
-                            }
+                            spp_core::event_bus::notify_error(
+                                bus,
+                                "error",
+                                &format!(
+                                    "Connection check failed: {} — {}",
+                                    step.name, step.detail
+                                ),
+                                "connect",
+                                None,
+                            );
                         }
                         if let Ok(mut guard) = slot.lock() {
                             *guard = Some(steps);
@@ -1033,11 +849,6 @@ impl SettingsPage {
         }
     }
 
-    /// Remove every credential stored by the form. The connection
-    /// tokens are deliberately untouched. v1.4.0 (R3): the provider
-    /// deactivates in-session — the app stays fully usable against the
-    /// local mirror, and the R2 guard stops the sync timers from
-    /// stamping watermarks against the empty provider.
     fn clear_helpscout_credentials(&mut self, db: &DbHandle) {
         let result =
             db.with_write(|conn| spp_core::helpscout_real::HsCredentials::clear_envelope(conn));
@@ -1068,10 +879,6 @@ impl SettingsPage {
         self.reload(db);
     }
 
-    /// One-click workspace reset (1.2.0): clears all business content —
-    /// synced or left over from the pre-1.2.0 demo — keeps the
-    /// KEEP_TABLES config, resets the vector store when the data
-    /// directory is known, and arms a fresh first sync.
     fn reset_workspace(&mut self, db: &DbHandle) {
         let result = db.with_write(|conn| {
             spp_core::data_reset::reset_workspace_data(conn, self.data_dir.as_deref())
@@ -1174,7 +981,6 @@ impl SettingsPage {
         }
     }
 
-    /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
@@ -1184,9 +990,6 @@ impl SettingsPage {
             Some("local configuration, persisted in the settings table"),
             |_| {},
         );
-        // DS-C-09: the tab rail rides below the header (the archetype's
-        // placement — same six labels, same state machine; the reload on
-        // switch keeps the per-tab mirrors fresh).
         if let Some(i) = design::tabs(
             ui,
             &[
@@ -1267,10 +1070,6 @@ impl SettingsPage {
                     .width(190.0)
                     .selected_text(general.reply_status_after.clone())
                     .show_ui(ui, |ui| {
-                        // Audit item 25: `open` is Help Scout's own status
-                        // for "await agent" — the old `waiting` option was
-                        // not in the platform's vocabulary and every send
-                        // configured with it failed on the wire.
                         for (value, label) in [
                             ("pending", "pending (await customer)"),
                             ("open", "open (await agent)"),
@@ -1335,8 +1134,6 @@ impl SettingsPage {
             },
         );
         ui.add_space(10.0);
-        // R7: version transparency — running vs latest published release.
-        // The check is user-initiated only; nothing phones home on its own.
         self.poll_update_result();
         design::card_titled(ui, "About & updates", None, |ui| {
             ui.label(format!("Running version: v{}", env!("CARGO_PKG_VERSION")));
@@ -1381,17 +1178,12 @@ impl SettingsPage {
     }
 
     fn helpscout_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        // Pick up a finished client-credentials connect (1.1.4) and a
-        // finished doctor run (R1).
         self.poll_connect_result(db);
         self.poll_doctor_result();
         let Some(status) = self.helpscout.clone() else {
             ui.spinner();
             return;
         };
-        // FIND-001: the listener state used to be log-only — an occupied
-        // :3000 silently degraded webhook ingress and the OAuth callback.
-        // Surface the port the listener actually bound (if any).
         match spp_core::loopback::bound_port() {
             Some(port) => design::hint_text(
                 ui,
@@ -1426,8 +1218,6 @@ impl SettingsPage {
                             } else {
                                 "not configured"
                             },
-                            // Any unconnected state reads the same: the
-                            // badge tone only distinguishes "connected".
                             if status.configured {
                                 BadgeTone::Success
                             } else {
@@ -1463,9 +1253,6 @@ impl SettingsPage {
                     {
                         self.disconnect_helpscout(db);
                     }
-                    // R1: client credentials is the primary, recommended
-                    // flow — it completes inside the app with no browser
-                    // round-trip and no exact-match redirect dependency.
                     if !status.configured
                         && status.credentials
                         && !self.hs_connecting
@@ -1489,11 +1276,6 @@ impl SettingsPage {
                 });
                 if !status.configured && status.credentials {
                     ui.add_space(4.0);
-                    // R1: the browser flow is demoted to a clearly-labeled
-                    // secondary with the exact-match warning the audit
-                    // demanded (D3): loopback redirects are undocumented on
-                    // the platform, and a mismatched callback URL dead-ends
-                    // silently on Help Scout's side of the browser.
                     ui.collapsing(
                         egui::RichText::new("advanced: browser authorization flow")
                             .small()
@@ -1538,15 +1320,9 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
-        // Connection Doctor (v1.4.0 R1): five sequential checks with
-        // per-step results and remedies, so no owner ever has to guess
-        // which link in the chain broke.
         self.connection_doctor_ui(ui);
         ui.add_space(10.0);
 
-        // Credential form (1.1.3): values are stored in the encrypted
-        // secrets envelope; saving activates the connection immediately
-        // (R3 — no restart). Environment variables still win per field.
         design::card_titled(
             ui,
             "Help Scout credentials",
@@ -1636,7 +1412,6 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
-        // P4 (D21): the webhook relay + the self-healing guard.
         design::card_titled(
             ui,
             "Webhook relay & health",
@@ -1660,8 +1435,6 @@ impl SettingsPage {
                         self.queue_webhook_health_check(db);
                     }
                 });
-                // The user-run tunnel guide: what to run, how to prove the
-                // chain, and the honest limit on secret rotation.
                 design::hint_text(
                     ui,
                     "relay options: cloudflared tunnel --url http://127.0.0.1:PORT · \
@@ -1706,9 +1479,6 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
-        // Workspace reset (1.2.0): one click, two-step confirmation — the
-        // lab's danger-zone card (DS.card danger: the title carries the
-        // zone, the sub is the honest one-word verdict).
         design::card_titled(
             ui,
             "Danger zone — Workspace data",
@@ -1754,7 +1524,6 @@ impl SettingsPage {
         );
     }
 
-    /// Save the public relay URL the health check re-registers to (P4).
     fn save_webhook_relay_url(&mut self, db: &DbHandle) {
         let url = self.webhook_public_url.trim().to_string();
         let saved =
@@ -1768,8 +1537,6 @@ impl SettingsPage {
         }
     }
 
-    /// Queue the on-demand webhook health check (P4): the job runs within
-    /// seconds and stores the outcome this card reads.
     fn queue_webhook_health_check(&mut self, db: &DbHandle) {
         let queued = db.with_write(|conn| {
             spp_core::jobs::enqueue_on(
@@ -1790,10 +1557,6 @@ impl SettingsPage {
         }
     }
 
-    /// The Connection Doctor card (R1): a run button, the five steps
-    /// with pass/warn/fail state, what each saw, and the remedy for a
-    /// failure. Runs automatically after every credential save and can
-    /// be re-run any time.
     fn connection_doctor_ui(&mut self, ui: &mut egui::Ui) {
         design::card_titled(
             ui,
@@ -1863,9 +1626,6 @@ impl SettingsPage {
         );
     }
 
-    /// Pick up a finished doctor run (called from the UI each frame
-    /// while the Help Scout tab is visible); the report stays on screen
-    /// until the next run replaces it.
     fn poll_doctor_result(&mut self) {
         if !self.doctor_running {
             return;
@@ -1881,8 +1641,6 @@ impl SettingsPage {
         }
     }
 
-    /// R7 version transparency: launch the user-initiated release check on
-    /// a detached thread (own runtime inside `latest_release_blocking`).
     fn start_update_check(&mut self) {
         self.update_running = true;
         let slot = std::sync::Arc::clone(&self.update_result);
@@ -1907,7 +1665,6 @@ impl SettingsPage {
         });
     }
 
-    /// Take a finished update-check outcome, if any (UI thread).
     fn poll_update_result(&mut self) {
         if !self.update_running {
             return;
@@ -1922,7 +1679,6 @@ impl SettingsPage {
         }
     }
 
-    /// The update-check outcome currently on display (cloned for render).
     fn update_snapshot(&self) -> Option<Result<String, String>> {
         self.update_result
             .lock()
@@ -1930,13 +1686,6 @@ impl SettingsPage {
             .and_then(|guard| guard.clone())
     }
 
-    /// Start the browser OAuth flow: issue a single-use state and show the
-    /// authorization URL (the loopback listener serves the callback).
-    ///
-    /// 1.1.4 guards stay (the listener must really be listening on the
-    /// redirect port); the 1.1.4 restart guard is gone — v1.4.0 (R3)
-    /// activates saved credentials in-session, so the callback listener
-    /// exchanges against the live provider whenever the browser lands.
     fn begin_oauth(&mut self, db: &DbHandle) {
         let live = self.provider.as_ref().and_then(|p| p.real());
         let Some(_real) = live else {
@@ -1954,31 +1703,17 @@ impl SettingsPage {
         self.begin_oauth_at(db, &creds, &redirect_uri);
     }
 
-    /// Testable core of [`Self::begin_oauth`]: guard the listener, then
-    /// issue the single-use state and the authorization URL.
     fn begin_oauth_at(
         &mut self,
         db: &DbHandle,
         creds: &spp_core::helpscout_real::HsCredentials,
         redirect_uri: &str,
     ) {
-        // FIND-001: prefer the port the loopback listener actually bound
-        // this boot (SPP_LOOPBACK_PORT override or the OS-assigned bind
-        // fallback); fall back to the redirect URI's own port when nothing
-        // was recorded (tests, or a listener started before this change).
         let bound = spp_core::loopback::bound_port()
             .or_else(|| spp_core::loopback::port_from_redirect_uri(redirect_uri));
         self.begin_oauth_on(db, creds, redirect_uri, bound);
     }
 
-    /// FIND-001: `bound` is the port the loopback listener actually bound
-    /// this boot (`None` when it is not running). It may legitimately
-    /// differ from the redirect URI's port — the recorded redirect URI is
-    /// rewritten to the bound port so the callback's own port-match still
-    /// validates. Help Scout matches the redirect exactly, so the message
-    /// names the URL to register on the Help Scout app. Non-local redirect
-    /// URIs (e.g. a user-run relay) are kept untouched — the callback
-    /// validation accepts those on any port by design.
     fn begin_oauth_on(
         &mut self,
         db: &DbHandle,
@@ -1997,12 +1732,8 @@ impl SettingsPage {
             return;
         };
         let effective_redirect = match spp_core::loopback::port_from_redirect_uri(redirect_uri) {
-            // A local URI whose port matches the bound listener: keep it.
             Some(port) if port == bound_port => redirect_uri.to_string(),
-            // A local URI naming a port the listener did NOT bind: rewrite
-            // it to the bound port so the callback validation passes.
             Some(_) => format!("http://localhost:{bound_port}/oauth/callback"),
-            // A non-local URI (user-run relay): keep it untouched.
             None => redirect_uri.to_string(),
         };
         if !spp_core::loopback::listener_answers(bound_port) {
@@ -2033,14 +1764,6 @@ impl SettingsPage {
         }
     }
 
-    /// Connect with the client-credentials grant in the background
-    /// (1.1.4): the immediate in-app answer to "are my credentials any
-    /// good?" — and a full connection for users whose Help Scout app
-    /// authenticates that way (no browser round-trip). v1.4.0 (R5):
-    /// failures emit a live error event, and (R3) the provider comes from
-    /// the swappable handle, not a boot-time snapshot. The detached
-    /// thread writes its outcome into `hs_connect_result`; the UI polls
-    /// it every frame and turns it into a message/error.
     fn connect_client_credentials(&mut self) {
         let Some(real) = self.provider.as_ref().and_then(|p| p.real()) else {
             self.error = Some(
@@ -2071,8 +1794,6 @@ impl SettingsPage {
                     })
                     .map_or_else(
                         |e| {
-                            // R5 (D4): connect failures reach the UI live,
-                            // even from another page.
                             if let Some(bus) = &bus {
                                 spp_core::event_bus::notify_error(
                                     bus,
@@ -2100,8 +1821,6 @@ impl SettingsPage {
         }
     }
 
-    /// Poll the in-flight client-credentials connect (called from the
-    /// UI each frame while the Help Scout tab is visible).
     fn poll_connect_result(&mut self, db: &DbHandle) {
         if !self.hs_connecting {
             return;
@@ -2172,7 +1891,6 @@ impl SettingsPage {
             ),
             |ui| {
                 if self.vector_store_path.is_empty() {
-                    // Reuse the lazy-load slot to remember where the store lives.
                     self.vector_store_path = db
                         .file_path()
                         .and_then(|p| p.parent().map(|d| d.join("vectors").join("vectors.db")))
@@ -2190,10 +1908,6 @@ impl SettingsPage {
                         .color(design::tokens(ui).foreground),
                     );
                     ui.end_row();
-                    // Clean-audit item 139: the card subtitle references the
-                    // qdrant_enabled setting, but no control exposed it
-                    // anywhere — the toggle lives here now. The workers open
-                    // the store at boot, so a change lands on the next start.
                     let prev = db
                         .with_read(|conn| {
                             spp_core::settings::get_bool(conn, "qdrant_enabled", true)
@@ -2378,18 +2092,12 @@ impl SettingsPage {
                                 && let Some(dir) = &self.backups_dir
                             {
                                 let path = dir.join(str_field(backup, "file"));
-                                // Audit item 11: the first click only ARMS
-                                // the restore — a single unconfirmed click
-                                // must never replace the live database.
                                 self.restore_armed = Some(path.display().to_string());
                             }
                         });
                         ui.add_space(2.0);
                     }
                 });
-            // Second step of the two-step restore confirmation (audit
-            // item 11): nothing is swapped until the user reads the
-            // consequence and clicks again.
             if let Some(path) = self.restore_armed.clone() {
                 ui.add_space(6.0);
                 design::error_text(
@@ -2421,7 +2129,6 @@ impl Default for SettingsPage {
     }
 }
 
-/// `HH:MM` label for a minute-of-day value.
 #[must_use]
 pub fn minutes_label(minutes: i64) -> String {
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
@@ -2449,11 +2156,6 @@ mod tests {
         assert_ne!(reloaded, GeneralSettings::default());
     }
 
-    /// Clean-audit item 25: `waiting` was never in the platform's status
-    /// vocabulary. The loader maps a stored legacy value onto the real
-    /// await-agent status (`open`) so old installs stop offering and
-    /// sending the phantom one; unknown values still fall back to the
-    /// default.
     #[test]
     fn audit25_legacy_waiting_setting_loads_as_open() {
         let db = fixture(Vec::new());
@@ -2528,11 +2230,6 @@ mod tests {
         assert!(result2.is_err());
     }
 
-    /// Clean-audit item 141: the `days` field used to save verbatim —
-    /// "1-5", "mon-fri" or "1; 2; 3" parsed as nothing on the SLA side
-    /// and silently meant the default schedule. The save now rejects
-    /// anything that is not a real weekday list and normalizes the
-    /// stored value.
     #[test]
     fn business_hours_days_are_validated_and_normalized() {
         let db = fixture(Vec::new());
@@ -2560,7 +2257,6 @@ mod tests {
             "the stored list is normalized (deduped, sorted, JSON)"
         );
 
-        // The default row text round-trips unchanged.
         row.days = "[1,2,3,4,5]".into();
         db.with_write(|conn| save_business_hours(conn, &row))
             .expect("save");
@@ -2588,10 +2284,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Install a master key for envelope tests (pub API; in-memory
-    /// databases do not get one from bootstrap by design). Only these
-    /// page tests touch the key in this test binary, so there is no
-    /// parallel-flip race.
     fn install_master_key() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2612,9 +2304,6 @@ mod tests {
         let db = fixture(Vec::new());
 
         let mut page = SettingsPage::new();
-        // The real UI loads the form once on the first frame (see
-        // reload); simulate that so the save-time field clear is not
-        // immediately overwritten by the first prefill.
         page.hs_form_loaded = true;
         page.hs_client_id = "cid-app".into();
         page.hs_client_secret = "secret-app".into();
@@ -2644,12 +2333,10 @@ mod tests {
             "secret fields are cleared after a successful save"
         );
 
-        // The stored secrets decrypt back through the envelope.
         let stored = db.with_read(spp_core::helpscout_real::HsCredentials::from_envelope);
         assert_eq!(stored.client_id, "cid-app");
         assert_eq!(stored.client_secret, "secret-app");
 
-        // Clear: connection tokens survive.
         db.with_write(|conn| {
             conn.execute("INSERT INTO oauth_tokens (access_token) VALUES ('tok')", [])
                 .expect("token");
@@ -2723,10 +2410,6 @@ mod tests {
 
     #[test]
     fn begin_oauth_without_an_active_connection_explains_itself() {
-        // v1.4.0 (R3): the restart ritual is gone; the browser flow's
-        // only remaining precondition is an active connection. Without
-        // one (fresh page, no handle), the click explains what to do
-        // instead of dead-ending in a browser.
         install_master_key();
         let db = fixture(Vec::new());
         db.with_write(|conn| {
@@ -2792,10 +2475,6 @@ mod tests {
         server.stop();
     }
 
-    /// FIND-001: the recorded redirect URI is rewritten to the port the
-    /// listener actually bound — a SPP_LOOPBACK_PORT override (or the
-    /// OS-assigned bind fallback) keeps the OAuth round-trip functional
-    /// instead of dead-ending on the callback's own port match.
     #[test]
     fn begin_oauth_rewrites_the_recorded_uri_to_the_bound_port() {
         let db = fixture(Vec::new());
@@ -2806,8 +2485,6 @@ mod tests {
         )
         .expect("listener");
         let bound = server.port();
-        // The env redirect URI still names the DEFAULT :3000 — the port the
-        // listener did NOT bind (the FIND-001 collision case).
         let redirect_uri = "http://localhost:3000/oauth/callback";
         assert_ne!(
             spp_core::loopback::port_from_redirect_uri(redirect_uri),
@@ -2840,14 +2517,11 @@ mod tests {
 
     #[test]
     fn client_credentials_connect_reports_failures_in_app() {
-        // The in-app answer to "are my credentials any good?" (1.1.4):
-        // a provider pointed at an unreachable endpoint must land its
-        // friendly error in the page, not in a browser tab.
         let db = fixture(Vec::new());
         let creds = spp_core::helpscout_real::HsCredentials {
             client_id: "cid-x".into(),
             client_secret: "secret-x".into(),
-            api_base: "http://127.0.0.1:1".into(), // nothing listens here
+            api_base: "http://127.0.0.1:1".into(),
             ..Default::default()
         };
         let mut page = SettingsPage::new();
@@ -2876,14 +2550,9 @@ mod tests {
 
     #[test]
     fn r3_saving_credentials_activates_the_provider_in_session() {
-        // D2 regression test: saving credentials used to demand a
-        // restart; now the shared handle swaps to the real provider
-        // immediately and the R2 transition policy resets a poisoned
-        // state machine.
         install_master_key();
         let db = fixture(Vec::new());
         let handle = std::sync::Arc::new(spp_core::provider_handle::ProviderHandle::new_empty());
-        // A poisoned pre-1.4.0 state: the empty session stamped LIVE.
         db.with_write(|conn| {
             spp_core::sync_engine::set_state(conn, "LIVE");
             let _ = spp_core::settings::set_string(conn, "provider_kind", "empty");
@@ -2908,18 +2577,12 @@ mod tests {
         });
         assert_eq!(state, "NEW", "the poisoned LIVE watermark is reset (R2)");
         assert_eq!(kind.as_deref(), Some("real"));
-        // The doctor + sync kick are live-shell side effects (this bare
-        // test page has no bus), so nothing touched the network here.
         assert!(
             !page.doctor_running,
             "bare pages skip the network side effects"
         );
     }
 
-    /// Clean-audit batch 18 (item 11): a restore runs against a
-    /// file-backed database only through the armed two-step path, a
-    /// verified backup lands, and an unverified file is refused with
-    /// the live database left untouched.
     #[test]
     fn restore_backup_lands_a_verified_file_and_refuses_junk() {
         let tmp = std::env::temp_dir().join(format!(
@@ -2938,11 +2601,8 @@ mod tests {
         let db = DbHandle::new(rusqlite::Connection::open(&db_path).expect("reopen file db"));
 
         let mut page = SettingsPage::new();
-        // The first click arms; the confirm card runs restore_backup —
-        // simulate having armed and confirmed.
         page.restore_armed = None;
 
-        // 1) A real backup restores cleanly.
         let backups_dir = tmp.join("backups");
         let result = db.with_read(|conn| spp_core::backup_service::backup(conn, &backups_dir));
         assert!(result.ok, "backup for the test: {}", result.message);
@@ -2956,7 +2616,6 @@ mod tests {
             page.message
         );
 
-        // 2) An unverified file is refused before the live db is touched.
         page.message = None;
         page.error = None;
         let junk = tmp.join("junk.db");
@@ -2984,10 +2643,6 @@ mod tests {
     }
 }
 
-/// Clean-audit item 31: saving a changed `api_concurrency` reaches the
-/// LIVE provider's queues in-session — the setting used to be parsed and
-/// persisted while every queue ran the hard-coded default until restart
-/// (and the restart didn't matter either: nothing ever applied it).
 #[cfg(test)]
 mod batch22_audit31_tests {
     use super::*;
@@ -2996,7 +2651,6 @@ mod batch22_audit31_tests {
     #[test]
     fn api_concurrency_save_reaches_the_live_provider() {
         let db = fixture(Vec::new());
-        // The boot-time provider (build_boot_services shape): default 2.
         let real = std::sync::Arc::new(spp_core::helpscout_real::RealHelpScoutProvider::new(
             db.clone(),
             spp_core::helpscout_real::HsCredentials::default(),
@@ -3008,7 +2662,6 @@ mod batch22_audit31_tests {
             spp_core::provider_handle::ProviderHandle::new_real(std::sync::Arc::clone(&real)),
         ));
 
-        // Load the form, change the concurrency, save.
         page.reload(&db);
         page.general.as_mut().expect("loaded").api_concurrency = 6;
         page.save_general(&db);
@@ -3023,7 +2676,6 @@ mod batch22_audit31_tests {
             6,
             "the live provider's queues resized in-session"
         );
-        // And the write persisted: a fresh provider starts at the new width.
         let rebuilt = spp_core::helpscout_real::RealHelpScoutProvider::new(
             db.clone(),
             spp_core::helpscout_real::HsCredentials::default(),
@@ -3036,10 +2688,6 @@ mod batch22_audit31_tests {
     }
 }
 
-/// Clean-audit item 77: a sync invalidation must never revert unsaved
-/// General-tab edits — the pre-fix `invalidate` dropped the form
-/// (`general = None`), so the next render's reload silently re-read the
-/// persisted values over whatever the user was typing.
 #[cfg(test)]
 mod batch27_audit77_tests {
     use super::*;
@@ -3050,17 +2698,13 @@ mod batch27_audit77_tests {
         let db = fixture(Vec::new());
         let mut page = SettingsPage::new();
 
-        // First load: the form mirrors the persisted settings.
         page.ensure_loaded(&db);
         let loaded_interval = page.general.as_ref().expect("loaded").sync_interval_minutes;
 
-        // The user types an edit (say the sync interval) and saves nothing.
         page.general.as_mut().expect("form").sync_interval_minutes = 720;
 
-        // A sync event lands → the shell invalidates the page.
         page.invalidate();
 
-        // Next render: mirrors re-read, the unsaved edit survives.
         page.ensure_loaded(&db);
         assert_eq!(
             page.general
@@ -3079,7 +2723,6 @@ mod batch27_audit77_tests {
             "the pending invalidation was consumed by the reload"
         );
 
-        // And the DB still holds the persisted value (nothing was saved).
         assert_eq!(
             db.with_read(|conn| { spp_core::settings::get_i64(conn, "sync_interval_minutes", 1) })
                 .unwrap_or(1),
@@ -3094,7 +2737,6 @@ mod batch27_audit77_tests {
         let mut page = SettingsPage::new();
         page.ensure_loaded(&db);
 
-        // Another surface persists a new interval while the form is clean.
         db.with_write(|conn| spp_core::settings::set_i64(conn, "sync_interval_minutes", 45))
             .expect("write");
 
@@ -3114,13 +2756,10 @@ mod batch27_audit77_tests {
         let mut page = SettingsPage::new();
         page.ensure_loaded(&db);
 
-        // Edit + save: the snapshot must catch up so a later
-        // invalidation takes fresh reads instead of pinning the form.
         page.general.as_mut().expect("form").api_concurrency = 4;
         page.save_general(&db);
         assert!(page.error.is_none(), "save failed: {:?}", page.error);
 
-        // A DB-side change after the save must reach the form.
         db.with_write(|conn| spp_core::settings::set_i64(conn, "sync_interval_minutes", 30))
             .expect("write");
         page.invalidate();

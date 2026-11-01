@@ -1,30 +1,3 @@
-//! RS-17 — DS-A-01 list-page goldens (organizations pilot + customers).
-//!
-//! The lab references live at `mockups/design-lab/goldens/v4/{light,dark}/{organizations,customers}-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real pages: PageHeader with the counter pill,
-//! FilterBar, DataTable, and the DS-C-17 DetailPanel with its DS-A-03
-//! record composition over a seeded database); the side-by-side review
-//! against the lab is the G3 evidence pack.
-//!
-//! The customers half drives the page's real search flow first: the page
-//! opens on its empty state (HEAD behavior — the list populates when the
-//! user applies the search), so the goldens click the FilterBar's primary
-//! `search` apply through the a11y tree before locking the populated
-//! table, exactly what a user's empty-box search ("show all") does.
-//!
-//! Determinism note: the seed helpers below write **fixed timestamps** —
-//! the organizations page renders names, domains and counts only, but the
-//! conversation seeds pin `created_at`/`updated_at` anyway so nothing can
-//! drift with wall-clock time. The customers seeds pin every sort key the
-//! page reads (`last_activity_at`, `local_created_at`, event and
-//! milestone timestamps) for the same reason. (`spp_shell::testsupport`
-//! is `#[cfg(test)]`-gated and not visible to integration tests anyway.)
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_list_pages`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -35,21 +8,12 @@ use spp_shell::design;
 use spp_shell::pages::customers::CustomersPage;
 use spp_shell::pages::organizations::OrganizationsPage;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct OrganizationsPageState {
     installed: bool,
     page: OrganizationsPage,
     db: DbHandle,
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic fixture (fixed timestamps; mirrors the lab's org fixture)
-// ---------------------------------------------------------------------------
-
-/// Bootstrap an in-memory database (all migrations) and seed the
-/// organizations fixture into it. The three organizations mirror the
-/// conformed lab fixture (`mockups/design-lab/data.js` → `PAGES.organizations`):
-/// Northwind Logistics, Acme (two members), Globex (none).
 fn seeded_page() -> (OrganizationsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
@@ -70,8 +34,6 @@ fn seeded_page() -> (OrganizationsPage, DbHandle) {
         spp_core::people_store::create_organization(&conn, "Globex", &["globex.com".into()])
             .expect("globex");
 
-    // Members: customers linked by `organization_id` (the same edge the
-    // detail SQL reads). Fixed ids/remote_ids keep the render stable.
     seed_customer(
         &conn,
         9,
@@ -103,8 +65,6 @@ fn seeded_page() -> (OrganizationsPage, DbHandle) {
         acme,
     );
 
-    // Conversations ride the customer→organization edge too: they feed the
-    // org's conversation counts (Kim 3, Marta 2, John 1).
     seed_conversation(
         &conn,
         1,
@@ -199,9 +159,6 @@ fn seed_customer(
     .expect("customer");
 }
 
-/// One conversation row with fixed timestamps (created == updated == `at`);
-/// same columns the sync pipeline fills, so the page exercises its real
-/// count queries.
 fn seed_conversation(
     conn: &rusqlite::Connection,
     id: i64,
@@ -231,12 +188,6 @@ fn seed_conversation(
     .expect("conversation");
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens + the DetailPanel interaction
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light and lock it as
-/// `{name}.png` under `tests/snapshots/`.
 fn render_organizations_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -294,31 +245,16 @@ fn r3_organizations_page_800_dark() {
     render_organizations_page(true, 800.0, "r3_organizations_page_800_dark");
 }
 
-// ---------------------------------------------------------------------------
-// Customers (DS-A-01): fixture + the six goldens + the DetailPanel interaction
-// ---------------------------------------------------------------------------
-
-/// Harness state: the REAL page + the seeded database it reads.
 struct CustomersPageState {
     installed: bool,
     page: CustomersPage,
     db: DbHandle,
 }
 
-/// Bootstrap an in-memory database (all migrations) and seed the customers
-/// fixture into it. The four customers mirror the conformed lab fixture
-/// (`mockups/design-lab/data.js` → `PAGES.customers.results`): Kim Pearce
-/// (three conversations, customer events, support milestones and the AI
-/// recommendation the detail panel reads), Ada Customer (two), Nabin
-/// Sayeed (one) and Marta Keller (none). The list sorts by most recent
-/// activity, so the seeded timestamps fix the render order (Kim, Ada,
-/// Nabin, Marta).
 fn seeded_customers_page() -> (CustomersPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
     seed_mailbox(&conn);
-    // The organization edge feeds the record head's company meta (the
-    // detail SQL resolves organization_id → organizations.name).
     let northwind = spp_core::people_store::create_organization(
         &conn,
         "Northwind Logistics",
@@ -375,10 +311,6 @@ fn seeded_customers_page() -> (CustomersPage, DbHandle) {
         "2026-02-07T08:00:00.000Z",
     );
 
-    // Kim's conversations are the lab's profile rows (501 active, 503
-    // active, 505 pending); Ada two, Nabin one, Marta none. The rows pin
-    // `last_activity_at` too — it is the list's sort key AND the
-    // last-contact column.
     seed_customer_conversation(
         &conn,
         1,
@@ -434,7 +366,6 @@ fn seeded_customers_page() -> (CustomersPage, DbHandle) {
         "2026-02-12T10:00:00.000Z",
     );
 
-    // Kim's customer events (the timeline card reads the latest 100).
     seed_customer_event(
         &conn,
         9,
@@ -468,9 +399,6 @@ fn seeded_customers_page() -> (CustomersPage, DbHandle) {
         "seed-kim-ev-4",
     );
 
-    // Kim's support milestones (item 56: the intelligence sweep's rows —
-    // the lab's breach: first_response and effort score 7.20). The detail
-    // parser reads breach_type / effort_score out of the payload.
     conn.execute(
         "INSERT INTO customer_timeline (customer_id, event_type, event_data_json, occurred_at)
          VALUES (9, 'sla_breach', '{\"breach_type\":\"first_response\"}', '2026-02-14T08:40:00.000Z'),
@@ -479,8 +407,6 @@ fn seeded_customers_page() -> (CustomersPage, DbHandle) {
     )
     .expect("milestones");
 
-    // Kim's AI-stage recommendation (the M21 client_current_signals read:
-    // the stage badge, the Support approach block and the provenance).
     let recommendation = serde_json::json!({
         "recommendation": {
             "approach": "lead with the engineering ticket number, then the workaround",
@@ -501,8 +427,6 @@ fn seeded_customers_page() -> (CustomersPage, DbHandle) {
     (CustomersPage::new(), DbHandle::new(conn))
 }
 
-/// The customers variant of `seed_customer`: phone, job title, the org
-/// edge and the `local_created_at` sort key all pinned.
 fn seed_customer_row(
     conn: &rusqlite::Connection,
     id: i64,
@@ -534,9 +458,6 @@ fn seed_customer_row(
     .expect("customer");
 }
 
-/// One conversation row with fixed timestamps, including
-/// `last_activity_at` (the customers list sort key and last-contact
-/// column; created == updated == last activity == `at`).
 fn seed_customer_conversation(
     conn: &rusqlite::Connection,
     id: i64,
@@ -567,8 +488,6 @@ fn seed_customer_conversation(
     .expect("conversation");
 }
 
-/// One customer event row (the timeline card's source); `created_at`
-/// rides `occurred_at` so nothing drifts with wall-clock time.
 fn seed_customer_event(
     conn: &rusqlite::Connection,
     customer_id: i64,
@@ -586,11 +505,6 @@ fn seed_customer_event(
     .expect("customer event");
 }
 
-/// Render the real page at `width` × 900 in `dark`/light and lock it as
-/// `{name}.png` under `tests/snapshots/`. The page opens on its empty
-/// state (HEAD behavior — the list populates when the search is applied),
-/// so the golden clicks the FilterBar's primary `search` apply through
-/// the a11y tree first (the user's empty-box "show all" search).
 fn render_customers_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_customers_page();
     let mut h = Harness::builder()
@@ -653,11 +567,6 @@ fn r3_customers_page_800_dark() {
     render_customers_page(true, 800.0, "r3_customers_page_800_dark");
 }
 
-/// The A-1 flow: the search populates the table, and a row's `open` act
-/// opens the DS-C-17 DetailPanel with the DS-A-03 record composition
-/// (rows sort by most recent activity, so the first `open` is Kim Pearce
-/// — three conversations, events, milestones and the AI recommendation).
-/// Snapshot the open panel.
 #[test]
 fn r3_customers_open_detail_light() {
     let (page, db) = seeded_customers_page();
@@ -684,15 +593,12 @@ fn r3_customers_open_detail_light() {
         .expect("the FilterBar's search apply")
         .click();
     h.run_ok();
-    // Click the first row's open act through the accessibility tree.
     h.get_all_by_label("open")
         .next()
         .expect("the first row's open act")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the panel frame
-    // The panel is open: its close button is in the tree, and
-    // the a11y check (still ON) validates the panel's controls.
+    h.run_steps(2);
     assert!(
         h.query_by_label("close panel").is_some(),
         "the DetailPanel must be open after the row's open act"
@@ -700,9 +606,6 @@ fn r3_customers_open_detail_light() {
     h.snapshot("r3_customers_detail_light");
 }
 
-/// The A-1 flow: a row's `open` act opens the DS-C-17 DetailPanel with the
-/// DS-A-03 record composition (rows sort by name, so the first `open` is
-/// Acme — two members, three conversations). Snapshot the open panel.
 #[test]
 fn organizations_open_detail_light() {
     let (page, db) = seeded_page();
@@ -724,15 +627,12 @@ fn organizations_open_detail_light() {
             },
         );
     h.run_ok();
-    // Click the first row's open act through the accessibility tree.
     h.get_all_by_label("open")
         .next()
         .expect("the first row's open act")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the panel frame
-    // The panel is open: its close button is in the tree, and
-    // the a11y check (still ON) validates the panel's controls.
+    h.run_steps(2);
     assert!(
         h.query_by_label("close panel").is_some(),
         "the DetailPanel must be open after the row's open act"

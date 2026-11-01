@@ -230,11 +230,6 @@ fn compute(
         "affected_inboxes": inboxes,
         "top_tags": tags,
         "products": products,
-        // Audit item 113: 'pending' is an unresolved conversation — the
-        // workload, operations and digest surfaces all count open as
-        // status IN ('active','pending') — but this distribution dropped
-        // it, so open + closed silently undercounted affected_conversations
-        // whenever a linked conversation sat in the platform's pending state.
         "open_closed_distribution": { "open": open_count, "closed": closed_count },
         "customer_waiting_count": waiting_count,
         "release_correlation_candidates": release_candidates,
@@ -293,10 +288,6 @@ mod batch30_tests {
     use super::*;
     use rusqlite::Connection;
 
-    /// Audit item 113: 'pending' is an unresolved conversation — every
-    /// other surface counts open as status IN ('active','pending') — but
-    /// the open/closed distribution dropped it, so open + closed silently
-    /// undercounted affected_conversations.
     #[test]
     fn open_closed_distribution_counts_pending_as_open() {
         let mut conn = Connection::open_in_memory().expect("db");

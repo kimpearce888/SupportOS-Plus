@@ -215,11 +215,6 @@ pub fn create(
     get(conn, id)?.ok_or_else(|| Error::Config("connector vanished".into()))
 }
 
-// Clean-audit item 156: `patch` — the connector edit/auth-change
-// route logic — is gone. It had no caller: the shell's connector page
-// creates, deletes and refreshes connectors but exposes no edit form,
-// so no code path could ever change a stored auth payload.
-
 pub fn delete(conn: &Connection, id: i64) -> Result<bool> {
     conn.execute(
         "DELETE FROM connector_rows WHERE connector_id = ?1",
@@ -546,8 +541,6 @@ pub async fn validate_config(
 ) -> Option<String> {
     if kind == "http" {
         let url = url.unwrap_or("");
-        // Clean-audit item 51: this is an async context — the blocking
-        // getaddrinfo of the sync guard must not run on the executor.
         return match crate::security::validate_ssrf_full_async(url).await {
             Ok(()) => None,
             Err(e) => Some(format!("URL refused: {e}")),
@@ -666,8 +659,6 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
         }
         "http" => {
             let url = config.get("url").and_then(|v| v.as_str()).unwrap_or("");
-            // Clean-audit item 51: fetch_rows rides the async refresh
-            // pipeline — the DNS-based SSRF guard must resolve off-thread.
             crate::security::validate_ssrf_full_async(url).await?;
             let client = reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
@@ -813,11 +804,6 @@ pub fn parse_csv(text: &str, max_rows: usize) -> Vec<Value> {
     let Some(headers) = records.first() else {
         return Vec::new();
     };
-    // Audit item 126: empty headers were FILTERED OUT of the header list
-    // while the data records kept all their columns — with a header row
-    // like "a,,c" every data field after the gap shifted one column left
-    // ("c" received what belonged to the unnamed column). Empty headers
-    // keep their positions now; they just produce no key.
     let headers: Vec<Option<&str>> = headers
         .iter()
         .map(|h| {
@@ -942,20 +928,10 @@ fn infer_schema(rows: &[NormalizedRow]) -> Option<Value> {
     Some(Value::Array(schema))
 }
 
-// Clean-audit item 156: the connector AI-search surface
-// (`search_for_ai`, `ai_visible_connector_names`) is gone. Nothing
-// called it — the copilot's tool set reads the local archive through
-// `ai_tools`, not through connectors — and the dead lane also carried
-// a legacy-schema assumption (string rows through `list_rows`) that
-// drifted from the live storage shape.
-
 #[cfg(test)]
 mod batch31_tests {
     use super::*;
 
-    /// Audit item 126: empty headers were filtered out of the header list
-    /// while data records kept all columns — every field after the gap
-    /// shifted one column left. Empty headers keep their positions now.
     #[test]
     fn parse_csv_keeps_positional_alignment_across_empty_headers() {
         let rows = parse_csv("a,,c\n1,2,3\n", 100);
@@ -967,7 +943,6 @@ mod batch31_tests {
             "the unnamed column produces no key"
         );
 
-        // Regular CSV is unchanged.
         let plain = parse_csv("x,y\n10,20\n", 100);
         assert_eq!(plain.len(), 1);
         assert_eq!(plain[0]["x"], "10");

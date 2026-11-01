@@ -1141,12 +1141,6 @@ mod batch30_tests {
     use super::*;
     use rusqlite::{Connection, params};
 
-    /// Audit item 116: the outcome computation read the thread sequence
-    /// with a bare `ORDER BY remote_created_at` — a column the sync
-    /// writer never fills, so the order was scan-order luck. The
-    /// COALESCE fallback keeps the lane working on synced data (where
-    /// remote_created_at is NULL for every row) and prefers the remote
-    /// stamp when a writer does provide one.
     #[test]
     fn compute_outcome_survives_synced_threads_with_null_remote_stamps() {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -1164,11 +1158,6 @@ mod batch30_tests {
         )
         .expect("conversation");
         let conv: i64 = conn.last_insert_rowid();
-        // Synced rows: only created_at is populated, remote_created_at NULL.
-        // The rows are INSERTED reply-first — with the old constant-NULL
-        // ORDER BY the scan order won and the follow-up customer message
-        // was miscounted; the COALESCE order reads customer → reply →
-        // follow-up.
         for (offset, kind, body) in [
             (
                 "-3 days",
@@ -1193,8 +1182,6 @@ mod batch30_tests {
         let outcome = compute_outcome(&conn, conv)
             .expect("compute")
             .expect("an outcome for a closed, replied conversation");
-        // Chronological order: one customer message after the reply, and
-        // it is a complaint, not a closing acknowledgment.
         assert_eq!(outcome.follow_up_count, 1, "one follow-up customer message");
         assert_eq!(
             outcome.resolved_after_first_response,

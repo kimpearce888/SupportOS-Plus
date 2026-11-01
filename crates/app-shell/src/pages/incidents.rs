@@ -1,29 +1,3 @@
-//! Incidents page (port of the web `pages/incidents.rs`).
-//!
-//! RS-18 (wave B) rebuild on **Design Contract v1.0 archetype DS-A-01** —
-//! the list-page recipe (docs/audit/design-contract-v1.md §4): PageHeader
-//! with the counter pill (DS-C-01, register A-6 — the count lives beside
-//! the header) → FilterBar with exactly one primary apply (DS-C-10, A-2) →
-//! DataTable (DS-C-05, virtualized rows) → the row `open` act opens the
-//! DetailPanel (DS-C-17, A-1) whose content is the DS-A-03 record
-//! composition (record head + description / customer-safe cards, then the
-//! linked-conversations / releases / affected-customers / notes blocks in
-//! the lab's two-column arrangement). The conformed lab reference is
-//! `mockups/design-lab/pages-ds.js` (`DS.definePage("incidents", …)`).
-//!
-//! Behavior, queries, and data flow are unchanged (decisions.md D6:
-//! presentation only). The list still reads
-//! `spp_core::incident_workspace::list_incident_rows` (the `/api/incidents`
-//! SQL) with the same status/severity/open-only/query filters, the detail
-//! still reads the `/api/incidents/{id}` family (conversations, affected
-//! customers, notes, releases), create still runs
-//! `intelligence_features::create_manual_incident` with the same
-//! validation and the skipped-id notice (clean-audit item 131), and the
-//! add-note / link-conversation actions are the same state machine as
-//! before the rebuild. Per the clean-audit item 131 semantics, the combo
-//! and checkbox filters still refetch on change — the text query keeps
-//! its explicit apply (the FilterBar's one primary action).
-
 use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::incident_workspace::IncidentListFilters;
@@ -33,10 +7,8 @@ use super::{i64_field, opt_str_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-/// DataTable row height — the 32px button row (DS-C-05 cells ride it).
 const ROW_HEIGHT: f32 = 32.0;
 
-/// Incident statuses (web: the status select).
 pub const INCIDENT_STATUSES: [&str; 5] = [
     "investigating",
     "identified",
@@ -45,10 +17,8 @@ pub const INCIDENT_STATUSES: [&str; 5] = [
     "resolved",
 ];
 
-/// Incident severities (web: the severity select).
 pub const INCIDENT_SEVERITIES: [&str; 4] = ["sev1", "sev2", "sev3", "sev4"];
 
-/// The interactive incidents page state.
 pub struct IncidentsPage {
     filter_status: Option<String>,
     filter_severity: Option<String>,
@@ -56,9 +26,6 @@ pub struct IncidentsPage {
     filter_query: String,
     applied_query: String,
     rows: Vec<serde_json::Value>,
-    /// Clean-audit item 147: reload latch — an empty mirror is a legal
-    /// steady state, so "list empty" can no longer mean "re-query every
-    /// frame".
     loaded: bool,
     total: i64,
     selected: Option<i64>,
@@ -76,15 +43,10 @@ pub struct IncidentsPage {
     new_note: String,
     link_conversation: String,
     error: Option<String>,
-    /// Post-action feedback (clean-audit item 131): which typed
-    /// conversation ids were skipped and why, after a create.
     notice: Option<String>,
-    /// DS-C-17 DetailPanel open flag (A-1): the row `open` act opens the
-    /// right sheet; Esc, the scrim, or the close button close it.
     panel_open: bool,
 }
 
-/// Incident severity → badge tone (redesign of the raw RED/YELLOW/GRAY).
 fn severity_tone(severity: &str) -> BadgeTone {
     match severity {
         "sev1" => BadgeTone::Destructive,
@@ -93,7 +55,6 @@ fn severity_tone(severity: &str) -> BadgeTone {
     }
 }
 
-/// Incident status → badge tone.
 fn incident_status_tone(status: &str) -> BadgeTone {
     match status {
         "resolved" => BadgeTone::Success,
@@ -135,7 +96,6 @@ impl IncidentsPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.loaded = false;
         self.rows.clear();
@@ -161,8 +121,6 @@ impl IncidentsPage {
                 if let Some(id) = self.selected
                     && !self.rows.iter().any(|r| i64_field(r, "id") == id)
                 {
-                    // Detail may still exist beyond the filtered page;
-                    // keep the selection, just refresh it.
                     self.reload_detail(db, id);
                 }
             }
@@ -213,9 +171,6 @@ impl IncidentsPage {
             self.error = Some("Invalid severity.".into());
             return;
         }
-        // Clean-audit item 131: keep what the user typed so the skipped
-        // ids can be named in the notice — the old chain dropped a
-        // non-numeric or non-positive token before anyone saw it.
         let parsed: Vec<(Option<i64>, String)> = self
             .new_conversation_ids
             .split(',')
@@ -233,9 +188,6 @@ impl IncidentsPage {
             .map(|(_, s)| s.clone())
             .collect();
         let conversation_ids: Vec<i64> = parsed.iter().filter_map(|(v, _)| *v).collect();
-        // The route validated each id exists; skip missing ones the same
-        // way — but say so (clean-audit item 131: the drop used to be
-        // silent, so a typo'd id just vanished from the link list).
         let mut valid_ids = Vec::new();
         let mut missing = unparseable;
         for id in conversation_ids {
@@ -253,7 +205,6 @@ impl IncidentsPage {
                 missing.push(id.to_string());
             }
         }
-        // The count is read before `valid_ids` moves into the incident.
         let linked_count = valid_ids.len();
         let incident = ManualIncident {
             title,
@@ -284,8 +235,6 @@ impl IncidentsPage {
                 self.new_title.clear();
                 self.new_description.clear();
                 self.new_conversation_ids.clear();
-                // Clean-audit item 131: name the dropped ids instead of
-                // silently losing them.
                 self.notice = if missing.is_empty() {
                     None
                 } else {
@@ -297,8 +246,6 @@ impl IncidentsPage {
                     ))
                 };
                 self.reload_list(db);
-                // The created incident's detail becomes visible — the panel
-                // takes the role the old right column played.
                 self.panel_open = true;
                 self.select(db, id);
             }
@@ -359,13 +306,9 @@ impl IncidentsPage {
         }
     }
 
-    /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
-        // Audit fix (M20): the list caps at 100 rows with no pager — say
-        // so instead of implying the full set is shown. The lab's
-        // subtitle is the incident count itself; the cap note rides it.
         let subtitle = if (self.rows.len() as i64) < self.total {
             format!(
                 "showing first {} of {} incident(s) — the list has no pager",
@@ -376,12 +319,6 @@ impl IncidentsPage {
             format!("{} incident(s)", self.total)
         };
 
-        // DS-C-01 PageHeader: title + subtitle, right cluster = the New
-        // Incident primary (the lab's actions) + the counter pill (A-6).
-        // egui right_to_left puts the first added widget rightmost, so the
-        // add order below paints [counter] [New Incident] — the lab's
-        // DS-C-01 order. The pill counts the rendered table (the lab's
-        // list.length), while the subtitle carries the workspace total.
         design::page_header(ui, "Incidents", Some(&subtitle), |ui| {
             if design::button_with_icon(ui, Icon::Plus, "New Incident", ButtonVariant::Primary)
                 .on_hover_text("open the new-incident form")
@@ -398,10 +335,6 @@ impl IncidentsPage {
             design::hint_text(ui, note);
         }
 
-        // DS-C-10 FilterBar (A-2): filters left, exactly one primary apply
-        // right. Behavior preserved (clean-audit item 131): the combos and
-        // the checkbox still refetch on change; the text query keeps its
-        // explicit apply — the FilterBar's one primary action.
         let apply = design::filter_bar(
             ui,
             |ui| {
@@ -422,9 +355,6 @@ impl IncidentsPage {
                     })
                     .response
                     .widget_info(|| {
-                        // The visible "status:" label is a separate widget,
-                        // so the combo button carries the name itself or
-                        // kittest's a11y check trips on an unlabeled node.
                         egui::WidgetInfo::labeled(
                             egui::Role::Button,
                             ui.is_enabled(),
@@ -480,18 +410,11 @@ impl IncidentsPage {
         }
         ui.add_space(design::scale::space::SP2);
 
-        // The lab's create affordance: a page-flow card under the filters
-        // (`card_titled` + DS-C-13 form rows + one primary create action).
-        // Same validation, same write, same skipped-id notice.
         if self.show_new {
             self.new_incident_ui(ui, db);
             ui.add_space(design::scale::space::SP2);
         }
 
-        // DS-C-05 DataTable — virtualized rows over the same capped list
-        // query; columns per the conformed lab list (code, title, severity,
-        // status, conversations, open act). With no rows the lab engine
-        // swaps the table for the empty state (A-7).
         let rows = self.rows.clone();
         let mut pick: Option<i64> = None;
         if rows.is_empty() {
@@ -575,18 +498,11 @@ impl IncidentsPage {
             );
         }
 
-        // A-1: the row `open` act selects the incident and opens the
-        // DetailPanel.
         if let Some(id) = pick {
             self.panel_open = true;
             self.select(db, id);
         }
 
-        // DS-C-17 DetailPanel (A-1) over the scrim — content is the DS-A-03
-        // record composition: record head (name = code · title, meta =
-        // started + owner, badges = status + severity), the description and
-        // customer-safe cards, then the lab's two-column block (linked
-        // conversations + releases | affected customers + notes).
         let detail = self.detail.clone();
         let title = detail
             .as_ref()
@@ -610,11 +526,6 @@ impl IncidentsPage {
                     );
                     return;
                 };
-                // The store nests the incident row under `incident`
-                // (incident_workspace::incident_detail returns
-                // {incident, impact, conversations, …}) — the pre-rebuild
-                // page read the top level and silently rendered an empty
-                // record head.
                 let incident = detail
                     .get("incident")
                     .cloned()
@@ -623,9 +534,6 @@ impl IncidentsPage {
                 let status = str_field(&incident, "status");
                 let severity = str_field(&incident, "severity");
 
-                // DS-A-03 record head: name + meta line + the status /
-                // severity badges (the lab's recordHead with no avatar —
-                // incidents carry codes, not faces).
                 let code = str_field(&incident, "code");
                 let incident_title = str_field(&incident, "title");
                 ui.vertical(|ui| {
@@ -667,8 +575,6 @@ impl IncidentsPage {
                     }
                 }
 
-                // The lab's twoCol: left = Linked conversations + Releases,
-                // right = Affected customers + Notes.
                 ui.columns(2, |columns| {
                     let conversations = self.conversations.clone();
                     let releases = self.releases.clone();
@@ -676,8 +582,6 @@ impl IncidentsPage {
                     let customers = self.customers.clone();
                     let notes = self.notes.clone();
 
-                    // Left column: Linked conversations (+ link form) and
-                    // Releases.
                     design::card_titled(
                         &mut columns[0],
                         &format!("Linked conversations ({})", conversations.len()),
@@ -733,8 +637,6 @@ impl IncidentsPage {
                         columns[0].add_space(design::scale::space::SP2);
                     }
 
-                    // Right column: Affected customers and Notes (+ add
-                    // note form).
                     design::card_titled(
                         &mut columns[1],
                         &format!("Affected customers ({})", customers.len()),
@@ -848,9 +750,6 @@ impl Default for IncidentsPage {
     }
 }
 
-/// One DataTable cell: fixed width, vertically centered in the 32px row,
-/// truncated (DS-C-05 cell anatomy). `right` right-aligns the text (the
-/// mono numeral cells).
 fn dt_cell(ui: &mut egui::Ui, width: f32, text: egui::RichText, right: bool) {
     let layout = if right {
         egui::Layout::right_to_left(egui::Align::Center)
@@ -902,9 +801,6 @@ mod tests {
         assert_eq!(page.conversations.len(), 1);
     }
 
-    /// Clean-audit item 131: the create path used to drop invalid and
-    /// nonexistent conversation ids silently — a typo'd id just vanished
-    /// from the link list. The notice names every skipped token.
     #[test]
     fn create_names_the_skipped_conversation_ids() {
         let db = fixture(vec![(

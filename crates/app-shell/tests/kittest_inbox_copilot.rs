@@ -1,25 +1,3 @@
-//! RS-4-8 — the copilot-open inbox states, golden-locked (the G4-rejection
-//! fix wave's regression locks).
-//!
-//! The G4 rejection (2026-10-30) proved the copilot-open full-page state had
-//! never been render-locked: `kittest_inbox_page` locks the copilot CLOSED,
-//! the identity goldens lock the pane widgets at 720 px, and at a real
-//! desktop width the reader's content painted straight over the copilot
-//! panel (root cause + fix in the RS-4 batch record, `completed.md`). This
-//! suite locks the fixed state class at the owner's live aspect (1625×828):
-//! copilot OPEN (light + dark) and copilot CLOSED (light).
-//!
-//! The fixture mirrors the owner's live data shape — the case that broke:
-//! Help Scout HTML in `body_text` (`<br><br>`), a long unbreakable URL in
-//! the internal note, a blank-name customer row, a closed unassigned
-//! conversation. Customer bodies use the canonical `customer` thread type
-//! the analyzer reads, so the copilot pane renders its full surface
-//! (Signals + Summary) deterministically.
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_inbox_copilot`
-//! Regenerate with `UPDATE_SNAPSHOTS=1`; a clean re-run must pass
-//! byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -65,7 +43,6 @@ fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
         [],
     )
     .expect("customer emails");
-    // Conv 1 = the owner's live ticket shape: closed, unassigned, HTML body.
     seed_conversation(
         &conn,
         1,
@@ -77,7 +54,6 @@ fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
         9,
         "2026-10-28T10:26:00.000Z",
     );
-    // Conv 2 = the blank-name customer row (RS-4-7's fallback case).
     seed_conversation(
         &conn,
         2,
@@ -89,8 +65,6 @@ fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
         10,
         "2026-07-22T11:15:00.000Z",
     );
-    // Canonical `customer` type + HTML markup: the analyzer strips it
-    // (RS-4-2), the reader renders it clean, the copilot Summary card fills.
     seed_thread(
         &conn,
         1,
@@ -104,7 +78,6 @@ fn seeded_page() -> (InboxPage, DbHandle, EventBus) {
          the watch page without a login?<br><br>Thank you!",
         "2026-10-16T14:09:00.000Z",
     );
-    // Internal note with the long unbreakable URL (RS-4-3's break case).
     seed_thread(
         &conn,
         1,
@@ -199,8 +172,6 @@ fn seed_thread(
     .expect("thread");
 }
 
-/// Render at `w`×`h`; `open_copilot` drives the REAL toggle chip (the same
-/// path a user's click takes) before locking.
 fn render_copilot_state(dark: bool, w: f32, h: f32, open_copilot: bool, name: &str) {
     let (page, db, bus) = seeded_page();
     let mut harness = Harness::builder()
@@ -234,8 +205,6 @@ fn render_copilot_state(dark: bool, w: f32, h: f32, open_copilot: bool, name: &s
     harness.snapshot(name);
 }
 
-/// The owner's live window size with the copilot open — the state class
-/// that was never locked and broke (light).
 #[test]
 fn r4_inbox_copilot_open_1625_light() {
     render_copilot_state(
@@ -247,14 +216,11 @@ fn r4_inbox_copilot_open_1625_light() {
     );
 }
 
-/// Same state class, dark theme.
 #[test]
 fn r4_inbox_copilot_open_1625_dark() {
     render_copilot_state(true, 1625.0, 828.0, true, "r4_inbox_copilot_open_1625_dark");
 }
 
-/// The copilot-closed state at the same aspect (reader-only regression
-/// lock for the note-card token breaking).
 #[test]
 fn r4_inbox_copilot_closed_1625_light() {
     render_copilot_state(

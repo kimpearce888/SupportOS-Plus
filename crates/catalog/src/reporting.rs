@@ -324,12 +324,6 @@ pub fn metric_entry(key: ReportMetricKey) -> MetricCatalogEntry {
     }
 }
 
-// (audit item 163) `all_metric_entries` / `all_dimension_entries` were
-// removed: computed catalog vectors with zero callers anywhere in the
-// workspace. The per-key `metric_entry` / `dimension_entry` constructors
-// below stay — the report engine (core/reports.rs) pins each report's
-// catalog entry with them.
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DimensionCatalogEntry {
     pub key: ReportDimensionKey,

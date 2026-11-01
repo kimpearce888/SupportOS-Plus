@@ -73,18 +73,8 @@ fn try_backup(conn: &Connection, backups_dir: &Path) -> Result<BackupResult> {
     let target = backups_dir.join(format!("supportos-backup-{stamp}.db"));
     let escaped = target.to_string_lossy().replace('\'', "''");
     conn.execute_batch(&format!("VACUUM INTO '{escaped}'"))?;
-    // Audit fix (M12): the backup is the full mirror database in plaintext
-    // (customer PII included). VACUUM INTO inherits the umask (0644);
-    // force owner-only like secrets.key.
     crypto::restrict_permissions(&target);
 
-    // Audit fix (M18): only the file EXTENSION may change here. The
-    // pre-fix `to_string_lossy().replace(".db", ".settings.json")`
-    // rewrote EVERY ".db" occurrence, so a data directory containing
-    // ".db" anywhere in its path (e.g. …/my.db.d/backups) produced a
-    // sidecar path inside a nonexistent directory and failed the whole
-    // backup. with_extension touches the final component only (and
-    // appends honestly if the name carried no extension at all).
     let settings_target = target.with_extension("settings.json");
     let mut safe_rows: Vec<Value> = Vec::new();
     {
@@ -107,8 +97,6 @@ fn try_backup(conn: &Connection, backups_dir: &Path) -> Result<BackupResult> {
             "settings": safe_rows,
         }))?,
     )?;
-    // Audit fix (M12): the sidecar is secret-redacted but still carries
-    // application settings; keep it owner-only alongside the .db.
     crypto::restrict_permissions(&settings_target);
 
     let size = fs::metadata(&target)?.len();
@@ -188,11 +176,6 @@ pub fn prune_backups(backups_dir: &Path, keep: usize) -> usize {
     removed
 }
 
-/// Structural probe for a restore source: a SupportOS database always
-/// carries the base-schema `app_state` table. A foreign-but-valid SQLite
-/// file (an export from some other tool, a half-copied unrelated `.db`)
-/// would pass a bare integrity check yet brick the app once swapped in,
-/// so it is refused before anything on disk is touched.
 fn looks_like_supportos_db(path: &Path) -> bool {
     Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .and_then(|conn| {
@@ -210,10 +193,6 @@ pub fn restore(db_path: &Path, backup_path: &Path) -> Value {
     if !backup_path.exists() {
         return json!({ "ok": false, "message": "Backup file not found." });
     }
-    // Audit item 11: never swap an unverified file over the live
-    // database. The integrity check catches truncated copies and
-    // non-databases; the structural probe catches foreign SQLite files.
-    // Both run BEFORE anything on disk is modified.
     if !verify_backup(backup_path) {
         return json!({
             "ok": false,
@@ -234,8 +213,6 @@ pub fn restore(db_path: &Path, backup_path: &Path) -> Value {
     let db_str = db_path.to_string_lossy();
     let restore_tmp = format!("{db_str}.restore-tmp");
     let prev = format!("{db_str}.restore-prev");
-    // Stage the verified copy and fsync it BEFORE anything is swapped,
-    // so a power cut cannot leave a half-written file in place.
     if fs::copy(backup_path, &restore_tmp).is_err() {
         return json!({ "ok": false, "message": "Restore failed: could not stage the backup." });
     }
@@ -246,18 +223,9 @@ pub fn restore(db_path: &Path, backup_path: &Path) -> Value {
         let _ = fs::remove_file(&restore_tmp);
         return json!({ "ok": false, "message": "Restore failed: could not flush the staged backup." });
     }
-    // A stale prev from an earlier restore must not block the rename.
     let _ = fs::remove_file(&prev);
     let _ = fs::remove_file(format!("{prev}-wal"));
     let _ = fs::remove_file(format!("{prev}-shm"));
-    // Move the LIVE database and its WAL/SHM aside as one unit. This
-    // closes the stale-WAL window: the previous code renamed the new
-    // database into place first and only then deleted the old `-wal`,
-    // so a crash in between would have paired the fresh file with the
-    // old WAL and replayed foreign pages onto it. With the live side
-    // moved first, between the renames the db path simply does not
-    // exist — SQLite treats that as "open fresh", never as a
-    // cross-generation pair.
     if db_path.exists() && fs::rename(db_path, &prev).is_err() {
         let _ = fs::remove_file(&restore_tmp);
         return json!({
@@ -272,7 +240,6 @@ pub fn restore(db_path: &Path, backup_path: &Path) -> Value {
         }
     }
     if fs::rename(&restore_tmp, db_path).is_err() {
-        // Roll back: the live database (and its WAL) return to place.
         if Path::new(&prev).exists() {
             let _ = fs::rename(&prev, db_path);
         }
@@ -284,14 +251,10 @@ pub fn restore(db_path: &Path, backup_path: &Path) -> Value {
         }
         return json!({ "ok": false, "message": "Restore failed: could not swap the database into place." });
     }
-    // Durability: fsync the swapped file and the directory entry that
-    // now names it.
     let _ = fs::File::open(db_path).and_then(|f| f.sync_all());
     if let Some(parent) = db_path.parent() {
         let _ = fs::File::open(parent).and_then(|d| d.sync_all());
     }
-    // Success: the pre-restore database is discarded along with its
-    // moved-aside WAL/SHM (the backup file itself remains on disk).
     let _ = fs::remove_file(&prev);
     let _ = fs::remove_file(format!("{prev}-wal"));
     let _ = fs::remove_file(format!("{prev}-shm"));
@@ -381,8 +344,6 @@ fn try_export_json(conn: &Connection, backups_dir: &Path) -> Result<Value> {
             "data": data,
         }))?,
     )?;
-    // Audit fix (M12): JSON exports contain full customer records (PII);
-    // owner-only instead of the umask's 0644.
     crypto::restrict_permissions(&target);
     Ok(json!({
         "ok": true,
@@ -391,14 +352,6 @@ fn try_export_json(conn: &Connection, backups_dir: &Path) -> Result<Value> {
     }))
 }
 
-/// Clean-audit item 106: the CSV export lacked a formula-injection guard.
-/// A cell that starts with a formula trigger (`=`, `+`, `-`, `@`, TAB,
-/// CR — the OWASP CSV-injection set) executes when the exported file is
-/// opened in a spreadsheet: a conversation subject like
-/// `=HYPERLINK("http://evil","click")` became a live formula on the
-/// analyst's desk. The guard prefixes those cells with a single quote,
-/// which spreadsheet apps render as inert text, then applies the normal
-/// CSV quoting on top.
 fn csv_cell(v: &Option<String>) -> String {
     let raw = v.as_deref().unwrap_or("");
     let guarded = if raw.starts_with(['=', '+', '-', '@', '\t', '\r']) {
@@ -489,7 +442,6 @@ fn try_export_csv(conn: &Connection, backups_dir: &Path) -> Result<Value> {
         lines.push(values.iter().map(esc).collect::<Vec<_>>().join(","));
     }
     fs::write(&target, lines.join("\n"))?;
-    // Audit fix (M12): the CSV export carries customer names/emails (PII).
     crypto::restrict_permissions(&target);
     Ok(json!({
         "ok": true,
@@ -539,7 +491,6 @@ mod tests {
         let db_path = PathBuf::from(result.path.expect("backup path"));
         assert!(db_path.exists());
 
-        // The .db backup is a full copy: all three settings rows survive.
         let check =
             Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .expect("open backup");
@@ -550,7 +501,6 @@ mod tests {
             .expect("count settings");
         assert_eq!(rows, 3);
 
-        // The .settings.json sidecar redacts secret-like keys (token/secret/password).
         let sidecar = db_path.with_extension("settings.json");
         let raw = fs::read_to_string(&sidecar).expect("sidecar readable");
         let parsed: Value = serde_json::from_str(&raw).expect("sidecar JSON");
@@ -570,12 +520,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Audit fix (M18): the settings sidecar path must be derived from the
-    /// file extension only. The pre-fix code did
-    /// `path.replace(".db", ".settings.json")`, which rewrote EVERY
-    /// ".db" occurrence — a backups directory whose own path contained
-    /// ".db" pointed the sidecar at a nonexistent directory and failed
-    /// the whole backup.
     #[test]
     fn audit_m18_sidecar_path_survives_a_directory_named_with_db() {
         let root = temp_dir("m18");
@@ -591,7 +535,6 @@ mod tests {
         );
         let db_path = PathBuf::from(result.path.expect("backup path"));
         assert!(db_path.exists());
-        // The sidecar sits beside the .db with exactly the extension swapped.
         let sidecar = db_path.with_extension("settings.json");
         assert!(
             sidecar.exists(),
@@ -620,7 +563,6 @@ mod tests {
         .expect("vacuum into");
 
         let target = dir.join("target.db");
-        // Pre-existing WAL/SHM files must be cleaned up by the restore.
         fs::write(dir.join("target.db-wal"), b"stale").expect("wal");
         fs::write(dir.join("target.db-shm"), b"stale").expect("shm");
 
@@ -629,8 +571,6 @@ mod tests {
         assert!(target.exists());
         assert!(!dir.join("target.db-wal").exists());
         assert!(!dir.join("target.db-shm").exists());
-        // Audit item 11: no staging or previous-generation residue may
-        // outlive a successful restore.
         assert!(!dir.join("target.db.restore-tmp").exists());
         assert!(!dir.join("target.db.restore-prev").exists());
         assert!(!dir.join("target.db.restore-prev-wal").exists());
@@ -656,8 +596,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Audit item 11: an unverified file (junk / truncated copy) must be
-    /// refused before the live database is touched.
     #[test]
     fn restore_refuses_an_unverified_file_and_keeps_the_live_db() {
         let dir = temp_dir("restore-junk");
@@ -678,7 +616,6 @@ mod tests {
         assert_eq!(result["ok"], json!(false));
         assert!(result["message"].as_str().unwrap().contains("integrity"));
 
-        // The live database is untouched and still opens with its data.
         let check =
             Connection::open_with_flags(&target, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .expect("live db opens");
@@ -690,9 +627,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Audit item 11: a VALID SQLite file that is not a SupportOS backup
-    /// passes integrity_check — the structural probe is what must catch
-    /// it before the swap.
     #[test]
     fn restore_refuses_a_foreign_sqlite_database() {
         let dir = temp_dir("restore-foreign");
@@ -764,7 +698,6 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(remaining, vec![kept_name]);
-        // Sidecars of pruned backups are removed; the kept one survives.
         assert!(dir.join("supportos-backup-2.settings.json").exists());
         assert!(!dir.join("supportos-backup-0.settings.json").exists());
         assert!(!dir.join("supportos-backup-1.settings.json").exists());
@@ -788,10 +721,6 @@ mod batch29_audit106_tests {
         dir
     }
 
-    /// Clean-audit item 106: the CSV export must carry the formula-injection
-    /// guard — a conversation subject that starts with a formula trigger
-    /// (= + - @ TAB CR) is prefixed with a single quote so a spreadsheet
-    /// renders inert text, while ordinary cells pass through unchanged.
     #[test]
     fn audit106_csv_export_neutralizes_formula_cells() {
         let dir = csv_temp_dir("csv-guard");
@@ -824,8 +753,6 @@ mod batch29_audit106_tests {
         );
         let path = PathBuf::from(out.get("path").and_then(|v| v.as_str()).expect("path"));
         let text = fs::read_to_string(&path).expect("csv text");
-        // CSV quoting doubles inner quotes inside a quoted field; the guard
-        // prefix must sit INSIDE the quoted cell.
         assert!(
             text.contains("\"'=HYPERLINK(\"\"http://evil.example\"\",\"\"click me\"\")\""),
             "the = cell must be quote-prefixed: {text}"

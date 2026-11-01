@@ -229,18 +229,12 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
     let Some(customer_id) = conv.customer_local_id else {
         return Ok(None);
     };
-    // Audit item 116: remote_created_at is never populated by the sync
-    // writer, so the bare ORDER BY sorted on a constant NULL — the same
-    // defect and the same COALESCE convention as interaction_signals.rs.
     let mut stmt = conn.prepare(
         "SELECT type, body_html, body_text, from_type, created_at
            FROM conversation_threads
           WHERE conversation_id = ?1 AND deleted_at IS NULL AND state = 'published'
           ORDER BY COALESCE(remote_created_at, created_at) ASC",
     )?;
-    // Audit fix (H5): the real API never produces a 'reply' thread type —
-    // agent replies are 'message' (user-authored chat/phone too). Carry
-    // from_type through so authorship is decidable for every type.
     type ThreadRow = (String, Option<String>, Option<String>, Option<String>);
     let rows: Vec<ThreadRow> = stmt
         .query_map(params![conversation_id], |r| {

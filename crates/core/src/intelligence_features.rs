@@ -645,15 +645,6 @@ pub fn add_incident_note(
     Ok(note_id)
 }
 
-// ---------------------------------------------------------------------------
-// Item 150: the tracking writers. The M018/M019 tables above shipped with
-// readers but no caller ever wrote them — the dashboard's sla_breach count
-// (reports::get_dashboard_metrics) read an always-empty table, knowledge
-// gaps and doc freshness never gained a row. The sweeps and ingest hooks
-// below are the wiring the owner's "wire it" decision asked for.
-// ---------------------------------------------------------------------------
-
-/// The owning customer of a conversation (`conversations.customer_local_id`).
 fn conversation_customer_id(conn: &Connection, conversation_id: i64) -> Option<i64> {
     conn.query_row(
         "SELECT customer_local_id FROM conversations WHERE id = ?1",
@@ -663,11 +654,6 @@ fn conversation_customer_id(conn: &Connection, conversation_id: i64) -> Option<i
     .ok()
 }
 
-/// Persist one breach (deduped per conversation + breach kind) and record
-/// the support-milestone timeline event that feeds the Customers page
-/// (item 56). Returns true when a new row was written. Shared by both
-/// breach sweeps so the persisted log and the timeline stay consistent
-/// regardless of which evaluator found the breach.
 fn persist_breach(conn: &Connection, conversation_id: i64, breach_type: &str) -> Result<bool> {
     let already: i64 = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sla_breaches
@@ -681,17 +667,11 @@ fn persist_breach(conn: &Connection, conversation_id: i64, breach_type: &str) ->
     record_sla_breach(conn, conversation_id, breach_type)?;
     if let Some(customer_id) = conversation_customer_id(conn, conversation_id) {
         let data = format!("{{\"breach_type\":\"{breach_type}\"}}");
-        // Best-effort: a milestone must never fail the sweep.
         let _ = crate::reports::record_timeline_event(conn, customer_id, "sla_breach", Some(&data));
     }
     Ok(true)
 }
 
-/// Persist the breaches the LIVE SLA evaluation reports. `sla::sla_alerts`
-/// is the single source of truth for what counts as breached (business
-/// hours, targets, snoozes, the replied flag); this sweep only makes the
-/// verdict durable — `reports::get_dashboard_metrics` reads this table and
-/// previously saw zeros forever.
 pub fn sweep_sla_breaches(conn: &Connection) -> Result<usize> {
     let alerts = crate::sla::sla_alerts(conn)?;
     let mut recorded = 0usize;
@@ -706,13 +686,6 @@ pub fn sweep_sla_breaches(conn: &Connection) -> Result<usize> {
     Ok(recorded)
 }
 
-/// Coarse wall-clock breach tracking for mailboxes the live business-hours
-/// system does not monitor (no `mailbox_business_hours` row — exactly the
-/// mailboxes `sla::sla_alerts` reports as unconfigured). Thresholds come
-/// from `sla_configs` (`set_sla_config`), defaulting to the schema's
-/// 24h / 72h. Deliberately simpler than the live page — plain hours since
-/// the reference stamp, no business-hours math — and disjoint from it by
-/// construction, so the two evaluators can never double-record a breach.
 pub fn sweep_unmonitored_sla(conn: &Connection) -> Result<usize> {
     let mailboxes: Vec<i64> = {
         let mut stmt = conn.prepare(
@@ -777,11 +750,6 @@ pub fn sweep_unmonitored_sla(conn: &Connection) -> Result<usize> {
     Ok(recorded)
 }
 
-/// Doc-freshness sweep: prune rows whose document is gone, mark docs
-/// stale when their content has not been re-ingested within the
-/// `freshness_stale_days` window (the same setting the Knowledge page's
-/// freshness report uses), and clear the flag when a doc was updated
-/// again. Returns rows pruned + marked + cleared.
 pub fn sweep_doc_freshness(conn: &Connection) -> Result<usize> {
     let stale_days = crate::settings::get_int(conn, "freshness_stale_days", 180)?.max(1);
     let pruned = conn.execute(
@@ -812,10 +780,6 @@ pub fn sweep_doc_freshness(conn: &Connection) -> Result<usize> {
     Ok(pruned + marked + cleared)
 }
 
-/// One intelligence sweep tick: persist live SLA breaches, track
-/// unmonitored mailboxes coarsely, refresh doc-freshness state. The legs
-/// are independent — one failure must not eat the others' work, so the
-/// first error is returned after every leg ran.
 pub fn sweep(conn: &Connection) -> Result<()> {
     let mut first_err: Option<crate::error::Error> = None;
     if let Err(e) = sweep_sla_breaches(conn) {
@@ -871,10 +835,6 @@ mod item150_tests {
         .expect("conversation");
     }
 
-    /// Item 150: the live SLA evaluation is persisted — a breached
-    /// conversation gains a deduped sla_breaches row, a customer_timeline
-    /// milestone, and the dashboard metric finally counts it. A second
-    /// sweep records nothing (dedup per conversation + kind).
     #[test]
     fn sweep_sla_breaches_persists_live_verdicts_deduped() {
         let conn = db();
@@ -926,15 +886,11 @@ mod item150_tests {
         assert_eq!(count_sla_breaches(&conn).expect("count"), 1);
     }
 
-    /// Item 150: mailboxes without business-hours config are tracked by
-    /// the coarse wall-clock sweep, honoring the sla_configs thresholds
-    /// (set_sla_config) instead of the schema defaults.
     #[test]
     fn sweep_unmonitored_honors_sla_configs() {
         let conn = db();
         seed_customer(&conn, 1);
         seed_mailbox(&conn, 2);
-        // 3 days unanswered: breaches the 24h default, not a 100h override.
         seed_conversation(&conn, 20, 2, 3);
 
         let default_sweep = sweep_unmonitored_sla(&conn).expect("default sweep");
@@ -950,8 +906,6 @@ mod item150_tests {
         assert_eq!(cfg.resolution_hours, 200.0);
     }
 
-    /// Item 150: knowledge gaps gain rows on repeated zero-hit queries and
-    /// list back in hit-count order.
     #[test]
     fn knowledge_gaps_gain_rows_and_list_back() {
         let conn = db();
@@ -964,10 +918,6 @@ mod item150_tests {
         assert_eq!(gaps[1], ("api keys".into(), 1));
     }
 
-    /// Item 150: ingest stamps freshness (update_doc_freshness via
-    /// upsert_document), the sweep marks docs stale past the window and
-    /// clears the flag when content is refreshed, and orphaned rows are
-    /// pruned when a document is deleted.
     #[test]
     fn doc_freshness_stamps_marks_clears_and_prunes() {
         let conn = db();
@@ -996,7 +946,6 @@ mod item150_tests {
             .expect("freshness row");
         assert_eq!(stamped, 1, "ingest stamps the tracked freshness row");
 
-        // Backdate the content past the window -> the sweep marks it stale.
         conn.execute(
             "UPDATE knowledge_documents SET updated_at = datetime('now', '-200 days')
              WHERE id = ?1",
@@ -1006,8 +955,6 @@ mod item150_tests {
         sweep_doc_freshness(&conn).expect("stale sweep");
         assert_eq!(count_stale_docs(&conn).expect("stale count"), 1);
 
-        // Refreshing the content (fresh upsert -> updated_at back to now)
-        // clears the flag on the next sweep.
         crate::knowledge_store::upsert_document(
             &conn,
             source,
@@ -1020,7 +967,6 @@ mod item150_tests {
         sweep_doc_freshness(&conn).expect("clear sweep");
         assert_eq!(count_stale_docs(&conn).expect("stale count"), 0);
 
-        // Deleting the document prunes the orphaned freshness row.
         crate::knowledge_store::delete_document(&conn, doc_id).expect("delete");
         sweep_doc_freshness(&conn).expect("prune sweep");
         let left: i64 = conn
@@ -1031,8 +977,6 @@ mod item150_tests {
         assert_eq!(left, 0, "orphaned freshness rows are pruned");
     }
 
-    /// The combined sweep runs every leg and tolerates partial failure
-    /// surface: on a clean database it simply succeeds.
     #[test]
     fn combined_sweep_succeeds_on_clean_database() {
         let conn = db();

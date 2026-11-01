@@ -1,20 +1,3 @@
-//! A6 golden-set runner: the seeded 9-case regression harness for the
-//! analysis pipeline.
-//!
-//! The 9 cases (`golden_test_set`, seeded at boot by `ai_pipeline` since the
-//! earliest builds) exercise the real ticket-analysis prompt end to end:
-//! each case is rendered through the exact same `build_ticket_analysis_user`
-//! and `TICKET_ANALYSIS_SYSTEM` path production uses, and passes only when
-//! the model returns a parseable analysis with at least one non-empty core
-//! field. Every case records an `ai_runs` row (kind `golden_eval`, with
-//! token usage and endpoint) so the cost ledger prices eval runs too, and
-//! the whole run lands in `golden_test_runs` for the AI usage dashboard.
-//!
-//! Triggers (A6): on demand from the AI Center, on model-role reassignment
-//! (the role grid enqueues a job), and via [`golden_context_fingerprint`] —
-//! when the analysis prompt version or role map changes after an upgrade,
-//! the maintenance pass notices the fingerprint drift and re-runs the set.
-
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -55,9 +38,6 @@ fn active_cases(conn: &Connection) -> Result<Vec<GoldenCase>> {
     Ok(rows)
 }
 
-/// Execute every active golden case against the routed backend and persist
-/// the run. A disabled backend still writes an honest run row — passed=0,
-/// failed=N, one error per case — instead of pretending nothing happened.
 pub async fn run_golden_set(
     conn: &Connection,
     backend: &AiBackend,
@@ -221,7 +201,6 @@ async fn run_case(
     }
 }
 
-/// One persisted golden run, as the dashboard renders it.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct GoldenRunRow {
     pub id: i64,
@@ -233,7 +212,6 @@ pub struct GoldenRunRow {
     pub results: Value,
 }
 
-/// The most recent golden runs (A6 usage dashboard's eval column).
 pub fn latest_golden_runs(conn: &Connection, limit: usize) -> Vec<GoldenRunRow> {
     let mut stmt = match conn.prepare(
         "SELECT id, started_at, finished_at, backend, passed, failed, results
@@ -260,10 +238,6 @@ pub fn latest_golden_runs(conn: &Connection, limit: usize) -> Vec<GoldenRunRow> 
     .unwrap_or_default()
 }
 
-/// The change-detection fingerprint for "re-run the golden set on prompt or
-/// role changes": the analysis + eval prompt versions and the current role
-/// map. When maintenance sees a stored fingerprint that differs from this,
-/// the set re-runs and the new fingerprint is stored.
 pub fn golden_context_fingerprint(conn: &Connection) -> String {
     let roles = crate::ai_hub::load_roles(conn)
         .map(|r| serde_json::to_string(&r).unwrap_or_default())
@@ -276,8 +250,6 @@ pub fn golden_context_fingerprint(conn: &Connection) -> String {
     crate::crypto::hex(&digest)
 }
 
-/// Whether the stored fingerprint is stale (maintenance asks this on its
-/// daily pass).
 pub fn golden_fingerprint_stale(conn: &Connection) -> bool {
     let current = golden_context_fingerprint(conn);
     let stored = crate::settings::get_string(conn, "ai_golden_fingerprint")
@@ -286,7 +258,6 @@ pub fn golden_fingerprint_stale(conn: &Connection) -> bool {
     stored.as_deref() != Some(current.as_str())
 }
 
-/// Persist the current fingerprint after a successful run.
 pub fn store_golden_fingerprint(conn: &Connection) -> Result<()> {
     crate::settings::set_string(
         conn,
@@ -306,8 +277,6 @@ mod batch13_a6_tests {
         conn
     }
 
-    /// A6: a disabled backend still writes an honest run row — passed=0,
-    /// failed=9, one error per case — instead of pretending nothing happened.
     #[test]
     fn golden_set_with_disabled_backend_writes_honest_failed_run() {
         let conn = db();
@@ -354,8 +323,6 @@ mod batch13_a6_tests {
         );
     }
 
-    /// A6: the fingerprint is stale after a role-map change and fresh right
-    /// after storing — the "re-run on prompt/role changes" trigger.
     #[test]
     fn golden_fingerprint_tracks_role_changes() {
         let conn = db();

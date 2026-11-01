@@ -67,8 +67,6 @@ pub struct ConversationListItem {
     pub mailbox_name: Option<String>,
     pub assignee_id: Option<i64>,
     pub assignee_name: Option<String>,
-    /// Clean-audit item 33: team assignments — the team the platform
-    /// holds when no individual user is assigned.
     pub assigned_team_id: Option<i64>,
     pub assigned_team_name: Option<String>,
     pub customer_id: Option<i64>,
@@ -123,8 +121,6 @@ pub struct ConversationDetail {
     pub mailbox_name: Option<String>,
     pub assignee_id: Option<i64>,
     pub assignee_name: Option<String>,
-    /// Clean-audit item 33: team assignments — the team the platform
-    /// holds when no individual user is assigned.
     pub assigned_team_id: Option<i64>,
     pub assigned_team_name: Option<String>,
     pub customer_id: Option<i64>,
@@ -190,10 +186,6 @@ pub fn list_conversations(
         params_vec.push(number.into());
     }
     if let Some(ref query) = filters.query {
-        // Clean-audit item 83: the search text is a LITERAL — a `%` or
-        // `_` the user typed must not act as a wildcard, and a trailing
-        // `\` must not escape the wrapping percent (the pre-fix pattern
-        // silently matched the wrong rows or nothing).
         let q = format!("%{}%", crate::search::escape_like(query));
         where_parts
             .push("(c.subject LIKE ? ESCAPE '\\' OR c.preview LIKE ? ESCAPE '\\')".to_string());
@@ -380,10 +372,6 @@ fn params_from_iter_ref(values: &[rusqlite::types::Value]) -> impl rusqlite::Par
     rusqlite::params_from_iter(values.iter().cloned())
 }
 
-/// Clean-audit item 83: the inbox query filter interpolated raw search
-/// text into the LIKE pattern despite the declared `ESCAPE '\'` clause —
-/// a `%`/`_` the user typed acted as a wildcard and a trailing `\`
-/// escaped the wrapping percent, silently matching the wrong rows.
 #[cfg(test)]
 mod batch27_audit83_tests {
     use super::*;
@@ -445,9 +433,6 @@ mod batch27_audit83_tests {
     #[test]
     fn trailing_backslash_finds_backslash_rows() {
         let (conn, ()) = seeded();
-        // The pre-fix pattern wrapped the text as `%path C:\temp%` — the
-        // trailing `\` escaped the wrapping percent and the search found
-        // nothing (or errored). Escaped, it finds the real backslash row.
         let hits = subjects_matching(&conn, "path C:\\temp");
         assert_eq!(
             hits,
@@ -456,10 +441,6 @@ mod batch27_audit83_tests {
         );
     }
 
-    /// RS-4-7 (G4-rejection fix): a customer imported with blank
-    /// first/last names (`'' || ' ' || ''` = `' '`) rendered a headerless
-    /// list row — the owner's live inbox showed one (#49224). The name
-    /// column now falls back to the email, then to 'customer'.
     #[test]
     fn blank_customer_name_falls_back_to_email() {
         let mut conn = rusqlite::Connection::open_in_memory().expect("db");

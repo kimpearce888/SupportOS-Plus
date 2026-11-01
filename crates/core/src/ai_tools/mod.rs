@@ -310,8 +310,6 @@ mod batch23_audit_tests {
             rusqlite::params![customer],
         )
         .expect("conversation");
-        // One human-written note and one machine-extracted fact — the
-        // same table, different provenance.
         conn.execute(
             "INSERT INTO customer_memory (customer_id, memory_key, memory_value, evidence_excerpt,
                      source_conversation_id, confidence, provenance, source, last_seen_at)
@@ -331,11 +329,6 @@ mod batch23_audit_tests {
         conn
     }
 
-    /// Item 41: get_customer_memory used to relay AI-extracted rows under
-    /// a note claiming "human-written entries are the only persisted
-    /// rows" — the model treated machine-extracted facts as human
-    /// statements. Every entry now carries its own source and the note
-    /// says what each source means.
     #[test]
     fn customer_memory_note_no_longer_claims_human_only() {
         let conn = db_with_memory_rows();

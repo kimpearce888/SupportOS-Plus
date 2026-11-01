@@ -7,10 +7,6 @@ pub const PROMPT_VERSIONS_ISSUE_CLUSTER: &str = "issue_cluster_v1";
 pub const PROMPT_VERSIONS_MEMORY_EXTRACTION: &str = "memory_extraction_v1";
 pub const PROMPT_VERSIONS_INTERACTION_OBSERVATION: &str = "interaction_observation_v1";
 pub const PROMPT_VERSIONS_INTERACTION_RECOMMENDATION: &str = "interaction_recommendation_v1";
-// Clean-audit item 149: the ai_prompts copies of the report-narrative and
-// attribute-extraction prompt surfaces are gone — the attribute feature
-// owns its prompt and version in `ai_attributes.rs`, and the report
-// narrative runner had no caller.
 pub const PROMPT_VERSIONS_COPILOT_CHAT: &str = "copilot_chat_v1";
 pub const PROMPT_VERSIONS_DRAFT_REWRITE: &str = "draft_rewrite_v1";
 pub const PROMPT_VERSIONS_TRANSLATION: &str = "translation_v1";
@@ -132,9 +128,6 @@ pub struct EvidenceContext {
     pub saved_replies: Vec<SavedReplyEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_strategy: Option<String>,
-    /// Durable customer facts extracted from past conversations (A2):
-    /// the "know before you reply" briefing block. Quarantined keys
-    /// never reach the prompt (ai_memory_guard filters them at load).
     #[serde(default)]
     pub customer_memory: Vec<MemoryEntry>,
 }
@@ -347,9 +340,6 @@ pub fn build_issue_cluster_user(
             format!("#{} [{}] {}: {}", c.number, tags, c.subject, c.preview)
         })
         .collect();
-    // Clean-audit item 42: when the window is capped, the model is told
-    // it is seeing a newest-first sample of a larger population so it
-    // does not treat the list as exhaustive.
     let sampling_note = if (conversations.len() as i64) < total_in_window {
         format!(
             "\n\nNOTE: the window holds {} conversations; only the newest {} are listed (context cap). Cluster only the listed ones.",
@@ -630,16 +620,8 @@ pub fn build_interaction_recommendation_user(
     out
 }
 
-// ---------------------------------------------------------------------------
-// Batch 14 — K2 article drafting, K4 weekly digest
-// ---------------------------------------------------------------------------
-
 pub const PROMPT_VERSIONS_ARTICLE_DRAFT: &str = "article_draft_v1";
 
-/// K2: the model drafts a knowledge-base article grounded ONLY in the
-/// supplied resolutions. Every factual sentence must carry a [^N] marker
-/// bound to the numbered source; the review queue (a human) is the only
-/// path forward, so the draft is explicitly labelled as AI-generated.
 pub const ARTICLE_DRAFT_SYSTEM: &str = "You draft internal knowledge-base articles from real support resolutions. The numbered sources are the ONLY ground truth: never invent steps, commands, error messages or causes that do not appear in them. Every factual sentence MUST end with a [^N] citation marker referring to its source number. Where the sources disagree or a step is uncertain, write it as an open question for the reviewer instead of guessing. The article is a starting point for a human author who will review it before anything is published. Respond ONLY with JSON: {\"title\": \"...\", \"body_markdown\": \"...\"}. The body is Markdown; place the citations section header last and the model must NOT add its own signature or notes beyond the JSON fields.";
 
 pub fn build_article_draft_user(
@@ -669,9 +651,6 @@ pub fn build_article_draft_user(
 
 pub const PROMPT_VERSIONS_WEEKLY_DIGEST: &str = "weekly_digest_v1";
 
-/// K4: same contract as the report narrative — SQL-computed numbers are
-/// authoritative, the model summarizes and never recalculates, and
-/// uncertainty is flagged rather than smoothed over.
 pub const WEEKLY_DIGEST_SYSTEM: &str = "You write the weekly support digest for a support lead. The computed facts given to you are authoritative - never recalculate, round or invent numbers, and do not omit anomalies. Write in plain, direct prose: what happened with volume, what topics dominated, how sentiment moved, which anomalies stand out, what the workload looked like, what changed in the knowledge base (new gaps, new or updated articles), and the one or two things that deserve attention next week. Flag any statement you are unsure about with \"requires verification\". The digest is clearly labelled as AI-generated. Respond ONLY with JSON: {\"narrative\": \"...\"} - 6 to 10 sentences.";
 
 pub fn build_weekly_digest_user(facts: &serde_json::Value) -> String {

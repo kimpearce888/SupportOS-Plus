@@ -1,25 +1,3 @@
-//! RS-20 — DS connectors goldens (wave D).
-//!
-//! The lab reference lives at `mockups/design-lab/goldens/v4/{light,dark}/connectors-*.png`;
-//! egui renders will not pixel-match that HTML lab — these goldens lock the
-//! EGUI page state (the real `ConnectorsPage`: the header with the lab's
-//! counter pill beside the New Connector primary, the striped table with
-//! the chip / muted-mono kind / dot+badge health / refresh / muted-mono
-//! last-sync cells and the collapsed refresh+delete acts, the lab's A-5
-//! quirk receipt, the rows viewer for the picked connector and the New
-//! Connector form) over a seeded mirror; the side-by-side review against
-//! the lab is the G3 evidence pack.
-//!
-//! The goldens click the first connector chip through the a11y tree before
-//! locking the populated page (the user's first act — the chip opens the
-//! rows viewer below, exactly the lab's A-5 semantics); the interaction
-//! golden opens the New Connector form (its labelled_by bindings under the
-//! a11y check).
-//!
-//! Run under a display (Xvfb on display :99 in this lab):
-//! `cargo test -p supportos-plus-app-shell --features kittest-ui --test kittest_connectors_page`
-//! Regenerate the baselines with `UPDATE_SNAPSHOTS=1`; a clean re-run must
-//! then pass byte-identical (the repo's diff-locked-twice rule).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -29,16 +7,12 @@ use spp_core::db::DbHandle;
 use spp_shell::design;
 use spp_shell::pages::connectors::ConnectorsPage;
 
-/// Harness state: the REAL page + the seeded database it reads.
 struct ConnectorsPageState {
     installed: bool,
     page: ConnectorsPage,
     db: DbHandle,
 }
 
-/// Bootstrap an in-memory database and seed the connectors fixture (the
-/// lab's three rows: an ok csv, a stale http, an error http — plus the
-/// rows viewer's two mirror rows on the first connector).
 fn seeded_page() -> (ConnectorsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
@@ -96,14 +70,6 @@ fn seeded_page() -> (ConnectorsPage, DbHandle) {
     (ConnectorsPage::new(), DbHandle::new(conn))
 }
 
-// ---------------------------------------------------------------------------
-// The six goldens + the New Connector interaction
-// ---------------------------------------------------------------------------
-
-/// Render the real page once at `width` × 900 in `dark`/light, pick the
-/// first connector (the user's first act — the chip opens the rows viewer
-/// below, the lab's A-5 semantics) and lock the populated page as
-/// `{name}.png` under `tests/snapshots/`.
 fn render_connectors_page(dark: bool, width: f32, name: &str) {
     let (page, db) = seeded_page();
     let mut h = Harness::builder()
@@ -166,10 +132,6 @@ fn r3_connectors_page_800_dark() {
     render_connectors_page(true, 800.0, "r3_connectors_page_800_dark");
 }
 
-/// The header act: clicking `New Connector` opens the create form (name /
-/// kind chips / file-url / refresh seconds / allow-AI, each input bound to
-/// its visible label — the a11y check validates the bindings) with the
-/// create act. Snapshot the form state.
 #[test]
 fn r3_connectors_new_connector_light() {
     let (page, db) = seeded_page();
@@ -196,7 +158,7 @@ fn r3_connectors_new_connector_light() {
         .expect("the New Connector act")
         .click();
     h.run_ok();
-    h.run_steps(2); // settle the form frame
+    h.run_steps(2);
     assert!(
         h.get_all_by_label("create").next().is_some(),
         "the New Connector form must show the create act"

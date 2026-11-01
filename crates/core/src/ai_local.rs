@@ -1,36 +1,7 @@
-//! Built-in local intelligence — the zero-configuration Copilot.
-//!
-//! Every generative path in this app (ticket analysis, draft replies,
-//! copilot chat) silently required a running LM Studio server with
-//! hand-typed model names; with nothing configured the AI features
-//! looked completely dead. This module gives the conversation view a
-//! local, offline, deterministic analysis engine so "read the entire
-//! conversation, check previous conversations for the same issue,
-//! suggest an answer" works on a fresh install with nothing but synced
-//! Help Scout data:
-//!
-//! * extractive summary + key questions from the customer's messages,
-//! * intent / urgency / sentiment / escalation signals (keyword markers),
-//! * "same issue before" via [`crate::ai_evidence::find_similar`] with
-//!   resolution excerpts,
-//! * relevant Help Center articles and knowledge-base snippets,
-//! * an evidence-grounded draft reply assembled from the best past
-//!   resolution (never a hallucination — every line cites its source),
-//! * the customer's history snapshot.
-//!
-//! When LM Studio IS configured, the UI offers the deeper generative
-//! passes on top (analyze_ticket / generate_draft jobs); this engine is
-//! the always-on floor, not the ceiling.
-
 use rusqlite::{Connection, params};
 
 use crate::ai_evidence::SimilarConversation;
 use crate::error::Result;
-
-// ---------------------------------------------------------------------------
-// Marker lists (kept local and compact; mirrors of the deterministic
-// attribute vocabulary, scoped to what the copilot panel displays).
-// ---------------------------------------------------------------------------
 
 const URGENCY_MARKERS: &[&str] = &[
     "asap",
@@ -181,24 +152,14 @@ const STOPWORDS: &[&str] = &[
     "did", "doing", "how", "why", "who", "whom", "its", "it's", "his", "her", "she", "him", "she",
 ];
 
-// ---------------------------------------------------------------------------
-// Report model
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Default)]
 pub struct LocalAnalysis {
-    /// 2-4 extractive sentences summarizing what the customer wants.
     pub summary: Vec<String>,
-    /// Explicit questions the customer asked.
     pub questions: Vec<String>,
-    /// Best-guess intent label (see INTENT_RULES).
     pub intent: String,
-    /// low | medium | high.
     pub urgency: String,
-    /// negative | neutral | positive.
     pub sentiment: String,
     pub escalation: bool,
-    /// Top discriminating keywords (for search and the panel chips).
     pub keywords: Vec<String>,
 }
 
@@ -221,15 +182,9 @@ pub struct CopilotReport {
     pub analysis: LocalAnalysis,
     pub similar: Vec<SimilarConversation>,
     pub articles: Vec<RelatedArticle>,
-    /// Evidence-grounded draft reply; every line traces to a real past
-    /// resolution or a real article.
     pub suggested_reply: String,
     pub history: CustomerHistory,
 }
-
-// ---------------------------------------------------------------------------
-// Engine
-// ---------------------------------------------------------------------------
 
 fn tokenize(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
@@ -260,7 +215,6 @@ fn sentences(text: &str) -> Vec<String> {
         .map(|s| s.trim())
         .filter(|s| s.chars().count() > 12)
         .map(|s| {
-            // Keep the terminal punctuation so questions stay questions.
             if s.chars().count() < 400 {
                 s.to_string()
             } else {
@@ -270,10 +224,7 @@ fn sentences(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The local, always-on analysis of one conversation.
 pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAnalysis> {
-    // Customer messages drive the analysis; agent messages only add
-    // context keywords.
     let mut stmt = conn.prepare(
         "SELECT type, COALESCE(body_text, '') FROM conversation_threads
           WHERE conversation_id = ?1 AND deleted_at IS NULL
@@ -284,11 +235,6 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
             Ok((r.get(0)?, r.get(1)?))
         })?
         .filter_map(|r| r.ok())
-        // RS-4-2 (G4-rejection fix): the mirror stores the source HTML
-        // (Help Scout import) — the reader renders it through
-        // `richtext::html_to_spans`, but the analyzer previously sliced
-        // the raw body, so `<br>`/`<p>` leaked into the copilot's summary
-        // and questions. Same pipeline, plain-text projection.
         .map(|(t, b): (String, String)| (t, crate::richtext::strip_html(&b)))
         .collect();
 
@@ -307,7 +253,6 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
     let customer_lower = customer_text.to_lowercase();
     let keywords = top_keywords(&format!("{all_text} {customer_text}"), 8);
 
-    // Questions: customer sentences that ask something.
     let mut questions: Vec<String> = Vec::new();
     for s in sentences(&customer_text) {
         let lower = s.to_lowercase();
@@ -323,7 +268,6 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
         }
     }
 
-    // Signals.
     let urgency_hits = count_markers(&customer_lower, URGENCY_MARKERS);
     let frustration_hits = count_markers(&customer_lower, FRUSTRATION_MARKERS);
     let escalation = count_markers(&customer_lower, ESCALATION_MARKERS) > 0;
@@ -353,9 +297,6 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
         "neutral"
     };
 
-    // Intent: the rule with the most distinct keyword hits wins (ties
-    // keep declaration order) — a bug report that happens to mention an
-    // invoice must not classify as billing.
     let mut intent = "General question".to_string();
     let mut best_hits = 0usize;
     for (label, words) in INTENT_RULES {
@@ -366,8 +307,6 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
         }
     }
 
-    // Extractive summary: score customer sentences by keyword density,
-    // keep the top 3 in chronological order.
     let mut summary: Vec<(usize, String, f64)> = Vec::new();
     for (idx, s) in sentences(&customer_text).into_iter().enumerate() {
         let tokens = tokenize(&s).len().max(1);
@@ -397,7 +336,6 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
     })
 }
 
-/// Help Center + knowledge base hits for the conversation's keywords.
 pub fn related_articles(
     conn: &Connection,
     keywords: &[String],
@@ -410,7 +348,6 @@ pub fn related_articles(
     if fts == "\"\"" {
         return out;
     }
-    // Help Center mirror (docs_fts: name, text, article_id).
     if let Ok(mut stmt) = conn.prepare(
         "SELECT article_id, name, snippet(docs_fts, 1, '[', ']', '…', 14)
                         FROM docs_fts WHERE docs_fts MATCH ?1 ORDER BY rank LIMIT ?2",
@@ -461,12 +398,6 @@ pub fn customer_history(conn: &Connection, conversation_local_id: i64) -> Custom
     })
 }
 
-/// Assemble the evidence-grounded draft. Sources, in priority order:
-/// 1. the best similar past resolution (adapted, with a visible pointer
-///    to the past conversation),
-/// 2. the strongest matching Help Center article,
-/// 3. a neutral skeleton that asks the clarifying questions the local
-///    analysis extracted — never an invented answer.
 fn build_draft(
     analysis: &LocalAnalysis,
     similar: &[SimilarConversation],
@@ -523,20 +454,12 @@ fn build_draft(
     draft
 }
 
-/// The full local copilot report for one conversation. A4: when a vector
-/// index is available the similar-issues lane fuses FTS + sqlite-vec hits,
-/// so the panel's "semantic match" reasons are backed by real vectors.
 pub fn copilot_report(
     conn: &Connection,
     index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
     conversation_local_id: i64,
 ) -> Result<CopilotReport> {
     let analysis = analyze(conn, conversation_local_id)?;
-    // Clean-audit item 102: the signature must be the conversation's
-    // actual assignee — the pre-fix subquery grabbed `users ORDER BY id
-    // LIMIT 1`, i.e. whichever teammate happens to have the lowest row
-    // id, and signed the draft with that arbitrary agent's name. An
-    // unassigned conversation falls back to the honest "Support".
     let (subject, customer_first, me_name): (Option<String>, Option<String>, Option<String>) = conn
         .query_row(
             "SELECT c.subject,
@@ -574,8 +497,6 @@ pub fn copilot_report(
     })
 }
 
-/// The newest LM Studio draft for a conversation (the deep generative
-/// pass the panel offers when a provider is configured).
 pub fn latest_ai_draft(conn: &Connection, conversation_local_id: i64) -> Option<(String, String)> {
     conn.query_row(
         "SELECT content, model FROM ai_drafts
@@ -586,9 +507,6 @@ pub fn latest_ai_draft(conn: &Connection, conversation_local_id: i64) -> Option<
     .ok()
 }
 
-/// A6 feedback loop variant of [`latest_ai_draft`]: the newest draft's
-/// **row id** rides along so the composer can track provenance and record
-/// accept / edit-distance / reject against the real `ai_drafts` row.
 pub fn latest_ai_draft_row(
     conn: &Connection,
     conversation_local_id: i64,
@@ -602,15 +520,10 @@ pub fn latest_ai_draft_row(
     .ok()
 }
 
-/// Whether the generative draft pass is usable (A1: routed through the
-/// Draft role — the hub's endpoint + model, or the legacy single-model
-/// fallback with a configured chat model).
 pub fn generative_backend_available(conn: &Connection) -> bool {
     match crate::ai_hub::backend_for_role(conn, crate::ai_hub::AiRole::Draft) {
         crate::ai_pipeline::AiBackend::Disabled => false,
         crate::ai_pipeline::AiBackend::LmStudio { model, .. } => {
-            // A role-assigned model qualifies; the legacy fallback needs
-            // its explicitly configured chat model.
             model.is_some()
                 || crate::settings::get_string(conn, "lmstudio_chat_model")
                     .ok()
@@ -665,11 +578,6 @@ mod tests {
         assert!(a.keywords.iter().any(|k| k == "export"));
     }
 
-    /// RS-4-2 (G4-rejection fix): Help Scout imports store source HTML in
-    /// `body_text`; the analyzer must summarize what the reader shows —
-    /// the plain-text projection — never the raw markup. The owner's live
-    /// data produced summary lines like `• <br><br>When I opened the link
-    /// …` before the fix.
     #[test]
     fn analyze_strips_html_from_thread_bodies() {
         let handle = db();
@@ -747,16 +655,10 @@ mod tests {
 mod batch29_audit102_tests {
     use super::*;
 
-    /// Clean-audit item 102: the draft signature must be the
-    /// conversation's actual assignee. The pre-fix subquery grabbed
-    /// `users ORDER BY id LIMIT 1` — whichever teammate happened to hold
-    /// the lowest row id signed every copilot draft; an unassigned
-    /// conversation falls back to the honest "Support".
     #[test]
     fn audit102_signature_is_the_assignee_not_an_arbitrary_user() {
         let mut conn = Connection::open_in_memory().expect("db");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        // The arbitrary user the pre-fix query would have picked: lowest id.
         conn.execute(
             "INSERT INTO users (remote_id, first_name, last_name, email)
              VALUES (11, 'Adam', 'Arbitrary', 'adam@example.com')",
@@ -778,7 +680,6 @@ mod batch29_audit102_tests {
         .expect("customer");
         let customer = conn.last_insert_rowid();
 
-        // The assigned conversation: the draft signs as Grace.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status,
                                         customer_local_id, assignee_local_id)
@@ -798,7 +699,6 @@ mod batch29_audit102_tests {
             "the lowest-id user must not sign another agent's draft"
         );
 
-        // The unassigned conversation: the honest fallback.
         conn.execute(
             "INSERT INTO conversations (remote_id, number, subject, preview, status,
                                         customer_local_id)

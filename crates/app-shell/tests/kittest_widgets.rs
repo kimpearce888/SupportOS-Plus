@@ -1,12 +1,3 @@
-//! RS-13 — kittest harness: per-widget/state snapshots, light + dark.
-//!
-//! Run under a display (Xvfb on CI-less sandboxes):
-//! `xvfb-run cargo test -p supportos-plus-app-shell --features kittest-ui`
-//! Regenerate the baseline PNGs with `UPDATE_SNAPSHOTS=1`.
-//!
-//! The snapshots under `crates/app-shell/tests/snapshots/` are the R2a drift
-//! lock: any widget repaint that changes pixels fails verification until
-//! reviewed against the DC (docs/audit/design-contract-v1.md §3).
 #![cfg(feature = "kittest-ui")]
 
 use eframe::egui;
@@ -15,7 +6,6 @@ use egui_kittest::kittest::Queryable;
 use spp_shell::design::{self, BadgeTone, ButtonVariant};
 use spp_shell::icons;
 
-/// Harness state shared by the composition + interaction tests.
 struct Widgets {
     installed: bool,
     tab: usize,
@@ -48,9 +38,7 @@ fn harness(dark: bool) -> Harness<'static, Widgets> {
         )
 }
 
-/// The full DS-C structure composition under test.
 fn draw(ui: &mut egui::Ui, s: &mut Widgets) {
-    // DS-C-01 PageHeader + counter pill.
     design::page_header(
         ui,
         "Customers",
@@ -66,12 +54,10 @@ fn draw(ui: &mut egui::Ui, s: &mut Widgets) {
         },
     );
 
-    // DS-C-09 Tabs (underline) — clicking moves the active underline.
     if let Some(i) = design::tabs(ui, &["All", "Active", "Pending", "Closed"], s.tab) {
         s.tab = i;
     }
 
-    // DS-C-10 FilterBar — one primary apply (A-2).
     let apply = design::filter_bar(
         ui,
         |ui| {
@@ -89,7 +75,6 @@ fn draw(ui: &mut egui::Ui, s: &mut Widgets) {
         s.applied += 1;
     }
 
-    // DS-C-06 Badge / Chip / StatusDot — one tone system.
     ui.horizontal(|ui| {
         design::badge(ui, "Open", BadgeTone::Info);
         design::badge(ui, "Pending", BadgeTone::Warning);
@@ -108,7 +93,6 @@ fn draw(ui: &mut egui::Ui, s: &mut Widgets) {
         ui.label("dots — same tone map");
     });
 
-    // DS-C-11 Buttons — the full variant set.
     ui.horizontal(|ui| {
         let _ = design::button(ui, "Primary", ButtonVariant::Primary);
         let _ = design::button(ui, "Outline", ButtonVariant::Outline);
@@ -118,7 +102,6 @@ fn draw(ui: &mut egui::Ui, s: &mut Widgets) {
         let _ = design::button_with_icon(ui, icons::Icon::Refresh, "Sync", ButtonVariant::Outline);
     });
 
-    // DS-C-03 StatTile · DS-C-04 MetricTile (banded + drill).
     ui.horizontal(|ui| {
         design::metric_card(ui, "New today", "12", Some("+3 vs yesterday"));
         if design::metric_tile(
@@ -138,7 +121,6 @@ fn draw(ui: &mut egui::Ui, s: &mut Widgets) {
         }
     });
 
-    // DS-C-05 DataTable — virtualized (500 rows, ~15 visible).
     design::data_table(
         ui,
         "customers",
@@ -188,10 +170,6 @@ fn structure_tabs_click_moves_underline_dark() {
     assert_eq!(h.state().tab, 2, "clicking the Pending tab must move state");
 }
 
-// ---------------------------------------------------------------------------
-// RS-14 — R2b feedback set (DS-C-14/15/16/19)
-// ---------------------------------------------------------------------------
-
 struct Feedback {
     installed: bool,
     confirmed: bool,
@@ -223,7 +201,6 @@ fn harness_feedback(dark: bool) -> Harness<'static, Feedback> {
 fn draw_feedback(ui: &mut egui::Ui, s: &mut Feedback) {
     use spp_shell::design::{self, AvatarSize, BadgeTone, ButtonVariant, CalloutRole};
 
-    // DS-C-14 EmptyState: full + CTA, and the slim variant.
     if design::empty_state_cta(
         ui,
         icons::Icon::Inbox,
@@ -240,7 +217,6 @@ fn draw_feedback(ui: &mut egui::Ui, s: &mut Feedback) {
         "Milestones appear after the first sync.",
     );
 
-    // DS-C-15 Callout set — the five fixed B-1 roles.
     design::callout(ui, CalloutRole::Neutral, "In-card context note.");
     design::callout(
         ui,
@@ -255,7 +231,6 @@ fn draw_feedback(ui: &mut egui::Ui, s: &mut Feedback) {
         "Data-layer quirk: freshness is stale until U2 lands (receipt-cited).",
     );
 
-    // DS-C-19 Avatar / Assignee.
     ui.horizontal(|ui| {
         design::avatar(ui, AvatarSize::Lg, "KP", BadgeTone::Neutral);
         design::avatar(ui, AvatarSize::Md, "AI", BadgeTone::Ai);
@@ -264,7 +239,6 @@ fn draw_feedback(ui: &mut egui::Ui, s: &mut Feedback) {
         design::assignee(ui, None);
     });
 
-    // DS-C-16 armed danger button — two-step confirm (A-5).
     ui.horizontal(|ui| {
         if design::armed_danger_button(ui, "row-delete", "delete", "confirm delete?") {
             s.confirmed = true;
@@ -272,7 +246,6 @@ fn draw_feedback(ui: &mut egui::Ui, s: &mut Feedback) {
         let _ = design::button(ui, "Safe action", ButtonVariant::Outline);
     });
 
-    // DC: DS-C-13 form rows.
     design::form_row(ui, "Team name", |ui| {
         let _ = ui.add(
             egui::TextEdit::singleline(&mut String::from("Support"))
@@ -300,13 +273,11 @@ fn feedback_widgets_snapshot_dark() {
 fn armed_confirm_requires_two_clicks_light() {
     let mut h = harness_feedback(false);
     h.run_ok();
-    // First click arms — no confirm.
     h.get_by_label("delete").click();
     h.run_ok();
-    h.run_steps(3); // settle past the arm frame; the danger label renders
+    h.run_steps(3);
     h.snapshot("r2b_armed_confirm_light");
     assert!(!h.state().confirmed, "first click must only arm");
-    // Second click on the armed label confirms.
     h.get_by_label("confirm delete?").click();
     h.run_ok();
     h.run_steps(2);
@@ -327,10 +298,6 @@ fn armed_confirm_requires_two_clicks_dark() {
     h.run_steps(2);
     assert!(h.state().confirmed);
 }
-
-// ---------------------------------------------------------------------------
-// RS-15 — R2c inbox identity set (DS-C-20/21/22)
-// ---------------------------------------------------------------------------
 
 struct InboxIdentity {
     installed: bool,
@@ -395,7 +362,6 @@ fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
         "Likely the v2 export path — flagged for the data track.",
         |_| {},
     );
-    // DS-C-22: the AI card must identify as AI in 5 seconds — violet + AI badge.
     design::message_card(
         ui,
         MessageRole::Ai,
@@ -418,7 +384,6 @@ fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
         );
     });
 
-    // DS-C-22 copilot cards.
     if design::cop_suggest(
         ui,
         "Suggested reply",
@@ -444,7 +409,6 @@ fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
     design::cop_chat(ui, true, "I found 2 similar resolved conversations.");
     design::cop_chat(ui, false, "Show me the fix for the first one.");
 
-    // DS-C-21 composer.
     let mut st = ComposerState::new();
     st.mode = ComposerMode::Reply;
     st.draft = String::new();
@@ -537,7 +501,6 @@ fn composer_snapshot_dark() {
 fn composer_send_button_and_shortcut_light() {
     let mut h = harness_composer(false);
     h.run_ok();
-    // The send button sends the draft.
     h.get_by_label("send").click();
     h.run_ok();
     h.run_steps(2);
@@ -547,7 +510,6 @@ fn composer_send_button_and_shortcut_light() {
         "send button must emit ComposerAct::Send"
     );
     assert_eq!(h.state().sent[0], "draft text");
-    // Ctrl+Enter sends again (shortcut path).
     h.key_combination_modifiers(egui::Modifiers::CTRL, &[egui::Key::Enter]);
     h.run_ok();
     h.run_steps(2);
@@ -556,17 +518,11 @@ fn composer_send_button_and_shortcut_light() {
 
 #[test]
 fn ai_message_card_is_identifiable() {
-    // The 5-second pre-check: the AI card exposes an "AI" badge node and the
-    // role label, isolated from any other context.
     let mut h = harness_identity(false);
     h.run_ok();
     let ai_nodes = h.get_all_by_label_contains("AI").count();
     assert!(ai_nodes >= 2, "AI badge + role label must both exist");
 }
-
-// ---------------------------------------------------------------------------
-// RS-20 — wave D console set (DS-C-24)
-// ---------------------------------------------------------------------------
 
 struct HeroState {
     installed: bool,
@@ -586,8 +542,6 @@ fn harness_hero(dark: bool) -> Harness<'static, HeroState> {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                // The sync-health composition: mono state + the lab's
-                // forensic note + the SYNC-map badge right.
                 design::hero(
                     ui,
                     "LIVE",

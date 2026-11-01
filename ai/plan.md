@@ -446,11 +446,12 @@ Test module paths/imports follow the RF-5..RF-7 layout (import-path-only
 edits; no semantic test change). The ten items selected by the test-surface
 census at open live in `progress.md` per Rule 2 while the batch is active.
 
-### RF-11 — comment deletion (LAST, per the original program order)
+### RF-11 — comment deletion (OPENED 2026-11-01 on the owner's `continue`, LAST per the original program order)
 
 All comments deleted in one final wave (module docs, item docs, inline);
 rustfmt + full gates after; the program's known-bugs list and rollback
-instructions ship at FINISH.
+instructions ship at FINISH. The ten deletion waves selected by the comment
+census at open live in `progress.md` per Rule 2 while the batch is active.
 
 ### FINISH
 

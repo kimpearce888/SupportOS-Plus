@@ -1,20 +1,3 @@
-//! Onboarding page.
-//!
-//! RS-20 reskin: rebuilt onto the DC widget set (`crate::design`) per the
-//! conformed lab's `onboarding` sheet (DS "stack" archetype): the Setup
-//! status card renders the lab's DS.row anatomy — the DS-C-06 state dot
-//! (the lab's okFlag: conversations > 0, "true", "receiving") + the
-//! strong key left, the mono value pushed right — over the same five
-//! status keys; the toolbar (Run initial sync primary + Mark complete
-//! outline) and the conditional hints stay. Status from the onboarding
-//! route logic (first-run flag, conversation count, Help Scout credential
-//! presence, sync state) and the action buttons: run the initial sync
-//! (`/api/sync/initial`, dispatched through the shared sync engine) and
-//! mark onboarding complete (`/api/onboarding/complete`).
-//!
-//! Since 1.2.0 a fresh install is empty until Help Scout is connected:
-//! nothing is pre-seeded, nothing is stand-in content.
-
 use std::sync::Arc;
 
 use eframe::egui;
@@ -25,7 +8,6 @@ use spp_core::sync_engine::SyncEngine;
 use crate::design::{self, ButtonVariant};
 use crate::pages::sync_health::SyncAction;
 
-/// Onboarding status (typed port of the `/api/onboarding` route).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OnboardingStatus {
     pub step: String,
@@ -35,17 +17,12 @@ pub struct OnboardingStatus {
     pub sync_state: String,
 }
 
-/// Load the onboarding status (the route's SQL, in-process).
 #[must_use]
 pub fn load_status(conn: &Connection) -> OnboardingStatus {
     let first_run = spp_core::settings::first_run_done(conn).unwrap_or(false);
     let conv_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
         .unwrap_or(0);
-    // 1.2.0: credentials count as "configured" the moment the user
-    // saves them (the encrypted envelope), not only after a token
-    // exists — the 1.1.x check missed the freshly-connected state the
-    // user actually starts from.
     let credentials_configured = spp_core::helpscout_real::HsCredentials::resolve(conn)
         .0
         .is_configured();
@@ -78,7 +55,6 @@ pub fn load_status(conn: &Connection) -> OnboardingStatus {
     }
 }
 
-/// The interactive onboarding page state.
 pub struct OnboardingPage {
     status: Option<OnboardingStatus>,
     message: Option<String>,
@@ -93,7 +69,6 @@ impl OnboardingPage {
         }
     }
 
-    /// Live-update invalidation.
     pub fn invalidate(&mut self) {
         self.status = None;
     }
@@ -102,7 +77,6 @@ impl OnboardingPage {
         self.status = Some(db.with_read(load_status));
     }
 
-    /// Mark onboarding complete (the `/api/onboarding/complete` route logic).
     pub fn complete(&mut self, db: &DbHandle) {
         db.with_write(|conn| {
             let _ = spp_core::settings::mark_first_run_done(conn);
@@ -111,12 +85,6 @@ impl OnboardingPage {
         self.reload(db);
     }
 
-    // Clean-audit item 145: the `save_step` route logic (writing the
-    // `onboarding_step` setting) had no caller and nothing ever read the
-    // setting — the page's step is derived from `first_run_done`. The
-    // dead writer and its unread row are removed.
-
-    /// Render the page.
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, engine: Option<&Arc<SyncEngine>>) {
         if self.status.is_none() {
             self.reload(db);
@@ -136,9 +104,6 @@ impl OnboardingPage {
         let status = self.status.clone().unwrap_or_default();
         design::card_titled(ui, "Setup status", None, |ui| {
             let t = design::tokens(ui);
-            // The lab's DS.row anatomy: the DS-C-06 state dot (the lab's
-            // okFlag — conversations > 0, "true", "receiving") + the
-            // strong key left, the mono value pushed right.
             let rows = [
                 ("step:", status.step.clone(), status.step == "complete"),
                 (
@@ -197,7 +162,6 @@ impl OnboardingPage {
                         if engine.is_running() {
                             self.message = Some("A sync is already running.".into());
                         } else {
-                            // Same dispatch as the Sync Health page.
                             let mut sync_page = crate::pages::sync_health::SyncHealthPage::new();
                             sync_page.run_sync_action(db, engine, SyncAction::Initial);
                             self.message = Some(
@@ -253,9 +217,6 @@ mod tests {
 
     #[test]
     fn saved_credentials_count_as_configured_before_any_token_exists() {
-        // The 1.1.x status only saw oauth_tokens, so a user who had just
-        // saved credentials (and had not completed a connect) was told
-        // Help Scout was not configured.
         crate::testsupport::install_master_key();
         let db = fixture(Vec::new());
         let before = db.with_read(load_status);
