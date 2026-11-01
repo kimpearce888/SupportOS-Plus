@@ -571,3 +571,124 @@ the two ai records. Diff: +233/−139 across 37 files.
 None — Batch RF-8 completed and moved to `completed.md` (2026-11-01): the
 rename wave (6 file renames + 4 item renames, all zero-semantic-change).
 Next per plan.md (opens on the owner's `continue`): Batch RF-9 — docs sync.
+
+## Batch RF-9 — docs sync (items RF-9-1..RF-9-10)
+
+**Batch RF-9 (items RF-9-1..RF-9-10)** — active, moved from plan.md per Rule 2
+(2026-11-01, owner's `continue`). Source: the plan.md RF-9 one-liner + the docs
+census at open (2026-11-01): grep of the four live surfaces (README.md,
+USER_MANUAL.md, .gitignore, ai/decisions.md + ai/rule.md) for every
+pre-RF-5..RF-8 module basename/path, plus verification of every countable claim
+in those surfaces against source ground truth (Cargo.toml members, xtask Cmd
+enum, PageKey variants, .github/workflows/ci.yml lanes, .cargo/config.toml,
+core env readers, xtask hygiene tests). Historical batch ledgers (plan.md
+RF-sections, progress.md, completed.md) are excluded from the sync by design —
+their old-path mentions ARE the audit trail.
+
+1. **RF-9-1 (census)** — build the old→new module map of the whole refactor
+   program (RF-5 migrations relocation; RF-6 splits workers/ai_pipeline/
+   helpscout_real/sync_engine/outreach/design/segment/quality/
+   interaction_engine; RF-7 splits ai_attributes/helpscout/app/people_store/
+   support_graph/search/ai_tools/saved_views/coaching + pages/queries.rs;
+   RF-8 renames eventing→event_bus, hybrid_search→rrf, sync→mirror,
+   interaction_current→interaction_signals, mention→mention_popup,
+   bridge→task_bridge) and grep all four live surfaces for each old
+   basename/path; record the hit ledger (2 genuine doc hits + 3 dead
+   .gitignore entries; everything else clean).
+2. **RF-9-2 (README fix)** — the "Verification" section synced to
+   `.github/workflows/ci.yml` ground truth (the batch's genuine README drift):
+   the CI bullet gains (a) the two machine gates — no-simulation
+   (`scripts/gate_no_simulation.py`, ci.yml:35) + traceability
+   (`scripts/gate_traceability.py`, ci.yml:41), (b) the kittest snapshot-locks
+   lane (job 3, ci.yml:181 — the reskin drift gate the RS-21 program added and
+   the RF-6-era kittest CI gap closure confirmed), (c) `cargo-deny`'s `bans`
+   check (ci.yml:95 `check advisories licenses bans`; README said
+   advisories/licenses), (d) the sandbox-feature clippy half (ci.yml:79 clippy
+   AND tests the sandbox feature; README said only tests). Every other claim
+   in the section re-verified line-by-line against ci.yml.
+3. **RF-9-3 (README verify)** — "What's inside" proven against source: crate
+   table 4/4 = Cargo.toml workspace members (app-shell, catalog, core, xtask);
+   xtask subcommand list 10/10 = `crates/xtask/src/bin/xtask.rs` Cmd enum
+   (dev/lint/verify-icons/package/deb + migrate/backup/restore/healthcheck/
+   vector-count); the 23-pages list 23/23 = PageKey variants incl. the
+   display spellings (AI Center, Live Chats, Issue Radar, Support Graph, Sync
+   Health, Custom Objects). No-op expected; any drift the check surfaces is
+   fixed.
+4. **RF-9-4 (README verify)** — "Building from source" proven: `.cargo/
+   config.toml` alias = `run --locked -p supportos-plus-xtask --` (the README
+   claim verbatim); rust-toolchain.toml present at the root; package output
+   paths = the xtask defaults (target/appimage, target/deb); the
+   bundled-libs claim vs ci.yml:122 (libxkbcommon0 libxkbcommon-x11-0
+   libxcb-xkb1). No-op expected.
+5. **RF-9-5 (.gitignore fix)** — the three dead crate-path entries removed:
+   `/crates/ui/dist`, `/crates/app/src-tauri/target`, `/crates/app/src-tauri/
+   gen` (crates/ui and crates/app ceased at the Phase 4 cutover — the
+   workspace is 4 crates, none named ui/app). Every remaining entry kept with
+   a one-line justification in the completed record; the spp_xtask hygiene
+   test `gitignore_keeps_the_secrets_key_never_track_rule` (lib.rs:60, pins
+   only the `secrets.key` line) re-run to prove the pinned rule survives.
+6. **RF-9-6 (ai/decisions.md fix)** — D6's mapping line re-pointed: "every
+   `--ds-*` token → one design.rs constant" → the design/ token factory
+   (RF-6 converted design.rs → design/mod.rs + design/); the 1:1 mapping
+   claim preserved truthfully. decisions.md otherwise checked end-to-end:
+   line 21's `ui/src/pages` is the UPSTREAM original's tree (historical,
+   correct as written); D7's git anchors are history.
+7. **RF-9-7 (USER_MANUAL verify)** — grep-swept for every old basename +
+   `src/` + `crates/` (0 hits expected — the manual is end-user writing) and
+   §13's env-var table verified name-by-name against source readers:
+   SPP_DATA_DIR (config.rs:35), SPP_LOOPBACK_PORT (app-shell main.rs),
+   SPP_LOG_FORMAT (core logging.rs:41), SPP_RENDERER (app-shell lib.rs:211 +
+   fatal.rs), HELPSCOUT_* (config.rs + loopback.rs:313), LMSTUDIO_*
+   (config.rs:245..), QDRANT_* (config.rs), LOG_LEVEL (logging.rs:23),
+   SYNC_INTERVAL_MINUTES / SYNC_API_CONCURRENCY (config.rs). §8 page
+   walkthrough = 23/23 PageKey coverage. No-op expected; disclosed.
+8. **RF-9-8 (frozen/dated artifacts disposition)** — recorded, NOT edited:
+   docs/audit/design-contract-v1.md (frozen DC v1.0, a gate input — its two
+   `design.rs` refs describe the v1.0 freeze-time state; the gate's own
+   DESIGN constant already follows design/mod.rs since RF-6), mockups/
+   design-lab/README.md + mismatch-register.md (dated reskin artifacts whose
+   line refs predate the reskin they document), repo-audit-2026-10-24/,
+   qa-audit/20261019T050847Z/, qa-redesign/, docs/audit/acceptance/ (dated
+   audit artifacts). Zero live claims depend on their stale paths.
+9. **RF-9-9 (CHANGELOG disposition)** — the three `design.rs` mentions
+   (lines 66/837/842) are immutable release-history records describing v1.x
+   states at release time; history is not rewritten; disclosed as deliberate
+   so the post-batch grep expectations are explicit.
+10. **RF-9-10 (closing gate)** — post-fix zero-stale-path grep re-run across
+    the four live surfaces (clean required); full verification table (fmt
+    AFTER the last content edit — RF-7 hotfix lesson; clippy
+    `--workspace --all-targets -D warnings`; gate_traceability 23/20/27;
+    gate_no_simulation; verify-icons; **style_lint explicit — RF-6 hotfix
+    lesson**; core lib `--test-threads=1`; app-shell lib; xtask; doc-tests;
+    kittest 24 suites = CI lane); ai records synced; single commit; push.
+
+Batch verification (Rule 5, before any item completes): the table above is
+the gate list; every row must be green with numbers recorded in this file
+before the batch moves to completed.md.
+
+Batch verification results (all green): fmt clean (run after the last
+content edit — all three content edits landed first, docs-only, zero Rust
+bytes touched so no fmt re-sort was possible); clippy `--workspace
+--all-targets -D warnings` 0; gate_traceability OK (23 routes / 20 DC
+tags / 27 ids, alias declared True); gate_no_simulation clean; verify-icons
+clean; style_lint 2 passed / 0 failed (explicit in the table — RF-6 hotfix
+lesson); core lib 495 passed / 0 failed / 4 ignored (--test-threads=1,
+352.28s); app-shell lib 237/0 (213.39s); xtask 11/0 (lib) + 0 bin + 0
+doc; doc-tests 0/0 (core + app-shell); kittest 24 suites = CI lane (runs
+on this push). Hygiene proof for RF-9-5:
+`gitignore_keeps_the_secrets_key_never_track_rule` +
+`no_secret_key_artifacts_anywhere_in_the_repo` both pass after the prune.
+Post-fix census re-run (RF-9-10): the 28-basename old-path grep over the
+four live surfaces returns exactly one hit — the D6 historical framing
+itself ("the frozen-in `design.rs` became `design/mod.rs` … in RF-6"),
+which states the old name as PAST, not present; every other old basename
+and every `crates/*/src` path returns zero hits (the only `crates/` path
+now named is the new, correct `crates/app-shell/src/design/`).
+
+None — Batch RF-9 completed and moved to `completed.md` (2026-11-01): the
+docs-sync wave (2 README claims re-pointed to CI ground truth + 3 dead
+.gitignore entries pruned + 1 decisions.md D6 mapping re-pointed to the
+design/ token factory; 7 verify/disposition items disclosed). Next per
+plan.md (opens on the owner's `continue`): Batch RF-10 — test paths follow
+the new structure.
+

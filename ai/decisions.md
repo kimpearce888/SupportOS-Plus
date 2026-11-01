@@ -256,9 +256,11 @@ new design system").
 - **HTML/CSS/JS stays in `mockups/design-lab/` only** (spec/preview artifact, never
   shipped, no webview in the program). The reskin itself is pure Rust/egui —
   consistent with D1 (no UI DSL, one language).
-- **Mapping is 1:1:** every `--ds-*` token → one design.rs constant; every DS-C-xx →
-  one egui widget; DS.TONE → one match arm. Pages are recomposed from those widgets
-  only.
+- **Mapping is 1:1:** every `--ds-*` token → one token-factory constant in
+  `crates/app-shell/src/design/` (the frozen-in `design.rs` became
+  `design/mod.rs` + extracted components in RF-6 — same constants, one home);
+  every DS-C-xx → one egui widget; DS.TONE → one match arm. Pages are
+  recomposed from those widgets only.
 - **Fidelity loop** (Task 20 plan, now binding): F0 Design Contract v1.0 freeze →
   R1 token port + style lint → R2 widget sets (kittest snapshots) → R3 page waves
   (Inbox pilot first, goldens at 1440/1024/800 vs lab goldens) → R4 traceability +

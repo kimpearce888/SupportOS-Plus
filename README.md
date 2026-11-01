@@ -251,11 +251,17 @@ targets are gone; the two Linux packages are the complete packaging surface.
 
 ## Verification
 
-- **CI (every push to main):** fmt, clippy (`-D warnings`), the full workspace
-  test suite, the sandbox-feature tests, `cargo-deny` advisories/licenses, plus
-  an AppImage build, a `.deb` build, and boot-chain smoke runs of both
-  packages (`SPP_SMOKE=1` verifies logging, single-instance lock, migrations,
-  boot services, background workers and the loopback listener).
+- **CI (every push to main):** the no-simulation and traceability gates
+  (`scripts/gate_no_simulation.py`, `scripts/gate_traceability.py` — the app
+  builds empty and every page traces to its acceptance record), fmt, icon
+  verification, clippy (`-D warnings`) across the workspace and the `sandbox`
+  feature, the full workspace test suite plus the sandbox-feature tests,
+  `cargo-deny` advisories/licenses/bans, and the kittest snapshot locks (the
+  reskin drift gate — golden snapshots diff-locked on lavapipe).
+  A second job adds an AppImage build, a `.deb` build, and boot-chain smoke
+  runs of both packages (`SPP_SMOKE=1` verifies logging, single-instance
+  lock, migrations, boot services, background workers and the loopback
+  listener).
 - **Release pipeline (every tag):** builds both packages on the ubuntu:22.04
   glibc 2.35 baseline, installs the `.deb` through APT on clean
   ubuntu:22.04 / ubuntu:24.04 / debian:12 containers (dependency resolution,

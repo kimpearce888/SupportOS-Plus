@@ -5748,3 +5748,112 @@ two ai records). Kittest 24 suites: CI lane (runs on this push). Docs:
 README/USER_MANUAL/docs reference none of the renamed names — zero doc
 debt created for RF-9. Dead `scripts/archive/*` verifiers still name old
 paths — dead code, historical records, untouched.
+
+## Batch RF-9 — docs sync (opened and completed 2026-11-01)
+
+Ten items selected at open by the docs census (grep of the four live
+surfaces — README.md, USER_MANUAL.md, .gitignore, ai/decisions.md +
+ai/rule.md — for every pre-RF-5..RF-8 module basename/path, plus
+claim-by-claim verification against source ground truth: Cargo.toml
+members, the xtask Cmd enum, PageKey variants, ci.yml lanes,
+.cargo/config.toml, core env readers, xtask hygiene tests). The three
+content edits touched docs only — zero code, test or gate bytes changed;
+every gate number below therefore re-proves the pre-existing behavior on
+the post-edit tree.
+
+RF-9-1 (census) — the old→new module map of the whole program (RF-5
+migrations relocation; RF-6 splits workers/ai_pipeline/helpscout_real/
+sync_engine/outreach/design/segment/quality/interaction_engine; RF-7
+splits ai_attributes/helpscout/app/people_store/support_graph/search/
+ai_tools/saved_views/coaching + pages/queries.rs; RF-8 renames
+eventing→event_bus, hybrid_search→rrf, sync→mirror,
+interaction_current→interaction_signals, mention→mention_popup,
+bridge→task_bridge) grepped over the four live surfaces: 2 genuine doc
+hits (README Verification section drift — item 2; ai/decisions.md D6
+`design.rs` — item 6) + 3 dead .gitignore entries (item 5) + 0 hits in
+USER_MANUAL.md and ai/rule.md. Historical batch ledgers (plan.md
+RF-sections, progress.md, completed.md) excluded by design — their
+old-path mentions ARE the audit trail.
+RF-9-2 (README fix) — the "Verification" CI bullet re-pointed to
+.github/workflows/ci.yml ground truth: now names the two machine gates
+(scripts/gate_no_simulation.py + scripts/gate_traceability.py, ci.yml:35/
+41), icon verification (ci.yml:66), clippy across the workspace AND the
+sandbox feature (ci.yml:69/79 — the README said only sandbox tests),
+cargo-deny advisories/licenses/bans (ci.yml:95 — the README dropped
+`bans`), and the kittest snapshot locks (ci.yml:181, the reskin drift
+gate on lavapipe — added by RS-21, confirmed by the RF-6-era kittest CI
+gap closure; the README never mentioned it). The AppImage/.deb/smoke
+claims re-verified line-by-line unchanged (job 2).
+RF-9-3 (README verify, no-op) — "What's inside" proven 4/4 crates =
+Cargo.toml members; 10/10 xtask subcommands = crates/xtask/src/bin/
+xtask.rs Cmd enum (dev/lint/verify-icons/package/deb + migrate/backup/
+restore/healthcheck/vector-count); 23/23 pages = PageKey variants incl.
+display spellings (AI Center, Live Chats, Issue Radar, Support Graph,
+Sync Health, Custom Objects).
+RF-9-4 (README verify, no-op) — .cargo/config.toml alias = `run --locked
+-p supportos-plus-xtask --` (README claim verbatim); rust-toolchain.toml
+present; package output paths = xtask defaults (target/appimage,
+target/deb); bundled-libs claim = ci.yml:122 (libxkbcommon0
+libxkbcommon-x11-0 libxcb-xkb1).
+RF-9-5 (.gitignore fix) — three dead crate-path entries removed:
+`/crates/ui/dist`, `/crates/app/src-tauri/target`, `/crates/app/
+src-tauri/gen` (crates/ui and crates/app ceased at the Phase 4 cutover;
+workspace = app-shell, catalog, core, xtask — no tooling references the
+dead paths, grep-verified over .github/ + scripts/). Every remaining
+entry kept with justification: /target /dist (build output), /data
+(xtask backup default ./data/backups), *.sosync (crypto sync bundles,
+README-claimed), *.supportos (workspace data), .env/!.env.example
+(secret overrides), .vscode/.idea/.DS_Store/Thumbs.db/*.log/*.dmp
+(editor/OS/diagnostic noise), /reference /supportos (scratch),
+*.db/*.db-shm/*.db-wal (SQLite sidecars), secrets.key (FIND-003 —
+pinned by the spp_xtask hygiene test, which passes post-prune:
+gitignore_keeps_the_secrets_key_never_track_rule +
+no_secret_key_artifacts_anywhere_in_the_repo, 2/0).
+RF-9-6 (ai/decisions.md fix) — D6's mapping re-pointed: "every `--ds-*`
+token → one token-factory constant in `crates/app-shell/src/design/`"
+with the RF-6 history named inline; the 1:1 contract preserved
+truthfully. decisions.md otherwise clean: line 21's `ui/src/pages` is
+the UPSTREAM original's tree (correct as written); D7 anchors are
+history.
+RF-9-7 (USER_MANUAL verify, no-op) — zero old-basename/`src/`/`crates/`
+hits; §13 env names verified name-by-name against source readers:
+SPP_DATA_DIR (config.rs:35), SPP_LOOPBACK_PORT (app-shell main.rs),
+SPP_LOG_FORMAT (core logging.rs:41), SPP_RENDERER (app-shell lib.rs:211
++ fatal.rs:60), HELPSCOUT_CLIENT_ID/SECRET/WEBHOOK_SECRET (config.rs +
+loopback.rs:313), HELPSCOUT_API_BASE/DOCS_API_BASE/DOCS_API_KEY/
+REDIRECT_URI (config.rs), LMSTUDIO_BASE_URL/CHAT_MODEL/EMBEDDING_MODEL/
+TIMEOUT_MS/CONCURRENCY (config.rs:245..), QDRANT_URL/QDRANT_ENABLED
+(config.rs), LOG_LEVEL (logging.rs:23), SYNC_INTERVAL_MINUTES/
+SYNC_API_CONCURRENCY (config.rs); §8 page walkthrough = 23/23 PageKey
+coverage.
+RF-9-8 (frozen/dated artifacts disposition, NOT edited) — docs/audit/
+design-contract-v1.md: frozen DC v1.0, a gate input; its two `design.rs`
+refs (lines 11/36) describe the v1.0 freeze-time state and stay — the
+gate's own DESIGN constant already follows design/mod.rs since RF-6;
+mockups/design-lab/README.md + mismatch-register.md: dated reskin
+artifacts whose line refs predate the reskin they document (app.rs
+NAV_GROUPS since moved to app/chrome.rs — RF-7); repo-audit-2026-10-24/,
+qa-audit/20261019T050847Z/, qa-redesign/, docs/audit/acceptance/: dated
+audit artifacts. Zero live claims depend on their stale paths.
+RF-9-9 (CHANGELOG disposition, NOT edited) — the three `design.rs`
+mentions (lines 66/837/842) are immutable release-history records
+describing v1.x states at release time; history is not rewritten;
+disclosed so the post-batch grep expectations are explicit.
+RF-9-10 (closing gate) — post-fix census re-run: the 28-basename
+old-path grep over the four live surfaces returns exactly one hit — the
+D6 historical framing itself (old name stated as PAST); every other old
+basename and every `crates/*/src` path returns zero hits (the only
+`crates/` path now named in the live docs is the new, correct
+`crates/app-shell/src/design/`).
+
+Verification (all green): fmt clean (run after the last content edit;
+docs-only edits, zero Rust bytes touched); clippy `--workspace
+--all-targets -D warnings` 0; gate_traceability OK (23 routes / 20 DC
+tags / 27 ids, alias declared True); gate_no_simulation clean;
+verify-icons clean; style_lint 2 passed / 0 failed (explicit — RF-6
+lesson); core lib 495 passed / 0 failed / 4 ignored (--test-threads=1,
+352.28s); app-shell lib 237/0 (213.39s); xtask 11/0 (lib) + 0 bin + 0
+doc; doc-tests 0/0 (core + app-shell); hygiene 2/0 post-prune. Kittest
+24 suites: CI lane (runs on this push). Churn proof: 3 content files
+(README.md, .gitignore, ai/decisions.md) + the two ai records; diff is
+docs-only (zero .rs bytes, zero CI/workflow bytes, zero script bytes).

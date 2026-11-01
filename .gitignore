@@ -1,9 +1,5 @@
 /target
 /dist
-/crates/ui/dist
-
-/crates/app/src-tauri/target
-/crates/app/src-tauri/gen
 
 /data
 *.sosync

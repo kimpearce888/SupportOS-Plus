@@ -434,10 +434,11 @@ naming debts surfaced by RF-2..RF-7 execution; census at open). The ten
 items selected by the census live in `progress.md` per Rule 2 while the
 batch is active.
 
-### RF-9 — docs sync
+### RF-9 — docs sync (OPENED 2026-11-01 on the owner's `continue`)
 
 README / USER_MANUAL / .gitignore / ai/* module maps synced to the post-split
-tree; zero stale paths (grep-verified).
+tree; zero stale paths (grep-verified). The ten items selected by the docs
+census at open live in `progress.md` per Rule 2 while the batch is active.
 
 ### RF-10 — test paths follow the new structure
 
