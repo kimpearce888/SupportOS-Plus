@@ -349,3 +349,107 @@ gate_no_simulation clean; verify-icons clean; xtask tests 0/0. Lib/core
 suites unaffected (no lib or core bytes changed; CI already ran app-shell
 lib 237/0 + all 24 kittest suites green on a60904c). Next per plan.md
 (opens on the owner's `continue`): Batch RF-7.
+
+## Batch RF-7 — god-file split, part 2 + pages/queries.rs (opened 2026-11-01)
+
+Selection basis: fresh line census post-RF-6 (both crates, excluding pages/
+—the RF-6 census precedent—excluding test-only modules it_helpscout.rs/it_sync.rs,
+excluding the NO-TOUCH set; the next tier after RF-6's ten). Pattern unchanged
+from RF-6: byte-identical contiguous-region extraction into a sibling child
+module under the directory-converted parent (`git mv X.rs X/mod.rs`; pages/
+is already a directory — item 10 only adds a child), `use super::*` at the
+child top, re-exports at the old home, `pub(super)` bumps only where the
+compiler demands them on moved privates called from retained parent code.
+Zero call-site edits outside the split modules. `use super::*` + re-export
+keeps every `crate::X::item` and `spp_core::X::item` path resolving.
+
+1. **RF-7-1 ai_attributes.rs (2069 ln)** — the AI extraction engine to
+   `ai_attributes/extraction.rs`: lines ~535–1464 (ATTRIBUTE_EXTRACTION_PROMPT_VERSION,
+   ATTRIBUTE_EXTRACTION_SYSTEM, CustomerMessage + customer_messages,
+   PreparedComputation + prepare_computation, ExtractionOutput +
+   finish_computation, merge_extraction, is_ai_slot, parse_confidence,
+   normalize_ai_value, build_extraction_user, ExtractionRunRow,
+   store_extraction_run, lookup_cached_extraction, TECHNICAL_VOCAB +
+   the four marker tables, find_evidence, excerpt, is_word_byte,
+   has_marker, count_markers, DeterministicSignals, derive_signals,
+   deterministic_records). Parent keeps the m033 migration block + the
+   snapshot store (structs/insert/save/upsert/current/history/MatchOp/
+   distributions/snapshot) + the three test mods.
+2. **RF-7-2 helpscout.rs (1810 ln)** — the inert provider to
+   `helpscout/inert.rs`: lines ~998–1751 (EmptyHelpScoutProvider + Default,
+   InertWorld, `impl HelpScoutProvider for EmptyHelpScoutProvider`,
+   encode_cursor, decode_cursor, no_account, not_found_remote). Parent
+   keeps the DTO structs + the HelpScoutProvider trait + the input/output
+   structs + tests.
+3. **RF-7-3 app.rs (1700 ln)** — the shell chrome to `app/chrome.rs`:
+   lines ~874–1195 (human_outbound_kind, sync_completed_toast, NAV_GROUPS,
+   nav_row, palette_trigger, theme_row). Parent keeps the ShellApp struct
+   + the three impl blocks + eframe::App + seed fixture + tests.
+4. **RF-7-4 people_store.rs (1685 ln)** — the support-health report family
+   to `people_store/health.rs`: lines ~176–702 (EVIDENCE_LIMIT, evidence_ids,
+   health_metric, health_flag, build_support_health_report). Parent keeps
+   the org queries + customer summary/detail/patch/create + tests.
+5. **RF-7-5 support_graph.rs (1671 ln)** — the derived-edge engine to
+   `support_graph/derived.rs`: lines ~261–1013 (struct DerivedEdge,
+   derived_edges_touching). Parent keeps the edges schema + node refs +
+   human edges + the GRAPH_MAX_* consts + graph_stats/graph_search/
+   neighbors_json/subgraph_json + tests.
+6. **RF-7-6 search.rs (1641 ln)** — the per-type lanes to `search/lanes.rs`:
+   lines ~341–735 (search_conversations, recent_conversations,
+   status_applies, has_filters, search_customers, search_knowledge_raw,
+   search_knowledge, search_known_issues, search_saved_replies,
+   search_ai_analyses). Parent keeps consts + the FTS migration + fts_query
+   family + escape_like (RF-4 canonical) + search/search_with_semantics/
+   universal_search + the indexing/rebuild family + tests.
+7. **RF-7-7 ai_tools.rs (1624 ln)** — the tool-execution engine to
+   `ai_tools/execute.rs`: execute (line 331) through collect_rows (1431)
+   plus the execute-only helpers clamp_limit/arg_i64/red/red_chars/
+   conv_by_number if the usage census confirms them execute-only (span
+   finalized at implementation). Parent keeps ensure_tool_tables +
+   definitions() + tests.
+8. **RF-7-8 saved_views.rs (1568 ln)** — the compile engine to
+   `saved_views/engine.rs`: lines ~603–1359 (`impl ViewEngine`). Parent
+   keeps the view-model types (DateRange machinery, RESPONSE_STATE_SQL,
+   VIEW_CONDITION_KINDS, ViewNode, ViewDefinition/SavedInboxView/requests,
+   CompiledView, ViewEngine struct) + placeholders/text/integer/real +
+   ensure_inbox_views_table + tests.
+9. **RF-7-9 coaching.rs (1565 ln)** — the check family to
+   `coaching/checks.rs`: lines ~403–1145 (check_unanswered_questions,
+   check_duplicated_questions, check_timeframe, check_acknowledgment,
+   check_wording, check_detail, check_internal_leakage, check_wrong_context,
+   check_preference_mismatch). Parent keeps the consts/text helpers/row
+   loaders/result/summarize/evidence + CoachingChatFn + the AI layer +
+   get() + tests.
+10. **RF-7-10 pages/queries.rs (the app-shell relocation)** — the
+    invalidation map + page-model field helpers move out of pages/mod.rs
+    (618 ln) into a new `pages/queries.rs` child: invalidated_pages with
+    its doc block (~391–470, the port of the web `queries::keys_for_event`
+    named by the pages/mod.rs doc comments) + str_field/i64_field/
+    opt_str_field (~472–491). pages/mod.rs adds `mod queries;` + re-exports;
+    the PageKey enum, its labels, all() and the tests stay — verified at
+    open: the moved text contains no `PageKey::X => "label"` patterns, so
+    gate_traceability's routes() source (PAGEKEY = pages/mod.rs) is
+    unaffected; gate re-run proves 23 routes unchanged.
+
+Batch verification (Rule 5, before any item completes): fmt clean; clippy
+`--workspace --all-targets -D warnings` 0; gate_traceability OK (23 routes /
+20 DC tags / 27 ids); gate_no_simulation clean; verify-icons clean;
+style_lint 2/0 (added to the table per the RF-6 hotfix lesson); core lib
+495 passed / 4 ignored / 0 failed (`--test-threads=1`); app-shell lib
+237/0; xtask 11/0; doc-tests 0/0; kittest 24 suites = CI lane (green in CI
+run 41284592762). Zero-call-site-churn proof: external callers of every
+moved pub surface grep-verified unchanged (before = after).
+
+Batch verification results (all green): fmt clean; clippy
+`--workspace --all-targets -D warnings` 0; gate_traceability OK (23 routes /
+20 DC tags / 27 ids); gate_no_simulation clean; verify-icons clean;
+style_lint 2 passed / 0 failed; core lib 495 passed / 0 failed / 4 ignored
+(--test-threads=1, 351.72s); app-shell lib 237/0; xtask 11/0; doc-tests
+0/0. Churn proof: `git status` touches ONLY the ten split modules (9
+git-mv renames + 10 new child files incl. pages/queries.rs) + this record
+— zero call-site edits anywhere else in the tree.
+
+None — Batch RF-7 completed and moved to `completed.md` (2026-11-01): the
+second census wave (9 core/app-shell god-files) + the pages/queries.rs
+relocation, all byte-identical region extractions under the RF-6 pattern.
+Next per plan.md (opens on the owner's `continue`): Batch RF-8 — renames.

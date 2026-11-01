@@ -5582,3 +5582,82 @@ standing CI-lane gap is closed green. Verified: style_lint 2/0, fmt clean,
 clippy --workspace --all-targets -D warnings 0, gate_traceability OK
 (23/20/27), gate_no_simulation clean, verify-icons clean, xtask tests 0/0.
 Diff: 1 file (crates/app-shell/tests/style_lint.rs, +6/−3).
+
+## Batch RF-7 — god-file split, part 2 + pages/queries.rs (2026-11-01)
+
+Ten items completed per progress.md selection: the second census wave plus
+the app-shell relocation, all as byte-identical contiguous-region
+extractions under the RF-6 pattern (git mv X.rs X/mod.rs, child opens with
+`use super::*`, re-exports at the old home, compiler-demanded visibility
+bumps only, zero call-site edits outside the split modules):
+
+1. **RF-7-1 ai_attributes.rs 2069→1148** — the AI extraction engine (929
+   ln: prompt version/system, CustomerMessage, prepare/finish_computation,
+   run_extraction/compute/compute_with_backend — three `pub async fn`s the
+   census outline regex initially missed, disclosed — deterministic
+   records, the marker vocab tables) → `ai_attributes/extraction.rs`; pub
+   surface re-exported (workers' compute_with_backend caller untouched).
+2. **RF-7-2 helpscout.rs 1810→1063** — the inert provider (755 ln:
+   EmptyHelpScoutProvider, InertWorld, the full `impl
+   HelpScoutProvider for EmptyHelpScoutProvider`, cursor codec,
+   no_account/not_found_remote, the region-only `use
+   std::sync::Mutex;` travelling with its consumer) → `helpscout/inert.rs`;
+   `pub use inert::{EmptyHelpScoutProvider, InertWorld}` keeps
+   workers_host/sync_engine/workers + provider_handle constructing it.
+3. **RF-7-3 app.rs 1700→1402** — the shell chrome (313 ln:
+   human_outbound_kind, sync_completed_toast, NAV_GROUPS, nav_row,
+   palette_trigger, theme_row) → `app/chrome.rs`; six `pub(super)` bumps +
+   the parent's `use chrome::{…}` import (app-internal surface, no
+   external callers).
+4. **RF-7-4 people_store.rs 1685→1166** — the support-health report family
+   (529 ln: EVIDENCE_LIMIT, evidence_ids, health_metric, health_flag,
+   build_support_health_report) → `people_store/health.rs`; one
+   `pub(super)` bump (build_support_health_report, the only parent
+   caller).
+5. **RF-7-5 support_graph.rs 1671→927** — the derived-edge engine (754 ln:
+   DerivedEdge + derived_edges_touching) → `support_graph/derived.rs`;
+   nine `pub(super)` bumps (the fn + all eight struct fields —
+   neighbors_json reads relation/origin/kind/id/note/at directly);
+   `use derived::derived_edges_touching` import.
+6. **RF-7-6 search.rs 1641→1254** — the per-type lanes (397 ln:
+   search_conversations/customers/knowledge_raw/knowledge/known_issues/
+   saved_replies/ai_analyses + their three private helpers) →
+   `search/lanes.rs`; seven-fn `pub use` re-export; escape_like and the
+   FTS migration stay put (RF-4 canonical untouched).
+7. **RF-7-7 ai_tools.rs 1624→483+483** — the tool-execution engine (1144
+   ln: execute + clamp_limit/arg_i64/red/red_chars/conv_by_number — usage
+   census confirmed execute-only — + map_cluster_row/collect_rows) →
+   `ai_tools/execute.rs`; `pub use execute::execute`.
+8. **RF-7-8 saved_views.rs 1568→820** — the compile engine (`impl
+   ViewEngine`, 756 ln) → `saved_views/engine.rs`; no re-export needed
+   (inherent impl on the parent-resident ViewEngine struct resolves
+   crate-wide).
+9. **RF-7-9 coaching.rs 1565→831** — the check family (742 ln, nine
+   check_* fns) → `coaching/checks.rs`; nine `pub(super)` bumps + the
+   parent import (get() calls all nine).
+10. **RF-7-10 pages/queries.rs** — the invalidation map + field helpers
+    (101 ln: invalidated_pages with its doc, str_field/i64_field/
+    opt_str_field) out of pages/mod.rs (618→522); `pub use
+    queries::invalidated_pages` + `pub(crate) use queries::{…}`; the
+    PageKey enum/labels/all()/tests stay — gate_traceability's
+    routes() source intact, gate re-proven at 23/20/27.
+
+Two compiler-demanded cfg(test) follow-ons, disclosed: the ai_tools
+`batch29_audit98_99_tests` mod (103 ln, three tests of the moved
+arg_i64/execute paths) relocated into execute.rs — tests of moved code
+live with the moved code; `lock_world` bumped `pub(super)` for the
+helpscout parent tests.
+
+Incident (disclosed, recovered): the first style_lint rerun hit "No space
+left on device" — a shell missing the `CARGO_INCREMENTAL=0` contract let
+incremental sessions regrow; incremental dir cleaned (1.2 GB freed), the
+run repeated under the contract and passed.
+
+Verification (all green): fmt clean; clippy `--workspace --all-targets -D
+warnings` 0; gate_traceability OK (23 routes / 20 DC tags / 27 ids);
+gate_no_simulation clean; verify-icons clean; style_lint 2/0; core lib 495
+passed / 0 failed / 4 ignored (--test-threads=1, 351.72s); app-shell lib
+237/0; xtask 11/0; doc-tests 0/0. Churn proof: only the ten split modules
++ this record changed. Diff: 21 files, +5850/−5690 (net +160 — the splits
+are structural). Kittest 24 suites: CI lane (green in CI run 41284592762,
+re-confirmed on this push).
