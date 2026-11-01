@@ -377,4 +377,3 @@ mod batch23_audit_tests {
         assert_eq!(ai.get("title").and_then(Value::as_str), Some("environment"));
     }
 }
-

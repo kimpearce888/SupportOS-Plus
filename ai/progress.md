@@ -453,3 +453,13 @@ None — Batch RF-7 completed and moved to `completed.md` (2026-11-01): the
 second census wave (9 core/app-shell god-files) + the pages/queries.rs
 relocation, all byte-identical region extractions under the RF-6 pattern.
 Next per plan.md (opens on the owner's `continue`): Batch RF-8 — renames.
+
+CI hotfix (RF-7 follow-up, 2026-11-01): run 41290521329 failed only the
+Format-check step — `ai_tools/mod.rs` ended with a stray trailing blank
+line left by the post-fmt relocation of the batch29_audit98_99_tests mod
+into execute.rs (the trim appended `\n` to a file already ending `}\n`;
+local fmt had run BEFORE that edit, so the seam was never re-checked —
+process miss: fmt belongs AFTER the last content edit, not before).
+Fix: strip the trailing blank; `cargo fmt --all --check` clean. Whitespace
+only — no code, no tests touched. All other CI jobs (workspace tests,
+kittest snapshot locks, AppImage/.deb smoke) green on this run.
