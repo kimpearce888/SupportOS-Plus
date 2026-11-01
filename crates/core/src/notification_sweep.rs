@@ -24,7 +24,7 @@ pub fn first_sync_settled(conn: &Connection) -> Result<bool> {
 
 type SweepRow = (i64, String, String, Option<String>, Option<String>);
 
-pub fn sweep(conn: &Connection, bus: Option<&crate::eventing::EventBus>) -> Result<SweepOutcome> {
+pub fn sweep(conn: &Connection, bus: Option<&crate::event_bus::EventBus>) -> Result<SweepOutcome> {
     let now = now_stamp();
     let cursor_raw = crate::settings::get_i64(conn, CURSOR_KEY, -1)?;
     let sweep_at = crate::settings::get_string(conn, SWEEP_AT_KEY)?;
@@ -71,7 +71,7 @@ type SubSweepOutcome = (u32, Option<i64>);
 
 fn run_sub_sweeps(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     cursor: i64,
     sweep_at: &str,
 ) -> Result<SubSweepOutcome> {
@@ -137,7 +137,7 @@ const EVENT_SWEEP_CAP: usize = 500;
 
 fn sweep_conversation_events(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     after_event_id: i64,
 ) -> Result<(u32, Option<i64>)> {
     // Clean-audit item 65: fetch one row PAST the cap. If it exists, the
@@ -301,7 +301,7 @@ fn sweep_conversation_events(
     Ok((created, processed_to))
 }
 
-fn sweep_sla(conn: &Connection, bus: Option<&crate::eventing::EventBus>) -> Result<u32> {
+fn sweep_sla(conn: &Connection, bus: Option<&crate::event_bus::EventBus>) -> Result<u32> {
     let mut created = 0u32;
     let alerts = crate::sla::sla_alerts(conn)?;
     let day = day_stamp();
@@ -347,7 +347,7 @@ fn sweep_sla(conn: &Connection, bus: Option<&crate::eventing::EventBus>) -> Resu
 
 fn sweep_automation_approvals(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
 ) -> Result<u32> {
     let rows: Vec<(i64, Option<String>)> = {
         let mut stmt = conn.prepare(
@@ -404,7 +404,7 @@ fn sweep_automation_approvals(
 
 fn sweep_failed_jobs(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
     // Audit item 125: the window selected `ORDER BY id DESC LIMIT 200`
@@ -453,7 +453,7 @@ fn sweep_failed_jobs(
     Ok(created)
 }
 
-fn sweep_sync_state(conn: &Connection, bus: Option<&crate::eventing::EventBus>) -> Result<u32> {
+fn sweep_sync_state(conn: &Connection, bus: Option<&crate::event_bus::EventBus>) -> Result<u32> {
     let state = crate::sync_engine::get_state(conn);
     if state != "ERROR" {
         return Ok(0);
@@ -475,7 +475,7 @@ fn sweep_sync_state(conn: &Connection, bus: Option<&crate::eventing::EventBus>) 
 
 fn sweep_campaign_replies(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
     type SweepRows0 = (
@@ -543,7 +543,7 @@ fn sweep_campaign_replies(
 
 fn sweep_known_issues(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
     type SweepRows1 = (
@@ -593,7 +593,7 @@ fn sweep_known_issues(
 
 fn sweep_issue_spikes(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
     type SweepRows2 = (
@@ -646,7 +646,7 @@ fn sweep_issue_spikes(
 
 fn sweep_ai_escalations(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
     type SweepRows3 = (
@@ -740,7 +740,7 @@ fn sweep_ai_escalations(
 
 fn sweep_ratings(
     conn: &Connection,
-    bus: Option<&crate::eventing::EventBus>,
+    bus: Option<&crate::event_bus::EventBus>,
     since_stamp: &str,
 ) -> Result<u32> {
     // Audit item 125: same window repair as the other stamp lanes — the

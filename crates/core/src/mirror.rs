@@ -353,7 +353,7 @@ pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
 /// loss behind the empty Customers page and the Outreach "No usable email
 /// address on file" wall. Use this whenever the payload carries no channel
 /// data and the stored rows are still authoritative.
-pub fn upsert_customer_basic(conn: &Connection, c: &HsCustomer) -> Result<()> {
+pub fn upsert_customer_without_channels(conn: &Connection, c: &HsCustomer) -> Result<()> {
     upsert_customer_with(conn, c, false)
 }
 

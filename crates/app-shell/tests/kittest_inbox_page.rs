@@ -22,7 +22,7 @@
 use eframe::egui;
 use egui_kittest::Harness;
 use spp_core::db::DbHandle;
-use spp_core::eventing::EventBus;
+use spp_core::event_bus::EventBus;
 use spp_shell::design;
 use spp_shell::pages::inbox::InboxPage;
 

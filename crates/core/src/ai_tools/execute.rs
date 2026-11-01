@@ -25,17 +25,17 @@ fn arg_i64(args: &serde_json::Map<String, Value>, key: &str) -> Option<i64> {
     None
 }
 
-fn red(conn: &Connection, text: &str) -> String {
+fn redact(conn: &Connection, text: &str) -> String {
     let enabled = crate::settings::get_bool(conn, "redaction_enabled", true).unwrap_or(true);
     crate::security::redact_text(text, enabled).0
 }
 
-fn red_chars(conn: &Connection, text: &str, n: usize) -> String {
+fn redact_chars(conn: &Connection, text: &str, n: usize) -> String {
     let taken: String = text.chars().take(n).collect();
-    red(conn, &taken)
+    redact(conn, &taken)
 }
 
-fn conv_by_number(conn: &Connection, number: i64) -> Option<(i64, Option<i64>)> {
+fn conversation_by_number(conn: &Connection, number: i64) -> Option<(i64, Option<i64>)> {
     conn.query_row(
         "SELECT id, customer_local_id FROM conversations WHERE number = ?1 AND deleted_at IS NULL",
         params![number],
@@ -88,7 +88,7 @@ pub fn execute(
                         json!({
                             "number": number,
                             "title": h.title,
-                            "snippet": red_chars(conn, &h.snippet, 300),
+                            "snippet": redact_chars(conn, &h.snippet, 300),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -107,7 +107,7 @@ pub fn execute(
                 hits.iter()
                     .map(|h| json!({
                         "title": h.title,
-                        "snippet": red_chars(conn, &h.snippet, 300),
+                        "snippet": redact_chars(conn, &h.snippet, 300),
                     }))
                     .collect::<Vec<_>>()
             )
@@ -126,7 +126,7 @@ pub fn execute(
                     .map(|h| json!({
                         "id": h.id,
                         "title": h.title,
-                        "snippet": red_chars(conn, &h.snippet, 300),
+                        "snippet": redact_chars(conn, &h.snippet, 300),
                     }))
                     .collect::<Vec<_>>()
             )
@@ -145,7 +145,7 @@ pub fn execute(
                     .map(|h| json!({
                         "id": h.id,
                         "title": h.title,
-                        "snippet": red_chars(conn, &h.snippet, 300),
+                        "snippet": redact_chars(conn, &h.snippet, 300),
                     }))
                     .collect::<Vec<_>>()
             )
@@ -186,7 +186,7 @@ pub fn execute(
                     stmt.query_map(params![id], |r| {
                         Ok(json!({
                             "type": r.get::<_, String>(0)?,
-                            "text": red_chars(conn, &r.get::<_, String>(1)?, 400),
+                            "text": redact_chars(conn, &r.get::<_, String>(1)?, 400),
                             "date": r.get::<_, Option<String>>(2)?,
                         }))
                     })
@@ -289,7 +289,7 @@ pub fn execute(
                         "author": author,
                         "type": kind,
                         "date": date,
-                        "text": red(conn, &text),
+                        "text": redact(conn, &text),
                     })
                 })
                 .collect();
@@ -363,8 +363,8 @@ pub fn execute(
                     "status": status,
                     "created": created,
                     "closed": closed,
-                    "first_message": red_chars(conn, first_message, 300),
-                    "last_reply": red_chars(conn, last_reply, 300),
+                    "first_message": redact_chars(conn, first_message, 300),
+                    "last_reply": redact_chars(conn, last_reply, 300),
                 })).collect::<Vec<_>>(),
             })
         }
@@ -372,7 +372,7 @@ pub fn execute(
             let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
-            let Some((id, _)) = conv_by_number(conn, num) else {
+            let Some((id, _)) = conversation_by_number(conn, num) else {
                 return json!({ "error": "Conversation not found" });
             };
             // A4: the agent's similar lane rides the same semantic spine as
@@ -392,7 +392,7 @@ pub fn execute(
                         "conversation_id": s.conversation_id,
                         "number": s.number,
                         "subject": s.subject,
-                        "resolution": red_chars(conn, &s.resolution, 400),
+                        "resolution": redact_chars(conn, &s.resolution, 400),
                     }))
                     .collect::<Vec<_>>()
             )
@@ -451,7 +451,7 @@ pub fn execute(
             let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
-            let Some((id, _)) = conv_by_number(conn, num) else {
+            let Some((id, _)) = conversation_by_number(conn, num) else {
                 return json!({ "error": "Conversation not found" });
             };
             let run = conn
@@ -555,7 +555,7 @@ pub fn execute(
             let Some(num) = arg_i64(&args, "number") else {
                 return json!({ "error": "Invalid number" });
             };
-            let Some((id, _)) = conv_by_number(conn, num) else {
+            let Some((id, _)) = conversation_by_number(conn, num) else {
                 return json!({ "error": "Conversation not found" });
             };
             let attrs: Vec<Value> = conn
@@ -574,7 +574,7 @@ pub fn execute(
                             .iter()
                             .take(2)
                             .map(|e| {
-                                json!({ "excerpt": red_chars(
+                                json!({ "excerpt": redact_chars(
                                     conn,
                                     e.get("excerpt").and_then(Value::as_str).unwrap_or(""),
                                     200,
@@ -724,14 +724,14 @@ pub fn execute(
                     if let Some(obj) = properties.as_object() {
                         for (k, v) in obj.iter().take(12) {
                             let v = match v.as_str() {
-                                Some(s) => Value::String(red_chars(conn, s, 200)),
+                                Some(s) => Value::String(redact_chars(conn, s, 200)),
                                 None => v.clone(),
                             };
                             clean.insert(k.clone(), v);
                         }
                     }
                     let _ = id;
-                    json!({ "type": type_name, "title": red_chars(conn, title, 200), "properties": clean })
+                    json!({ "type": type_name, "title": redact_chars(conn, title, 200), "properties": clean })
                 })
                 .collect::<Vec<_>>())
         }
@@ -761,7 +761,7 @@ pub fn execute(
                         Ok(json!({
                             "kind": r.get::<_, String>(0)?,
                             "at": r.get::<_, Option<String>>(1)?,
-                            "title": red_chars(conn, &r.get::<_, String>(2)?, 160),
+                            "title": redact_chars(conn, &r.get::<_, String>(2)?, 160),
                             "source": r.get::<_, String>(3)?,
                         }))
                     })
@@ -838,7 +838,7 @@ pub fn execute(
                     if let Some(obj) = d.as_object() {
                         for (k, v) in obj.iter().take(15) {
                             let v = match v.as_str() {
-                                Some(s) => Value::String(red_chars(conn, s, 300)),
+                                Some(s) => Value::String(redact_chars(conn, s, 300)),
                                 None => v.clone(),
                             };
                             out.insert(k.clone(), v);
@@ -894,10 +894,10 @@ pub fn execute(
                     json!({
                         "id": id,
                         "kind": kind,
-                        "question": red_chars(conn, &question, 200),
+                        "question": redact_chars(conn, &question, 200),
                         "occurrences": occurrences,
                         "status": status,
-                        "explanation": red_chars(conn, &explanation, 300),
+                        "explanation": redact_chars(conn, &explanation, 300),
                         "note": "Candidates are deterministic detections awaiting human approval; approving never publishes automatically."
                     })
                 })
@@ -964,13 +964,13 @@ pub fn execute(
                     json!({
                         "relation": e["relation"],
                         "connected_kind": other["kind"],
-                        "connected": red_chars(conn, other["label"].as_str().unwrap_or(""), 120),
+                        "connected": redact_chars(conn, other["label"].as_str().unwrap_or(""), 120),
                         "note": e["note"],
                     })
                 })
                 .collect::<Vec<_>>();
             json!({
-                "node": { "kind": kind, "label": red_chars(conn, &node_ref.label, 160) },
+                "node": { "kind": kind, "label": redact_chars(conn, &node_ref.label, 160) },
                 "total_edges": edges.len(),
                 "edges": items,
                 "note": "Edges are read from the local support graph store; only human-asserted edges are stored."
@@ -1044,7 +1044,7 @@ pub fn execute(
                 .and_then(|mut stmt| {
                     stmt.query_map(params![customer], |r| {
                         Ok(json!({
-                            "title": red_chars(conn, &r.get::<_, String>(0)?, 140),
+                            "title": redact_chars(conn, &r.get::<_, String>(0)?, 140),
                             "value": r.get::<_, Option<String>>(1)?,
                             "source": "local_mirror",
                             "confidence": "high",
@@ -1087,8 +1087,8 @@ pub fn execute(
                 .take(5)
                 .map(|(k, v, source, confidence, last_seen)| {
                     json!({
-                        "title": red_chars(conn, k, 140),
-                        "value": v.as_deref().map(|v| red_chars(conn, v, 200)),
+                        "title": redact_chars(conn, k, 140),
+                        "value": v.as_deref().map(|v| redact_chars(conn, v, 200)),
                         "source": source,
                         "confidence": confidence,
                         "last_seen": last_seen,
@@ -1130,7 +1130,7 @@ fn map_cluster_row(conn: &Connection, r: &rusqlite::Row<'_>) -> rusqlite::Result
         .collect();
     Ok(json!({
         "title": title,
-        "summary": red_chars(conn, summary.as_deref().unwrap_or(""), 400),
+        "summary": redact_chars(conn, summary.as_deref().unwrap_or(""), 400),
         "category": r.get::<_, Option<String>>(3)?,
         "product": r.get::<_, Option<String>>(4)?,
         "feature": r.get::<_, Option<String>>(5)?,

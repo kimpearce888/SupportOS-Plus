@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::interaction_current::{CurrentInteraction, InteractionSignal, MessageStats};
+use crate::interaction_signals::{CurrentInteraction, InteractionSignal, MessageStats};
 use crate::quality::is_closing_acknowledgment;
 
 mod baseline;
@@ -463,7 +463,7 @@ pub fn save_current_interaction(
     sources: &str,
     analysis_version: Option<&str>,
 ) -> Result<()> {
-    crate::interaction_current::ensure_client_current_signals_table(conn)?;
+    crate::interaction_signals::ensure_client_current_signals_table(conn)?;
     let provenance = if sources == "heuristic" {
         "heuristic"
     } else {
@@ -1037,13 +1037,13 @@ fn humanize_style(style: &str) -> String {
 }
 
 fn dimension_rank(dimension: &str, value: &str) -> Option<usize> {
-    crate::interaction_current::dimension_vocabulary(dimension)?
+    crate::interaction_signals::dimension_vocabulary(dimension)?
         .iter()
         .position(|v| *v == value)
 }
 
 fn rank_span(dimension: &str) -> usize {
-    crate::interaction_current::dimension_vocabulary(dimension)
+    crate::interaction_signals::dimension_vocabulary(dimension)
         .map(|v| v.len().saturating_sub(1))
         .filter(|s| *s >= 1)
         .unwrap_or(1)

@@ -14,16 +14,16 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
 pub mod app;
-pub mod bridge;
 pub mod chart;
 pub mod design;
 pub mod fatal;
 pub mod icons;
-pub mod mention;
+pub mod mention_popup;
 pub mod overlays;
 pub mod pages;
 pub mod palette;
 pub mod smoke;
+pub mod task_bridge;
 pub mod workers_host;
 // The only unsafe code in this crate: two libc::flock FFI calls that hold
 // and release the single-instance advisory lock.
@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use spp_core::db::DbHandle;
-use spp_core::eventing::EventBus;
+use spp_core::event_bus::EventBus;
 use spp_core::provider_handle::ProviderHandle;
 use spp_core::sync_engine::SyncEngine;
 
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn boot_serves_the_empty_provider_on_a_fresh_install() {
         let db = crate::testsupport::empty_db();
-        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
+        let boot = build_boot_services(&db, &spp_core::event_bus::EventBus::default());
         assert_eq!(boot.mode, BootMode::Empty);
         assert!(
             !boot.handle.is_real(),
@@ -337,7 +337,7 @@ mod tests {
             )
             .expect("store");
         });
-        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
+        let boot = build_boot_services(&db, &spp_core::event_bus::EventBus::default());
         assert_eq!(boot.mode, BootMode::Real);
         assert!(boot.handle.is_real(), "credentials resolve at boot");
         assert!(boot.handle.real().is_some());
@@ -348,7 +348,7 @@ mod tests {
         install_master_key();
         let db = crate::testsupport::empty_db();
         // First boot with no credentials: writes provider_kind=empty.
-        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
+        let boot = build_boot_services(&db, &spp_core::event_bus::EventBus::default());
         assert_eq!(boot.mode, BootMode::Empty);
         // A pre-1.4.0 poisoned install: the empty session stamped
         // sync_state=LIVE and its watermarks forward every minute.
@@ -373,7 +373,7 @@ mod tests {
             )
             .expect("store");
         });
-        let boot = build_boot_services(&db, &spp_core::eventing::EventBus::default());
+        let boot = build_boot_services(&db, &spp_core::event_bus::EventBus::default());
         assert_eq!(boot.mode, BootMode::Real);
         let state = db.with_read(spp_core::sync_engine::get_state);
         assert_eq!(state, "NEW", "the poisoned LIVE watermark is forgotten");

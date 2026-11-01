@@ -388,7 +388,7 @@ pub fn search(
 /// The BM25 lanes run exactly as [`search`] does; when the retrieval feature
 /// is enabled, an Embed role is routed, and a vector index is available, the
 /// query is embedded and dense hits are fused per lane via the existing RRF
-/// k=60 math (see `hybrid_search::RRF_K`). The reported flags are real:
+/// k=60 math (see `rrf::RRF_K`). The reported flags are real:
 /// `used_semantic` is set only when vector hits actually made the list, and
 /// every fused hit carries its lane provenance ("keyword match" /
 /// "semantic match") in `why`. Absent any part of the chain the response is
@@ -550,10 +550,10 @@ pub fn search_with_semantics(
         return Ok(response);
     }
 
-    // RRF fusion (k=60, same constant as hybrid_search): per lane, every hit
+    // RRF fusion (k=60, same constant as rrf): per lane, every hit
     // scores 1/(k + rank) on each list it appears on. FTS rank is position in
     // its lane; semantic rank is by cosine score.
-    let k = crate::hybrid_search::RRF_K;
+    let k = crate::rrf::RRF_K;
     let mut fused: Vec<SearchHit> = Vec::new();
     for lane in ["tickets", "knowledge"] {
         let fts_lane: Vec<&SearchHit> = response.hits.iter().filter(|h| h.scope == lane).collect();
@@ -1132,7 +1132,7 @@ mod batch25_search_tests {
     /// "semantic" results to the bottom of a response that claimed fusion.
     #[test]
     fn audit59_fts_only_lanes_rescore_to_the_rrf_scale() {
-        let k = crate::hybrid_search::RRF_K;
+        let k = crate::rrf::RRF_K;
         let mut hits = vec![
             hit("customers", 1, 1.0),
             hit("customers", 2, 1.0),
@@ -1183,7 +1183,7 @@ mod batch25_search_tests {
     /// helper's own lane list).
     #[test]
     fn audit59_rescore_leaves_unknown_lanes_alone() {
-        let k = crate::hybrid_search::RRF_K;
+        let k = crate::rrf::RRF_K;
         let mut hits = vec![hit("tickets", 5, 0.5), hit("customers", 1, 1.0)];
         rescore_fts_only_lanes_to_rrf_scale(&mut hits, k);
         assert_eq!(

@@ -427,10 +427,12 @@ Second wave of the census list + the app-shell relocation: page-model query
 surfaces move to `pages/queries.rs` (the invalidation-map port named in
 pages/mod.rs doc comments).
 
-### RF-8 — renames
+### RF-8 — renames (OPENED 2026-11-01 on the owner's `continue`)
 
 The rename wave recorded by the original program (file- and item-level
-naming debts surfaced by RF-2..RF-7 execution; census at open).
+naming debts surfaced by RF-2..RF-7 execution; census at open). The ten
+items selected by the census live in `progress.md` per Rule 2 while the
+batch is active.
 
 ### RF-9 — docs sync
 

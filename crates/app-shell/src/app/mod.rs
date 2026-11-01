@@ -15,11 +15,10 @@ use std::sync::Arc;
 
 use eframe::egui;
 use spp_core::db::DbHandle;
-use spp_core::eventing::EventBus;
+use spp_core::event_bus::EventBus;
 use spp_core::sync_engine::SyncEngine;
 
 use crate::ShellOptions;
-use crate::bridge::TaskBridge;
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 use crate::overlays::{ConfirmDialog, DialogOutcome};
@@ -49,6 +48,7 @@ use crate::pages::settings::SettingsPage;
 use crate::pages::support_graph::SupportGraphPage;
 use crate::pages::sync_health::SyncHealthPage;
 use crate::palette::CommandPalette;
+use crate::task_bridge::TaskBridge;
 use crate::theme::Theme;
 use crate::toasts::Toasts;
 
@@ -1125,7 +1125,7 @@ mod headless_tests {
         convs: Vec<crate::testsupport::ConvSeed>,
     ) -> (ShellApp, spp_core::db::DbHandle) {
         let db = crate::testsupport::fixture(convs);
-        let bus = spp_core::eventing::EventBus::default();
+        let bus = spp_core::event_bus::EventBus::default();
         let sync = crate::build_sync_engine(&db, &bus);
         let options = ShellOptions {
             db: db.clone(),

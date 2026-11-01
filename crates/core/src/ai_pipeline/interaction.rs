@@ -21,7 +21,7 @@ pub fn build_interaction_strategy_block(
     let approach = match stored.recommendation.as_ref() {
         Some(r) => r.recommendation.clone(),
         None => {
-            let current = crate::interaction_current::CurrentInteraction {
+            let current = crate::interaction_signals::CurrentInteraction {
                 conversation_local_id,
                 customer_local_id: customer,
                 is_returning_client: false,
@@ -190,7 +190,7 @@ pub struct AnalyzeInteractionOutcome {
 
 #[derive(Debug, Default)]
 struct ObservationOutput {
-    signals: Vec<crate::interaction_current::InteractionSignal>,
+    signals: Vec<crate::interaction_signals::InteractionSignal>,
     customer_goal: Option<String>,
     notes: Vec<String>,
 }
@@ -199,7 +199,7 @@ fn parse_observation(
     json: Option<&serde_json::Value>,
     valid_thread_ids: &std::collections::HashSet<i64>,
 ) -> ObservationOutput {
-    use crate::interaction_current::InteractionSignal;
+    use crate::interaction_signals::InteractionSignal;
     let Some(obj) = json.and_then(|v| v.as_object()) else {
         return ObservationOutput::default();
     };
@@ -208,7 +208,7 @@ fn parse_observation(
         for s in arr {
             let dimension = s.get("dimension").and_then(|v| v.as_str()).unwrap_or("");
             let value = s.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            if !crate::interaction_current::is_valid_value(dimension, value) {
+            if !crate::interaction_signals::is_valid_value(dimension, value) {
                 continue;
             }
             let confidence = s
@@ -234,7 +234,7 @@ fn parse_observation(
                 confidence,
                 evidence: excerpt_safe.then(|| {
                     let e = excerpt.unwrap_or_default();
-                    crate::interaction_current::Evidence {
+                    crate::interaction_signals::Evidence {
                         excerpt: e.to_string(),
                         thread_local_id: thread_id,
                         conversation_local_id: None,
@@ -244,7 +244,7 @@ fn parse_observation(
             });
         }
     }
-    let sanitized = crate::interaction_current::sanitize_signals(signals).signals;
+    let sanitized = crate::interaction_signals::sanitize_signals(signals).signals;
     let goal_check = obj.get("customer_goal").and_then(|v| v.as_str());
     let customer_goal = goal_check
         .filter(|g| {
@@ -333,7 +333,7 @@ pub async fn analyze_interaction(
     if exists == 0 {
         return Err(LmStudioError::new("Conversation not found", false));
     }
-    let _ = crate::interaction_current::record_current_interaction(conn, conversation_local_id);
+    let _ = crate::interaction_signals::record_current_interaction(conn, conversation_local_id);
     if backend.kind() == "disabled" {
         return Ok(AnalyzeInteractionOutcome {
             ai_enriched: false,
@@ -522,14 +522,14 @@ pub async fn analyze_interaction(
 
     if !obs.signals.is_empty() {
         let heuristic =
-            crate::interaction_current::compute_current_interaction(conn, conversation_local_id)
+            crate::interaction_signals::compute_current_interaction(conn, conversation_local_id)
                 .ok()
                 .flatten();
         let merged = match &heuristic {
             Some(h) => engine::merge_signals(&h.signals, &obs.signals),
             None => obs.signals.clone(),
         };
-        let merged = crate::interaction_current::sanitize_signals(merged).signals;
+        let merged = crate::interaction_signals::sanitize_signals(merged).signals;
         let _ = engine::save_current_interaction(
             conn,
             conversation_local_id,
@@ -538,7 +538,7 @@ pub async fn analyze_interaction(
             heuristic
                 .as_ref()
                 .map(|h| &h.message_stats)
-                .unwrap_or(&crate::interaction_current::MessageStats::default()),
+                .unwrap_or(&crate::interaction_signals::MessageStats::default()),
             obs.customer_goal
                 .as_deref()
                 .or(heuristic.as_ref().and_then(|h| h.customer_goal.as_deref())),
@@ -569,19 +569,19 @@ pub async fn analyze_interaction(
         .ok()
         .flatten();
     let card_current =
-        crate::interaction_current::compute_current_interaction(conn, conversation_local_id)
+        crate::interaction_signals::compute_current_interaction(conn, conversation_local_id)
             .ok()
             .flatten();
     let mut stage_current =
         card_current
             .clone()
-            .unwrap_or_else(|| crate::interaction_current::CurrentInteraction {
+            .unwrap_or_else(|| crate::interaction_signals::CurrentInteraction {
                 conversation_local_id,
                 customer_local_id: Some(customer_id),
                 is_returning_client: !history.is_empty(),
                 signals: Vec::new(),
                 customer_goal: None,
-                message_stats: crate::interaction_current::MessageStats::default(),
+                message_stats: crate::interaction_signals::MessageStats::default(),
                 sources: "heuristic+ai".into(),
                 generated_at: None,
             });

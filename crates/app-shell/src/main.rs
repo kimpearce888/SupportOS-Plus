@@ -62,7 +62,7 @@ fn main() {
         spp_core::logging::apply_log_level(&level);
     }
 
-    let bus = spp_core::eventing::EventBus::default();
+    let bus = spp_core::event_bus::EventBus::default();
     let boot = spp_shell::build_boot_services(&db, &bus);
 
     // Background workers (cutover gap fix): job drain, webhook drain,

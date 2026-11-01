@@ -759,7 +759,7 @@ impl SyncEngine {
                         full.social_profiles = ch.social_profiles.clone();
                         mirror::upsert_customer(&conn, &full)
                     } else if bare_payload_ids.contains(&c.remote_id) {
-                        mirror::upsert_customer_basic(&conn, c)
+                        mirror::upsert_customer_without_channels(&conn, c)
                     } else {
                         mirror::upsert_customer(&conn, c)
                     };

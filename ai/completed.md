@@ -5661,3 +5661,90 @@ passed / 0 failed / 4 ignored (--test-threads=1, 351.72s); app-shell lib
 + this record changed. Diff: 21 files, +5850/−5690 (net +160 — the splits
 are structural). Kittest 24 suites: CI lane (green in CI run 41284592762,
 re-confirmed on this push).
+
+## Batch RF-8 — renames (opened and completed 2026-11-01)
+
+The plan.md §RF-8 census at open (word-boundary reference census per
+candidate across all four crates + tests + the two live gates +
+README/USER_MANUAL) selected ten naming debts surfaced by RF-2..RF-7
+execution. All renames are zero-semantic-change: `git mv` (rename
+detection intact) + reference re-pointing, compiler + full suite prove
+behavior unchanged.
+
+1. **RF-8-1 eventing.rs → event_bus.rs (core file)** — the module is the
+   EventBus home (broadcast bus + notify_* helpers); the `events` (type
+   definitions) vs `eventing` (the bus) minimal pair was the confusable
+   debt. lib.rs decl + all 53 path refs follow across core src, app-shell
+   src, it_sync/it_helpscout and the two kittest suites.
+2. **RF-8-2 hybrid_search.rs → rrf.rs (core file)** — since batch 34 the
+   module carries only `RRF_K` + its characterization test; the name
+   described the deleted fusion stack. lib.rs decl + 3 `crate::rrf::RRF_K`
+   refs in search/mod.rs + two comment mentions updated truthful (the
+   module doc's history line intentionally still names the deleted
+   `hybrid_search` entry point).
+3. **RF-8-3 sync.rs → mirror.rs (core file)** — the Hs* mirror-upsert
+   layer; debt proven by the codebase's own alias `use crate::sync as
+   mirror;` (sync_engine/mod.rs:12) — the alias dropped, the 12 `mirror::`
+   sites resolve directly, 5 `crate::sync::` sites re-pointed (bench×3,
+   workers/execute×2); `sync_engine`/`sync_schema` untouched
+   (word-boundary proof: zero `crate::sync\b` refs remain).
+4. **RF-8-4 interaction_current.rs → interaction_signals.rs (core
+   file)** — word-salad name next to `interaction_engine/`; the module
+   holds the interaction-signal infrastructure (client_current_signals +
+   interaction_evidence tables, signal vocabulary, needs_de_escalation,
+   MessageStats). ~35 refs across 10 files follow. Disclosed path-follows:
+   migrations/db_breadth.rs:360 (import path only — zero SQL semantics
+   touched, diff-verified one line), the bench timeit label, one
+   baseline.rs comment; intelligence.rs:46 comment stays byte-identical
+   (NO-TOUCH; dies with all comments at RF-11).
+5. **RF-8-5 mention.rs → mention_popup.rs (app-shell file)** — the
+   composer mention-autocomplete popup logic; disambiguates from the core
+   `mentions` parser it consumes. inbox.rs import + lib.rs decl follow.
+6. **RF-8-6 bridge.rs → task_bridge.rs (app-shell file)** — module name =
+   the `TaskBridge` type it holds. app/mod.rs import + lib.rs decl follow.
+7. **RF-8-7 `red` → `redact` (item, ai_tools/execute.rs)** — the fn
+   applies the redaction gate (`redaction_enabled` setting +
+   `security::redact_text`); "red" read as a color. Private, file-local.
+8. **RF-8-8 `red_chars` → `redact_chars` (item, same file)** — same debt;
+   all call sites file-local.
+9. **RF-8-9 `conv_by_number` → `conversation_by_number` (item, same
+   file)** — abbreviation debt surfaced by the RF-7 census that moved it;
+   private, file-local.
+10. **RF-8-10 `upsert_customer_basic` → `upsert_customer_without_channels`
+    (item, mirror.rs + its one caller sync_engine/loops.rs:762)** —
+    "basic" never said what it does; the name now carries the audit-C4
+    contract (upsert WITHOUT touching the contact-channel tables).
+
+Census exclusions recorded (with reasons): `helpscout_real` (established
+real-vs-inert pairing), `webhook.rs`/`webhook_handler.rs` (distinct
+roles), `vectorstore.rs` (holds the `VectorStore` trait — name is right),
+`search::search` (the documented `/api/search` port; the stutter lint is
+explicitly allowed off), `it_*`/`mockserver`/`bench` (RF-10 territory),
+migration modules (wiring stays), audit-artifact test names
+(`batch29_audit98_99_tests`, `auditNNN_*` — the audit-trail traceability
+convention), `ProviderHandle`/`ProviderKind` (moderate value, high UI
+churn — dropped).
+
+**Census FINDING disclosed for the owner's decision:**
+`mirror_readouts.rs` (298 ln, five pub fns: inbox_fields/workflows/
+user_statuses/webhook_configs/saved_replies + ensure_tables) has ZERO
+references anywhere — no path refs, no fn callers, not in tests or gates.
+It is dead code, but deletion is outside RF-8's rename scope, so it is
+preserved byte-identical and parked like the RF-6 zero-ref disclosures
+(`ai_pipeline::ProcessNewTicketResult`, `interaction_engine::AiEnrichment`).
+Recommend: delete in a follow-up owner decision (or at FINISH if the
+owner approves).
+
+Verification (all green): fmt clean (applied AFTER the last content edit
+— the rename-driven re-sort of module decls/import order was applied and
+re-checked; RF-7 hotfix lesson honored); clippy `--workspace
+--all-targets -D warnings` 0; gate_traceability OK (23 routes / 20 DC
+tags / 27 ids); gate_no_simulation clean; verify-icons clean; style_lint
+2 passed / 0 failed (explicit — RF-6 lesson); core lib 495 passed / 0
+failed / 4 ignored (--test-threads=1, 350.79s); app-shell lib 237/0;
+xtask 11/0; doc-tests 0/0. Churn proof: 6 git-mv renames (0-line deltas
+on moved files) + 31 ref-site files (+233/−139 across 37 files incl. the
+two ai records). Kittest 24 suites: CI lane (runs on this push). Docs:
+README/USER_MANUAL/docs reference none of the renamed names — zero doc
+debt created for RF-9. Dead `scripts/archive/*` verifiers still name old
+paths — dead code, historical records, untouched.

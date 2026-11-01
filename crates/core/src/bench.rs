@@ -449,7 +449,7 @@ fn bench_diagnose_write_path() {
     {
         let started = Instant::now();
         for i in 0..500 {
-            crate::sync::upsert_customer(&conn, &sample_customer(i)).expect("upsert");
+            crate::mirror::upsert_customer(&conn, &sample_customer(i)).expect("upsert");
         }
         println!(
             "[diag] (b) 500 upsert_customer on conn: {:.1?} ({:.0}/s)",
@@ -463,7 +463,7 @@ fn bench_diagnose_write_path() {
     {
         let started = Instant::now();
         for i in 500..1000 {
-            db.with_write(|c| crate::sync::upsert_customer(c, &sample_customer(i)))
+            db.with_write(|c| crate::mirror::upsert_customer(c, &sample_customer(i)))
                 .expect("upsert via handle");
         }
         println!(
@@ -480,7 +480,7 @@ fn bench_diagnose_write_path() {
             let items: Vec<_> = (page * 50..page * 50 + 50).map(sample_customer).collect();
             db.with_write(|c| -> crate::error::Result<()> {
                 for cust in &items {
-                    crate::sync::upsert_customer(c, cust).expect("upsert");
+                    crate::mirror::upsert_customer(c, cust).expect("upsert");
                 }
                 Ok(())
             })
@@ -678,8 +678,8 @@ fn bench_db_operations_on_large_dataset() {
     assert!(t_fts.as_millis() < 5_000, "FTS search: {t_fts:?}");
 
     // --- Post-sync full-table pass ---------------------------------------
-    let (t_backfill, n) = timeit("interaction_current::backfill_all", || {
-        crate::interaction_current::backfill_all(&db.write_guard()).expect("backfill")
+    let (t_backfill, n) = timeit("interaction_signals::backfill_all", || {
+        crate::interaction_signals::backfill_all(&db.write_guard()).expect("backfill")
     });
     println!("[bench]   -> {n} conversation snapshots");
     assert!(

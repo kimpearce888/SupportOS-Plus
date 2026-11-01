@@ -16,8 +16,8 @@ fn apply_runtime_guards(conn: &Connection) -> Result<()> {
     crate::saved_views::ensure_inbox_views_table(conn)?;
     crate::oauth_state::ensure_oauth_states_table(conn)?;
     crate::jobs::ensure_jobs_table(conn)?;
-    crate::interaction_current::ensure_client_current_signals_table(conn)?;
-    crate::interaction_current::ensure_interaction_evidence_table(conn)?;
+    crate::interaction_signals::ensure_client_current_signals_table(conn)?;
+    crate::interaction_signals::ensure_interaction_evidence_table(conn)?;
     crate::interaction_engine::ensure_schema(conn)?;
     crate::sla::ensure_sla_schema(conn)?;
     crate::ai_pipeline::ensure_pipeline_schema(conn)?;

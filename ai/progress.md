@@ -463,3 +463,111 @@ process miss: fmt belongs AFTER the last content edit, not before).
 Fix: strip the trailing blank; `cargo fmt --all --check` clean. Whitespace
 only — no code, no tests touched. All other CI jobs (workspace tests,
 kittest snapshot locks, AppImage/.deb smoke) green on this run.
+
+---
+
+**Batch RF-8 (RF-8-1..RF-8-10)** — active, moved from plan.md per Rule 2
+(2026-11-01, on the owner's `continue` after the RF-7 close). Source:
+plan.md §RF-8 — the rename wave (file- and item-level naming debts
+surfaced by RF-2..RF-7 execution; census at open).
+
+## Batch RF-8 — renames (census at open, 2026-11-01)
+
+Census method: every module file in both crates size- and role-reviewed;
+word-boundary reference census per candidate (`rg '\bname\b'` across all
+four crates + tests + the two live gates + README/USER_MANUAL — zero doc
+or gate references to any renamed name, so nothing outside the crate tree
+follows). Excluded from the wave, with reasons: `helpscout_real`
+(established real-vs-inert pairing with `helpscout/`), `webhook.rs` vs
+`webhook_handler.rs` (distinct roles: event store+HMAC vs dispatch
+pipeline), `vectorstore.rs` (holds the `VectorStore` trait — name is
+right), `search::search` (the documented `/api/search` port; the stutter
+lint is explicitly allowed off in lib.rs), the `it_*`/`mockserver`/`bench`
+test modules (RF-10 territory), migration modules (`db_breadth` et al. —
+migration wiring stays), audit-artifact test names (`batch29_audit98_99_tests`,
+`auditNNN_*` — the audit-trail traceability convention, not a debt),
+`ProviderHandle`/`ProviderKind` (moderate value, high UI churn — dropped),
+`mirror_readouts.rs` (census FINDING, not a rename: zero references to any
+of its five pub fns or the module path anywhere — disclosed at the STOP
+for the owner's delete-or-keep decision, consistent with the RF-6
+zero-ref disclosure precedent).
+
+1. **RF-8-1 (file, core)** — `crates/core/src/eventing.rs` →
+   `event_bus.rs`. The module is the EventBus home (broadcast bus +
+   notify_* helpers); the `events` (type definitions) vs `eventing` (the
+   bus) minimal pair is the confusable debt. lib.rs decl + all 53 path
+   refs follow (`crate::eventing::` → `crate::event_bus::`,
+   `spp_core::eventing::` → `spp_core::event_bus::`) across core src,
+   app-shell src, it_sync/it_helpscout and the two kittest suites.
+2. **RF-8-2 (file, core)** — `crates/core/src/hybrid_search.rs` →
+   `rrf.rs`. Since batch 34 the module carries ONLY `RRF_K` + its
+   characterization test; the name describes the deleted fusion stack
+   (surfaced by RF-2/batch-34). lib.rs decl + 3 `crate::hybrid_search::RRF_K`
+   refs in search/mod.rs + two comment mentions updated to stay truthful.
+3. **RF-8-3 (file, core)** — `crates/core/src/sync.rs` → `mirror.rs`.
+   The Hs* mirror-upsert layer (mailbox/user/team/tag/conversation/
+   customer upserts into the local mirror); debt proven by the codebase's
+   own alias `use crate::sync as mirror;` (sync_engine/mod.rs:12) — the
+   alias drops, the 12 `mirror::` sites resolve directly, 5 `crate::sync::`
+   sites re-point (bench×3, workers/execute×2). Word-boundary discipline:
+   `sync_engine`/`sync_schema` untouched.
+4. **RF-8-4 (file, core)** — `crates/core/src/interaction_current.rs` →
+   `interaction_signals.rs`. "Interaction current" is a word-salad name
+   sitting next to `interaction_engine/`; the module holds the
+   interaction-signal infrastructure (client_current_signals +
+   interaction_evidence tables, the signal vocabulary, needs_de_escalation,
+   MessageStats). ~35 refs across 12 files follow. Disclosed path-follows:
+   migrations/db_breadth.rs:360 (import path only — zero SQL semantics),
+   the bench timeit label, one baseline.rs comment; intelligence.rs:46
+   comment stays byte-identical (NO-TOUCH; the comment dies with all
+   comments at RF-11).
+5. **RF-8-5 (file, app-shell)** — `crates/app-shell/src/mention.rs` →
+   `mention_popup.rs`. The module is the composer mention-autocomplete
+   popup logic (MentionEntry, caret_query, the view model); "mention"
+   alone collides conceptually with the core `mentions` parser it
+   consumes. inbox.rs import + lib.rs decl follow; zero kittest refs.
+6. **RF-8-6 (file, app-shell)** — `crates/app-shell/src/bridge.rs` →
+   `task_bridge.rs`. The module holds `TaskBridge`; module name = type
+   name; "bridge" alone is vague in a shell full of crossings.
+   app/mod.rs import + lib.rs decl follow.
+7. **RF-8-7 (item, core)** — `red` → `redact` in ai_tools/execute.rs.
+   The fn applies the redaction gate (settings `redaction_enabled` +
+   `security::redact_text`); "red" reads as a color. Private fn —
+   file-local rename (definition + call sites).
+8. **RF-8-8 (item, core)** — `red_chars` → `redact_chars` in
+   ai_tools/execute.rs. Same debt; all call sites file-local (private).
+9. **RF-8-9 (item, core)** — `conv_by_number` → `conversation_by_number`
+   in ai_tools/execute.rs. Abbreviation debt surfaced by the RF-7 census
+   that moved it; private, file-local.
+10. **RF-8-10 (item, core)** — `upsert_customer_basic` →
+    `upsert_customer_without_channels` (sync.rs→mirror.rs + its one
+    caller sync_engine/loops.rs:762). "Basic" never says what it does —
+    the doc comment does (audit C4: upsert WITHOUT touching the
+    contact-channel tables); the name now carries the contract.
+
+Batch verification (Rule 5, before any item completes): fmt clean (run
+AFTER the last content edit — RF-7 hotfix lesson); clippy
+`--workspace --all-targets -D warnings` 0; gate_traceability OK (23
+routes / 20 DC tags / 27 ids); gate_no_simulation clean; verify-icons
+clean; style_lint 2/0 (explicit in the table — RF-6 hotfix lesson); core
+lib 495 passed / 4 ignored / 0 failed (`--test-threads=1`); app-shell lib
+237/0; xtask 11/0; doc-tests 0/0; kittest 24 suites = CI lane. Renames
+are zero-semantic-change by construction: compiler + full suite prove
+behavior unchanged; `git status` review proves only the renamed files +
+ref sites + ai records changed.
+
+Batch verification results (all green): fmt clean (run after the last
+content edit — the fmt re-sort of module decls/import order the renames
+require was applied and re-checked); clippy `--workspace --all-targets -D
+warnings` 0; gate_traceability OK (23 routes / 20 DC tags / 27 ids);
+gate_no_simulation clean; verify-icons clean; style_lint 2 passed / 0
+failed; core lib 495 passed / 0 failed / 4 ignored (--test-threads=1,
+350.79s); app-shell lib 237/0; xtask 11/0; doc-tests 0/0. Churn proof:
+`git status` = 6 git-mv renames (rename detection intact, 0-line deltas
+on moved files) + 31 ref-site files (one-line path/name swaps, incl. the
+disclosed db_breadth path-follow — exactly one line, zero SQL bytes) +
+the two ai records. Diff: +233/−139 across 37 files.
+
+None — Batch RF-8 completed and moved to `completed.md` (2026-11-01): the
+rename wave (6 file renames + 4 item renames, all zero-semantic-change).
+Next per plan.md (opens on the owner's `continue`): Batch RF-9 — docs sync.

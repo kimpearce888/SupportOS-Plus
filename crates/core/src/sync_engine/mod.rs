@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::helpscout::{
     ConversationQuery, CustomerQuery, HelpScoutProvider, HsConversation, HsThread,
 };
-use crate::sync as mirror;
+use crate::mirror;
 
 // Removed from the sweep by design (R6, honest stubs):
 //   chats, attachments, ratings — Help Scout exposes no list endpoints for
@@ -812,7 +812,7 @@ fn upsert_thread(conn: &Connection, conversation_local: i64, t: &HsThread) -> Re
     )?;
     persist_thread_details(conn, t)?;
     if t.kind == "customer" {
-        let _ = crate::interaction_current::record_current_interaction(conn, conversation_local);
+        let _ = crate::interaction_signals::record_current_interaction(conn, conversation_local);
     }
     Ok(())
 }
@@ -965,7 +965,7 @@ pub struct SyncEngine {
     provider: Arc<dyn HelpScoutProvider>,
     running: AtomicBool,
     cancel_requested: AtomicBool,
-    pub bus: Option<crate::eventing::EventBus>,
+    pub bus: Option<crate::event_bus::EventBus>,
 }
 
 impl SyncEngine {
@@ -981,7 +981,7 @@ impl SyncEngine {
     }
 
     #[must_use]
-    pub fn with_bus(mut self, bus: crate::eventing::EventBus) -> Self {
+    pub fn with_bus(mut self, bus: crate::event_bus::EventBus) -> Self {
         self.bus = Some(bus);
         self
     }
@@ -1502,7 +1502,7 @@ impl SyncEngine {
             let processed: i64 = results.iter().map(|r| r.processed).sum();
             {
                 let conn = self.lock();
-                let n = crate::interaction_current::backfill_all(&conn).unwrap_or(0);
+                let n = crate::interaction_signals::backfill_all(&conn).unwrap_or(0);
                 if n > 0 {
                     tracing::debug!(conversations = n, "interaction snapshots built");
                 }

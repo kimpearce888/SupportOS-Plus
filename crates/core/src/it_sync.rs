@@ -296,7 +296,7 @@ fn initial_sync_round_trips_the_full_fixture_into_the_mirror() {
     let fix = Fixture::new();
     let mock = mock_with_fixture(&fix);
     let db = fixture_db();
-    let bus = crate::eventing::EventBus::default();
+    let bus = crate::event_bus::EventBus::default();
     let mut rx = bus.subscribe();
     let engine = engine(&db, &mock).with_bus(bus.clone());
 

@@ -250,7 +250,7 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
                 // before, they landed only in Diagnostics and a red-zero
                 // Sync Health page looked like a healthy quiet account.
                 if let Some(bus) = &bus {
-                    spp_core::eventing::notify_error(
+                    spp_core::event_bus::notify_error(
                         bus,
                         "error",
                         &format!("{} failed: {e}", action_label_static(action)),
@@ -309,7 +309,7 @@ pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
                 });
                 // v1.4.0 (R5, D4): same live surfacing for the docs pass.
                 if let Some(bus) = &bus {
-                    spp_core::eventing::notify_error(
+                    spp_core::event_bus::notify_error(
                         bus,
                         "error",
                         &format!("Help Center sync failed: {e}"),

@@ -2664,14 +2664,14 @@ mod batch23_audit_tests {
         .expect("thread");
 
         let signals = vec![
-            crate::interaction_current::InteractionSignal {
+            crate::interaction_signals::InteractionSignal {
                 dimension: "frustration".into(),
                 value: "moderate".into(),
                 confidence: "high".into(),
                 evidence: None,
                 source: "heuristic".into(),
             },
-            crate::interaction_current::InteractionSignal {
+            crate::interaction_signals::InteractionSignal {
                 dimension: "detail".into(),
                 value: "high".into(),
                 confidence: "medium".into(),
@@ -2679,7 +2679,7 @@ mod batch23_audit_tests {
                 source: "heuristic".into(),
             },
         ];
-        let stats = crate::interaction_current::MessageStats {
+        let stats = crate::interaction_signals::MessageStats {
             customer_messages: 2,
             avg_message_length: 40,
             question_count: 1,

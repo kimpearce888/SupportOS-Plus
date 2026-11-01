@@ -231,7 +231,7 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
     };
     // Audit item 116: remote_created_at is never populated by the sync
     // writer, so the bare ORDER BY sorted on a constant NULL — the same
-    // defect and the same COALESCE convention as interaction_current.rs.
+    // defect and the same COALESCE convention as interaction_signals.rs.
     let mut stmt = conn.prepare(
         "SELECT type, body_html, body_text, from_type, created_at
            FROM conversation_threads
@@ -467,7 +467,7 @@ pub fn heuristic_recommendation(
         .collect();
     let pref_override = overrides.iter().find(|o| {
         o.field == "response_preference"
-            && crate::interaction_current::dimension_vocabulary("response_preference")
+            && crate::interaction_signals::dimension_vocabulary("response_preference")
                 .is_some_and(|vocab| vocab.contains(&o.human_value.as_str()))
     });
     let explicit_pref = current.signals.iter().find(|s| {
@@ -497,7 +497,7 @@ pub fn heuristic_recommendation(
         strategy.push("Recognize the reported impact before troubleshooting".into());
     }
     strategy.push("Answer the primary question directly".into());
-    if crate::interaction_current::needs_de_escalation(&current.signals) {
+    if crate::interaction_signals::needs_de_escalation(&current.signals) {
         strategy.push("Explain what is being checked and what happens next".into());
     }
     strategy.push("State the concrete next action".into());
@@ -574,7 +574,7 @@ pub fn heuristic_recommendation(
         then: Some("Explain the action being taken and what happens next.".into()),
         avoid,
         response_strategy: strategy,
-        de_escalation: crate::interaction_current::needs_de_escalation(&current.signals),
+        de_escalation: crate::interaction_signals::needs_de_escalation(&current.signals),
         escalation_recommendation: (sig.get("expectation") == Some(&"escalation")).then(|| {
             "The customer is asking for escalation — review the linked previous cases before replying.".to_string()
         }),
@@ -715,7 +715,7 @@ fn ensure_history_backfill(conn: &Connection, customer_id: Option<i64>) -> Resul
         if covered.contains(&c.id) {
             continue;
         }
-        if crate::interaction_current::record_current_interaction_opts(conn, c.id, false).is_err() {
+        if crate::interaction_signals::record_current_interaction_opts(conn, c.id, false).is_err() {
             continue;
         }
         let _ = compute_outcome(conn, c.id);

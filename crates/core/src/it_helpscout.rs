@@ -1300,7 +1300,7 @@ fn reply_dispatch_resolves_the_customer_from_the_api_and_repairs_the_mirror() {
             db.clone(),
             creds,
         )),
-        crate::eventing::EventBus::default(),
+        crate::event_bus::EventBus::default(),
         std::env::temp_dir(),
         None,
     );
@@ -1693,7 +1693,7 @@ fn retried_saved_reply_create_never_reposts() {
         db.clone(),
         None,
         Arc::new(p) as Arc<dyn HelpScoutProvider>,
-        crate::eventing::EventBus::default(),
+        crate::event_bus::EventBus::default(),
         std::env::temp_dir(),
         None,
     );

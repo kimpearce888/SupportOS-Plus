@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use std::panic::AssertUnwindSafe;
 
 use crate::error::{Error, Result};
-use crate::eventing::EventBus;
+use crate::event_bus::EventBus;
 use crate::helpscout::{ConversationPatch, CreateThreadInput, HelpScoutProvider};
 use crate::jobs;
 use crate::outbound;
@@ -496,7 +496,7 @@ impl WorkerManager {
                 drop(conn);
                 // R5 (D4): a panicking background job used to be visible
                 // only in the stdout log; it must reach the UI too.
-                crate::eventing::notify_error(
+                crate::event_bus::notify_error(
                     &self.bus,
                     "error",
                     &format!("background job {} panicked and was marked failed", job.kind),
@@ -541,7 +541,7 @@ impl WorkerManager {
                     true,
                 );
                 self.emit_outbound_finished(&job, false, Some("dispatcher panicked"));
-                crate::eventing::notify_error(
+                crate::event_bus::notify_error(
                     &self.bus,
                     "error",
                     "the outbound dispatcher panicked while delivering; the job was marked failed",
@@ -940,7 +940,7 @@ impl WorkerManager {
                 // specific OutboundJobFinished handler changes. The shell
                 // suppresses the duplicate toast for service="outbound" —
                 // the outbound event already carries the exact message.
-                crate::eventing::notify_error(
+                crate::event_bus::notify_error(
                     &self.bus,
                     if will_retry { "warn" } else { "error" },
                     &msg,
@@ -957,7 +957,7 @@ impl WorkerManager {
         success: bool,
         error: Option<&str>,
     ) {
-        crate::eventing::notify_outbound_finished(
+        crate::event_bus::notify_outbound_finished(
             &self.bus,
             job.id,
             &job.kind,
@@ -1048,7 +1048,7 @@ impl WorkerManager {
                     drop(conn);
                     // R5 (D4): background failures reach the UI live, not
                     // only through the Diagnostics page.
-                    crate::eventing::notify_error(
+                    crate::event_bus::notify_error(
                         &self.bus,
                         "error",
                         &format!("Automatic sync failed: {msg}"),
@@ -1475,7 +1475,7 @@ mod batch20_audit22_tests {
             db.clone(),
             None,
             Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
-            crate::eventing::EventBus::default(),
+            crate::event_bus::EventBus::default(),
             std::env::temp_dir(),
             None,
         ))
@@ -1597,7 +1597,7 @@ mod auto_sync_tests {
             db.clone(),
             Some(engine),
             Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
-            crate::eventing::EventBus::default(),
+            crate::event_bus::EventBus::default(),
             std::env::temp_dir(),
             None,
         );
@@ -1673,7 +1673,7 @@ mod batch14_tests {
             db.clone(),
             None,
             provider,
-            crate::eventing::EventBus::default(),
+            crate::event_bus::EventBus::default(),
             std::env::temp_dir(),
             None,
         ))
@@ -2251,7 +2251,7 @@ mod batch27_workers_tests {
             db.clone(),
             None,
             provider,
-            crate::eventing::EventBus::default(),
+            crate::event_bus::EventBus::default(),
             std::env::temp_dir(),
             None,
         ))
@@ -2455,7 +2455,7 @@ mod batch28_workers_tests {
             db.clone(),
             None,
             Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
-            crate::eventing::EventBus::default(),
+            crate::event_bus::EventBus::default(),
             std::env::temp_dir(),
             None,
         ))

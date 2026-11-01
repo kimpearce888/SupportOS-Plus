@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
-use crate::interaction_current::round2;
+use crate::interaction_signals::round2;
 
 pub const CAPACITY_WINDOW_DAYS: i64 = 7;
 

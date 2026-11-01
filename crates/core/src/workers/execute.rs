@@ -71,7 +71,7 @@ impl WorkerManager {
                     if let Some(remote) = num("remoteId")
                         && let Some(customer) = self.provider.get_customer(remote).await? {
                             let conn = self.lock();
-                            crate::sync::upsert_customer(&conn, &customer)?;
+                            crate::mirror::upsert_customer(&conn, &customer)?;
                         }
                 }
                 "delete_customer" => {
@@ -94,7 +94,7 @@ impl WorkerManager {
                     let tags = self.provider.list_tags().await?;
                     let conn = self.lock();
                     for t in &tags {
-                        crate::sync::upsert_tag(&conn, t)?;
+                        crate::mirror::upsert_tag(&conn, t)?;
                     }
                 }
                 "sync_user_statuses" => {
@@ -143,7 +143,7 @@ impl WorkerManager {
                                     )
                                 };
                                 if inserted {
-                                    crate::eventing::notify_rating_received(
+                                    crate::event_bus::notify_rating_received(
                                         &self.bus,
                                         r.rating.as_deref(),
                                         conv_local,
@@ -782,7 +782,7 @@ impl WorkerManager {
                         2,
                     );
                 }
-                let _ = crate::interaction_current::record_current_interaction(
+                let _ = crate::interaction_signals::record_current_interaction(
                     &conn,
                     conversation_local_id,
                 );

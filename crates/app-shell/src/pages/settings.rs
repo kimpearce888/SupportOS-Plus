@@ -476,7 +476,7 @@ pub struct SettingsPage {
     /// waiting for the auto-sync timer).
     engine: Option<std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
     /// Event bus handle for connect-failure events (R5/D4).
-    bus: Option<spp_core::eventing::EventBus>,
+    bus: Option<spp_core::event_bus::EventBus>,
     /// In-flight client-credentials connect (1.1.4): the detached
     /// thread writes its outcome here; the UI polls it each frame.
     hs_connect_result: std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>,
@@ -600,7 +600,7 @@ impl SettingsPage {
     }
 
     /// Install the event bus (connect failures emit live errors, R5/D4).
-    pub fn set_bus(&mut self, bus: spp_core::eventing::EventBus) {
+    pub fn set_bus(&mut self, bus: spp_core::event_bus::EventBus) {
         self.bus = Some(bus);
     }
 
@@ -995,7 +995,7 @@ impl SettingsPage {
                             // R5 (D4): a failing step is a live error, not
                             // just a form detail.
                             if let Some(bus) = &bus {
-                                spp_core::eventing::notify_error(
+                                spp_core::event_bus::notify_error(
                                     bus,
                                     "error",
                                     &format!(
@@ -1013,7 +1013,7 @@ impl SettingsPage {
                     }
                     Err(e) => {
                         if let Some(bus) = &bus {
-                            spp_core::eventing::notify_error(
+                            spp_core::event_bus::notify_error(
                                 bus,
                                 "error",
                                 &format!("the Connection Doctor could not run: {e}"),
@@ -2074,7 +2074,7 @@ impl SettingsPage {
                             // R5 (D4): connect failures reach the UI live,
                             // even from another page.
                             if let Some(bus) = &bus {
-                                spp_core::eventing::notify_error(
+                                spp_core::event_bus::notify_error(
                                     bus,
                                     "error",
                                     &format!("Connecting with client credentials failed: {e}"),

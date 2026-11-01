@@ -27,7 +27,7 @@ use sha2::{Digest, Sha256};
 use spp_core::conversation_ops::NOT_CONNECTED;
 use spp_core::conversation_ops::{create_outbound_job_keyed, set_outbound_status};
 use spp_core::db::DbHandle;
-use spp_core::eventing::EventBus;
+use spp_core::event_bus::EventBus;
 use spp_core::inbox::{ConversationDetail, ConversationListItem, InboxFilters};
 use spp_core::sync_engine::SyncEngine;
 use spp_core::ticket_ops::{OperationResult, TicketOperation};
@@ -36,7 +36,7 @@ use crate::design::{
     self, AvatarSize, BadgeTone, ButtonVariant, ComposerAct, ComposerState, MessageRole,
 };
 use crate::icons::Icon;
-use crate::mention::{
+use crate::mention_popup::{
     Directory, apply_completion, caret_query, char_index_to_byte, filter_matches,
 };
 
@@ -3332,7 +3332,7 @@ fn mutate(
 mod tests {
     use super::*;
     use crate::testsupport::fixture;
-    use spp_core::eventing::EventBus;
+    use spp_core::event_bus::EventBus;
 
     fn seeded() -> (crate::testsupport::ConvSeed, i64, i64, i64, i64) {
         (

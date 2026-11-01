@@ -357,7 +357,7 @@ fn create_missing_reference_tables(conn: &Connection) -> Result<()> {
 
 fn add_missing_reference_columns(conn: &Connection) -> Result<()> {
     crate::saved_views::ensure_inbox_views_table(conn)?;
-    crate::interaction_current::ensure_client_current_signals_table(conn)?;
+    crate::interaction_signals::ensure_client_current_signals_table(conn)?;
 
     add(conn, "mailboxes", "remote_created_at", "TEXT")?;
     add(conn, "mailboxes", "remote_updated_at", "TEXT")?;

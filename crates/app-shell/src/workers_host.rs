@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use spp_core::db::DbHandle;
-use spp_core::eventing::EventBus;
+use spp_core::event_bus::EventBus;
 use spp_core::helpscout::HelpScoutProvider;
 use spp_core::sync_engine::SyncEngine;
 use spp_core::workers::WorkerManager;
