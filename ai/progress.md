@@ -324,3 +324,28 @@ home, zero call-site edits outside the split modules; full gate table green
 (core 495/0/4ig, app-shell 237/0, clippy 0, gates 23/20/27). Next per
 plan.md (opens on the owner's `continue`): Batch RF-7 — god-file split,
 part 2 + pages/queries.rs.
+
+CI hotfix (RF-6 follow-up, 2026-11-01): the RF-6 push (a60904c) failed the
+CI run (41260762329) in BOTH the workspace-test job and the kittest job on
+the same test — `style_lint::no_raw_colors_and_no_off_scale_spacing` —
+flagging `src/design/controls.rs:91` and `src/design/mod.rs:136/468/656`
+(raw `Color32::` constructions). Root cause: the lint's token-factory
+exemption was keyed to the FILENAME (`const TOKEN_FACTORY = "design.rs"`,
+`rel.ends_with(...)`) — RF-6's `git mv design.rs design/mod.rs` broke the
+match, so the factory's own frozen primitives (the `rgb()` const fn, the
+shadow helpers, the hover-tint BLACK darkening) stopped being exempt.
+Process miss disclosed: RF-6's gate table ran verify-icons/xtask but
+dropped `--test style_lint` from the app-shell lane, so the breakage never
+ran locally. Notably the kittest job's real payload — all 24 snapshot
+suites — PASSED in CI: the standing "CI-lane gap" is closed green.
+Fix: verification-infra path-follow only, same class as RF-6's
+gate_traceability.py DESIGN-constant follow — `TOKEN_FACTORY_PREFIX =
+"src/design/"` prefix check (separator-normalized) replaces the filename
+suffix check, doc comment updated; zero Rust source bytes changed (the
+flagged lines are byte-identical pre-RF-6 design.rs lines 132/464/652/886).
+Re-verified: style_lint 2 passed / 0 failed; fmt clean; clippy
+`--workspace --all-targets -D warnings` 0; gate_traceability OK (23/20/27);
+gate_no_simulation clean; verify-icons clean; xtask tests 0/0. Lib/core
+suites unaffected (no lib or core bytes changed; CI already ran app-shell
+lib 237/0 + all 24 kittest suites green on a60904c). Next per plan.md
+(opens on the owner's `continue`): Batch RF-7.

@@ -2,7 +2,7 @@
 //!
 //! Two rules, enforced over every `crates/app-shell/src/**/*.rs` file:
 //!
-//! 1. **No raw color construction outside `design.rs`.** Every static UI color
+//! 1. **No raw color construction outside the `design/` module.** Every static UI color
 //!    must be a token (`design::LIGHT`/`DARK` fields) or resolve through the
 //!    DS.TONE match arm. Raw `Color32::from_rgb/from_gray/from_rgba*/from_*_alpha`,
 //!    `Color32::BLACK/WHITE` call sites are forbidden. `Color32::TRANSPARENT` is
@@ -25,8 +25,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const SRC_DIR: &str = "src";
-/// The token factory — the only file allowed to construct colors.
-const TOKEN_FACTORY: &str = "design.rs";
+/// The token factory module — the only code allowed to construct colors.
+/// (RF-6 split `design.rs` into the `design/` module — `mod.rs` plus the
+/// extracted component files — so the exemption follows the directory.)
+const TOKEN_FACTORY_PREFIX: &str = "src/design/";
 
 /// Raw color construction patterns (RS-12 lint rule 1).
 const COLOR_PATTERNS: [&str; 7] = [
@@ -111,8 +113,8 @@ fn test_region_lines(lines: &[&str]) -> Vec<bool> {
 
 /// Rule 1: raw color construction outside the token factory (tests exempt).
 fn lint_colors(_file: &Path, rel: &str, lines: &[&str], violations: &mut Vec<Finding>) {
-    if rel.ends_with(TOKEN_FACTORY) {
-        return; // design.rs IS the token factory
+    if rel.replace('\\', "/").starts_with(TOKEN_FACTORY_PREFIX) {
+        return; // the design/ module IS the token factory
     }
     let skip = test_region_lines(lines);
     for (idx, line) in lines.iter().enumerate() {

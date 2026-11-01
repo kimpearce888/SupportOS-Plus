@@ -5566,3 +5566,19 @@ passed / 4 ignored / 0 failed (--test-threads=1, 351.92s); app-shell lib
 237/0; xtask 11/0; doc-tests 0/0. Diff: 21 files (+9,126/−9,071 net +55 —
 the split is structural, not a deletion wave). Kittest: standing CI-lane
 gap.
+
+RF-6 CI hotfix (2026-11-01): the RF-6 push failed CI (run 41260762329,
+both the workspace-test and kittest jobs) on `style_lint`
+`no_raw_colors_and_no_off_scale_spacing` — the token-factory exemption was
+keyed to the `design.rs` filename and RF-6's directory conversion
+(design.rs → design/mod.rs + controls.rs) broke it, flagging the factory's
+own raw colors in the split files. Fixed as a verification-infra
+path-follow (filename suffix → `src/design/` directory prefix,
+separator-normalized, doc comment updated); zero Rust source bytes
+changed. Disclosed: RF-6's local gate table omitted `--test style_lint`
+(process miss — the gate that would have caught this). Disclosed (good
+news): all 24 kittest snapshot suites PASSED in CI on this run — the
+standing CI-lane gap is closed green. Verified: style_lint 2/0, fmt clean,
+clippy --workspace --all-targets -D warnings 0, gate_traceability OK
+(23/20/27), gate_no_simulation clean, verify-icons clean, xtask tests 0/0.
+Diff: 1 file (crates/app-shell/tests/style_lint.rs, +6/−3).
