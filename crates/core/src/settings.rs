@@ -203,14 +203,6 @@ pub fn has_secret(conn: &Connection, key: &str) -> Result<bool> {
     Ok(exists)
 }
 
-pub fn redacted_secret(conn: &Connection, key: &str) -> Result<String> {
-    if has_secret(conn, key)? {
-        Ok("••••".into())
-    } else {
-        Ok(String::new())
-    }
-}
-
 pub fn delete_secret(conn: &Connection, key: &str) -> Result<bool> {
     let rows = conn.execute("DELETE FROM secrets WHERE key = ?1", params![key])?;
     Ok(rows > 0)
@@ -299,10 +291,6 @@ mod tests {
 
         assert!(get_secret(&conn, "nope").expect("get").is_none());
         assert!(has_secret(&conn, "webhook_secret").expect("has"));
-        assert_eq!(
-            redacted_secret(&conn, "webhook_secret").expect("redacted"),
-            "••••"
-        );
         assert!(delete_secret(&conn, "webhook_secret").expect("delete"));
         assert!(!has_secret(&conn, "webhook_secret").expect("has"));
         assert!(get_secret(&conn, "webhook_secret").expect("get").is_none());

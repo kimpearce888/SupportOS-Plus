@@ -1198,10 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn campaign_events_invalidate_outreach_and_notifications_arrive() {
-        let event = ServerEvent::campaign_updated(1, "queued", 0, 0, 0, 0);
-        assert_eq!(invalidated_pages(&event), vec![PageKey::Outreach]);
-
+    fn notification_events_invalidate_notifications_and_inbox() {
         let event = ServerEvent::notification_received(
             5,
             "sync",

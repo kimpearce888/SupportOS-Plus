@@ -7,23 +7,8 @@ use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 
-pub const COACHING_MAX_DRAFT_CHARS: usize = 20_000;
-pub const COACHING_MAX_DRAFT_BYTES: usize = 60_000;
 pub const COACHING_NOTE: &str = "Advisory only - coaching never blocks or modifies the send. Every finding cites its evidence; heuristics are labeled as heuristics.";
 const PROMPT_VERSION: &str = "agent_coaching_v1";
-
-pub const COACHING_CHECK_KINDS: &[&str] = &[
-    "unanswered_customer_questions",
-    "duplicated_questions",
-    "unsupported_claims",
-    "unsupported_timeframe",
-    "missing_acknowledgment",
-    "excessive_wording",
-    "insufficient_detail",
-    "internal_information_leakage",
-    "wrong_customer_context",
-    "preference_mismatch",
-];
 
 fn check_label(kind: &str) -> &'static str {
     match kind {

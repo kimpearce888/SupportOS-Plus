@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
-use regex::Regex;
 use rusqlite::{Connection, params};
 
 use crate::error::Result;
@@ -24,16 +22,6 @@ impl Mention {
     }
 }
 
-fn user_mention_regex() -> &'static Regex {
-    static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"@(\w{1,64})").expect("static regex compiles"))
-}
-
-fn team_mention_regex() -> &'static Regex {
-    static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"@team:([\w-]{1,64})").expect("static regex compiles"))
-}
-
 fn is_preceded_by_word_char(body: &str, pos: usize) -> bool {
     if pos == 0 {
         return false;
@@ -48,60 +36,6 @@ fn is_preceded_by_word_char(body: &str, pos: usize) -> bool {
         Some(c) => c.is_alphanumeric() || c == '_',
         None => false,
     }
-}
-
-pub fn scan_for_mentions(body: &str) -> Result<Vec<Mention>> {
-    if body.len() > MAX_BODY_BYTES {
-        return Err(crate::error::Error::Other(
-            format!(
-                "mention scan refused: body {} bytes exceeds max {} bytes",
-                body.len(),
-                MAX_BODY_BYTES
-            )
-            .into(),
-        ));
-    }
-
-    if !body.contains('@') {
-        return Ok(Vec::new());
-    }
-
-    let mut mentions: Vec<Mention> = Vec::new();
-    let mut seen_usernames: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut seen_teamnames: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for cap in team_mention_regex().captures_iter(body) {
-        if let Some(m) = cap.get(0) {
-            if is_preceded_by_word_char(body, m.start()) {
-                continue;
-            }
-            if let Some(name_match) = cap.get(1) {
-                let teamname = name_match.as_str().to_string();
-                if seen_teamnames.insert(teamname.clone()) {
-                    mentions.push(Mention::Team { teamname });
-                }
-            }
-        }
-    }
-
-    for cap in user_mention_regex().captures_iter(body) {
-        if let Some(m) = cap.get(0) {
-            if is_preceded_by_word_char(body, m.start()) {
-                continue;
-            }
-            if let Some(name_match) = cap.get(1) {
-                let username = name_match.as_str().to_string();
-                if username == "team" {
-                    continue;
-                }
-                if seen_usernames.insert(username.clone()) {
-                    mentions.push(Mention::User { username });
-                }
-            }
-        }
-    }
-
-    Ok(mentions)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -413,17 +347,5 @@ mod batch25_item62_tests {
             mentions.iter().all(|m| m.user_local_id.is_none()),
             "no USER mention for the bare @team word: {mentions:?}"
         );
-    }
-
-    #[test]
-    fn the_scanner_and_parser_agree_on_plain_bodies() {
-        let dir = directory();
-        let body = "hey @josé and @team:billing — email me at x@jane.doe";
-        let scanned = scan_for_mentions(body).expect("scan");
-        let parsed = parse_mentions(body, &dir).expect("parse");
-        assert_eq!(scanned.len(), 2, "scanner: josé + team:billing");
-        assert_eq!(parsed.len(), 2, "parser resolves both, ignores the email");
-        assert!(parsed.iter().any(|m| m.user_local_id == Some(1)));
-        assert!(parsed.iter().any(|m| m.team_local_id == Some(10)));
     }
 }

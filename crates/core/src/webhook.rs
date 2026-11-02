@@ -5,8 +5,6 @@ use sha1::Sha1;
 
 use crate::error::{Error, Result};
 
-pub const HELPSCOUT_SIGNATURE_HEADER: &str = "X-Helpscout-Signature";
-
 type HmacSha1 = Hmac<Sha1>;
 
 pub const SECRET_CAP: usize = 40;

@@ -17,7 +17,7 @@ sources it claims to trace:
      Sections may also declare the registered harness exception
      ("SPP_SMOKE (harness exception)") — the RS-20h Shell precedent.
 
-Additionally, every `DC: DS-C-xx` doc-tag in `crates/app-shell/src/design.rs`
+Additionally, every `DC: DS-C-xx` doc-tag in `crates/app-shell/src/design/mod.rs`
 must resolve to a DC id (the same alias rule) — code never leads the contract.
 
 Run from the repository root:

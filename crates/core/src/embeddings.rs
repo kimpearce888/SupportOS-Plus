@@ -2,23 +2,6 @@ use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
 
-pub const M008_SQL: &str = r#"
-    CREATE TABLE IF NOT EXISTS ai_runs (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        input_hash      TEXT NOT NULL,
-        prompt_version  TEXT NOT NULL,
-        model           TEXT NOT NULL,
-        response_json   TEXT NOT NULL,
-        created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_ai_runs_lookup
-        ON ai_runs (input_hash, prompt_version, model);
-    CREATE INDEX IF NOT EXISTS idx_ai_runs_created_at
-        ON ai_runs (created_at);
-
-    UPDATE app_state SET schema_version = 8 WHERE id = 1;
-"#;
-
 pub fn apply_m008(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ai_runs (

@@ -815,7 +815,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -4701,7 +4700,6 @@ dependencies = [
  "sha1",
  "sha2 0.11.1",
  "sqlite-vec",
- "subtle",
  "supportos-plus-catalog",
  "thiserror 2.0.21",
  "tokio",
@@ -4718,8 +4716,6 @@ dependencies = [
  "anyhow",
  "clap",
  "reqwest",
- "serde",
- "serde_json",
  "sha2 0.11.1",
  "supportos-plus-core",
 ]

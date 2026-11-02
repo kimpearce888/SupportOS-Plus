@@ -215,56 +215,6 @@ pub fn reject(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> R
     Ok(rows > 0)
 }
 
-pub const MAIN_TRIGGERS: [&str; 4] = [
-    "new_conversation",
-    "customer_reply",
-    "ai_low_confidence",
-    "manual",
-];
-
-pub const MAIN_ACTION_KINDS: [&str; 9] = [
-    "analyze_ticket",
-    "search_similar",
-    "check_known_issues",
-    "create_ai_note",
-    "create_ai_draft",
-    "add_tag",
-    "set_status",
-    "assign",
-    "manual_review_queue",
-];
-
-pub const MAIN_CONDITION_FIELDS: [&str; 8] = [
-    "subject",
-    "body",
-    "tag",
-    "mailbox",
-    "confidence",
-    "known_issue_match",
-    "ai_attribute",
-    "ai_verification",
-];
-
-pub const MAIN_CONDITION_OPERATORS: [&str; 7] =
-    ["contains", "equals", "not_equals", "gt", "gte", "lt", "lte"];
-
-pub const MAIN_AI_ATTRIBUTE_KEYS: [&str; 14] = [
-    "intent",
-    "product",
-    "feature",
-    "issue",
-    "urgency",
-    "frustration_cues",
-    "technical_familiarity",
-    "customer_goal",
-    "question_count",
-    "risk",
-    "known_issue",
-    "issue_cluster",
-    "response_style",
-    "escalation_signal",
-];
-
 #[must_use]
 pub fn risk_tier(kind: &str) -> Option<&'static str> {
     match kind {

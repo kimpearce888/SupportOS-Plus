@@ -22,8 +22,6 @@ pub const OPS_TILE_WHITELIST: [&str; 9] = [
     "ai_escalation",
 ];
 
-pub const OPS_INVALID_MESSAGE: &str = "ops must be one of: unassigned, needs_first_response, customer_waiting, waiting_over_threshold, urgent, high_effort, repeated_issue, known_issue, ai_escalation.";
-
 #[must_use]
 pub fn is_conversation_ops_tile(key: &str) -> bool {
     OPS_TILE_WHITELIST.contains(&key)

@@ -515,45 +515,6 @@ pub async fn check_url_resolved(raw_url: &str) -> SsrfCheckResult {
     }
 }
 
-pub fn validate_ssrf_full(raw_url: &str) -> crate::error::Result<()> {
-    let literal = check_url_literal(raw_url);
-    if !literal.ok {
-        return Err(crate::error::Error::Config(format!(
-            "SSRF guard: {}",
-            literal.reason.unwrap_or_else(|| "refused".into())
-        )));
-    }
-    let host = literal.host.clone().unwrap_or_default();
-    if is_ipv4_literal(&host) || host.contains(':') {
-        return Ok(());
-    }
-    use std::net::ToSocketAddrs;
-    match (host.as_str(), 0u16).to_socket_addrs() {
-        Err(_) => {
-            return Err(crate::error::Error::Config(format!(
-                "SSRF guard: host \"{host}\" does not resolve"
-            )));
-        }
-        Ok(addrs) => {
-            let list: Vec<std::net::SocketAddr> = addrs.collect();
-            if list.is_empty() {
-                return Err(crate::error::Error::Config(format!(
-                    "SSRF guard: host \"{host}\" resolved to no addresses"
-                )));
-            }
-            for a in &list {
-                if let Some(reason) = literal_ip_reason(&a.ip().to_string()) {
-                    return Err(crate::error::Error::Config(format!(
-                        "SSRF guard: host \"{host}\" resolves to {} ({reason})",
-                        a.ip()
-                    )));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 pub async fn validate_ssrf_full_async(raw_url: &str) -> crate::error::Result<()> {
     let result = check_url_resolved(raw_url).await;
     if result.ok {

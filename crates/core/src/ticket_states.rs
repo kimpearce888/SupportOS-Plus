@@ -50,27 +50,6 @@ pub struct StateTransition {
     pub transitioned_at: String,
 }
 
-pub const M004_SQL: &str = r#"
-    CREATE TABLE IF NOT EXISTS ticket_state_transitions (
-        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
-        conversation_remote_id INTEGER NOT NULL,
-        from_state             TEXT,
-        to_state               TEXT NOT NULL,
-        from_priority          TEXT,
-        to_priority            TEXT,
-        actor_type             TEXT NOT NULL,
-        actor_id               INTEGER,
-        transitioned_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_transitions_conv
-        ON ticket_state_transitions (conversation_remote_id, transitioned_at);
-
-    -- Add the local priority column to conversations.
-    -- This is NOT the Help Scout status — it's a SupportOS++-local addition.
-    ALTER TABLE conversations ADD COLUMN supportos_priority TEXT;
-    ALTER TABLE conversations ADD COLUMN supportos_state TEXT;
-"#;
-
 pub fn apply_m004(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ticket_state_transitions (

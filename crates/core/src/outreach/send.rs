@@ -1,7 +1,7 @@
 use super::*;
 fn pick_batch(conn: &Connection, campaign_id: i64) -> Vec<BatchRow> {
     let mut stmt = match conn.prepare(
-        "SELECT id, customer_local_id, customer_remote_id, email, snapshot, attempts
+        "SELECT id, customer_local_id, customer_remote_id, snapshot, attempts
            FROM outreach_recipients
           WHERE campaign_id = ?1 AND state IN ('selected','queued')
           ORDER BY id ASC LIMIT ?2",
@@ -15,9 +15,8 @@ fn pick_batch(conn: &Connection, campaign_id: i64) -> Vec<BatchRow> {
                 recipient_id: r.get(0)?,
                 customer_local_id: r.get(1)?,
                 customer_remote_id: r.get(2)?,
-                email: r.get(3)?,
-                snapshot: r.get(4)?,
-                attempts: r.get(5)?,
+                snapshot: r.get(3)?,
+                attempts: r.get(4)?,
             })
         })
         .ok();

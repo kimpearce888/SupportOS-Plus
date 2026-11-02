@@ -27,6 +27,7 @@ pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
             PageKey::Automation,
             PageKey::Settings,
             PageKey::Connectors,
+            PageKey::Outreach,
         ],
         ServerEvent::ConversationUpdated(_) => vec![
             PageKey::Inbox,
@@ -50,7 +51,6 @@ pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
         ServerEvent::NotificationReceived(_) => {
             vec![PageKey::Inbox, PageKey::Notifications, PageKey::Operations]
         }
-        ServerEvent::CampaignUpdated(_) => vec![PageKey::Outreach],
         ServerEvent::ErrorOccurred(e) => {
             let mut pages = vec![PageKey::Diagnostics, PageKey::SyncHealth];
             match e.service.as_str() {

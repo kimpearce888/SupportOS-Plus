@@ -6,7 +6,6 @@ use crate::interaction_signals::{CurrentInteraction, InteractionSignal, MessageS
 use crate::quality::is_closing_acknowledgment;
 
 mod baseline;
-pub use baseline::AiEnrichment;
 pub use baseline::{
     build_profile, comparison_baseline, compute_changes, compute_outcome, detect_repeat_issue,
     heuristic_recommendation, outcome_summary, rebuild_baseline,
@@ -215,38 +214,6 @@ pub struct RelatedConversation {
 pub struct RepeatIssue {
     pub detected: bool,
     pub related_conversations: Vec<RelatedConversation>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct CardProvenance {
-    pub ai_generated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub generated_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct InteractionCard {
-    pub conversation_local_id: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub customer_local_id: Option<i64>,
-    pub client_kind: String,
-    pub current: CurrentInteraction,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub baseline: Option<BehaviorBaseline>,
-    pub changes: Vec<InteractionChange>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recommendation: Option<SupportApproach>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub friction: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repeat_issue: Option<RepeatIssue>,
-    pub provenance: CardProvenance,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -992,22 +959,19 @@ pub fn get_customer_conversations(
 struct ConversationInfo {
     customer_local_id: Option<i64>,
     subject: Option<String>,
-    #[allow(dead_code)]
-    number: i64,
     status: String,
 }
 
 fn conversation_info(conn: &Connection, conversation_id: i64) -> Option<ConversationInfo> {
     conn.query_row(
-        "SELECT customer_local_id, subject, number, status
+        "SELECT customer_local_id, subject, status
            FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
         params![conversation_id],
         |r| {
             Ok(ConversationInfo {
                 customer_local_id: r.get(0)?,
                 subject: r.get(1)?,
-                number: r.get(2)?,
-                status: r.get(3)?,
+                status: r.get(2)?,
             })
         },
     )

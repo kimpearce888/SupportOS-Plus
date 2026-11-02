@@ -20,8 +20,6 @@ use crate::helpscout::{
 
 mod http;
 
-pub const HS_API_BASE: &str = "https://api.helpscout.net";
-pub const HS_DOCS_API_BASE: &str = "https://docsapi.helpscout.net";
 pub const HS_AUTHORIZE_URL: &str =
     "https://secure.helpscout.net/authentication/authorizeClientApplication";
 

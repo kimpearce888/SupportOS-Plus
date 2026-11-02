@@ -176,14 +176,6 @@ impl HumanEdge {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LinkError {
-    SelfEdge,
-    SourceNotFound,
-    TargetNotFound,
-    Duplicate,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkInput {
     pub source_kind: GraphNodeKind,

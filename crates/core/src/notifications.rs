@@ -4,39 +4,6 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::NotificationType;
 use crate::error::Result;
 
-pub const M005_SQL: &str = r#"
-    CREATE TABLE IF NOT EXISTS notifications (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        type            TEXT NOT NULL,
-        severity        TEXT NOT NULL DEFAULT 'info',
-        title           TEXT NOT NULL DEFAULT '',
-        body            TEXT,
-        target_user_id  INTEGER,
-        actor_user_local_id INTEGER,
-        conversation_id INTEGER,
-        conversation_number INTEGER,
-        customer_local_id   INTEGER,
-        issue_id        INTEGER,
-        campaign_id     INTEGER,
-        job_id          INTEGER,
-        side_thread_id  INTEGER,
-        dedup_key       TEXT NOT NULL DEFAULT '',
-        payload         TEXT,
-        read_at         TEXT,
-        created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedup
-        ON notifications (dedup_key);
-    CREATE INDEX IF NOT EXISTS idx_notifications_target_unread
-        ON notifications (target_user_id, read_at);
-    CREATE INDEX IF NOT EXISTS idx_notifications_type_created_at
-        ON notifications (type, created_at);
-    CREATE INDEX IF NOT EXISTS idx_notifications_created_at
-        ON notifications (created_at);
-
-    UPDATE app_state SET schema_version = 5 WHERE id = 1;
-"#;
-
 pub fn apply_m005(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS notifications (

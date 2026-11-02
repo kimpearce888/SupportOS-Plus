@@ -974,3 +974,269 @@ Batch KB-1 completed and moved to `completed.md` (2026-11-01): both
 known bugs fixed with 5 pinned regression tests; the kittest CI-lane
 gap resolved in-sandbox (175/175, 171/171 goldens). ai records synced;
 single commit; push next.
+
+## Batch AUDIT-1 — post-kb1 full-repo unwired/orphaned/dead-surface audit (completed 2026-11-02)
+
+Scope: whole-repo read-only census @ `0f02e62` (kb1 = origin/main, tree
+clean) for unwired sources, orphaned files, verified-dead pub APIs,
+unused deps/features, placebo settings, dead events, stale doc paths,
+and unreferenced artifacts. Method: 6 parallel scripted scans (entry-
+point reachability walk, pub-item cross-module consumer check, Cargo
+graph probe, settings read/write census, event-bus publish census,
+basename/path resolution over live docs) + 3 manual spot-checks that
+all confirmed the scan output. Read-only by necessity — the audit
+sandbox hit 99% disk (148 MB free; `target/` = 5.1 GB), so zero cargo
+runs backed this batch; every finding is grep/script/census evidence
+plus manual confirmation, and the fix batch (kb2) re-proves each
+deletion against the full gate battery. Environment: the sandbox reset
+again after the kb1 push (repo, credentials, toolchain lost — third
+reset of the program); this record and kb2 are written from a fresh
+clone of origin/main @ `0f02e62` (RF-1 recovery precedent; tree is
+byte-identical to the audited one, so all findings apply as stated).
+
+Findings (11 groups):
+
+**A1-1 — orphaned source files: 0.** 205/205 .rs files reachable from
+the lib/bin entry points; no orphans.
+
+**A1-2 — ~25 verified-dead pub API clusters** (lib-crate `pub` surface
+is invisible to clippy's dead_code lint; deletion is kb2's primary
+scope). Largest: the **saved-views engine cluster** — core/saved_views/
+engine.rs + mod.rs:536-595 (`SavedInboxView`, `CreateViewRequest`,
+`UpdateViewRequest`, `ViewIssue`, `VIEW_CONDITION_KINDS`, `SlaResolver`,
+`CompiledView`, `resolve_date_range` and dependents). The rest:
+`universal_search` (search/mod.rs:615), `rewrite_draft` (ai_pipeline
+:1394), the outreach dead type group (mod.rs:62-164, 949), the
+interaction_profile family (interaction_signals.rs:81, 951-1033),
+`build_report`/`compute_friction` family (reports/mod.rs:106-423,
+1341), `validate_ssrf_full` (security.rs:90, 439-518),
+`InteractionCard`/`CardProvenance`, `AiEnrichment`, `LinkError`,
+`scan_for_mentions`, `redacted_secret`, 5 dead constants, the `Toast`
+struct, 11 dead design tokens (design/mod.rs:187-221), and 8 catalog
+dead re-exports.
+
+**A1-3 — ~80 EXPORTED-UNUSED de-pub candidates.** Internal callers
+only, no cross-module consumers; disposition is de-pub (visibility
+tightening), NOT deletion — deferred to a later visibility pass (kb3
+candidate) to keep kb2's diff reviewable; kb2 takes the deletions and
+deps.
+
+**A1-4 — 2 `allow(dead_code)` stashes:** `ConversationInfo.number`
+(interaction_engine/mod.rs:995), `BatchRow.email` (outreach/mod.rs
+:1377) — fields written by nothing, suppressed by the attribute.
+
+**A1-5 — unused deps/features:** `subtle` (core Cargo.toml:27),
+xtask's `serde`+`serde_json`, workspace-root `anyhow` (root Cargo.toml
+:26), `rusqlite` `blob`+`limits` features, `chrono/serde`. Lockfile
+consequence for kb2 disclosed: pruning updates Cargo.lock only by
+cargo's own resolution (entries removed, no version churn); no
+hand-edit.
+
+**A1-6 — 4 placebo settings switches** (UI renders + persisted, zero
+readers): `automatic_reply_sending`, `fts_version`,
+`demo_mode`/`demo_content_purged`, `display_timezone`. kb2 drops them
+wire-or-drop; persisted-DB-schema is OFF-LIMITS, so the drop shape must
+not alter migration semantics (keys die in code; schema untouched).
+
+**A1-7 — 11 read-never-written knobs** (always-default, no UI):
+`redaction_enabled`, `lmstudio_timeout_ms`, `lmstudio_concurrency`,
+`ai_evaluation_mode`, `ops_waiting_threshold_minutes`,
+`freshness_*_days`, `*_sweep_seconds`, `backup_interval_hours`,
+`retention_days`, `notifications.{type}.enabled`. Several carry
+behavior semantics (`retention_days=0`, `ai_evaluation_mode`) —
+deleting the field is behavior-preserving only because the reader
+always observes the default; each case re-verified in kb2 before
+removal, else deferred.
+
+**A1-8 — 1 dead event:** `CampaignUpdated` (no production publisher;
+queries.rs:53 invalidation arm unreachable) + 3 dead helpers
+(`ServerEvent::channel`, `ServerEvent::payload_json`,
+`EventBus::subscriber_count`).
+
+**A1-9 — 4 stale live-doc paths:** design-contract-v1.md:36,338;
+blind-test-protocol.md:23; gate_traceability.py:20 docstring.
+
+**A1-10 — orphaned artifacts:** manual/finalize_book.py +
+manual/finalize_handover.py (2 orphaned scripts), verify_batch35.py
+(archive gap), and ~48 MB of unreferenced history dirs (qa-audit/,
+repo-audit-2026-10-24/, qa-redesign/) — dated artifacts preserved in
+git history, so HEAD deletion is reversible. docs/audit and mockups are
+live-referenced and stay.
+
+**A1-11 — clean:** 0 TODO/FIXME, 0 asset mismatches, 0 schema drift,
+23/23 routes reachable, CI paths all resolve.
+
+Disposition recorded for kb2 (fix batch): A1-2/A1-4/A1-8 deletions;
+A1-5 pruning; A1-6 wire-or-drop; A1-9 doc path fixes; A1-10 script/dir
+disposition. **A1-2 exception disclosed:** the 3 dead fns in
+response_state_sql.rs (:12, :25, :37) stay — the module is on the
+NO-TOUCH list; owner confirmation required before it is ever touched.
+A1-3 (de-pub sweep) and A1-7 (knob census) are recorded as open items,
+not kb2 scope.
+
+## Batch KB-2 — dead-surface deletion + dep pruning + placebo wire-or-drop (items KB-2-1..KB-2-9) — opened and completed 2026-11-02
+
+Implements AUDIT-1's disposition at `0f02e62`. Compiler + full gate
+battery re-proved every removal; two audit claims were corrected by
+that re-proof (disclosed inline below). A1-3 (de-pub sweep) and A1-7
+(read-never-written knob census) remain open for a later batch.
+
+**KB-2-1 — saved-views engine cluster (A1-2's largest)**: engine.rs
+(742 lines, pure `impl ViewEngine`) deleted; mod.rs dead surface
+deleted — ViewCompileError (+Display/Error impls), DateRangeKind/
+DateRange/DateRangeInput, resolve_date_range (+parse_time_of_day,
+wall_parts, local_instant_ms, days_in_month, rolling, now_ms_epoch),
+activity_field_column, age_metric_sql, VIEW_CONDITION_KINDS, ViewNode,
+ViewDefinition, SavedInboxView, ViewIssue, CreateViewRequest,
+UpdateViewRequest, SqlParams, Fragment, CompiledView, SlaResolver,
+ViewEngine, mod engine, placeholders/text/integer/real helpers, both
+re-exports (is_valid_timezone, escape_like), MAX_TREE_DEPTH — plus
+batch31_tests (its 2 tests exercised only the dead engine). Kept: the
+live trio `iso_utc`/`iso_utc_pub` (operations.rs:412),
+`RESPONSE_STATE_SQL` (7 consumers), `ensure_inbox_views_table`
+(bootstrap.rs + migrations/db_breadth.rs). mod.rs 800 → 51 lines.
+Census note: MAX_TREE_DEPTH/SqlParams ext hits were same-name
+collisions with segment's own items, not consumers.
+
+**KB-2-2 — other verified-dead pub APIs**: `universal_search` +
+cap_query + MAX_SEARCH_QUERY_LENGTH (search — cap_query and the const
+became orphans of the deletion, deleted with it); `rewrite_draft`
+(ai_pipeline; rewrite_instruction/get_draft stay — other callers);
+`validate_ssrf_full` sync twin (security.rs — the async twin stays, 2
+live consumers); `scan_for_mentions` + user/team_mention_regex + the
+scanner/parser agreement test (mentions; is_preceded_by_word_char and
+MAX_BODY_BYTES stay — live via parse_mentions); `redacted_secret` +
+its assertion inside the secrets round-trip test (settings);
+`InteractionCard`/`CardProvenance`/`AiEnrichment` (interaction_engine;
+field types all live elsewhere); `LinkError` (support_graph); reports:
+ReportRow/ReportResult/build_report/metric_info + the 2 tests that
+were their only callers (week_dimension_is_iso…,
+build_report_excludes_soft_deleted…) + `friction_findings` (re-verified
+zero callers during kb2). **AUDIT CORRECTION disclosed**: the audit's
+"build_report/compute_friction family" over-reached —
+compute_friction/FrictionScore/FrictionFactors/HIGH_FRICTION_THRESHOLD
+are LIVE (recompute_recent_friction at reports/mod.rs calls
+compute_friction; app-shell pages/reports.rs:1245 calls
+recompute_recent_friction) and were KEPT; the audit's family-span
+reading (106-423, 1341) was too broad.
+
+**KB-2-3 — outreach dead types + stashes**: SavedSegment, create_segment,
+DEFAULT_MAX_CAMPAIGN_ATTEMPTS, Campaign, CampaignRecipient, CampaignStats,
+campaign_reconcile (+ its batch30_tests module — only consumer),
+count_remaining (orphaned by campaign_reconcile's deletion) deleted.
+Live and kept: delete_segment (app-shell outreach.rs:307 — caught in the
+first cut by the app-shell compile, restored byte-identical,
+disclosed), add_to_dnc/remove_from_dnc/is_on_dnc/list_dnc, the whole
+campaign_*_v2 surface. **AUDIT CORRECTION disclosed**: BatchRow is live
+(constructed by outreach/send.rs::pick_batch — the audit's mod.rs-only
+span missed the submodule); only its `email` field is a write-never-read
+stash — field removed, SELECT and get() indices re-shifted. The other
+stash: ConversationInfo.number (interaction_engine) removed the same way
+(SELECT no longer selects number).
+
+**KB-2-4 — interaction_profile family** (interaction_signals.rs): the
+closed dead island 950-1121 (StoredCurrentSignals, ProfileDimensionValue,
+ProfileDimension, ProfileResponsePreference, InteractionProfile,
+InteractionOverrideRow, get_interaction_override, interaction_profile) +
+INTERACTION_DIMENSIONS — zero external consumers, all references
+intra-island. ClientInteractionProfile (interaction_engine, baseline.rs)
+is a different, LIVE type — untouched.
+
+**KB-2-5 — dead constants + design tokens + catalog re-exports**:
+22 census-verified dead consts deleted: CAPACITY_WINDOW_DAYS;
+COACHING_CHECK_KINDS / COACHING_MAX_DRAFT_BYTES / COACHING_MAX_DRAFT_CHARS;
+FIELD_TYPES / LINK_TARGET_KINDS; FRICTION_KINDS;
+HELPSCOUT_SIGNATURE_HEADER; HS_API_BASE / HS_DOCS_API_BASE;
+MAIN_TRIGGERS / MAIN_ACTION_KINDS / MAIN_CONDITION_FIELDS /
+MAIN_CONDITION_OPERATORS / MAIN_AI_ATTRIBUTE_KEYS;
+MAX_RESULTS_PER_TYPE / SEARCH_SCOPES; OPS_INVALID_MESSAGE; and M003/
+M004/M005/M006/M008/M010_SQL — never-executed historical duplicates of
+the inline registry SQL; the MIGRATIONS registry is untouched, so
+migration SQL semantics (OFF-LIMITS) are intact. NO-TOUCH exceptions
+held: M009_SQL (ai_center.rs) and M014_SQL (migrations/intelligence.rs)
+stay. 9 dead design tokens deleted (SP5, SP6, PAD_CARD_V, PAD_BODY_V,
+PAD_READER_X, PAD_READER_V, radius SM/MD/LG — audit said 11, the kb2
+census verified 9; DS-C-02/DS-A-05 remain cited by live tokens so the
+traceability gate's id set is unchanged — 20 DC tags / 27 ids, same as
+kb1). 9 dead catalog re-exports deleted (ActivityField, ConditionKind,
+DateMode + the whole workspace block: ConnectorAuthMode, ConnectorKind,
+CustomFieldType, IncidentSeverity, IncidentSource, IncidentStatus —
+audit said 8; both counts approximate, the census is the record).
+Disclosed census hole: AI_ATTRIBUTE_SCHEMA_VERSION and GraphHumanRelation
+were initially cut too — the first pass missed braced single-line
+`use crate::catalog::{…}` imports — both restored on the compile error
+and their re-exports stand.
+
+**KB-2-6 — dead event + helpers**: CampaignUpdatedEvent struct,
+ServerEvent::CampaignUpdated variant + its wire_name arm, `channel()`,
+`payload_json()`, campaign_updated() ctor, EventBus::subscriber_count —
+all zero-consumer, deleted. App-shell consumers re-pointed: the
+queries.rs CampaignUpdated arm died with the variant, and SyncCompleted
+now also invalidates PageKey::Outreach — CampaignUpdated was Outreach's
+ONLY invalidating event, so the D19 every-cacheable-page-covered
+invariant fails without a truthful replacement; reply-state (replied_at,
+hs_conversation_number) lands in outreach_recipients via sync, so
+SyncCompleted is the correct carrier (the outreach send batch itself
+emits no event — verified in workers/execute.rs). The D19 test caught
+this on the first app-shell run (241/1: "page Outreach is subscribed to
+no event at all"); after the re-wiring 242/0. Also: the pages/mod.rs
+coverage probe list drops the campaign probe; the app/mod.rs test
+campaign_events_invalidate_outreach_and_notifications_arrive renamed to
+notification_events_invalidate_notifications_and_inbox minus its
+campaign half.
+
+**KB-2-7 — placebo switches + dep pruning**: automatic_reply_sending
+dropped end-to-end (GeneralSettings field, Default, load, save, and the
+"Automatic reply sending" UI checkbox row). The fts_version write-only
+marker block dropped from the FTS rebuild path (runtime
+application_settings write, NOT migrations SQL; zero readers).
+demo_mode/demo_content_purged and display_timezone verified ALREADY
+inert (no UI, no writer, no production reader — only audit.rs's legacy
+key purge, which stays for old DBs, and data_reset test samples):
+recorded, no change. Deps: root `subtle` + core's subtle.workspace line,
+root `anyhow` (xtask keeps its own direct, used, anyhow), xtask
+serde+serde_json, rusqlite `blob`+`limits` features (no rusqlite::Blob/
+limits call sites; ValueRef::Blob is not feature-gated), chrono `serde`
+feature (no serde-serialized chrono types). Cargo.lock diff = exactly
+4 dep-reference removals, zero version churn (subtle remains as a
+transitive of scrypt — only the direct declaration died).
+
+**KB-2-8 — docs + artifacts**: 4 stale paths fixed —
+design-contract-v1.md:36 `design.rs` → `design/mod.rs`; :338
+`app.rs:926-971` → `app/chrome.rs` (NAV_GROUPS's current home);
+blind-test-protocol.md:23 `design.rs` → `design/mod.rs`;
+gate_traceability.py:20 docstring `design.rs` → `design/mod.rs` (the
+gate's DESIGN constant was already correct — docstring-only change).
+manual/finalize_book.py + manual/finalize_handover.py deleted (zero
+references). qa-audit/ + repo-audit-2026-10-24/ + qa-redesign/ deleted
+— 528 tracked files, so the git-history preservation the audit claimed
+holds (they were tracked after all; deletion is reversible via
+history). verify_batch35.py: never existed in git — archive gap
+recorded only.
+
+**KB-2-9 — verification (all green)**: fmt clean (applied + re-checked);
+clippy --workspace --all-targets -D warnings 0; gate_traceability OK —
+23 routes / 20 DC tags / 27 ids / alias True (identical to kb1);
+gate_no_simulation clean; verify-icons clean; style_lint 2/0 (explicit);
+core lib 489 passed / 0 failed / 4 ignored (--test-threads=1, 345.18s —
+495 minus exactly the 6 deleted cluster tests, census reconciles);
+app-shell lib 242/0; xtask 11/0; doc-tests 0/0; kittest 23 suites /
+173 passed / 0 failed — 171 goldens total, census reconciled: exactly
+the 6 settings goldens regenerated (UPDATE_SNAPSHOTS=1; the dropped
+checkbox row changes the settings layout at all 3 widths × both
+themes — the intended UI consequence of the wire-or-drop), the other
+165 zero-drift, all .diff/.old artifacts cleaned. Churn: +139/−2011
+across 50 tracked files (44 modified incl. 6 goldens + 3 deleted
+sources/scripts) + 528 history-dir file deletions + the ai records.
+
+Environment disclosure: 4th sandbox reset (repo, credentials,
+toolchain, and the Mesa install all lost); everything re-provisioned
+from scratch — fresh clone of origin/main @ `0f02e62` (tree
+byte-identical to the audited one), rustup 1.99.1, Mesa lavapipe via
+the kb1 dpkg -x recipe (lvp_icd.json library_path patched to the
+extracted absolute path). Disk hit 100% once during the kittest feature
+build (linker bus-errors, no code meaning) — reclaimed (the duplicate
+`stable` toolchain 593 MB + re-downloadable browser caches) and the
+feature build re-run with CARGO_PROFILE_DEV_DEBUG=0 + `-j 2` to bound
+linking pressure; test semantics and rendering are unaffected by debug
+info, disclosed for fidelity.

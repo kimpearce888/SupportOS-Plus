@@ -191,27 +191,6 @@ pub const KNOWLEDGE_GAP_KINDS: [(&str, &str); 5] = [
     ("new_issue_undocumented", "New issue with no documentation"),
 ];
 
-pub const FRICTION_KINDS: [(&str, &str); 6] = [
-    (
-        "repeated_customer_explanations",
-        "Customer explained the same thing repeatedly",
-    ),
-    (
-        "repeated_agent_questions",
-        "The agent asked the same question repeatedly",
-    ),
-    ("troubleshooting_loop", "Unnecessary troubleshooting loop"),
-    ("repeated_handoffs", "Repeated handoffs between agents"),
-    (
-        "repeated_unresolved_interactions",
-        "Repeated unresolved interactions",
-    ),
-    (
-        "duplicated_information_requests",
-        "Agent re-requested information the customer already provided",
-    ),
-];
-
 struct RepeatedQuestion {
     question: String,
     conversation_ids: Vec<i64>,

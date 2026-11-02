@@ -1,5 +1,5 @@
 use rusqlite::{Connection, params};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::sync::Arc;
 
 use crate::error::Result;
@@ -58,65 +58,9 @@ pub fn apply_m023_to_m025(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SavedSegment {
-    pub id: Option<i64>,
-    pub name: String,
-    pub criteria: String,
-    pub created_at: String,
-}
-
-pub fn create_segment(conn: &Connection, name: &str, criteria: &str) -> Result<i64> {
-    conn.execute(
-        "INSERT INTO saved_segments (name, criteria_json) VALUES (?1, ?2)",
-        params![name, criteria],
-    )?;
-    Ok(conn.last_insert_rowid())
-}
-
 pub fn delete_segment(conn: &Connection, id: i64) -> Result<bool> {
     let rows = conn.execute("DELETE FROM saved_segments WHERE id = ?1", params![id])?;
     Ok(rows > 0)
-}
-
-pub const DEFAULT_MAX_CAMPAIGN_ATTEMPTS: i64 = 3;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Campaign {
-    pub id: Option<i64>,
-    pub name: String,
-    pub segment_id: Option<i64>,
-    pub status: String,
-    pub message_template: Option<String>,
-    pub created_at: String,
-    pub started_at: Option<String>,
-    pub completed_at: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CampaignRecipient {
-    pub id: Option<i64>,
-    pub campaign_id: i64,
-    pub customer_id: i64,
-    pub status: String,
-    pub attempts: i64,
-    pub max_attempts: i64,
-    pub last_error: Option<String>,
-    pub sent_at: Option<String>,
-    pub replied_at: Option<String>,
-}
-
-pub fn create_campaign(
-    conn: &Connection,
-    name: &str,
-    segment_id: Option<i64>,
-    message_template: Option<&str>,
-) -> Result<i64> {
-    conn.execute(
-        "INSERT INTO campaigns (name, segment_id, message_template) VALUES (?1, ?2, ?3)",
-        params![name, segment_id, message_template],
-    )?;
-    Ok(conn.last_insert_rowid())
 }
 
 pub fn add_to_dnc(conn: &Connection, customer_id: i64, reason: &str) -> Result<()> {
@@ -158,16 +102,6 @@ pub fn list_dnc(conn: &Connection) -> Result<Vec<(i64, String, String)>> {
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CampaignStats {
-    pub total_recipients: u32,
-    pub sent: u32,
-    pub failed: u32,
-    pub pending: u32,
-    pub replied: u32,
-    pub reply_rate: f64,
 }
 
 pub const PERSONALIZATION_VARIABLES: [&str; 6] = [
@@ -366,17 +300,6 @@ fn update_status(conn: &Connection, id: i64, status: &str) {
         rusqlite::params![status, id],
     );
 }
-
-fn count_remaining(conn: &Connection, campaign_id: i64) -> i64 {
-    conn.query_row(
-        "SELECT COUNT(*) FROM outreach_recipients
-          WHERE campaign_id = ?1 AND state IN ('selected','queued','sending')",
-        [campaign_id],
-        |r| r.get(0),
-    )
-    .unwrap_or(0)
-}
-
 fn personalization_context(
     conn: &Connection,
     customer_local_id: i64,
@@ -946,57 +869,6 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
     (resolved_sent, returned, still_unknown)
 }
 
-pub fn campaign_reconcile(conn: &Connection, campaign_id: i64) -> serde_json::Value {
-    let (resolved_sent, returned, still_unknown) = reconcile_recipient_states(conn, campaign_id);
-    let remaining = count_remaining(conn, campaign_id);
-    if remaining > 0 {
-        let _ = crate::jobs::enqueue_on(
-            conn,
-            "outreach",
-            "outreach_send_batch",
-            &serde_json::json!({ "campaignId": campaign_id }).to_string(),
-            1,
-            3,
-        );
-    } else {
-        if let Some(c) = get_outreach_campaign(conn, campaign_id).ok().flatten()
-            && c.status != "completed"
-            && c.status != "cancelled"
-            && c.status != "paused"
-        {
-            update_status(conn, campaign_id, "completed");
-            let _ = conn.execute(
-                "UPDATE outreach_campaigns SET completed_at = datetime('now') WHERE id = ?1",
-                [campaign_id],
-            );
-            log_event(
-                conn,
-                campaign_id,
-                None,
-                "campaign_completed",
-                Some(&format!(
-                    "{} sent, {} failed, {} skipped{}",
-                    c.sent,
-                    c.failed,
-                    c.skipped,
-                    if still_unknown > 0 {
-                        format!(
-                            ", {still_unknown} recipients left with unknown delivery outcomes (attempts exhausted)"
-                        )
-                    } else {
-                        String::new()
-                    }
-                )),
-            );
-        }
-    }
-    serde_json::json!({
-        "resolvedSent": resolved_sent,
-        "returnedToQueue": returned,
-        "stillUnknown": still_unknown
-    })
-}
-
 pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
     let tx = conn.unchecked_transaction()?;
     let sent: Vec<(i64, Option<i64>)> = {
@@ -1374,12 +1246,10 @@ pub const SEND_BATCH_SIZE: i64 = 5;
 
 pub const SEND_MAX_ATTEMPTS: i64 = 3;
 
-#[allow(dead_code)]
 struct BatchRow {
     recipient_id: i64,
     customer_local_id: i64,
     customer_remote_id: Option<i64>,
-    email: Option<String>,
     snapshot: String,
     attempts: i64,
 }
@@ -2031,67 +1901,6 @@ mod batch19_tests {
             })
             .expect("pragma");
         assert!(has_column, "the claim/staleness clock column exists");
-    }
-}
-
-#[cfg(test)]
-mod batch30_tests {
-    use super::*;
-    use rusqlite::Connection;
-
-    #[test]
-    fn campaign_reconcile_self_heals_missing_updated_at_column() {
-        let mut conn = Connection::open_in_memory().expect("db");
-        crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        conn.execute_batch("ALTER TABLE outreach_recipients DROP COLUMN updated_at;")
-            .expect("legacy schema");
-
-        conn.execute(
-            "INSERT INTO outreach_campaigns (name, subject, body, status)
-             VALUES ('legacy', 'Hi', 'Body', 'sending')",
-            [],
-        )
-        .expect("campaign");
-        let campaign: i64 = conn.last_insert_rowid();
-        conn.execute(
-            "INSERT INTO customers (remote_id, first_name) VALUES (555, 'C')",
-            [],
-        )
-        .expect("customer");
-        conn.execute(
-            "INSERT INTO outreach_recipients
-                 (campaign_id, customer_local_id, customer_remote_id, email, state, attempts, sent_at)
-             VALUES (?1, 1, 555, 'c@example.com', 'unknown', ?2, datetime('now', '-1 hour'))",
-            rusqlite::params![campaign, MAX_ATTEMPTS],
-        )
-        .expect("recipient");
-
-        let out = campaign_reconcile(&conn, campaign);
-        assert_eq!(out["stillUnknown"], 1);
-
-        let state: String = conn
-            .query_row(
-                "SELECT state FROM outreach_recipients WHERE campaign_id = ?1",
-                [campaign],
-                |r| r.get(0),
-            )
-            .expect("recipient state");
-        assert_eq!(
-            state, "failed",
-            "attempts exhausted + no mirror match = failed, not stuck 'unknown'"
-        );
-        let has_column: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM pragma_table_info('outreach_recipients')
-                  WHERE name = 'updated_at'",
-                [],
-                |r| r.get(0),
-            )
-            .expect("pragma");
-        assert!(
-            has_column,
-            "the reconcile path must self-heal the clock column"
-        );
     }
 }
 

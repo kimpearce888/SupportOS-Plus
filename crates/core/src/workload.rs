@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::interaction_signals::round2;
 
-pub const CAPACITY_WINDOW_DAYS: i64 = 7;
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapacityMetrics {
     pub incoming_7d: u32,

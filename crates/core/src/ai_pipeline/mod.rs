@@ -1391,53 +1391,6 @@ pub async fn rewrite_composer_text(
     }
 }
 
-pub async fn rewrite_draft(
-    conn: &Connection,
-    backend: &AiBackend,
-    draft_id: i64,
-    instruction: &str,
-) -> std::result::Result<String, LmStudioError> {
-    let draft = get_draft(conn, draft_id)
-        .map_err(|e| LmStudioError::new(e.to_string(), true))?
-        .ok_or_else(|| LmStudioError::new("Draft not found", false))?;
-    let instructions = rewrite_instruction(instruction);
-    let (client, model) = match backend {
-        AiBackend::LmStudio { client, model, .. } => (client, model.as_deref()),
-        AiBackend::Disabled => return Err(LmStudioError::new(AI_DISABLED_MESSAGE, false)),
-    };
-    let safe_content = redact_for_model(conn, &draft.content);
-    let messages = vec![
-        ChatMessage {
-            role: "system".into(),
-            content: "You rewrite customer support replies. Preserve all facts exactly; never add new facts. Output only the rewritten reply text.".into(),
-        },
-        ChatMessage {
-            role: "user".into(),
-            content: format!("{instructions}\n\nReply to rewrite:\n\"\"\"\n{}\n\"\"\"", safe_content),
-        },
-    ];
-    let res = client
-        .chat_with_opts(
-            model,
-            &messages,
-            ChatOpts {
-                temperature: Some(0.3),
-                max_tokens: Some(1600),
-                json_mode: false,
-            },
-        )
-        .await
-        .map_err(|e| LmStudioError::new(e.to_string(), true))?;
-    let text = res.content.unwrap_or_default().trim().to_string();
-    if text.is_empty() {
-        return Err(LmStudioError::new(
-            "The local model returned an empty rewrite.",
-            false,
-        ));
-    }
-    Ok(text)
-}
-
 pub async fn extract_memories(
     conn: &Connection,
     backend: &AiBackend,

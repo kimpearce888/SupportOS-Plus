@@ -184,21 +184,12 @@ pub mod scale {
         pub const SP2: f32 = 8.0;
         pub const SP3: f32 = 12.0;
         pub const SP4: f32 = 16.0;
-        pub const SP5: f32 = 20.0;
-        pub const SP6: f32 = 24.0;
         pub const SP7: f32 = 32.0;
         pub const CLUSTER: f32 = 6.0;
-        /// Card header vertical pad (DC §3 DS-C-02, `11px 14px`).
-        pub const PAD_CARD_V: f32 = 11.0;
         /// Card horizontal pad (DC §3 DS-C-02).
         pub const PAD_CARD: f32 = 14.0;
-        /// Card body vertical pad (DC §3 DS-C-02, `12px 14px`).
-        pub const PAD_BODY_V: f32 = 12.0;
         /// Toolbar/table-cell horizontal pad (DC §3 DS-C-05/10, `8px 12px`).
         pub const PAD_TOOL: f32 = 10.0;
-        /// Reader pane horizontal pad (DC §4 DS-A-05, `18px 22px`).
-        pub const PAD_READER_X: f32 = 22.0;
-        pub const PAD_READER_V: f32 = 18.0;
     }
     pub mod text {
         pub const META: f32 = 11.0;
@@ -215,9 +206,6 @@ pub mod scale {
         pub const TITLE: f32 = 22.0;
     }
     pub mod radius {
-        pub const SM: f32 = 6.0;
-        pub const MD: f32 = 8.0;
-        pub const LG: f32 = 10.0;
         pub const XL: f32 = 12.0;
     }
 }

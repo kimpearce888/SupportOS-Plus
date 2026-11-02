@@ -20,7 +20,7 @@ The human test below exercises a guarantee the code already enforces structurall
    set (`design::cop_suggest`, `cop_chat`, `cop_similar`) or the `ai` role arm of
    `design::message_card_with`; the AI badge (`badge` with the `ai` tone) is
    hard-wired to `--ds-ai*`. There is no free-form card an AI row could take
-   (`crates/app-shell/src/design.rs`, R2c widget set, RS-15).
+   (`crates/app-shell/src/design/mod.rs`, R2c widget set, RS-15).
 2. **Single tone map** — §5 DS.TONE is the only status→color site (`design::tone`
    + `tone_colors`); the `ai` tone resolves to violet in both themes. The style
    lint (`crates/app-shell/tests/style_lint.rs`, CI) bans raw color sites, so no

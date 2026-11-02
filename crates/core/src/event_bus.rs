@@ -29,11 +29,6 @@ impl EventBus {
     pub fn subscribe(&self) -> broadcast::Receiver<ServerEvent> {
         self.tx.subscribe()
     }
-
-    #[must_use]
-    pub fn subscriber_count(&self) -> usize {
-        self.tx.receiver_count()
-    }
 }
 
 impl Default for EventBus {

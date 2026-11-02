@@ -6,18 +6,6 @@ use crate::migrations::add_column_if_missing;
 
 pub const MAX_SEARCH_QUERY_LENGTH: usize = 500;
 
-pub const MAX_RESULTS_PER_TYPE: u32 = 50;
-
-pub const SEARCH_SCOPES: &[&str] = &[
-    "all",
-    "tickets",
-    "customers",
-    "knowledge",
-    "issues",
-    "saved_replies",
-    "ai",
-];
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
     pub scope: String,
@@ -797,12 +785,6 @@ fn rebuild_indexes_tx(conn: &Connection) -> Result<usize> {
         rebuild_custom_objects_fts(conn)?;
     }
 
-    if table_exists(conn, "application_settings")? {
-        conn.execute(
-            "INSERT OR REPLACE INTO application_settings (key, value) VALUES ('fts_version', '3')",
-            [],
-        )?;
-    }
     Ok(conv_count)
 }
 

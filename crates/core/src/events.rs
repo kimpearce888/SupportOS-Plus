@@ -58,18 +58,6 @@ pub struct ConversationUpdatedEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct CampaignUpdatedEvent {
-    pub campaign_id: i64,
-    pub status: String,
-    pub sent: u32,
-    pub failed: u32,
-    pub unknown: u32,
-    pub remaining: u32,
-    pub at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct NotificationReceivedEvent {
     pub id: i64,
     #[serde(rename = "type")]
@@ -123,7 +111,6 @@ pub enum ServerEvent {
     SyncCompleted(SyncCompletedEvent),
     SyncProgress(SyncProgressEvent),
     ConversationUpdated(ConversationUpdatedEvent),
-    CampaignUpdated(CampaignUpdatedEvent),
     NotificationReceived(NotificationReceivedEvent),
     ErrorOccurred(ErrorOccurredEvent),
     OutboundJobFinished(OutboundJobFinishedEvent),
@@ -137,43 +124,9 @@ impl ServerEvent {
             Self::SyncCompleted { .. } => "sync",
             Self::SyncProgress { .. } => "sync",
             Self::ConversationUpdated { .. } => "conversation",
-            Self::CampaignUpdated { .. } => "campaign",
             Self::NotificationReceived { .. } => "notification",
             Self::ErrorOccurred { .. } => "error",
             Self::OutboundJobFinished { .. } => "outbound",
-        }
-    }
-
-    #[must_use]
-    pub fn channel(&self) -> &'static str {
-        match self {
-            Self::RatingReceived { .. } => "spp://rating/arrived",
-            Self::SyncCompleted { .. } | Self::SyncProgress { .. } => "spp://sync/updated",
-            Self::ConversationUpdated { .. } => "spp://sync/updated",
-            Self::CampaignUpdated { .. } => "spp://campaign/updated",
-            Self::NotificationReceived { .. } => "spp://notification/received",
-            Self::ErrorOccurred { .. } => "spp://error/occurred",
-            Self::OutboundJobFinished { .. } => "spp://outbound/finished",
-        }
-    }
-
-    #[must_use]
-    pub fn payload_json(&self) -> String {
-        match self {
-            Self::RatingReceived(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
-            Self::SyncCompleted(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
-            Self::ConversationUpdated(e) => {
-                serde_json::to_string(e).unwrap_or_else(|_| "{}".into())
-            }
-            Self::CampaignUpdated(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
-            Self::SyncProgress(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
-            Self::OutboundJobFinished(e) => {
-                serde_json::to_string(e).unwrap_or_else(|_| "{}".into())
-            }
-            Self::NotificationReceived(e) => {
-                serde_json::to_string(e).unwrap_or_else(|_| "{}".into())
-            }
-            Self::ErrorOccurred(e) => serde_json::to_string(e).unwrap_or_else(|_| "{}".into()),
         }
     }
 
@@ -264,26 +217,6 @@ impl ServerEvent {
             customer_id,
             customer_name,
             comments,
-            at: Self::now_iso(),
-        })
-    }
-
-    #[must_use]
-    pub fn campaign_updated(
-        campaign_id: i64,
-        status: &str,
-        sent: u32,
-        failed: u32,
-        unknown: u32,
-        remaining: u32,
-    ) -> Self {
-        Self::CampaignUpdated(CampaignUpdatedEvent {
-            campaign_id,
-            status: status.to_string(),
-            sent,
-            failed,
-            unknown,
-            remaining,
             at: Self::now_iso(),
         })
     }

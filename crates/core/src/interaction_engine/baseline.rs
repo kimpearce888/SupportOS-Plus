@@ -721,13 +721,6 @@ fn ensure_history_backfill(conn: &Connection, customer_id: Option<i64>) -> Resul
     Ok(())
 }
 
-pub type AiEnrichment<'a> = (
-    &'a [InteractionSignal],
-    Option<&'a SupportApproach>,
-    Option<&'a str>,
-    Option<&'a str>,
-);
-
 fn build_timeline(conv_rows: &[CustomerConversation]) -> Vec<TimelineEntry> {
     let mut sorted: Vec<&CustomerConversation> = conv_rows.iter().collect();
     sorted.sort_by(|a, b| a.remote_created_at.cmp(&b.remote_created_at));

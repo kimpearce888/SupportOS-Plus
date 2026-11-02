@@ -372,7 +372,6 @@ mod tests {
             ServerEvent::notification_received(
                 1, "mention", "info", "probe", None, None, None, None, 0,
             ),
-            ServerEvent::campaign_updated(1, "sent", 0, 0, 0, 0),
             ServerEvent::error_occurred("error", "probe", "sync", None),
             ServerEvent::error_occurred("warn", "probe", "docs", None),
         ];

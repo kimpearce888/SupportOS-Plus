@@ -50,7 +50,6 @@ pub struct GeneralSettings {
     pub automation_enabled: bool,
     pub automation_write_actions_enabled: bool,
     pub attachment_auto_download: bool,
-    pub automatic_reply_sending: bool,
     pub reply_status_after: String,
     pub log_level: String,
     pub agent_language: String,
@@ -68,7 +67,6 @@ impl Default for GeneralSettings {
             automation_enabled: false,
             automation_write_actions_enabled: false,
             attachment_auto_download: true,
-            automatic_reply_sending: false,
             reply_status_after: "pending".into(),
             log_level: "info".into(),
             agent_language: "en".into(),
@@ -131,12 +129,6 @@ impl GeneralSettings {
                 defaults.attachment_auto_download,
             )
             .unwrap_or(defaults.attachment_auto_download),
-            automatic_reply_sending: spp_core::settings::get_bool(
-                conn,
-                "automatic_reply_sending",
-                defaults.automatic_reply_sending,
-            )
-            .unwrap_or(defaults.automatic_reply_sending),
             reply_status_after: spp_core::settings::get_string(conn, "reply_status_after")
                 .ok()
                 .flatten()
@@ -182,11 +174,6 @@ impl GeneralSettings {
             conn,
             "attachment_auto_download",
             self.attachment_auto_download,
-        )?;
-        spp_core::settings::set_bool(
-            conn,
-            "automatic_reply_sending",
-            self.automatic_reply_sending,
         )?;
         spp_core::settings::set_string(conn, "reply_status_after", &self.reply_status_after)?;
         spp_core::settings::set_string(conn, "log_level", &self.log_level)?;
@@ -1126,10 +1113,6 @@ impl SettingsPage {
                             (
                                 "Automatic draft replies",
                                 &mut general.automatic_draft_enabled,
-                            ),
-                            (
-                                "Automatic reply sending",
-                                &mut general.automatic_reply_sending,
                             ),
                             ("Automation rules", &mut general.automation_enabled),
                             (

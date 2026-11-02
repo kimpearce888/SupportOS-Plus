@@ -3,17 +3,6 @@ use serde_json::{Map, Value, json};
 
 use crate::error::{Error, Result};
 
-pub const LINK_TARGET_KINDS: [&str; 6] = [
-    "customer",
-    "organization",
-    "conversation",
-    "known_issue",
-    "incident",
-    "campaign",
-];
-
-pub const FIELD_TYPES: [&str; 6] = ["text", "long_text", "number", "date", "boolean", "select"];
-
 fn valid_field_key(key: &str) -> bool {
     let mut chars = key.chars();
     match chars.next() {

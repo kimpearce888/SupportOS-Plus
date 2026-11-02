@@ -6138,3 +6138,73 @@ alias True); gate_no_simulation clean; verify-icons clean; style_lint
 doc-tests 0/0; kittest 175/175 with 171/171 goldens (in-sandbox AND CI
 lane). Churn: +339/−38 across 4 source files (4 fixes + 5 regression
 tests) + the ai records.
+
+## Batch AUDIT-1 — full-repo dead-surface audit — completed 2026-11-02
+
+Read-only whole-repo audit @ `0f02e62` (kb1): 205/205 .rs reachable (0
+orphaned files); ~25 verified-dead pub API clusters inventoried with
+locations (largest: the saved-views engine cluster, core/saved_views/
+engine.rs + mod.rs:536-595); ~80 EXPORTED-UNUSED de-pub candidates
+(disposition: de-pub later, not delete); 2 allow(dead_code) stashes;
+5 unused deps/features (subtle; xtask serde+serde_json; root anyhow;
+rusqlite blob+limits; chrono/serde); 4 placebo settings switches
+(UI+persisted, zero readers); 11 read-never-written knobs; 1 dead event
+(CampaignUpdated + 3 dead helpers); 4 stale live-doc paths; 2 orphaned
+scripts + verify_batch35.py archive gap + ~48 MB unreferenced history
+dirs (qa-audit/, repo-audit-2026-10-24/, qa-redesign/); clean on
+TODO/FIXME, assets, schema drift, routes, CI paths. Method: 6 parallel
+scripted scans + 3 manual confirmations; zero cargo runs (audit sandbox
+at 99% disk — disclosed; kb2 re-proves every removal against the full
+gate battery). Environment: sandbox reset after the kb1 push — repo +
+credentials + toolchain re-provisioned; records written from a fresh
+clone of origin/main @ `0f02e62` (tree byte-identical to the audited
+one). Fix disposition: kb2 takes the deletions (A1-2 minus the
+response_state_sql.rs NO-TOUCH exception, A1-4, A1-8), dep pruning
+(A1-5), placebo wire-or-drop (A1-6), doc path fixes (A1-9), script/dir
+disposition (A1-10); A1-3 de-pub sweep + A1-7 knob census recorded as
+open items.
+
+## Batch KB-2 — dead-surface deletion + dep pruning + placebo wire-or-drop — completed 2026-11-02
+
+Implements AUDIT-1's disposition; every removal re-proved by the
+compiler + full gate battery; two audit over-reaches corrected during
+the re-proof (compute_friction family LIVE via recompute_recent_friction
+→ kept; BatchRow live via outreach/send.rs → only its `email` stash
+field removed; delete_segment live → restored on the compile catch).
+
+Deleted: the saved-views engine cluster (engine.rs + mod.rs dead
+surface, mod.rs 800→51, live trio kept); universal_search/rewrite_draft/
+validate_ssrf_full-sync/scan_for_mentions/redacted_secret/
+InteractionCard/CardProvenance/AiEnrichment/LinkError; reports
+ReportRow/ReportResult/build_report/metric_info/friction_findings + 2
+tests; outreach SavedSegment/create_segment/Campaign/CampaignRecipient/
+CampaignStats/campaign_reconcile/count_remaining + batch30_tests;
+interaction_signals' interaction_profile island + INTERACTION_DIMENSIONS;
+22 dead consts (incl. 6 never-executed M0XX_SQL duplicates — registry
+untouched; M009/M014 NO-TOUCH exceptions held); 9 dead design tokens
+(gate output unchanged: 20 DC tags / 27 ids); 9 dead catalog re-exports
+(2 initially mis-cut via a braced-import census hole — restored on
+compile, disclosed); the CampaignUpdated event family + channel/
+payload_json/subscriber_count (SyncCompleted now also invalidates
+Outreach — the D19 test caught the uncovered page at 241/1, re-wiring
+→ 242/0); the automatic_reply_sending placebo end-to-end (UI row
+dropped) + the write-only fts_version marker; 2 orphan scripts; the 3
+unreferenced history dirs (528 tracked files, reversible via git
+history); 4 stale doc paths re-pointed (incl. the gate docstring).
+demo_mode/display_timezone verified already-inert — recorded, no
+change. Deps pruned: subtle, root anyhow, xtask serde+serde_json,
+rusqlite blob+limits, chrono/serde; Cargo.lock = 4 dep-reference
+removals, zero version churn.
+
+Verification, all green: fmt clean; clippy --workspace --all-targets
+-D warnings 0; gate_traceability OK (23 routes / 20 DC tags / 27 ids,
+identical to kb1); gate_no_simulation clean; verify-icons clean;
+style_lint 2/0; core lib 489/0/4ig (--test-threads=1, 345.18s — 495
+minus exactly the 6 deleted cluster tests); app-shell lib 242/0; xtask
+11/0; doc-tests 0/0; kittest 23 suites / 173 passed / 0 failed —
+exactly the 6 settings goldens regenerated for the intended checkbox
+drop, the other 165 zero-drift. Churn: +139/−2011 across 50 tracked
+files + 528 history-dir deletions + ai records. Environment: 4th
+sandbox reset — repo/toolchain/Mesa re-provisioned from a fresh clone
+@ `0f02e62`; one disk-full event during the kittest build (bus-error
+links) reclaimed and rebuilt with DEBUG=0 + -j 2 (disclosed).

@@ -15,38 +15,6 @@ pub struct ActivityEvent {
     pub dedup_key: String,
 }
 
-pub const M003_SQL: &str = r#"
-    CREATE TABLE IF NOT EXISTS activity_events (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        conversation_id INTEGER NOT NULL,
-        event_type      TEXT NOT NULL,
-        actor_type      TEXT NOT NULL,
-        actor_id        INTEGER,
-        occurred_at     TEXT NOT NULL,
-        dedup_key        TEXT NOT NULL UNIQUE,
-        created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_activity_events_conv
-        ON activity_events (conversation_id, occurred_at);
-    CREATE INDEX IF NOT EXISTS idx_activity_events_type
-        ON activity_events (event_type, occurred_at);
-
-    -- Derived columns on conversations (updated by the activity engine).
-    -- These are the "derived timestamps" the spec requires:
-    -- first_customer_message_at, first_response_at, last_customer_reply_at,
-    -- last_human_agent_response_at, last_activity_at, closed_at,
-    -- customer_waiting_since, response_state.
-    -- All added as nullable columns so existing rows don't break.
-    ALTER TABLE conversations ADD COLUMN first_customer_message_at TEXT;
-    ALTER TABLE conversations ADD COLUMN first_response_at TEXT;
-    ALTER TABLE conversations ADD COLUMN last_customer_reply_at TEXT;
-    ALTER TABLE conversations ADD COLUMN last_human_agent_response_at TEXT;
-    ALTER TABLE conversations ADD COLUMN customer_waiting_since TEXT;
-    ALTER TABLE conversations ADD COLUMN response_state TEXT NOT NULL DEFAULT 'needs_first_response';
-
-    UPDATE app_state SET schema_version = 3 WHERE id = 1;
-"#;
-
 pub fn apply_m003(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS activity_events (

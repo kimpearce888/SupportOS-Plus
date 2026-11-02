@@ -33,7 +33,7 @@
 ## 2. Token sheet (DS-T) — `--ds-*` values, both themes
 
 Source: `mockups/design-lab/ds.css` (lines 33–66). Ported 1:1 into
-`crates/app-shell/src/design.rs` LIGHT/DARK tables (RS-12).
+`crates/app-shell/src/design/mod.rs` LIGHT/DARK tables (RS-12).
 
 ### 2.1 Surfaces
 
@@ -335,7 +335,7 @@ site in the crate.
 ## 6. Layout & chrome (shell)
 
 Sidebar nav (surface-2, 218–260px): groups verbatim from NAV_GROUPS
-(`crates/app-shell/src/app.rs:926-971`); active item = neutral fill + 500.
+(`crates/app-shell/src/app/chrome.rs`, NAV_GROUPS); active item = neutral fill + 500.
 Global search (⌘K) stays in the sidebar. Theme switch: light/dark from the
 settings table (unchanged). Notes drawer is a **lab-only** artifact — not part
 of the app shell. Shortcuts (`j`/`k` list nav, `/` filter focus, Ctrl+Enter send,
