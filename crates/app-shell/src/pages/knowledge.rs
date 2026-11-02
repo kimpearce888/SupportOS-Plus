@@ -310,6 +310,7 @@ impl ImportPanel {
 pub struct KnowledgePage {
     tab: Tab,
     documents: Vec<Value>,
+    loaded: bool,
     sources: Vec<Value>,
     freshness: Option<Value>,
     stats: DocsStats,
@@ -340,6 +341,7 @@ impl KnowledgePage {
         Self {
             tab: Tab::Documents,
             documents: Vec::new(),
+            loaded: false,
             sources: Vec::new(),
             freshness: None,
             stats: DocsStats::default(),
@@ -418,6 +420,7 @@ impl KnowledgePage {
     }
 
     pub fn invalidate(&mut self) {
+        self.loaded = false;
         self.documents.clear();
         self.sources.clear();
         self.freshness = None;
@@ -444,6 +447,7 @@ impl KnowledgePage {
         self.stats = stats;
         self.collections = collections;
         self.articles = articles;
+        self.loaded = true;
     }
 
     fn reload_docs(&mut self, db: &DbHandle) {
@@ -682,10 +686,14 @@ impl KnowledgePage {
         }
     }
 
-    fn documents_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
-        if self.documents.is_empty() {
+    fn ensure_loaded(&mut self, db: &DbHandle) {
+        if !self.loaded {
             self.reload_all(db);
         }
+    }
+
+    fn documents_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
+        self.ensure_loaded(db);
         design::hint_text(
             ui,
             "Local knowledge documents used by search and AI answers",
@@ -760,9 +768,7 @@ impl KnowledgePage {
     }
 
     fn sources_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        if self.sources.is_empty() {
-            self.reload_all(db);
-        }
+        self.ensure_loaded(db);
         if self.sources.is_empty() {
             design::empty_state(
                 ui,
@@ -1704,5 +1710,48 @@ mod tests {
 
         page.import_file_action(&db, "../escape.md");
         assert!(page.error.is_some_and(|e| e.contains("knowledge-import")));
+    }
+
+    #[test]
+    fn ensure_loaded_latches_and_invalidate_refetches() {
+        let db = empty_db();
+        let mut page = KnowledgePage::new();
+        assert!(!page.loaded);
+        page.ensure_loaded(&db);
+        assert!(page.loaded);
+        assert!(page.documents.is_empty(), "no documents seeded yet");
+        assert!(page.sources.is_empty(), "a legitimately empty mirror");
+
+        page.error = Some("sentinel".into());
+        page.ensure_loaded(&db);
+        assert_eq!(
+            page.error.as_deref(),
+            Some("sentinel"),
+            "latch holds: no reload ran (pre-fix documents_ui and sources_ui each re-ran reload_all every frame on an empty mirror)"
+        );
+
+        db.with_write(|conn| {
+            let source = spp_core::knowledge_store::get_or_create_source(
+                conn,
+                "Latch source",
+                "manual",
+                "internal_only",
+            )
+            .expect("source");
+            spp_core::knowledge_store::upsert_document(
+                conn,
+                source,
+                "Latch doc",
+                "Latch body",
+                "internal_only",
+                "markdown",
+            )
+            .expect("document");
+        });
+        page.invalidate();
+        assert!(!page.loaded);
+        page.ensure_loaded(&db);
+        assert!(page.loaded);
+        assert_eq!(page.documents.len(), 1, "invalidate refetches");
     }
 }

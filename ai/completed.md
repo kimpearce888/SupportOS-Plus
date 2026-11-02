@@ -6075,3 +6075,66 @@ RF-11 and FINISH (local tree and stored credentials lost); this record
 was written from a fresh clone of origin/main (recovery precedent,
 RF-1). FINISH changed zero code bytes: two ai records, the
 pre-refactor tag, this commit.
+
+## Batch KB-1 — known-bugs fix wave + kittest in-sandbox resolution — completed 2026-11-01
+
+Owner-directed post-FINISH batch (the FINISH program's LIST-ONLY scope
+decision on these two bugs superseded by the owner's explicit "fix this"
++ "resolve this"). The two known bugs are FIXED on main; the kittest
+CI-lane gap is RESOLVED in-sandbox.
+
+KB-1-1 (custom_objects) — pages/custom_objects.rs: batch-34 latch pattern
+applied to both buggy gates: `types_loaded` (reload_types sets it,
+invalidate clears it) and selection-scoped `objects_loaded` (reload_objects
+sets it; cleared on invalidate, select_type, delete_type's selection-clear,
+and reload_types' selection-vanished branch — selection changes still
+refetch). ensure_loaded fires once per latch; a genuinely empty mirror no
+longer re-runs reload_types/reload_objects every rendered frame.
+
+KB-1-2 (inbox) — pages/inbox.rs: `refs_loaded` + `list_loaded` latches
+(set in reload_refs/reload_list; reload_list's latch sits before the
+refresh_view_counts tail so the page-clamp recursive path also lands on
+it); invalidate clears both; the inline ui() gates extracted into
+`ensure_loaded` (the batch-34 shape); the filters-prerequisite gate inside
+reload_list now keys on the latch, and the transient detail gate is
+unchanged. An empty mirror no longer re-runs reload_refs + reload_list
+per frame.
+
+KB-1-3 (knowledge) — pages/knowledge.rs: one `loaded` latch over
+reload_all, extracted into `ensure_loaded`, gating both documents_ui and
+sources_ui (pre-fix each tab fn re-ran the full reload_all every frame on
+an empty mirror — twice per frame across the two). The empty-state
+rendering after the gate is unchanged.
+
+KB-1-4 (Settings LM Studio dirty-clobber) — pages/settings.rs: the
+`lmstudio_base_url.is_empty()` gate replaced with General's
+`general_persisted` dirty-guard shape (the in-file counterexample): a
+`lmstudio_persisted: (String, String, String)` snapshot; reload() assigns
+to the form only when the form matches the snapshot; save_lmstudio
+re-bases the snapshot on the saved trimmed values. Clearing the URL field
+— or a persisted-empty config — no longer re-pulls stored values over
+unsaved edits; external changes still propagate while the form is clean.
+
+KB-1-5 (kittest in-sandbox) — the RF-1-9 standing gap RESOLVED: sandbox
+capacity re-verified (7.7 GB free / 2.8 GB RAM available — the ~600 MB /
+3 GB constraint no longer binds); Mesa lavapipe installed without root
+(apt-get download + dpkg -x of mesa-vulkan-drivers 25.0.7 + libllvm19
+into /home/z/mesa-lvp; VK_DRIVER_FILES/VK_ICD_FILENAMES at the extracted
+lvp_icd.json, LD_LIBRARY_PATH at the extracted libs, WGPU_BACKEND=vulkan
+— ci.yml's own env block ci.yml:198-220); the CI command
+`cargo test --locked -p supportos-plus-app-shell --features kittest-ui`
+run per suite. **23 suites / 173 tests passed / 0 failed; all 171
+committed goldens diff-locked with zero drift; snapshots/ = exactly 171
+.png baselines (census reconciled: 24 files = 23 suites + style_lint,
+175 tests = 173 + 2, 171 goldens).** style_lint under the same feature
+build: 2/0. First in-sandbox kittest run in the program's history.
+
+KB-1-6 (closing gate) — all green: fmt clean (applied + re-checked);
+check --workspace --all-targets clean; clippy --workspace --all-targets
+-D warnings 0; gate_traceability OK (23 routes / 20 DC tags / 27 ids,
+alias True); gate_no_simulation clean; verify-icons clean; style_lint
+2/0; core lib 495/0/4ig (--test-threads=1, 348.55s); app-shell lib
+242/0 (235.32s — 237 baseline + exactly the 5 new tests); xtask 11/0;
+doc-tests 0/0; kittest 175/175 with 171/171 goldens (in-sandbox AND CI
+lane). Churn: +339/−38 across 4 source files (4 fixes + 5 regression
+tests) + the ai records.

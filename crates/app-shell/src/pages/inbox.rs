@@ -228,6 +228,7 @@ pub struct InboxPage {
     search_edit: String,
     number_edit: String,
     list: Vec<ConversationListItem>,
+    list_loaded: bool,
     total: u32,
     page: u32,
     selected: Option<i64>,
@@ -241,6 +242,7 @@ pub struct InboxPage {
     composer_focused: bool,
     users: Vec<(i64, String)>,
     mailboxes: Vec<(i64, String)>,
+    refs_loaded: bool,
     tags: Vec<String>,
     directory: Directory,
     status: Option<String>,
@@ -313,6 +315,7 @@ impl InboxPage {
             search_edit: String::new(),
             number_edit: String::new(),
             list: Vec::new(),
+            list_loaded: false,
             total: 0,
             page: 0,
             selected: None,
@@ -326,6 +329,7 @@ impl InboxPage {
             composer_focused: false,
             users: Vec::new(),
             mailboxes: Vec::new(),
+            refs_loaded: false,
             tags: Vec::new(),
             directory: Directory::default(),
             status: None,
@@ -369,11 +373,25 @@ impl InboxPage {
 
     pub fn invalidate(&mut self) {
         self.list.clear();
+        self.list_loaded = false;
         self.detail = None;
         self.users.clear();
         self.mailboxes.clear();
+        self.refs_loaded = false;
         self.tags.clear();
         self.directory = Directory::default();
+    }
+
+    fn ensure_loaded(&mut self, db: &DbHandle) {
+        if !self.refs_loaded {
+            self.reload_refs(db);
+        }
+        if !self.list_loaded {
+            self.reload_list(db);
+        }
+        if self.selected.is_some() && self.detail.is_none() {
+            self.reload_detail(db);
+        }
     }
 
     fn reload_refs(&mut self, db: &DbHandle) {
@@ -392,13 +410,14 @@ impl InboxPage {
         });
         self.users = users;
         self.mailboxes = mailboxes;
+        self.refs_loaded = true;
         self.tags = tags;
         self.directory = directory;
         self.saved_replies = saved_replies;
     }
 
     fn reload_list(&mut self, db: &DbHandle) {
-        if self.mailboxes.is_empty() {
+        if !self.refs_loaded {
             self.reload_refs(db);
         }
         let result = db.with_read(|conn| {
@@ -417,6 +436,7 @@ impl InboxPage {
             }
             Err(e) => self.status = Some(e.to_string()),
         }
+        self.list_loaded = true;
         self.refresh_view_counts(db);
     }
 
@@ -844,15 +864,7 @@ impl InboxPage {
         bus: &EventBus,
         engine: Option<&std::sync::Arc<SyncEngine>>,
     ) {
-        if self.mailboxes.is_empty() {
-            self.reload_refs(db);
-        }
-        if self.list.is_empty() {
-            self.reload_list(db);
-        }
-        if self.selected.is_some() && self.detail.is_none() {
-            self.reload_detail(db);
-        }
+        self.ensure_loaded(db);
         self.poll_pending_ai(db);
         self.poll_assistant(db);
 
@@ -3362,6 +3374,43 @@ mod tests {
             parsed["statusAfter"], "open",
             "the legacy phantom status maps onto the real one"
         );
+    }
+
+    #[test]
+    fn ensure_loaded_latches_and_invalidate_refetches() {
+        let db = crate::testsupport::empty_db();
+        let mut page = InboxPage::new();
+        assert!(!page.refs_loaded);
+        assert!(!page.list_loaded);
+        page.ensure_loaded(&db);
+
+        assert!(page.refs_loaded);
+        assert!(page.list_loaded);
+        assert!(page.mailboxes.is_empty(), "no mailboxes seeded yet");
+        assert!(page.list.is_empty(), "a legitimately empty mirror");
+
+        page.status = Some("sentinel".into());
+        page.ensure_loaded(&db);
+        assert_eq!(
+            page.status.as_deref(),
+            Some("sentinel"),
+            "both gates latch: no reload ran (pre-fix reload_refs + reload_list re-ran every frame on an empty mirror)"
+        );
+
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO mailboxes (remote_id, name, email) VALUES (778, 'Latched', 'latched@example.test')",
+                [],
+            )
+        })
+        .expect("mailbox");
+        page.invalidate();
+        assert!(!page.refs_loaded);
+        assert!(!page.list_loaded);
+        page.ensure_loaded(&db);
+        assert!(page.refs_loaded);
+        assert!(page.list_loaded);
+        assert_eq!(page.mailboxes.len(), 1, "invalidate refetches the refs");
     }
 }
 

@@ -911,3 +911,66 @@ Batch RF-11 completed and moved to `completed.md` (2026-11-01): the
 comment-free tree — 11,871 comment lines deleted, 58 gate-locked DS-id
 lines kept. Next per plan.md (opens on the owner's `continue`): FINISH —
 rollback instructions + the known-bugs list carried verbatim.
+
+## Batch KB-1 — known-bugs fix wave + kittest in-sandbox resolution (items KB-1-1..KB-1-6)
+
+**Batch KB-1 (items KB-1-1..KB-1-6)** — active, opened 2026-11-01 on the
+owner's explicit direction ("Fix this" the two known bugs, "Resolve this"
+the kittest sandbox gap) recorded in plan.md; the FINISH program's
+LIST-ONLY scope decision is superseded by the owner's instruction. Batch
+verification (Rule 5): the KB-1-6 gate table; every row green with numbers
+recorded here before the batch moves to completed.md.
+
+Batch verification results (all green): fmt clean (applied + re-checked
+after the last content edit); cargo check --workspace --all-targets
+clean; clippy `--workspace --all-targets -D warnings` 0;
+gate_traceability OK (23 routes / 20 DC tags / 27 ids, alias declared
+True); gate_no_simulation clean; verify-icons clean; style_lint 2
+passed / 0 failed (explicit — RF-6 lesson); core lib 495 passed / 0
+failed / 4 ignored (--test-threads=1, 348.55s); app-shell lib 242/0
+(235.32s — the 237 baseline plus exactly the 5 new regression tests);
+xtask 11/0; doc-tests 0/0 (four crates).
+
+**KB-1-5 — the kittest gap RESOLVED in-sandbox**: the RF-era constraint
+that justified CI-lane-only no longer binds (7.7 GB free disk at open,
+2.8 GB available RAM). CI's own recipe was replicated locally: Mesa's
+lavapipe software Vulkan rasterizer installed WITHOUT root (apt-get
+download + dpkg -x of mesa-vulkan-drivers + libllvm19 into
+/home/z/mesa-lvp, VK_DRIVER_FILES/VK_ICD_FILENAMES pointed at the
+extracted lvp_icd.json, LD_LIBRARY_PATH at the extracted libs,
+WGPU_BACKEND=vulkan — the exact env block of ci.yml:198-220), then the
+CI command `cargo test --locked -p supportos-plus-app-shell --features
+kittest-ui` per suite. Result: **23 kittest suites — 173 tests passed /
+0 failed — all 171 committed goldens diff-locked with ZERO drift**
+(snapshots/ holds exactly 171 .png baselines — the census reconciles:
+24 files = 23 suites + style_lint, 175 tests = 173 + 2, 171 goldens).
+style_lint under the same feature build: 2/0. First-ever in-sandbox
+kittest run in the program's history; the standing gap disclosed at
+every STOP is now closed both at CI (RF-11/FINISH) and locally (KB-1).
+
+Fix notes: the custom_objects `objects_loaded` latch is selection-scoped
+(cleared on select_type, delete_type's selection-clear, and reload_types'
+selection-vanished branch — a selection change still refetches); inbox's
+inline ui() gates were extracted into `ensure_loaded` (the batch-34
+shape; the transient `detail.is_none` gate is unchanged); knowledge got
+one `loaded` latch over reload_all gating both tab UI fns; the Settings
+fix mirrors General's `general_persisted` guard exactly
+(`lmstudio_persisted` triple, reload assigns only when the form matches
+the snapshot, save_lmstudio re-bases the snapshot on the saved trimmed
+values). Regression tests: 3× `ensure_loaded_latches_and_invalidate_
+refetches` (one per page, sentinel-error side-effect assertions prove
+the no-refetch behavior) + the General pair mirrored for lmstudio
+(`lmstudio_invalidation_refreshes_a_clean_form_from_the_db`,
+`lmstudio_dirty_form_survives_invalidation`).
+
+Environment note: fresh-sandbox toolchain re-provisioned (rustup
+1.99.1); disk hit 100% once during the kittest feature build — the
+kittest results were already recorded, so the feature-build artifacts
+were reclaimed (incremental dir 634 MB) and the remaining battery
+completed on the freed space. No gate was run under disk pressure
+except verify-icons, which was re-run clean after the reclaim.
+
+Batch KB-1 completed and moved to `completed.md` (2026-11-01): both
+known bugs fixed with 5 pinned regression tests; the kittest CI-lane
+gap resolved in-sandbox (175/175, 171/171 goldens). ai records synced;
+single commit; push next.

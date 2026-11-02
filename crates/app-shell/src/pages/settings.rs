@@ -398,6 +398,7 @@ pub struct SettingsPage {
     lmstudio_base_url: String,
     lmstudio_chat_model: String,
     lmstudio_embedding_model: String,
+    lmstudio_persisted: (String, String, String),
     vector_store_path: String,
     hours: Vec<BusinessHoursRow>,
     hours_edit: Option<BusinessHoursRow>,
@@ -443,6 +444,7 @@ impl SettingsPage {
             lmstudio_base_url: String::new(),
             lmstudio_chat_model: String::new(),
             lmstudio_embedding_model: String::new(),
+            lmstudio_persisted: (String::new(), String::new(), String::new()),
             vector_store_path: String::new(),
             hours: Vec::new(),
             hours_edit: None,
@@ -535,26 +537,36 @@ impl SettingsPage {
             .with_read(spp_core::webhook_health::load_outcome)
             .ok()
             .flatten();
-        if self.lmstudio_base_url.is_empty() {
-            let (base, chat, embed) = db.with_read(|conn| {
-                (
-                    spp_core::settings::get_string(conn, "lmstudio_base_url")
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default(),
-                    spp_core::settings::get_string(conn, "lmstudio_chat_model")
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default(),
-                    spp_core::settings::get_string(conn, "lmstudio_embedding_model")
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default(),
-                )
-            });
-            self.lmstudio_base_url = base;
-            self.lmstudio_chat_model = chat;
-            self.lmstudio_embedding_model = embed;
+        let (base, chat, embed) = db.with_read(|conn| {
+            (
+                spp_core::settings::get_string(conn, "lmstudio_base_url")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                spp_core::settings::get_string(conn, "lmstudio_chat_model")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                spp_core::settings::get_string(conn, "lmstudio_embedding_model")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+            )
+        });
+        let lmstudio_dirty = (
+            self.lmstudio_base_url.as_str(),
+            self.lmstudio_chat_model.as_str(),
+            self.lmstudio_embedding_model.as_str(),
+        ) != (
+            self.lmstudio_persisted.0.as_str(),
+            self.lmstudio_persisted.1.as_str(),
+            self.lmstudio_persisted.2.as_str(),
+        );
+        if !lmstudio_dirty {
+            self.lmstudio_base_url = base.clone();
+            self.lmstudio_chat_model = chat.clone();
+            self.lmstudio_embedding_model = embed.clone();
+            self.lmstudio_persisted = (base, chat, embed);
         }
         if self.tab == Tab::Backups {
             self.reload_backups();
@@ -644,7 +656,10 @@ impl SettingsPage {
             spp_core::error::Result::Ok(())
         });
         match result {
-            Ok(()) => self.message = Some("LM Studio settings saved".into()),
+            Ok(()) => {
+                self.lmstudio_persisted = (base, chat, embed);
+                self.message = Some("LM Studio settings saved".into());
+            }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
@@ -2772,6 +2787,67 @@ mod batch27_audit77_tests {
         );
         assert_eq!(
             general.api_concurrency, 4,
+            "the SAVED edit is the persisted value now"
+        );
+    }
+
+    #[test]
+    fn lmstudio_invalidation_refreshes_a_clean_form_from_the_db() {
+        let db = fixture(Vec::new());
+        let mut page = SettingsPage::new();
+        page.ensure_loaded(&db);
+
+        db.with_write(|conn| {
+            spp_core::settings::set_string(conn, "lmstudio_base_url", "http://192.168.1.10:1234")
+        })
+        .expect("write");
+
+        page.invalidate();
+        page.ensure_loaded(&db);
+
+        assert_eq!(
+            page.lmstudio_base_url, "http://192.168.1.10:1234",
+            "a clean form still takes the fresh read"
+        );
+        assert_eq!(
+            page.lmstudio_persisted.0, "http://192.168.1.10:1234",
+            "the snapshot re-bases on the fresh read"
+        );
+    }
+
+    #[test]
+    fn lmstudio_dirty_form_survives_invalidation() {
+        let db = fixture(Vec::new());
+        let mut page = SettingsPage::new();
+        page.ensure_loaded(&db);
+
+        page.lmstudio_base_url = "http://localhost:9999".into();
+        page.lmstudio_chat_model = "qwen2.5-7b-instruct".into();
+        page.invalidate();
+        page.ensure_loaded(&db);
+
+        assert_eq!(
+            page.lmstudio_base_url, "http://localhost:9999",
+            "unsaved edits survive a reload (pre-fix the is_empty gate re-pulled stored values over them)"
+        );
+        assert_eq!(page.lmstudio_chat_model, "qwen2.5-7b-instruct");
+
+        page.save_lmstudio(&db);
+        assert!(page.error.is_none(), "save failed: {:?}", page.error);
+
+        db.with_write(|conn| {
+            spp_core::settings::set_string(conn, "lmstudio_base_url", "http://other:1234")
+        })
+        .expect("write");
+        page.invalidate();
+        page.ensure_loaded(&db);
+
+        assert_eq!(
+            page.lmstudio_base_url, "http://other:1234",
+            "after save the form is clean, so the fresh read wins"
+        );
+        assert_eq!(
+            page.lmstudio_chat_model, "qwen2.5-7b-instruct",
             "the SAVED edit is the persisted value now"
         );
     }

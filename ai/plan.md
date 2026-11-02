@@ -461,3 +461,60 @@ per-frame refetch; Settings LM Studio dirty-clobber) with current-code
 file:line evidence; kittest CI lane disposition (closed at CI — all three
 check runs success on 672fef7). The program RF-1..RF-11 is complete:
 plan.md has no open items.
+
+## Items — post-FINISH owner-directed work order KB-1 (opened 2026-11-01)
+
+Source: the owner's direction on the FINISH report (2026-11-01): "Fix this"
+(the known-bugs list — the empty-list per-frame refetch and the Settings LM
+Studio dirty-clobber) and "Resolve this" (the kittest CI-lane disposition —
+run the suites in-sandbox). The FINISH program (RF-1..RF-11) is closed; this
+is a new, owner-directed batch outside it. The LIST-ONLY protection on these
+two bugs was a program scope decision, now superseded by the owner's explicit
+instruction to fix them. Batch size: 6 items — the direction defines the
+scope (rule.md's ten-at-a-time is the ceiling, not a pad; nothing skipped,
+nothing invented).
+
+### KB-1 — known-bugs fix wave + kittest in-sandbox resolution (COMPLETED 2026-11-01, record in completed.md)
+
+1. **KB-1-1 (custom_objects latches)** — pages/custom_objects.rs: the
+   batch-34 `loaded`-latch pattern (`reload` sets the latch, `invalidate`
+   clears it, `ensure_loaded` fires once) applied to both gates:
+   `types_loaded` (:182) and selection-scoped `objects_loaded` (:184 —
+   cleared on `select_type`, `delete_type`'s selection-clear, and
+   `reload_types`' selection-vanished branch so a selection change still
+   refetches). Page-level regression test mirroring batch 34's
+   `ensure_loaded_latches_and_invalidate_refetches`.
+2. **KB-1-2 (inbox latches)** — pages/inbox.rs: `refs_loaded` (:847 +
+   the filters-prerequisite gate inside `reload_list` at :402) and
+   `list_loaded` (:850, set on both the normal and the page-clamp
+   recursive path). `invalidate` clears both. The `detail` gate (:853,
+   transient `is_none` shape) is not a bug and stays. Regression test.
+3. **KB-1-3 (knowledge latch)** — pages/knowledge.rs: one `loaded` latch
+   over `reload_all`, gating both `documents_ui` (:687) and `sources_ui`
+   (:764); the empty-state rendering after the gate stays. Regression
+   test.
+4. **KB-1-4 (Settings LM Studio dirty guard)** — pages/settings.rs:
+   replace the `lmstudio_base_url.is_empty()` gate (:538) with the
+   General section's `general_persisted` dirty-guard shape (:507-511,
+   the in-file counterexample): a `lmstudio_persisted` triple snapshot;
+   a reload assigns to the form only when the form matches the snapshot;
+   `save_lmstudio` re-bases the snapshot on the saved (trimmed) values.
+   Two regression tests mirroring the General pair
+   (`invalidation_refreshes_a_clean_form_from_the_db`,
+   `saved_edits_clear_the_dirty_guard`).
+5. **KB-1-5 (kittest in-sandbox resolution)** — the standing RF-1-9 gap,
+   resolved on the owner's instruction: install Mesa's lavapipe software
+   Vulkan rasterizer (CI's own recipe, ci.yml:198-220), then run the
+   full CI command in-sandbox: `cargo test --locked -p
+   supportos-plus-app-shell --features kittest-ui` — 24 suites / 175
+   tests / 171 goldens, diff-locked against the committed baselines
+   (UPDATE_SNAPSHOTS deliberately unset, same as CI). Sandbox capacity
+   re-verified at open: 7.7 GB free disk, 2.8 GB available RAM (the
+   ~600 MB / 3 GB constraint that justified CI-lane-only no longer
+   binds). Result recorded either way (suite failures = honest finding).
+6. **KB-1-6 (closing gate)** — the full battery: fmt (apply + re-check),
+   check `--workspace --all-targets`, clippy `-D warnings`,
+   gate_traceability / gate_no_simulation / verify-icons / style_lint,
+   core lib `--test-threads=1`, app-shell lib, xtask, doc-tests, the
+   kittest run from KB-1-5; ai records synced; single commit; push; CI
+   watched to completion on the push.

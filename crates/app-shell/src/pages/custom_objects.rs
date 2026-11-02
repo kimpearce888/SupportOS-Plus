@@ -85,8 +85,10 @@ impl FieldDraft {
 
 pub struct CustomObjectsPage {
     types: Vec<TypeDetail>,
+    types_loaded: bool,
     selected_type: Option<i64>,
     objects: Vec<serde_json::Value>,
+    objects_loaded: bool,
     objects_total: i64,
     object_query: String,
     report: Option<serde_json::Value>,
@@ -104,8 +106,10 @@ impl CustomObjectsPage {
     pub fn new() -> Self {
         Self {
             types: Vec::new(),
+            types_loaded: false,
             selected_type: None,
             objects: Vec::new(),
+            objects_loaded: false,
             objects_total: 0,
             object_query: String::new(),
             report: None,
@@ -127,7 +131,9 @@ impl CustomObjectsPage {
 
     pub fn invalidate(&mut self) {
         self.types.clear();
+        self.types_loaded = false;
         self.objects.clear();
+        self.objects_loaded = false;
         self.report = None;
     }
 
@@ -142,12 +148,14 @@ impl CustomObjectsPage {
                 {
                     self.selected_type = None;
                     self.objects.clear();
+                    self.objects_loaded = false;
                     self.new_object_fields.clear();
                 }
             }
             Err(e) => self.error = Some(e.to_string()),
         }
         self.report = db.with_read(spp_core::custom_objects::report).ok();
+        self.types_loaded = true;
     }
 
     fn reload_objects(&mut self, db: &DbHandle) {
@@ -176,13 +184,14 @@ impl CustomObjectsPage {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+        self.objects_loaded = true;
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.types.is_empty() {
+        if !self.types_loaded {
             self.reload_types(db);
         }
-        if self.selected_type.is_some() && self.objects.is_empty() {
+        if self.selected_type.is_some() && !self.objects_loaded {
             self.reload_objects(db);
         }
     }
@@ -190,6 +199,7 @@ impl CustomObjectsPage {
     fn select_type(&mut self, db: &DbHandle, id: i64) {
         self.selected_type = Some(id);
         self.objects.clear();
+        self.objects_loaded = false;
         self.reload_objects(db);
         if let Some(t) = self.types.iter().find(|t| t.id == id) {
             self.new_object_fields = t
@@ -248,6 +258,7 @@ impl CustomObjectsPage {
                 if self.selected_type == Some(id) {
                     self.selected_type = None;
                     self.objects.clear();
+                    self.objects_loaded = false;
                     self.new_object_fields.clear();
                 }
                 self.reload_types(db);
@@ -989,6 +1000,56 @@ mod tests {
         assert_eq!(
             page.objects[0]["properties"]["docs"],
             serde_json::json!("https://example.com/x")
+        );
+    }
+
+    #[test]
+    fn ensure_loaded_latches_and_invalidate_refetches() {
+        let db = fixture(Vec::new());
+        let mut page = CustomObjectsPage::new();
+        assert!(!page.types_loaded);
+        page.ensure_loaded(&db);
+        assert!(page.types_loaded);
+        assert!(page.types.is_empty(), "no types seeded yet");
+
+        let (type_id, _) = db.with_write(|conn| {
+            spp_core::custom_objects::create_type(
+                conn,
+                "Latched",
+                None,
+                &[field("reason", "text", false, None)],
+            )
+            .expect("type")
+        });
+
+        page.error = Some("sentinel".into());
+        page.ensure_loaded(&db);
+        assert!(
+            page.types.is_empty(),
+            "latch holds: ensure_loaded did not refetch (pre-fix this re-ran reload_types every frame on an empty mirror)"
+        );
+        assert_eq!(
+            page.error.as_deref(),
+            Some("sentinel"),
+            "the reload side effect (error clear) did not run"
+        );
+
+        page.invalidate();
+        assert!(!page.types_loaded);
+        page.ensure_loaded(&db);
+        assert!(page.types_loaded);
+        assert_eq!(page.types.len(), 1, "invalidate refetches");
+        assert!(page.error.is_none(), "the refetch cleared the error");
+
+        page.select_type(&db, type_id);
+        assert!(page.objects_loaded);
+        assert!(page.objects.is_empty(), "a legitimately empty object list");
+        page.error = Some("sentinel".into());
+        page.ensure_loaded(&db);
+        assert_eq!(
+            page.error.as_deref(),
+            Some("sentinel"),
+            "the empty-objects gate latches too (pre-fix this re-ran reload_objects every frame)"
         );
     }
 }
