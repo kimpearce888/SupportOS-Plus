@@ -4,7 +4,7 @@ use crate::jobs;
 use crate::webhook;
 
 #[derive(Debug, PartialEq)]
-pub enum WebhookProcessResult {
+pub(crate) enum WebhookProcessResult {
     Accepted { row_id: i64 },
     Duplicate { row_id: i64 },
     SignatureInvalid,
@@ -12,7 +12,7 @@ pub enum WebhookProcessResult {
     SecretNotConfigured,
 }
 
-pub fn process_webhook(
+pub(crate) fn process_webhook(
     conn: &Connection,
     secret: &[u8],
     body: &[u8],
@@ -183,7 +183,7 @@ pub fn process_event(conn: &Connection, row_id: i64, event_type: &str, raw: &str
     let _ = webhook::set_webhook_event_state(conn, row_id, "processed", None);
 }
 
-pub fn drain_pending(conn: &Connection) -> usize {
+pub(crate) fn drain_pending(conn: &Connection) -> usize {
     match webhook::get_pending_webhook_events(conn, 50) {
         Ok(pending) => {
             let count = pending.len();

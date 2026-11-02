@@ -37,7 +37,7 @@ impl Default for EventBus {
     }
 }
 
-pub fn notify_outbound_finished(
+pub(crate) fn notify_outbound_finished(
     bus: &EventBus,
     job_id: i64,
     kind: &str,
@@ -69,7 +69,7 @@ pub fn notify_error(
     ));
 }
 
-pub fn notify_rating_received(
+pub(crate) fn notify_rating_received(
     bus: &EventBus,
     rating: Option<&str>,
     conversation_id: Option<i64>,
@@ -89,7 +89,7 @@ pub fn notify_rating_received(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn notify_notification_received(
+pub(crate) fn notify_notification_received(
     bus: &EventBus,
     id: i64,
     kind: &str,

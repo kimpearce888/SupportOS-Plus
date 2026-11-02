@@ -20,7 +20,7 @@ use crate::helpscout::{
 
 mod http;
 
-pub const HS_AUTHORIZE_URL: &str =
+pub(crate) const HS_AUTHORIZE_URL: &str =
     "https://secure.helpscout.net/authentication/authorizeClientApplication";
 
 const DOC_ARTICLE_FETCH_CAP: usize = 500;
@@ -47,7 +47,7 @@ impl From<HsApiError> for Error {
     }
 }
 
-pub fn friendly_error(status: u16, body: &str, method: &str) -> String {
+pub(crate) fn friendly_error(status: u16, body: &str, method: &str) -> String {
     let detail = if body.is_empty() {
         String::new()
     } else {
@@ -76,7 +76,7 @@ fn is_retryable(status: u16) -> bool {
     matches!(status, 429 | 500 | 503 | 504)
 }
 
-pub fn apply_m043(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m043(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS hs_rate_limit (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -207,7 +207,7 @@ impl HsRateLimiter {
         );
     }
 
-    pub fn record_response(
+    pub(crate) fn record_response(
         &self,
         limit: Option<i64>,
         remaining: Option<i64>,
@@ -242,7 +242,7 @@ impl HsRateLimiter {
         }
     }
 
-    pub fn record_error_429(&self, retry_after_sec: Option<i64>) {
+    pub(crate) fn record_error_429(&self, retry_after_sec: Option<i64>) {
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         state.retry_after_sec = Some(retry_after_sec.unwrap_or(30));
         state.remaining = Some(0);
@@ -250,7 +250,7 @@ impl HsRateLimiter {
         self.persist(&state);
     }
 
-    pub fn wait_time_ms(&self, _is_write: bool) -> i64 {
+    pub(crate) fn wait_time_ms(&self, _is_write: bool) -> i64 {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let (Some(retry), Some(0)) = (state.retry_after_sec, state.remaining)
@@ -646,12 +646,12 @@ impl RealHelpScoutProvider {
     }
 
     #[must_use]
-    pub fn http_client(&self) -> reqwest::Client {
+    pub(crate) fn http_client(&self) -> reqwest::Client {
         self.client.clone()
     }
 
     #[must_use]
-    pub fn rate_limit_snapshot(&self) -> RateLimitState {
+    pub(crate) fn rate_limit_snapshot(&self) -> RateLimitState {
         self.limiter.rate_limit_state()
     }
 
@@ -2280,7 +2280,7 @@ fn is_not_found(e: &Error) -> bool {
     hs_status(e) == Some(404) || e.to_string().contains("-> 404")
 }
 
-pub fn hs_status(e: &Error) -> Option<u16> {
+pub(crate) fn hs_status(e: &Error) -> Option<u16> {
     if let Error::Other(b) = e
         && let Some(hs) = b.downcast_ref::<HsApiError>()
     {
@@ -2289,7 +2289,7 @@ pub fn hs_status(e: &Error) -> Option<u16> {
     None
 }
 
-pub fn hs_error(e: &Error) -> Option<&HsApiError> {
+pub(crate) fn hs_error(e: &Error) -> Option<&HsApiError> {
     if let Error::Other(b) = e {
         b.downcast_ref::<HsApiError>()
     } else {
@@ -2458,7 +2458,7 @@ mod r6_honest_stub_tests {
     }
 }
 
-pub fn apply_m053_oauth_token_envelope(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m053_oauth_token_envelope(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "oauth_tokens")? {
         return Ok(());
     }

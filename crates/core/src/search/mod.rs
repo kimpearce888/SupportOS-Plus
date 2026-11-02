@@ -56,7 +56,7 @@ pub struct KnowledgeRawHit {
     pub visibility: String,
 }
 
-pub fn apply_fts_migration(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_fts_migration(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS fts_conversations USING fts5(
             subject, preview, customer, tags, numbers,
@@ -249,7 +249,7 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
 }
 
 #[must_use]
-pub fn fts_query(q: &str) -> String {
+pub(crate) fn fts_query(q: &str) -> String {
     let tokens = tokenize(q, 1, 8);
     if tokens.is_empty() {
         return "\"\"".to_string();
@@ -262,7 +262,7 @@ pub fn fts_query(q: &str) -> String {
 }
 
 #[must_use]
-pub fn fts_query_or(q: &str, max_tokens: usize) -> String {
+pub(crate) fn fts_query_or(q: &str, max_tokens: usize) -> String {
     let tokens = tokenize(q, 3, max_tokens);
     if tokens.is_empty() {
         return "\"\"".to_string();
@@ -294,7 +294,7 @@ pub fn tokenize(q: &str, min_chars: usize, max_tokens: usize) -> Vec<String> {
 }
 
 #[must_use]
-pub fn escape_like(q: &str) -> String {
+pub(crate) fn escape_like(q: &str) -> String {
     let mut out = String::with_capacity(q.len());
     for c in q.chars() {
         if matches!(c, '\\' | '%' | '_') {
@@ -590,7 +590,7 @@ fn rescore_fts_only_lanes_to_rrf_scale(hits: &mut [SearchHit], k: u32) {
     }
 }
 
-pub fn index_conversation_fts(conn: &Connection, local_id: i64) -> Result<()> {
+pub(crate) fn index_conversation_fts(conn: &Connection, local_id: i64) -> Result<()> {
     conn.execute(
         "DELETE FROM fts_conversations WHERE conversation_id = ?1",
         params![local_id],

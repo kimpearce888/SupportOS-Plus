@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub fn apply_m029(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m029(conn: &Connection) -> Result<()> {
     apply_inner(conn)?;
     let _ = conn.execute("UPDATE app_state SET schema_version = 29 WHERE id = 1", []);
     Ok(())
@@ -405,7 +405,7 @@ fn apply_inner(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn apply_m042(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m042(conn: &Connection) -> Result<()> {
     if table_exists(conn, "sync_cursors")? && !column_exists(conn, "sync_cursors", "cursor")? {
         conn.execute_batch(
             "ALTER TABLE sync_cursors RENAME TO sync_cursors_legacy_m042;
@@ -432,7 +432,7 @@ pub fn apply_m042(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
@@ -444,7 +444,7 @@ pub fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<boo
     Ok(false)
 }
 
-pub fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+pub(crate) fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
         [table],
@@ -453,7 +453,7 @@ pub fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     Ok(n > 0)
 }
 
-pub fn apply_m052(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m052(conn: &Connection) -> Result<()> {
     if table_exists(conn, "sync_checkpoints")? {
         conn.execute(
             "DELETE FROM sync_checkpoints

@@ -37,7 +37,7 @@ impl TicketPriority {
     }
 }
 
-pub fn apply_m004(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m004(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ticket_state_transitions (
             id                     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,7 +106,7 @@ pub fn set_priority(
     Ok(())
 }
 
-pub fn set_ticket_state(
+pub(crate) fn set_ticket_state(
     conn: &mut Connection,
     conversation_remote_id: i64,
     new_state: &str,
@@ -146,7 +146,7 @@ pub fn set_ticket_state(
     Ok(())
 }
 
-pub fn apply_m032(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m032(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ticket_states (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,

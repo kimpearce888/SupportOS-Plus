@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::helpscout::{HsChat, HsChatEvent, HsChatParticipant};
 
-pub fn apply_m059_beacon_chats(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m059_beacon_chats(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS beacon_chats (
             chat_id            TEXT PRIMARY KEY,
@@ -90,7 +90,7 @@ fn parse_participant(v: &Value) -> Option<HsChatParticipant> {
 }
 
 #[must_use]
-pub fn parse_chat_object(v: &Value) -> Option<HsChat> {
+pub(crate) fn parse_chat_object(v: &Value) -> Option<HsChat> {
     let id = v.get("id").and_then(|x| x.as_str())?.to_string();
     if id.is_empty() {
         return None;
@@ -366,7 +366,7 @@ pub fn new_message_id() -> String {
     )
 }
 
-pub fn record_outgoing_message(
+pub(crate) fn record_outgoing_message(
     conn: &Connection,
     chat_id: &str,
     message_id: &str,

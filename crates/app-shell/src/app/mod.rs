@@ -40,7 +40,7 @@ use crate::task_bridge::TaskBridge;
 use crate::theme::Theme;
 use crate::toasts::Toasts;
 
-pub struct ShellApp {
+pub(crate) struct ShellApp {
     db: DbHandle,
     bus: EventBus,
     sync: Option<Arc<SyncEngine>>,
@@ -86,7 +86,7 @@ impl ShellApp {
     }
 
     #[must_use]
-    pub fn new_with_context(ctx: &egui::Context, options: ShellOptions) -> Self {
+    pub(crate) fn new_with_context(ctx: &egui::Context, options: ShellOptions) -> Self {
         design::install(ctx);
         let theme = Theme::load(&options.db);
         theme.apply(ctx);
@@ -166,7 +166,7 @@ impl ShellApp {
         app
     }
 
-    pub fn select_page(&mut self, page: PageKey) {
+    pub(crate) fn select_page(&mut self, page: PageKey) {
         self.page = page;
     }
 

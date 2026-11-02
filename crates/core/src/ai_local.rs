@@ -375,7 +375,7 @@ pub fn related_articles(
     out
 }
 
-pub fn customer_history(conn: &Connection, conversation_local_id: i64) -> CustomerHistory {
+pub(crate) fn customer_history(conn: &Connection, conversation_local_id: i64) -> CustomerHistory {
     conn.query_row(
         "SELECT COUNT(*), MIN(remote_created_at), MAX(remote_created_at)
            FROM conversations c

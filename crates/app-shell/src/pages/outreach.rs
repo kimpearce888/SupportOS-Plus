@@ -81,7 +81,7 @@ impl OutreachPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.loaded = false;
         self.campaigns.clear();
         self.segments.clear();
@@ -340,7 +340,7 @@ impl OutreachPage {
         }
     }
 
-    pub fn remove_dnc(&mut self, db: &DbHandle, customer_id: i64) -> spp_core::Result<()> {
+    pub(crate) fn remove_dnc(&mut self, db: &DbHandle, customer_id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::remove_from_dnc(conn, customer_id));
         if let Err(e) = &result {
             self.set_error(e.to_string());
@@ -349,7 +349,7 @@ impl OutreachPage {
         result.map(|_| ())
     }
 
-    pub fn cancel_campaign_remaining_confirmed(
+    pub(crate) fn cancel_campaign_remaining_confirmed(
         &mut self,
         db: &DbHandle,
         id: i64,

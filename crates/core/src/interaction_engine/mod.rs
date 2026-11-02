@@ -75,7 +75,7 @@ pub struct TextScan {
     pub warnings: Vec<String>,
 }
 
-pub fn sanitize_interaction_text(text: &str) -> TextScan {
+pub(crate) fn sanitize_interaction_text(text: &str) -> TextScan {
     let mut warnings = Vec::new();
     for p in forbidden_patterns() {
         if p.regex.is_match(text) {
@@ -91,7 +91,7 @@ pub fn sanitize_interaction_text(text: &str) -> TextScan {
     }
 }
 
-pub fn assert_interaction_text_safe(text: Option<&str>) -> TextScan {
+pub(crate) fn assert_interaction_text_safe(text: Option<&str>) -> TextScan {
     match text {
         Some(t) if !t.is_empty() => sanitize_interaction_text(t),
         _ => TextScan {
@@ -305,7 +305,7 @@ pub struct StoredCurrent {
     pub recommendation: Option<StoredRecommendation>,
 }
 
-pub fn ensure_schema(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS client_behavior_observations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -407,7 +407,7 @@ pub fn ensure_schema(conn: &Connection) -> Result<()> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ObservationRow {
+pub(crate) struct ObservationRow {
     pub customer_id: i64,
     pub dimension: String,
     pub value: String,
@@ -420,7 +420,7 @@ pub struct ObservationRow {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn save_current_interaction(
+pub(crate) fn save_current_interaction(
     conn: &Connection,
     conversation_id: i64,
     customer_id: Option<i64>,
@@ -464,7 +464,7 @@ pub fn save_current_interaction(
     Ok(())
 }
 
-pub fn get_latest_current_interaction(
+pub(crate) fn get_latest_current_interaction(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Option<StoredCurrent>> {
@@ -514,7 +514,7 @@ pub fn get_latest_current_interaction(
     }))
 }
 
-pub fn save_recommendation(
+pub(crate) fn save_recommendation(
     conn: &Connection,
     conversation_id: i64,
     recommendation: &SupportApproach,
@@ -533,7 +533,7 @@ pub fn save_recommendation(
     Ok(())
 }
 
-pub fn insert_observations(conn: &Connection, rows: &[ObservationRow]) -> Result<()> {
+pub(crate) fn insert_observations(conn: &Connection, rows: &[ObservationRow]) -> Result<()> {
     for o in rows {
         conn.execute(
             "INSERT INTO client_behavior_observations
@@ -568,7 +568,7 @@ pub fn insert_observations(conn: &Connection, rows: &[ObservationRow]) -> Result
     Ok(())
 }
 
-pub fn get_observations_for_customer(
+pub(crate) fn get_observations_for_customer(
     conn: &Connection,
     customer_id: i64,
 ) -> Result<Vec<ObservationRow>> {
@@ -600,7 +600,7 @@ pub fn get_observations_for_customer(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn upsert_baseline(
+pub(crate) fn upsert_baseline(
     conn: &Connection,
     customer_id: i64,
     dimension: &str,
@@ -637,7 +637,10 @@ pub fn upsert_baseline(
 
 type BaselineRow = (String, String, String, i64, Option<String>, i64, String);
 
-pub fn get_baseline(conn: &Connection, customer_id: i64) -> Result<Option<BehaviorBaseline>> {
+pub(crate) fn get_baseline(
+    conn: &Connection,
+    customer_id: i64,
+) -> Result<Option<BehaviorBaseline>> {
     let mut stmt = conn.prepare(
         "SELECT dimension, typical_value, confidence, observation_count, last_observed,
                 profile_version, updated_at
@@ -695,7 +698,7 @@ pub fn get_baseline(conn: &Connection, customer_id: i64) -> Result<Option<Behavi
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn upsert_preference(
+pub(crate) fn upsert_preference(
     conn: &Connection,
     customer_id: i64,
     preference: &str,
@@ -734,7 +737,7 @@ pub fn upsert_preference(
     Ok(())
 }
 
-pub fn get_preferences(
+pub(crate) fn get_preferences(
     conn: &Connection,
     customer_id: i64,
 ) -> Result<Vec<CommunicationPreference>> {
@@ -796,7 +799,10 @@ pub fn get_preferences(
         .collect())
 }
 
-pub fn get_active_overrides(conn: &Connection, customer_id: i64) -> Result<Vec<OverrideRow>> {
+pub(crate) fn get_active_overrides(
+    conn: &Connection,
+    customer_id: i64,
+) -> Result<Vec<OverrideRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, field, ai_value, human_value, reason, created_at, active
            FROM client_human_overrides
@@ -834,7 +840,7 @@ pub fn get_active_overrides(conn: &Connection, customer_id: i64) -> Result<Vec<O
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn upsert_outcome(
+pub(crate) fn upsert_outcome(
     conn: &Connection,
     customer_id: i64,
     conversation_id: i64,
@@ -887,7 +893,10 @@ pub struct OutcomeRow {
     pub friction: Option<String>,
 }
 
-pub fn get_outcomes_for_customer(conn: &Connection, customer_id: i64) -> Result<Vec<OutcomeRow>> {
+pub(crate) fn get_outcomes_for_customer(
+    conn: &Connection,
+    customer_id: i64,
+) -> Result<Vec<OutcomeRow>> {
     let mut stmt = conn.prepare(
         "SELECT o.conversation_id, o.resolved_after_first_response, o.follow_up_count,
                 o.clarification_count, o.escalated, o.effort_score, o.response_style, o.friction
@@ -924,7 +933,7 @@ pub struct CustomerConversation {
     pub thread_count: i64,
 }
 
-pub fn get_customer_conversations(
+pub(crate) fn get_customer_conversations(
     conn: &Connection,
     customer_id: i64,
     exclude_conversation_id: Option<i64>,
@@ -978,7 +987,7 @@ fn conversation_info(conn: &Connection, conversation_id: i64) -> Option<Conversa
     .ok()
 }
 
-pub fn conversation_customer(conn: &Connection, conversation_id: i64) -> Option<i64> {
+pub(crate) fn conversation_customer(conn: &Connection, conversation_id: i64) -> Option<i64> {
     conversation_info(conn, conversation_id)?.customer_local_id
 }
 
@@ -1037,7 +1046,7 @@ fn parse_age_days(observed_at: &str, now_ms: f64) -> f64 {
         .unwrap_or(999.0)
 }
 
-pub fn merge_signals(
+pub(crate) fn merge_signals(
     base: &[InteractionSignal],
     enrichment: &[InteractionSignal],
 ) -> Vec<InteractionSignal> {
@@ -1063,7 +1072,10 @@ fn next_profile_version(conn: &Connection, customer_id: i64) -> i64 {
         + 1
 }
 
-pub fn record_observations_for(conn: &Connection, current: &CurrentInteraction) -> Result<()> {
+pub(crate) fn record_observations_for(
+    conn: &Connection,
+    current: &CurrentInteraction,
+) -> Result<()> {
     let Some(customer_id) = current.customer_local_id else {
         return Ok(());
     };

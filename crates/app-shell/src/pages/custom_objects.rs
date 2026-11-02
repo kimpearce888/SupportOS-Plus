@@ -129,7 +129,7 @@ impl CustomObjectsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.types.clear();
         self.types_loaded = false;
         self.objects.clear();

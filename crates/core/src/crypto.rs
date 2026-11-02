@@ -5,8 +5,8 @@ use scrypt::scrypt;
 use crate::error::{Error, Result};
 
 pub const SALT_LEN: usize = 16;
-pub const NONCE_LEN: usize = 12;
-pub const KEY_LEN: usize = 32;
+pub(crate) const NONCE_LEN: usize = 12;
+pub(crate) const KEY_LEN: usize = 32;
 
 const SCRYPT_R: u32 = 8;
 const SCRYPT_P: u32 = 1;
@@ -26,7 +26,7 @@ pub fn random_salt() -> [u8; SALT_LEN] {
     salt
 }
 
-pub fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()> {
+pub(crate) fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()> {
     if path.exists() {
         return Err(Error::Config(format!(
             "refusing to overwrite existing key file at {}",
@@ -56,7 +56,7 @@ pub fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()>
     Ok(())
 }
 
-pub fn restrict_permissions(path: &std::path::Path) {
+pub(crate) fn restrict_permissions(path: &std::path::Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
@@ -68,7 +68,7 @@ pub fn restrict_permissions(path: &std::path::Path) {
     }
 }
 
-pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<([u8; NONCE_LEN], Vec<u8>)> {
+pub(crate) fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<([u8; NONCE_LEN], Vec<u8>)> {
     let mut nonce = [0u8; NONCE_LEN];
     rand::fill(&mut nonce[..]);
     let ciphertext = cipher(key)
@@ -77,7 +77,7 @@ pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<([u8; NONCE_LEN]
     Ok((nonce, ciphertext))
 }
 
-pub fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn decrypt(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
     let nonce: [u8; NONCE_LEN] = nonce
         .try_into()
         .map_err(|_| Error::Config("nonce must be 12 bytes".into()))?;

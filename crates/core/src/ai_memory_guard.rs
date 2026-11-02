@@ -74,7 +74,7 @@ fn has_case_word(text: &str, word: &str) -> bool {
     false
 }
 
-pub fn is_quarantined(key: &str, value: Option<&str>) -> bool {
+pub(crate) fn is_quarantined(key: &str, value: Option<&str>) -> bool {
     let text = value.map_or(key.to_string(), |v| format!("{key} {v}"));
     let key_lower = key.to_lowercase();
     let text_lower = text.to_lowercase();

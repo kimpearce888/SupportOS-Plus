@@ -23,7 +23,7 @@ const CLIENT_CURRENT_SIGNALS_SQL: &str = "
             ON client_current_signals(conversation_id);
 ";
 
-pub fn ensure_client_current_signals_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_client_current_signals_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(CLIENT_CURRENT_SIGNALS_SQL)?;
     Ok(())
 }
@@ -40,7 +40,7 @@ const INTERACTION_EVIDENCE_SQL: &str = "
             ON interaction_evidence(conversation_id);
 ";
 
-pub fn ensure_interaction_evidence_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_interaction_evidence_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(INTERACTION_EVIDENCE_SQL)?;
     Ok(())
 }
@@ -118,7 +118,7 @@ const RESPONSE_PREFERENCE_VALUES: [&str; 6] = [
     "outcome_focused",
 ];
 
-pub fn dimension_vocabulary(dimension: &str) -> Option<&'static [&'static str]> {
+pub(crate) fn dimension_vocabulary(dimension: &str) -> Option<&'static [&'static str]> {
     match dimension {
         "tone" => Some(&TONE_VALUES),
         "directness" => Some(&DIRECTNESS_VALUES),
@@ -133,7 +133,7 @@ pub fn dimension_vocabulary(dimension: &str) -> Option<&'static [&'static str]> 
     }
 }
 
-pub fn needs_de_escalation(signals: &[InteractionSignal]) -> bool {
+pub(crate) fn needs_de_escalation(signals: &[InteractionSignal]) -> bool {
     let frustration = |level: &str| {
         signals
             .iter()
@@ -146,7 +146,7 @@ pub fn needs_de_escalation(signals: &[InteractionSignal]) -> bool {
             && (frustration("moderate") || frustration("strong")))
 }
 
-pub fn is_valid_value(dimension: &str, value: &str) -> bool {
+pub(crate) fn is_valid_value(dimension: &str, value: &str) -> bool {
     let vocab: &[&str] = match dimension {
         "tone" => &TONE_VALUES,
         "directness" => &DIRECTNESS_VALUES,
@@ -686,7 +686,7 @@ pub struct SanitizedSignals {
 }
 
 #[must_use]
-pub fn sanitize_signals(signals: Vec<InteractionSignal>) -> SanitizedSignals {
+pub(crate) fn sanitize_signals(signals: Vec<InteractionSignal>) -> SanitizedSignals {
     let mut kept: Vec<InteractionSignal> = Vec::new();
     let mut removed: Vec<(String, String, String)> = Vec::new();
     let mut seen: Vec<(String, String)> = Vec::new();
@@ -830,7 +830,7 @@ pub(crate) fn customer_messages(
         .collect())
 }
 
-pub fn compute_current_interaction(
+pub(crate) fn compute_current_interaction(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Option<CurrentInteraction>> {
@@ -886,14 +886,14 @@ pub fn compute_current_interaction(
     }))
 }
 
-pub fn record_current_interaction(
+pub(crate) fn record_current_interaction(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Option<CurrentInteraction>> {
     record_current_interaction_opts(conn, conversation_id, true)
 }
 
-pub fn record_current_interaction_opts(
+pub(crate) fn record_current_interaction_opts(
     conn: &Connection,
     conversation_id: i64,
     rebuild_baseline: bool,
@@ -935,7 +935,7 @@ pub fn record_current_interaction_opts(
     Ok(Some(current))
 }
 
-pub fn backfill_all(conn: &Connection) -> Result<usize> {
+pub(crate) fn backfill_all(conn: &Connection) -> Result<usize> {
     let ids: Vec<i64> = {
         let mut stmt =
             conn.prepare("SELECT id FROM conversations WHERE deleted_at IS NULL ORDER BY id")?;

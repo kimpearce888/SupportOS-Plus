@@ -48,7 +48,7 @@ impl NotificationsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.loaded = false;
         self.records.clear();
         self.mentions.clear();

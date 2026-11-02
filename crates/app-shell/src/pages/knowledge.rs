@@ -85,7 +85,7 @@ fn post_import_side_effects(conn: &Connection, results: &[Value], mode: &str) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
+pub(crate) enum Tab {
     Documents,
     Sources,
     Freshness,
@@ -367,7 +367,7 @@ impl KnowledgePage {
         }
     }
 
-    pub fn set_data_dir(&mut self, data_dir: PathBuf) {
+    pub(crate) fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = Some(data_dir);
     }
 
@@ -419,7 +419,7 @@ impl KnowledgePage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.loaded = false;
         self.documents.clear();
         self.sources.clear();

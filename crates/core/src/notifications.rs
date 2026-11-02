@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::NotificationType;
 use crate::error::Result;
 
-pub fn apply_m005(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m005(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS notifications (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -317,7 +317,7 @@ pub fn mentions_for_me(conn: &Connection, me: i64, limit: i64) -> Result<Vec<Not
     Ok(rows)
 }
 
-pub fn unread_count(conn: &Connection, me: Option<i64>) -> Result<i64> {
+pub(crate) fn unread_count(conn: &Connection, me: Option<i64>) -> Result<i64> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM notifications
          WHERE (target_user_id IS NULL OR target_user_id = ?1) AND read_at IS NULL",

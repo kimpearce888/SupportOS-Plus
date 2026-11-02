@@ -1,16 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROMPT_VERSIONS_TICKET_ANALYSIS: &str = "ticket_analysis_v1";
-pub const PROMPT_VERSIONS_CUSTOMER_DRAFT: &str = "customer_draft_v1";
-pub const PROMPT_VERSIONS_DRAFT_VERIFICATION: &str = "draft_verification_v1";
-pub const PROMPT_VERSIONS_ISSUE_CLUSTER: &str = "issue_cluster_v1";
-pub const PROMPT_VERSIONS_MEMORY_EXTRACTION: &str = "memory_extraction_v1";
-pub const PROMPT_VERSIONS_INTERACTION_OBSERVATION: &str = "interaction_observation_v1";
-pub const PROMPT_VERSIONS_INTERACTION_RECOMMENDATION: &str = "interaction_recommendation_v1";
-pub const PROMPT_VERSIONS_COPILOT_CHAT: &str = "copilot_chat_v1";
-pub const PROMPT_VERSIONS_DRAFT_REWRITE: &str = "draft_rewrite_v1";
-pub const PROMPT_VERSIONS_TRANSLATION: &str = "translation_v1";
-pub const PROMPT_VERSIONS_GOLDEN_EVAL: &str = "golden_eval_v1";
+pub(crate) const PROMPT_VERSIONS_TICKET_ANALYSIS: &str = "ticket_analysis_v1";
+pub(crate) const PROMPT_VERSIONS_CUSTOMER_DRAFT: &str = "customer_draft_v1";
+pub(crate) const PROMPT_VERSIONS_DRAFT_VERIFICATION: &str = "draft_verification_v1";
+pub(crate) const PROMPT_VERSIONS_ISSUE_CLUSTER: &str = "issue_cluster_v1";
+pub(crate) const PROMPT_VERSIONS_MEMORY_EXTRACTION: &str = "memory_extraction_v1";
+pub(crate) const PROMPT_VERSIONS_INTERACTION_OBSERVATION: &str = "interaction_observation_v1";
+pub(crate) const PROMPT_VERSIONS_INTERACTION_RECOMMENDATION: &str = "interaction_recommendation_v1";
+pub(crate) const PROMPT_VERSIONS_COPILOT_CHAT: &str = "copilot_chat_v1";
+pub(crate) const PROMPT_VERSIONS_DRAFT_REWRITE: &str = "draft_rewrite_v1";
+pub(crate) const PROMPT_VERSIONS_TRANSLATION: &str = "translation_v1";
+pub(crate) const PROMPT_VERSIONS_GOLDEN_EVAL: &str = "golden_eval_v1";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TicketAnalysis {
@@ -211,7 +211,7 @@ fn render_evidence(ctx: &EvidenceContext) -> String {
     parts.join("\n")
 }
 
-pub const TICKET_ANALYSIS_SYSTEM: &str = "You are the analysis engine of a local customer-support assistant. You analyze support conversations and produce STRICT JSON.
+pub(crate) const TICKET_ANALYSIS_SYSTEM: &str = "You are the analysis engine of a local customer-support assistant. You analyze support conversations and produce STRICT JSON.
 
 Rules:
 - Base every field ONLY on the evidence provided. If information is missing, use null or an empty array - never invent.
@@ -238,14 +238,14 @@ JSON shape:
   \"evidence_quality\": \"strong | some | limited | insufficient\"
 }";
 
-pub fn build_ticket_analysis_user(ctx: &EvidenceContext) -> String {
+pub(crate) fn build_ticket_analysis_user(ctx: &EvidenceContext) -> String {
     format!(
         "Analyze the following support conversation evidence and respond with the JSON object described.\n\n{}",
         render_evidence(ctx)
     )
 }
 
-pub const CUSTOMER_DRAFT_SYSTEM: &str = "You draft customer-facing support replies. You operate in VERIFIED ANSWER MODE.
+pub(crate) const CUSTOMER_DRAFT_SYSTEM: &str = "You draft customer-facing support replies. You operate in VERIFIED ANSWER MODE.
 
 Hard rules:
 - Use ONLY customer-safe evidence: the current conversation, verified account information, approved customer-safe knowledge, verified known-issue customer-safe explanations, and saved replies.
@@ -255,7 +255,7 @@ Hard rules:
 - Keep the tone professional, warm and concise. No markdown headers. Plain paragraphs and optional short lists.
 - Respond with a single JSON object: {\"draft\": \"<reply text>\", \"used_evidence\": [\"short label of each piece of evidence you relied on\"]}";
 
-pub fn build_customer_draft_user(
+pub(crate) fn build_customer_draft_user(
     ctx: &EvidenceContext,
     mode: &str,
     analysis: Option<&TicketAnalysis>,
@@ -285,7 +285,7 @@ pub fn build_customer_draft_user(
     )
 }
 
-pub const DRAFT_VERIFICATION_SYSTEM: &str = "You verify AI-drafted customer replies against evidence. You are strict and skeptical.
+pub(crate) const DRAFT_VERIFICATION_SYSTEM: &str = "You verify AI-drafted customer replies against evidence. You are strict and skeptical.
 
 Check:
 1. Does the draft answer every explicit customer question? (missing_questions)
@@ -297,7 +297,7 @@ Check:
 
 Respond ONLY with JSON: {\"verified\": true/false, \"unsupported_claims\": [\"...\"], \"missing_questions\": [\"...\"], \"internal_leakage\": [\"...\"], \"conflicts\": [\"...\"], \"warnings\": [\"...\"]}";
 
-pub fn build_draft_verification_user(
+pub(crate) fn build_draft_verification_user(
     ctx: &EvidenceContext,
     draft: &str,
     customer_questions: &[String],
@@ -317,7 +317,7 @@ pub fn build_draft_verification_user(
     )
 }
 
-pub const ISSUE_CLUSTER_SYSTEM: &str = "You group support conversations into issue clusters based on their content.
+pub(crate) const ISSUE_CLUSTER_SYSTEM: &str = "You group support conversations into issue clusters based on their content.
 
 Rules:
 - Derive categories from the ACTUAL data - do not force predefined categories.
@@ -325,7 +325,7 @@ Rules:
 - Titles: short, specific, lowercase topic style (e.g. \"timezone after DST change\", \"invite emails bouncing\").
 - Respond ONLY with JSON: {\"clusters\": [{\"title\": \"...\", \"summary\": \"one sentence\", \"category\": \"...\", \"product\": \"...\"|null, \"feature\": \"...\"|null, \"conversation_numbers\": [..]}]}";
 
-pub fn build_issue_cluster_user(
+pub(crate) fn build_issue_cluster_user(
     conversations: &[ClusterConversation],
     total_in_window: i64,
 ) -> String {
@@ -356,16 +356,19 @@ pub fn build_issue_cluster_user(
 }
 
 #[derive(Debug, Clone)]
-pub struct ClusterConversation {
+pub(crate) struct ClusterConversation {
     pub number: i64,
     pub subject: String,
     pub preview: String,
     pub tags: Vec<String>,
 }
 
-pub const MEMORY_EXTRACTION_SYSTEM: &str = "You extract durable customer facts worth remembering for future support interactions. Only include facts clearly supported by the conversation. Do NOT include sensitive payment data or credentials. Respond ONLY with JSON: {\"memories\": [{\"key\": \"short_label\", \"value\": \"one sentence fact\", \"confidence\": \"high|medium|low\"}]}";
+pub(crate) const MEMORY_EXTRACTION_SYSTEM: &str = "You extract durable customer facts worth remembering for future support interactions. Only include facts clearly supported by the conversation. Do NOT include sensitive payment data or credentials. Respond ONLY with JSON: {\"memories\": [{\"key\": \"short_label\", \"value\": \"one sentence fact\", \"confidence\": \"high|medium|low\"}]}";
 
-pub fn build_memory_extraction_user(customer_name: &str, threads: &[(String, String)]) -> String {
+pub(crate) fn build_memory_extraction_user(
+    customer_name: &str,
+    threads: &[(String, String)],
+) -> String {
     let lines: Vec<String> = threads
         .iter()
         .map(|(author, text)| format!("{author}: {text}"))
@@ -376,7 +379,7 @@ pub fn build_memory_extraction_user(customer_name: &str, threads: &[(String, Str
     )
 }
 
-pub const INTERACTION_OBSERVATION_SYSTEM: &str = "You analyze the client's observable communication patterns for support purposes. Identify current communication signals, recurring support interaction patterns, relevant communication preferences, and meaningful changes from historical behavior. Do not diagnose mental health or infer sensitive personal traits. Base each important observation on evidence from the supplied conversation history.
+pub(crate) const INTERACTION_OBSERVATION_SYSTEM: &str = "You analyze the client's observable communication patterns for support purposes. Identify current communication signals, recurring support interaction patterns, relevant communication preferences, and meaningful changes from historical behavior. Do not diagnose mental health or infer sensitive personal traits. Base each important observation on evidence from the supplied conversation history.
 
 HARD RULES:
 - Report ONLY observable communication behavior: tone, directness, detail level, technical language, question structure, urgency cues, frustration cues, expectation, response preference.
@@ -397,7 +400,7 @@ HARD RULES:
 Respond ONLY with JSON:
 {\"signals\": [{\"dimension\": \"...\", \"value\": \"...\", \"confidence\": \"...\", \"evidence_excerpt\": \"...\", \"evidence_thread_local_id\": 123}], \"customer_goal\": \"...\", \"notes\": [\"...\"]}";
 
-pub const INTERACTION_RECOMMENDATION_SYSTEM: &str = "You are a support-approach advisor. Given observations about a client's observable communication (never psychological claims), you recommend how a support rep should approach this specific conversation.
+pub(crate) const INTERACTION_RECOMMENDATION_SYSTEM: &str = "You are a support-approach advisor. Given observations about a client's observable communication (never psychological claims), you recommend how a support rep should approach this specific conversation.
 
 RULES:
 - Be actionable: tone, length, how to start, what to avoid, response strategy steps.
@@ -409,7 +412,7 @@ RULES:
 Respond ONLY with JSON:
 {\"tone\": \"...\", \"length\": \"concise|moderate|detailed\", \"start_with\": \"...\", \"then\": \"...\", \"avoid\": [\"...\"], \"response_strategy\": [\"step 1\", \"step 2\"], \"de_escalation\": false, \"escalation_recommendation\": null, \"why\": [\"...\"]}";
 
-pub fn interaction_strategy_block(
+pub(crate) fn interaction_strategy_block(
     tone: Option<&str>,
     length: Option<&str>,
     response_strategy: &[String],
@@ -449,7 +452,7 @@ pub fn interaction_strategy_block(
     out
 }
 
-pub const COPILOT_SYSTEM: &str = "You are the SupportOS Local Copilot - an assistant for one support rep, running fully locally. You help the rep understand a ticket, its customer and the local knowledge base BEFORE they reply.
+pub(crate) const COPILOT_SYSTEM: &str = "You are the SupportOS Local Copilot - an assistant for one support rep, running fully locally. You help the rep understand a ticket, its customer and the local knowledge base BEFORE they reply.
 
 Core rules:
 - You have READ-ONLY tools that search the local archive: conversations, customer history, similar tickets, knowledge, known issues, issue clusters, saved replies, AI analyses and ticket metadata. Use them instead of guessing.
@@ -461,7 +464,7 @@ Core rules:
 - Be concise and structured: short paragraphs or tight bullet lists. Lead with the direct answer, then the evidence.
 - When the rep asks \"what should I check before replying\", produce a practical checklist grounded in the retrieved evidence (unanswered questions, missing info, known issue status, similar resolutions).";
 
-pub fn build_copilot_context_block(
+pub(crate) fn build_copilot_context_block(
     conversation_number: Option<i64>,
     subject: Option<&str>,
     customer_name: Option<&str>,
@@ -497,14 +500,14 @@ pub fn truncate(s: &str, n: usize) -> &str {
     }
 }
 
-pub struct InteractionChangeInput {
+pub(crate) struct InteractionChangeInput {
     pub dimension: String,
     pub baseline_value: Option<String>,
     pub current_value: Option<String>,
     pub significant: bool,
 }
 
-pub fn build_interaction_observation_user(
+pub(crate) fn build_interaction_observation_user(
     customer_name: &str,
     client_kind: &str,
     current_messages: &[(String, Option<i64>)],
@@ -563,7 +566,7 @@ pub fn build_interaction_observation_user(
     out
 }
 
-pub fn build_interaction_recommendation_user(
+pub(crate) fn build_interaction_recommendation_user(
     client_kind: &str,
     current_signals: &[(String, String, String)],
     changes: &[InteractionChangeInput],
@@ -620,11 +623,11 @@ pub fn build_interaction_recommendation_user(
     out
 }
 
-pub const PROMPT_VERSIONS_ARTICLE_DRAFT: &str = "article_draft_v1";
+pub(crate) const PROMPT_VERSIONS_ARTICLE_DRAFT: &str = "article_draft_v1";
 
-pub const ARTICLE_DRAFT_SYSTEM: &str = "You draft internal knowledge-base articles from real support resolutions. The numbered sources are the ONLY ground truth: never invent steps, commands, error messages or causes that do not appear in them. Every factual sentence MUST end with a [^N] citation marker referring to its source number. Where the sources disagree or a step is uncertain, write it as an open question for the reviewer instead of guessing. The article is a starting point for a human author who will review it before anything is published. Respond ONLY with JSON: {\"title\": \"...\", \"body_markdown\": \"...\"}. The body is Markdown; place the citations section header last and the model must NOT add its own signature or notes beyond the JSON fields.";
+pub(crate) const ARTICLE_DRAFT_SYSTEM: &str = "You draft internal knowledge-base articles from real support resolutions. The numbered sources are the ONLY ground truth: never invent steps, commands, error messages or causes that do not appear in them. Every factual sentence MUST end with a [^N] citation marker referring to its source number. Where the sources disagree or a step is uncertain, write it as an open question for the reviewer instead of guessing. The article is a starting point for a human author who will review it before anything is published. Respond ONLY with JSON: {\"title\": \"...\", \"body_markdown\": \"...\"}. The body is Markdown; place the citations section header last and the model must NOT add its own signature or notes beyond the JSON fields.";
 
-pub fn build_article_draft_user(
+pub(crate) fn build_article_draft_user(
     question: &str,
     resolutions: &[crate::quality::ResolutionCitation],
 ) -> String {
@@ -649,11 +652,11 @@ pub fn build_article_draft_user(
     )
 }
 
-pub const PROMPT_VERSIONS_WEEKLY_DIGEST: &str = "weekly_digest_v1";
+pub(crate) const PROMPT_VERSIONS_WEEKLY_DIGEST: &str = "weekly_digest_v1";
 
-pub const WEEKLY_DIGEST_SYSTEM: &str = "You write the weekly support digest for a support lead. The computed facts given to you are authoritative - never recalculate, round or invent numbers, and do not omit anomalies. Write in plain, direct prose: what happened with volume, what topics dominated, how sentiment moved, which anomalies stand out, what the workload looked like, what changed in the knowledge base (new gaps, new or updated articles), and the one or two things that deserve attention next week. Flag any statement you are unsure about with \"requires verification\". The digest is clearly labelled as AI-generated. Respond ONLY with JSON: {\"narrative\": \"...\"} - 6 to 10 sentences.";
+pub(crate) const WEEKLY_DIGEST_SYSTEM: &str = "You write the weekly support digest for a support lead. The computed facts given to you are authoritative - never recalculate, round or invent numbers, and do not omit anomalies. Write in plain, direct prose: what happened with volume, what topics dominated, how sentiment moved, which anomalies stand out, what the workload looked like, what changed in the knowledge base (new gaps, new or updated articles), and the one or two things that deserve attention next week. Flag any statement you are unsure about with \"requires verification\". The digest is clearly labelled as AI-generated. Respond ONLY with JSON: {\"narrative\": \"...\"} - 6 to 10 sentences.";
 
-pub fn build_weekly_digest_user(facts: &serde_json::Value) -> String {
+pub(crate) fn build_weekly_digest_user(facts: &serde_json::Value) -> String {
     format!(
         "Weekly digest computed facts (authoritative, do not change):\n{}\n\n\
          Write the weekly digest narrative from these facts.",

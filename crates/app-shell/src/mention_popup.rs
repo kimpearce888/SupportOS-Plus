@@ -10,7 +10,7 @@ pub struct Directory {
 
 impl Directory {
     #[must_use]
-    pub fn from_core(dir: &MentionDirectory) -> Self {
+    pub(crate) fn from_core(dir: &MentionDirectory) -> Self {
         let mut users: Vec<(String, String)> = dir
             .user_by_name
             .iter()
@@ -74,7 +74,7 @@ fn default_token(display: &str) -> String {
 }
 
 #[must_use]
-pub fn caret_query(value: &str, caret: usize) -> Option<(String, usize)> {
+pub(crate) fn caret_query(value: &str, caret: usize) -> Option<(String, usize)> {
     let upto = &value[..caret.min(value.len())];
     let mut idx = None;
     for (i, ch) in upto.char_indices().rev() {
@@ -102,7 +102,7 @@ fn is_token_char(c: char) -> bool {
 }
 
 #[must_use]
-pub fn filter_matches(dir: &Directory, query: &str) -> Vec<MentionEntry> {
+pub(crate) fn filter_matches(dir: &Directory, query: &str) -> Vec<MentionEntry> {
     let q = query.to_lowercase();
     if q.chars().any(|c| !is_token_char(c)) {
         return Vec::new();
@@ -117,7 +117,7 @@ pub fn filter_matches(dir: &Directory, query: &str) -> Vec<MentionEntry> {
 }
 
 #[must_use]
-pub fn apply_completion(value: &str, start: usize, token: &str, caret: usize) -> String {
+pub(crate) fn apply_completion(value: &str, start: usize, token: &str, caret: usize) -> String {
     let caret = caret.min(value.len());
     let after = &value[caret..];
     let sep = if after.is_empty() || after.starts_with(' ') {
@@ -129,7 +129,7 @@ pub fn apply_completion(value: &str, start: usize, token: &str, caret: usize) ->
 }
 
 #[must_use]
-pub fn char_index_to_byte(value: &str, char_index: usize) -> usize {
+pub(crate) fn char_index_to_byte(value: &str, char_index: usize) -> usize {
     value
         .char_indices()
         .nth(char_index)

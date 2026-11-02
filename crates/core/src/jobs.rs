@@ -8,7 +8,7 @@ pub mod status {
     pub const CANCELLED: &str = "cancelled";
 }
 
-pub fn ensure_jobs_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_jobs_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS jobs (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +67,7 @@ pub fn enqueue_on(
     Ok(conn.last_insert_rowid())
 }
 
-pub fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<Option<ClaimedJob>> {
+pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<Option<ClaimedJob>> {
     let tx = conn.transaction()?;
     type ClaimRow = (i64, String, String, i64, i64);
     let select_row = |stmt: &mut rusqlite::Statement<'_>,
@@ -157,7 +157,7 @@ pub fn complete(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn complete_with_result(conn: &Connection, id: i64, result: &str) -> Result<()> {
+pub(crate) fn complete_with_result(conn: &Connection, id: i64, result: &str) -> Result<()> {
     let rows = conn.execute(
         "UPDATE jobs SET status = 'completed', completed_at = datetime('now'), error = NULL,
                          result = ?2
@@ -210,7 +210,7 @@ pub fn fail(conn: &Connection, id: i64, error: &str, retryable: bool) -> Result<
     Ok(())
 }
 
-pub fn park_job(conn: &Connection, id: i64) -> Result<()> {
+pub(crate) fn park_job(conn: &Connection, id: i64) -> Result<()> {
     conn.execute(
         "UPDATE jobs SET status = 'awaiting_approval', completed_at = NULL WHERE id = ?1",
         params![id],
@@ -313,7 +313,7 @@ pub fn get_job(conn: &Connection, id: i64) -> Result<Option<QueueJob>> {
     Ok(job)
 }
 
-pub fn recover_stale_jobs(conn: &Connection) -> Result<usize> {
+pub(crate) fn recover_stale_jobs(conn: &Connection) -> Result<usize> {
     let rows = conn.execute(
         "UPDATE jobs SET status = 'queued', error = 'Recovered after restart'
           WHERE status = 'running' AND started_at < datetime('now', '-30 minutes')",
@@ -322,7 +322,7 @@ pub fn recover_stale_jobs(conn: &Connection) -> Result<usize> {
     Ok(rows)
 }
 
-pub fn requeue_stale_running_jobs(
+pub(crate) fn requeue_stale_running_jobs(
     conn: &Connection,
     threshold_minutes: i64,
     executing: &std::collections::HashSet<i64>,
@@ -425,7 +425,7 @@ pub fn audit_entry(
     Ok(())
 }
 
-pub fn record_outbound_attempt(
+pub(crate) fn record_outbound_attempt(
     conn: &Connection,
     job_id: i64,
     attempt: i64,

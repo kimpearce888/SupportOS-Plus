@@ -5,7 +5,7 @@ use crate::catalog::ResponseState;
 use crate::error::Result;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ActivityEvent {
+pub(crate) struct ActivityEvent {
     pub id: Option<i64>,
     pub conversation_id: i64,
     pub event_type: String,
@@ -15,7 +15,7 @@ pub struct ActivityEvent {
     pub dedup_key: String,
 }
 
-pub fn apply_m003(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m003(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS activity_events (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +55,7 @@ pub fn apply_m003(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn record_event(conn: &Connection, event: &ActivityEvent) -> Result<bool> {
+pub(crate) fn record_event(conn: &Connection, event: &ActivityEvent) -> Result<bool> {
     let rows = conn.execute(
         "INSERT OR IGNORE INTO activity_events
             (conversation_id, event_type, actor_type, actor_id, occurred_at, dedup_key)
@@ -73,7 +73,7 @@ pub fn record_event(conn: &Connection, event: &ActivityEvent) -> Result<bool> {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FullActivityEvent {
+pub(crate) struct FullActivityEvent {
     #[serde(flatten)]
     pub base: ActivityEvent,
     pub thread_local_id: Option<i64>,
@@ -81,7 +81,7 @@ pub struct FullActivityEvent {
     pub metadata: Option<String>,
 }
 
-pub fn record_full_event(conn: &Connection, event: &FullActivityEvent) -> Result<bool> {
+pub(crate) fn record_full_event(conn: &Connection, event: &FullActivityEvent) -> Result<bool> {
     let has_columns = conn
         .prepare("SELECT metadata, source, thread_local_id FROM activity_events LIMIT 0")
         .is_ok();
@@ -165,7 +165,7 @@ fn derive_mirror_event(t: &MirrorThread) -> Option<(String, String, Option<i64>)
     }
 }
 
-pub fn update_derived_columns_by_local_id(conn: &Connection, conv_local: i64) -> Result<()> {
+pub(crate) fn update_derived_columns_by_local_id(conn: &Connection, conv_local: i64) -> Result<()> {
     let status: Option<String> = conn
         .query_row(
             "SELECT status FROM conversations WHERE id = ?1",
@@ -260,7 +260,7 @@ pub fn update_derived_columns_by_local_id(conn: &Connection, conv_local: i64) ->
     Ok(())
 }
 
-pub fn rebuild_all(conn: &Connection) -> Result<RebuildSummary> {
+pub(crate) fn rebuild_all(conn: &Connection) -> Result<RebuildSummary> {
     let mut summary = RebuildSummary::default();
 
     let conversations: Vec<i64> = {

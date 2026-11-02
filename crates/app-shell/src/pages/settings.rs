@@ -445,40 +445,40 @@ impl SettingsPage {
         }
     }
 
-    pub fn set_data_dir(&mut self, dir: PathBuf) {
+    pub(crate) fn set_data_dir(&mut self, dir: PathBuf) {
         self.data_dir = Some(dir);
     }
 
-    pub fn set_backups_dir(&mut self, dir: PathBuf) {
+    pub(crate) fn set_backups_dir(&mut self, dir: PathBuf) {
         self.backups_dir = Some(dir);
     }
 
-    pub fn set_workers(
+    pub(crate) fn set_workers(
         &mut self,
         workers: Option<std::sync::Arc<crate::workers_host::WorkersHost>>,
     ) {
         self.workers = workers;
     }
 
-    pub fn set_provider_handle(
+    pub(crate) fn set_provider_handle(
         &mut self,
         handle: std::sync::Arc<spp_core::provider_handle::ProviderHandle>,
     ) {
         self.provider = Some(handle);
     }
 
-    pub fn set_sync_engine(
+    pub(crate) fn set_sync_engine(
         &mut self,
         engine: Option<std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
     ) {
         self.engine = engine;
     }
 
-    pub fn set_bus(&mut self, bus: spp_core::event_bus::EventBus) {
+    pub(crate) fn set_bus(&mut self, bus: spp_core::event_bus::EventBus) {
         self.bus = Some(bus);
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.stale = true;
         self.helpscout = None;
         self.hours.clear();

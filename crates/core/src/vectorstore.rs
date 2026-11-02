@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 
-pub type PointId = String;
+pub(crate) type PointId = String;
 
-pub type DenseVector = Vec<f32>;
+pub(crate) type DenseVector = Vec<f32>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SparseVector {

@@ -99,7 +99,7 @@ impl SupportGraphPage {
         self.reload_results(db);
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.stats = None;
         self.stats_at = None;
         if self.query.is_empty() {

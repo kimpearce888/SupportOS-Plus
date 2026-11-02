@@ -71,7 +71,7 @@ pub struct ConfirmRequest {
 
 impl ConfirmRequest {
     #[must_use]
-    pub fn delete_automation_rule(id: i64, name: &str) -> Self {
+    pub(crate) fn delete_automation_rule(id: i64, name: &str) -> Self {
         Self {
             title: "Delete automation rule?".into(),
             message: format!(
@@ -84,7 +84,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn delete_knowledge_doc(id: i64, title: &str) -> Self {
+    pub(crate) fn delete_knowledge_doc(id: i64, title: &str) -> Self {
         Self {
             title: "Delete knowledge document?".into(),
             message: format!(
@@ -98,7 +98,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn delete_custom_type(id: i64, name: &str) -> Self {
+    pub(crate) fn delete_custom_type(id: i64, name: &str) -> Self {
         Self {
             title: "Delete custom type?".into(),
             message: format!(
@@ -112,7 +112,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn delete_custom_object(id: i64, name: &str) -> Self {
+    pub(crate) fn delete_custom_object(id: i64, name: &str) -> Self {
         Self {
             title: "Delete object?".into(),
             message: format!(
@@ -125,7 +125,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn delete_connector(id: i64, name: &str) -> Self {
+    pub(crate) fn delete_connector(id: i64, name: &str) -> Self {
         Self {
             title: "Delete connector?".into(),
             message: format!(
@@ -153,7 +153,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn clear_diagnostics_log(count: usize) -> Self {
+    pub(crate) fn clear_diagnostics_log(count: usize) -> Self {
         Self {
             title: "Clear the event log?".into(),
             message: format!(
@@ -188,7 +188,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn cancel_campaign_remaining(id: i64, name: &str) -> Self {
+    pub(crate) fn cancel_campaign_remaining(id: i64, name: &str) -> Self {
         Self {
             title: "Cancel the remaining sends?".into(),
             message: format!(
@@ -202,7 +202,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn disable_all_ai() -> Self {
+    pub(crate) fn disable_all_ai() -> Self {
         Self {
             title: "Disable all AI?".into(),
             message: "Every AI feature and every endpoint call is disabled at once. \
@@ -231,7 +231,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn dialog(&self) -> crate::overlays::ConfirmDialog {
+    pub(crate) fn dialog(&self) -> crate::overlays::ConfirmDialog {
         let mut dialog =
             crate::overlays::ConfirmDialog::new(self.title.clone(), self.message.clone())
                 .confirm_label(self.confirm_label.clone());
@@ -338,7 +338,7 @@ impl PageKey {
 
 mod queries;
 
-pub use queries::invalidated_pages;
+pub(crate) use queries::invalidated_pages;
 pub(crate) use queries::{i64_field, opt_str_field, str_field};
 
 #[cfg(test)]

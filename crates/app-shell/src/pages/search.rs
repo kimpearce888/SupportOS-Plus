@@ -59,14 +59,14 @@ impl SearchPage {
         }
     }
 
-    pub fn set_vector_index(
+    pub(crate) fn set_vector_index(
         &mut self,
         index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
     ) {
         self.vector_index = index;
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         if self.query.is_empty() {
             return;
         }

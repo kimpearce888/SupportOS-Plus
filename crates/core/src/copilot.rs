@@ -22,7 +22,7 @@ use crate::ai_prompts::{
 };
 use crate::ai_tools;
 
-pub fn ensure_copilot_schema(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_copilot_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS copilot_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

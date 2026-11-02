@@ -12,11 +12,11 @@ fn iso_utc(ts_ms: i64) -> String {
 }
 
 #[must_use]
-pub fn iso_utc_pub(ts_ms: i64) -> String {
+pub(crate) fn iso_utc_pub(ts_ms: i64) -> String {
     iso_utc(ts_ms)
 }
 
-pub const RESPONSE_STATE_SQL: &str = "CASE
+pub(crate) const RESPONSE_STATE_SQL: &str = "CASE
   WHEN c.status = 'closed' THEN 'closed'
   WHEN c.status = 'spam' THEN 'closed'
   WHEN c.status = 'active' AND c.snoozed_until IS NOT NULL AND c.snoozed_until > datetime('now') THEN 'snoozed'
@@ -37,7 +37,7 @@ pub const RESPONSE_STATE_SQL: &str = "CASE
   ELSE 'never_responded'
 END";
 
-pub fn ensure_inbox_views_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_inbox_views_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS inbox_views (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

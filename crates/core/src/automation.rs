@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::migrations::add_column_if_missing;
 
-pub fn apply_m007(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m007(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS automation_rules (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,7 +187,7 @@ pub fn risk_tier(kind: &str) -> Option<&'static str> {
     }
 }
 
-pub fn ensure_main_rule_columns(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_main_rule_columns(conn: &Connection) -> Result<()> {
     add_column_if_missing(
         conn,
         "automation_rules",
@@ -207,7 +207,7 @@ pub fn ensure_main_rule_columns(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "automation_runs", "detail", "TEXT")
 }
 
-pub fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> {
     add_column_if_missing(
         conn,
         "conversations",
@@ -217,7 +217,7 @@ pub fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> {
 }
 
 #[must_use]
-pub fn customer_thread_trigger_decision(
+pub(crate) fn customer_thread_trigger_decision(
     last_fired: Option<i64>,
     newest_customer_thread: Option<i64>,
 ) -> Option<&'static str> {
@@ -523,7 +523,7 @@ fn execute_non_destructive(
     }
 }
 
-pub fn execute_approved_action(
+pub(crate) fn execute_approved_action(
     conn: &mut Connection,
     conversation_id: i64,
     action: &serde_json::Value,
@@ -628,7 +628,7 @@ pub fn execute_approved_action(
     }
 }
 
-pub fn record_approved_run(
+pub(crate) fn record_approved_run(
     conn: &Connection,
     rule_id: i64,
     conversation_id: i64,
@@ -889,7 +889,7 @@ fn attribute_matches(
     }
 }
 
-pub fn fire_trigger_for_conversation(
+pub(crate) fn fire_trigger_for_conversation(
     conn: &mut Connection,
     fired: &str,
     conversation_id: i64,

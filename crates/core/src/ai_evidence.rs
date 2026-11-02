@@ -291,7 +291,7 @@ pub fn build(
 }
 
 #[must_use]
-pub fn semantic_hits(
+pub(crate) fn semantic_hits(
     conn: &Connection,
     index: &crate::vectorstore_sqlitevec::VectorIndex,
     conversation_local_id: i64,
@@ -357,7 +357,7 @@ pub fn semantic_hits(
     best
 }
 
-pub fn find_similar(
+pub(crate) fn find_similar(
     conn: &Connection,
     conversation_local_id: i64,
     limit: usize,
@@ -551,7 +551,7 @@ pub struct AiSourceRef {
     pub timestamp: Option<String>,
 }
 
-pub fn sources_for(conn: &Connection, ctx: &EvidenceContext) -> Vec<AiSourceRef> {
+pub(crate) fn sources_for(conn: &Connection, ctx: &EvidenceContext) -> Vec<AiSourceRef> {
     let mut sources: Vec<AiSourceRef> = Vec::new();
     let conv_id_by_number = |number: i64| -> Option<i64> {
         conn.query_row(

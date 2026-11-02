@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 
 pub const STATE_TTL_SECONDS: i64 = 600;
 
-pub fn ensure_oauth_states_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_oauth_states_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS oauth_states (
             state        TEXT PRIMARY KEY,
@@ -25,7 +25,11 @@ pub fn ensure_oauth_states_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn issue_state(conn: &Connection, redirect_uri: &str, scope: Option<&str>) -> Result<String> {
+pub(crate) fn issue_state(
+    conn: &Connection,
+    redirect_uri: &str,
+    scope: Option<&str>,
+) -> Result<String> {
     ensure_oauth_states_table(conn)?;
     let state = random_state();
     conn.execute(
@@ -35,7 +39,7 @@ pub fn issue_state(conn: &Connection, redirect_uri: &str, scope: Option<&str>) -
     Ok(state)
 }
 
-pub fn consume_state(conn: &Connection, state: &str) -> Result<()> {
+pub(crate) fn consume_state(conn: &Connection, state: &str) -> Result<()> {
     ensure_oauth_states_table(conn)?;
     let consumed = conn.execute(
         "UPDATE oauth_states
@@ -60,7 +64,7 @@ pub fn redirect_uri_for(conn: &Connection, state: &str) -> Result<Option<String>
     Ok(v)
 }
 
-pub fn sweep_states(conn: &Connection) -> Result<u32> {
+pub(crate) fn sweep_states(conn: &Connection) -> Result<u32> {
     ensure_oauth_states_table(conn)?;
     let rows = conn.execute(
         "DELETE FROM oauth_states

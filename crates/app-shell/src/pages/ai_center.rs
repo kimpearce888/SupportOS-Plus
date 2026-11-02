@@ -300,14 +300,14 @@ impl AiCenterPage {
         }
     }
 
-    pub fn set_vector_index(
+    pub(crate) fn set_vector_index(
         &mut self,
         index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
     ) {
         self.vector_index = index;
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.settings = None;
         self.analytics = None;
         self.distributions.clear();
@@ -456,7 +456,7 @@ impl AiCenterPage {
         None
     }
 
-    pub fn disable_all_ai_confirmed(&mut self, db: &DbHandle) -> spp_core::Result<()> {
+    pub(crate) fn disable_all_ai_confirmed(&mut self, db: &DbHandle) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::settings::set_bool(conn, "ai_enabled", false));
         self.reload_hub(db);
         result

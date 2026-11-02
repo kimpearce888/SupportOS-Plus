@@ -199,7 +199,7 @@ pub fn latest_version() -> u32 {
     MIGRATIONS.iter().map(|m| m.version).max().unwrap_or(0)
 }
 
-pub fn run_all(conn: &mut rusqlite::Connection) -> crate::error::Result<()> {
+pub(crate) fn run_all(conn: &mut rusqlite::Connection) -> crate::error::Result<()> {
     crate::db::ensure_migrations_table(conn)?;
     let current = crate::db::latest_version(conn)?;
     let target = latest_version();

@@ -43,7 +43,7 @@ pub fn html_to_spans(html: &str) -> Vec<Span> {
     Parser::new(&clean).run()
 }
 
-pub fn strip_html(html: &str) -> String {
+pub(crate) fn strip_html(html: &str) -> String {
     html_to_spans(html)
         .iter()
         .map(|s| s.text.as_str())

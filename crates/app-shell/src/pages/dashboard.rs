@@ -6,7 +6,7 @@ use crate::chart;
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
-pub const RANGES: [(i64, &str); 4] = [
+pub(crate) const RANGES: [(i64, &str); 4] = [
     (7, "7 days"),
     (30, "30 days"),
     (90, "90 days"),
@@ -54,7 +54,7 @@ pub struct MailboxComparison {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct DashboardData {
+pub(crate) struct DashboardData {
     pub range_from: String,
     pub range_to: String,
     pub new_conversations: i64,
@@ -80,7 +80,7 @@ pub struct DashboardData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DashboardScope {
+pub(crate) struct DashboardScope {
     pub days: i64,
     pub mailbox_ids: Vec<i64>,
     pub channel: Option<String>,
@@ -121,7 +121,7 @@ fn name_counts(
 }
 
 #[must_use]
-pub fn load_dashboard(conn: &Connection, scope: &DashboardScope) -> DashboardData {
+pub(crate) fn load_dashboard(conn: &Connection, scope: &DashboardScope) -> DashboardData {
     let now = scope.today.unwrap_or_else(chrono::Utc::now);
     let from = spp_core::business_hours::iso_days_ago_at(scope.days, now);
     let to = spp_core::business_hours::now_iso_millis_at(now);
@@ -434,7 +434,7 @@ pub fn radar_alerts(conn: &Connection) -> Vec<serde_json::Value> {
 }
 
 #[must_use]
-pub fn daily_new_points(data: &DashboardData) -> Vec<[f64; 2]> {
+pub(crate) fn daily_new_points(data: &DashboardData) -> Vec<[f64; 2]> {
     data.daily_new
         .iter()
         .enumerate()
@@ -465,7 +465,7 @@ impl DashboardPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.data = None;
     }
 

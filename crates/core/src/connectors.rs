@@ -12,7 +12,7 @@ const MAX_ROW_BYTES: usize = 32_000;
 const HTTP_TIMEOUT_MS: u64 = 10_000;
 const HTTP_MAX_BYTES: u64 = 10 * 1024 * 1024;
 
-pub fn apply_m038(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m038(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS connector_rows (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -296,7 +296,7 @@ pub struct RefreshResult {
     pub error: Option<String>,
 }
 
-pub fn due_for_refresh(conn: &Connection) -> Result<Vec<i64>> {
+pub(crate) fn due_for_refresh(conn: &Connection) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare(
         "SELECT id, enabled, refresh_method, refresh_seconds, last_sync_at FROM connectors",
     )?;

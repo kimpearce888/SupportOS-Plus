@@ -13,7 +13,7 @@ use crate::mirror;
 
 mod loops;
 
-pub const INITIAL_SYNC_ORDER: [&str; 19] = [
+pub(crate) const INITIAL_SYNC_ORDER: [&str; 19] = [
     "account",
     "users",
     "system_users",
@@ -51,7 +51,7 @@ pub const INCREMENTAL_REFERENCE_ORDER: [&str; 13] = [
     "docs_articles",
 ];
 
-pub const SYNC_OVERLAP_MINUTES: i64 = 10;
+pub(crate) const SYNC_OVERLAP_MINUTES: i64 = 10;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ResourceSyncResult {
@@ -86,7 +86,7 @@ impl Drop for RunningGuard<'_> {
     }
 }
 
-pub fn recover_interrupted_state(conn: &Connection) -> bool {
+pub(crate) fn recover_interrupted_state(conn: &Connection) -> bool {
     let state = get_state(conn);
     if state != "INITIALIZING" && state != "BACKFILLING" {
         return false;
@@ -113,7 +113,7 @@ pub fn recover_interrupted_state(conn: &Connection) -> bool {
     true
 }
 
-pub fn cancel_orphaned_runs(conn: &Connection) -> Result<usize> {
+pub(crate) fn cancel_orphaned_runs(conn: &Connection) -> Result<usize> {
     let n = conn.execute(
         "UPDATE sync_runs SET state = 'CANCELLED', finished_at = datetime('now') \
          WHERE state IN ('INITIALIZING', 'BACKFILLING') AND finished_at IS NULL",
@@ -205,7 +205,7 @@ pub fn start_run(conn: &Connection, kind: &str) -> Result<i64> {
     Ok(conn.last_insert_rowid())
 }
 
-pub struct RunUpdate<'a> {
+pub(crate) struct RunUpdate<'a> {
     pub state: Option<&'a str>,
     pub resources_done: Option<i64>,
     pub resources_total: Option<i64>,
@@ -215,7 +215,7 @@ pub struct RunUpdate<'a> {
     pub finished: bool,
 }
 
-pub fn update_run(conn: &Connection, id: i64, fields: RunUpdate<'_>) -> Result<()> {
+pub(crate) fn update_run(conn: &Connection, id: i64, fields: RunUpdate<'_>) -> Result<()> {
     let mut sets: Vec<&str> = Vec::new();
     let mut args: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(s) = fields.state {
@@ -266,7 +266,7 @@ pub fn record_success(conn: &Connection, resource: &str, records_processed: i64)
     );
 }
 
-pub fn record_failure(conn: &Connection, resource: &str, error: &str, records_failed: i64) {
+pub(crate) fn record_failure(conn: &Connection, resource: &str, error: &str, records_failed: i64) {
     let clipped: String = error.chars().take(500).collect();
     let _ = conn.execute(
         "INSERT INTO sync_checkpoints (resource, records_processed, records_failed, last_error, retry_count, status)
@@ -293,7 +293,7 @@ pub fn set_checkpoint_running(conn: &Connection, resource: &str, running: bool) 
     );
 }
 
-pub fn get_incremental_since(
+pub(crate) fn get_incremental_since(
     conn: &Connection,
     resource: &str,
     overlap_minutes: i64,
@@ -329,7 +329,7 @@ pub fn last_sync_age_seconds(conn: &Connection) -> Option<i64> {
     Some(age.num_seconds().max(0))
 }
 
-pub fn get_cursor(conn: &Connection, resource: &str) -> Option<String> {
+pub(crate) fn get_cursor(conn: &Connection, resource: &str) -> Option<String> {
     conn.query_row(
         "SELECT cursor FROM sync_cursors WHERE resource = ?1",
         params![resource],
@@ -340,7 +340,7 @@ pub fn get_cursor(conn: &Connection, resource: &str) -> Option<String> {
     .filter(|c| !c.is_empty())
 }
 
-pub fn set_cursor(conn: &Connection, resource: &str, cursor: Option<&str>) {
+pub(crate) fn set_cursor(conn: &Connection, resource: &str, cursor: Option<&str>) {
     let _ = conn.execute(
         "INSERT INTO sync_cursors (resource, cursor, updated_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(resource) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at",
@@ -348,7 +348,7 @@ pub fn set_cursor(conn: &Connection, resource: &str, cursor: Option<&str>) {
     );
 }
 
-pub fn local_id_str(conn: &Connection, table: &str, remote_id: &str) -> Option<i64> {
+pub(crate) fn local_id_str(conn: &Connection, table: &str, remote_id: &str) -> Option<i64> {
     conn.query_row(
         &format!("SELECT id FROM {table} WHERE remote_id = ?1"),
         params![remote_id],
@@ -366,7 +366,7 @@ pub fn local_id(conn: &Connection, table: &str, remote_id: i64) -> Option<i64> {
     .ok()
 }
 
-pub fn conversation_local_id(conn: &Connection, remote_id: i64) -> Option<i64> {
+pub(crate) fn conversation_local_id(conn: &Connection, remote_id: i64) -> Option<i64> {
     conn.query_row(
         "SELECT id FROM conversations WHERE remote_id = ?1",
         params![remote_id],
@@ -436,7 +436,10 @@ fn upsert_property_definitions(
     Ok(())
 }
 
-pub fn upsert_organization(conn: &Connection, o: &crate::helpscout::HsOrganization) -> Result<()> {
+pub(crate) fn upsert_organization(
+    conn: &Connection,
+    o: &crate::helpscout::HsOrganization,
+) -> Result<()> {
     let domains = serde_json::to_string(&o.domains).unwrap_or_else(|_| "[]".into());
     conn.execute(
         "INSERT INTO organizations (remote_id, name, domains, remote_created_at, remote_updated_at, last_seen_at, last_synced_at)

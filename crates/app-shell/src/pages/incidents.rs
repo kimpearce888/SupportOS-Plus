@@ -96,7 +96,7 @@ impl IncidentsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.loaded = false;
         self.rows.clear();
         self.detail = None;

@@ -7,9 +7,9 @@ use crate::ai_provider::{
 };
 use crate::error::{Error, Result};
 
-pub const LM_STUDIO_BASE_URL: &str = "http://127.0.0.1:1234/v1";
+pub(crate) const LM_STUDIO_BASE_URL: &str = "http://127.0.0.1:1234/v1";
 
-pub const LM_STUDIO_DEFAULT_TIMEOUT_MS: u64 = 120_000;
+pub(crate) const LM_STUDIO_DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 #[must_use]
 pub fn normalize_v1_base_url(url: &str) -> String {
@@ -23,7 +23,7 @@ pub struct LmStudioProvider {
 
 impl LmStudioProvider {
     #[must_use]
-    pub fn with_client(client: OpenAiCompatibleClient) -> Self {
+    pub(crate) fn with_client(client: OpenAiCompatibleClient) -> Self {
         Self { client }
     }
 
@@ -97,7 +97,7 @@ impl OpenAiCompatibleClient {
     }
 
     #[must_use]
-    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
+    pub(crate) fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
         self
     }
@@ -107,7 +107,7 @@ impl OpenAiCompatibleClient {
         &self.base_url
     }
 
-    pub async fn is_available(&self) -> bool {
+    pub(crate) async fn is_available(&self) -> bool {
         let mut req = self.http.get(format!("{}/models", self.base_url));
         if let Some(ref key) = self.api_key {
             req = req.bearer_auth(key);
@@ -172,7 +172,7 @@ impl OpenAiCompatibleClient {
         parse_chat_response(body)
     }
 
-    pub async fn chat_with_opts(
+    pub(crate) async fn chat_with_opts(
         &self,
         model: Option<&str>,
         messages: &[ChatMessage],
@@ -264,7 +264,7 @@ impl OpenAiCompatibleClient {
         })
     }
 
-    pub async fn chat_with_tools(
+    pub(crate) async fn chat_with_tools(
         &self,
         model: Option<&str>,
         messages: &[CopilotWireMessage],
@@ -401,7 +401,7 @@ pub fn build_chat_request_body(model: &str, messages: &[ChatMessage]) -> ChatCom
 }
 
 #[derive(Debug, Clone)]
-pub struct ChatOptsResult {
+pub(crate) struct ChatOptsResult {
     pub content: Option<String>,
     pub model: String,
     pub latency_ms: u64,
@@ -410,7 +410,7 @@ pub struct ChatOptsResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct ChatTool {
+pub(crate) struct ChatTool {
     pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,
@@ -424,7 +424,7 @@ pub struct ToolCall {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CopilotWireMessage {
+pub(crate) struct CopilotWireMessage {
     pub role: String,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -436,20 +436,20 @@ pub struct CopilotWireMessage {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CopilotWireToolCall {
+pub(crate) struct CopilotWireToolCall {
     pub id: String,
     pub r#type: &'static str,
     pub function: CopilotWireToolFunction,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CopilotWireToolFunction {
+pub(crate) struct CopilotWireToolFunction {
     pub name: String,
     pub arguments: String,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ChatOpts {
+pub(crate) struct ChatOpts {
     pub temperature: Option<f64>,
     pub max_tokens: Option<u32>,
     pub json_mode: bool,

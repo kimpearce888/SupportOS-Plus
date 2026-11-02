@@ -358,7 +358,7 @@ impl WorkerManager {
         tracing::info!(operation = "stop", "Background workers stopped");
     }
 
-    pub async fn tick(&self) {
+    pub(crate) async fn tick(&self) {
         if self.stopped.load(Ordering::SeqCst) {
             return;
         }

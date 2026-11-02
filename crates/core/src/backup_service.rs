@@ -149,7 +149,7 @@ pub fn list_backups(backups_dir: &Path) -> Vec<Value> {
     out.into_iter().map(|(_, v)| v).collect()
 }
 
-pub fn prune_backups(backups_dir: &Path, keep: usize) -> usize {
+pub(crate) fn prune_backups(backups_dir: &Path, keep: usize) -> usize {
     let Ok(entries) = fs::read_dir(backups_dir) else {
         return 0;
     };

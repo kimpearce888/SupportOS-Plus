@@ -45,7 +45,7 @@ pub(crate) fn clear_master_key_for_tests() {
 #[cfg(test)]
 pub(crate) static SECRETS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-pub fn master_key_available() -> bool {
+pub(crate) fn master_key_available() -> bool {
     MASTER_KEY.read().expect("master key lock").is_some()
 }
 
@@ -59,7 +59,7 @@ fn master_key() -> Result<[u8; KEY_LEN]> {
 
 const ENVELOPE_VERSION: u8 = 0x01;
 
-pub fn set_secret(conn: &Connection, key: &str, plaintext: &[u8]) -> Result<()> {
+pub(crate) fn set_secret(conn: &Connection, key: &str, plaintext: &[u8]) -> Result<()> {
     let mk = master_key()?;
     let (nonce, ciphertext) = crypto::encrypt(&mk, plaintext)?;
     let mut blob = Vec::with_capacity(1 + NONCE_LEN + ciphertext.len());
@@ -91,7 +91,7 @@ pub fn get_secret(conn: &Connection, key: &str) -> Result<Option<Vec<u8>>> {
     Ok(Some(plaintext))
 }
 
-pub fn apply_m049_secret_envelope(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m049_secret_envelope(conn: &Connection) -> Result<()> {
     if master_key().is_err() {
         tracing::warn!(
             "secrets master key not initialized; leaving plaintext webhook_secret in place for now"
@@ -147,7 +147,7 @@ pub fn set_bool(conn: &Connection, key: &str, value: bool) -> Result<()> {
     set_string(conn, key, if value { "true" } else { "false" })
 }
 
-pub fn get_int(conn: &Connection, key: &str, default: i64) -> Result<i64> {
+pub(crate) fn get_int(conn: &Connection, key: &str, default: i64) -> Result<i64> {
     Ok(match get_string(conn, key)? {
         None => default,
         Some(s) => match s.trim().parse::<i64>() {
@@ -176,7 +176,10 @@ pub fn set_i64(conn: &Connection, key: &str, value: i64) -> Result<()> {
     set_string(conn, key, &value.to_string())
 }
 
-pub fn get_json<T: serde::de::DeserializeOwned>(conn: &Connection, key: &str) -> Result<Option<T>> {
+pub(crate) fn get_json<T: serde::de::DeserializeOwned>(
+    conn: &Connection,
+    key: &str,
+) -> Result<Option<T>> {
     match get_string(conn, key)? {
         None => Ok(None),
         Some(s) => {
@@ -188,13 +191,13 @@ pub fn get_json<T: serde::de::DeserializeOwned>(conn: &Connection, key: &str) ->
     }
 }
 
-pub fn set_json<T: serde::Serialize>(conn: &Connection, key: &str, value: &T) -> Result<()> {
+pub(crate) fn set_json<T: serde::Serialize>(conn: &Connection, key: &str, value: &T) -> Result<()> {
     let s = serde_json::to_string(value)
         .map_err(|e| Error::Config(format!("settings key {key:?} failed to serialize: {e}")))?;
     set_string(conn, key, &s)
 }
 
-pub fn has_secret(conn: &Connection, key: &str) -> Result<bool> {
+pub(crate) fn has_secret(conn: &Connection, key: &str) -> Result<bool> {
     let exists: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM secrets WHERE key = ?1)",
         params![key],

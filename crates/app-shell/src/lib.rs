@@ -3,12 +3,12 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
 pub mod app;
-pub mod chart;
+pub(crate) mod chart;
 pub mod design;
 pub mod fatal;
 pub mod icons;
 pub mod mention_popup;
-pub mod overlays;
+pub(crate) mod overlays;
 pub mod pages;
 pub mod palette;
 #[allow(unsafe_code)]

@@ -203,7 +203,7 @@ impl OperationsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.snapshot = None;
         self.workload = None;
         self.suggestions_loaded = false;

@@ -1382,3 +1382,96 @@ regions + 40 visibility edits' pub-keyword removals). Open items
 recorded: **A1-3b** (1,134 cross-file crate-internal pub→pub(crate)
 sweep), the 9 undocumented knobs (document-or-remove, owner's call),
 response_state_sql.rs 3 fns (KEEP recorded, owner-delegated).
+
+## Batch KB-4 — A1-3b visibility tranche (447 pub→pub(crate)) + A1-7 hidden-lever documentation (USER_MANUAL §13.1) — opened and completed 2026-11-02
+
+Owner directive at open: "take the best course of action" on the two
+recorded open items (the A1-3b 1,134-item sweep; the 9 undocumented
+knobs). Course chosen: BOTH — the knobs documented (cheap, zero-risk,
+completes A1-7's recorded follow-up) and the visibility sweep executed
+as ONE reviewable tranche per kb3's "its own reviewable batch"
+discipline, with the residual re-censused and recorded rather than
+churned unreviewed. The tranche itself was found ALREADY APPLIED in the
+working tree on session resume (the prior session was cut mid-batch
+after applying it; no records, no compile proof, no commit) — this
+session verified it line-by-line, completed it, proved it, and
+recorded it. Nothing was trusted from the cut session: every edit
+re-derived, every manual claim re-checked against the readers.
+
+**KB-4-1 — A1-3b tranche: 447 pub→pub(crate) visibility edits across
+99 source files (68 core + 31 app-shell), +517/−447 source lines;
+ZERO deletions, zero signature changes, zero SQL/migration semantics
+touched.** Diff purity proven line-by-line: filtering the whole diff
+for non-visibility lines yields exactly the USER_MANUAL §13.1 block
+plus rustfmt reflows of widened signatures (each a deleted one-line
+`pub` signature replaced by a multi-line `pub(crate)` one — e.g.
+chart.rs `line_chart`); nothing else. NO-TOUCH modules absent from the
+diff (ai_center.rs, db.rs, maintenance.rs, response_state_sql.rs —
+diff-verified; there is no separate intelligence.rs); migrations.rs
+edits are visibility-only on non-SQL items. No allow() stamps.
+
+**KB-4-2 — residual census re-derived, honestly recorded.** The lost
+session applied 447 of kb3's 1,134-item census; the residual was
+RE-DERIVED at the post-tranche tree with the kb3 methodology
+(conservative name-based, collision-suppressing, external consumers =
+app-shell src+tests / xtask / catalog, #[cfg(test)] mods blanked,
+NO-TOUCH files counted apart): **651 remaining candidates (472 core +
+170 app-shell + 9 catalog) + 41 plain-pub sites in NO-TOUCH files
+(out of scope by owner directive)**. 447 + 651 = 1,098 ≈ kb3's 1,134
+(±3% name-based noise on both ends — consistent). The 9 catalog
+candidates are exactly the enum definitions whose kb2-deleted
+re-exports orphaned them (ActivityField/DateMode/ConditionKind + 6
+workspace enums) — recorded for a future batch, NOT executed here.
+
+**KB-4-3 — A1-7 completed: USER_MANUAL §13.1 "Settings-table levers"
+added** — all 9 KEEP-hidden-lever keys plus retention_days (the DEFER
+resolved as "document instead") in an operator-facing table with
+defaults, accepted ranges, read-timing, and the notification type
+list. EVERY claim verified against the readers before shipping; the
+verification caught two imprecisions, fixed in the same pass:
+(1) ops_waiting_threshold_minutes is read by the Inbox filter bar
+(inbox.rs:98 → tile_fragment) as well as the Ops page — row now reads
+"Ops and Inbox pages"; (2) enforce_retention also prunes
+NOTIFICATIONS (rows older than the window, or read longer ago than
+the window) — the draft row omitted them; maintenance.rs:108-136 read
+in full and the row corrected. All 15 notification type names match
+NotificationType::as_str exactly (catalog/notifications.rs);
+default_enabled() ≡ true; pref_for gates the insert path
+(notifications.rs:229); sweep defaults/clamps verified at
+workers/mod.rs:275/297/319 (15 s / 5–3600, 60 s / 15–3600,
+900 s / 60–86400; each read once at worker start then looped —
+"restart after changing" is literal); backup_interval_hours default
+24, `0` = off (workers/mod.rs:985-987); freshness defaults
+180/90/60 (knowledge_store.rs:336-340); ops threshold default 240,
+clamp 1..=20_160 (operations.rs:11,148-158); the example SQL matches
+the application_settings(key,value) schema; the §7 anchor and the
+§13.1 numbering verified collision-free.
+
+**KB-4-4 — verification, all green (incidents disclosed):** fmt clean
+(applied + re-checked — the reflows were already fmt'd, zero churn);
+cargo check --workspace --all-targets clean with ZERO warnings; cargo
+clippy --workspace --all-targets -- -D warnings 0; gate_traceability
+OK — identical 23 routes / 20 DC tags / 27 ids; gate_no_simulation
+clean; verify-icons clean; core lib **487 passed / 0 failed / 4
+ignored** (--test-threads=1, 345.74s — identical baseline); app-shell
+lib **242/0** (215.41s); xtask **11/0**; doc-tests 0/0; **kittest:
+batch A 13 suites/93 + batch B 12 targets/89 (style_lint 2 + the
+live_chats double-run) = 24 unique targets / 175 unique tests /
+0 failed — exactly the kb1/kb2 canonical baseline (23 kittest suites
+/ 173 + style_lint 2) — 171 goldens ZERO drift** (UPDATE_SNAPSHOTS
+never set; every suite is diff-locked against the committed baselines
+and passed). **RECORD CORRECTION disclosed: kb3's "24 suites / 185
+tests" was a batch-arithmetic artifact (103+82 double-counted the
+live_chats overlap); the true canonical is 175 = 173 + 2, re-proven
+here — kb3's tree had no UI changes and the golden set is
+byte-identical.** Environment notes, disclosed: detached background
+builds are reaped by this sandbox (setsid survives only briefly), so
+long builds ran foreground-iteratively on cargo's cache; disk
+pressure managed per the kb2 recipe (CARGO_PROFILE_DEV_DEBUG=0 +
+CARGO_BUILD_JOBS=2; test-profile artifacts cannot reuse check/clippy
+rmeta, so target/ was cleaned once mid-batch to reclaim 3.9G and the
+proven lib-test binaries were deleted between phases). Churn: 100
+files, +541/−447 (99 source files: 447 visibility edits + 70 reflow
+lines; USER_MANUAL +24). Residual open items: **A1-3b remainder (651
+candidates, re-censused)**, response_state_sql.rs 3 fns (KEEP
+recorded, owner-delegated). ai records synced.

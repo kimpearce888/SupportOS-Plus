@@ -40,7 +40,7 @@ impl OrganizationsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.loaded = false;
         self.orgs.clear();
         self.detail = None;

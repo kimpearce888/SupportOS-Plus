@@ -6,7 +6,7 @@ use crate::error::Result;
 use crate::migrations::add_column_if_missing;
 
 mod qa_ai;
-pub use qa_ai::compute_qa_ai_layer;
+pub(crate) use qa_ai::compute_qa_ai_layer;
 pub(crate) use qa_ai::derive_outcome;
 
 const FRICTION_FINDINGS_SQL: &str = r#"
@@ -28,7 +28,7 @@ const FRICTION_FINDINGS_SQL: &str = r#"
         ON friction_findings(customer_local_id);
 "#;
 
-pub fn ensure_quality_tables(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_quality_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(FRICTION_FINDINGS_SQL)?;
     add_column_if_missing(conn, "friction_findings", "detail", "TEXT")?;
     add_column_if_missing(conn, "post_resolution_qa", "computed_at", "TEXT")?;
@@ -652,7 +652,7 @@ const GAP_COLS: &str = "id, kind, query_text, occurrence_count, evidence_convers
                         related_document_ids, detail, status, decided_at, decision_note, \
                         created_at, updated_at";
 
-pub fn gap_by_id(conn: &Connection, id: i64) -> Option<Value> {
+pub(crate) fn gap_by_id(conn: &Connection, id: i64) -> Option<Value> {
     conn.query_row(
         &format!("SELECT {GAP_COLS} FROM knowledge_gap_candidates WHERE id = ?1"),
         params![id],
@@ -1200,7 +1200,7 @@ pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
         .collect()
 }
 
-pub fn rebuild_friction(conn: &Connection) -> (usize, usize) {
+pub(crate) fn rebuild_friction(conn: &Connection) -> (usize, usize) {
     let ids: Vec<i64> = {
         let Ok(mut stmt) = conn.prepare(
             "SELECT DISTINCT c.id FROM conversations c
@@ -1247,7 +1247,7 @@ fn minutes_between(later: &str, earlier: &str) -> Option<i64> {
 
 type RelatedConversation = (i64, i64, Option<String>, String, Option<String>);
 
-pub fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) -> Option<Value> {
+pub(crate) fn compute_qa_deterministic(conn: &Connection, conversation_id: i64) -> Option<Value> {
     type QaConversationRow = (String, Option<String>, Option<String>, Option<String>, i64);
     let conv: Option<QaConversationRow> = conn
         .query_row(
@@ -1428,7 +1428,7 @@ pub fn get_qa(conn: &Connection, conversation_id: i64, ai_available: bool) -> Op
     }))
 }
 
-pub fn rebuild_qa(conn: &Connection) -> usize {
+pub(crate) fn rebuild_qa(conn: &Connection) -> usize {
     let ids: Vec<i64> = conn
         .prepare("SELECT id FROM conversations WHERE deleted_at IS NULL AND status = 'closed'")
         .and_then(|mut stmt| {
@@ -1593,7 +1593,7 @@ mod batch13_k1_tests {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ResolutionCitation {
+pub(crate) struct ResolutionCitation {
     pub conversation_local_id: i64,
     pub number: i64,
     pub subject: Option<String>,
@@ -1601,7 +1601,7 @@ pub struct ResolutionCitation {
     pub excerpt: String,
 }
 
-pub fn best_resolutions(
+pub(crate) fn best_resolutions(
     conn: &Connection,
     conversation_ids: &[i64],
     limit: usize,

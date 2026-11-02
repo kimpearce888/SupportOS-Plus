@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 
 const TASK_TIMEOUT: Duration = Duration::from_secs(120);
 
-pub fn run_sandboxed<T, F>(label: &'static str, f: F) -> Result<T>
+pub(crate) fn run_sandboxed<T, F>(label: &'static str, f: F) -> Result<T>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,

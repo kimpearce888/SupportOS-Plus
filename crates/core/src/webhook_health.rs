@@ -61,7 +61,7 @@ impl WebhookHealthOutcome {
     }
 
     #[must_use]
-    pub fn is_healed(&self) -> bool {
+    pub(crate) fn is_healed(&self) -> bool {
         self.verdict == "reregistered"
     }
 
@@ -77,7 +77,7 @@ pub fn not_configured_outcome(detail: &str) -> WebhookHealthOutcome {
 }
 
 #[must_use]
-pub fn failed_outcome(detail: &str) -> WebhookHealthOutcome {
+pub(crate) fn failed_outcome(detail: &str) -> WebhookHealthOutcome {
     WebhookHealthOutcome::new("failed", detail.to_string())
 }
 
@@ -91,7 +91,7 @@ pub fn load_outcome(conn: &Connection) -> Result<Option<WebhookHealthOutcome>> {
     crate::settings::get_json(conn, KEY_OUTCOME)
 }
 
-pub fn cadence_due(conn: &Connection) -> Result<bool> {
+pub(crate) fn cadence_due(conn: &Connection) -> Result<bool> {
     let last = crate::settings::get_i64(conn, KEY_LAST_RUN, 0)?;
     Ok(chrono::Utc::now().timestamp() - last >= CADENCE_SECS)
 }
@@ -295,7 +295,7 @@ fn is_event_name(s: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
 }
 
-pub async fn run_check(
+pub(crate) async fn run_check(
     provider: &dyn HelpScoutProvider,
     our_url: &str,
     secret: &str,

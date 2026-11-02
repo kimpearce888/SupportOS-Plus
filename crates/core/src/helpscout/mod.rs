@@ -90,7 +90,7 @@ pub struct HsCustomer {
 
 impl HsCustomer {
     #[must_use]
-    pub fn placeholder() -> Self {
+    pub(crate) fn placeholder() -> Self {
         Self {
             remote_id: 0,
             first_name: None,
@@ -118,7 +118,7 @@ impl HsCustomer {
     }
 
     #[must_use]
-    pub fn channels_all_empty(&self) -> bool {
+    pub(crate) fn channels_all_empty(&self) -> bool {
         self.emails.is_empty()
             && self.phones.is_empty()
             && self.chats.is_empty()

@@ -204,7 +204,7 @@ fn endpoint_by_id<'a>(list: &'a [EndpointConfig], id: &str) -> Option<&'a Endpoi
 }
 
 #[must_use]
-pub fn resolve_role(
+pub(crate) fn resolve_role(
     conn: &Connection,
     role: AiRole,
 ) -> Option<(EndpointConfig, Option<String>, Option<String>)> {
@@ -416,7 +416,7 @@ pub fn usage_ledger(conn: &Connection, days: i64) -> Result<Vec<UsageRow>> {
         .collect())
 }
 
-pub fn apply_m054_ai_runs_endpoint(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m054_ai_runs_endpoint(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "ai_runs")? {
         return Ok(());
     }

@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
 
-pub fn apply_m008(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m008(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ai_runs (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +35,7 @@ fn is_js_whitespace(c: char) -> bool {
     c.is_whitespace() || c == '\u{feff}'
 }
 
-pub fn utf16_slice(s: &str, start: usize, end: usize) -> String {
+pub(crate) fn utf16_slice(s: &str, start: usize, end: usize) -> String {
     let units: Vec<u16> = s.encode_utf16().collect();
     if start >= units.len() || end <= start {
         return String::new();
@@ -45,7 +45,7 @@ pub fn utf16_slice(s: &str, start: usize, end: usize) -> String {
 }
 
 #[must_use]
-pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
+pub(crate) fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
     let mut collapsed = String::with_capacity(text.len());
     let mut in_ws = false;
     for c in text.chars() {
@@ -108,7 +108,7 @@ fn last_index_of_dot_space(units: &[u16], from: usize) -> Option<usize> {
     None
 }
 
-pub fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<usize> {
+pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Result<usize> {
     struct ConvRow {
         number: i64,
         subject: Option<String>,
@@ -246,7 +246,7 @@ fn resolution_excerpt(conn: &Connection, conversation_id: i64, header: &str) -> 
     ))
 }
 
-pub fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "conversation_chunks")? {
         return Ok(());
     }
@@ -269,7 +269,7 @@ pub fn apply_m055_chunk_kind(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<()> {
     if !crate::sync_schema::table_exists(conn, "knowledge_chunks")? {
         return Ok(());
     }
@@ -323,7 +323,7 @@ pub struct LmStudioEmbeddingSettings {
     pub api_key: Option<String>,
 }
 
-pub fn lm_studio_embedding_settings(conn: &Connection) -> Result<LmStudioEmbeddingSettings> {
+pub(crate) fn lm_studio_embedding_settings(conn: &Connection) -> Result<LmStudioEmbeddingSettings> {
     let timeout_ms = u64::try_from(
         crate::settings::get_i64(conn, "lmstudio_timeout_ms", 120_000).unwrap_or(120_000),
     )
@@ -369,7 +369,7 @@ pub fn lm_studio_embedding_settings(conn: &Connection) -> Result<LmStudioEmbeddi
 }
 
 #[must_use]
-pub fn normalize_lm_base_url(url: &str) -> String {
+pub(crate) fn normalize_lm_base_url(url: &str) -> String {
     let s = url.strip_suffix('/').unwrap_or(url);
     let s = s.strip_suffix("/v1").unwrap_or(s);
     s.to_string()
@@ -456,7 +456,7 @@ fn embed_texts_blocking(
         .map_err(|_| Error::Config("LM Studio embedding worker thread panicked".into()))?
 }
 
-pub fn embed_query_text_blocking(conn: &Connection, text: &str) -> Result<Option<Vec<f32>>> {
+pub(crate) fn embed_query_text_blocking(conn: &Connection, text: &str) -> Result<Option<Vec<f32>>> {
     let settings = lm_studio_embedding_settings(conn)?;
     let Some(model) = settings.embedding_model else {
         return Ok(None);
@@ -793,21 +793,21 @@ fn set_chunk_state(
     Ok(())
 }
 
-pub fn embed_pending_knowledge(
+pub(crate) fn embed_pending_knowledge(
     conn: &Connection,
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     embed_pending_chunks(conn, "knowledge_chunks", qdrant)
 }
 
-pub fn embed_pending_docs(
+pub(crate) fn embed_pending_docs(
     conn: &Connection,
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {
     embed_pending_chunks(conn, "docs_chunks", qdrant)
 }
 
-pub fn embed_pending_conversation_chunks(
+pub(crate) fn embed_pending_conversation_chunks(
     conn: &Connection,
     qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
 ) -> Result<usize> {

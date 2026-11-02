@@ -162,7 +162,7 @@ impl AutomationPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.loaded = false;
         self.rules.clear();
         self.approvals.clear();

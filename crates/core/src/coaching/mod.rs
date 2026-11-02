@@ -393,7 +393,7 @@ use checks::{
     check_wrong_context,
 };
 
-pub type CoachingChatFn<'a> = &'a dyn Fn(
+pub(crate) type CoachingChatFn<'a> = &'a dyn Fn(
     Vec<crate::ai_provider::ChatMessage>,
     f64,
     u32,

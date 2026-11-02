@@ -10,7 +10,7 @@ type HmacSha1 = Hmac<Sha1>;
 pub const SECRET_CAP: usize = 40;
 
 #[must_use]
-pub fn effective_secret(secret: &str) -> String {
+pub(crate) fn effective_secret(secret: &str) -> String {
     secret.chars().take(SECRET_CAP).collect()
 }
 
@@ -21,7 +21,7 @@ pub fn compute_signature(secret: &[u8], body: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
 }
 
-pub fn verify_signature(secret: &[u8], body: &[u8], provided_signature: &str) -> Result<()> {
+pub(crate) fn verify_signature(secret: &[u8], body: &[u8], provided_signature: &str) -> Result<()> {
     let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(body);
     let provided = base64::engine::general_purpose::STANDARD
@@ -40,7 +40,7 @@ pub struct WebhookEventRecord {
     pub processing_state: String,
 }
 
-pub fn apply_m048_webhook_events(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m048_webhook_events(conn: &Connection) -> Result<()> {
     let old_schema = conn
         .query_row(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='webhook_events'",
@@ -76,7 +76,7 @@ pub fn apply_m048_webhook_events(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn insert_webhook_event(
+pub(crate) fn insert_webhook_event(
     conn: &Connection,
     event_type: &str,
     payload: &str,
@@ -109,7 +109,7 @@ pub fn insert_webhook_event(
     Ok((conn.last_insert_rowid(), false))
 }
 
-pub fn set_webhook_event_state(
+pub(crate) fn set_webhook_event_state(
     conn: &Connection,
     id: i64,
     state: &str,
@@ -122,7 +122,7 @@ pub fn set_webhook_event_state(
     Ok(())
 }
 
-pub fn recover_stale_webhook_events(conn: &Connection) -> Result<usize> {
+pub(crate) fn recover_stale_webhook_events(conn: &Connection) -> Result<usize> {
     const LEASE_MINUTES: i64 = 15;
     const MAX_STALE_ATTEMPTS: i64 = 5;
     let cutoff = (chrono::Utc::now() - chrono::Duration::minutes(LEASE_MINUTES))
@@ -165,7 +165,7 @@ pub fn recover_stale_webhook_events(conn: &Connection) -> Result<usize> {
     Ok(recovered)
 }
 
-pub fn prune_webhook_events(conn: &Connection, keep: u32) -> Result<()> {
+pub(crate) fn prune_webhook_events(conn: &Connection, keep: u32) -> Result<()> {
     conn.execute(
         "DELETE FROM webhook_events
           WHERE NOT (processing_state IN ('pending','failed') AND attempts < 5)
@@ -175,7 +175,7 @@ pub fn prune_webhook_events(conn: &Connection, keep: u32) -> Result<()> {
     Ok(())
 }
 
-pub fn get_pending_webhook_events(
+pub(crate) fn get_pending_webhook_events(
     conn: &Connection,
     limit: u32,
 ) -> Result<Vec<WebhookEventRecord>> {

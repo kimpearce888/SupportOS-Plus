@@ -7,7 +7,7 @@ use crate::migrations::add_column_if_missing;
 
 mod send;
 use send::ensure_recipient_updated_at;
-pub use send::send_batch;
+pub(crate) use send::send_batch;
 
 pub const M023_TO_M025_SQL: &str = r#"
     -- M023: saved_segments
@@ -53,7 +53,7 @@ pub const M023_TO_M025_SQL: &str = r#"
     UPDATE app_state SET schema_version = 25 WHERE id = 1;
 "#;
 
-pub fn apply_m023_to_m025(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m023_to_m025(conn: &Connection) -> Result<()> {
     conn.execute_batch(M023_TO_M025_SQL)?;
     Ok(())
 }
@@ -115,7 +115,7 @@ pub const PERSONALIZATION_VARIABLES: [&str; 6] = [
 
 const MAX_ATTEMPTS: i64 = 3;
 
-pub fn apply_m031(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m031(conn: &Connection) -> Result<()> {
     let needs_dnc_rebuild: bool = {
         let old_exists: bool = conn
             .query_row(
@@ -274,7 +274,7 @@ const CAMPAIGN_SELECT: &str = "SELECT oc.id, oc.name, oc.subject, oc.body, oc.ma
    LEFT JOIN mailboxes m ON m.id = oc.mailbox_local_id
    LEFT JOIN saved_segments s ON s.id = oc.segment_id";
 
-pub fn get_outreach_campaign(conn: &Connection, id: i64) -> Result<Option<CampaignDetail>> {
+pub(crate) fn get_outreach_campaign(conn: &Connection, id: i64) -> Result<Option<CampaignDetail>> {
     let mut stmt = conn.prepare(&format!("{CAMPAIGN_SELECT} WHERE oc.id = ?1"))?;
     let mut rows = stmt.query_map([id], map_campaign_row)?;
     Ok(rows.next().transpose()?)
@@ -371,7 +371,7 @@ pub fn render_template(text: &str, ctx: &serde_json::Value) -> (String, Vec<Stri
     (out, unresolved)
 }
 
-pub fn render_for(
+pub(crate) fn render_for(
     conn: &Connection,
     customer_local_id: i64,
     matching_tickets: &[serde_json::Value],
@@ -1242,9 +1242,9 @@ pub fn list_outreach_campaigns(conn: &Connection) -> Result<Vec<serde_json::Valu
         .map_err(|e| e.into())
 }
 
-pub const SEND_BATCH_SIZE: i64 = 5;
+pub(crate) const SEND_BATCH_SIZE: i64 = 5;
 
-pub const SEND_MAX_ATTEMPTS: i64 = 3;
+pub(crate) const SEND_MAX_ATTEMPTS: i64 = 3;
 
 struct BatchRow {
     recipient_id: i64,

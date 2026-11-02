@@ -229,7 +229,11 @@ pub fn affected_customers(conn: &Connection, incident_id: i64, limit: i64) -> Ve
 }
 
 #[must_use]
-pub fn affected_organizations(conn: &Connection, incident_id: i64, limit: i64) -> Vec<Value> {
+pub(crate) fn affected_organizations(
+    conn: &Connection,
+    incident_id: i64,
+    limit: i64,
+) -> Vec<Value> {
     let sql = "SELECT (SELECT o.id FROM organizations o WHERE o.name = cu.organization LIMIT 1) AS organization_id,
            cu.organization AS name,
            COUNT(DISTINCT c.customer_local_id) AS customers,

@@ -38,7 +38,7 @@ fn active_cases(conn: &Connection) -> Result<Vec<GoldenCase>> {
     Ok(rows)
 }
 
-pub async fn run_golden_set(
+pub(crate) async fn run_golden_set(
     conn: &Connection,
     backend: &AiBackend,
 ) -> std::result::Result<Value, LmStudioError> {
@@ -250,7 +250,7 @@ pub fn golden_context_fingerprint(conn: &Connection) -> String {
     crate::crypto::hex(&digest)
 }
 
-pub fn golden_fingerprint_stale(conn: &Connection) -> bool {
+pub(crate) fn golden_fingerprint_stale(conn: &Connection) -> bool {
     let current = golden_context_fingerprint(conn);
     let stored = crate::settings::get_string(conn, "ai_golden_fingerprint")
         .ok()
@@ -258,7 +258,7 @@ pub fn golden_fingerprint_stale(conn: &Connection) -> bool {
     stored.as_deref() != Some(current.as_str())
 }
 
-pub fn store_golden_fingerprint(conn: &Connection) -> Result<()> {
+pub(crate) fn store_golden_fingerprint(conn: &Connection) -> Result<()> {
     crate::settings::set_string(
         conn,
         "ai_golden_fingerprint",

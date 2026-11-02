@@ -4,7 +4,7 @@ use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DialogOutcome {
+pub(crate) enum DialogOutcome {
     Open,
     Confirmed,
     Cancelled,
@@ -12,13 +12,13 @@ pub enum DialogOutcome {
 
 impl DialogOutcome {
     #[must_use]
-    pub fn is_done(self) -> bool {
+    pub(crate) fn is_done(self) -> bool {
         !matches!(self, Self::Open)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConfirmDialog {
+pub(crate) struct ConfirmDialog {
     pub title: String,
     pub message: String,
     pub confirm_label: String,
@@ -37,13 +37,13 @@ impl ConfirmDialog {
     }
 
     #[must_use]
-    pub fn confirm_label(mut self, label: impl Into<String>) -> Self {
+    pub(crate) fn confirm_label(mut self, label: impl Into<String>) -> Self {
         self.confirm_label = label.into();
         self
     }
 
     #[must_use]
-    pub fn danger(mut self) -> Self {
+    pub(crate) fn danger(mut self) -> Self {
         self.danger = true;
         self
     }

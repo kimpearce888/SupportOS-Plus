@@ -11,7 +11,7 @@ use crate::vectorstore::{
     SparseVector, VectorStore,
 };
 
-pub const VECTOR_COLLECTION: &str = "supportos_vectors";
+pub(crate) const VECTOR_COLLECTION: &str = "supportos_vectors";
 
 const POINT_ID_STRIDE: i64 = 1_000_000_000;
 
@@ -25,7 +25,7 @@ fn chunk_family_band(entity_type: &str) -> Option<i64> {
     }
 }
 
-pub fn namespaced_chunk_point_id(entity_type: &str, chunk_id: i64) -> Result<i64> {
+pub(crate) fn namespaced_chunk_point_id(entity_type: &str, chunk_id: i64) -> Result<i64> {
     let band = chunk_family_band(entity_type).ok_or_else(|| {
         Error::Config(format!(
             "vector point ids must be namespaced by a known chunk family \
@@ -126,7 +126,7 @@ fn blob_to_vec(bytes: &[u8]) -> DenseVector {
         .collect()
 }
 
-pub struct SqliteVecStore {
+pub(crate) struct SqliteVecStore {
     conn: Mutex<Connection>,
 }
 
@@ -229,7 +229,7 @@ impl SqliteVecStore {
         Ok(removed)
     }
 
-    pub fn purge_all(data_dir: &Path) -> Result<u64> {
+    pub(crate) fn purge_all(data_dir: &Path) -> Result<u64> {
         let conn = open_store_db(&store_dir(data_dir).join("vectors.db"))?;
         let collections: Vec<String> = {
             let mut stmt = conn.prepare(
@@ -719,7 +719,7 @@ impl VectorIndex {
         store.try_point_count(VECTOR_COLLECTION)
     }
 
-    pub fn ensure_collection(&self, dimension: usize) -> bool {
+    pub(crate) fn ensure_collection(&self, dimension: usize) -> bool {
         let Some(store) = self.store_handle() else {
             return false;
         };
@@ -781,7 +781,11 @@ impl VectorIndex {
             .is_ok()
     }
 
-    pub fn prune_orphaned_points(&self, entity_type: &str, live_point_ids: &[i64]) -> Option<u64> {
+    pub(crate) fn prune_orphaned_points(
+        &self,
+        entity_type: &str,
+        live_point_ids: &[i64],
+    ) -> Option<u64> {
         let store = self.store_handle()?;
         store
             .prune_family_except(VECTOR_COLLECTION, entity_type, live_point_ids)
@@ -797,7 +801,7 @@ impl VectorIndex {
             .unwrap_or(0)
     }
 
-    pub fn drop_collection(&self) -> bool {
+    pub(crate) fn drop_collection(&self) -> bool {
         let Some(store) = self.store_handle() else {
             return false;
         };

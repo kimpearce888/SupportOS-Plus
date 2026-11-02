@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::error::Result;
 
-pub fn apply_m057_ai_digests(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m057_ai_digests(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ai_digests (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +56,7 @@ fn digest_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DigestRow> {
 const DIGEST_COLUMNS: &str =
     "id, period_start, period_end, trigger_kind, facts, narrative, ai_run_id, status, created_at";
 
-pub struct NewDraft<'a> {
+pub(crate) struct NewDraft<'a> {
     pub period_start: &'a str,
     pub period_end: &'a str,
     pub trigger_kind: &'a str,
@@ -66,7 +66,7 @@ pub struct NewDraft<'a> {
     pub status: &'a str,
 }
 
-pub fn store_digest(conn: &Connection, draft: &NewDraft<'_>) -> Result<i64> {
+pub(crate) fn store_digest(conn: &Connection, draft: &NewDraft<'_>) -> Result<i64> {
     conn.execute(
         "INSERT INTO ai_digests
              (period_start, period_end, trigger_kind, facts, narrative, ai_run_id, status)
@@ -447,7 +447,7 @@ fn change_facts(conn: &Connection, start: &str) -> Value {
     })
 }
 
-pub fn collect_facts(conn: &Connection, days: i64) -> (Value, String, String) {
+pub(crate) fn collect_facts(conn: &Connection, days: i64) -> (Value, String, String) {
     let days = days.clamp(1, 90);
     let (start, end) = day_bounds(days);
     let prev_start = chrono::DateTime::parse_from_rfc3339(&start)

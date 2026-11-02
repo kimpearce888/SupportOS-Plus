@@ -150,7 +150,7 @@ struct Pair {
     end: Option<String>,
 }
 
-pub fn ensure_sla_schema(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_sla_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS mailbox_business_hours (
             mailbox_local_id INTEGER PRIMARY KEY,

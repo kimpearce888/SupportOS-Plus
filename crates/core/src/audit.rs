@@ -5,7 +5,7 @@ use crate::error::Result;
 
 const EVENT_LOG_CAP: i64 = 500;
 
-pub fn apply_m050(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m050(conn: &Connection) -> Result<()> {
     ensure_tables(conn)?;
     let retired = conn.execute(
         "DELETE FROM application_settings WHERE key IN ('demo_mode', 'demo_content_purged')",

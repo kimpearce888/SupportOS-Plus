@@ -42,7 +42,12 @@ pub fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egui::Pos2
     )
 }
 
-pub fn line_chart(ui: &mut egui::Ui, _id: &str, points: &[Point], label: &str) -> egui::Rect {
+pub(crate) fn line_chart(
+    ui: &mut egui::Ui,
+    _id: &str,
+    points: &[Point],
+    label: &str,
+) -> egui::Rect {
     let t = design::tokens(ui);
     let (rect, _response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), 180.0),

@@ -6264,3 +6264,35 @@ mirror_readouts tests); app-shell lib 242/0; xtask 11/0; doc-tests
 drift (no UI changes). Churn: +7/−670 across 18 files. Environment:
 5th sandbox reset — repo/toolchain/Mesa re-provisioned from a fresh
 clone @ `59f981d`.
+
+---
+
+## kb4 — A1-3b visibility tranche + A1-7 documentation (2026-11-02)
+
+Owner-delegated "best course of action" batch: BOTH recorded open
+items closed. (1) **A1-3b**: 447 pub→pub(crate) visibility edits
+across 99 source files (68 core + 31 app-shell) — the one-reviewable-
+tranche slice of kb3's 1,134-item census; zero deletions, zero
+signature changes, migrations/SQL semantics untouched, NO-TOUCH
+modules diff-verified absent. Diff purity proven line-by-line (the
+only non-visibility lines are the manual section + rustfmt reflows of
+widened signatures). Residual census RE-DERIVED at the post-tranche
+tree: 651 candidates remain (472 core + 170 app-shell + 9 catalog —
+the latter exactly the enums orphaned by kb2's re-export deletions) +
+41 NO-TOUCH sites out of scope; 447 + 651 ≈ kb3's 1,134 within
+name-based noise. (2) **A1-7**: USER_MANUAL §13.1 "Settings-table
+levers" documents all 9 hidden-lever keys + retention_days (DEFER
+resolved as documented) with defaults, ranges, read-timing — every
+claim verified against the readers first; verification fixed two
+imprecisions (Inbox also reads ops_waiting_threshold_minutes;
+enforce_retention also prunes notifications). Verification, all
+green: fmt clean; check 0 warnings; clippy -D warnings 0;
+gate_traceability identical (23 routes / 20 DC / 27 ids);
+gate_no_simulation clean; verify-icons clean; core lib 487/0/4ig
+(345.74s); app-shell lib 242/0; xtask 11/0; doc-tests 0/0; kittest 24
+unique targets / 175 unique tests / 0 failed (batch A 13/93 + batch B
+12/89 with the live_chats overlap) — 171 goldens ZERO drift. RECORD
+CORRECTION: kb3's "185 tests" double-counted the live_chats overlap;
+canonical is 175 = 173 + 2, re-proven. Churn: 100 files, +541/−447.
+Open: A1-3b remainder (651, re-censused), response_state_sql.rs 3 fns
+(KEEP). ai records synced.

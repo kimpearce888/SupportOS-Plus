@@ -181,7 +181,7 @@ impl CustomersPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.stale = true;
     }
 

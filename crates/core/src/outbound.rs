@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 
 use crate::error::Result;
 
-pub const OUTBOUND_BATCH_PER_TICK: usize = 4;
+pub(crate) const OUTBOUND_BATCH_PER_TICK: usize = 4;
 
 pub const OUTBOUND_MAX_ATTEMPTS: i64 = 3;
 
@@ -16,7 +16,7 @@ pub struct OutboundJob {
     pub max_attempts: i64,
 }
 
-pub fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
+pub(crate) fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
     let tx = conn.transaction()?;
     let row: Option<(i64, String, Option<i64>, String, i64, i64)> = {
         let mut stmt = tx.prepare(
@@ -59,7 +59,7 @@ pub fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
     }))
 }
 
-pub fn mark_confirmed(conn: &Connection, id: i64, remote_result: &str) -> Result<()> {
+pub(crate) fn mark_confirmed(conn: &Connection, id: i64, remote_result: &str) -> Result<()> {
     conn.execute(
         "UPDATE outbound_jobs
             SET status = 'confirmed', attempts = attempts + 1, error = NULL,
@@ -71,7 +71,12 @@ pub fn mark_confirmed(conn: &Connection, id: i64, remote_result: &str) -> Result
     Ok(())
 }
 
-pub fn mark_failed(conn: &Connection, id: i64, error: &str, retryable: bool) -> Result<bool> {
+pub(crate) fn mark_failed(
+    conn: &Connection,
+    id: i64,
+    error: &str,
+    retryable: bool,
+) -> Result<bool> {
     let error: String = error.chars().take(1000).collect();
     let row: Option<(i64, i64)> = conn
         .prepare("SELECT attempts, max_attempts FROM outbound_jobs WHERE id = ?1")?
@@ -108,7 +113,7 @@ pub fn mark_failed(conn: &Connection, id: i64, error: &str, retryable: bool) -> 
     Ok(will_retry)
 }
 
-pub fn recover_stale_sending(conn: &Connection) -> Result<usize> {
+pub(crate) fn recover_stale_sending(conn: &Connection) -> Result<usize> {
     let n = conn.execute(
         "UPDATE outbound_jobs SET status = 'queued', updated_at = datetime('now')
           WHERE status = 'sending' AND updated_at < datetime('now', '-10 minutes')",
@@ -178,7 +183,7 @@ pub fn latest_for_conversation(conn: &Connection, conversation_id: i64) -> Optio
     .ok()
 }
 
-pub fn apply_m051(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m051(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "UPDATE outbound_jobs SET max_attempts = 3
           WHERE max_attempts IS NULL OR max_attempts < 3;

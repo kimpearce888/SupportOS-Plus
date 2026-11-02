@@ -9,7 +9,7 @@ use crate::icons::Icon;
 use crate::pages::dashboard::{DashboardData, DashboardScope, load_dashboard};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
+pub(crate) enum Tab {
     Overview,
     Sla,
     WhyContacting,
@@ -199,7 +199,7 @@ impl ReportsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.overview = None;
         self.sla = None;
         self.why_contacting.clear();

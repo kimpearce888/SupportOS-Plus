@@ -1,4 +1,4 @@
-pub const RRF_K: u32 = 60;
+pub(crate) const RRF_K: u32 = 60;
 
 #[cfg(test)]
 mod tests {

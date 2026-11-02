@@ -364,14 +364,14 @@ impl InboxPage {
         }
     }
 
-    pub fn set_vector_index(
+    pub(crate) fn set_vector_index(
         &mut self,
         index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
     ) {
         self.vector_index = index;
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.list.clear();
         self.list_loaded = false;
         self.detail = None;
@@ -804,7 +804,12 @@ impl InboxPage {
         }
     }
 
-    pub fn change_status(&mut self, db: &DbHandle, bus: &EventBus, status: &str) -> ActionOutcome {
+    pub(crate) fn change_status(
+        &mut self,
+        db: &DbHandle,
+        bus: &EventBus,
+        status: &str,
+    ) -> ActionOutcome {
         let Some(detail) = self.detail.clone() else {
             return ActionOutcome::Rejected("No conversation selected.".into());
         };

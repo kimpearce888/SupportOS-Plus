@@ -60,7 +60,7 @@ pub fn take_hits(hits: &[PaletteHit]) -> &[PaletteHit] {
 }
 
 #[must_use]
-pub fn move_selection(selected: usize, len: usize, delta: i64) -> usize {
+pub(crate) fn move_selection(selected: usize, len: usize, delta: i64) -> usize {
     if len == 0 {
         return 0;
     }
@@ -129,7 +129,7 @@ impl CommandPalette {
         self.just_opened = true;
     }
 
-    pub fn toggle(&mut self) {
+    pub(crate) fn toggle(&mut self) {
         if self.open {
             self.close();
         } else {

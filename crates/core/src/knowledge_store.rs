@@ -14,7 +14,7 @@ pub const MAX_PDF_INPUT_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_DOCX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 
 #[must_use]
-pub fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
+pub(crate) fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
     let clean: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if clean.len() <= max_len {
         return if clean.is_empty() {
@@ -1164,7 +1164,7 @@ mod tests {
     }
 }
 
-pub fn apply_m056_article_drafts(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m056_article_drafts(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS article_drafts (
             id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1237,7 +1237,7 @@ const ARTICLE_DRAFT_COLUMNS: &str = "id, candidate_id, title, body, citations, a
     status, created_at, decided_at, publish_state, remote_article_id,
     collection_local_id, published_at, publish_error";
 
-pub fn insert_article_draft(
+pub(crate) fn insert_article_draft(
     conn: &Connection,
     candidate_id: Option<i64>,
     title: &str,
@@ -1275,7 +1275,7 @@ pub fn list_article_drafts(conn: &Connection, status: Option<&str>) -> Vec<Artic
 }
 
 #[must_use]
-pub fn article_draft_by_id(conn: &Connection, id: i64) -> Option<ArticleDraftRow> {
+pub(crate) fn article_draft_by_id(conn: &Connection, id: i64) -> Option<ArticleDraftRow> {
     let sql = format!("SELECT {ARTICLE_DRAFT_COLUMNS} FROM article_drafts WHERE id = ?1");
     conn.query_row(&sql, params![id], |r| article_draft_from_row(r).map(Some))
         .unwrap_or(None)
@@ -1307,7 +1307,7 @@ pub fn decide_article_draft(
     article_draft_by_id(conn, id)
 }
 
-pub fn set_article_draft_publish_state(
+pub(crate) fn set_article_draft_publish_state(
     conn: &Connection,
     id: i64,
     publish_state: &str,
@@ -1337,7 +1337,7 @@ pub fn set_article_draft_publish_state(
 }
 
 #[must_use]
-pub fn article_draft_exists_for_candidate(conn: &Connection, candidate_id: i64) -> bool {
+pub(crate) fn article_draft_exists_for_candidate(conn: &Connection, candidate_id: i64) -> bool {
     conn.query_row(
         "SELECT COUNT(*) FROM article_drafts
           WHERE candidate_id = ?1 AND status IN ('drafted','approved')",

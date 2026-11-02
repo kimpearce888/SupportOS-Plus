@@ -923,6 +923,30 @@ You never need these. They exist for special setups (scripted installs, custom p
 
 The program takes **no command-line arguments** — everything is configured in the app or with these variables.
 
+### 13.1 Settings-table levers (beyond the app's screens)
+
+The app stores its settings in an SQLite table called `application_settings`, inside the database file (`supportos-plus.db` in your data folder — see [Section 7](#7-where-your-data-lives-backups-and-deleting-data)). The screens in **Settings** write the keys they own; a handful of further keys are only **read** by the app — no screen sets them. You never need them, but if you administer the app for other people they are honest levers: every one has a live reader in the program, a safe default, and values outside the accepted range are clamped or fall back to the default. A typo in a key name simply does nothing, and the app itself never changes these keys.
+
+Set a key with any SQLite tool while the app is **not running** (ordinary SQLite hygiene):
+
+```sql
+INSERT OR REPLACE INTO application_settings (key, value)
+VALUES ('ops_waiting_threshold_minutes', '120');
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `ops_waiting_threshold_minutes` | `240` (4 h) | The waiting threshold, in minutes, the Ops and Inbox pages use for their waiting counters. Accepts 1–20160; other values fall back to the default. Read live. |
+| `freshness_stale_days` | `180` | Knowledge documents not touched for this many days count as **stale** in the Knowledge freshness report and Issue Radar. Read live. |
+| `freshness_unreviewed_days` | `90` | Knowledge documents unreviewed for this many days are flagged in the same reports. Read live. |
+| `freshness_low_usage_days` | `60` | Knowledge documents unused for this many days are flagged as low-usage. Read live. |
+| `notification_sweep_seconds` | `15` | How often, in seconds, the app scans for new notifications. Accepts 5–3600. Read once at app start — restart after changing. |
+| `customer_event_sweep_seconds` | `60` | How often, in seconds, the app scans for customer events. Accepts 15–3600. Read once at app start — restart after changing. |
+| `intelligence_sweep_seconds` | `900` | How often, in seconds, the background intelligence pass re-runs. Accepts 60–86400. Read once at app start — restart after changing. |
+| `backup_interval_hours` | `24` | Minimum hours between automatic backups, checked during the periodic sweeps. `0` turns automatic backups off (not recommended). |
+| `retention_days` | `0` (keep everything) | Above 0, the maintenance sweep prunes webhook events, error reports, audit-log entries, AI run records, the translation cache and notifications older than this many days (for read notifications the clock runs from when they were read). Conversations and customers are never pruned. |
+| `notifications.<type>.enabled` | `true` | Per-kind notification switch: set to `false` and new notifications of that kind are silenced at the moment they are created. `<type>` is one of: `customer_replied`, `ticket_assigned`, `mentioned`, `team_mentioned`, `sla_risk`, `sla_breach`, `automation_approval`, `ai_escalation`, `known_issue_detected`, `issue_spike`, `campaign_reply`, `sync_failure`, `job_failure`, `customer_event`, `incident_update`. |
+
 ---
 
 ## 14. Glossary — words this manual uses

@@ -41,7 +41,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
 
 type LegacyM010Row = (i64, i64, String, String, String, String, f64, String);
 
-pub fn apply_m033(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m033(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "ai_attributes")? {
         conn.execute_batch(M033_SQL)?;
         let _ = conn.execute("UPDATE app_state SET schema_version = 33 WHERE id = 1", []);
@@ -267,7 +267,7 @@ fn insert_record(
     Ok(true)
 }
 
-pub fn save_snapshot(
+pub(crate) fn save_snapshot(
     conn: &mut Connection,
     conversation_id: i64,
     records: &[AttributeRecord],

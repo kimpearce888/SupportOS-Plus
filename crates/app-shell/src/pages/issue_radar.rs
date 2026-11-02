@@ -183,7 +183,7 @@ impl IssueRadarPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.radar.clear();
         self.sla = None;
         self.clusters.clear();

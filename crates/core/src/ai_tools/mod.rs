@@ -24,7 +24,7 @@ const FRICTION_FINDINGS_SQL: &str = r#"
         ON friction_findings(customer_local_id);
 "#;
 
-pub fn ensure_tool_tables(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_tool_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(FRICTION_FINDINGS_SQL)?;
     Ok(())
 }
@@ -59,7 +59,7 @@ fn prop(name: &str, kind: &str, description: &str) -> Value {
     json!({ name: { "type": kind, "description": description } })
 }
 
-pub fn definitions() -> Vec<ChatTool> {
+pub(crate) fn definitions() -> Vec<ChatTool> {
     vec![
         tool(
             "search_conversations",

@@ -3,7 +3,7 @@ use rusqlite::{Connection, params};
 use crate::error::Result;
 use crate::helpscout::{HsConversation, HsCustomer, HsMailbox, HsTag, HsTeam, HsUser};
 
-pub fn upsert_mailbox(conn: &Connection, m: &HsMailbox) -> Result<()> {
+pub(crate) fn upsert_mailbox(conn: &Connection, m: &HsMailbox) -> Result<()> {
     conn.execute(
         "INSERT INTO mailboxes (remote_id, name, slug, email, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -25,7 +25,7 @@ pub fn upsert_mailbox(conn: &Connection, m: &HsMailbox) -> Result<()> {
     Ok(())
 }
 
-pub fn upsert_user(conn: &Connection, u: &HsUser) -> Result<()> {
+pub(crate) fn upsert_user(conn: &Connection, u: &HsUser) -> Result<()> {
     conn.execute(
         "INSERT INTO users (remote_id, first_name, last_name, email, role, user_type, timezone,
             photo_url, initials, mention, job_title, phone, created_at, updated_at)
@@ -64,7 +64,7 @@ pub fn upsert_user(conn: &Connection, u: &HsUser) -> Result<()> {
     Ok(())
 }
 
-pub fn upsert_team(conn: &Connection, t: &HsTeam) -> Result<()> {
+pub(crate) fn upsert_team(conn: &Connection, t: &HsTeam) -> Result<()> {
     conn.execute(
         "INSERT INTO teams (remote_id, name)
          VALUES (?1, ?2)
@@ -98,7 +98,7 @@ pub fn upsert_team(conn: &Connection, t: &HsTeam) -> Result<()> {
     Ok(())
 }
 
-pub fn upsert_tag(conn: &Connection, t: &HsTag) -> Result<()> {
+pub(crate) fn upsert_tag(conn: &Connection, t: &HsTag) -> Result<()> {
     conn.execute(
         "INSERT INTO tags (remote_id, name, slug, color, ticket_count, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -122,7 +122,7 @@ pub fn upsert_tag(conn: &Connection, t: &HsTag) -> Result<()> {
     Ok(())
 }
 
-pub fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> {
+pub(crate) fn upsert_conversation(conn: &Connection, c: &HsConversation) -> Result<()> {
     let mailbox_local = crate::sync_engine::local_id(conn, "mailboxes", c.mailbox_id);
     let customer_local = if c.customer_id > 0 {
         crate::sync_engine::local_id(conn, "customers", c.customer_id)
@@ -328,11 +328,11 @@ fn normalized_tag_set(tags: &[String]) -> Vec<String> {
     set
 }
 
-pub fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
+pub(crate) fn upsert_customer(conn: &Connection, c: &HsCustomer) -> Result<()> {
     upsert_customer_with(conn, c, true)
 }
 
-pub fn upsert_customer_without_channels(conn: &Connection, c: &HsCustomer) -> Result<()> {
+pub(crate) fn upsert_customer_without_channels(conn: &Connection, c: &HsCustomer) -> Result<()> {
     upsert_customer_with(conn, c, false)
 }
 

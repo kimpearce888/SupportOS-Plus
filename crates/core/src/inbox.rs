@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 
-pub fn apply_m028(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m028(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS conversation_threads (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,

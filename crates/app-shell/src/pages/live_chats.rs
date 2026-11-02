@@ -47,7 +47,7 @@ impl LiveChatsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.model = None;
         self.detail_cache = None;
     }

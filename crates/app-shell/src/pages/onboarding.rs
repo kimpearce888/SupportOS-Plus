@@ -18,7 +18,7 @@ pub struct OnboardingStatus {
 }
 
 #[must_use]
-pub fn load_status(conn: &Connection) -> OnboardingStatus {
+pub(crate) fn load_status(conn: &Connection) -> OnboardingStatus {
     let first_run = spp_core::settings::first_run_done(conn).unwrap_or(false);
     let conv_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
@@ -69,7 +69,7 @@ impl OnboardingPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.status = None;
     }
 

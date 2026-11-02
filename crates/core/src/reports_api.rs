@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::error::Result;
 
-pub fn apply_m058_hs_report_cache(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m058_hs_report_cache(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS hs_report_cache (
             report_key TEXT PRIMARY KEY,
@@ -224,7 +224,7 @@ pub const REPORTS: [ReportSpec; REPORT_COUNT] = [
 ];
 
 #[must_use]
-pub fn report_spec(key: &str) -> Option<ReportSpec> {
+pub(crate) fn report_spec(key: &str) -> Option<ReportSpec> {
     REPORTS.iter().find(|r| r.key == key).copied()
 }
 
@@ -291,18 +291,18 @@ pub fn get_capability(conn: &Connection) -> ReportsCapability {
     )
 }
 
-pub fn set_capability(conn: &Connection, capability: ReportsCapability) -> Result<()> {
+pub(crate) fn set_capability(conn: &Connection, capability: ReportsCapability) -> Result<()> {
     crate::settings::set_string(conn, CAPABILITY_KEY, capability.as_str())?;
     crate::settings::set_i64(conn, CAPABILITY_CHECKED_AT, chrono::Utc::now().timestamp())?;
     Ok(())
 }
 
-pub fn reset_capability(conn: &Connection) {
+pub(crate) fn reset_capability(conn: &Connection) {
     let _ = crate::settings::set_string(conn, CAPABILITY_KEY, "unknown");
 }
 
 #[must_use]
-pub fn classify_fetch_error(status_code: u16) -> Option<ReportsCapability> {
+pub(crate) fn classify_fetch_error(status_code: u16) -> Option<ReportsCapability> {
     match status_code {
         403 => Some(ReportsCapability::PlanBlocked),
         200..=299 => Some(ReportsCapability::Available),
@@ -310,7 +310,7 @@ pub fn classify_fetch_error(status_code: u16) -> Option<ReportsCapability> {
     }
 }
 
-pub fn cache_report(
+pub(crate) fn cache_report(
     conn: &Connection,
     report_key: &str,
     start: &str,

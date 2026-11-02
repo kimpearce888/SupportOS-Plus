@@ -48,7 +48,7 @@ pub const M020_TO_M022_SQL: &str = r#"
     UPDATE app_state SET schema_version = 22 WHERE id = 1;
 "#;
 
-pub fn apply_m020_to_m022(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m020_to_m022(conn: &Connection) -> Result<()> {
     conn.execute_batch(M020_TO_M022_SQL)?;
     crate::support_graph::ensure_graph_edges_schema(conn)?;
     Ok(())
@@ -66,7 +66,7 @@ pub const M034_SQL: &str = r#"
     UPDATE app_state SET schema_version = 34 WHERE id = 1;
 "#;
 
-pub fn apply_m034(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m034(conn: &Connection) -> Result<()> {
     conn.execute_batch(M034_SQL)?;
     ensure_mailbox_business_hours(conn)?;
     Ok(())
@@ -1315,7 +1315,7 @@ pub struct TimelineEvent {
     pub occurred_at: String,
 }
 
-pub fn record_timeline_event(
+pub(crate) fn record_timeline_event(
     conn: &Connection,
     customer_id: i64,
     event_type: &str,

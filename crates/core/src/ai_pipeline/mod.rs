@@ -62,7 +62,7 @@ pub enum AiBackend {
     Disabled,
 }
 
-pub fn backend_from_settings(conn: &Connection) -> AiBackend {
+pub(crate) fn backend_from_settings(conn: &Connection) -> AiBackend {
     let enabled = crate::settings::get_bool(conn, "ai_enabled", true).unwrap_or(true);
     if !enabled {
         return AiBackend::Disabled;
@@ -159,7 +159,7 @@ impl AiBackend {
         })
     }
 
-    pub async fn chat_qa(
+    pub(crate) async fn chat_qa(
         &self,
         messages: Vec<crate::ai_provider::ChatMessage>,
         temperature: f64,
@@ -196,7 +196,7 @@ pub struct ChatJsonResult {
     pub usage: Option<crate::ai_provider::TokenUsage>,
 }
 
-pub fn extract_json(text: &str) -> Option<serde_json::Value> {
+pub(crate) fn extract_json(text: &str) -> Option<serde_json::Value> {
     let cleaned = text.replace("```json", "```").replace("```", "");
     let cleaned = cleaned.trim();
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(cleaned) {
@@ -211,7 +211,7 @@ pub fn extract_json(text: &str) -> Option<serde_json::Value> {
     }
 }
 
-pub fn ensure_pipeline_schema(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_pipeline_schema(conn: &Connection) -> Result<()> {
     apply_fts_migration(conn)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ai_sources (
@@ -357,7 +357,7 @@ pub fn start_run(
     Ok(conn.last_insert_rowid())
 }
 
-pub fn complete_run(
+pub(crate) fn complete_run(
     conn: &Connection,
     id: i64,
     output: &serde_json::Value,
@@ -366,7 +366,7 @@ pub fn complete_run(
     complete_run_with_usage(conn, id, output, latency_ms, None, None)
 }
 
-pub fn complete_run_with_usage(
+pub(crate) fn complete_run_with_usage(
     conn: &Connection,
     id: i64,
     output: &serde_json::Value,
@@ -394,7 +394,7 @@ pub fn complete_run_with_usage(
     Ok(())
 }
 
-pub fn fail_run(conn: &Connection, id: i64, error: &str) -> Result<()> {
+pub(crate) fn fail_run(conn: &Connection, id: i64, error: &str) -> Result<()> {
     let capped: String = error.chars().take(2000).collect();
     conn.execute(
         "UPDATE ai_runs SET status='failed', error=?2, completed_at=datetime('now') WHERE id=?1",
@@ -475,7 +475,7 @@ pub struct LatestAnalysis {
     pub sources: Vec<AiSourceRef>,
 }
 
-pub fn get_latest_analysis(
+pub(crate) fn get_latest_analysis(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Option<LatestAnalysis>> {
@@ -865,7 +865,7 @@ pub struct AnalyzeOutcome {
     pub run_id: i64,
 }
 
-pub async fn analyze_ticket(
+pub(crate) async fn analyze_ticket(
     conn: &Connection,
     backend: &AiBackend,
     index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
@@ -986,7 +986,7 @@ fn analysis_has_core_content(a: &TicketAnalysis) -> bool {
     .any(|v| v.is_some_and(|s| !s.trim().is_empty()))
 }
 
-pub fn parse_ticket_analysis(json: Option<&serde_json::Value>) -> Option<TicketAnalysis> {
+pub(crate) fn parse_ticket_analysis(json: Option<&serde_json::Value>) -> Option<TicketAnalysis> {
     let obj = json?.as_object()?;
     let get_str = |k: &str| -> Option<String> {
         obj.get(k)
@@ -1046,7 +1046,7 @@ pub fn parse_ticket_analysis(json: Option<&serde_json::Value>) -> Option<TicketA
     })
 }
 
-pub async fn generate_draft(
+pub(crate) async fn generate_draft(
     conn: &Connection,
     backend: &AiBackend,
     index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
@@ -1309,7 +1309,7 @@ fn redact_for_model(conn: &Connection, text: &str) -> String {
     safe
 }
 
-pub async fn rewrite_composer_text(
+pub(crate) async fn rewrite_composer_text(
     conn: &Connection,
     backend: &AiBackend,
     conversation_id: Option<i64>,
@@ -1391,7 +1391,7 @@ pub async fn rewrite_composer_text(
     }
 }
 
-pub async fn extract_memories(
+pub(crate) async fn extract_memories(
     conn: &Connection,
     backend: &AiBackend,
     conversation_local_id: i64,

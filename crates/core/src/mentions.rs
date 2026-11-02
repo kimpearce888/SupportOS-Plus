@@ -4,7 +4,7 @@ use rusqlite::{Connection, params};
 
 use crate::error::Result;
 
-pub const MAX_BODY_BYTES: usize = 100_000;
+pub(crate) const MAX_BODY_BYTES: usize = 100_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mention {

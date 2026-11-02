@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use crate::error::Result;
 use crate::migrations::add_column_if_missing;
 
-pub fn apply_m036(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m036(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS customer_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

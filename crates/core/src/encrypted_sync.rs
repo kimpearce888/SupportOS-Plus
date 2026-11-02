@@ -92,7 +92,7 @@ fn derive_key(passphrase: &str, salt: &[u8]) -> Result<[u8; KEY_LEN]> {
     crypto::derive_key(passphrase.as_bytes(), salt, LOG_N)
 }
 
-pub fn ensure_log_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_log_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS encrypted_sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

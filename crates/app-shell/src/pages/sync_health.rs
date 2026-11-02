@@ -59,7 +59,7 @@ pub struct SyncStatus {
 }
 
 #[must_use]
-pub fn load_status(conn: &Connection) -> SyncStatus {
+pub(crate) fn load_status(conn: &Connection) -> SyncStatus {
     let state = spp_core::sync_engine::get_state(conn);
     let last_success = spp_core::sync_engine::last_successful_sync(conn);
 
@@ -150,7 +150,7 @@ pub fn load_status(conn: &Connection) -> SyncStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncAction {
+pub(crate) enum SyncAction {
     Initial,
     Incremental,
     Reconcile,
@@ -168,7 +168,11 @@ impl SyncAction {
     }
 }
 
-pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) -> bool {
+pub(crate) fn spawn_sync_action(
+    db: &DbHandle,
+    engine: &Arc<SyncEngine>,
+    action: SyncAction,
+) -> bool {
     if action != SyncAction::Cancel && engine.is_running() {
         return false;
     }
@@ -235,7 +239,7 @@ pub fn spawn_sync_action(db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAc
     true
 }
 
-pub fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
+pub(crate) fn spawn_docs_sync(db: &DbHandle, engine: &Arc<SyncEngine>) {
     if engine.is_running() {
         return;
     }
@@ -305,12 +309,12 @@ impl SyncHealthPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.status = None;
         self.message = None;
     }
 
-    pub fn note_progress(&mut self, event: spp_core::events::SyncProgressEvent) {
+    pub(crate) fn note_progress(&mut self, event: spp_core::events::SyncProgressEvent) {
         self.last_progress = Some(event);
         self.status = None;
     }
@@ -319,7 +323,12 @@ impl SyncHealthPage {
         self.status = Some(db.with_read(load_status));
     }
 
-    pub fn run_sync_action(&mut self, db: &DbHandle, engine: &Arc<SyncEngine>, action: SyncAction) {
+    pub(crate) fn run_sync_action(
+        &mut self,
+        db: &DbHandle,
+        engine: &Arc<SyncEngine>,
+        action: SyncAction,
+    ) {
         if action != SyncAction::Cancel && engine.is_running() {
             self.message = Some("A sync is already running.".into());
             return;

@@ -515,7 +515,7 @@ pub async fn check_url_resolved(raw_url: &str) -> SsrfCheckResult {
     }
 }
 
-pub async fn validate_ssrf_full_async(raw_url: &str) -> crate::error::Result<()> {
+pub(crate) async fn validate_ssrf_full_async(raw_url: &str) -> crate::error::Result<()> {
     let result = check_url_resolved(raw_url).await;
     if result.ok {
         Ok(())
@@ -575,7 +575,7 @@ pub fn redaction_patterns() -> Vec<RedactionPattern> {
     ]
 }
 
-pub fn redact_text(text: &str, enabled: bool) -> (String, Vec<Value>) {
+pub(crate) fn redact_text(text: &str, enabled: bool) -> (String, Vec<Value>) {
     if !enabled {
         return (text.to_string(), Vec::new());
     }

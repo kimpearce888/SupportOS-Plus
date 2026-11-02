@@ -16,7 +16,7 @@ fn valid_field_key(key: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-pub fn slugify(name: &str) -> String {
+pub(crate) fn slugify(name: &str) -> String {
     let lowered = name.trim().to_lowercase();
     let mut slug = String::new();
     let mut pending_dash = false;

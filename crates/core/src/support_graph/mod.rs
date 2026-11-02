@@ -37,7 +37,7 @@ const GRAPH_EDGES_SQL: &str = r#"
         ON graph_edges (target_kind, target_local_id);
 "#;
 
-pub fn ensure_graph_edges_schema(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_graph_edges_schema(conn: &Connection) -> Result<()> {
     let legacy_shape = table_columns(conn, "graph_edges")?
         .iter()
         .any(|c| c == "source_id");
@@ -87,7 +87,11 @@ impl GraphNodeRef {
     }
 }
 
-pub fn node_ref(conn: &Connection, kind: GraphNodeKind, id: i64) -> Result<Option<GraphNodeRef>> {
+pub(crate) fn node_ref(
+    conn: &Connection,
+    kind: GraphNodeKind,
+    id: i64,
+) -> Result<Option<GraphNodeRef>> {
     let sql = match kind {
         GraphNodeKind::Customer => "SELECT cu.id,
                 COALESCE(NULLIF(TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, '')), ''), 'Customer #' || cu.id),
@@ -187,7 +191,7 @@ pub struct LinkInput {
     pub user_local_id: Option<i64>,
 }
 
-pub fn human_edges_touching(
+pub(crate) fn human_edges_touching(
     conn: &Connection,
     kind: GraphNodeKind,
     local_id: i64,
@@ -254,7 +258,7 @@ mod derived;
 
 use derived::derived_edges_touching;
 
-pub const GRAPH_MAX_NEIGHBOR_EDGES: usize = 200;
+pub(crate) const GRAPH_MAX_NEIGHBOR_EDGES: usize = 200;
 pub const GRAPH_MAX_SUBGRAPH_NODES: usize = 250;
 pub const GRAPH_MAX_SUBGRAPH_DEPTH: u32 = 2;
 pub const GRAPH_MAX_SEARCH_PER_KIND: usize = 10;

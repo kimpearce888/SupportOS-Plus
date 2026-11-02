@@ -170,7 +170,7 @@ pub fn tokens(ui: &egui::Ui) -> &'static Tokens {
 }
 
 #[must_use]
-pub fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
+pub(crate) fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
     if ctx.theme() == egui::Theme::Dark {
         &DARK
     } else {
@@ -180,30 +180,30 @@ pub fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
 
 pub mod scale {
     pub mod space {
-        pub const SP1: f32 = 4.0;
-        pub const SP2: f32 = 8.0;
+        pub(crate) const SP1: f32 = 4.0;
+        pub(crate) const SP2: f32 = 8.0;
         pub const SP3: f32 = 12.0;
         pub const SP4: f32 = 16.0;
         pub const SP7: f32 = 32.0;
-        pub const CLUSTER: f32 = 6.0;
+        pub(crate) const CLUSTER: f32 = 6.0;
         /// Card horizontal pad (DC §3 DS-C-02).
-        pub const PAD_CARD: f32 = 14.0;
+        pub(crate) const PAD_CARD: f32 = 14.0;
         /// Toolbar/table-cell horizontal pad (DC §3 DS-C-05/10, `8px 12px`).
-        pub const PAD_TOOL: f32 = 10.0;
+        pub(crate) const PAD_TOOL: f32 = 10.0;
     }
     pub mod text {
-        pub const META: f32 = 11.0;
-        pub const META_HALF: f32 = 11.5;
-        pub const SMALL: f32 = 12.0;
-        pub const SMALL_HALF: f32 = 12.5;
-        pub const CONTROL: f32 = 13.0;
-        pub const BODY: f32 = 13.5;
-        pub const LEAD: f32 = 14.0;
-        pub const SECTION: f32 = 15.0;
-        pub const SECTION_BIG: f32 = 18.0;
+        pub(crate) const META: f32 = 11.0;
+        pub(crate) const META_HALF: f32 = 11.5;
+        pub(crate) const SMALL: f32 = 12.0;
+        pub(crate) const SMALL_HALF: f32 = 12.5;
+        pub(crate) const CONTROL: f32 = 13.0;
+        pub(crate) const BODY: f32 = 13.5;
+        pub(crate) const LEAD: f32 = 14.0;
+        pub(crate) const SECTION: f32 = 15.0;
+        pub(crate) const SECTION_BIG: f32 = 18.0;
         pub const STAT: f32 = 20.0;
         pub const STAT_BIG: f32 = 26.0;
-        pub const TITLE: f32 = 22.0;
+        pub(crate) const TITLE: f32 = 22.0;
     }
     pub mod radius {
         pub const XL: f32 = 12.0;
@@ -383,7 +383,7 @@ pub fn button_with_icon(
     button_impl(ui, text, Some(icon), variant)
 }
 
-pub fn icon_button(
+pub(crate) fn icon_button(
     ui: &mut egui::Ui,
     icon: Icon,
     variant: ButtonVariant,
@@ -558,7 +558,7 @@ pub enum BadgeTone {
     Ai,
 }
 
-pub fn tone_colors(ui: &egui::Ui, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
+pub(crate) fn tone_colors(ui: &egui::Ui, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
     tone_colors_of(tokens(ui), tone)
 }
 
@@ -606,7 +606,7 @@ pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
     response
 }
 
-pub fn status_tone(status: &str) -> (BadgeTone, &'static str) {
+pub(crate) fn status_tone(status: &str) -> (BadgeTone, &'static str) {
     match status {
         "open" => (BadgeTone::Info, "Open"),
         "pending" => (BadgeTone::Warning, "Pending"),
@@ -746,7 +746,12 @@ pub fn page_counter(ui: &mut egui::Ui, text: &str) {
 }
 
 /// DC: DS-A-05 views-rail row — one inbox view: full-width label with the
-pub fn view_item(ui: &mut egui::Ui, label: &str, count: u32, selected: bool) -> egui::Response {
+pub(crate) fn view_item(
+    ui: &mut egui::Ui,
+    label: &str,
+    count: u32,
+    selected: bool,
+) -> egui::Response {
     let t = tokens(ui);
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::click());
@@ -790,7 +795,7 @@ pub fn view_item(ui: &mut egui::Ui, label: &str, count: u32, selected: bool) -> 
     resp
 }
 
-pub fn tone_solid(t: &Tokens, tone: BadgeTone) -> egui::Color32 {
+pub(crate) fn tone_solid(t: &Tokens, tone: BadgeTone) -> egui::Color32 {
     match tone {
         BadgeTone::Neutral => t.border_strong,
         BadgeTone::Success => t.success,
@@ -874,7 +879,11 @@ pub fn tabs(ui: &mut egui::Ui, items: &[&str], active: usize) -> Option<usize> {
 }
 
 /// DC: DS-C-09 grouped variant — labeled tab groups with a global index
-pub fn tab_groups(ui: &mut egui::Ui, groups: &[(&str, &[&str])], active: usize) -> Option<usize> {
+pub(crate) fn tab_groups(
+    ui: &mut egui::Ui,
+    groups: &[(&str, &[&str])],
+    active: usize,
+) -> Option<usize> {
     let t = tokens(ui);
     let mut clicked = None;
     let mut base = 0;
@@ -916,7 +925,7 @@ pub fn filter_bar<R>(
     .inner
 }
 
-pub fn empty_state(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) {
+pub(crate) fn empty_state(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str) {
     let t = tokens(ui);
     ui.vertical_centered(|ui| {
         ui.add_space(18.0);
@@ -1139,7 +1148,7 @@ pub fn metric_tile(
 }
 
 /// DC: DS-C-23 bar row (folded helper) — the lab's `.ds-bar-row`: a fixed
-pub fn bar_row(ui: &mut egui::Ui, label: &str, value: i64, max: i64, slim: bool) {
+pub(crate) fn bar_row(ui: &mut egui::Ui, label: &str, value: i64, max: i64, slim: bool) {
     let t = tokens(ui);
     let label_w = if slim { 120.0 } else { 140.0 };
     let value_w = 56.0;
@@ -1181,7 +1190,7 @@ pub fn bar_row(ui: &mut egui::Ui, label: &str, value: i64, max: i64, slim: bool)
     });
 }
 
-pub fn form_grid<R>(
+pub(crate) fn form_grid<R>(
     ui: &mut egui::Ui,
     id: &str,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
@@ -1192,7 +1201,7 @@ pub fn form_grid<R>(
         .show(ui, add_contents)
 }
 
-pub fn field_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
+pub(crate) fn field_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.label(
         egui::RichText::new(text)
             .size(13.0)
@@ -1200,7 +1209,7 @@ pub fn field_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     )
 }
 
-pub fn success_text(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn success_text(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
             .small()
@@ -1208,7 +1217,7 @@ pub fn success_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-pub fn error_text(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn error_text(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
             .small()
@@ -1216,7 +1225,7 @@ pub fn error_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-pub fn divider(ui: &mut egui::Ui) {
+pub(crate) fn divider(ui: &mut egui::Ui) {
     let t = tokens(ui);
     let width = ui.available_width();
     let (id, rect) = ui.allocate_space(egui::vec2(width, 1.0));
@@ -1464,7 +1473,7 @@ pub fn armed_danger_button(ui: &mut egui::Ui, id: &str, label: &str, confirm_lab
 }
 
 /// DC: DS-C-16 DetailPanel — the right sheet (420px, surface, left
-pub fn detail_panel(
+pub(crate) fn detail_panel(
     ctx: &egui::Context,
     id: &str,
     open: &mut bool,
@@ -1600,7 +1609,7 @@ pub fn message_card<R>(
 }
 
 /// DC: DS-C-20 Message Card, rich-body form. `role_label` overrides the
-pub fn message_card_with<B, A, R>(
+pub(crate) fn message_card_with<B, A, R>(
     ui: &mut egui::Ui,
     role: MessageRole,
     name: &str,

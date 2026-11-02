@@ -83,7 +83,7 @@ pub const M015_TO_M019_SQL: &str = r#"
     UPDATE app_state SET schema_version = 19 WHERE id = 1;
 "#;
 
-pub fn apply_m015_to_m019(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m015_to_m019(conn: &Connection) -> Result<()> {
     conn.execute_batch(M015_TO_M019_SQL)?;
     Ok(())
 }
@@ -238,7 +238,7 @@ pub fn list_knowledge_gaps(conn: &Connection, limit: u32) -> Result<Vec<(String,
     Ok(rows)
 }
 
-pub fn update_doc_freshness(
+pub(crate) fn update_doc_freshness(
     conn: &Connection,
     doc_id: i64,
     content_hash: Option<&str>,
@@ -266,7 +266,7 @@ pub fn count_stale_docs(conn: &Connection) -> Result<u32> {
     Ok(u32::try_from(count).unwrap_or(0))
 }
 
-pub fn apply_m035(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m035(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS incident_conversations (
             incident_id     INTEGER NOT NULL REFERENCES incidents (id) ON DELETE CASCADE,
@@ -363,7 +363,7 @@ pub fn apply_m035(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn apply_m041(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m041(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS incident_releases (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,

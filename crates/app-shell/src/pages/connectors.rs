@@ -92,11 +92,11 @@ impl ConnectorsPage {
         }
     }
 
-    pub fn set_data_dir(&mut self, data_dir: PathBuf) {
+    pub(crate) fn set_data_dir(&mut self, data_dir: PathBuf) {
         self.data_dir = Some(data_dir);
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.loaded = false;
         self.connectors.clear();
         self.rows.clear();

@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::crypto::hex;
 use crate::error::Result;
 
-pub fn apply_m030(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m030(conn: &Connection) -> Result<()> {
     ensure_column(
         conn,
         "conversations",
@@ -108,7 +108,7 @@ pub fn conv_by_local_id(conn: &Connection, id: i64) -> Option<ConvRef> {
     .ok()
 }
 
-pub fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
+pub(crate) fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
     let mut stmt = match conn.prepare(
         "SELECT t.name FROM conversation_tags ct
             JOIN tags t ON t.id = ct.tag_id
@@ -123,7 +123,7 @@ pub fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<St
         .unwrap_or_default()
 }
 
-pub fn write_conversation_tags(conn: &Connection, conversation_id: i64, tags: &[String]) {
+pub(crate) fn write_conversation_tags(conn: &Connection, conversation_id: i64, tags: &[String]) {
     let _ = conn.execute(
         "DELETE FROM conversation_tags WHERE conversation_id = ?1",
         params![conversation_id],
@@ -209,7 +209,7 @@ pub fn attachment_by_id(conn: &Connection, id: i64) -> Option<AttachmentRow> {
     .ok()
 }
 
-pub fn persist_attachment_bytes(
+pub(crate) fn persist_attachment_bytes(
     conn: &Connection,
     attachments_dir: &std::path::Path,
     attachment_id: i64,
@@ -248,7 +248,7 @@ pub fn persist_attachment_bytes(
     Ok(path_str)
 }
 
-pub fn set_attachment_state(
+pub(crate) fn set_attachment_state(
     conn: &Connection,
     id: i64,
     state: &str,

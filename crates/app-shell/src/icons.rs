@@ -52,7 +52,7 @@ pub enum Icon {
 
 impl Icon {
     #[must_use]
-    pub fn for_page(key: crate::pages::PageKey) -> Self {
+    pub(crate) fn for_page(key: crate::pages::PageKey) -> Self {
         use crate::pages::PageKey as K;
         match key {
             K::Dashboard => Self::Dashboard,
@@ -89,7 +89,7 @@ impl Icon {
         response
     }
 
-    pub fn paint_at(self, painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    pub(crate) fn paint_at(self, painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
         let side = rect.width().min(rect.height());
         let scale = side / 24.0;
         let origin = rect.center() - egui::vec2(12.0 * scale, 12.0 * scale);

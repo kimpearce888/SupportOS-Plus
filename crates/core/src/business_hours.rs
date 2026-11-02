@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BusinessHoursConfig {
+pub(crate) struct BusinessHoursConfig {
     pub timezone: String,
     pub days: Vec<i64>,
     pub start_minute: i64,
@@ -12,13 +12,13 @@ pub struct BusinessHoursConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct SlaTargets {
+pub(crate) struct SlaTargets {
     pub first_response_target_min: Option<i64>,
     pub resolution_target_min: Option<i64>,
 }
 
 #[must_use]
-pub fn default_business_hours() -> BusinessHoursConfig {
+pub(crate) fn default_business_hours() -> BusinessHoursConfig {
     BusinessHoursConfig {
         timezone: "UTC".to_string(),
         days: vec![1, 2, 3, 4, 5],
@@ -121,7 +121,7 @@ pub fn parse_instant_ms(raw: &str) -> Option<i64> {
 }
 
 #[must_use]
-pub fn business_minutes_between(
+pub(crate) fn business_minutes_between(
     start_iso: &str,
     end_iso: &str,
     cfg: &BusinessHoursConfig,
@@ -189,7 +189,7 @@ pub fn wall_minutes_between(start_iso: &str, end_iso: &str) -> Option<f64> {
 }
 
 #[must_use]
-pub fn sla_status(minutes: Option<f64>, target_min: Option<i64>) -> SlaVerdict {
+pub(crate) fn sla_status(minutes: Option<f64>, target_min: Option<i64>) -> SlaVerdict {
     match (target_min, minutes) {
         (None, Some(_)) => SlaVerdict::NoTarget,
         (None, None) => SlaVerdict::Unmeasured,

@@ -8,11 +8,11 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::helpscout_real::HsRateLimiter;
 
-pub const PRIORITY_USER_SEND: u8 = 0;
-pub const PRIORITY_INTERACTIVE: u8 = 1;
-pub const PRIORITY_SYNC: u8 = 2;
-pub const PRIORITY_ANALYTICS: u8 = 3;
-pub const PRIORITY_INDEXING: u8 = 4;
+pub(crate) const PRIORITY_USER_SEND: u8 = 0;
+pub(crate) const PRIORITY_INTERACTIVE: u8 = 1;
+pub(crate) const PRIORITY_SYNC: u8 = 2;
+pub(crate) const PRIORITY_ANALYTICS: u8 = 3;
+pub(crate) const PRIORITY_INDEXING: u8 = 4;
 
 pub const DEFAULT_CONCURRENCY: usize = 2;
 
@@ -91,7 +91,7 @@ impl ApiQueue {
             .clone()
     }
 
-    pub fn set_concurrency(&self, n: usize) {
+    pub(crate) fn set_concurrency(&self, n: usize) {
         self.concurrency.store(n.max(1), Ordering::Relaxed);
         self.pump();
     }

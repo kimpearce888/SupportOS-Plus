@@ -120,7 +120,7 @@ impl DiagnosticsPage {
         }
     }
 
-    pub fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.events = None;
         self.runs = None;
         self.audit = None;
@@ -144,7 +144,7 @@ impl DiagnosticsPage {
         self.audit = Some(audit);
     }
 
-    pub fn clear_log(&mut self, db: &DbHandle) -> spp_core::Result<()> {
+    pub(crate) fn clear_log(&mut self, db: &DbHandle) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::audit::clear_events(conn));
         match &result {
             Ok(cleared) => {
