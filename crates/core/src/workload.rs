@@ -4,15 +4,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::interaction_signals::round2;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-pub struct CapacityMetrics {
-    pub incoming_7d: u32,
-    pub closing_7d: u32,
-    pub window_days: i64,
-    pub incoming_rate_per_day: f64,
-    pub closing_rate_per_day: f64,
-}
-
 pub const CAPACITY_SETTING_KEY: &str = "capacity_model";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

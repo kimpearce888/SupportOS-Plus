@@ -6208,3 +6208,59 @@ files + 528 history-dir deletions + ai records. Environment: 4th
 sandbox reset — repo/toolchain/Mesa re-provisioned from a fresh clone
 @ `0f02e62`; one disk-full event during the kittest build (bus-error
 links) reclaimed and rebuilt with DEBUG=0 + -j 2 (disclosed).
+
+## KB-3 — A1-3 de-pub sweep + A1-7 knob census + response_state_sql disposition (2026-11-02)
+
+The A1-3/A1-7 open items closed at `59f981d`, plus one kb2 record
+correction and the owner-delegated response_state_sql decision. Owner
+directives: response_state_sql.rs's 3 dead fns = **KEEP** (NO-TOUCH
+module; ~30 dead lines are not worth a gate re-proof on the most
+sensitive SQL surface — logical minimum-risk choice, module never
+touched, diff-verified); A1-3 + A1-7 approved.
+
+A1-3: the census (conservative name-based, collisions only suppress)
+found 1,182 zero-external-consumer pub items = 44 same-file-only +
+1,134 cross-file crate-internal (recorded as open **A1-3b** — its own
+reviewable batch, not executed). The 44 − 7 NO-TOUCH skips
+(response_state_sql ×3 per owner, db.rs open_with_migrations,
+ai_center M009_SQL + copilot_tool_allowlist, migrations/intelligence
+M014_SQL) − 1 universal_search = 36 de-pubs + 4 sibling cfg(test) lib
+mods = 40 visibility edits. **kb2 correction disclosed: the kb2 record
+claimed universal_search deleted but the 59f981d diff never contained
+it — kb3 completed the disposition** (universal_search + cap_query +
+MAX_SEARCH_QUERY_LENGTH + SearchResult, 39 lines — the return-struct
+orphan the original audit also missed). The compiler re-proof then
+showed every de-pub'd item except l2_norm is FULLY dead: **34 items
+deleted** (incl. the l2_norm cascade and CapacityMetrics) and
+**mirror_readouts deleted whole** (291 lines — RF-8's parked decision,
+now compiler-proven; its exactly-2 own tests died with it, reconciling
+core lib 489 → 487). M007_SQL (an unregistered never-executed
+duplicate kb2's list missed) deleted — apply_m007's inline SQL and all
+migration semantics untouched. The 6 cfg(test) lib mods are
+alive-and-now-private. No allow() stamps anywhere.
+
+A1-7: census delivered, zero deletions. 14 concrete keys, all with
+live readers and zero production writers: KEEP documented
+(lmstudio_timeout_ms/lmstudio_concurrency — README + USER_MANUAL
+"Request budget"; ai_evaluation_mode — USER_MANUAL:871 + test
+coverage), KEEP tested (redaction_enabled — two tests exercise the
+disabled path), KEEP hidden-lever (ops_waiting_threshold_minutes,
+freshness ×3, sweep ×3, backup_interval_hours, notifications.{type}
+.enabled), DEFER (retention_days — NO-TOUCH maintenance.rs coupling).
+The settings table is the app's documented operator interface; these
+are running knobs, not dead code. A1-6 residue re-verified inert.
+
+Incident disclosed: the region-deleter's ()/{} conflation left 6
+orphaned fn bodies — caught by the immediate check, repaired by hand,
+re-proven. The `#ust_use]` scare was a display-pipeline artifact
+(files byte-correct).
+
+Verification, all green: fmt clean; clippy --workspace --all-targets
+-D warnings 0; gate_traceability OK (23 routes / 20 DC tags / 27 ids,
+identical); gate_no_simulation clean; verify-icons clean; core lib
+487/0/4ig (--test-threads=1, 346.02s — 489 minus exactly the 2 dead
+mirror_readouts tests); app-shell lib 242/0; xtask 11/0; doc-tests
+0/0; kittest 24 suites / 185 passed / 0 failed — 171 goldens ZERO
+drift (no UI changes). Churn: +7/−670 across 18 files. Environment:
+5th sandbox reset — repo/toolchain/Mesa re-provisioned from a fresh
+clone @ `59f981d`.

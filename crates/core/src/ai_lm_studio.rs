@@ -97,15 +97,6 @@ impl OpenAiCompatibleClient {
     }
 
     #[must_use]
-    pub fn with_timeout_ms(self, timeout_ms: u64) -> Self {
-        Self {
-            base_url: self.base_url,
-            http: build_http_client(timeout_ms),
-            api_key: self.api_key,
-        }
-    }
-
-    #[must_use]
     pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
         self

@@ -132,13 +132,6 @@ pub struct IssueCluster {
     pub status: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RadarSnapshot {
-    pub active_known_issues: u32,
-    pub active_clusters: u32,
-    pub active_incidents: u32,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Incident {
     pub id: Option<i64>,
@@ -157,13 +150,6 @@ pub struct SlaConfig {
     pub mailbox_id: i64,
     pub first_response_hours: f64,
     pub resolution_hours: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum SlaStatus {
-    Ok,
-    AtRisk,
-    Breached,
 }
 
 pub fn set_sla_config(
@@ -531,41 +517,6 @@ pub struct IncidentPatch {
     pub workaround: Option<Option<String>>,
     pub resolution: Option<Option<String>>,
     pub started_at: Option<Option<String>>,
-}
-
-impl IncidentPatch {
-    #[must_use]
-    pub fn changed_columns(&self) -> Vec<String> {
-        let mut cols = Vec::new();
-        if self.title.is_some() {
-            cols.push("title".to_string());
-        }
-        if self.status.is_some() {
-            cols.push("status".to_string());
-        }
-        if self.severity.is_some() {
-            cols.push("severity".to_string());
-        }
-        if self.owner_user_local_id.is_some() {
-            cols.push("owner_user_local_id".to_string());
-        }
-        for (column, slot) in [
-            ("product", &self.product),
-            ("feature", &self.feature),
-            ("description", &self.description),
-            ("internal_explanation", &self.internal_explanation),
-            ("customer_safe_explanation", &self.customer_safe_explanation),
-            ("known_cause", &self.known_cause),
-            ("workaround", &self.workaround),
-            ("resolution", &self.resolution),
-            ("started_at", &self.started_at),
-        ] {
-            if slot.is_some() {
-                cols.push(column.to_string());
-            }
-        }
-        cols
-    }
 }
 
 pub fn link_incident_conversation(

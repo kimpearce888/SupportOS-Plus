@@ -729,13 +729,6 @@ impl InboxPage {
         self.reload_detail(db);
     }
 
-    pub fn set_composer_mode(&mut self, mode: ComposerMode) {
-        if mode == ComposerMode::Note {
-            self.inserted_draft = None;
-        }
-        self.composer_mode = mode;
-    }
-
     pub fn composer_edited(&mut self, body: String) {
         if body.trim().is_empty() {
             self.inserted_draft = None;

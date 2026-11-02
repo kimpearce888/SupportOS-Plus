@@ -4,32 +4,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::migrations::add_column_if_missing;
 
-pub const M007_SQL: &str = r#"
-    CREATE TABLE IF NOT EXISTS automation_rules (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        name            TEXT NOT NULL,
-        trigger_json    TEXT NOT NULL,
-        action_json     TEXT NOT NULL,
-        enabled         INTEGER NOT NULL DEFAULT 1,
-        created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS automation_approvals (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        rule_id             INTEGER NOT NULL REFERENCES automation_rules (id) ON DELETE CASCADE,
-        conversation_id     INTEGER NOT NULL,
-        proposed_action_json TEXT NOT NULL,
-        status              TEXT NOT NULL DEFAULT 'pending',
-        decided_by_user_id  INTEGER,
-        decided_at          TEXT,
-        created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_automation_approvals_status
-        ON automation_approvals (status, created_at);
-
-    UPDATE app_state SET schema_version = 7 WHERE id = 1;
-"#;
-
 pub fn apply_m007(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS automation_rules (
@@ -179,20 +153,6 @@ pub fn delete_rule(conn: &Connection, rule_id: i64) -> Result<bool> {
     Ok(rows > 0)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AutomationEvent {
-    StatusChanged { from: String, to: String },
-    TagAdded { tag: String },
-    SlaRisk,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EvaluateResult {
-    pub executed_directly: u32,
-    pub approval_pending: u32,
-    pub no_match: u32,
-}
-
 pub fn approve(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> Result<bool> {
     let rows = conn.execute(
         "UPDATE automation_approvals
@@ -276,17 +236,6 @@ pub struct ValidationIssue {
 }
 
 impl ValidationIssue {}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct RuleInput {
-    pub name: String,
-    pub enabled: bool,
-    pub trigger: String,
-    pub conditions: serde_json::Value,
-    pub actions: serde_json::Value,
-    pub priority: i64,
-    pub requires_approval: bool,
-}
 
 #[derive(Debug, Clone)]
 pub struct RuleRecord {
@@ -429,17 +378,6 @@ pub enum SqlValue {
     Int(i64),
     Real(f64),
     Text(String),
-}
-
-#[derive(Debug, Default)]
-pub struct RuleUpdate {
-    pub name: Option<String>,
-    pub enabled: Option<i64>,
-    pub trigger: Option<String>,
-    pub conditions: Option<serde_json::Value>,
-    pub actions: Option<serde_json::Value>,
-    pub priority: Option<SqlValue>,
-    pub requires_approval: Option<i64>,
 }
 
 #[derive(Debug, Clone)]

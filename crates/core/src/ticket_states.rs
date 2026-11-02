@@ -37,19 +37,6 @@ impl TicketPriority {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateTransition {
-    pub id: Option<i64>,
-    pub conversation_remote_id: i64,
-    pub from_state: Option<String>,
-    pub to_state: String,
-    pub from_priority: Option<String>,
-    pub to_priority: Option<String>,
-    pub actor_type: String,
-    pub actor_id: Option<i64>,
-    pub transitioned_at: String,
-}
-
 pub fn apply_m004(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ticket_state_transitions (
@@ -211,17 +198,4 @@ pub fn apply_m032(conn: &Connection) -> Result<()> {
     }
     let _ = conn.execute("UPDATE app_state SET schema_version = 32 WHERE id = 1", []);
     Ok(())
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TicketStateDef {
-    pub id: i64,
-    pub key: String,
-    pub name: String,
-    pub color: Option<String>,
-    pub sort_order: i64,
-    pub is_resolved: i64,
-    pub built_in: i64,
-    pub created_at: String,
-    pub updated_at: String,
 }

@@ -497,16 +497,6 @@ pub fn copilot_report(
     })
 }
 
-pub fn latest_ai_draft(conn: &Connection, conversation_local_id: i64) -> Option<(String, String)> {
-    conn.query_row(
-        "SELECT content, model FROM ai_drafts
-          WHERE conversation_id = ?1 ORDER BY id DESC LIMIT 1",
-        params![conversation_local_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )
-    .ok()
-}
-
 pub fn latest_ai_draft_row(
     conn: &Connection,
     conversation_local_id: i64,

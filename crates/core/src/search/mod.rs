@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::migrations::add_column_if_missing;
 
-pub const MAX_SEARCH_QUERY_LENGTH: usize = 500;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
     pub scope: String,
@@ -56,14 +54,6 @@ pub struct KnowledgeRawHit {
     pub title: String,
     pub snippet: String,
     pub visibility: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchResult {
-    pub resource_type: String,
-    pub remote_id: i64,
-    pub title: String,
-    pub snippet: String,
 }
 
 pub fn apply_fts_migration(conn: &Connection) -> Result<()> {
@@ -598,35 +588,6 @@ fn rescore_fts_only_lanes_to_rrf_scale(hits: &mut [SearchHit], k: u32) {
             *rank += 1;
         }
     }
-}
-
-pub fn universal_search(conn: &Connection, query: &str) -> Result<Vec<SearchResult>> {
-    let query = cap_query(query);
-    if query.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let response = search(conn, query, "all", &SearchFilters::default())?;
-    Ok(response
-        .hits
-        .into_iter()
-        .map(|h| SearchResult {
-            resource_type: h.scope,
-            remote_id: h.id,
-            title: h.title,
-            snippet: h.snippet,
-        })
-        .collect())
-}
-
-fn cap_query(query: &str) -> &str {
-    if query.len() <= MAX_SEARCH_QUERY_LENGTH {
-        return query;
-    }
-    let mut end = MAX_SEARCH_QUERY_LENGTH;
-    while !query.is_char_boundary(end) {
-        end -= 1;
-    }
-    &query[..end]
 }
 
 pub fn index_conversation_fts(conn: &Connection, local_id: i64) -> Result<()> {

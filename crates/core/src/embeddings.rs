@@ -292,28 +292,6 @@ pub fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ConversationChunkStats {
-    pub chunks: usize,
-    pub indexed: usize,
-    pub pending: usize,
-    pub failed: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct ConversationChunkWithEmbedding {
-    pub conversation_id: i64,
-    pub content: String,
-    pub embedding: Vec<f32>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DocChunkWithEmbedding {
-    pub article_id: i64,
-    pub content: String,
-    pub embedding: Vec<f32>,
-}
-
 #[must_use]
 pub fn encode_f32_le(vector: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(vector.len() * 4);

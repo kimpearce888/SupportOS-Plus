@@ -63,7 +63,6 @@ pub mod maintenance;
 pub mod mentions;
 pub mod migrations;
 pub mod mirror;
-pub mod mirror_readouts;
 pub mod notification_prefs;
 pub mod notification_sweep;
 pub mod notifications;
@@ -109,17 +108,17 @@ pub use migrations::{
 };
 
 #[cfg(test)]
-pub mod bench;
+mod bench;
 #[cfg(test)]
-pub mod it_helpscout;
+mod it_helpscout;
 #[cfg(test)]
-pub mod it_lm_studio;
+mod it_lm_studio;
 #[cfg(test)]
-pub mod it_loopback;
+mod it_loopback;
 #[cfg(test)]
-pub mod it_sync;
+mod it_sync;
 #[cfg(test)]
-pub mod mockserver;
+mod mockserver;
 
 pub use error::{Error, Result};
 

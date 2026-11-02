@@ -13,9 +13,4 @@ impl NotificationPreference {
             Self::Disabled => false,
         }
     }
-
-    #[must_use]
-    pub fn from_bool(b: bool) -> Self {
-        if b { Self::Enabled } else { Self::Disabled }
-    }
 }

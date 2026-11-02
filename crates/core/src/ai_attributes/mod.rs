@@ -205,17 +205,6 @@ pub struct AttributeSnapshot {
     pub computed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AttributeMatch {
-    pub conversation_id: i64,
-    pub number: i64,
-    pub subject: Option<String>,
-    pub value: String,
-    pub confidence: String,
-    pub source: String,
-    pub computed_at: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AttributeDistribution {
     pub attribute: &'static str,

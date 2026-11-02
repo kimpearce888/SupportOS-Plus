@@ -12,14 +12,6 @@ pub struct ToolResult {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CopilotResult {
-    pub response: String,
-    pub tool_calls: Vec<ToolResult>,
-    pub rounds_used: u32,
-    pub terminated_by_bound: bool,
-}
-
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 

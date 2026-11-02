@@ -32,30 +32,6 @@ impl SparseVector {
         values = pairs.iter().map(|(_, v)| *v).collect();
         Self { indices, values }
     }
-
-    #[must_use]
-    pub fn dot_product(&self, other: &Self) -> f32 {
-        let mut sum = 0.0_f32;
-        let mut i = 0;
-        let mut j = 0;
-        while i < self.indices.len() && j < other.indices.len() {
-            if self.indices[i] == other.indices[j] {
-                sum += self.values[i] * other.values[j];
-                i += 1;
-                j += 1;
-            } else if self.indices[i] < other.indices[j] {
-                i += 1;
-            } else {
-                j += 1;
-            }
-        }
-        sum
-    }
-
-    #[must_use]
-    pub fn l2_norm(&self) -> f32 {
-        self.values.iter().map(|v| v * v).sum::<f32>().sqrt()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

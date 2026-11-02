@@ -1240,3 +1240,145 @@ build (linker bus-errors, no code meaning) — reclaimed (the duplicate
 feature build re-run with CARGO_PROFILE_DEV_DEBUG=0 + `-j 2` to bound
 linking pressure; test semantics and rendering are unaffected by debug
 info, disclosed for fidelity.
+
+## Batch KB-3 — A1-3 de-pub sweep + A1-7 knob census + response_state_sql owner disposition + kb2 record correction — opened and completed 2026-11-02
+
+Owner directives at open: (1) response_state_sql.rs's 3 dead fns —
+"untouchable … take the best decision which is logical": disposition
+recorded as **KEEP** (the module is NO-TOUCH; the 3 fns are dead but
+removing them buys ~30 lines against a full gate re-proof on the
+most sensitive SQL surface in the program — keeping is the logical
+minimum-risk choice; the module was never touched, diff-verified).
+(2) A1-3 de-pub sweep + A1-7 knob census — approved. Environment: 5th
+sandbox reset — repo, credentials, toolchain, Mesa all re-provisioned
+from scratch; fresh clone of origin/main @ `59f981d` (tree
+byte-identical to the kb2-audited one); rustup 1.99.1 (minimal
+profile + the pinned components), Mesa lavapipe re-extracted
+(Debian trixie mesa-vulkan-drivers 25.0.7 + libllvm19, lvp_icd.json
+library_path patched, VK_DRIVER_FILES/VK_ICD_FILENAMES +
+LD_LIBRARY_PATH + WGPU_BACKEND=vulkan per the kb1 recipe).
+
+**KB-3-1 — A1-3 census + execution.** A conservative name-based census
+(collisions only suppress candidates) over catalog/core/app-shell lib
+surfaces against the external consumer corpora (app-shell lib + bin +
+integration tests, xtask) found **1,182 pub items with zero external
+consumers**; caller-locality split: **44 same-file-only** (de-pub-able
+in one step) + **1,134 cross-file crate-internal** (a 1,134-line
+pub→pub(crate) sweep — recorded as open item **A1-3b**, its own
+reviewable batch, NOT executed here). The audit's "~80" was a
+pre-kb2 approximation of the same-file-only population; kb2's
+deletions and stricter test-region tracking re-derived it as 44.
+
+The 44 − 7 NO-TOUCH skips (response_state_sql.rs:12/25/37 —
+owner-confirmed keep; db.rs:21 open_with_migrations; ai_center.rs:7
+M009_SQL and ai_center.rs:172 copilot_tool_allowlist;
+migrations/intelligence.rs:11 M014_SQL) − 1 (universal_search, see
+KB-3-2) = 36 de-pubs, + 4 sibling cfg(test) lib mods (bench,
+it_lm_studio, it_sync, mockserver — added for uniformity with the
+flagged it_helpscout/it_loopback; all six are #[cfg(test)]-gated so
+no external surface ever existed) = **40 visibility edits**.
+
+**KB-3-2 — kb2 record correction (disclosed): universal_search was
+claimed deleted in kb2 but never was.** The 59f981d diff for
+search/mod.rs contains only the MAX_RESULTS_PER_TYPE/SEARCH_SCOPES +
+fts_version deletions (18 lines); universal_search, cap_query and
+MAX_SEARCH_QUERY_LENGTH survived at :603/:621/:7. kb3 completes the
+recorded disposition: **universal_search + cap_query +
+MAX_SEARCH_QUERY_LENGTH + SearchResult deleted** (39 lines) —
+SearchResult (the fn's return struct) was orphaned with the cluster
+and missed by the original audit too. Every other kb2 deletion claim
+was re-verified present-and-deleted at HEAD (the census found none of
+them).
+
+**KB-3-3 — the compiler re-proof converted the de-pub sweep into a
+deletion batch.** After the 40 edits, `cargo check` fired **40
+dead_code warnings**: every de-pub'd item except l2_norm is FULLY dead
+(the census's "same-file refs" were mentions inside other dead code)
+plus 8 items inside mirror_readouts.rs. Compiler-authoritative
+disposition (no allow() stamps — the A1-4 anti-pattern stays banned):
+**34 dead items deleted** (32 de-pub'd + CapacityMetrics which the
+deletion list initially missed + l2_norm whose only caller dot_product
+died in the same sweep — the cascade the compiler caught) and the
+**mirror_readouts module deleted whole** (291 lines + its mod decl) —
+completing RF-8's parked owner decision with compiler proof; its
+exactly-2 own tests (percent_and_underscore_match_literally,
+plain_searches_still_match) exercised only the module's dead fns and
+died with it, census-reconciling core lib 489 → 487. Alive-and-now-
+private: l2_norm… (corrected: l2_norm was deleted with the cascade;
+the alive set is exactly the 6 cfg(test) mods). Deleted: jobs
+RUNNING/FAILED/AWAITING_APPROVAL; automation M007_SQL (an unregistered
+never-executed duplicate — apply_m007's inline SQL untouched, zero
+migration-semantics change; kb2's M003..M010 list missed it),
+AutomationEvent, EvaluateResult, RuleInput, RuleUpdate;
+ai_attributes AttributeMatch; conversation_ops ConvFull; embeddings
+ConversationChunkStats/ConversationChunkWithEmbedding/
+DocChunkWithEmbedding; copilot CopilotResult; migrations/side_threads
+SideThread/SideThreadMessage/CreateSideThreadInput/ValidationIssues/
+SideThreadMentionForUser/SideThreadSummary/SideThreadDetail (row
+structs only — the executed SQL is byte-identical);
+intelligence_features RadarSnapshot/SlaStatus/changed_columns (+
+the now-empty impl IncidentPatch block); ticket_states
+StateTransition/TicketStateDef; vectorstore dot_product + l2_norm;
+notification_prefs from_bool; ai_local latest_ai_draft;
+ai_lm_studio with_timeout_ms; app-shell inbox set_composer_mode;
+mirror_readouts.rs entire.
+
+**KB-3-4 — A1-7 knob census (deliverable: verified table +
+dispositions; zero deletions).** 14 concrete keys across the 11 audit
+groups; every key re-verified at HEAD: **zero production writers**
+(the only writers found are tests: redaction_enabled ×2,
+ai_evaluation_mode ×1) and **every key has a live reader** — these
+knobs are running code, not dead code, and the settings table IS this
+app's operator interface (USER_MANUAL:871 teaches it explicitly).
+Dispositions: **KEEP documented** — lmstudio_timeout_ms (5 readers
+incl. the AI-center display) + lmstudio_concurrency (README:109,
+USER_MANUAL:920: "Request budget"; the audit's "no UI" was true but
+they are shipped, documented settings-table configuration; removal
+would contradict the manual) and ai_evaluation_mode (USER_MANUAL:871
+documents the flag itself + the eval_mode_blocks_all_mutations test
+covers the non-default path). **KEEP tested** — redaction_enabled (4
+readers; two tests exercise disabled-redaction "honored verbatim").
+**KEEP hidden-lever, undocumented** — ops_waiting_threshold_minutes
+(reader sanitizes to 1..=20_160 — deliberately built to be set),
+freshness_stale_days (2 readers), freshness_unreviewed_days,
+freshness_low_usage_days, notification_sweep_seconds,
+customer_event_sweep_seconds, intelligence_sweep_seconds,
+backup_interval_hours, notifications.{type}.enabled (pref_for gates
+every insert with per-type defaults). **DEFER** — retention_days
+(reader feeds enforce_retention in NO-TOUCH maintenance.rs; the
+knob+call pair stays byte-identical). A1-6 residue re-verified at
+HEAD: automatic_reply_sending + fts_version zero refs (kb2 drop
+complete); demo_mode/demo_content_purged + display_timezone exist
+only in audit.rs's legacy-key purge + data_reset tests (old-DB
+compat, intentional) — recorded, no change. Follow-up options for the
+owner (recorded, not executed): document the 9 undocumented keys in
+USER_MANUAL, or take a product decision to remove them.
+
+**KB-3-5 — incident, disclosed.** The region-deleter's scanner
+conflated () with {} in its depth counter, so all 6 fn deletions left
+orphaned bodies (signature deleted, body remaining). The immediate
+cargo check caught it (first syntax error at ai_lm_studio.rs:339);
+all six repaired by hand (ai_lm_studio, app-shell inbox,
+notification_prefs, vectorstore, intelligence_features — where the
+now-empty impl IncidentPatch block was removed whole — and ai_local);
+re-check green. Also investigated: terminal output showed
+`#[must_use]` as `#ust_use]` across many files — proven a display-
+pipeline artifact only (Read + git show show the correct bytes; the
+files were never corrupted; no action).
+
+**KB-3-6 — verified, all green:** fmt clean (applied + re-checked
+after the last content edit); cargo clippy --workspace --all-targets
+-D warnings 0; gate_traceability OK — identical line 23 routes / 20
+DC tags / 27 ids; gate_no_simulation clean; verify-icons clean; core
+lib **487 passed / 0 failed / 4 ignored** (--test-threads=1, 346.02s
+— 489 minus exactly mirror_readouts' 2 own tests); app-shell lib 242
+passed / 0 failed (228.45s); xtask 11 passed / 0 failed; doc-tests
+0/0; **kittest 24 suites / 185 tests passed / 0 failed** in-sandbox
+(batches: 13 suites/103 + 11 unique suites/82 + style_lint 2/0 —
+live_chats double-run deduped) — **171 goldens, ZERO drift** (kb3
+touched no UI; the settings page is byte-identical). Churn: 18 files,
++7/−670 (mirror_readouts.rs 291 + search/mod.rs 39 + the 32 dead-item
+regions + 40 visibility edits' pub-keyword removals). Open items
+recorded: **A1-3b** (1,134 cross-file crate-internal pub→pub(crate)
+sweep), the 9 undocumented knobs (document-or-remove, owner's call),
+response_state_sql.rs 3 fns (KEEP recorded, owner-delegated).

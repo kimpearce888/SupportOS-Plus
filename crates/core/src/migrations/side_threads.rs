@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
 use crate::error::Result;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub fn apply_m006(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -40,64 +40,6 @@ pub fn apply_m006(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SideThread {
-    pub id: Option<i64>,
-    pub conversation_id: i64,
-    pub created_by_user_id: Option<i64>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SideThreadMessage {
-    pub id: Option<i64>,
-    pub thread_id: i64,
-    pub body: String,
-    pub author_user_id: Option<i64>,
-    pub created_at: String,
-    pub mentions_json: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct CreateSideThreadInput {
-    pub title: String,
-    pub team_local_id: Option<i64>,
-    pub participant_user_ids: Vec<i64>,
-    pub created_by_user_id: Option<i64>,
-    pub first_message: Option<String>,
-}
-
-pub type ValidationIssues = Vec<(String, String)>;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SideThreadMentionForUser {
-    pub message_id: i64,
-    pub thread_id: i64,
-    pub thread_title: Option<String>,
-    pub conversation_id: i64,
-    pub conversation_number: Option<i64>,
-    pub author: Option<String>,
-    pub body: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SideThreadSummary {
-    pub id: i64,
-    pub conversation_id: i64,
-    pub conversation_number: Option<i64>,
-    pub title: String,
-    pub team_local_id: Option<i64>,
-    pub team_name: Option<String>,
-    pub status: String,
-    pub created_by_user_local_id: Option<i64>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub resolved_at: Option<String>,
-    pub message_count: i64,
-    pub last_message_at: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct SideThreadParticipant {
     pub user_local_id: i64,
@@ -124,23 +66,4 @@ pub struct SideThreadMessageItem {
     pub body: String,
     pub created_at: String,
     pub mentions: Vec<SideThreadMentionRef>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SideThreadDetail {
-    pub id: i64,
-    pub conversation_id: i64,
-    pub conversation_number: Option<i64>,
-    pub title: String,
-    pub team_local_id: Option<i64>,
-    pub team_name: Option<String>,
-    pub status: String,
-    pub created_by_user_local_id: Option<i64>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub resolved_at: Option<String>,
-    pub message_count: i64,
-    pub last_message_at: Option<String>,
-    pub participants: Vec<SideThreadParticipant>,
-    pub messages: Vec<SideThreadMessageItem>,
 }

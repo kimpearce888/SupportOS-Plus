@@ -270,16 +270,6 @@ pub fn eval_mode_on(conn: &Connection) -> bool {
     matches!(on.as_deref(), Some("1") | Some("true") | Some("on"))
 }
 
-pub struct ConvFull {
-    pub id: i64,
-    pub remote_id: i64,
-    pub status: String,
-    pub subject: Option<String>,
-    pub closed_at: Option<String>,
-    pub assignee_local_id: Option<i64>,
-    pub merged_into_conversation_id: Option<i64>,
-}
-
 pub const NOT_CONNECTED: &str = "Help Scout is not connected. Remote actions are disabled - connect Help Scout in Settings first.";
 
 pub fn create_outbound_job_keyed(

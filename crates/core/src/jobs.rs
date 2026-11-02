@@ -4,11 +4,8 @@ use crate::error::{Error, Result};
 
 pub mod status {
     pub const QUEUED: &str = "queued";
-    pub const RUNNING: &str = "running";
     pub const COMPLETED: &str = "completed";
-    pub const FAILED: &str = "failed";
     pub const CANCELLED: &str = "cancelled";
-    pub const AWAITING_APPROVAL: &str = "awaiting_approval";
 }
 
 pub fn ensure_jobs_table(conn: &Connection) -> Result<()> {
