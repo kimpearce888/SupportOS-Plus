@@ -326,3 +326,9 @@ issued).
 - **Artifacts match the source commit** by construction: BUILD-INFO.txt
   embeds `git rev-parse HEAD` at build time; versioned artifact names carry
   the workspace version; SHA256SUMS.txt covers every shipped file.
+- **Closure (2026-11-03, same day):** the owner re-supplied the token;
+  `main` (88830e4→a53273d) and the annotated tag `v1.9.2` (0b572c9) pushed;
+  Release run 41731702400 success (32.1 min, 6/6 jobs); SupportOS+ 1.9.2
+  published with both packages + SHA256SUMS.txt + BUILD-INFO.txt (commit
+  a53273d); all assets downloaded live from the published URLs and
+  `sha256sum -c` verified OK. The credential gate is closed.

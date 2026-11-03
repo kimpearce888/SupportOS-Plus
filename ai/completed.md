@@ -6414,3 +6414,77 @@ Engagement state: A1-3b complete end-to-end (kb3 census → kb4 tranche →
 kb5 completion → kb6 field surgery → kb7 independent re-derivation finds
 zero surviving live candidates); no open items remain anywhere in the
 ledger. ai records synced.
+
+### Batch REL-1 — 2026-11-03 (release commit `a53273d`, tag `v1.9.2`, Release run `41731702400`: success)
+
+**Owner-directed Build & Release — SupportOS+ 1.9.2 published.** The repo was declared
+production-ready on 2026-11-03 (honest answer: yes, with two owner-accepted reservations
+disclosed at the time — G4 blind-test 5/10 against the ≥9/10 preregistered line, owner
+exemption on record; SUS 85.0 n=1; no external security audit). The owner then issued the
+eight-point Build & Release work order; REL-1 executed it against the terminal source
+`88830e4` (kb7's zero-survivor state), the release content differing only by the version
+bump, CHANGELOG section and ledger entries (commit `a53273d` = tag `v1.9.2` target = main
+HEAD).
+
+**REL-1-1 — release prep (commit `a53273d`)**: workspace version 1.9.1 → 1.9.2
+(Cargo.toml + Cargo.lock, all four members); CHANGELOG `## [1.9.2] — 2026-11-03`
+(Fixed: the two KB-1 user-visible production defects — the empty-state per-frame re-query
+on Inbox/Customers/Knowledge/Custom Objects, and the Settings→LM Studio dirty guard;
+Changed: the internal hardening program summarized); plan.md REL-1 opener, progress.md
+REL-1-1..6, decisions.md D8.
+
+**REL-1-2 — full gate set on the exact release content (local)**: fmt clean;
+`check --workspace --all-targets` zero diagnostics; `clippy --locked -D warnings` clean
+(workspace + core/sandbox feature); tests `--locked`: core 452/0/3 (--test-threads=1,
+byte-identical to the kb7 baseline), app-shell 240/0, xtask 11/0, core+sandbox 460/0/3,
+doc-tests 0/0; gate_no_simulation clean; gate_traceability OK (23 routes / 20 DC tags /
+27 ids); verify-icons clean.
+
+**REL-1-3/4 — rehearsal packaging + local verification (disclosed scope)**: the
+release-profile LTO link OOMs in this 4 GB no-swap sandbox, so the rehearsal built at
+`CARGO_PROFILE_RELEASE_LTO=off` from the locked tree with the unmodified xtask — both
+packages produced and staged (AppImage 15,292,920 B; .deb 10,917,076 B; versioned names +
+SHA256SUMS.txt + BUILD-INFO.txt). No-root lanes all green: dpkg -I metadata correct;
+`apt-get install -s` resolves the full dependency set; payload = usr/bin + .desktop +
+4 hicolor icons; ldd fully resolved; SPP_SMOKE=1 EXIT=0 from the extracted deb tree
+(53 migrations, boot services, workers, automatic backup, loopback listener with
+OS-assigned-port fallback, first-run init DB + 0600 secrets.key + instance.lock, 24/24
+pages = 4,220 shapes); Xvfb+lavapipe GUI rc=124 (window created, render loop alive at the
+25 s TERM — the CI success criterion); AppImage APPIMAGE_EXTRACT_AND_RUN smoke EXIT=0 +
+Xvfb GUI rc=124. The root-requiring lanes (real APT install with dependency fetch,
+desktop-file-validate, reinstall, uninstall data-retention, purge, 0.2.x upgrade
+migration) ran only in CI's verify-deb containers — sudo needs a password in this
+sandbox; disclosed, not skipped.
+
+**REL-1-5 — publish (Release run `41731702400`, 32.1 min, 6/6 jobs success)**: the owner
+re-supplied the token (D7/D8 credential gate closed); pushed `main` (88830e4→a53273d) and
+the annotated tag `v1.9.2` (0b572c9). The unmodified release.yml executed end-to-end:
+build+test+package on ubuntu:22.04 (glibc 2.35 baseline, pinned profile, full workspace
+suite incl. the sandbox feature); verify .deb on ubuntu:22.04, ubuntu:24.04, debian:12
+(APT dependency resolution + real install, desktop entry + icons, boot smoke, 0.2.x→1.x
+upgrade migration with data preserved, GUI under Xvfb with only declared dependencies,
+reinstall, uninstall, purge); verify AppImage (smoke + Xvfb GUI); publish. Companion:
+CI #212 on `a53273d` (main) — success.
+
+**Published release — https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.2**
+(draft=false, prerelease=false, published 2026-11-03T23:04:22Z):
+
+| Asset | Size | SHA-256 (shipped bytes) |
+|---|---|---|
+| `SupportOS-Plus-1.9.2-x86_64.AppImage` | 12,777,976 B | `a4dc96a1382dbea5e5808ace584bf7012174d56ae9b10ac8b3d2edaa67726a79` |
+| `supportos-plus_1.9.2_amd64.deb` | 10,165,298 B | `7ee1e689f4678f39b0d2ca915693038c25a92cc1670f392a811c3cd9bb08923d` |
+| `SHA256SUMS.txt` | 200 B | covers both packages |
+| `BUILD-INFO.txt` | 187 B | version 1.9.2, commit `a53273d`, ubuntu:22.04 container, glibc 2.35 baseline |
+
+**Release integrity, independently re-verified (2026-11-03)**: all four assets downloaded
+live from the published URLs; `sha256sum -c SHA256SUMS.txt` → both packages OK (the
+hashes above are the shipped bytes, not rehearsal bytes); BUILD-INFO commit = `a53273d` =
+tag target = main HEAD (the publish job refuses to ship on mismatch); the CI-built .deb
+lints correct (Package supportos-plus, Version 1.9.2, amd64, full Depends stack,
+Homepage); release notes carry the 1.9.2 changelog, install instructions (APT one-liner +
+AppImage chmod +x), and system requirements (x86_64; glibc 2.35+ = Ubuntu 22.04 LTS+ /
+Debian 12+; X11/Wayland desktop session; ~200 MB; no compilation, dev tools or manual
+setup).
+
+**Engagement state:** REL-1 complete — the owner's Build & Release spec is satisfied
+end-to-end. No open items remain in the ledger. Rule 8 STOP awaits owner direction.

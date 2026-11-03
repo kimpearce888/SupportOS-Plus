@@ -1871,5 +1871,15 @@ shapes) and Xvfb+lavapipe GUI rc=124; sha256sum -c SHA256SUMS.txt OK for
 both. The root-requiring lanes (real APT install with dependency fetch,
 desktop-file-validate, reinstall, uninstall data-retention, purge, the
 0.2.x upgrade migration) remain CI's verify-deb matrix — sudo needs a
-password here; disclosed, not skipped. REL-1-5 in progress: commit + tag
-v1.9.2 next; push waits on credentials (D7/D8).
+password here; disclosed, not skipped. REL-1-5 done (2026-11-03): the
+owner re-supplied the token; pushed main 88830e4→a53273d and the annotated
+tag v1.9.2 (0b572c9); Release run 41731702400 completed success in 32.1
+min — 6/6 jobs green (build+test+package on ubuntu:22.04; verify .deb on
+ubuntu:22.04/24.04/debian:12; verify AppImage; publish); SupportOS+ 1.9.2
+published (draft=false, prerelease=false, target a53273d) with 4 assets —
+AppImage 12,777,976 B (sha256 a4dc96a1…67726a79), .deb 10,165,298 B (sha256
+7ee1e689…bb08923d), SHA256SUMS.txt, BUILD-INFO.txt (commit a53273d = tag
+target = main HEAD); all four downloaded live from the published URLs,
+sha256sum -c OK; CI #212 on a53273d success. REL-1-6 done: Batch REL-1
+recorded in completed.md with the full evidence table; no open items
+remain anywhere in the ledger; Rule 8 STOP.
