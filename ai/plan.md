@@ -545,3 +545,62 @@ launch) → publish + live download-link checksum verification.
 Batch REL-1 (scope-defined by the direction; rule.md's ten is the ceiling, not
 a pad): items REL-1-1..REL-1-6, moved to `progress.md` per Rule 2. The active
 item text lives there while the batch runs.
+
+---
+
+## Batch AU-1 — code-truth audit: every issue, bug, blocker, dead code, orphan, broken/unwired feature, and anything not done and due (owner-directed, 2026-11-03)
+
+Owner directive (2026-11-03): **only the code that makes the program is the source of
+truth — nothing else**; existing tests and anything that documents the program must NOT
+be consulted as evidence; sweep the repo for every issue, bug, blocker, dead code,
+orphaned code, broken feature, unwired feature, and everything not done and due; write
+files only in the repo (pushed to GitHub — ledger per rule.md); follow `ai/rule.md`;
+answer from the current tree, never from memory.
+
+**Evidence rules for this batch (binding):**
+- Program corpus (the only source of truth): what the shipping binary runs —
+  `crates/app-shell` (bin + lib), `crates/core` (lib, incl. `migrations/` — runtime
+  program code), `crates/catalog`; program-relevant build config (Cargo.toml features,
+  build script). `crates/xtask` is dev tooling, not the program (marker scan only).
+- Tests are NOT evidence and are NOT consumers: anything under `tests/` dirs or
+  `#[cfg(test)]` modules is excluded from every consumer census — an item whose only
+  references come from test code is **dead in the program**.
+- Docs (README, docs/, CHANGELOG, ai/*) are not behavioral evidence. Ledger writes record
+  the audit process itself (rule.md requirement) — findings cite program code only,
+  re-verified at HEAD `49247d5`.
+
+**Items (moved to progress.md per Rule 2):**
+1. **AU-1-1 (baseline)** — pin HEAD, define the program corpus mechanically (non-test
+   file inventory, LOC, pub-face counts), record the audit method.
+2. **AU-1-2 (incompleteness markers)** — whole-corpus scan of program code for
+   `todo!`/`unimplemented!`/`panic!("not implemented")`/TODO/FIXME/XXX/HACK,
+   placeholder UI strings, `cfg`-disabled program paths; classify each hit.
+3. **AU-1-3 (program-only dead-surface census)** — cross-reference the entire pub face
+   (core 733 / app-shell 214 / catalog 57 items) against non-test program consumers;
+   items referenced only by tests or by nothing = dead-in-program findings.
+4. **AU-1-4 (UI wiring audit)** — app-shell: every page's interactive elements →
+   handler → real core effect; find rendered-but-inert controls, no-op handlers,
+   state that never persists, palette/shortcut actions misrouted or absent.
+5. **AU-1-5 (services wiring audit)** — core runtime services: workers, sync engine,
+   backup, webhook handler, AI pipeline, encryption, sandbox feature, single-instance,
+   auto-update/version-check — started? output consumed? feature flags actually honored
+   in the shipped binary?
+6. **AU-1-6 (data-layer orphans)** — DB columns/tables written but never read (and
+   read-but-never-written) in program code; migration-created structures untouched;
+   settings keys persisted but never loaded (and vice versa).
+7. **AU-1-7 (logic bug hunt: core)** — deep-read of highest-risk paths: SQL
+   column/param mismatches, inverted conditions, off-by-one, unit errors (s/ms),
+   swallowed Results that silently break a feature, lock/race patterns.
+8. **AU-1-8 (logic bug hunt: app-shell)** — lifecycle/state defects: load latches never
+   invalidated, selection desync, command routing, theme/zoom application, focus and
+   shortcut conflicts, error paths that strand the user.
+9. **AU-1-9 (adjudication)** — every candidate finding re-verified at HEAD with
+   file:line + program-code-only evidence; false positives discarded with reasons;
+   confirmed set written back into plan.md as numbered items for subsequent batches.
+10. **AU-1-10 (records + STOP)** — completed.md batch record with the findings table +
+    evidence; ledger sync; Rule 8 STOP.
+
+**Scope honesty:** ~125K LOC. The mechanical sweeps (AU-1-2/3/6) are complete over the
+whole corpus. The semantic reads (AU-1-4/5/7/8) are broad, high-signal passes, not a
+line-by-line proof of absence; anything found lands in plan.md, and remaining risk is
+stated in the batch record.

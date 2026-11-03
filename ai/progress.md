@@ -1883,3 +1883,31 @@ target = main HEAD); all four downloaded live from the published URLs,
 sha256sum -c OK; CI #212 on a53273d success. REL-1-6 done: Batch REL-1
 recorded in completed.md with the full evidence table; no open items
 remain anywhere in the ledger; Rule 8 STOP.
+
+## Batch AU-1 — code-truth audit (owner-directed, 2026-11-03) — items AU-1-1..AU-1-10, moved from plan.md per Rule 2
+
+Owner directive: program code only is the source of truth; tests and documentation are
+not evidence; find every issue, bug, blocker, dead code, orphan, broken/unwired feature,
+everything not done and due; repo-files only (pushed to GitHub); follow rule.md; no
+answers from memory. Evidence rules + item definitions live in the plan.md batch opener
+(binding for this batch). Items:
+
+1. **AU-1-1 (baseline)** — HEAD pinned `49247d5`; corpus = app-shell + core + catalog
+   non-test sources (+ program build config); xtask out of corpus (marker scan only).
+2. **AU-1-2 (incompleteness markers)** — todo!/unimplemented!/panic!/TODO/FIXME/XXX/
+   HACK/placeholder/cfg-out scan across the corpus, each hit classified.
+3. **AU-1-3 (program-only dead-surface census)** — pub face vs non-test program
+   consumers; test-only-referenced = dead-in-program.
+4. **AU-1-4 (UI wiring audit)** — all 24 pages + palette + overlays + toasts: control →
+   handler → core effect; find inert controls and never-persisted state.
+5. **AU-1-5 (services wiring audit)** — workers/sync/backup/webhook/AI pipeline/
+   crypto/sandbox/single-instance/version-check: started? consumed? honored?
+6. **AU-1-6 (data-layer orphans)** — written-never-read / read-never-written columns,
+   orphaned tables, one-way settings keys (program code only).
+7. **AU-1-7 (logic bug hunt: core)** — SQL mismatch, inverted logic, off-by-one, units,
+   swallowed Results, races.
+8. **AU-1-8 (logic bug hunt: app-shell)** — latch invalidation, selection desync,
+   routing, theme/zoom, shortcuts, stranded error paths.
+9. **AU-1-9 (adjudication)** — re-verify every candidate at HEAD (file:line, program
+   code only); discard false positives with reasons; confirmed findings → plan.md items.
+10. **AU-1-10 (records + STOP)** — completed.md record + ledger sync + Rule 8 STOP.
