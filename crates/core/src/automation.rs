@@ -229,48 +229,22 @@ pub(crate) fn customer_thread_trigger_decision(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValidationIssue {
-    pub path: String,
-    pub message: String,
-}
-
-impl ValidationIssue {}
-
 #[derive(Debug, Clone)]
-pub struct RuleRecord {
+pub(crate) struct RuleRecord {
     pub id: i64,
-    pub name: String,
     pub enabled: bool,
     pub trigger: String,
     pub conditions: serde_json::Value,
     pub actions: serde_json::Value,
-    pub priority: i64,
     pub requires_approval: bool,
-    pub last_run_at: Option<String>,
-    pub run_count: i64,
 }
 
-impl RuleRecord {}
-
 const RULE_RECORD_SELECT: &str =
-    "SELECT id, name, trigger_json, action_json, COALESCE(enabled, 0), conditions,
-            COALESCE(priority, 0), COALESCE(requires_approval, 0), last_run_at,
-            COALESCE(run_count, 0)
+    "SELECT id, trigger_json, action_json, COALESCE(enabled, 0), conditions,
+            COALESCE(requires_approval, 0)
      FROM automation_rules";
 
-type RuleRow = (
-    i64,
-    String,
-    String,
-    String,
-    i64,
-    String,
-    i64,
-    i64,
-    Option<String>,
-    i64,
-);
+type RuleRow = (i64, String, String, i64, String, i64);
 
 fn read_rule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RuleRow> {
     Ok((
@@ -280,10 +254,6 @@ fn read_rule_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RuleRow> {
         r.get(3)?,
         r.get(4)?,
         r.get(5)?,
-        r.get(6)?,
-        r.get(7)?,
-        r.get(8)?,
-        r.get(9)?,
     ))
 }
 
@@ -304,18 +274,7 @@ fn parse_trigger_json(raw: &str) -> Result<String> {
 }
 
 fn parse_rule_record(row: RuleRow) -> Result<RuleRecord> {
-    let (
-        id,
-        name,
-        trigger_json,
-        action_json,
-        enabled,
-        conditions_json,
-        priority,
-        requires_approval,
-        last_run_at,
-        run_count,
-    ) = row;
+    let (id, trigger_json, action_json, enabled, conditions_json, requires_approval) = row;
     let trigger: String = parse_trigger_json(&trigger_json)?;
     let actions: serde_json::Value = serde_json::from_str(&action_json)
         .map_err(|e| crate::error::Error::Config(format!("actions deserialization failed: {e}")))?;
@@ -324,15 +283,11 @@ fn parse_rule_record(row: RuleRow) -> Result<RuleRecord> {
     })?;
     Ok(RuleRecord {
         id,
-        name,
         enabled: enabled == 1,
         trigger,
         conditions,
         actions,
-        priority,
         requires_approval: requires_approval == 1,
-        last_run_at,
-        run_count,
     })
 }
 
@@ -363,32 +318,6 @@ pub enum SqlValue {
     Real(f64),
     Text(String),
 }
-
-#[derive(Debug, Clone)]
-pub struct RunRecord {
-    pub id: i64,
-    pub rule_id: i64,
-    pub conversation_id: Option<i64>,
-    pub triggered_at: String,
-    pub status: String,
-    pub detail: Option<String>,
-}
-
-impl RunRecord {
-    fn read(r: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: r.get(0)?,
-            rule_id: r.get(1)?,
-            conversation_id: r.get(2)?,
-            triggered_at: r.get(3)?,
-            status: r.get(4)?,
-            detail: r.get(5)?,
-        })
-    }
-}
-
-const RUN_SELECT: &str =
-    "SELECT id, rule_id, conversation_id, created_at, outcome, detail FROM automation_runs";
 
 fn record_run(
     conn: &Connection,
@@ -865,12 +794,12 @@ pub(crate) fn fire_trigger_for_conversation(
     conn: &mut Connection,
     fired: &str,
     conversation_id: i64,
-) -> Result<Vec<RunRecord>> {
+) -> Result<()> {
     if !crate::settings::get_bool(conn, "automation_enabled", false)? {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let Some(ctx) = load_fire_context(conn, conversation_id)? else {
-        return Ok(Vec::new());
+        return Ok(());
     };
     ensure_main_rule_columns(conn)?;
     let analysis = crate::ai_pipeline::get_latest_analysis(conn, conversation_id)
@@ -883,7 +812,6 @@ pub(crate) fn fire_trigger_for_conversation(
         crate::ai_hub::backend_for_role(conn, crate::ai_hub::AiRole::Classify),
         crate::ai_pipeline::AiBackend::Disabled
     );
-    let mut runs = Vec::new();
     for rule in list_rule_records(conn)? {
         if !rule.enabled || rule.trigger != fired {
             continue;
@@ -1016,20 +944,8 @@ pub(crate) fn fire_trigger_for_conversation(
              WHERE id = ?1",
             params![rule.id],
         )?;
-        let last: Option<RunRecord> = conn
-            .query_row(
-                &format!(
-                    "{RUN_SELECT} WHERE id = (SELECT MAX(id) FROM automation_runs WHERE rule_id = ?1)"
-                ),
-                params![rule.id],
-                RunRecord::read,
-            )
-            .ok();
-        if let Some(r) = last {
-            runs.push(r);
-        }
     }
-    Ok(runs)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1075,13 +991,9 @@ mod batch19_tests {
             .with_read(crate::automation::list_rule_records)
             .expect("the engine must survive every stored rule shape");
         assert_eq!(records.len(), 2, "both real generations parse: {records:?}");
-        let legacy = records
-            .iter()
-            .find(|r| r.name == "ui legacy")
-            .expect("the UI-created rule is visible to the engine");
-        assert_eq!(
-            legacy.trigger, "tag_added",
-            "the legacy M007 enum maps to its kind name"
+        assert!(
+            records.iter().any(|r| r.trigger == "tag_added"),
+            "the UI-created legacy rule is visible to the engine and its M007 enum maps to its kind name"
         );
     }
 

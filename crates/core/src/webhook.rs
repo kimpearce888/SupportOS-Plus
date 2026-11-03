@@ -32,12 +32,10 @@ pub(crate) fn verify_signature(secret: &[u8], body: &[u8], provided_signature: &
 }
 
 #[derive(Debug, Clone)]
-pub struct WebhookEventRecord {
+pub(crate) struct WebhookEventRecord {
     pub id: i64,
-    pub event_id: Option<String>,
     pub event_type: String,
     pub payload: String,
-    pub processing_state: String,
 }
 
 pub(crate) fn apply_m048_webhook_events(conn: &Connection) -> Result<()> {
@@ -180,7 +178,7 @@ pub(crate) fn get_pending_webhook_events(
     limit: u32,
 ) -> Result<Vec<WebhookEventRecord>> {
     let mut stmt = conn.prepare(
-        "SELECT id, event_id, event_type, payload FROM webhook_events
+        "SELECT id, event_type, payload FROM webhook_events
           WHERE processing_state IN ('pending','failed') AND attempts < 5
           ORDER BY id LIMIT ?1",
     )?;
@@ -188,10 +186,8 @@ pub(crate) fn get_pending_webhook_events(
         .query_map(params![limit], |r| {
             Ok(WebhookEventRecord {
                 id: r.get(0)?,
-                event_id: r.get(1)?,
-                event_type: r.get(2)?,
-                payload: r.get(3)?,
-                processing_state: "pending".into(),
+                event_type: r.get(1)?,
+                payload: r.get(2)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

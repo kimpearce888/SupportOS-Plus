@@ -289,20 +289,17 @@ pub struct ClientInteractionProfile {
 }
 
 #[derive(Debug, Clone)]
-pub struct StoredRecommendation {
+pub(crate) struct StoredRecommendation {
     pub recommendation: SupportApproach,
-    pub prompt_version: Option<String>,
-    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct StoredCurrent {
+pub(crate) struct StoredCurrent {
     pub signals: Vec<InteractionSignal>,
     pub message_stats: Option<MessageStats>,
     pub customer_goal: Option<String>,
     pub sources: String,
     pub generated_at: String,
-    pub analysis_version: Option<String>,
     pub recommendation: Option<StoredRecommendation>,
 }
 
@@ -472,7 +469,7 @@ pub(crate) fn get_latest_current_interaction(
     let row = conn
         .query_row(
             "SELECT signals_json, message_stats_json, customer_goal, sources, generated_at,
-                    analysis_version, recommendation_json
+                    recommendation_json
                FROM client_current_signals WHERE conversation_id = ?1
               ORDER BY id DESC LIMIT 1",
             params![conversation_id],
@@ -484,24 +481,17 @@ pub(crate) fn get_latest_current_interaction(
                     r.get::<_, String>(3)?,
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, Option<String>>(5)?,
-                    r.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .ok();
-    let Some((signals_json, stats_json, goal, sources, generated_at, analysis_version, rec)) = row
-    else {
+    let Some((signals_json, stats_json, goal, sources, generated_at, rec)) = row else {
         return Ok(None);
     };
     let recommendation = rec.and_then(|json| {
         let v: serde_json::Value = serde_json::from_str(&json).ok()?;
         Some(StoredRecommendation {
             recommendation: serde_json::from_value(v.get("recommendation")?.clone()).ok()?,
-            prompt_version: v
-                .get("prompt_version")
-                .and_then(|p| p.as_str())
-                .map(String::from),
-            model: v.get("model").and_then(|m| m.as_str()).map(String::from),
         })
     });
     Ok(Some(StoredCurrent {
@@ -510,7 +500,6 @@ pub(crate) fn get_latest_current_interaction(
         customer_goal: goal,
         sources,
         generated_at: generated_at.unwrap_or_default(),
-        analysis_version,
         recommendation,
     }))
 }

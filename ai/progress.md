@@ -1559,3 +1559,112 @@ struct headers. Environment notes: sandbox disk pressure recurred
 (93% before batch B; kittest bins reclaimed between batches);
 background builds still reaped (foreground-iterative pattern used
 throughout). ai records synced.
+
+## Batch KB-6 — never-read DB-adjacent field surgery + the A1-3b final re-narrows — opened and completed 2026-11-03
+
+Owner directive at open: "continue" — the recorded KB-5-5 residual
+(never-read fields in DB-adjacent structs + re-narrowing their held
+headers) was the last open item in the engagement. Course: census
+re-derived at HEAD with the compiler made authoritative, field-level
+deletions with SQL-mapping care per the kb2 precedent, then the full
+gate + test battery.
+
+**KB-6-1 — census re-derived at HEAD; the loose labels reconciled.**
+Of the KB-5-5 list: RuleRecord/RunRecord (automation.rs), ClaimedJob
+(jobs.rs), WebhookEventRecord (webhook.rs) found exactly as recorded.
+The labels "ConversationChunk email-adjacent fields" and "AiRunLog
+run_id/model/prompt_version/latency_ms/created_at/sources" have NO
+code counterpart at HEAD — no struct by either name exists in any of
+the four crates, and -S archaeology shows the strings entered history
+only through kb5's own ai/record diff (census display-name artifacts;
+the corresponding embeddings-stats/ai-runs surfaces had already died
+in kb2/kb3/kb5) — recorded as phantom labels and closed. The
+"interaction_engine fields" label was resolved by the compiler rather
+than by guessing. Method: the seven candidate struct headers
+(RuleRecord, RunRecord, ClaimedJob, WebhookEventRecord,
+StoredRecommendation, StoredCurrent, ValidationIssue) were narrowed
+to pub(crate) — every one grep-verified zero external consumers
+(app-shell/xtask/catalog) and zero serde paths; OverrideRow excluded
+BECAUSE its parent ClientInteractionProfile is serde_json::to_value'd
+LIVE at app-shell customers.rs:234 (kittest-rendered), SqliteVecStore
+excluded (its single field conn is private and heavily read, and the
+header must stay pub for the E0446 pub-interface constraint on
+store_handle; kb5's widen was that constraint, not dead fields) —
+then `cargo check` (lib-only, tests excluded) was made the census
+authority: exactly 6 dead_code warnings fired, enumerating the dead
+fields by name.
+
+**KB-6-2 — the compiler-certified set, deleted with SQL-mapping
+care.** RuleRecord: name/priority/last_run_at/run_count —
+RULE_RECORD_SELECT re-shifted to 6 columns, RuleRow 10→6-tuple,
+read_rule_row/parse_rule_record re-indexed; the SQL
+`ORDER BY priority, id` stays (SQL-level ordering on the intact
+schema column). RunRecord: ALL 6 fields → the struct died whole
+(struct + impl read + RUN_SELECT + the per-rule readback block);
+fire_trigger_for_conversation Result<Vec<RunRecord>>→Result<()> (both
+production caller workers/execute.rs:638 and tests check is_ok only);
+the automation_runs INSERT and the run_count/last_run_at UPDATE stay
+byte-identical (DB-level behavior). ClaimedJob: attempts/max_attempts
+— both claim SELECTs re-shifted to `SELECT id, type, payload,
+attempt` (attempt kept: the claim UPDATE still writes attempt+1).
+WebhookEventRecord: event_id/processing_state —
+get_pending_webhook_events SELECT re-shifted to id/event_type/payload;
+the WHERE processing_state/attempts filters stay (schema intact).
+StoredRecommendation: prompt_version/model — the recommendation_json
+parse now extracts only "recommendation". StoredCurrent:
+analysis_version — SELECT re-shifted (recommendation_json re-indexed
+6→5). Compiler silence certified the siblings live:
+StoredCurrent.message_stats/sources/generated_at, ClaimedJob
+id/kind/payload, WebhookEventRecord id/event_type/payload. Bonus
+same-file deletions: ValidationIssue (zero uses anywhere incl.
+tests — found during the census round) and the two EMPTY impl blocks
+`impl ValidationIssue {}` / `impl RuleRecord {}` (zero content).
+Total: 15 fields across 6 structs + RunRecord whole +
+ValidationIssue whole + 2 empty impls; net +27/−144 across exactly 4
+files (automation.rs, interaction_engine/mod.rs, jobs.rs,
+webhook.rs). The six surviving headers are now pub(crate) — the
+A1-3b direction completed for the last set kb5 had held back
+precisely because of these fields.
+
+**KB-6-3 — test coverage preserved.** Exactly one test touched:
+batch19's ui_created_legacy_rules_parse_instead_of_poisoning_the_
+engine read RuleRecord.name as a lookup handle (test-only read; the
+standing census convention: test-only reads do not keep surface
+alive — kb5's test-only-observer precedent). Rewritten to assert
+records.len()==2 (both rule generations parse — a failed legacy parse
+would skip the record and drop the count) plus
+any(trigger=="tag_added") (the legacy M007 enum maps to its kind
+name). The live coverage — parse survival + trigger mapping — is
+fully preserved. Core lib census reconciles EXACTLY: 467/0/3 equals
+kb5's baseline, zero tests died (no test exercised any deleted
+field).
+
+**KB-6-4 — verification, all green.** fmt clean (applied +
+re-checked); cargo check --workspace --all-targets 0 errors 0
+warnings; clippy --workspace --all-targets -- -D warnings 0;
+gate_traceability OK — identical 23 routes / 20 DC tags / 27 ids;
+gate_no_simulation clean; verify-icons clean; core lib 467 passed /
+0 failed / 3 ignored (--test-threads=1, 318.82s — identical
+baseline); app-shell lib 241/0 (229.36s — identical); xtask 11/0;
+doc-tests 0/0; kittest batch A 13 suites/93 + batch B 11 targets/82
+= 24 unique targets / 175 unique tests / 0 failed — 171 goldens ZERO
+drift (UPDATE_SNAPSHOTS never set; this batch's split re-derived
+alphabetically: 13+11 with NO overlap run — cleaner than kb3-5's
+13/12-with-double-run accounting, same 175 unique). Migrations SQL
+semantics untouched (no M-code, no schema, no executed migration in
+any diff; only runtime SELECT column lists re-shifted per the kb2
+precedent); NO-TOUCH modules (ai_center/db/maintenance/
+response_state_sql) never in the diff; no allow() stamps.
+
+**KB-6-5 — engagement state: no open items remain.** The KB-5-5
+residual is closed; response_state_sql's 3 fns stay KEEP (owner
+disposition, kb3 — nothing to execute); the phantom labels are
+closed as census artifacts; plan.md's RF-1..RF-11 + FINISH + KB-1
+were already closed; kb2..kb6 residuals are all consumed. The
+ledger's Items sections hold nothing open. Environment: cold build
+(target/ was cleaned at kb5 end; core check 73s warm-up then
+steady-state); disk peaked 96% after the kittest feature build and
+the recorded reclamation recipe applied post-run (test bins deleted,
+back to 47%); foreground-iterative runs throughout (background
+builds still reaped by the sandbox); CARGO_PROFILE_DEV_DEBUG=0 +
+CARGO_BUILD_JOBS=2 per the kb2 recipe. ai records synced.

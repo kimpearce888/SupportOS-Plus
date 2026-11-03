@@ -69,26 +69,20 @@ pub fn enqueue_on(
 
 pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<Option<ClaimedJob>> {
     let tx = conn.transaction()?;
-    type ClaimRow = (i64, String, String, i64, i64);
+    type ClaimRow = (i64, String, String, i64);
     let select_row = |stmt: &mut rusqlite::Statement<'_>,
                       params: &[&dyn rusqlite::ToSql]|
      -> rusqlite::Result<Option<ClaimRow>> {
         let mut rows = stmt.query(params)?;
         match rows.next()? {
-            Some(r) => Ok(Some((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-            ))),
+            Some(r) => Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))),
             None => Ok(None),
         }
     };
     let row: Option<ClaimRow> = match queue {
         Some(q) => {
             let mut stmt = tx.prepare(
-                "SELECT id, type, payload, attempt, max_attempts
+                "SELECT id, type, payload, attempt
                    FROM jobs
                   WHERE status = 'queued'
                     AND (run_at IS NULL OR run_at <= datetime('now'))
@@ -100,7 +94,7 @@ pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<O
         }
         None => {
             let mut stmt = tx.prepare(
-                "SELECT id, type, payload, attempt, max_attempts
+                "SELECT id, type, payload, attempt
                    FROM jobs
                   WHERE status = 'queued'
                     AND (run_at IS NULL OR run_at <= datetime('now'))
@@ -111,7 +105,7 @@ pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<O
         }
     };
 
-    let Some((id, kind, payload, attempt, max_attempts)) = row else {
+    let Some((id, kind, payload, attempt)) = row else {
         return Ok(None);
     };
 
@@ -125,22 +119,14 @@ pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<O
     )?;
     tx.commit()?;
 
-    Ok(Some(ClaimedJob {
-        id,
-        kind,
-        payload,
-        attempts: attempt + 1,
-        max_attempts,
-    }))
+    Ok(Some(ClaimedJob { id, kind, payload }))
 }
 
 #[derive(Debug, Clone)]
-pub struct ClaimedJob {
+pub(crate) struct ClaimedJob {
     pub id: i64,
     pub kind: String,
     pub payload: String,
-    pub attempts: i64,
-    pub max_attempts: i64,
 }
 
 pub fn complete(conn: &Connection, id: i64) -> Result<()> {

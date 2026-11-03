@@ -6323,3 +6323,43 @@ kittest 24 targets / 175 unique / 0 failed, 171 goldens ZERO drift.
 Residual for kb6: never-read DB-adjacent struct fields (field surgery
 per kb2 precedent) + re-narrowing their reverted struct headers. ai
 records synced.
+
+---
+
+## kb6 — never-read DB-adjacent field surgery; the engagement's last open item closed (2026-11-03)
+
+The KB-5-5 residual executed: the census re-derived at HEAD with the
+compiler made authoritative (7 candidate headers narrowed to
+pub(crate) — all verified zero external consumers / zero serde paths;
+OverrideRow and SqliteVecStore excluded with reasons — then lib-only
+cargo check fired exactly 6 dead_code warnings). Deleted:
+RuleRecord.name/priority/last_run_at/run_count (SELECT re-shifted to
+6 columns), RunRecord whole (all 6 fields never read — struct +
+read + RUN_SELECT + readback died; fire_trigger_for_conversation now
+returns Result<()>; its production caller and tests check is_ok
+only), ClaimedJob.attempts/max_attempts (claim SELECTs re-shifted,
+attempt kept for the claim UPDATE), WebhookEventRecord
+.event_id/.processing_state (pending-events SELECT re-shifted to
+3 columns), StoredRecommendation.prompt_version/model,
+StoredCurrent.analysis_version (SELECT re-indexed); plus
+ValidationIssue whole (zero uses anywhere) and two empty impl
+blocks. Two KB-5-5 labels — "ConversationChunk" and "AiRunLog" —
+proven phantom census display names with no code counterpart at HEAD
+(strings entered history only through kb5's own record diff); closed
+as artifacts. Runtime SELECT column lists re-shifted per the kb2
+precedent; migrations SQL semantics untouched; NO-TOUCH modules
+never in the diff; one test-only read (RuleRecord.name lookup)
+rewritten preserving its live coverage (parse survival + legacy
+trigger mapping). The six surviving headers now pub(crate) — the
+A1-3b direction completed for the last held-back set. Verified all
+green: fmt clean, check --workspace --all-targets 0/0, clippy
+-D warnings 0, gate_traceability identical (23/20/27),
+no_simulation clean, verify-icons clean, core lib 467/0/3
+(--test-threads=1, 318.82s — identical baseline, zero test deaths,
+census reconciles), app-shell 241/0, xtask 11/0, doc-tests 0/0,
+kittest batch A 13/93 + batch B 11/82 = 24 unique targets / 175
+unique tests / 0 failed — 171 goldens ZERO drift (alphabetical
+13+11 split, no overlap run). Churn: 4 files, +27/−144 (+2 ai
+records). Engagement state: NO open items remain anywhere —
+response_state_sql 3 fns KEEP by owner disposition; plan.md's
+programs closed; kb2..kb6 residuals all consumed. ai records synced.
