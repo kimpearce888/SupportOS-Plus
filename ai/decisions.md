@@ -299,3 +299,30 @@ to remote are authorized for this program (credentials stored at
 `~/.git-credentials`, credential.helper=store, per the owner's explicit
 instruction; the owner will revoke when required — no warnings to be
 issued).
+
+## D8 — Release v1.9.2 from the final source (2026-11-03)
+
+- **Trigger (owner):** "is this repo production ready? … follow the next
+  steps: Build and Release". Verdict delivered honestly: ready, with the two
+  standing disclosed caveats (G4 blind test 5/10 owner-accepted; SUS n=1;
+  no external third-party audit). Direction accepted as work order REL-1.
+- **Version:** 1.9.2 (patch). Changes since v1.9.1: RF-1..11 (internal),
+  KB-1 known-bug fixes (the user-facing deltas), A1-3b closeout kb2..7
+  (internal). No features; no behavior change beyond the two fixes.
+- **Verification split (disclosed):** the sandbox has no passwordless sudo,
+  so the root-requiring .deb lanes (real APT install with dependency fetch,
+  desktop-file-validate, upgrade/reinstall/uninstall/purge) run in
+  release.yml's verify-deb matrix on clean ubuntu:22.04/24.04 + debian:12
+  containers — exactly where they ran for v1.9.0/v1.9.1. Locally verified:
+  the full gate set at the tagged content, both packages built from the
+  locked tree, payload smoke + Xvfb/lavapipe GUI launch (deb-extracted tree
+  and AppImage), SHA-256 checksums. The Release job additionally refuses to
+  ship unless BUILD-INFO's embedded commit matches HEAD, and live-checks
+  every published asset URL against SHA256SUMS.
+- **Credential gate:** ~/.git-credentials was lost in the environment reset
+  (see D7). No push (branch or tag) is possible until the owner re-supplies
+  the token; all pre-push work completes first and the exact push commands
+  are staged for immediate execution.
+- **Artifacts match the source commit** by construction: BUILD-INFO.txt
+  embeds `git rev-parse HEAD` at build time; versioned artifact names carry
+  the workspace version; SHA256SUMS.txt covers every shipped file.

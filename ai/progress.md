@@ -1790,3 +1790,86 @@ either narrowed (42), deleted as compiler-certified dead (~127), or
 reverted as signature-constrained (138, structural). The remaining pub
 face is, by compiler proof, exactly the externally-consumed surface.
 ai records synced.
+
+## Batch REL-1 — release v1.9.2 from the final source (items REL-1-1..REL-1-6) — opened 2026-11-03
+
+Owner-directed Build & Release work order on the closed engagement (plan.md
+carries the direction and the pipeline description; the ship-list is
+release.yml's, already proven on v1.9.0/v1.9.1).
+
+1. **REL-1-1 (release prep)** — workspace version 1.9.1 → 1.9.2 (Cargo.toml +
+   Cargo.lock sync), CHANGELOG `[1.9.2]` section (product language: the two
+   KB-1 fixes; internal hardening summarized; no feature/behavior change),
+   ai records Rule-2 entries (this section + plan.md opener + decisions.md
+   D8).
+2. **REL-1-2 (gates on the release tree)** — the release.yml gate set run
+   locally at the exact tagged content: fmt --all --check; check
+   --workspace --all-targets (zero diagnostics); clippy --locked -D
+   warnings (workspace + core/sandbox feature); test --locked --workspace
+   (single-threaded in-sandbox per the 3 GB recipe); gate_no_simulation;
+   gate_traceability; verify-icons.
+3. **REL-1-3 (local packaging)** — cargo build --locked --release -p
+   supportos-plus-app-shell --features supportos-plus-core/sandbox; xtask
+   package --skip-build (AppImage; appimagetool 1.9.1 pinned + SHA-256);
+   xtask deb --skip-build; dist staging (versioned names + SHA256SUMS.txt +
+   BUILD-INFO.txt commit-pinned) exactly as release.yml's build job does.
+4. **REL-1-4 (local verification, no-root scope — honest split)** —
+   runnable without root, mirrored from release.yml's verify lanes:
+   .deb — dpkg -I metadata lint (Depends/Section/Description), apt-get
+   install -s dependency-resolution simulation, dpkg -x payload extraction,
+   SPP_SMOKE=1 boot chain from the extracted tree, Xvfb+lavapipe GUI launch
+   (rc==124 alive-at-timeout = window created, render loop running);
+   AppImage — chmod +x, APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1, Xvfb GUI
+   launch. The root-requiring lanes (real APT install with automatic
+   dependency fetch, desktop-file-validate, reinstall, uninstall data
+   retention, purge, the 0.2.x upgrade migration) run in CI's verify-deb
+   matrix (ubuntu:22.04/24.04, debian:12) — the same lanes that verified
+   v1.9.0/v1.9.1; locally blocked by the sudo password (disclosed, not
+   skipped).
+5. **REL-1-5 (publish)** — single commit (release prep + ledger) + annotated
+   tag v1.9.2; push blocked pending credentials (~/.git-credentials lost in
+   the environment reset, decisions.md D7) — every pre-push step completes;
+   the push executes the moment the owner re-supplies the token; then CI
+   (incl. the kittest lavapipe lane) + the Release workflow are watched to
+   completion (scrape-verified: CI run conclusion + release assets + live
+   link checksums, as the workflow's own final step also asserts).
+6. **REL-1-6 (records + STOP)** — completed.md release record (evidence
+   table: gates, package paths/sizes/SHA-256, local verify results, CI +
+   release links); Rule 8 STOP.
+
+**REL-1 execution evidence (2026-11-03, local).** REL-1-1 done: workspace
+1.9.2 (Cargo.toml + Cargo.lock, all four members), CHANGELOG `[1.9.2]`,
+plan/progress/decisions entries. REL-1-2 done — the release.yml gate set on
+the exact release content: fmt clean; check --workspace --all-targets zero
+diagnostics (2m55s); clippy --locked -D warnings workspace + core/sandbox
+both clean; tests --locked: core 452/0/3 (--test-threads=1 — byte-identical
+to the kb7 record), app-shell 240/0, xtask 11/0, core+sandbox 460/0/3,
+doc-tests 0/0; gate_no_simulation clean; gate_traceability OK 23/20/27;
+verify-icons clean. REL-1-3 done (rehearsal, disclosed): the release-profile
+LTO link OOMs in this 4 GB no-swap sandbox (SIGKILL inside rustc LTO —
+environmental, the RF-era reason release packaging is CI's job), so the
+rehearsal built at CARGO_PROFILE_RELEASE_LTO=off and BOTH packages were
+produced from the locked tree by the unmodified xtask: AppImage 15,292,920 B
+(appimagetool 1.9.1, SHA-pinned, verified) and .deb 10,917,076 B; dist
+staged with versioned names + SHA256SUMS.txt + BUILD-INFO.txt. Rehearsal
+host-lib disclosure: libxkbcommon0/libxkbcommon-x11-0/libxcb-xkb1 (and
+xauth/libxmuu1 for xvfb-run) were fetched via `apt-get download` + `dpkg -x`
+(genuine distro packages, extracted uninstalled) with an `ldconfig -p` PATH
+shim surfacing them — CI's build job installs these packages for real.
+REL-1-4 done (every lane runnable without root, mirrored from release.yml):
+dpkg -I metadata correct (Version 1.9.2, full Depends stack, Homepage,
+Description); `apt-get install -s ./…deb` resolves the package and its
+dependency set cleanly; payload = usr/bin + .desktop + 4 hicolor icons;
+ldd fully resolved; SPP_SMOKE=1 EXIT=0 from the extracted tree — 53
+migrations, boot services, background workers, automatic backup, loopback
+listener (OS-assigned-port fallback exercised), first-run init (DB +
+0600 secrets.key + instance.lock), all 24 pages rendered headlessly (4,220
+shapes); GUI launch under Xvfb 1280×800 + lavapipe rc=124 (window created,
+render loop alive at the 25 s TERM — the CI success criterion);
+AppImage APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 EXIT=0 (same 24 pages/4,220
+shapes) and Xvfb+lavapipe GUI rc=124; sha256sum -c SHA256SUMS.txt OK for
+both. The root-requiring lanes (real APT install with dependency fetch,
+desktop-file-validate, reinstall, uninstall data-retention, purge, the
+0.2.x upgrade migration) remain CI's verify-deb matrix — sudo needs a
+password here; disclosed, not skipped. REL-1-5 in progress: commit + tag
+v1.9.2 next; push waits on credentials (D7/D8).

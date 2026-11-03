@@ -518,3 +518,30 @@ nothing invented).
    core lib `--test-threads=1`, app-shell lib, xtask, doc-tests, the
    kittest run from KB-1-5; ai records synced; single commit; push; CI
    watched to completion on the push.
+
+## Items — post-kb7 owner-directed work order REL-1 (opened 2026-11-03)
+
+Source: the owner's direction on the kb7 closeout report (2026-11-03): "if this
+repo is production ready … follow the next steps: Build and Release" — build,
+test and publish install-ready Linux `.deb` + `.AppImage` packages from the
+final repository source as a versioned GitHub Release with SHA-256 checksums,
+clean-environment verification and GitHub Actions automation. The
+production-readiness verdict was delivered with the two standing disclosed
+caveats (G4 blind test 5/10 owner-accepted; SUS n=1; no external audit).
+Nothing else changes the answer: the codebase ships.
+
+The final source is `main` @ kb7 (`88830e4`). Changes since v1.9.1 (`acd557a`):
+the RF-1..11 refactor program, the KB-1 known-bug fixes (the only user-facing
+deltas) and the A1-3b closeout kb2..kb7 (internal). Version: **1.9.2**
+(patch — fixes + internal hardening, no features). The release pipeline is the
+repo's own `.github/workflows/release.yml` (proven on v1.9.0/v1.9.1): tagged
+push → ubuntu:22.04 build (glibc 2.35 baseline) → gates → `xtask package` +
+`xtask deb` → SHA256SUMS + BUILD-INFO (commit-pinned) → verify-deb on
+ubuntu:22.04/24.04 + debian:12 (APT resolution, desktop entry, SPP_SMOKE boot
+chain, 0.2.x upgrade migration, Xvfb GUI launch on declared deps only,
+reinstall/uninstall/purge) → verify-appimage (extract-and-run smoke + Xvfb
+launch) → publish + live download-link checksum verification.
+
+Batch REL-1 (scope-defined by the direction; rule.md's ten is the ceiling, not
+a pad): items REL-1-1..REL-1-6, moved to `progress.md` per Rule 2. The active
+item text lives there while the batch runs.

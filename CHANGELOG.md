@@ -4,6 +4,46 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.2] — 2026-11-03
+
+### Fixed — the two known production defects (the RF-FINISH known-bugs list, resolved in KB-1)
+
+- **List pages re-queried the database every rendered frame while showing an
+  empty state** (Inbox, Customers, Knowledge, Custom Objects): the
+  empty-result branch of each page's load latch re-fired its query every
+  frame, so an idle empty view burned continuous DB round-trips. All gates
+  now load once and refetch only on explicit invalidation, with
+  selection-scoped clearing where a selection change must re-query; each
+  page carries a regression test mirroring the established latch pattern.
+- **Settings → LM Studio could lose in-flight edits**: background refreshes
+  clobbered unsaved typing and a stale snapshot could overwrite a save. The
+  form now carries a persisted-triple dirty guard — reloads assign to the
+  form only when it matches the saved snapshot, and a successful save
+  re-bases the snapshot on the saved (trimmed) values; two regression tests
+  mirror the General section's guard shape.
+
+### Changed — internal hardening; no feature, workflow or data change (RF-1..11, KB-2..7)
+
+- The refactor program landed end-to-end: dead-surface deletion (the legacy
+  saved-views engine, unconsumed public APIs, placebo settings switches,
+  dead DB-adjacent fields with their SELECT columns re-shifted), the two
+  helper unifications (`escape_like` 5→1, `add_column_if_missing` 9→1),
+  migration modules relocated byte-identically under `migrations/`,
+  god-file splits by `git mv` + re-export (zero call-site churn), renames,
+  docs sync, test-path moves, and the final comment-deletion wave.
+- Visibility closeout (A1-3b): the public surface narrowed to the
+  compiler-proven consumed face — 447 + 649 + 42 visibility narrows (kb4,
+  kb5, kb7), ~127 compiler-certified dead-item deletions in the closeout
+  alone, and an independent re-derivation of the whole census at this
+  release's commit finding **zero surviving live candidates**. `cargo check
+  --workspace --all-targets` finishes with zero diagnostics; clippy `-D
+  warnings` is clean; the traceability gate holds 23 routes / 20 DC tags /
+  27 ids.
+- The egui kittest suite (24 suites / 175 tests / 171 goldens) is verified
+  green in-sandbox on Mesa lavapipe + Xvfb as well as CI — the snapshot
+  locks carry zero drift over the full set; the CI lane remains the
+  canonical gate on every push.
+
 ## [1.9.1] — 2026-10-30
 
 ### Fixed — the Gate-G4 rejection fix wave (RS-4-1..RS-4-11), on the accepted state
