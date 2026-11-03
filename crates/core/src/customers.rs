@@ -18,22 +18,6 @@ pub struct Customer {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CustomerConversation {
-    pub id: i64,
-    pub remote_id: i64,
-    pub number: i64,
-    pub subject: Option<String>,
-    pub status: String,
-    pub mailbox_id: Option<i64>,
-    pub mailbox_name: Option<String>,
-    pub priority: Option<String>,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
-    pub closed_at: Option<String>,
-    pub response_state: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomerTimelineEntry {
     pub id: i64,
     pub conversation_id: i64,
@@ -43,34 +27,6 @@ pub struct CustomerTimelineEntry {
     pub actor_type: String,
     pub actor_name: Option<String>,
     pub occurred_at: String,
-}
-
-pub fn get_customer(conn: &Connection, customer_id: i64) -> Result<Option<Customer>> {
-    let row = conn.query_row(
-        "SELECT id, remote_id, first_name, last_name, email, organization,
-                job_title, phone, created_at, updated_at
-         FROM customers WHERE id = ?",
-        params![customer_id],
-        |row| {
-            Ok(Customer {
-                id: row.get(0)?,
-                remote_id: row.get(1)?,
-                first_name: row.get(2)?,
-                last_name: row.get(3)?,
-                email: row.get(4)?,
-                organization: row.get(5)?,
-                job_title: row.get(6)?,
-                phone: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-            })
-        },
-    );
-    match row {
-        Ok(c) => Ok(Some(c)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
 }
 
 pub fn customer_timeline(
@@ -113,98 +69,4 @@ pub fn customer_timeline(
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| e.into());
     entries
-}
-
-pub fn search_customers(
-    conn: &Connection,
-    query: &str,
-    limit: Option<u32>,
-) -> Result<Vec<Customer>> {
-    let limit = limit.unwrap_or(20).min(100);
-    let q = format!("%{}%", crate::search::escape_like(query));
-    let mut stmt = conn.prepare(
-        "SELECT id, remote_id, first_name, last_name, email, organization,
-                job_title, phone, created_at, updated_at
-         FROM customers
-         WHERE first_name LIKE ? ESCAPE '\\'
-            OR last_name LIKE ? ESCAPE '\\'
-            OR email LIKE ? ESCAPE '\\'
-            OR organization LIKE ? ESCAPE '\\'
-         ORDER BY COALESCE(updated_at, local_created_at) DESC
-         LIMIT ?",
-    )?;
-    let items: Result<Vec<Customer>> = stmt
-        .query_map(rusqlite::params![&q, &q, &q, &q, i64::from(limit)], |row| {
-            Ok(Customer {
-                id: row.get(0)?,
-                remote_id: row.get(1)?,
-                first_name: row.get(2)?,
-                last_name: row.get(3)?,
-                email: row.get(4)?,
-                organization: row.get(5)?,
-                job_title: row.get(6)?,
-                phone: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-            })
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| e.into());
-    items
-}
-
-#[cfg(test)]
-mod batch27_audit83_tests {
-    use super::*;
-
-    fn seeded() -> rusqlite::Connection {
-        let mut conn = rusqlite::Connection::open_in_memory().expect("db");
-        crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        for (id, name, email) in [
-            (1, "Ada%", "ada@work.example"),
-            (2, "Grace_z", "grace@navy.example"),
-            (3, "Back\\slash", "kim@example.com"),
-        ] {
-            conn.execute(
-                "INSERT INTO customers (id, remote_id, first_name, last_name, email)
-                 VALUES (?1, ?1 * 10, ?2, 'Last', ?3)",
-                rusqlite::params![id, name, email],
-            )
-            .expect("customer");
-        }
-        conn
-    }
-
-    fn names_matching(conn: &rusqlite::Connection, query: &str) -> Vec<String> {
-        search_customers(conn, query, None)
-            .expect("search")
-            .into_iter()
-            .filter_map(|c| c.first_name)
-            .collect::<Vec<_>>()
-    }
-
-    #[test]
-    fn percent_and_underscore_match_literally() {
-        let conn = seeded();
-        assert_eq!(
-            names_matching(&conn, "Ada%"),
-            vec!["Ada%".to_string()],
-            "a literal % finds only Ada%, nobody else"
-        );
-        assert_eq!(
-            names_matching(&conn, "Grace_z"),
-            vec!["Grace_z".to_string()],
-            "a literal _ is not a wildcard"
-        );
-    }
-
-    #[test]
-    fn backslash_containing_names_are_findable() {
-        let conn = seeded();
-        assert_eq!(
-            names_matching(&conn, "Back\\"),
-            vec!["Back\\slash".to_string()],
-            "the trailing backslash no longer escapes the wrapping percent"
-        );
-    }
 }

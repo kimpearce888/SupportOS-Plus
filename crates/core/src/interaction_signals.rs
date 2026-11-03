@@ -292,7 +292,7 @@ pub(crate) struct MessageForAnalysis {
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-pub struct MessageStats {
+pub(crate) struct MessageStats {
     pub customer_messages: usize,
     pub avg_message_length: usize,
     pub question_count: usize,
@@ -400,14 +400,14 @@ fn excerpt(text: &str, max_len: usize) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Evidence {
+pub(crate) struct Evidence {
     pub excerpt: String,
     pub thread_local_id: Option<i64>,
     pub conversation_local_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InteractionSignal {
+pub(crate) struct InteractionSignal {
     pub dimension: String,
     pub value: String,
     pub confidence: String,

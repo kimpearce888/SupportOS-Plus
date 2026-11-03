@@ -70,16 +70,12 @@ pub(crate) async fn compute_qa_ai_layer(
     let deterministic = compute_qa_deterministic(conn, conversation_id);
     if deterministic.is_none() {
         return QaAiOutcome {
-            qa: Value::Null,
-            ai: None,
             error: Some("conversation not found".into()),
         };
     }
     if matches!(backend, crate::ai_pipeline::AiBackend::Disabled) {
-        let qa = get_qa(conn, conversation_id, false).unwrap_or(Value::Null);
+        let _ = get_qa(conn, conversation_id, false);
         return QaAiOutcome {
-            qa,
-            ai: None,
             error: Some(
                 "AI is not available (disabled or offline). The deterministic QA layer was computed; the AI layer stays honestly absent."
                     .into(),
@@ -172,10 +168,8 @@ pub(crate) async fn compute_qa_ai_layer(
     match chat_result {
         Err(e) => {
             crate::ai_pipeline::fail_run(conn, run_id, &e.message).ok();
-            let qa = get_qa(conn, conversation_id, true).unwrap_or(Value::Null);
+            let _ = get_qa(conn, conversation_id, true);
             QaAiOutcome {
-                qa,
-                ai: None,
                 error: Some(e.message),
             }
         }
@@ -211,10 +205,8 @@ fn finish_qa_ai_layer(
     match parsed {
         None => {
             crate::ai_pipeline::fail_run(conn, run_id, "unparseable model output").ok();
-            let qa = get_qa(conn, conversation_id, true).unwrap_or(Value::Null);
+            let _ = get_qa(conn, conversation_id, true);
             QaAiOutcome {
-                qa,
-                ai: None,
                 error: Some(
                     "The model returned unparseable output; the AI layer stays honestly absent."
                         .into(),
@@ -231,12 +223,8 @@ fn finish_qa_ai_layer(
                  WHERE conversation_id = ?1",
                 params![conversation_id, with_model.to_string(), run_id],
             );
-            let qa = get_qa(conn, conversation_id, true).unwrap_or(Value::Null);
-            QaAiOutcome {
-                qa,
-                ai: Some(with_model),
-                error: None,
-            }
+            let _ = get_qa(conn, conversation_id, true);
+            QaAiOutcome { error: None }
         }
     }
 }

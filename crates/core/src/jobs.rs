@@ -2,12 +2,6 @@ use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
 
-pub mod status {
-    pub const QUEUED: &str = "queued";
-    pub const COMPLETED: &str = "completed";
-    pub const CANCELLED: &str = "cancelled";
-}
-
 pub(crate) fn ensure_jobs_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS jobs (
@@ -204,101 +198,6 @@ pub(crate) fn park_job(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct QueueJob {
-    pub id: i64,
-    pub queue: String,
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub priority: i64,
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payload: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<String>,
-    pub attempt: i64,
-    pub max_attempts: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locked_by: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locked_at: Option<String>,
-    pub created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub started_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub completed_at: Option<String>,
-}
-
-pub fn list_jobs(
-    conn: &Connection,
-    status: Option<&str>,
-    queue: Option<&str>,
-    limit: i64,
-) -> Result<Vec<QueueJob>> {
-    let mut sql = String::from("SELECT * FROM jobs");
-    let mut conds: Vec<&str> = Vec::new();
-    if status.is_some() {
-        conds.push("status = ?");
-    }
-    if queue.is_some() {
-        conds.push("queue = ?");
-    }
-    if !conds.is_empty() {
-        sql.push_str(" WHERE ");
-        sql.push_str(&conds.join(" AND "));
-    }
-    sql.push_str(" ORDER BY id DESC LIMIT ?");
-    let mut stmt = conn.prepare(&sql)?;
-    let status_s = status.unwrap_or_default();
-    let queue_s = queue.unwrap_or_default();
-    let mut binds: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(3);
-    if status.is_some() {
-        binds.push(&status_s);
-    }
-    if queue.is_some() {
-        binds.push(&queue_s);
-    }
-    binds.push(&limit);
-    let rows = stmt.query_map(binds.as_slice(), map_queue_job)?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
-}
-
-fn map_queue_job(r: &rusqlite::Row<'_>) -> rusqlite::Result<QueueJob> {
-    let payload: Option<String> = r.get("payload")?;
-    Ok(QueueJob {
-        id: r.get("id")?,
-        queue: r.get("queue")?,
-        kind: r.get("type")?,
-        priority: r.get("priority")?,
-        status: r.get("status")?,
-        payload: payload
-            .as_deref()
-            .and_then(|p| serde_json::from_str(p).ok()),
-        result: r.get("result")?,
-        attempt: r.get("attempt")?,
-        max_attempts: r.get("max_attempts")?,
-        error: r.get("error")?,
-        run_at: r.get("run_at")?,
-        locked_by: r.get("locked_by")?,
-        locked_at: r.get("locked_at")?,
-        created_at: r.get("created_at")?,
-        started_at: r.get("started_at")?,
-        completed_at: r.get("completed_at")?,
-    })
-}
-
-pub fn get_job(conn: &Connection, id: i64) -> Result<Option<QueueJob>> {
-    let job = conn
-        .prepare("SELECT * FROM jobs WHERE id = ?1")?
-        .query_row(params![id], map_queue_job)
-        .ok();
-    Ok(job)
-}
-
 pub(crate) fn recover_stale_jobs(conn: &Connection) -> Result<usize> {
     let rows = conn.execute(
         "UPDATE jobs SET status = 'queued', error = 'Recovered after restart'
@@ -454,48 +353,17 @@ mod batch20_audit24_tests {
         assert_eq!(claimed.id, job_id);
 
         complete_with_result(&conn, job_id, "rewritten text").expect("complete");
-        let job = get_job(&conn, job_id).expect("get").expect("job row");
-        assert_eq!(job.status, status::COMPLETED);
-        assert_eq!(job.result.as_deref(), Some("rewritten text"));
-
-        let listed = list_jobs(&conn, Some(status::COMPLETED), Some("ai"), 10).expect("list");
-        assert_eq!(
-            listed.first().and_then(|j| j.result.as_deref()),
-            Some("rewritten text")
-        );
+        let (status, result): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, result FROM jobs WHERE id = ?1",
+                params![job_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("job row");
+        assert_eq!(status, "completed");
+        assert_eq!(result.as_deref(), Some("rewritten text"));
 
         assert!(complete_with_result(&conn, job_id, "again").is_err());
-    }
-
-    #[test]
-    fn list_jobs_binds_for_every_filter_combination() {
-        let conn = Connection::open_in_memory().expect("db");
-        ensure_jobs_table(&conn).expect("ensure");
-        enqueue_on(&conn, "ai", "rewrite_composer", "{}", 3, 2).expect("enqueue");
-        enqueue_on(&conn, "outbound", "send_reply", "{}", 3, 2).expect("enqueue");
-
-        assert_eq!(
-            list_jobs(&conn, None, None, 10).expect("no filters").len(),
-            2
-        );
-        assert_eq!(
-            list_jobs(&conn, Some(status::QUEUED), None, 10)
-                .expect("status only")
-                .len(),
-            2
-        );
-        assert_eq!(
-            list_jobs(&conn, None, Some("ai"), 10)
-                .expect("queue only")
-                .len(),
-            1
-        );
-        assert_eq!(
-            list_jobs(&conn, Some(status::QUEUED), Some("outbound"), 10)
-                .expect("both filters")
-                .len(),
-            1
-        );
     }
 
     #[test]
@@ -528,25 +396,36 @@ mod batch20_audit24_tests {
         )
         .expect("legacy row");
         let legacy_id = conn.last_insert_rowid();
+        let before = conn.query_row(
+            "SELECT type, result FROM jobs WHERE id = ?1",
+            params![legacy_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        );
         assert!(
-            get_job(&conn, legacy_id).expect("no db error").is_none(),
-            "the legacy row must be unreadable before the heal"
+            before.is_err(),
+            "the legacy row must be unreadable before the heal (no result column)"
         );
         ensure_jobs_table(&conn).expect("heal");
-        let job = get_job(&conn, legacy_id)
-            .expect("read after heal")
-            .expect("row");
-        assert_eq!(job.kind, "translate_composer");
-        assert!(job.result.is_none());
+        let (kind, result): (String, Option<String>) = conn
+            .query_row(
+                "SELECT type, result FROM jobs WHERE id = ?1",
+                params![legacy_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("read after heal");
+        assert_eq!(kind, "translate_composer");
+        assert!(result.is_none());
         claim_next(&mut conn, Some("ai"))
             .expect("claim")
             .expect("job");
         complete_with_result(&conn, legacy_id, "translated text").expect("complete");
-        assert_eq!(
-            get_job(&conn, legacy_id)
-                .expect("row")
-                .and_then(|j| j.result),
-            Some("translated text".to_string())
-        );
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT result FROM jobs WHERE id = ?1",
+                params![legacy_id],
+                |r| r.get(0),
+            )
+            .expect("row");
+        assert_eq!(result, Some("translated text".to_string()));
     }
 }

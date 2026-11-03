@@ -87,25 +87,13 @@ pub fn set_outbound_status(conn: &Connection, id: i64, status: &str, error: Opti
     );
 }
 
-pub struct ConvRef {
-    pub id: i64,
-    pub remote_id: i64,
-    pub mailbox_id: Option<i64>,
-}
-
-pub(crate) fn conv_by_local_id(conn: &Connection, id: i64) -> Option<ConvRef> {
+pub(crate) fn conv_exists(conn: &Connection, id: i64) -> bool {
     conn.query_row(
-        "SELECT id, remote_id, mailbox_local_id FROM conversations WHERE id = ?1",
+        "SELECT 1 FROM conversations WHERE id = ?1",
         params![id],
-        |r| {
-            Ok(ConvRef {
-                id: r.get(0)?,
-                remote_id: r.get(1)?,
-                mailbox_id: r.get(2)?,
-            })
-        },
+        |_| Ok(()),
     )
-    .ok()
+    .is_ok()
 }
 
 pub(crate) fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
@@ -176,33 +164,19 @@ fn slugify(name: &str) -> String {
     out
 }
 
-pub struct AttachmentRow {
-    pub id: i64,
-    pub remote_id: Option<i64>,
-    pub thread_id: Option<i64>,
+pub(crate) struct AttachmentRow {
     pub conversation_id: i64,
     pub filename: Option<String>,
-    pub mime_type: Option<String>,
-    pub local_path: Option<String>,
-    pub state: Option<String>,
 }
 
 pub(crate) fn attachment_by_id(conn: &Connection, id: i64) -> Option<AttachmentRow> {
     conn.query_row(
-        "SELECT id, remote_id, thread_id, conversation_id, filename, mime_type,
-                local_path, state
-           FROM attachments WHERE id = ?1",
+        "SELECT conversation_id, filename FROM attachments WHERE id = ?1",
         params![id],
         |r| {
             Ok(AttachmentRow {
-                id: r.get(0)?,
-                remote_id: r.get(1)?,
-                thread_id: r.get(2)?,
-                conversation_id: r.get(3)?,
-                filename: r.get(4)?,
-                mime_type: r.get(5)?,
-                local_path: r.get(6)?,
-                state: r.get(7)?,
+                conversation_id: r.get(0)?,
+                filename: r.get(1)?,
             })
         },
     )
@@ -218,7 +192,7 @@ pub(crate) fn persist_attachment_bytes(
     let Some(att) = attachment_by_id(conn, attachment_id) else {
         return Err("Attachment not found.".into());
     };
-    if conv_by_local_id(conn, att.conversation_id).is_none() {
+    if !conv_exists(conn, att.conversation_id) {
         return Err("Parent conversation not found.".into());
     }
     let safe_name = att

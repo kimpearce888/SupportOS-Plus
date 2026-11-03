@@ -340,19 +340,7 @@ impl RealHelpScoutProvider {
         Ok(access)
     }
 
-    pub fn revoke(&self) -> Result<()> {
-        let conn = self.conn_lock();
-        ensure_account_row(&conn);
-        let _ = crate::settings::delete_secret(&conn, SECRET_OAUTH_ACCESS);
-        let _ = crate::settings::delete_secret(&conn, SECRET_OAUTH_REFRESH);
-        conn.execute(
-            "UPDATE oauth_tokens SET revoked = 1, access_token = '', refresh_token = NULL
-              WHERE account = 'default'",
-            [],
-        )?;
-        Ok(())
-    }
-
+    #[cfg(test)]
     pub fn oauth_status(&self) -> Value {
         let conn = self.conn_lock();
         ensure_account_row(&conn);

@@ -24,15 +24,6 @@ impl ProviderKind {
             Self::Empty => "empty",
         }
     }
-
-    #[must_use]
-    pub fn from_setting(value: Option<&str>) -> Option<Self> {
-        match value {
-            Some("real") => Some(Self::Real),
-            Some("empty") => Some(Self::Empty),
-            _ => None,
-        }
-    }
 }
 
 struct Inner {
@@ -516,20 +507,6 @@ mod tests {
         assert_eq!(previous, ProviderKind::Real);
         assert_eq!(handle.kind(), ProviderKind::Empty);
         assert!(handle.real().is_none());
-    }
-
-    #[test]
-    fn setting_kind_round_trips() {
-        assert_eq!(
-            ProviderKind::from_setting(Some("real")),
-            Some(ProviderKind::Real)
-        );
-        assert_eq!(
-            ProviderKind::from_setting(Some("empty")),
-            Some(ProviderKind::Empty)
-        );
-        assert_eq!(ProviderKind::from_setting(Some("demo")), None);
-        assert_eq!(ProviderKind::from_setting(None), None);
     }
 
     #[test]

@@ -311,14 +311,6 @@ pub(crate) fn list_rule_records(conn: &Connection) -> Result<Vec<RuleRecord>> {
         .collect())
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SqlValue {
-    Null,
-    Int(i64),
-    Real(f64),
-    Text(String),
-}
-
 fn record_run(
     conn: &Connection,
     rule_id: i64,

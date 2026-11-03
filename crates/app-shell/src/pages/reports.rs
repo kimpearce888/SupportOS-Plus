@@ -55,17 +55,6 @@ impl Tab {
     }
 }
 
-#[must_use]
-pub fn sla_first_response_bars(report: &SlaReport) -> Vec<chart::Point> {
-    report
-        .mailboxes
-        .iter()
-        .filter_map(|m| m.first_response.avg_business_min)
-        .enumerate()
-        .map(|(i, v)| [i as f64, v as f64])
-        .collect()
-}
-
 pub struct ReportsPage {
     pub sync_note: String,
     pending_confirm: Option<ConfirmRequest>,
@@ -2059,9 +2048,6 @@ mod tests {
         });
         assert!(report.mailboxes.len() >= 2);
         assert!(report.range.from.starts_with("20"));
-
-        let bars = sla_first_response_bars(&report);
-        assert!(bars.is_empty(), "no first-response data in fixture");
     }
 
     #[test]

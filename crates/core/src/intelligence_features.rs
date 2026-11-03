@@ -502,23 +502,6 @@ pub fn create_manual_incident(conn: &Connection, inc: &ManualIncident) -> Result
     Ok(id)
 }
 
-#[derive(Default)]
-pub struct IncidentPatch {
-    pub title: Option<String>,
-    pub status: Option<String>,
-    pub severity: Option<String>,
-    pub owner_user_local_id: Option<Option<i64>>,
-    pub product: Option<Option<String>>,
-    pub feature: Option<Option<String>>,
-    pub description: Option<Option<String>>,
-    pub internal_explanation: Option<Option<String>>,
-    pub customer_safe_explanation: Option<Option<String>>,
-    pub known_cause: Option<Option<String>>,
-    pub workaround: Option<Option<String>>,
-    pub resolution: Option<Option<String>>,
-    pub started_at: Option<Option<String>>,
-}
-
 pub fn link_incident_conversation(
     conn: &Connection,
     incident_id: i64,

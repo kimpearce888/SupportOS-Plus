@@ -1006,34 +1006,6 @@ fn token_endpoint_rejection_is_friendly() {
 }
 
 #[test]
-fn revoke_clears_the_token_and_blocks_requests() {
-    let _secrets = secrets_guard();
-    let mock = MockServer::start(crate::mockserver::fixed(MockResponse::json(
-        200,
-        me_json().to_string(),
-    )))
-    .expect("mock server");
-    let db = fixture_db();
-    let p = provider_with_token(&db, &creds(&mock));
-
-    p.revoke().expect("revoke");
-    let status = p.oauth_status();
-    assert_eq!(status["authenticated"], json!(false));
-    let (envelope_access, envelope_refresh) = envelope_tokens(&db);
-    assert_eq!(envelope_access, None, "revocation must purge the envelope");
-    assert_eq!(envelope_refresh, None, "revocation must purge the envelope");
-
-    let err = runtime()
-        .block_on(async { p.get_me().await })
-        .expect_err("blocked");
-    assert_eq!(
-        hs_status(&err),
-        Some(401),
-        "revoked connection must surface as unauthenticated"
-    );
-}
-
-#[test]
 fn docs_api_skipped_entirely_without_key() {
     let _secrets = secrets_guard();
     let mock = MockServer::start(crate::mockserver::not_found()).expect("mock server");

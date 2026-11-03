@@ -552,10 +552,6 @@ fn stopwords_from(cleaned: &str) -> Vec<String> {
     words
 }
 
-pub fn detect(texts: &[String]) -> Vec<Value> {
-    texts.iter().take(50).map(|t| detect_language(t)).collect()
-}
-
 #[derive(Debug)]
 pub enum TranslateError {
     Client(String),

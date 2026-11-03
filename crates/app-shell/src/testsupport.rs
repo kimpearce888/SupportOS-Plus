@@ -2,13 +2,13 @@
 
 use spp_core::db::DbHandle;
 
-pub fn empty_db() -> DbHandle {
+pub(crate) fn empty_db() -> DbHandle {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
     DbHandle::new(conn)
 }
 
-pub fn install_master_key() {
+pub(crate) fn install_master_key() {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -22,7 +22,7 @@ pub fn install_master_key() {
     let _ = std::fs::remove_file(&path);
 }
 
-pub type ConvSeed = (
+pub(crate) type ConvSeed = (
     &'static str,
     i64,
     &'static str,
@@ -33,7 +33,7 @@ pub type ConvSeed = (
     i64,
 );
 
-pub fn fixture(convs: Vec<ConvSeed>) -> DbHandle {
+pub(crate) fn fixture(convs: Vec<ConvSeed>) -> DbHandle {
     let db = empty_db();
     db.with_write(|conn| {
         seed_users(conn);
@@ -161,7 +161,7 @@ pub fn seed_tag(conn: &rusqlite::Connection, conversation_id: i64, name: &str) {
     .expect("conversation tag");
 }
 
-pub fn seed_doc_article(
+pub(crate) fn seed_doc_article(
     conn: &rusqlite::Connection,
     collection_id: i64,
     name: &str,

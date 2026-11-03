@@ -7,20 +7,19 @@ pub(crate) const OUTBOUND_BATCH_PER_TICK: usize = 4;
 pub(crate) const OUTBOUND_MAX_ATTEMPTS: i64 = 3;
 
 #[derive(Debug, Clone)]
-pub struct OutboundJob {
+pub(crate) struct OutboundJob {
     pub id: i64,
     pub kind: String,
     pub conversation_local_id: Option<i64>,
     pub payload: String,
     pub attempts: i64,
-    pub max_attempts: i64,
 }
 
 pub(crate) fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
     let tx = conn.transaction()?;
-    let row: Option<(i64, String, Option<i64>, String, i64, i64)> = {
+    let row: Option<(i64, String, Option<i64>, String, i64)> = {
         let mut stmt = tx.prepare(
-            "SELECT id, kind, conversation_id, payload, attempts, max_attempts
+            "SELECT id, kind, conversation_id, payload, attempts
                FROM outbound_jobs
               WHERE status = 'queued' AND updated_at <= datetime('now')
               ORDER BY id ASC
@@ -33,7 +32,6 @@ pub(crate) fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
                 r.get::<_, Option<i64>>(2)?,
                 r.get::<_, String>(3)?,
                 r.get::<_, i64>(4)?,
-                r.get::<_, i64>(5)?,
             ))
         }) {
             Ok(v) => Some(v),
@@ -41,7 +39,7 @@ pub(crate) fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
             Err(other) => return Err(other.into()),
         }
     };
-    let Some((id, kind, conversation_local_id, payload, attempts, max_attempts)) = row else {
+    let Some((id, kind, conversation_local_id, payload, attempts)) = row else {
         return Ok(None);
     };
     tx.execute(
@@ -55,7 +53,6 @@ pub(crate) fn claim_next(conn: &mut Connection) -> Result<Option<OutboundJob>> {
         conversation_local_id,
         payload,
         attempts,
-        max_attempts,
     }))
 }
 

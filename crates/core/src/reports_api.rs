@@ -357,16 +357,6 @@ pub fn cached_report(
 }
 
 #[must_use]
-pub fn cached_report_keys(conn: &Connection) -> Vec<(String, String)> {
-    conn.prepare("SELECT report_key, fetched_at FROM hs_report_cache ORDER BY report_key")
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-                .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default()
-}
-
-#[must_use]
 pub fn flatten_report(data: &Value) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let push_object = |prefix: &str, v: &Value, out: &mut Vec<(String, String)>| {
@@ -484,6 +474,9 @@ mod tests {
         .expect("cache 2");
         let (_, start2, _, _) = cached_report(&conn, "conversations").expect("row 2");
         assert_eq!(start2, "2026-10-21");
-        assert_eq!(cached_report_keys(&conn).len(), 1);
+        let cached_keys: i64 = conn
+            .query_row("SELECT COUNT(*) FROM hs_report_cache", [], |r| r.get(0))
+            .expect("cache count");
+        assert_eq!(cached_keys, 1);
     }
 }

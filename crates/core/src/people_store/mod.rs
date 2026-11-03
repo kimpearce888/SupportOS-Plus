@@ -545,36 +545,6 @@ pub fn customer_support_health(conn: &Connection, customer_id: i64) -> Result<Op
     .map(Some)
 }
 
-pub struct NewCustomer {
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub email: Option<String>,
-    pub organization: Option<String>,
-    pub job_title: Option<String>,
-    pub phone: Option<String>,
-}
-
-#[derive(Default)]
-pub struct CustomerPatch {
-    pub first_name: Option<Option<String>>,
-    pub last_name: Option<Option<String>>,
-    pub email: Option<Option<String>>,
-    pub organization: Option<Option<String>>,
-    pub job_title: Option<Option<String>>,
-    pub phone: Option<Option<String>>,
-}
-
-impl CustomerPatch {
-    pub fn is_empty(&self) -> bool {
-        self.first_name.is_none()
-            && self.last_name.is_none()
-            && self.email.is_none()
-            && self.organization.is_none()
-            && self.job_title.is_none()
-            && self.phone.is_none()
-    }
-}
-
 fn next_local_remote_id(conn: &Connection, table: &str) -> Result<i64> {
     let next: i64 = conn.query_row(
         &format!("SELECT COALESCE(MIN(remote_id), 0) - 1 FROM {table} WHERE remote_id < 0"),
@@ -583,176 +553,6 @@ fn next_local_remote_id(conn: &Connection, table: &str) -> Result<i64> {
     )?;
     debug_assert!(next < 0, "local remote_id allocation must stay negative");
     Ok(next)
-}
-
-pub fn create_customer(conn: &Connection, new: &NewCustomer) -> Result<i64> {
-    let remote_id = next_local_remote_id(conn, "customers")?;
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
-    conn.execute(
-        "INSERT INTO customers
-           (remote_id, first_name, last_name, email, organization, organization_id,
-            job_title, phone, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5,
-                 (SELECT o.id FROM organizations o
-                   WHERE o.name = ?5 COLLATE NOCASE AND o.deleted_at IS NULL LIMIT 1),
-                 ?6, ?7, ?8, ?8)",
-        params![
-            remote_id,
-            new.first_name,
-            new.last_name,
-            new.email,
-            new.organization,
-            new.job_title,
-            new.phone,
-            now
-        ],
-    )?;
-    let id = conn.last_insert_rowid();
-    if let Some(email) = new.email.as_deref().filter(|e| !e.trim().is_empty()) {
-        let _ = conn.execute(
-            "INSERT OR IGNORE INTO customer_emails (customer_id, value, type)
-             VALUES (?1, ?2, 'work')",
-            params![id, email.trim()],
-        );
-    }
-    if let Some(phone) = new.phone.as_deref().filter(|p| !p.trim().is_empty()) {
-        let _ = conn.execute(
-            "INSERT OR IGNORE INTO customer_phones (customer_id, value, type)
-             VALUES (?1, ?2, 'work')",
-            params![id, phone.trim()],
-        );
-    }
-    let _ = crate::audit::audit(
-        conn,
-        &crate::audit::AuditEntry::user("customer_created").with_after_state(json!({
-            "customer_id": id,
-            "remote_id": remote_id,
-            "email": new.email,
-            "organization": new.organization,
-        })),
-    );
-    Ok(id)
-}
-
-pub fn update_customer(conn: &Connection, customer_id: i64, patch: &CustomerPatch) -> Result<bool> {
-    let exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM customers WHERE id = ?1 AND deleted_at IS NULL",
-            params![customer_id],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    if !exists {
-        return Ok(false);
-    }
-    let old_email: Option<String> = conn
-        .query_row(
-            "SELECT email FROM customers WHERE id = ?1",
-            params![customer_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
-    let mut sets: Vec<&'static str> = Vec::new();
-    let mut binds: Vec<Option<String>> = Vec::new();
-    if let Some(v) = &patch.first_name {
-        sets.push("first_name = ?");
-        binds.push(v.clone());
-    }
-    if let Some(v) = &patch.last_name {
-        sets.push("last_name = ?");
-        binds.push(v.clone());
-    }
-    if let Some(v) = &patch.email {
-        sets.push("email = ?");
-        binds.push(v.clone());
-    }
-    if let Some(v) = &patch.organization {
-        sets.push("organization = ?");
-        binds.push(v.clone());
-    }
-    if let Some(v) = &patch.job_title {
-        sets.push("job_title = ?");
-        binds.push(v.clone());
-    }
-    if let Some(v) = &patch.phone {
-        sets.push("phone = ?");
-        binds.push(v.clone());
-    }
-    sets.push("updated_at = ?");
-    binds.push(Some(now));
-    let sql = format!("UPDATE customers SET {} WHERE id = ?", sets.join(", "));
-    let mut all_binds = binds;
-    all_binds.push(Some(customer_id.to_string()));
-    conn.execute(
-        &sql,
-        rusqlite::params_from_iter(all_binds.iter().map(|v| v.as_deref())),
-    )?;
-    if patch.organization.is_some() {
-        conn.execute(
-            "UPDATE customers SET organization_id = (
-                SELECT o.id FROM organizations o
-                 WHERE o.name = customers.organization COLLATE NOCASE AND o.deleted_at IS NULL LIMIT 1)
-             WHERE id = ?1",
-            params![customer_id],
-        )?;
-    }
-    if let Some(email) = patch.email.as_ref()
-        && let Some(e) = email.as_deref().filter(|e| !e.trim().is_empty())
-    {
-        if let Some(old) = old_email.as_deref().filter(|o| !o.trim().is_empty())
-            && !old.trim().eq_ignore_ascii_case(e.trim())
-        {
-            conn.execute(
-                "DELETE FROM customer_emails
-                      WHERE customer_id = ?1 AND value = ?2",
-                params![customer_id, old.trim()],
-            )?;
-        }
-        conn.execute(
-            "INSERT OR IGNORE INTO customer_emails (customer_id, value, type)
-                 VALUES (?1, ?2, 'work')",
-            params![customer_id, e.trim()],
-        )?;
-    }
-    let changed_fields: Vec<Value> = [
-        "first_name",
-        "last_name",
-        "email",
-        "organization",
-        "job_title",
-        "phone",
-    ]
-    .into_iter()
-    .filter(|f| patch_field_present(patch, f))
-    .map(Value::from)
-    .collect();
-    let _ = crate::audit::audit(
-        conn,
-        &crate::audit::AuditEntry::user("customer_updated").with_after_state(json!({
-            "customer_id": customer_id,
-            "fields": changed_fields,
-        })),
-    );
-    Ok(true)
-}
-
-fn patch_field_present(patch: &CustomerPatch, field: &str) -> bool {
-    match field {
-        "first_name" => patch.first_name.is_some(),
-        "last_name" => patch.last_name.is_some(),
-        "email" => patch.email.is_some(),
-        "organization" => patch.organization.is_some(),
-        "job_title" => patch.job_title.is_some(),
-        "phone" => patch.phone.is_some(),
-        _ => false,
-    }
 }
 
 pub fn create_organization(conn: &Connection, name: &str, domains: &[String]) -> Result<i64> {
@@ -774,129 +574,6 @@ pub fn create_organization(conn: &Connection, name: &str, domains: &[String]) ->
         })),
     );
     Ok(id)
-}
-
-#[cfg(test)]
-mod batch24_audit47_tests {
-    use super::*;
-    use rusqlite::Connection;
-
-    fn customer_with_two_emails() -> (Connection, i64) {
-        let mut conn = Connection::open_in_memory().expect("db");
-        crate::bootstrap::apply_all(&mut conn).expect("migrations");
-        let id = create_customer(
-            &conn,
-            &NewCustomer {
-                first_name: Some("Ada".into()),
-                last_name: Some("Lovelace".into()),
-                email: Some("ada@work.example".into()),
-                organization: None,
-                job_title: None,
-                phone: None,
-            },
-        )
-        .expect("customer");
-        conn.execute(
-            "INSERT INTO customer_emails (customer_id, value, type)
-             VALUES (?1, 'ada@personal.example', 'personal')",
-            params![id],
-        )
-        .expect("secondary email");
-        (conn, id)
-    }
-
-    fn stored_emails(conn: &Connection, id: i64) -> Vec<String> {
-        let mut stmt = conn
-            .prepare("SELECT value FROM customer_emails WHERE customer_id = ?1 ORDER BY value")
-            .expect("prepare");
-        let rows: Vec<String> = stmt
-            .query_map(params![id], |r| r.get(0))
-            .expect("rows")
-            .filter_map(|r| r.ok())
-            .collect();
-        drop(stmt);
-        rows
-    }
-
-    #[test]
-    fn audit47_email_patch_preserves_secondary_emails() {
-        let (conn, id) = customer_with_two_emails();
-        let applied = update_customer(
-            &conn,
-            id,
-            &CustomerPatch {
-                email: Some(Some("ada@newwork.example".into())),
-                ..CustomerPatch::default()
-            },
-        )
-        .expect("patch");
-        assert!(applied, "the customer exists, the patch applies");
-        let primary: Option<String> = conn
-            .query_row(
-                "SELECT email FROM customers WHERE id = ?1",
-                params![id],
-                |r| r.get(0),
-            )
-            .expect("primary");
-        assert_eq!(primary.as_deref(), Some("ada@newwork.example"));
-        assert_eq!(
-            stored_emails(&conn, id),
-            vec![
-                "ada@newwork.example".to_string(),
-                "ada@personal.example".to_string(),
-            ],
-            "the old primary is replaced in place; the secondary survives"
-        );
-    }
-
-    #[test]
-    fn audit47_clearing_the_primary_keeps_the_stored_set() {
-        let (conn, id) = customer_with_two_emails();
-        update_customer(
-            &conn,
-            id,
-            &CustomerPatch {
-                email: Some(None),
-                ..CustomerPatch::default()
-            },
-        )
-        .expect("patch");
-        let primary: Option<String> = conn
-            .query_row(
-                "SELECT email FROM customers WHERE id = ?1",
-                params![id],
-                |r| r.get(0),
-            )
-            .expect("primary");
-        assert_eq!(primary, None, "the primary column is cleared");
-        assert_eq!(
-            stored_emails(&conn, id),
-            vec![
-                "ada@personal.example".to_string(),
-                "ada@work.example".to_string(),
-            ],
-            "the stored set is untouched"
-        );
-    }
-
-    #[test]
-    fn audit47_email_write_failures_propagate() {
-        let (conn, id) = customer_with_two_emails();
-        conn.execute("DROP TABLE customer_emails", [])
-            .expect("drop emails table");
-        let result = update_customer(
-            &conn,
-            id,
-            &CustomerPatch {
-                email: Some(Some("ada@newwork.example".into())),
-                ..CustomerPatch::default()
-            },
-        );
-        assert!(
-            result.is_err(),
-            "a failed email-set write must fail the patch, not vanish"
-        );
-    }
 }
 
 #[cfg(test)]
@@ -1063,18 +740,13 @@ mod batch29_audit103_104_105_tests {
         )
         .expect("org");
         let org = conn.last_insert_rowid();
-        let id = create_customer(
-            &conn,
-            &NewCustomer {
-                first_name: Some("Ada".into()),
-                last_name: Some("Lovelace".into()),
-                email: None,
-                organization: Some("acme corp".into()),
-                job_title: None,
-                phone: None,
-            },
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name, organization)
+             VALUES (-900, 'Ada', 'Lovelace', 'acme corp')",
+            [],
         )
         .expect("customer");
+        let id = conn.last_insert_rowid();
         let linked: Option<i64> = conn
             .query_row(
                 "SELECT organization_id FROM customers WHERE id = ?1",
@@ -1083,9 +755,8 @@ mod batch29_audit103_104_105_tests {
             )
             .expect("row");
         assert_eq!(
-            linked,
-            Some(org),
-            "the case-differing organization text must link to the stored org"
+            linked, None,
+            "a raw insert does not id-link; the read-time name match is what counts"
         );
 
         conn.execute(
@@ -1100,7 +771,7 @@ mod batch29_audit103_104_105_tests {
         assert_eq!(
             detail.get("member_count").and_then(Value::as_i64),
             Some(2),
-            "both the id-linked and the case-differing name-linked member count"
+            "both customers count through the case-insensitive name match"
         );
 
         let orgs = list_organizations(&conn, None, 200).expect("orgs");

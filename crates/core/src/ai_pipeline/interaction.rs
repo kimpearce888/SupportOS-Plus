@@ -296,7 +296,7 @@ fn parse_recommendation(
     })
 }
 
-pub async fn analyze_interaction(
+pub(crate) async fn analyze_interaction(
     conn: &Connection,
     backend: &AiBackend,
     conversation_local_id: i64,

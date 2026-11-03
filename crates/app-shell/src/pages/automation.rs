@@ -91,18 +91,17 @@ fn truncate(s: &str, max: usize) -> &str {
 }
 
 #[derive(Debug, Clone)]
-pub struct ApprovalRow {
+pub(crate) struct ApprovalRow {
     pub id: i64,
     pub rule_id: i64,
     pub conversation_id: i64,
     pub proposed_action: String,
-    pub status: String,
 }
 
 #[must_use]
 pub(crate) fn load_pending_approvals(conn: &rusqlite::Connection) -> Vec<ApprovalRow> {
     conn.prepare(
-        "SELECT id, rule_id, conversation_id, proposed_action_json, status
+        "SELECT id, rule_id, conversation_id, proposed_action_json
            FROM automation_approvals WHERE status = 'pending' ORDER BY id DESC LIMIT 100",
     )
     .and_then(|mut stmt| {
@@ -112,7 +111,6 @@ pub(crate) fn load_pending_approvals(conn: &rusqlite::Connection) -> Vec<Approva
                 rule_id: r.get(1)?,
                 conversation_id: r.get(2)?,
                 proposed_action: r.get(3)?,
-                status: r.get(4)?,
             })
         })
         .map(|rows| rows.filter_map(Result::ok).collect())
@@ -496,14 +494,6 @@ impl AutomationPage {
         nav
     }
 
-    pub fn delete_rule_confirmed(&mut self, db: &DbHandle, id: i64) {
-        let result = db.with_write(|conn| spp_core::automation::delete_rule(conn, id));
-        if let Err(e) = result {
-            self.error = Some(e.to_string());
-        }
-        self.reload(db);
-    }
-
     fn new_rule_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let t = design::tokens(ui);
         design::card(ui, |ui| {
@@ -691,7 +681,10 @@ mod tests {
         let id = rule.id.unwrap_or(0);
         page.toggle_rule(&db, id, false);
         assert!(!page.rules[0].enabled);
-        page.delete_rule_confirmed(&db, id);
+        let _ = db
+            .with_write(|conn| spp_core::automation::delete_rule(conn, id))
+            .expect("delete");
+        page.reload(&db);
         assert!(page.rules.is_empty());
     }
 
@@ -718,7 +711,10 @@ mod tests {
             .map(|rules| rules.len())
             .unwrap_or_default();
         assert_eq!(rules, 1, "cancel keeps the rule");
-        page.delete_rule_confirmed(&db, id);
+        let _ = db
+            .with_write(|conn| spp_core::automation::delete_rule(conn, id))
+            .expect("delete");
+        page.reload(&db);
         assert!(page.rules.is_empty(), "confirm deletes the rule");
     }
 

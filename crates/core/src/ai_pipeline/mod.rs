@@ -401,10 +401,8 @@ pub(crate) fn fail_run(conn: &Connection, id: i64, error: &str) -> Result<()> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CachedRun {
-    pub id: i64,
+pub(crate) struct CachedRun {
     pub output: String,
-    pub created_at: String,
 }
 
 pub(crate) fn find_cached_run(
@@ -414,17 +412,13 @@ pub(crate) fn find_cached_run(
     prompt_version: &str,
 ) -> Result<Option<CachedRun>> {
     let mut stmt = conn.prepare(
-        "SELECT id, response_json, created_at FROM ai_runs
+        "SELECT response_json FROM ai_runs
           WHERE type=?1 AND input_hash=?2 AND prompt_version=?3 AND status='completed'
           ORDER BY id DESC LIMIT 1",
     )?;
     let run = stmt
         .query_row(params![kind, input_hash, prompt_version], |r| {
-            Ok(CachedRun {
-                id: r.get(0)?,
-                output: r.get(1)?,
-                created_at: r.get(2)?,
-            })
+            Ok(CachedRun { output: r.get(0)? })
         })
         .ok();
     Ok(run)
@@ -462,67 +456,28 @@ pub(crate) fn get_analysis_signature(conn: &Connection, conversation_id: i64) ->
 }
 
 #[derive(Debug, Clone)]
-pub struct LatestAnalysis {
-    pub run_id: i64,
-    pub model: Option<String>,
-    pub prompt_version: Option<String>,
-    pub latency_ms: Option<i64>,
-    pub created_at: String,
+pub(crate) struct LatestAnalysis {
     pub analysis: TicketAnalysis,
-    pub sources: Vec<AiSourceRef>,
 }
 
 pub(crate) fn get_latest_analysis(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Option<LatestAnalysis>> {
-    let row = conn
+    let output: Option<String> = conn
         .query_row(
-            "SELECT id, response_json, model, prompt_version, latency_ms, created_at FROM ai_runs
+            "SELECT response_json FROM ai_runs
               WHERE conversation_id=?1 AND type='ticket_analysis' AND status='completed'
               ORDER BY id DESC LIMIT 1",
             params![conversation_id],
-            |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<i64>>(4)?,
-                    r.get::<_, String>(5)?,
-                ))
-            },
+            |r| r.get::<_, String>(0),
         )
         .ok();
-    let Some((run_id, output, model, prompt_version, latency_ms, created_at)) = row else {
+    let Some(output) = output else {
         return Ok(None);
     };
     let analysis: TicketAnalysis = serde_json::from_str(&output).unwrap_or_default();
-    let mut stmt = conn.prepare(
-        "SELECT source_type, source_id, title, relevance, visibility, timestamp
-           FROM ai_sources WHERE run_id = ?1",
-    )?;
-    let sources = stmt
-        .query_map(params![run_id], |r| {
-            Ok(AiSourceRef {
-                source_type: r.get(0)?,
-                source_id: r.get(1)?,
-                title: r.get(2)?,
-                relevance: r.get(3)?,
-                visibility: r.get(4)?,
-                timestamp: r.get(5)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(Some(LatestAnalysis {
-        run_id,
-        model,
-        prompt_version,
-        latency_ms,
-        created_at,
-        analysis,
-        sources,
-    }))
+    Ok(Some(LatestAnalysis { analysis }))
 }
 
 pub(crate) fn save_analysis(
@@ -578,26 +533,6 @@ pub(crate) fn save_analysis(
         ],
     )?;
     Ok(())
-}
-
-fn sources_for_run(conn: &Connection, run_id: i64) -> Result<Vec<AiSourceRef>> {
-    let mut stmt = conn.prepare(
-        "SELECT source_type, source_id, title, relevance, visibility, timestamp
-           FROM ai_sources WHERE run_id = ?1",
-    )?;
-    let sources = stmt
-        .query_map(params![run_id], |r| {
-            Ok(AiSourceRef {
-                source_type: r.get(0)?,
-                source_id: r.get(1)?,
-                title: r.get(2)?,
-                relevance: r.get(3)?,
-                visibility: r.get(4)?,
-                timestamp: r.get(5)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(sources)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -855,11 +790,8 @@ pub(crate) fn upsert_memory(
 }
 
 #[derive(Debug, Clone)]
-pub struct AnalyzeOutcome {
+pub(crate) struct AnalyzeOutcome {
     pub analysis: TicketAnalysis,
-    pub sources: Vec<AiSourceRef>,
-    pub cached: bool,
-    pub run_id: i64,
 }
 
 pub(crate) async fn analyze_ticket(
@@ -882,13 +814,7 @@ pub(crate) async fn analyze_ticket(
         && let Some(analysis) = parse_ticket_analysis(Some(&cached_json))
         && analysis_has_core_content(&analysis)
     {
-        let sources = sources_for_run(conn, cached.id).unwrap_or_default();
-        return Ok(AnalyzeOutcome {
-            analysis,
-            sources,
-            cached: true,
-            run_id: cached.id,
-        });
+        return Ok(AnalyzeOutcome { analysis });
     }
     let ctx = build_evidence(conn, index, conversation_local_id, true)
         .map_err(|e| LmStudioError::new(e.to_string(), true))?
@@ -965,12 +891,7 @@ pub(crate) async fn analyze_ticket(
     let sources = sources_for(conn, &ctx);
     save_analysis(conn, run_id, conversation_local_id, &analysis, &sources)
         .map_err(|e| LmStudioError::new(e.to_string(), true))?;
-    Ok(AnalyzeOutcome {
-        analysis,
-        sources,
-        cached: false,
-        run_id,
-    })
+    Ok(AnalyzeOutcome { analysis })
 }
 
 fn analysis_has_core_content(a: &TicketAnalysis) -> bool {
@@ -1188,7 +1109,7 @@ pub(crate) async fn generate_draft(
     Ok((draft, verification))
 }
 
-pub async fn verify_draft_internal(
+pub(crate) async fn verify_draft_internal(
     conn: &Connection,
     backend: &AiBackend,
     index: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
@@ -1802,6 +1723,27 @@ fn compute_trends(conn: &Connection) -> Result<()> {
 }
 
 #[cfg(test)]
+fn digest_row(
+    conn: &rusqlite::Connection,
+    id: i64,
+) -> (String, Option<String>, String, serde_json::Value) {
+    conn.query_row(
+        "SELECT status, narrative, trigger_kind, facts FROM ai_digests WHERE id = ?1",
+        [id],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+                serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(3)?)
+                    .expect("facts json"),
+            ))
+        },
+    )
+    .expect("digest row")
+}
+
+#[cfg(test)]
 mod batch13_a3_a6_tests {
     use super::*;
     use rusqlite::Connection;
@@ -2180,12 +2122,12 @@ mod batch14_k2_k4_tests {
         let id = rt
             .block_on(weekly_digest(&conn, &AiBackend::Disabled, "manual", 7))
             .expect("digest stored");
-        let row = crate::digest::digest_by_id(&conn, id).expect("row");
-        assert_eq!(row.status, "facts_only");
-        assert!(row.narrative.is_none());
-        assert_eq!(row.trigger_kind, "manual");
-        assert!(row.facts["volume"]["new_conversations"].is_number());
-        assert!(row.facts["what_changed"]["new_gap_candidates"].is_array());
+        let (status, narrative, trigger_kind, facts) = digest_row(&conn, id);
+        assert_eq!(status, "facts_only");
+        assert!(narrative.is_none());
+        assert_eq!(trigger_kind, "manual");
+        assert!(facts["volume"]["new_conversations"].is_number());
+        assert!(facts["what_changed"]["new_gap_candidates"].is_array());
         assert_eq!(
             crate::digest::list_digests(&conn, Some("deterministic digest facts"), 5).len(),
             1
@@ -2288,7 +2230,7 @@ mod batch23_audit_tests {
             Some("B-source"),
         );
 
-        let outcome = tokio::runtime::Builder::new_current_thread()
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime")
@@ -2301,26 +2243,34 @@ mod batch23_audit_tests {
             ))
             .expect("the cache hit needs no backend");
 
-        assert!(outcome.cached);
+        let (run_id, output): (i64, String) = conn
+            .query_row(
+                "SELECT id, response_json FROM ai_runs
+                  WHERE type='ticket_analysis' AND status='completed' AND input_hash = ?1",
+                [&hash],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("the hash-matched analysis run");
+        assert_eq!(run_id, run_a, "provenance points at the hash-matched run");
+        let analysis: crate::ai_prompts::TicketAnalysis =
+            serde_json::from_str(&output).expect("analysis json");
         assert_eq!(
-            outcome.run_id, run_a,
-            "provenance points at the hash-matched run"
-        );
-        assert_eq!(
-            outcome.analysis.intent.as_deref(),
+            analysis.intent.as_deref(),
             Some("question"),
             "the analysis is the hash-matched run's, not the newest run's"
         );
-        assert_eq!(
-            outcome.analysis.summary.as_deref(),
-            Some("A: the invite bounces")
-        );
-        assert_eq!(
-            outcome.sources.len(),
-            1,
-            "the sources are the hash-matched run's"
-        );
-        assert_eq!(outcome.sources[0].title, "A-source");
+        assert_eq!(analysis.summary.as_deref(), Some("A: the invite bounces"));
+        let titles: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT title FROM ai_sources WHERE run_id = ?1")
+                .expect("sources query");
+            stmt.query_map([run_a], |r| r.get::<_, String>(0))
+                .expect("sources rows")
+                .filter_map(|r| r.ok())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(titles.len(), 1, "the sources are the hash-matched run's");
+        assert_eq!(titles[0], "A-source");
     }
 
     #[test]
@@ -2694,7 +2644,6 @@ mod batch28_ai_tests {
         let outcome = rt()
             .block_on(analyze_ticket(&conn, &backend(&mock), None, conv, false))
             .expect("a content-bearing analysis is accepted");
-        assert!(!outcome.cached, "the empty answer was not cached");
         assert_eq!(
             outcome.analysis.summary.as_deref(),
             Some("Customer is stuck in a reset loop")
@@ -2727,10 +2676,6 @@ mod batch28_ai_tests {
         let outcome = rt()
             .block_on(analyze_ticket(&conn, &backend(&mock), None, conv, false))
             .expect("the stale empty cache degrades to a fresh computation");
-        assert!(
-            !outcome.cached,
-            "the empty cached output is not a cache hit"
-        );
         assert_eq!(
             outcome.analysis.intent.as_deref(),
             Some("get_account_access"),
@@ -2750,9 +2695,9 @@ mod batch28_ai_tests {
             let id = rt()
                 .block_on(weekly_digest(&conn, &backend(&mock), "manual", 7))
                 .expect("the digest still archives its facts");
-            let row = crate::digest::digest_by_id(&conn, id).expect("digest row");
-            assert_eq!(row.status, "failed");
-            assert!(row.narrative.is_none());
+            let (status, narrative, _trigger, _facts) = digest_row(&conn, id);
+            assert_eq!(status, "failed");
+            assert!(narrative.is_none());
             let (status, _, _) = latest_run(&conn, "weekly_digest");
             assert_eq!(
                 status, "failed",
@@ -2770,10 +2715,10 @@ mod batch28_ai_tests {
             let id = rt()
                 .block_on(weekly_digest(&conn, &backend(&mock), "manual", 7))
                 .expect("digest stored");
-            let row = crate::digest::digest_by_id(&conn, id).expect("digest row");
-            assert_eq!(row.status, "complete");
+            let (status, narrative, _trigger, _facts) = digest_row(&conn, id);
+            assert_eq!(status, "complete");
             assert_eq!(
-                row.narrative.as_deref(),
+                narrative.as_deref(),
                 Some("A quiet week: volume down, SLA met.")
             );
             let (status, _, _) = latest_run(&conn, "weekly_digest");

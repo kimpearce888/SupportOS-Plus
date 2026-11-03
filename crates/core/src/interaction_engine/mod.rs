@@ -134,7 +134,7 @@ pub(crate) struct InteractionChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SupportApproach {
+pub(crate) struct SupportApproach {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tone: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -914,13 +914,12 @@ pub(crate) fn get_outcomes_for_customer(
 }
 
 #[derive(Debug, Clone)]
-pub struct CustomerConversation {
+pub(crate) struct CustomerConversation {
     pub id: i64,
     pub number: i64,
     pub subject: Option<String>,
     pub status: String,
     pub remote_created_at: Option<String>,
-    pub thread_count: i64,
 }
 
 pub(crate) fn get_customer_conversations(
@@ -929,9 +928,7 @@ pub(crate) fn get_customer_conversations(
     exclude_conversation_id: Option<i64>,
 ) -> Result<Vec<CustomerConversation>> {
     let mut stmt = conn.prepare(
-        "SELECT c.id, c.number, c.subject, c.status, c.created_at,
-           (SELECT COUNT(*) FROM conversation_threads t
-             WHERE t.conversation_id = c.id AND t.deleted_at IS NULL) AS thread_count
+        "SELECT c.id, c.number, c.subject, c.status, c.created_at
            FROM conversations c
           WHERE c.customer_local_id = ?1 AND c.deleted_at IS NULL AND c.id != ?2
           ORDER BY c.created_at DESC",
@@ -946,7 +943,6 @@ pub(crate) fn get_customer_conversations(
                     subject: r.get(2)?,
                     status: r.get(3)?,
                     remote_created_at: r.get(4)?,
-                    thread_count: r.get(5)?,
                 })
             },
         )?

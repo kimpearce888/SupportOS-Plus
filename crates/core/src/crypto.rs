@@ -4,7 +4,7 @@ use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 use crate::error::{Error, Result};
 
 pub(crate) const NONCE_LEN: usize = 12;
-pub const KEY_LEN: usize = 32;
+pub(crate) const KEY_LEN: usize = 32;
 
 pub(crate) fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()> {
     if path.exists() {

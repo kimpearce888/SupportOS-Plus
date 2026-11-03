@@ -115,7 +115,7 @@ fn vec_to_blob(vector: &[f32]) -> Vec<u8> {
     out
 }
 
-pub struct SqliteVecStore {
+pub(crate) struct SqliteVecStore {
     conn: Mutex<Connection>,
 }
 
@@ -124,45 +124,6 @@ impl SqliteVecStore {
         Ok(Self {
             conn: Mutex::new(open_store_db(path)?),
         })
-    }
-
-    pub fn delete_by_entity(
-        &self,
-        collection: &str,
-        entity_type: &str,
-        entity_ids: &[i64],
-    ) -> Result<()> {
-        if entity_ids.is_empty() {
-            return Ok(());
-        }
-        let mut conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
-        let table = vec_table_for(collection);
-        let tx = conn.transaction()?;
-        let placeholders: Vec<String> =
-            (3..3 + entity_ids.len()).map(|i| format!("?{i}")).collect();
-        let in_list = placeholders.join(", ");
-        let mut bound: Vec<String> = vec![collection.to_string(), entity_type.to_string()];
-        bound.extend(entity_ids.iter().map(ToString::to_string));
-        tx.execute(
-            &format!(
-                "DELETE FROM {table} WHERE point_id IN (
-                     SELECT point_id FROM vec_payload
-                      WHERE collection = ?1 AND entity_type = ?2
-                        AND entity_id IN ({in_list})
-                 )"
-            ),
-            rusqlite::params_from_iter(bound.iter()),
-        )?;
-        tx.execute(
-            &format!(
-                "DELETE FROM vec_payload
-                  WHERE collection = ?1 AND entity_type = ?2
-                    AND entity_id IN ({in_list})"
-            ),
-            rusqlite::params_from_iter(bound.iter()),
-        )?;
-        tx.commit()?;
-        Ok(())
     }
 
     pub(crate) fn open_default(data_dir: &Path) -> Result<Self> {
@@ -537,13 +498,6 @@ impl VectorIndex {
         }
     }
 
-    pub fn reconfigure(&self, enabled: Option<bool>) {
-        let mut inner = self.inner.lock().expect("VectorIndex mutex poisoned");
-        if let Some(e) = enabled {
-            inner.enabled = e;
-        }
-    }
-
     fn store_handle(&self) -> Option<Arc<SqliteVecStore>> {
         let mut inner = self.inner.lock().expect("VectorIndex mutex poisoned");
         if !inner.enabled {
@@ -665,18 +619,6 @@ impl VectorIndex {
                 .collect(),
             Err(_) => Vec::new(),
         }
-    }
-
-    pub fn delete_by_entity(&self, entity_type: &str, entity_ids: &[i64]) -> bool {
-        if entity_ids.is_empty() {
-            return false;
-        }
-        let Some(store) = self.store_handle() else {
-            return false;
-        };
-        store
-            .delete_by_entity(VECTOR_COLLECTION, entity_type, entity_ids)
-            .is_ok()
     }
 
     pub(crate) fn prune_orphaned_points(
@@ -840,46 +782,6 @@ mod tests {
     }
 
     #[test]
-    fn delete_by_entity_removes_both_halves() {
-        let (_dir, store) = seeded_store("delentity", 2);
-        store
-            .upsert(
-                VECTOR_COLLECTION,
-                point(1, vec![1.0, 0.0], "conversation_chunk", 5),
-            )
-            .expect("upsert 1");
-        store
-            .upsert(
-                VECTOR_COLLECTION,
-                point(2, vec![0.0, 1.0], "conversation_chunk", 6),
-            )
-            .expect("upsert 2");
-        store
-            .upsert(
-                VECTOR_COLLECTION,
-                point(3, vec![0.5, 0.5], "knowledge_chunk", 6),
-            )
-            .expect("upsert 3");
-
-        store
-            .delete_by_entity(VECTOR_COLLECTION, "conversation_chunk", &[5, 6])
-            .expect("delete by entity");
-
-        assert_eq!(store.try_point_count(VECTOR_COLLECTION).unwrap(), Some(1));
-        assert_eq!(
-            store
-                .count_by_entity_type(VECTOR_COLLECTION, "conversation_chunk")
-                .unwrap(),
-            0
-        );
-        let remaining = store
-            .search_dense(VECTOR_COLLECTION, &[0.5, 0.5], None, 5)
-            .expect("search");
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].payload["entity_type"], "knowledge_chunk");
-    }
-
-    #[test]
     fn facade_disabled_and_enabled_states() {
         let dir = temp_data_dir("facade");
         let index = VectorIndex::new(&dir, false);
@@ -895,7 +797,7 @@ mod tests {
         }]));
         assert_eq!(index.count_by_entity("k"), 0);
 
-        index.reconfigure(Some(true));
+        let index = VectorIndex::new(&dir, true);
         assert!(index.enabled());
         let health = index.health();
         assert!(health.connected, "sqlite-vec is always local: {health:?}");
@@ -929,9 +831,6 @@ mod tests {
         let hits = index.search(&[1.0, 0.0], 2);
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, 1);
-
-        assert!(index.delete_by_entity("docs_chunk", &[20]));
-        assert_eq!(index.try_point_count().expect("count"), Some(1));
 
         assert!(index.drop_collection());
         assert_eq!(index.try_point_count().expect("count"), None);

@@ -130,51 +130,6 @@ pub fn list(conn: &Connection) -> Result<Vec<Value>> {
     Ok(rows)
 }
 
-pub fn redacted_auth(record: &Value) -> Value {
-    let mut auth = record
-        .get("auth")
-        .and_then(|v| v.as_object().cloned())
-        .unwrap_or_default();
-    if auth.get("mode").and_then(|m| m.as_str()) == Some("header") {
-        auth.insert("headerValue".into(), json!("••••••"));
-    }
-    if auth.get("mode").and_then(|m| m.as_str()) == Some("bearer") {
-        auth.insert("token".into(), json!("••••••"));
-    }
-    Value::Object(auth)
-}
-
-pub fn redacted(conn: &Connection, record: &Value) -> Value {
-    let id = record.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-    let row_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM connector_rows WHERE connector_id = ?1",
-            params![id],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    json!({
-        "id": record.get("id"),
-        "name": record.get("name"),
-        "kind": record.get("kind"),
-        "config": record.get("config"),
-        "auth": redacted_auth(record),
-        "refresh_method": record.get("refresh_method"),
-        "refresh_seconds": record.get("refresh_seconds"),
-        "allowed_ai": record.get("allowed_ai").and_then(|v| v.as_i64()).unwrap_or(0) == 1,
-        "enabled": record.get("enabled").and_then(|v| v.as_i64()).unwrap_or(0) == 1,
-        "schema_json": record.get("schema_json"),
-        "last_sync_at": record.get("last_sync_at"),
-        "last_sync_status": record.get("last_sync_status"),
-        "last_sync_error": record.get("last_sync_error"),
-        "last_sync_rows": record.get("last_sync_rows"),
-        "health": record.get("health"),
-        "row_count": row_count,
-        "created_at": record.get("created_at"),
-        "updated_at": record.get("updated_at"),
-    })
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn create(
     conn: &Connection,
@@ -530,35 +485,6 @@ impl CleanPath for Path {
             }
         }
         out
-    }
-}
-
-pub async fn validate_config(
-    data_dir: &Path,
-    kind: &str,
-    file: Option<&str>,
-    url: Option<&str>,
-) -> Option<String> {
-    if kind == "http" {
-        let url = url.unwrap_or("");
-        return match crate::security::validate_ssrf_full_async(url).await {
-            Ok(()) => None,
-            Err(e) => Some(format!("URL refused: {e}")),
-        };
-    }
-    let file = file.unwrap_or("");
-    match jail_resolve(data_dir, file) {
-        Ok(abs) => {
-            if !abs.exists() {
-                Some(format!(
-                    "File not found: create \"connectors/{file}\" first (the connectors folder is {})",
-                    connectors_root(data_dir).display()
-                ))
-            } else {
-                None
-            }
-        }
-        Err(e) => Some(e.to_string()),
     }
 }
 

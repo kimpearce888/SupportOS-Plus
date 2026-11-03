@@ -100,16 +100,6 @@ pub fn list_digests(conn: &Connection, query: Option<&str>, limit: i64) -> Vec<D
 }
 
 #[must_use]
-pub fn digest_by_id(conn: &Connection, id: i64) -> Option<DigestRow> {
-    conn.query_row(
-        &format!("SELECT {DIGEST_COLUMNS} FROM ai_digests WHERE id = ?1"),
-        params![id],
-        |r| digest_from_row(r).map(Some),
-    )
-    .unwrap_or(None)
-}
-
-#[must_use]
 pub(crate) fn latest_digest_created_at(conn: &Connection) -> Option<String> {
     conn.query_row(
         "SELECT created_at FROM ai_digests ORDER BY id DESC LIMIT 1",
@@ -533,7 +523,14 @@ mod tests {
         .expect("store 2");
         assert_eq!(list_digests(&conn, Some("billing"), 10).len(), 1);
         assert_eq!(list_digests(&conn, None, 10).len(), 2);
-        assert_eq!(digest_by_id(&conn, id).expect("row").trigger_kind, "manual");
+        let trigger_kind: String = conn
+            .query_row(
+                "SELECT trigger_kind FROM ai_digests WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .expect("digest row");
+        assert_eq!(trigger_kind, "manual");
     }
 
     #[test]

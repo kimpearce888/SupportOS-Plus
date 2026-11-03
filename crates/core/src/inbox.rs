@@ -23,38 +23,6 @@ pub(crate) fn apply_m028(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ThreadType {
-    CustomerMessage,
-    Reply,
-    Note,
-    System,
-}
-
-impl ThreadType {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::CustomerMessage => "customer_message",
-            Self::Reply => "reply",
-            Self::Note => "note",
-            Self::System => "system",
-        }
-    }
-
-    #[must_use]
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "customer_message" => Some(Self::CustomerMessage),
-            "reply" => Some(Self::Reply),
-            "note" => Some(Self::Note),
-            "system" => Some(Self::System),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationListItem {
     pub id: i64,

@@ -31,16 +31,6 @@ impl Kind {
     }
 }
 
-#[must_use]
-pub fn health_color(health: &str) -> egui::Color32 {
-    match health {
-        "ok" => egui::Color32::GREEN,
-        "stale" => egui::Color32::YELLOW,
-        "error" => egui::Color32::RED,
-        _ => egui::Color32::GRAY,
-    }
-}
-
 fn health_tone(health: &str) -> BadgeTone {
     match health {
         "ok" => BadgeTone::Success,
@@ -535,13 +525,5 @@ mod tests {
         page.reload_rows(&db, id);
         assert_eq!(page.rows_total, 2);
         assert_eq!(page.rows.len(), 2);
-    }
-
-    #[test]
-    fn health_badge_colors_map() {
-        assert_eq!(health_color("ok"), egui::Color32::GREEN);
-        assert_eq!(health_color("stale"), egui::Color32::YELLOW);
-        assert_eq!(health_color("error"), egui::Color32::RED);
-        assert_eq!(health_color("unknown"), egui::Color32::GRAY);
     }
 }

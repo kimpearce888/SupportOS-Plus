@@ -245,7 +245,7 @@ pub(crate) fn check_url_literal(raw_url: &str) -> SsrfCheckResult {
     }
 }
 
-pub async fn check_url_resolved(raw_url: &str) -> SsrfCheckResult {
+pub(crate) async fn check_url_resolved(raw_url: &str) -> SsrfCheckResult {
     let literal = check_url_literal(raw_url);
     if !literal.ok {
         return literal;
@@ -416,33 +416,6 @@ mod batch24_audit51_tests {
             validate_ssrf_full_async("http://93.184.216.34/feed.json")
                 .await
                 .expect("public IP literal must pass without DNS");
-        });
-    }
-
-    #[test]
-    fn audit51_connector_validation_runs_the_async_guard() {
-        let rt = rt();
-        rt.block_on(async {
-            let refused = crate::connectors::validate_config(
-                std::path::Path::new("/tmp"),
-                "http",
-                None,
-                Some("http://localhost/feed.json"),
-            )
-            .await;
-            let refused_msg = refused.as_deref().unwrap_or_default().to_string();
-            assert!(
-                refused_msg.contains("URL refused"),
-                "localhost must be refused: {refused_msg}"
-            );
-            let ok = crate::connectors::validate_config(
-                std::path::Path::new("/tmp"),
-                "http",
-                None,
-                Some("http://93.184.216.34/feed.json"),
-            )
-            .await;
-            assert!(ok.is_none(), "public literal must pass: {ok:?}");
         });
     }
 }

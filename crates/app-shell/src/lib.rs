@@ -16,6 +16,11 @@ pub mod single_instance;
 pub mod smoke;
 pub(crate) mod task_bridge;
 #[cfg(test)]
+pub(crate) fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
+    build_boot_services(db, bus).engine
+}
+
+#[cfg(test)]
 mod testsupport;
 pub(crate) mod theme;
 pub(crate) mod toasts;
@@ -107,11 +112,6 @@ pub fn build_boot_services(db: &DbHandle, bus: &EventBus) -> BootServices {
         provider,
         engine,
     }
-}
-
-#[must_use]
-pub fn build_sync_engine(db: &DbHandle, bus: &EventBus) -> Arc<SyncEngine> {
-    build_boot_services(db, bus).engine
 }
 
 fn resolve_renderer() -> eframe::Renderer {

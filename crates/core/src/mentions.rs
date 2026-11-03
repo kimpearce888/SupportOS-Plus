@@ -6,22 +6,6 @@ use crate::error::Result;
 
 pub(crate) const MAX_BODY_BYTES: usize = 100_000;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Mention {
-    User { username: String },
-    Team { teamname: String },
-}
-
-impl Mention {
-    #[must_use]
-    pub fn display(&self) -> String {
-        match self {
-            Self::User { username } => format!("@{username}"),
-            Self::Team { teamname } => format!("@team:{teamname}"),
-        }
-    }
-}
-
 fn is_preceded_by_word_char(body: &str, pos: usize) -> bool {
     if pos == 0 {
         return false;

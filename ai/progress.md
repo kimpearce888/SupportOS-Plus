@@ -1668,3 +1668,125 @@ the recorded reclamation recipe applied post-run (test bins deleted,
 back to 47%); foreground-iterative runs throughout (background
 builds still reaped by the sandbox); CARGO_PROFILE_DEV_DEBUG=0 +
 CARGO_BUILD_JOBS=2 per the kb2 recipe. ai records synced.
+
+## KB-7 — independent closeout audit (fresh census at HEAD, compiler as authority)
+
+**KB-7-1 — the census.** A fresh name-method census was derived at HEAD
+(e5baba2) with two corpus corrections over kb3's methodology: external
+consumers now include the integration tests (`crates/*/tests/` are
+independent crates) and the bin target (`src/main.rs` consumes the lib pub
+face — the bin sources are excluded from the internal corpus and counted as
+consumers). Result: 229 candidates (candidates.tsv), of which 2 are
+disposition-excluded by the standing rules (`response_state_sql` mod decl in
+core lib.rs and M014_SQL in migrations/intelligence.rs — the kb3 NO-TOUCH
+exclusions) → 227 applications recorded (applied.tsv).
+
+**KB-7-2 — convergence.** The compiler was made authoritative: the narrow →
+check → revert-signature-constraints → re-check loop ran until
+`private_interfaces` warnings were zero (3 rounds: 91 names → 41 → 5; 138
+items reverted to pub as signature-constrained and recorded in reverted.tsv —
+the layered-constraint mechanism from kb5: a pub struct's pub fields and
+enum-variant payloads constrain their field types back to pub). The dead_code
+cascade then ran rounds 4–13, each round deleting compiler-enumerated dead
+surface and re-checking until only two `unused_variables` (`id` bindings left
+over from an issue_radar SELECT re-shift) remained; fixed; final check r14 =
+0 errors, 0 warnings across the workspace, all targets, zero diagnostics.
+
+**KB-7-3 — what shipped (43 files, +226/−1980).** 42 surviving pub→pub(crate)
+narrows (mockserver 12, testsupport 5, ai_pipeline 4, interaction_signals 3,
+issue_radar/ai_prompts/interaction_engine/webhook 2 each, and singles);
+146 pub-decl lines removed as compiler-certified dead surface (~127 whole
+items incl. 4 whole test mods): custom_objects patch_type/patch_object/
+get_object/list_links/link_label, people_store NewCustomer/CustomerPatch/
+create_customer/update_customer/patch_field_present, customers
+CustomerConversation/get_customer/search_customers, jobs status module +
+QueueJob/list_jobs/get_job/map_queue_job, security validate_config,
+settings secret_or_error, support_graph HumanEdge/to_json/GRAPH_MAX_*.
+/subgraph_json, reports count_graph_nodes_by_kind, reports_api
+cached_report_keys, translation detect, connectors redacted_auth/redacted/
+validate_config, ai_attributes MatchOp whole, automation SqlValue, copilot
+ToolResult, mentions Mention, inbox ThreadType, intelligence_features
+IncidentPatch, digest digest_by_id, helpscout revoke + has_stored_tokens,
+conversation_ops ConvRef, webhook compute_signature+pending_event_count
+retained as #[cfg(test)] helpers (their only consumers were tests — same
+disposition as app-shell's build_sync_engine and the workers_host method:
+test-only helpers gated, not deleted, preserving their coverage),
+ai_pipeline dead-field surgery (kb6 pattern: CachedRun id/created_at,
+LatestAnalysis run_id/model/prompt_version/latency_ms/created_at/sources
+with the ai_sources readback query deleted, AnalyzeOutcome
+sources/cached/run_id — SELECTs re-shifted to response_json only),
+conversation_ops conv_by_local_id → conv_exists (SELECT 1; callers only
+tested existence), AttachmentRow dead fields, interaction_engine
+CustomerConversation.thread_count, outbound OutboundJob.max_attempts,
+issue_radar ClusterRow id/category/conversation_ids + KnownIssueRow.id,
+automation page ApprovalRow.status + delete_rule_confirmed, app-shell
+reports sla_first_response_bars, connectors page health_color.
+
+**KB-7-4 — test surgery, coverage preserved.** 16 tests died WITH their
+compiler-certified dead subjects (core −15: custom_objects ×3,
+people_store ×3, customers ×2, jobs list_jobs_binds…, provider_handle
+setting_kind_round_trips (from_setting was a test-only observer of a dead
+mapping; ProviderKind itself stays live and covered), security
+audit51_connector_validation…, settings secret_or_error_reports…,
+support_graph subgraph_renders…, vectorstore
+delete_by_entity_removes_both_halves, it_helpscout
+revoke_clears_the_token…; app-shell −1: health_badge_colors_map — every
+one's subject verified dead, every live sibling (create_type/create_object,
+ProviderKind, count_by_entity_type/search_dense, enqueue) retains its
+remaining tests). Rewrites preserved live coverage where the readback
+handle died: digest.rs's digest_by_id replaced by a #[cfg(test)]
+digest_row helper in ai_pipeline (4 tests keep their assertions), jobs
+batch20 get_job/list_jobs probes re-expressed as direct SQL, reports_api
+cached_report_keys probe → COUNT(*), support_graph/people_store probes
+likewise, helpscout r7 has_stored_tokens probes → COUNT(oauth_tokens),
+the batch23 cache-hit test re-expresses run_id/sources provenance through
+ai_runs/ai_sources SQL, and the two dropped `!outcome.cached` assertions
+are redundant with the surviving audit96 empty-analysis tests (which
+assert non-caching via run-status DB checks). The issue_radar tests lost
+only their unused `id` bindings.
+
+**KB-7-5 — verification, all green.** fmt clean; check --workspace
+--all-targets 0 errors 0 warnings (r14, zero diagnostics); clippy
+--workspace --all-targets -D warnings 0; gate_traceability OK — identical
+23 routes / 20 DC tags / 27 ids; gate_no_simulation clean; verify-icons
+clean; core lib 452 passed / 0 failed / 3 ignored (--test-threads=1 —
+467−15 exactly the enumerated dead-subject tests, census reconciles);
+app-shell lib 240/0 (241−1 health_badge_colors_map); xtask 11/0;
+doc-tests 0/0; kittest 24 unique targets / 175 unique tests / 0 failed —
+171 goldens ZERO drift (UPDATE_SNAPSHOTS never set; zero .new/.diff/.old
+artifacts; alphabetical 13+11 split as kb6). NO-TOUCH modules
+(ai_center/db/maintenance/response_state_sql/migrations-intelligence)
+absent from the diff (git-verified); no allow() stamps; no CREATE/ALTER
+TABLE or M-code in any diff (schema + migration semantics untouched);
+the `#[must_use]` terminal display artifact re-confirmed as rendering-only
+(od/rg verify true `#[must_use]` bytes in the diff; files never corrupted).
+
+**KB-7-6 — environment incidents, disclosed.** (1) Two disk-full events
+(100%): the first poisoned a core-lib test run — 35 failures, ALL
+ENOSPC artifacts (tempdir SQLite writes), the immediate re-run at free
+disk passed 452/0/3; the second broke the first kittest feature build
+(incremental-dir creation + the kb2-known linker bus-error signature).
+Reclamation per the kb2 recipe (incremental dir + stale bins deleted)
+between phases. (2) This sandbox lacked the Mesa lavapipe env: the first
+direct kittest runs all panicked "No adapter found" — resolved by
+sourcing the provisioned /home/z/mesa-env.sh (VK_DRIVER_FILES/
+VK_ICD_FILENAMES/LD_LIBRARY_PATH/WGPU_BACKEND), after which rendering
+works. (3) Direct test-bin execution (forced by disk pressure) hit two
+recipe gaps, both self-caught: egui_kittest resolves the snapshot dir
+CWD-relative, so bins must run from crates/app-shell (the first
+workspace-root runs wrote .new.png files into an UNTRACKED root-level
+tests/ dir — pollution deleted, goldens untouched, re-runs green); and
+CARGO_INCREMENTAL=0 changes local-crate metadata hashes (full recompile
+of the workspace in a new hash space) — reverted to the default env and
+the foreign hash-space artifacts removed. Net effect on the tree: none
+(git status clean of untracked files apart from none; goldens
+byte-identical).
+
+**KB-7-7 — engagement state.** The A1-3b program is complete end-to-end:
+kb3's census (1,134) → kb4's tranche (447) → kb5's completion (649 +
+compiler-certified deletions) → kb6's field surgery → kb7's independent
+re-derivation at HEAD finds zero surviving live candidates: every item
+either narrowed (42), deleted as compiler-certified dead (~127), or
+reverted as signature-constrained (138, structural). The remaining pub
+face is, by compiler proof, exactly the externally-consumed surface.
+ai records synced.

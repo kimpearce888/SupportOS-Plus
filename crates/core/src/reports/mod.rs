@@ -1457,15 +1457,6 @@ pub fn get_graph_node(conn: &Connection, node_id: i64) -> Result<Option<GraphNod
     }
 }
 
-pub fn count_graph_nodes_by_kind(conn: &Connection, kind: &str) -> Result<u32> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM graph_nodes WHERE kind = ?1",
-        params![kind],
-        |r| r.get(0),
-    )?;
-    Ok(u32::try_from(count).unwrap_or(0))
-}
-
 pub fn list_graph_nodes(conn: &Connection, limit: Option<u32>) -> Result<Vec<GraphNode>> {
     let limit = limit.unwrap_or(100).min(500) as i64;
     let mut stmt = conn.prepare(
@@ -1829,10 +1820,6 @@ mod item56_tests {
         assert_eq!(node.label.as_deref(), Some("SupportOS+"));
         let listed = list_graph_nodes(&conn, None).expect("list");
         assert_eq!(listed.len(), 1);
-        assert_eq!(
-            count_graph_nodes_by_kind(&conn, "product").expect("count"),
-            1
-        );
         assert_eq!(
             validate_graph_node_kind("product")
                 .expect("valid kind")

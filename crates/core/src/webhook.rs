@@ -14,13 +14,6 @@ pub(crate) fn effective_secret(secret: &str) -> String {
     secret.chars().take(SECRET_CAP).collect()
 }
 
-#[must_use]
-pub fn compute_signature(secret: &[u8], body: &[u8]) -> String {
-    let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
-    mac.update(body);
-    base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
-}
-
 pub(crate) fn verify_signature(secret: &[u8], body: &[u8], provided_signature: &str) -> Result<()> {
     let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(body);
@@ -194,7 +187,15 @@ pub(crate) fn get_pending_webhook_events(
     Ok(rows)
 }
 
-pub fn pending_event_count(conn: &Connection) -> Result<u32> {
+#[cfg(test)]
+pub(crate) fn compute_signature(secret: &[u8], body: &[u8]) -> String {
+    let mut mac = HmacSha1::new_from_slice(secret).expect("HMAC accepts any key length");
+    mac.update(body);
+    base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+}
+
+#[cfg(test)]
+pub(crate) fn pending_event_count(conn: &Connection) -> crate::error::Result<u32> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM webhook_events WHERE processing_state = 'pending'",
         [],

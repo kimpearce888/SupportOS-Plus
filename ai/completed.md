@@ -6363,3 +6363,54 @@ unique tests / 0 failed — 171 goldens ZERO drift (alphabetical
 records). Engagement state: NO open items remain anywhere —
 response_state_sql 3 fns KEEP by owner disposition; plan.md's
 programs closed; kb2..kb6 residuals all consumed. ai records synced.
+
+## kb7 — independent closeout audit: zero live candidates survive (2026-11-03)
+
+Fresh census at HEAD (e5baba2) with the corpus corrected to include
+integration tests and the bin target as external consumers: 229 candidates,
+2 excluded by standing disposition (response_state_sql mod decl, M014_SQL),
+227 applied, 138 reverted during the private_interfaces convergence
+(3 rounds: 91 → 41 → 5 — the kb5 layered-constraint mechanism: signature
+constraints hold a pub face exactly as wide as the compiler demands), then
+the dead_code cascade (rounds 4–13) executed the compiler-enumerated
+deletions until silence. Shipped: 43 files, +226/−1980 — 42 surviving
+pub→pub(crate) narrows, ~127 whole-item deletions (4 of them whole test
+mods) incl. custom_objects patch/read surface, people_store
+create/update-customer surface, customers search/get, jobs QueueJob/
+list_jobs/get_job/status, connectors redacted_auth/redacted/validate_config,
+ai_attributes MatchOp, support_graph subgraph_json/HumanEdge, security
+validate_config, settings secret_or_error, translation detect, mentions
+Mention, inbox ThreadType, copilot ToolResult, automation SqlValue,
+intelligence_features IncidentPatch, digest digest_by_id, helpscout
+revoke/has_stored_tokens, ai_pipeline dead-field surgery (CachedRun,
+LatestAnalysis + its ai_sources readback, AnalyzeOutcome), conversation_ops
+ConvRef → conv_exists, and the kb6-style dead-field SELECT re-shifts
+(AttachmentRow, CustomerConversation.thread_count, OutboundJob.max_attempts,
+ClusterRow/KnownIssueRow ids, ApprovalRow.status); test-only helpers
+(build_sync_engine, compute_signature, pending_event_count, the workers_host
+method) gated #[cfg(test)] instead of deleted — their coverage stays.
+16 dead-subject tests died with their surfaces (every subject verified
+compiler-certified dead, every live sibling retains coverage); readback
+probes rewritten as direct SQL or local cfg(test) helpers (digest_row),
+so no live assertion was lost — the dropped !outcome.cached pair is
+redundant with the surviving audit96 non-caching tests. NO-TOUCH modules
+never in the diff; no allow() stamps; no schema/migration SQL anywhere.
+Verified all green: fmt clean; check --workspace --all-targets 0/0
+(zero diagnostics); clippy -D warnings 0; gate_traceability identical
+(23/20/27); gate_no_simulation clean; verify-icons clean; core lib
+452/0/3 (−15 = exactly the enumerated dead-subject tests), app-shell
+240/0 (−1 health_badge_colors_map), xtask 11/0, doc-tests 0/0; kittest
+24 unique targets / 175 unique tests / 0 failed — 171 goldens ZERO drift,
+zero snapshot artifacts. Environment incidents disclosed: two disk-full
+events (one poisoned a core test run — all 35 failures ENOSPC artifacts,
+clean re-run 452/0/3; one broke the first kittest build — linker
+bus-error, the kb2 signature); this sandbox lacked the Mesa env (first
+kittest attempts: "No adapter found" ×56 — fixed by sourcing
+/home/z/mesa-env.sh); direct bin execution exposed two recipe gaps,
+both self-caught with zero tree impact (kittest snapshot dir is
+CWD-relative — root-level .new.png pollution deleted, re-runs from the
+package cwd green; CARGO_INCREMENTAL=0 rehashes local crates — reverted).
+Engagement state: A1-3b complete end-to-end (kb3 census → kb4 tranche →
+kb5 completion → kb6 field surgery → kb7 independent re-derivation finds
+zero surviving live candidates); no open items remain anywhere in the
+ledger. ai records synced.

@@ -540,7 +540,7 @@ pub(crate) fn find_similar(
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct AiSourceRef {
+pub(crate) struct AiSourceRef {
     pub source_type: String,
     pub source_id: i64,
     pub title: String,

@@ -10,7 +10,7 @@ const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
-pub struct MockRequest {
+pub(crate) struct MockRequest {
     pub method: String,
     pub path: String,
     pub query: String,
@@ -26,14 +26,14 @@ impl MockRequest {
             .map(|(_, v)| v.as_str())
     }
 
-    pub fn query_param(&self, key: &str) -> Option<String> {
+    pub(crate) fn query_param(&self, key: &str) -> Option<String> {
         self.query.split('&').find_map(|pair| {
             let (k, v) = pair.split_once('=')?;
             (k == key).then(|| urldecode(v))
         })
     }
 
-    pub fn form_pairs(&self) -> Vec<(String, String)> {
+    pub(crate) fn form_pairs(&self) -> Vec<(String, String)> {
         self.body
             .split('&')
             .filter(|s| !s.is_empty())
@@ -44,7 +44,7 @@ impl MockRequest {
             .collect()
     }
 
-    pub fn form_value(&self, key: &str) -> Option<String> {
+    pub(crate) fn form_value(&self, key: &str) -> Option<String> {
         self.form_pairs()
             .into_iter()
             .find(|(k, _)| k == key)
@@ -81,7 +81,7 @@ fn urldecode(s: &str) -> String {
 }
 
 #[derive(Debug, Clone)]
-pub struct MockBody(pub String);
+pub(crate) struct MockBody(pub String);
 
 impl From<String> for MockBody {
     fn from(s: String) -> Self {
@@ -102,7 +102,7 @@ impl From<serde_json::Value> for MockBody {
 }
 
 #[derive(Debug, Clone)]
-pub struct MockResponse {
+pub(crate) struct MockResponse {
     pub status: u16,
     pub reason: &'static str,
     pub headers: Vec<(String, String)>,
@@ -129,7 +129,7 @@ impl MockResponse {
     }
 
     #[must_use]
-    pub fn with_header(mut self, name: &str, value: impl Into<String>) -> Self {
+    pub(crate) fn with_header(mut self, name: &str, value: impl Into<String>) -> Self {
         self.headers.push((name.to_ascii_lowercase(), value.into()));
         self
     }
@@ -154,9 +154,9 @@ fn reason_for(status: u16) -> &'static str {
     }
 }
 
-pub type Handler = std::sync::Arc<dyn Fn(&MockRequest) -> MockResponse + Send + Sync>;
+pub(crate) type Handler = std::sync::Arc<dyn Fn(&MockRequest) -> MockResponse + Send + Sync>;
 
-pub struct MockServer {
+pub(crate) struct MockServer {
     port: u16,
     hits: Arc<Mutex<Vec<MockRequest>>>,
     handler: Arc<std::sync::RwLock<Handler>>,
@@ -228,7 +228,7 @@ impl MockServer {
             .count()
     }
 
-    pub fn set_handler(&self, handler: Handler) {
+    pub(crate) fn set_handler(&self, handler: Handler) {
         *self.handler.write().unwrap_or_else(|p| p.into_inner()) = handler;
     }
 
@@ -381,7 +381,7 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-pub fn scripted(responses: Vec<MockResponse>) -> Handler {
+pub(crate) fn scripted(responses: Vec<MockResponse>) -> Handler {
     let queue = Mutex::new(std::collections::VecDeque::from(responses));
     std::sync::Arc::new(move |_req: &MockRequest| {
         let mut q = queue.lock().unwrap_or_else(|p| p.into_inner());
@@ -400,6 +400,6 @@ pub fn fixed(response: MockResponse) -> Handler {
     std::sync::Arc::new(move |_req: &MockRequest| response.clone())
 }
 
-pub fn not_found() -> Handler {
+pub(crate) fn not_found() -> Handler {
     fixed(MockResponse::json(404, r#"{"error":"not found"}"#))
 }

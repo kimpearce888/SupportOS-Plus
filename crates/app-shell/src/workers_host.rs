@@ -83,7 +83,7 @@ impl WorkersHost {
         })
     }
 
-    #[must_use]
+    #[cfg(test)]
     pub fn manager(&self) -> &Arc<WorkerManager> {
         &self.manager
     }

@@ -39,41 +39,28 @@ impl Tab {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ClusterRow {
-    pub id: i64,
+pub(crate) struct ClusterRow {
     pub title: String,
     pub summary: Option<String>,
-    pub category: Option<String>,
     pub trend: Option<String>,
     pub conversation_count: i64,
     pub customer_count: Option<i64>,
-    pub conversation_ids: Vec<i64>,
 }
 
 #[must_use]
 pub(crate) fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
     conn.prepare(
-        "SELECT id, title, summary, category, trend, conversation_count, customer_count
+        "SELECT title, summary, trend, conversation_count, customer_count
            FROM issue_clusters ORDER BY conversation_count DESC",
     )
     .and_then(|mut stmt| {
         stmt.query_map([], |r| {
-            let id: i64 = r.get(0)?;
-            let ids: Vec<i64> = conn
-                .prepare(
-                    "SELECT conversation_id FROM issue_cluster_conversations WHERE cluster_id = ?1",
-                )?
-                .query_map(rusqlite::params![id], |row| row.get(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(ClusterRow {
-                id,
-                title: r.get(1)?,
-                summary: r.get(2)?,
-                category: r.get(3)?,
-                trend: r.get(4)?,
-                conversation_count: r.get(5)?,
-                customer_count: r.get(6)?,
-                conversation_ids: ids,
+                title: r.get(0)?,
+                summary: r.get(1)?,
+                trend: r.get(2)?,
+                conversation_count: r.get(3)?,
+                customer_count: r.get(4)?,
             })
         })
         .map(|rows| rows.filter_map(Result::ok).collect())
@@ -82,8 +69,7 @@ pub(crate) fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct KnownIssueRow {
-    pub id: i64,
+pub(crate) struct KnownIssueRow {
     pub title: String,
     pub symptoms: Option<String>,
     pub status: String,
@@ -94,19 +80,18 @@ pub struct KnownIssueRow {
 #[must_use]
 pub(crate) fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
     conn.prepare(
-        "SELECT id, COALESCE(title, name), symptoms, status,
+        "SELECT COALESCE(title, name), symptoms, status,
                 COALESCE(conversation_count, 0), workaround
            FROM known_issues ORDER BY last_seen_at DESC",
     )
     .and_then(|mut stmt| {
         stmt.query_map([], |r| {
             Ok(KnownIssueRow {
-                id: r.get(0)?,
-                title: r.get(1)?,
-                symptoms: r.get(2)?,
-                status: r.get(3)?,
-                conversation_count: r.get(4)?,
-                workaround: r.get(5)?,
+                title: r.get(0)?,
+                symptoms: r.get(1)?,
+                status: r.get(2)?,
+                conversation_count: r.get(3)?,
+                workaround: r.get(4)?,
             })
         })
         .map(|rows| rows.filter_map(Result::ok).collect())
@@ -926,7 +911,7 @@ mod tests {
             5,
             9,
         )]);
-        let id = db.with_write(|conn| {
+        db.with_write(|conn| {
             create_known_issue(
                 conn,
                 "Login loop",
@@ -939,7 +924,6 @@ mod tests {
         });
         let known = db.with_read(load_known);
         assert_eq!(known.len(), 1);
-        assert_eq!(known[0].id, id);
         assert_eq!(known[0].title, "Login loop");
         assert_eq!(
             known[0].conversation_count, 1,
@@ -996,7 +980,7 @@ mod batch27_audit81_tests {
             5,
             9,
         )]);
-        let id = db.with_write(|conn| {
+        db.with_write(|conn| {
             create_known_issue(
                 conn,
                 "Login loop",
@@ -1023,7 +1007,7 @@ mod batch27_audit81_tests {
         );
 
         let known = db.with_read(load_known);
-        assert_eq!(known[0].id, id);
+        assert_eq!(known.len(), 1, "the known issue loads");
         assert_eq!(known[0].conversation_count, 1, "dangling ids never counted");
     }
 

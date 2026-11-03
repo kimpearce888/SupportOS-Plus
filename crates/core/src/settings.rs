@@ -211,10 +211,6 @@ pub fn delete_secret(conn: &Connection, key: &str) -> Result<bool> {
     Ok(rows > 0)
 }
 
-pub fn secret_or_error(conn: &Connection, key: &str) -> Result<Vec<u8>> {
-    get_secret(conn, key)?.ok_or_else(|| Error::SecretNotFound { key: key.into() })
-}
-
 pub fn first_run_done(conn: &Connection) -> Result<bool> {
     let v: i64 = conn.query_row(
         "SELECT first_run_done FROM app_state WHERE id = 1",
@@ -338,12 +334,5 @@ mod tests {
         assert!(init_master_key(&bad_path).is_err());
         assert_eq!(std::fs::read(&bad_path).expect("untouched").len(), 5);
         let _ = std::fs::remove_file(&bad_path);
-    }
-
-    #[test]
-    fn secret_or_error_reports_missing_key_name() {
-        let conn = migrated_conn();
-        let err = secret_or_error(&conn, "oauth_token").expect_err("missing secret");
-        assert!(err.to_string().contains("oauth_token"));
     }
 }

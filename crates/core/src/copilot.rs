@@ -1,16 +1,5 @@
-use crate::catalog::copilot::{
-    CopilotTool, MAX_TOOL_CALLS, MAX_TOOL_ROUNDS, TOOL_RESULT_MAX_CHARS,
-};
+use crate::catalog::copilot::{MAX_TOOL_CALLS, MAX_TOOL_ROUNDS, TOOL_RESULT_MAX_CHARS};
 use crate::error::Result;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ToolResult {
-    pub tool: CopilotTool,
-    pub args: String,
-    pub output: String,
-    pub truncated: bool,
-}
 
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};

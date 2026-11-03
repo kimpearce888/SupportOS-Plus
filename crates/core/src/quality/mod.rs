@@ -1222,9 +1222,7 @@ pub(crate) fn rebuild_friction(conn: &Connection) -> (usize, usize) {
 
 const QA_PROMPT_VERSION: &str = "post_resolution_qa_v1";
 
-pub struct QaAiOutcome {
-    pub qa: Value,
-    pub ai: Option<Value>,
+pub(crate) struct QaAiOutcome {
     pub error: Option<String>,
 }
 

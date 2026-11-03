@@ -13,7 +13,7 @@ pub(crate) const PROMPT_VERSIONS_TRANSLATION: &str = "translation_v1";
 pub(crate) const PROMPT_VERSIONS_GOLDEN_EVAL: &str = "golden_eval_v1";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct TicketAnalysis {
+pub(crate) struct TicketAnalysis {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,7 +47,7 @@ pub struct TicketAnalysis {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct DraftVerification {
+pub(crate) struct DraftVerification {
     pub verified: bool,
     #[serde(default)]
     pub unsupported_claims: Vec<String>,
