@@ -7,11 +7,11 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{Error, Result};
 
-pub const IMPORT_DIR_NAME: &str = "knowledge-import";
+pub(crate) const IMPORT_DIR_NAME: &str = "knowledge-import";
 
-pub const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
-pub const MAX_PDF_INPUT_BYTES: u64 = 32 * 1024 * 1024;
-pub const MAX_DOCX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_PDF_INPUT_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) const MAX_DOCX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
 
 #[must_use]
 pub(crate) fn chunk_text(text: &str, max_len: usize, overlap: usize) -> Vec<String> {
@@ -479,7 +479,7 @@ fn days_since(stamp: &str) -> Option<i64> {
 }
 
 #[must_use]
-pub fn import_result(document_id: i64, title: &str, changed: bool) -> Value {
+pub(crate) fn import_result(document_id: i64, title: &str, changed: bool) -> Value {
     json!({ "documentId": document_id, "title": title, "changed": changed })
 }
 
@@ -965,7 +965,7 @@ fn flatten_record(obj: &Value) -> String {
 }
 
 #[must_use]
-pub fn html_to_text_keep_structure(html: &str) -> String {
+pub(crate) fn html_to_text_keep_structure(html: &str) -> String {
     let mut out = html.to_string();
     out = strip_tag_block(&out, "style");
     out = strip_tag_block(&out, "script");

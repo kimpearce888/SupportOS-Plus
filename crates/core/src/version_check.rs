@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::error::{Error, Result};
 
-pub const RELEASES_API: &str =
+pub(crate) const RELEASES_API: &str =
     "https://api.github.com/repos/kimpearce888/SupportOS-Plus/releases/latest";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -98,7 +98,7 @@ impl VersionOrdering {
     }
 }
 
-pub async fn latest_release(client: reqwest::Client) -> Result<ReleaseInfo> {
+pub(crate) async fn latest_release(client: reqwest::Client) -> Result<ReleaseInfo> {
     let response = client
         .get(RELEASES_API)
         .header("Accept", "application/vnd.github+json")

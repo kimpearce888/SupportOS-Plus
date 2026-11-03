@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 
-pub const COACHING_NOTE: &str = "Advisory only - coaching never blocks or modifies the send. Every finding cites its evidence; heuristics are labeled as heuristics.";
+pub(crate) const COACHING_NOTE: &str = "Advisory only - coaching never blocks or modifies the send. Every finding cites its evidence; heuristics are labeled as heuristics.";
 const PROMPT_VERSION: &str = "agent_coaching_v1";
 
 fn check_label(kind: &str) -> &'static str {

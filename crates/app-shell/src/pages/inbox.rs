@@ -59,10 +59,10 @@ pub struct FilterBar {
     pub ops: Option<String>,
 }
 
-pub const INBOX_PAGE_SIZE: u32 = 50;
+pub(crate) const INBOX_PAGE_SIZE: u32 = 50;
 
 #[must_use]
-pub fn parse_number_entry(text: &str) -> Option<i64> {
+pub(crate) fn parse_number_entry(text: &str) -> Option<i64> {
     text.trim()
         .trim_start_matches('#')
         .trim()
@@ -71,7 +71,11 @@ pub fn parse_number_entry(text: &str) -> Option<i64> {
 }
 
 #[must_use]
-pub fn filters_from_bar(bar: &FilterBar, page: u32, conn: &rusqlite::Connection) -> InboxFilters {
+pub(crate) fn filters_from_bar(
+    bar: &FilterBar,
+    page: u32,
+    conn: &rusqlite::Connection,
+) -> InboxFilters {
     let mut filters = InboxFilters {
         status: bar
             .view
@@ -111,7 +115,7 @@ pub enum ComposerMode {
 }
 
 #[must_use]
-pub fn reply_key(remote_id: i64, draft: bool, text: &str) -> String {
+pub(crate) fn reply_key(remote_id: i64, draft: bool, text: &str) -> String {
     let digest = Sha256::digest(text.as_bytes());
     format!(
         "reply:{}:{}:{}",
@@ -122,14 +126,14 @@ pub fn reply_key(remote_id: i64, draft: bool, text: &str) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActionOutcome {
+pub(crate) enum ActionOutcome {
     Success(String),
     Rejected(String),
 }
 
 impl ActionOutcome {
     #[must_use]
-    pub fn is_rejected(&self) -> bool {
+    pub(crate) fn is_rejected(&self) -> bool {
         matches!(self, Self::Rejected(_))
     }
 
@@ -141,7 +145,7 @@ impl ActionOutcome {
 }
 
 #[must_use]
-pub fn assignable_users(conn: &Connection) -> Vec<(i64, String)> {
+pub(crate) fn assignable_users(conn: &Connection) -> Vec<(i64, String)> {
     conn.prepare("SELECT id, first_name || ' ' || last_name FROM users ORDER BY id")
         .and_then(|mut stmt| {
             stmt.query_map([], |r| {
@@ -155,7 +159,7 @@ pub fn assignable_users(conn: &Connection) -> Vec<(i64, String)> {
 }
 
 #[must_use]
-pub fn tag_names(conn: &Connection) -> Vec<String> {
+pub(crate) fn tag_names(conn: &Connection) -> Vec<String> {
     conn.prepare("SELECT name FROM tags ORDER BY name")
         .and_then(|mut stmt| {
             stmt.query_map([], |r| r.get::<_, String>(0))
@@ -729,14 +733,14 @@ impl InboxPage {
         self.reload_detail(db);
     }
 
-    pub fn composer_edited(&mut self, body: String) {
+    pub(crate) fn composer_edited(&mut self, body: String) {
         if body.trim().is_empty() {
             self.inserted_draft = None;
         }
         self.composer_body = body;
     }
 
-    pub fn submit_composer(&mut self, db: &DbHandle, bus: &EventBus) -> ActionOutcome {
+    pub(crate) fn submit_composer(&mut self, db: &DbHandle, bus: &EventBus) -> ActionOutcome {
         let body = self.composer_body.trim().to_string();
         if body.is_empty() {
             return ActionOutcome::Rejected("Composer is empty.".into());
@@ -832,7 +836,12 @@ impl InboxPage {
         outcome
     }
 
-    pub fn assign(&mut self, db: &DbHandle, bus: &EventBus, user_id: Option<i64>) -> ActionOutcome {
+    pub(crate) fn assign(
+        &mut self,
+        db: &DbHandle,
+        bus: &EventBus,
+        user_id: Option<i64>,
+    ) -> ActionOutcome {
         let Some(detail) = self.detail.clone() else {
             return ActionOutcome::Rejected("No conversation selected.".into());
         };
@@ -2688,7 +2697,7 @@ fn saved_reply_list(conn: &rusqlite::Connection) -> Vec<(String, String)> {
     }
 }
 
-pub fn submit_reply(
+pub(crate) fn submit_reply(
     db: &DbHandle,
     bus: &EventBus,
     detail: &ConversationDetail,
@@ -2783,7 +2792,7 @@ pub fn submit_reply(
     }
 }
 
-pub fn submit_note(
+pub(crate) fn submit_note(
     db: &DbHandle,
     bus: &EventBus,
     detail: &ConversationDetail,

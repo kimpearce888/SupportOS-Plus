@@ -831,7 +831,7 @@ impl WorkerManager {
         self.engine.as_ref().is_some_and(|e| e.is_running())
     }
 
-    pub fn nudge_sync(&self) {
+    pub(crate) fn nudge_sync(&self) {
         self.sync_nudge.notify_one();
     }
 
@@ -1035,7 +1035,7 @@ impl WorkerManager {
         }
     }
 
-    pub fn notification_sweep_tick(&self) {
+    pub(crate) fn notification_sweep_tick(&self) {
         if self.stopped.load(Ordering::SeqCst) {
             return;
         }
@@ -1058,7 +1058,7 @@ impl WorkerManager {
         }
     }
 
-    pub fn customer_event_sweep_tick(&self) {
+    pub(crate) fn customer_event_sweep_tick(&self) {
         if self.stopped.load(Ordering::SeqCst) {
             return;
         }
@@ -1081,7 +1081,7 @@ impl WorkerManager {
         }
     }
 
-    pub fn intelligence_sweep_tick(&self) {
+    pub(crate) fn intelligence_sweep_tick(&self) {
         if self.stopped.load(Ordering::SeqCst) {
             return;
         }

@@ -10,7 +10,10 @@ fn closed_conversation_ids(conn: &Connection, customer_id: i64) -> std::collecti
         .unwrap_or_default()
 }
 
-pub fn rebuild_baseline(conn: &Connection, customer_id: i64) -> Result<Option<BehaviorBaseline>> {
+pub(crate) fn rebuild_baseline(
+    conn: &Connection,
+    customer_id: i64,
+) -> Result<Option<BehaviorBaseline>> {
     let closed = closed_conversation_ids(conn, customer_id);
     let observations: Vec<ObservationRow> = get_observations_for_customer(conn, customer_id)?
         .into_iter()
@@ -93,7 +96,7 @@ fn rank_confidence(c: &str) -> u8 {
     }
 }
 
-pub fn comparison_baseline(
+pub(crate) fn comparison_baseline(
     conn: &Connection,
     customer_id: i64,
     exclude_conversation_id: i64,
@@ -160,7 +163,7 @@ const ORDINAL_DIMENSIONS: [&str; 5] = [
     "technical_language",
 ];
 
-pub fn compute_changes(
+pub(crate) fn compute_changes(
     current: &CurrentInteraction,
     baseline: Option<&BehaviorBaseline>,
 ) -> Vec<InteractionChange> {
@@ -222,7 +225,10 @@ pub fn compute_changes(
     changes
 }
 
-pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option<OutcomeComputed>> {
+pub(crate) fn compute_outcome(
+    conn: &Connection,
+    conversation_id: i64,
+) -> Result<Option<OutcomeComputed>> {
     let Some(conv) = conversation_info(conn, conversation_id) else {
         return Ok(None);
     };
@@ -362,7 +368,7 @@ pub fn compute_outcome(conn: &Connection, conversation_id: i64) -> Result<Option
     Ok(Some(computed))
 }
 
-pub fn outcome_summary(
+pub(crate) fn outcome_summary(
     conn: &Connection,
     customer_id: i64,
 ) -> Result<Option<SupportOutcomeSummary>> {
@@ -448,7 +454,7 @@ pub fn outcome_summary(
     }))
 }
 
-pub fn heuristic_recommendation(
+pub(crate) fn heuristic_recommendation(
     current: &CurrentInteraction,
     changes: &[InteractionChange],
     baseline: Option<&BehaviorBaseline>,
@@ -616,7 +622,10 @@ fn conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
     .unwrap_or_default()
 }
 
-pub fn detect_repeat_issue(conn: &Connection, conversation_id: i64) -> Result<Option<RepeatIssue>> {
+pub(crate) fn detect_repeat_issue(
+    conn: &Connection,
+    conversation_id: i64,
+) -> Result<Option<RepeatIssue>> {
     let Some(conv) = conversation_info(conn, conversation_id) else {
         return Ok(None);
     };

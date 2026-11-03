@@ -336,7 +336,7 @@ pub fn analyze(conn: &Connection, conversation_local_id: i64) -> Result<LocalAna
     })
 }
 
-pub fn related_articles(
+pub(crate) fn related_articles(
     conn: &Connection,
     keywords: &[String],
     subject: Option<&str>,

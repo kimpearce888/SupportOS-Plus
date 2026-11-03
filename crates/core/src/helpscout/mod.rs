@@ -314,7 +314,7 @@ pub struct HsChat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct HsChatEvent {
+pub(crate) struct HsChatEvent {
     pub event_type: String,
     pub chat: HsChat,
 }
@@ -904,7 +904,7 @@ pub struct ConversationPatch {
 
 mod inert;
 
-pub use inert::{EmptyHelpScoutProvider, InertWorld};
+pub use inert::EmptyHelpScoutProvider;
 
 #[cfg(test)]
 mod batch20_audit25_tests {

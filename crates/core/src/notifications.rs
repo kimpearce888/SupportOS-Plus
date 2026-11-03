@@ -165,7 +165,7 @@ pub fn me_user_local_id(conn: &Connection) -> Result<Option<i64>> {
     Ok(fallback)
 }
 
-pub fn pref_for(conn: &Connection, notif_type: NotificationType) -> Result<bool> {
+pub(crate) fn pref_for(conn: &Connection, notif_type: NotificationType) -> Result<bool> {
     let key = format!("notifications.{}.enabled", notif_type.as_str());
     crate::settings::get_bool(conn, &key, notif_type.default_enabled())
 }

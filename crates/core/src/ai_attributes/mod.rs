@@ -7,7 +7,7 @@ use crate::catalog::{AI_ATTRIBUTE_SCHEMA_VERSION, AiAttributeKey, AttributeValue
 use crate::error::{Error, Result};
 use crate::sync_schema::table_exists;
 
-pub const M033_SQL: &str = r#"
+pub(crate) const M033_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS ai_attributes (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -522,12 +522,7 @@ pub fn snapshot(conn: &Connection, conversation_id: i64) -> Result<Option<Attrib
 }
 
 mod extraction;
-
-pub use extraction::{
-    ATTRIBUTE_EXTRACTION_PROMPT_VERSION, CustomerMessage, ExtractionOutput, PreparedComputation,
-    compute, compute_with_backend, customer_messages, deterministic_records, finish_computation,
-    prepare_computation, run_extraction,
-};
+pub(crate) use extraction::compute_with_backend;
 
 #[cfg(test)]
 mod a2_wiring_tests {
@@ -631,7 +626,7 @@ mod batch22_audit_tests {
         ExtractionOutput, finish_computation, prepare_computation, run_extraction,
     };
     use super::*;
-    use crate::ai_provider::{ChatResponse, LocalAiProvider, ModelInfo};
+    use crate::ai_provider::{ChatResponse, LocalAiProvider};
 
     fn db_with_conversation() -> Connection {
         let mut conn = Connection::open_in_memory().expect("db");
@@ -754,10 +749,6 @@ mod batch22_audit_tests {
 
     #[async_trait::async_trait]
     impl LocalAiProvider for RecordingProvider {
-        async fn list_models(&self) -> crate::error::Result<Vec<ModelInfo>> {
-            Ok(Vec::new())
-        }
-
         async fn chat(
             &self,
             _model: &str,
@@ -784,14 +775,6 @@ mod batch22_audit_tests {
                 usage: None,
                 finish_reason: None,
             })
-        }
-
-        async fn embed(
-            &self,
-            _model: &str,
-            _text: &str,
-        ) -> crate::error::Result<crate::ai_provider::EmbedResponse> {
-            Err(crate::error::Error::Config("not needed".into()))
         }
 
         async fn is_available(&self) -> bool {

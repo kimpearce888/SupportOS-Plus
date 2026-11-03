@@ -7,18 +7,18 @@ pub(crate) mod chart;
 pub mod design;
 pub mod fatal;
 pub mod icons;
-pub mod mention_popup;
+pub(crate) mod mention_popup;
 pub(crate) mod overlays;
 pub mod pages;
-pub mod palette;
+pub(crate) mod palette;
 #[allow(unsafe_code)]
 pub mod single_instance;
 pub mod smoke;
-pub mod task_bridge;
+pub(crate) mod task_bridge;
 #[cfg(test)]
 mod testsupport;
-pub mod theme;
-pub mod toasts;
+pub(crate) mod theme;
+pub(crate) mod toasts;
 pub mod workers_host;
 
 use crate::workers_host::WorkersHost;

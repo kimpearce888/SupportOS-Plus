@@ -51,7 +51,7 @@ pub struct ClusterRow {
 }
 
 #[must_use]
-pub fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
+pub(crate) fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
     conn.prepare(
         "SELECT id, title, summary, category, trend, conversation_count, customer_count
            FROM issue_clusters ORDER BY conversation_count DESC",
@@ -92,7 +92,7 @@ pub struct KnownIssueRow {
 }
 
 #[must_use]
-pub fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
+pub(crate) fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
     conn.prepare(
         "SELECT id, COALESCE(title, name), symptoms, status,
                 COALESCE(conversation_count, 0), workaround
@@ -114,7 +114,7 @@ pub fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
     .unwrap_or_default()
 }
 
-pub fn create_known_issue(
+pub(crate) fn create_known_issue(
     conn: &mut Connection,
     title: &str,
     symptoms: Option<&str>,

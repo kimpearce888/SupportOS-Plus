@@ -110,7 +110,7 @@ pub(crate) fn record_full_event(conn: &Connection, event: &FullActivityEvent) ->
 
 #[must_use]
 #[derive(Debug, Clone, Copy, Default, serde::Serialize)]
-pub struct RebuildSummary {
+pub(crate) struct RebuildSummary {
     pub conversations: i64,
     pub events_written: i64,
     pub events_total: i64,

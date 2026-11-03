@@ -5,9 +5,10 @@ use crate::catalog::{GraphNodeKind, ReportDimensionKey, ReportMetricKey};
 use crate::error::Result;
 
 mod config;
-pub use config::{config_to_json, parse_report_config};
+pub(crate) use config::config_to_json;
+pub use config::parse_report_config;
 
-pub const M020_TO_M022_SQL: &str = r#"
+pub(crate) const M020_TO_M022_SQL: &str = r#"
     -- M020: friction_scores
     CREATE TABLE IF NOT EXISTS friction_scores (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +55,7 @@ pub(crate) fn apply_m020_to_m022(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub const M034_SQL: &str = r#"
+pub(crate) const M034_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS report_definitions (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         name       TEXT NOT NULL,
@@ -72,7 +73,7 @@ pub(crate) fn apply_m034(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn ensure_mailbox_business_hours(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_mailbox_business_hours(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS mailbox_business_hours (
             mailbox_local_id INTEGER PRIMARY KEY,
@@ -88,7 +89,7 @@ pub fn ensure_mailbox_business_hours(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn ensure_report_definitions_table(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_report_definitions_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS report_definitions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,7 +104,7 @@ pub fn ensure_report_definitions_table(conn: &Connection) -> Result<()> {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct DashboardMetrics {
+pub(crate) struct DashboardMetrics {
     pub total_conversations: u32,
     pub new_conversations: u32,
     pub closed_conversations: u32,
@@ -114,7 +115,7 @@ pub struct DashboardMetrics {
     pub sla_breach_count: u32,
 }
 
-pub fn get_dashboard_metrics(
+pub(crate) fn get_dashboard_metrics(
     conn: &Connection,
     mailbox_id: Option<i64>,
     days_back: u32,
@@ -1158,23 +1159,23 @@ pub fn get_effectiveness_report(conn: &Connection) -> Result<EffectivenessReport
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FrictionScore {
+pub(crate) struct FrictionScore {
     pub conversation_id: i64,
     pub effort_score: f64,
     pub factors: FrictionFactors,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FrictionFactors {
+pub(crate) struct FrictionFactors {
     pub message_count: u32,
     pub resolution_hours: Option<f64>,
     pub reopen_count: u32,
     pub escalated: bool,
 }
 
-pub const HIGH_FRICTION_THRESHOLD: f64 = 0.6;
+pub(crate) const HIGH_FRICTION_THRESHOLD: f64 = 0.6;
 
-pub fn compute_friction(conn: &Connection, conversation_id: i64) -> Result<FrictionScore> {
+pub(crate) fn compute_friction(conn: &Connection, conversation_id: i64) -> Result<FrictionScore> {
     let message_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM activity_events WHERE conversation_id = ?1 AND event_type = 'message'",
@@ -1362,7 +1363,7 @@ pub struct GraphNode {
     pub created_at: String,
 }
 
-pub fn validate_graph_node_kind(kind: &str) -> Result<GraphNodeKind> {
+pub(crate) fn validate_graph_node_kind(kind: &str) -> Result<GraphNodeKind> {
     for k in GraphNodeKind::ALL {
         if k.as_str() == kind {
             return Ok(k);
@@ -1699,6 +1700,7 @@ pub fn recompute_recent_friction(conn: &Connection, limit: u32) -> Result<(u32, 
 #[cfg(test)]
 mod item56_tests {
     use super::*;
+    use crate::reports::config::parse_report_config;
     use rusqlite::Connection;
 
     fn db() -> Connection {

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const M011_SQL: &str = r#"
+pub(crate) const M011_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS verified_drafts (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         conversation_id INTEGER NOT NULL,
@@ -17,7 +17,7 @@ pub const M011_SQL: &str = r#"
         ON verified_drafts (conversation_id, status);
 "#;
 
-pub const M012_SQL: &str = r#"
+pub(crate) const M012_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS customer_memory (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         customer_id     INTEGER NOT NULL,
@@ -31,7 +31,7 @@ pub const M012_SQL: &str = r#"
         ON customer_memory (customer_id, memory_key);
 "#;
 
-pub const M013_SQL: &str = r#"
+pub(crate) const M013_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS post_resolution_qa (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         conversation_id INTEGER NOT NULL,
@@ -43,7 +43,7 @@ pub const M013_SQL: &str = r#"
         ON post_resolution_qa (conversation_id);
 "#;
 
-pub fn apply_m011_to_m013(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m011_to_m013(conn: &Connection) -> Result<()> {
     conn.execute_batch(M011_SQL)?;
     conn.execute_batch(M012_SQL)?;
     conn.execute_batch(M013_SQL)?;

@@ -122,7 +122,7 @@ pub(crate) fn parse_chat_object(v: &Value) -> Option<HsChat> {
 }
 
 #[must_use]
-pub fn parse_chat_event(event_type: &str, payload: &Value) -> Option<HsChatEvent> {
+pub(crate) fn parse_chat_event(event_type: &str, payload: &Value) -> Option<HsChatEvent> {
     let chat_value = payload
         .get("chat")
         .filter(|c| c.get("id").is_some_and(|i| i.as_str().is_some()))
@@ -293,7 +293,7 @@ pub fn list_chats(conn: &Connection, include_ended: bool) -> Result<Vec<MirrorCh
     Ok(rows)
 }
 
-pub fn chat_by_id(conn: &Connection, chat_id: &str) -> Result<Option<MirrorChat>> {
+pub(crate) fn chat_by_id(conn: &Connection, chat_id: &str) -> Result<Option<MirrorChat>> {
     let chat = conn
         .query_row(
             "SELECT chat_id, beacon_id, mailbox_remote_id, customer_remote_id, customer_name,

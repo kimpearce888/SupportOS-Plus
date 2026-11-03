@@ -1475,3 +1475,87 @@ files, +541/−447 (99 source files: 447 visibility edits + 70 reflow
 lines; USER_MANUAL +24). Residual open items: **A1-3b remainder (651
 candidates, re-censused)**, response_state_sql.rs 3 fns (KEEP
 recorded, owner-delegated). ai records synced.
+
+## Batch KB-5 — A1-3b completion: 649-item visibility tranche + compiler-re-proof deletions (~2,870 lines) — opened and completed 2026-11-02
+
+Owner directive at open: "continue" — the recorded A1-3b remainder
+(651 re-censused candidates from kb4) was the open work item. Course:
+execute it to completion per the kb3-approved playbook (de-pub →
+compiler re-proof → delete what the compiler proves dead → keep the
+rest narrowed), in one reviewable batch.
+
+**KB-5-1 — tranche + re-proof executed.** 649 visibility narrows
+applied (632 from the kb4-methodology census at HEAD + 17 `pub async
+fn` items the census regex missed — blind spot closed and disclosed).
+The compiler re-proof then fired at scale: the kb4 finding that
+"cross-file crate-internal" refs were largely mentions inside OTHER
+dead code held across the whole census. Deleted as compiler-certified
+dead: **the entire encrypted_sync bundle surface (1,047 lines — file
+rewritten to its single live item `ensure_log_table`)**, the entire
+security HTML-sanitizer surface (~225 lines — SsrfCheckResult/
+redact_text live surface kept, its 5 audit50 tests died with it), 9
+catalog dead enums + impls (orphaned by kb2's re-export deletions —
+workspace.rs died whole), notification_prefs (whole file), 3
+migrations/side_threads dead row structs, vectorstore dead trait
+methods (search_sparse/count/snapshot/restore/delete + Filter builder
+methods) + their 4 test-only-consumer tests, crypto dead scrypt
+wrapper (derive_key/random_salt/SALT_LEN/SCRYPT_R/SCRYPT_P — its 4
+tests REWRITTEN to fixed keys because they cover the LIVE
+encrypt/decrypt), ai_provider trait contract trimmed, ~20 further dead
+fns/consts/structs, and 7 write-never-read in-memory serde/struct
+fields (RawToolCall.r#type is a serde-ignored wire field — wire
+compatible). Net churn: 112 files, +542/−2,816. **Never-read fields
+in DB-adjacent structs were NOT deleted** — those structs were
+reverted to pub instead and the field list recorded as kb6's field-
+surgery queue (SQL-mapping care per the kb2 precedent).
+
+**KB-5-2 — three census blind spots found and closed, all
+compiler-caught:** (1) `pub async fn` was outside the item regex (17
+items); (2) mixed-name braced re-export lines narrow whole lines while
+the census decides per name — 12 collateral names on 4 lines,
+repaired by splitting the re-exports (search lanes, design controls,
+helpscout inert, reports config); the `pub mod catalog {
+pub(crate) use spp_catalog::*; }` inner GLOB re-narrowed twice by the
+applier before being recognized as a live external surface (32
+spp_core::catalog::X consumers) and restored; (3) types consumed only
+as enum-variant payloads (events.rs OutboundJobFinishedEvent family —
+zero name mentions, hard E0446-class errors) — reverted to pub. The
+candidates TSV was destroyed after use so the applier can never
+re-poison revert decisions again (it re-narrowed reverted lines
+twice — process lesson recorded).
+
+**KB-5-3 — NO-TOUCH violations self-inflicted and self-caught, all
+restored byte-identical:** the applier re-narrowed `pub mod
+response_state_sql` from its TSV row THREE separate times (after the
+deleter had deleted one of its fns once — restored from HEAD); each
+re-verified `git diff` = 0 lines vs HEAD. The module's 4 fns stay
+KEEP per the owner's kb3 disposition; the incident is disclosed in
+full. No other NO-TOUCH file was ever in the diff (db.rs,
+maintenance.rs, ai_center.rs — verified at every check round).
+
+**KB-5-4 — verification, all green:** fmt clean; cargo check
+--workspace --all-targets 0 errors 0 warnings; clippy --workspace
+--all-targets -D warnings 0; gate_traceability OK — identical 23
+routes / 20 DC tags / 27 ids; gate_no_simulation clean; verify-icons
+clean; core lib **467 passed / 0 failed / 3 ignored**
+(--test-threads=1, 317.21s — census reconciles EXACTLY: 9
+encrypted_sync + 5 audit50 + 4 vectorstore_sqlitevec + 3 it_lm_studio
+tests died with their deleted surface = −20 passed −1 ignored against
+kb4's 487/0/4); app-shell lib **241/0** (−1 = the deleted from_json
+parser test; 212.14s); xtask 11/0; doc-tests 0/0; kittest batch A
+13 suites/93 + batch B 12 targets/89 = **24 unique targets / 175
+unique tests / 0 failed — 171 goldens ZERO drift** (dead surface
+renders nothing). Test-count deltas census-reconciled to the item.
+
+**KB-5-5 — residual recorded for kb6:** never-read fields in
+DB-adjacent structs (RuleRecord name/priority/last_run_at/run_count,
+RunRecord 6 fields, ConversationChunk email-adjacent fields,
+AiRunLog run_id/model/prompt_version/latency_ms/created_at/sources,
+jobs attempts/max_attempts, interaction_engine fields, webhook
+event_id/processing_state, and their struct headers to re-narrow
+after surgery); the kb6 batch = field-level deletions with
+SQL-mapping care per the kb2 precedent, then re-narrow the reverted
+struct headers. Environment notes: sandbox disk pressure recurred
+(93% before batch B; kittest bins reclaimed between batches);
+background builds still reaped (foreground-iterative pattern used
+throughout). ai records synced.

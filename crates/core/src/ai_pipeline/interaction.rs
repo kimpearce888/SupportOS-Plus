@@ -1,5 +1,5 @@
 use super::*;
-pub fn build_interaction_strategy_block(
+pub(crate) fn build_interaction_strategy_block(
     conn: &Connection,
     conversation_local_id: i64,
 ) -> Option<String> {
@@ -74,7 +74,7 @@ pub fn build_interaction_strategy_block(
     ))
 }
 
-pub fn extract_provided_facts(text: &str) -> Vec<String> {
+pub(crate) fn extract_provided_facts(text: &str) -> Vec<String> {
     let lower = text.to_lowercase();
     let patterns: [(&str, &str); 8] = [
         ("screenshot", "screenshots/attachments"),
@@ -163,19 +163,9 @@ fn has_version_number(lower: &str) -> bool {
     false
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ProcessNewTicketResult {
-    pub analysis: Option<TicketAnalysis>,
-    pub note_created: bool,
-    pub draft_created: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
 #[derive(Debug, Clone)]
-pub struct AnalyzeInteractionOutcome {
+pub(crate) struct AnalyzeInteractionOutcome {
     pub ai_enriched: bool,
-    pub error: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -325,10 +315,7 @@ pub async fn analyze_interaction(
     }
     let _ = crate::interaction_signals::record_current_interaction(conn, conversation_local_id);
     if backend.kind() == "disabled" {
-        return Ok(AnalyzeInteractionOutcome {
-            ai_enriched: false,
-            error: None,
-        });
+        return Ok(AnalyzeInteractionOutcome { ai_enriched: false });
     }
     let customer_id: Option<i64> = conn
         .query_row(
@@ -338,10 +325,7 @@ pub async fn analyze_interaction(
         )
         .ok();
     let Some(customer_id) = customer_id else {
-        return Ok(AnalyzeInteractionOutcome {
-            ai_enriched: false,
-            error: None,
-        });
+        return Ok(AnalyzeInteractionOutcome { ai_enriched: false });
     };
     let customer_name: String = conn
         .query_row(
@@ -389,10 +373,7 @@ pub async fn analyze_interaction(
             .collect()
     };
     if messages.is_empty() {
-        return Ok(AnalyzeInteractionOutcome {
-            ai_enriched: false,
-            error: None,
-        });
+        return Ok(AnalyzeInteractionOutcome { ai_enriched: false });
     }
     let history =
         engine::get_customer_conversations(conn, customer_id, Some(conversation_local_id))
@@ -490,10 +471,7 @@ pub async fn analyze_interaction(
         ),
         Err(e) => {
             let _ = fail_run(conn, run_id1, &e.message);
-            return Ok(AnalyzeInteractionOutcome {
-                ai_enriched: false,
-                error: Some(e.message),
-            });
+            return Ok(AnalyzeInteractionOutcome { ai_enriched: false });
         }
     };
     complete_run_with_usage(
@@ -660,10 +638,7 @@ pub async fn analyze_interaction(
         ),
         Err(e) => {
             let _ = fail_run(conn, run_id2, &e.message);
-            return Ok(AnalyzeInteractionOutcome {
-                ai_enriched: false,
-                error: Some(e.message),
-            });
+            return Ok(AnalyzeInteractionOutcome { ai_enriched: false });
         }
     };
     match rec {
@@ -685,10 +660,7 @@ pub async fn analyze_interaction(
                 Some(PROMPT_VERSIONS_INTERACTION_RECOMMENDATION),
                 model_arg,
             );
-            Ok(AnalyzeInteractionOutcome {
-                ai_enriched: true,
-                error: None,
-            })
+            Ok(AnalyzeInteractionOutcome { ai_enriched: true })
         }
         None => {
             let _ = fail_run(
@@ -696,10 +668,7 @@ pub async fn analyze_interaction(
                 run_id2,
                 "Interaction recommendation returned an unparseable structure",
             );
-            Ok(AnalyzeInteractionOutcome {
-                ai_enriched: false,
-                error: Some("The local model did not return a valid support-approach JSON.".into()),
-            })
+            Ok(AnalyzeInteractionOutcome { ai_enriched: false })
         }
     }
 }

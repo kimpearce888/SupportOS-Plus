@@ -60,7 +60,7 @@ pub(crate) fn process_webhook(
     WebhookProcessResult::Accepted { row_id }
 }
 
-pub fn process_event(conn: &Connection, row_id: i64, event_type: &str, raw: &str) {
+pub(crate) fn process_event(conn: &Connection, row_id: i64, event_type: &str, raw: &str) {
     if let Err(e) = webhook::set_webhook_event_state(conn, row_id, "processing", None) {
         tracing::error!(error = %e, "failed to mark webhook event processing");
         return;

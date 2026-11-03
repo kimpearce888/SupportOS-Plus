@@ -266,7 +266,7 @@ impl SyncEngine {
         Ok(result)
     }
 
-    pub async fn sync_single_conversation(&self, remote_id: i64) -> Result<bool> {
+    pub(crate) async fn sync_single_conversation(&self, remote_id: i64) -> Result<bool> {
         self.guard_provider_connected()?;
         let remote = self.provider.get_conversation(remote_id).await;
         match remote {
@@ -299,7 +299,11 @@ impl SyncEngine {
         }
     }
 
-    pub async fn run_resource(&self, resource: &str, initial: bool) -> Result<ResourceSyncResult> {
+    pub(crate) async fn run_resource(
+        &self,
+        resource: &str,
+        initial: bool,
+    ) -> Result<ResourceSyncResult> {
         self.sync_resource(resource, initial).await
     }
 

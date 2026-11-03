@@ -1,9 +1,8 @@
 use rusqlite::Connection;
 
 use crate::error::Result;
-use serde::Serialize;
 
-pub fn apply_m006(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m006(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS side_threads (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,32 +37,4 @@ pub fn apply_m006(conn: &Connection) -> Result<()> {
     )?;
     let _ = conn.execute("UPDATE app_state SET schema_version = 6 WHERE id = 1", []);
     Ok(())
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SideThreadParticipant {
-    pub user_local_id: i64,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub mention: Option<String>,
-    pub added_at: String,
-    pub added_by_user_local_id: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SideThreadMentionRef {
-    pub user_local_id: Option<i64>,
-    pub team_local_id: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SideThreadMessageItem {
-    pub id: i64,
-    pub side_thread_id: i64,
-    pub author_user_local_id: Option<i64>,
-    pub author_first_name: Option<String>,
-    pub author_last_name: Option<String>,
-    pub body: String,
-    pub created_at: String,
-    pub mentions: Vec<SideThreadMentionRef>,
 }

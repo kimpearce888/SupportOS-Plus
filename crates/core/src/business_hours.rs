@@ -30,24 +30,14 @@ pub(crate) fn default_business_hours() -> BusinessHoursConfig {
 const MAX_SPAN_DAYS: i64 = 400;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SlaVerdict {
+pub(crate) enum SlaVerdict {
     Met,
     Missed,
     NoTarget,
     Unmeasured,
 }
 
-impl SlaVerdict {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Met => "met",
-            Self::Missed => "missed",
-            Self::NoTarget => "no_target",
-            Self::Unmeasured => "unmeasured",
-        }
-    }
-}
+impl SlaVerdict {}
 
 #[must_use]
 pub fn is_valid_timezone(timezone: &str) -> bool {
@@ -98,7 +88,7 @@ fn instant_for_wall(y: i32, mo: u32, d: u32, minute: i64, tz: &Tz) -> Option<i64
 }
 
 #[must_use]
-pub fn parse_instant_ms(raw: &str) -> Option<i64> {
+pub(crate) fn parse_instant_ms(raw: &str) -> Option<i64> {
     let s = raw.trim();
     if s.is_empty() {
         return None;

@@ -42,7 +42,7 @@ impl Tab {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AiSettings {
+pub(crate) struct AiSettings {
     pub ai_enabled: bool,
     pub base_url: String,
     pub chat_model: Option<String>,
@@ -52,7 +52,7 @@ pub struct AiSettings {
 }
 
 #[must_use]
-pub fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
+pub(crate) fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
     AiSettings {
         ai_enabled: spp_core::settings::get_bool(conn, "ai_enabled", true).unwrap_or(true),
         base_url: spp_core::settings::get_string(conn, "lmstudio_base_url")
@@ -75,7 +75,7 @@ pub fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct AiAnalytics {
+pub(crate) struct AiAnalytics {
     pub tickets_analyzed: i64,
     pub analysis_success_rate: f64,
     pub draft_count: i64,
@@ -88,7 +88,7 @@ pub struct AiAnalytics {
 }
 
 #[must_use]
-pub fn load_analytics(conn: &rusqlite::Connection) -> AiAnalytics {
+pub(crate) fn load_analytics(conn: &rusqlite::Connection) -> AiAnalytics {
     let (tickets_analyzed, analysis_completed, analysis_failed): (i64, i64, i64) = conn
         .query_row(
             "SELECT
@@ -184,7 +184,7 @@ pub struct AiJobRow {
 }
 
 #[must_use]
-pub fn load_jobs(conn: &rusqlite::Connection, limit: i64) -> Vec<AiJobRow> {
+pub(crate) fn load_jobs(conn: &rusqlite::Connection, limit: i64) -> Vec<AiJobRow> {
     let limit = limit.clamp(1, 1000);
     conn.prepare(
         "SELECT id, type, status, conversation_id, model, error, created_at, latency_ms
@@ -389,7 +389,7 @@ impl AiCenterPage {
         }
     }
 
-    pub fn test_connection(&mut self) {
+    pub(crate) fn test_connection(&mut self) {
         let Some(settings) = self.settings.clone() else {
             return;
         };

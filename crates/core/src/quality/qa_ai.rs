@@ -62,7 +62,7 @@ fn coerce_ai_json(raw: &Value) -> Value {
     })
 }
 
-pub async fn compute_qa_ai_layer(
+pub(crate) async fn compute_qa_ai_layer(
     conn: &Connection,
     backend: &crate::ai_pipeline::AiBackend,
     conversation_id: i64,

@@ -174,7 +174,7 @@ fn split_after_question(text: &str) -> Vec<String> {
     out
 }
 
-pub const KNOWLEDGE_GAP_KINDS: [(&str, &str); 5] = [
+pub(crate) const KNOWLEDGE_GAP_KINDS: [(&str, &str); 5] = [
     (
         "repeated_question_uncovered",
         "Repeated question, no covering document",
@@ -783,7 +783,7 @@ fn direct_complaint_re() -> &'static regex::Regex {
     })
 }
 
-pub fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
+pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<Value> {
     let conv: Option<(i64, Option<i64>)> = conn
         .query_row(
             "SELECT number, customer_local_id FROM conversations

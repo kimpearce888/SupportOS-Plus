@@ -513,7 +513,7 @@ fn context_block(conn: &Connection, conversation_id: Option<i64>) -> String {
     build_copilot_context_block(number, subject.as_deref(), customer_name.as_deref(), &today)
 }
 
-pub fn get_session(conn: &Connection, id: i64) -> Option<Value> {
+pub(crate) fn get_session(conn: &Connection, id: i64) -> Option<Value> {
     conn.query_row(
         "SELECT s.id, s.title, s.conversation_id, s.created_at, s.updated_at, c.number,
                 (SELECT COUNT(*) FROM copilot_messages m WHERE m.session_id = s.id)

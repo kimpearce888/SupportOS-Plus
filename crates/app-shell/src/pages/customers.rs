@@ -12,7 +12,7 @@ const ROW_HEIGHT: f32 = 32.0;
 const CUSTOMERS_PAGE_SIZE: i64 = 50;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct CustomerRow {
+pub(crate) struct CustomerRow {
     pub id: i64,
     pub display_name: String,
     pub email: Option<String>,
@@ -21,7 +21,7 @@ pub struct CustomerRow {
 }
 
 #[must_use]
-pub fn row_from_summary(v: &Value) -> CustomerRow {
+pub(crate) fn row_from_summary(v: &Value) -> CustomerRow {
     let first = str_field(v, "first_name");
     let last = str_field(v, "last_name");
     let display_name = format!("{first} {last}").trim().to_string();
@@ -40,7 +40,7 @@ pub fn row_from_summary(v: &Value) -> CustomerRow {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct ContactCard {
+pub(crate) struct ContactCard {
     pub display_name: String,
     pub email: Option<String>,
     pub phone: Option<String>,
@@ -50,7 +50,7 @@ pub struct ContactCard {
 }
 
 #[must_use]
-pub fn contact_from_detail(detail: &Value) -> ContactCard {
+pub(crate) fn contact_from_detail(detail: &Value) -> ContactCard {
     let customer = detail.get("customer").unwrap_or(detail);
     let first = str_field(customer, "first_name");
     let last = str_field(customer, "last_name");
@@ -76,7 +76,7 @@ pub fn contact_from_detail(detail: &Value) -> ContactCard {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct TimelineEvent {
+pub(crate) struct TimelineEvent {
     pub kind: String,
     pub occurred_at: String,
     pub conversation_number: Option<i64>,
@@ -84,7 +84,7 @@ pub struct TimelineEvent {
 }
 
 #[must_use]
-pub fn event_row(v: &Value) -> TimelineEvent {
+pub(crate) fn event_row(v: &Value) -> TimelineEvent {
     let occurred_at = str_field(v, "occurred_at");
     let occurred_at = if occurred_at.is_empty() {
         str_field(v, "created_at")
@@ -106,14 +106,14 @@ pub fn event_row(v: &Value) -> TimelineEvent {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct SupportHealth {
+pub(crate) struct SupportHealth {
     pub open_conversations: i64,
     pub not_good_ratings_90d: i64,
     pub breached_sla: i64,
 }
 
 #[must_use]
-pub fn health_from_report(report: &Value) -> SupportHealth {
+pub(crate) fn health_from_report(report: &Value) -> SupportHealth {
     let root = report.get("report").unwrap_or(report);
     SupportHealth {
         open_conversations: i64_field(root, "open_conversations"),
@@ -122,7 +122,7 @@ pub fn health_from_report(report: &Value) -> SupportHealth {
     }
 }
 
-pub fn conversations_for(
+pub(crate) fn conversations_for(
     conn: &Connection,
     customer_id: i64,
 ) -> spp_core::Result<Vec<spp_core::inbox::ConversationListItem>> {
@@ -208,7 +208,7 @@ impl CustomersPage {
         }
     }
 
-    pub fn open_profile(&mut self, db: &DbHandle, customer_id: i64) {
+    pub(crate) fn open_profile(&mut self, db: &DbHandle, customer_id: i64) {
         self.selected = Some(customer_id);
         self.panel_open = true;
         self.load_profile(db, customer_id);

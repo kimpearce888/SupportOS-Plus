@@ -61,7 +61,7 @@ macro_rules! spec {
     };
 }
 
-pub const REPORT_COUNT: usize = 32;
+pub(crate) const REPORT_COUNT: usize = 32;
 
 pub const REPORTS: [ReportSpec; REPORT_COUNT] = [
     spec!("company", "Company overall", "/v2/reports/company", Company),
@@ -248,7 +248,7 @@ impl ReportsCapability {
     }
 
     #[must_use]
-    pub fn from_str_raw(s: &str) -> Self {
+    pub(crate) fn from_str_raw(s: &str) -> Self {
         match s {
             "available" => Self::Available,
             "plan_blocked" => Self::PlanBlocked,

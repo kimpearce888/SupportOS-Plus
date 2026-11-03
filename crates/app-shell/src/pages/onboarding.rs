@@ -9,7 +9,7 @@ use crate::design::{self, ButtonVariant};
 use crate::pages::sync_health::SyncAction;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct OnboardingStatus {
+pub(crate) struct OnboardingStatus {
     pub step: String,
     pub completed: bool,
     pub conversations: i64,

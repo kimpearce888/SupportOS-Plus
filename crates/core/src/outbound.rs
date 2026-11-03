@@ -4,7 +4,7 @@ use crate::error::Result;
 
 pub(crate) const OUTBOUND_BATCH_PER_TICK: usize = 4;
 
-pub const OUTBOUND_MAX_ATTEMPTS: i64 = 3;
+pub(crate) const OUTBOUND_MAX_ATTEMPTS: i64 = 3;
 
 #[derive(Debug, Clone)]
 pub struct OutboundJob {

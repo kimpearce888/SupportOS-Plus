@@ -2,11 +2,11 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
+pub(crate) const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
 
-pub const MIN_OBSERVATIONS_FOR_PREFERENCE: u32 = 3;
+pub(crate) const MIN_OBSERVATIONS_FOR_PREFERENCE: u32 = 3;
 
-pub const CHANGE_SIGNIFICANCE_THRESHOLD: f64 = 0.34;
+pub(crate) const CHANGE_SIGNIFICANCE_THRESHOLD: f64 = 0.34;
 
 pub const M014_SQL: &str = r#"
     CREATE TABLE IF NOT EXISTS interaction_signals (
@@ -23,7 +23,7 @@ pub const M014_SQL: &str = r#"
     UPDATE app_state SET schema_version = 14 WHERE id = 1;
 "#;
 
-pub fn apply_m014(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m014(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS interaction_signals (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,

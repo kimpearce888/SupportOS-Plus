@@ -6,7 +6,7 @@ use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
+pub(crate) enum Scope {
     All,
     Tickets,
     Knowledge,

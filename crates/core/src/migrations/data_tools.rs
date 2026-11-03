@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const M026_TO_M027_SQL: &str = r#"
+pub(crate) const M026_TO_M027_SQL: &str = r#"
     -- M026: custom_object_types + custom_object_fields
     CREATE TABLE IF NOT EXISTS custom_object_types (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +34,7 @@ pub const M026_TO_M027_SQL: &str = r#"
     UPDATE app_state SET schema_version = 27 WHERE id = 1;
 "#;
 
-pub fn apply_m026_to_m027(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m026_to_m027(conn: &Connection) -> Result<()> {
     conn.execute_batch(M026_TO_M027_SQL)?;
     Ok(())
 }

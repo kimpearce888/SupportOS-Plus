@@ -9,10 +9,10 @@ pub enum Theme {
 }
 
 impl Theme {
-    pub const SETTING_KEY: &'static str = "theme";
+    pub(crate) const SETTING_KEY: &'static str = "theme";
 
     #[must_use]
-    pub fn from_setting_value(value: Option<&str>) -> Self {
+    pub(crate) fn from_setting_value(value: Option<&str>) -> Self {
         match value {
             Some("dark") => Self::Dark,
             _ => Self::Light,
@@ -20,7 +20,7 @@ impl Theme {
     }
 
     #[must_use]
-    pub fn setting_value(self) -> &'static str {
+    pub(crate) fn setting_value(self) -> &'static str {
         match self {
             Self::Light => "light",
             Self::Dark => "dark",
@@ -28,7 +28,7 @@ impl Theme {
     }
 
     #[must_use]
-    pub fn load(db: &DbHandle) -> Self {
+    pub(crate) fn load(db: &DbHandle) -> Self {
         let stored: Option<String> = db.with_read(|conn| {
             spp_core::settings::get_string(conn, Self::SETTING_KEY)
                 .ok()
@@ -44,7 +44,7 @@ impl Theme {
     }
 
     #[must_use]
-    pub fn toggle(self) -> Self {
+    pub(crate) fn toggle(self) -> Self {
         match self {
             Self::Light => Self::Dark,
             Self::Dark => Self::Light,

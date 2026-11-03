@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 use crate::helpscout::{HelpScoutProvider, HsWebhookConfig};
 
-pub const REQUIRED_EVENTS: &[&str] = &[
+pub(crate) const REQUIRED_EVENTS: &[&str] = &[
     "convo.created",
     "convo.assigned",
     "convo.status",
@@ -31,7 +31,7 @@ const HOOK_LABEL: &str = "SupportOS-Plus";
 const KEY_LAST_RUN: &str = "webhook_health_last_run";
 const KEY_OUTCOME: &str = "webhook_health_last_outcome";
 
-pub const CADENCE_SECS: i64 = 6 * 3600;
+pub(crate) const CADENCE_SECS: i64 = 6 * 3600;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WebhookHealthOutcome {

@@ -176,7 +176,7 @@ pub fn reject(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> R
 }
 
 #[must_use]
-pub fn risk_tier(kind: &str) -> Option<&'static str> {
+pub(crate) fn risk_tier(kind: &str) -> Option<&'static str> {
     match kind {
         "analyze_ticket" | "search_similar" | "check_known_issues" => Some("read"),
         "create_ai_note" | "create_ai_draft" | "add_tag" | "manual_review_queue" => {
@@ -251,23 +251,7 @@ pub struct RuleRecord {
     pub run_count: i64,
 }
 
-impl RuleRecord {
-    #[must_use]
-    pub fn to_main_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "id": self.id,
-            "name": self.name,
-            "enabled": if self.enabled { 1 } else { 0 },
-            "trigger": self.trigger,
-            "conditions": self.conditions,
-            "actions": self.actions,
-            "priority": self.priority,
-            "requires_approval": if self.requires_approval { 1 } else { 0 },
-            "last_run_at": self.last_run_at,
-            "run_count": self.run_count,
-        })
-    }
-}
+impl RuleRecord {}
 
 const RULE_RECORD_SELECT: &str =
     "SELECT id, name, trigger_json, action_json, COALESCE(enabled, 0), conditions,
@@ -352,7 +336,7 @@ fn parse_rule_record(row: RuleRow) -> Result<RuleRecord> {
     })
 }
 
-pub fn list_rule_records(conn: &Connection) -> Result<Vec<RuleRecord>> {
+pub(crate) fn list_rule_records(conn: &Connection) -> Result<Vec<RuleRecord>> {
     let mut stmt = conn.prepare(&format!("{RULE_RECORD_SELECT} ORDER BY priority, id"))?;
     let rows = stmt
         .query_map([], read_rule_row)?
@@ -391,18 +375,6 @@ pub struct RunRecord {
 }
 
 impl RunRecord {
-    #[must_use]
-    pub fn to_main_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "id": self.id,
-            "rule_id": self.rule_id,
-            "conversation_id": self.conversation_id,
-            "triggered_at": self.triggered_at,
-            "status": self.status,
-            "detail": self.detail,
-        })
-    }
-
     fn read(r: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: r.get(0)?,

@@ -35,7 +35,7 @@ pub(crate) const INITIAL_SYNC_ORDER: [&str; 19] = [
     "user_statuses",
 ];
 
-pub const INCREMENTAL_REFERENCE_ORDER: [&str; 13] = [
+pub(crate) const INCREMENTAL_REFERENCE_ORDER: [&str; 13] = [
     "mailboxes",
     "folders",
     "tags",
@@ -285,7 +285,7 @@ pub(crate) fn record_failure(conn: &Connection, resource: &str, error: &str, rec
     );
 }
 
-pub fn set_checkpoint_running(conn: &Connection, resource: &str, running: bool) {
+pub(crate) fn set_checkpoint_running(conn: &Connection, resource: &str, running: bool) {
     let _ = conn.execute(
         "INSERT INTO sync_checkpoints (resource, status) VALUES (?1, ?2)
          ON CONFLICT(resource) DO UPDATE SET status = excluded.status",

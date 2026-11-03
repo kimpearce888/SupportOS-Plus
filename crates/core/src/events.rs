@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub type RatingValue = Option<String>;
+pub(crate) type RatingValue = Option<String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

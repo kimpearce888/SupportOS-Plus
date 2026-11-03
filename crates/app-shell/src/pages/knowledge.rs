@@ -18,7 +18,11 @@ const VISIBILITIES: [(&str, &str); 2] = [
     ),
 ];
 
-pub fn run_file_import(db: &DbHandle, data_dir: &Path, file: &str) -> spp_core::Result<usize> {
+pub(crate) fn run_file_import(
+    db: &DbHandle,
+    data_dir: &Path,
+    file: &str,
+) -> spp_core::Result<usize> {
     db.with_write(|conn| {
         let results =
             spp_core::knowledge_store::import_file(conn, data_dir, file, None, "internal_only")?;
@@ -27,7 +31,7 @@ pub fn run_file_import(db: &DbHandle, data_dir: &Path, file: &str) -> spp_core::
     })
 }
 
-pub fn run_manual_import(
+pub(crate) fn run_manual_import(
     db: &DbHandle,
     source_name: &str,
     title: &str,
@@ -114,7 +118,7 @@ impl Tab {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DocsStats {
+pub(crate) struct DocsStats {
     pub collections: i64,
     pub articles: i64,
     pub published: i64,
@@ -125,7 +129,7 @@ pub struct DocsStats {
 }
 
 #[must_use]
-pub fn docs_stats(conn: &Connection) -> DocsStats {
+pub(crate) fn docs_stats(conn: &Connection) -> DocsStats {
     conn.query_row(
         "SELECT (SELECT COUNT(*) FROM docs_collections),
                 (SELECT COUNT(*) FROM docs_articles),
@@ -161,7 +165,7 @@ pub fn docs_collections(conn: &Connection) -> Vec<(i64, String)> {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DocArticle {
+pub(crate) struct DocArticle {
     pub id: i64,
     pub collection_name: Option<String>,
     pub name: String,
@@ -173,7 +177,7 @@ pub struct DocArticle {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct DocsFilter {
+pub(crate) struct DocsFilter {
     pub collection: Option<i64>,
     pub status: Option<String>,
     pub query: Option<String>,
@@ -199,7 +203,7 @@ fn article_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DocArticle> {
 }
 
 #[must_use]
-pub fn fts_article_ids(conn: &Connection, q: &str) -> Vec<i64> {
+pub(crate) fn fts_article_ids(conn: &Connection, q: &str) -> Vec<i64> {
     let tokens = spp_core::search::tokenize(q, 2, 8);
     if tokens.is_empty() {
         return Vec::new();
@@ -223,7 +227,7 @@ pub fn fts_article_ids(conn: &Connection, q: &str) -> Vec<i64> {
 }
 
 #[must_use]
-pub fn list_articles(conn: &Connection, filter: &DocsFilter) -> Vec<DocArticle> {
+pub(crate) fn list_articles(conn: &Connection, filter: &DocsFilter) -> Vec<DocArticle> {
     let fts_ids = filter
         .query
         .as_deref()
@@ -272,7 +276,7 @@ pub fn list_articles(conn: &Connection, filter: &DocsFilter) -> Vec<DocArticle> 
 }
 
 #[must_use]
-pub fn article_detail(conn: &Connection, id: i64) -> Option<(DocArticle, String)> {
+pub(crate) fn article_detail(conn: &Connection, id: i64) -> Option<(DocArticle, String)> {
     let sql = format!("{ARTICLE_SELECT} WHERE a.id = ?1");
     let summary = conn
         .query_row(&sql, rusqlite::params![id], article_from_row)
@@ -289,7 +293,7 @@ pub fn article_detail(conn: &Connection, id: i64) -> Option<(DocArticle, String)
 }
 
 #[derive(Debug, Default)]
-pub struct ImportPanel {
+pub(crate) struct ImportPanel {
     title: String,
     content: String,
     source_name: String,
@@ -384,7 +388,7 @@ impl KnowledgePage {
         self.import.import_dir = v.get("dir").and_then(Value::as_str).map(str::to_string);
     }
 
-    pub fn import_file_action(&mut self, db: &DbHandle, file: &str) {
+    pub(crate) fn import_file_action(&mut self, db: &DbHandle, file: &str) {
         let Some(dir) = self.data_dir.clone() else {
             self.error = Some("Import is unavailable (no data directory).".to_string());
             return;
@@ -400,7 +404,7 @@ impl KnowledgePage {
         self.reload_importable();
     }
 
-    pub fn manual_import_action(&mut self, db: &DbHandle) {
+    pub(crate) fn manual_import_action(&mut self, db: &DbHandle) {
         match run_manual_import(
             db,
             &self.import.source_name,
@@ -463,7 +467,7 @@ impl KnowledgePage {
         self.stale_docs_tracked = stale;
     }
 
-    pub fn mark_reviewed(&mut self, db: &DbHandle, id: i64) {
+    pub(crate) fn mark_reviewed(&mut self, db: &DbHandle, id: i64) {
         let ok = db.with_read(|conn| spp_core::knowledge_store::mark_reviewed(conn, id));
         self.status_message = Some(match ok {
             Ok(true) => format!("Document {id} marked reviewed."),
@@ -473,7 +477,7 @@ impl KnowledgePage {
         self.documents.clear();
     }
 
-    pub fn mark_verified(&mut self, db: &DbHandle, id: i64) {
+    pub(crate) fn mark_verified(&mut self, db: &DbHandle, id: i64) {
         let ok = db.with_read(|conn| spp_core::knowledge_store::mark_verified(conn, id));
         self.status_message = Some(match ok {
             Ok(true) => format!("Document {id} marked verified."),
@@ -483,7 +487,7 @@ impl KnowledgePage {
         self.documents.clear();
     }
 
-    pub fn delete_document(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
+    pub(crate) fn delete_document(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         db.with_write(|conn| {
             let removed = spp_core::knowledge_store::delete_document(conn, id)?;
             if removed {
@@ -603,7 +607,7 @@ impl KnowledgePage {
         }
     }
 
-    pub fn open_article(&mut self, db: &DbHandle, id: i64) {
+    pub(crate) fn open_article(&mut self, db: &DbHandle, id: i64) {
         self.reader = Some(id);
         self.reader_text = db.with_read(|conn| article_detail(conn, id));
     }

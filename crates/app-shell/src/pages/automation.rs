@@ -55,7 +55,7 @@ impl ActionKind {
 }
 
 #[must_use]
-pub fn trigger_description(trigger: &Trigger) -> String {
+pub(crate) fn trigger_description(trigger: &Trigger) -> String {
     match trigger {
         Trigger::StatusChanged {
             from_status,
@@ -71,7 +71,7 @@ pub fn trigger_description(trigger: &Trigger) -> String {
 }
 
 #[must_use]
-pub fn action_description(action: &Action) -> String {
+pub(crate) fn action_description(action: &Action) -> String {
     match action {
         Action::Assign { assignee_remote_id } => {
             format!("assign to user #{assignee_remote_id}")
@@ -100,7 +100,7 @@ pub struct ApprovalRow {
 }
 
 #[must_use]
-pub fn load_pending_approvals(conn: &rusqlite::Connection) -> Vec<ApprovalRow> {
+pub(crate) fn load_pending_approvals(conn: &rusqlite::Connection) -> Vec<ApprovalRow> {
     conn.prepare(
         "SELECT id, rule_id, conversation_id, proposed_action_json, status
            FROM automation_approvals WHERE status = 'pending' ORDER BY id DESC LIMIT 100",

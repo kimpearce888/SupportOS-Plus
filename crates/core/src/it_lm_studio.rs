@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde_json::json;
 
 use crate::ai_lm_studio::{ChatTool, CopilotWireMessage, LmStudioProvider, OpenAiCompatibleClient};
-use crate::ai_provider::{ChatMessage, LocalAiProvider, ModelRole};
+use crate::ai_provider::{ChatMessage, LocalAiProvider};
 
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -173,66 +173,6 @@ fn chat_with_tools_roundtrip_parses_tool_calls() {
 }
 
 #[test]
-fn list_models_and_role_inference_roundtrip() {
-    let mock =
-        crate::mockserver::MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
-            crate::mockserver::MockResponse::json(
-                200,
-                json!({"data": [
-                    {"id": "qwen2.5-7b-instruct"},
-                    {"id": "nomic-embed-text-v1.5"},
-                    {"id": "phi-3-mini"}
-                ]}),
-            )
-        }))
-        .expect("mock server");
-    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
-
-    let models = runtime()
-        .block_on(async { provider.list_models().await })
-        .expect("list_models");
-    assert_eq!(models.len(), 3);
-    assert_eq!(models[0].id, "qwen2.5-7b-instruct");
-    assert_eq!(models[0].role, ModelRole::Chat);
-    assert_eq!(
-        models[1].role,
-        ModelRole::Embedding,
-        "embed models detected"
-    );
-    assert_eq!(models[2].role, ModelRole::Chat);
-    assert_eq!(mock.hit_count("GET", "/v1/models"), 1);
-}
-
-#[test]
-fn embed_roundtrip_against_mock_server() {
-    let mock =
-        crate::mockserver::MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
-            crate::mockserver::MockResponse::json(
-                200,
-                json!({
-                    "model": "nomic-embed-text-v1.5",
-                    "data": [{"embedding": [0.1, -0.2, 0.3, 0.4]}],
-                    "usage": {"prompt_tokens": 4, "completion_tokens": 0, "total_tokens": 4}
-                }),
-            )
-        }))
-        .expect("mock server");
-    let provider = LmStudioProvider::with_client(OpenAiCompatibleClient::new(mock.url()));
-
-    let resp = runtime()
-        .block_on(async { provider.embed("nomic-embed-text-v1.5", "hello").await })
-        .expect("embed roundtrip");
-    assert_eq!(resp.dim, 4);
-    assert!((resp.vector[0] - 0.1).abs() < 1e-6);
-    assert_eq!(resp.model, "nomic-embed-text-v1.5");
-    assert_eq!(resp.usage.map(|u| u.total_tokens), Some(4));
-
-    let body: serde_json::Value = serde_json::from_str(&mock.hits()[0].body).expect("request json");
-    assert_eq!(body["model"], "nomic-embed-text-v1.5");
-    assert_eq!(body["input"], "hello");
-}
-
-#[test]
 fn availability_probe_reflects_server_state() {
     let mock =
         crate::mockserver::MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
@@ -284,16 +224,6 @@ fn server_error_surfaces_http_status_and_body() {
         msg.contains("model crashed"),
         "the error must include a body snippet for diagnostics: {msg}"
     );
-
-    let err = runtime()
-        .block_on(async { provider.embed("embed-model", "hi").await })
-        .expect_err("embed must fail on HTTP 500");
-    assert!(err.to_string().contains("HTTP 500"), "embed: {err}");
-
-    let err = runtime()
-        .block_on(async { provider.list_models().await })
-        .expect_err("list_models must fail on HTTP 500");
-    assert!(err.to_string().contains("HTTP 500"), "list_models: {err}");
 }
 
 #[test]
@@ -388,44 +318,5 @@ fn malformed_success_body_is_a_parse_error() {
     assert!(
         err.to_string().contains("parse failed"),
         "parse failures are labeled: {err}"
-    );
-}
-
-#[test]
-#[ignore = "requires a running local model server; set SPP_LM_STUDIO_URL"]
-fn live_roundtrip_when_server_provided() {
-    let url = match std::env::var("SPP_LM_STUDIO_URL") {
-        Ok(u) if !u.trim().is_empty() => u,
-        _ => panic!(
-            "SPP_LM_STUDIO_URL is not set. This live test needs a running local \
-             model server (e.g. LM Studio at http://127.0.0.1:1234)."
-        ),
-    };
-    let provider = LmStudioProvider::with_base_url_and_timeout(url.clone(), 60_000);
-    assert!(
-        runtime().block_on(async { provider.is_available().await }),
-        "server at {url} did not answer GET /v1/models"
-    );
-    let models = runtime()
-        .block_on(async { provider.list_models().await })
-        .expect("list models");
-    let chat_model = models
-        .iter()
-        .find(|m| m.role == ModelRole::Chat)
-        .expect("at least one chat model must be loaded");
-    let resp = runtime()
-        .block_on(async {
-            provider
-                .chat(&chat_model.id, &[user_message("Reply with exactly: OK")])
-                .await
-        })
-        .expect("live chat round-trip");
-    assert!(
-        !resp.content.trim().is_empty(),
-        "real inference returned empty content"
-    );
-    println!(
-        "live inference ok: model={} content={:?} usage={:?}",
-        resp.model, resp.content, resp.usage
     );
 }

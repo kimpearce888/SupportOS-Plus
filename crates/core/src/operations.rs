@@ -6,11 +6,11 @@ use crate::catalog::OperationsTileKey;
 use crate::error::{Error, Result};
 use crate::saved_views::RESPONSE_STATE_SQL;
 
-pub const OPS_WAITING_THRESHOLD_SETTING: &str = "ops_waiting_threshold_minutes";
+pub(crate) const OPS_WAITING_THRESHOLD_SETTING: &str = "ops_waiting_threshold_minutes";
 
-pub const OPS_WAITING_THRESHOLD_DEFAULT: i64 = 240;
+pub(crate) const OPS_WAITING_THRESHOLD_DEFAULT: i64 = 240;
 
-pub const OPS_TILE_WHITELIST: [&str; 9] = [
+pub(crate) const OPS_TILE_WHITELIST: [&str; 9] = [
     "unassigned",
     "needs_first_response",
     "customer_waiting",

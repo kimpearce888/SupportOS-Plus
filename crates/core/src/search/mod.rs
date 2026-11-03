@@ -49,7 +49,7 @@ pub struct SearchResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KnowledgeRawHit {
+pub(crate) struct KnowledgeRawHit {
     pub document_id: i64,
     pub title: String,
     pub snippet: String,
@@ -307,9 +307,9 @@ pub(crate) fn escape_like(q: &str) -> String {
 
 mod lanes;
 
-pub use lanes::{
-    search_ai_analyses, search_conversations, search_customers, search_knowledge,
-    search_knowledge_raw, search_known_issues, search_saved_replies,
+pub(crate) use lanes::{search_ai_analyses, search_customers, search_knowledge_raw};
+pub(crate) use lanes::{
+    search_conversations, search_knowledge, search_known_issues, search_saved_replies,
 };
 
 pub fn search(

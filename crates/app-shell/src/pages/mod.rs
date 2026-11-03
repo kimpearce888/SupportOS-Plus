@@ -139,7 +139,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn delete_segment(id: i64, name: &str) -> Self {
+    pub(crate) fn delete_segment(id: i64, name: &str) -> Self {
         Self {
             title: "Delete segment?".into(),
             message: format!(
@@ -166,7 +166,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn delete_saved_report(id: i64, name: &str) -> Self {
+    pub(crate) fn delete_saved_report(id: i64, name: &str) -> Self {
         Self {
             title: "Delete saved report?".into(),
             message: format!("The saved report \"{name}\" is removed. This cannot be undone."),
@@ -177,7 +177,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn remove_from_dnc(customer_id: i64) -> Self {
+    pub(crate) fn remove_from_dnc(customer_id: i64) -> Self {
         Self {
             title: "Remove from the do-not-contact list?".into(),
             message: format!("Customer {customer_id} becomes contactable by every campaign again."),
@@ -215,7 +215,7 @@ impl ConfirmRequest {
     }
 
     #[must_use]
-    pub fn delete_saved_reply(mailbox_remote_id: i64, remote_id: i64, name: &str) -> Self {
+    pub(crate) fn delete_saved_reply(mailbox_remote_id: i64, remote_id: i64, name: &str) -> Self {
         Self {
             title: "Delete saved reply?".into(),
             message: format!(

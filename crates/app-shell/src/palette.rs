@@ -3,10 +3,10 @@ use spp_core::db::DbHandle;
 
 use crate::pages::NavRequest;
 
-pub const MAX_HITS: usize = 12;
+pub(crate) const MAX_HITS: usize = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PaletteHit {
+pub(crate) struct PaletteHit {
     pub scope: String,
     pub id: i64,
     pub title: String,
@@ -16,34 +16,7 @@ pub struct PaletteHit {
 
 impl PaletteHit {
     #[must_use]
-    pub fn from_json(v: &serde_json::Value) -> Self {
-        Self {
-            scope: v
-                .get("scope")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            id: v.get("id").and_then(serde_json::Value::as_i64).unwrap_or(0),
-            title: v
-                .get("title")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            snippet: v
-                .get("snippet")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            href: v
-                .get("href")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-        }
-    }
-
-    #[must_use]
-    pub fn from_search_hit(hit: &spp_core::search::SearchHit) -> Self {
+    pub(crate) fn from_search_hit(hit: &spp_core::search::SearchHit) -> Self {
         Self {
             scope: hit.scope.clone(),
             id: hit.id,
@@ -55,7 +28,7 @@ impl PaletteHit {
 }
 
 #[must_use]
-pub fn take_hits(hits: &[PaletteHit]) -> &[PaletteHit] {
+pub(crate) fn take_hits(hits: &[PaletteHit]) -> &[PaletteHit] {
     &hits[..hits.len().min(MAX_HITS)]
 }
 
@@ -69,7 +42,7 @@ pub(crate) fn move_selection(selected: usize, len: usize, delta: i64) -> usize {
 }
 
 #[must_use]
-pub fn href_to_nav(href: &str) -> Option<NavRequest> {
+pub(crate) fn href_to_nav(href: &str) -> Option<NavRequest> {
     let rest = href.strip_prefix('/')?;
     if let Some(id) = rest.strip_prefix("inbox/conversation/") {
         return id
@@ -89,7 +62,7 @@ pub fn href_to_nav(href: &str) -> Option<NavRequest> {
     None
 }
 
-pub struct CommandPalette {
+pub(crate) struct CommandPalette {
     open: bool,
     query: String,
     hits: Vec<PaletteHit>,
@@ -115,11 +88,6 @@ impl CommandPalette {
         }
     }
 
-    #[must_use]
-    pub fn is_open(&self) -> bool {
-        self.open
-    }
-
     pub fn open(&mut self) {
         self.open = true;
         self.query.clear();
@@ -141,7 +109,7 @@ impl CommandPalette {
         self.open = false;
     }
 
-    pub fn toggle_shortcut(&mut self, ctx: &egui::Context) {
+    pub(crate) fn toggle_shortcut(&mut self, ctx: &egui::Context) {
         let pressed = (ctx.input(|i| i.modifiers.command || i.modifiers.ctrl)
             && ctx.input(|i| i.key_pressed(egui::Key::K)))
             || ctx.input(|i| i.key_pressed(egui::Key::Escape) && self.open);
@@ -516,25 +484,6 @@ mod tests {
         assert!(palette.hits.is_empty());
     }
 
-    #[test]
-    fn hit_parsing_reads_the_json_shape() {
-        let v = serde_json::json!({
-            "scope": "tickets",
-            "id": 5,
-            "title": "Login broken",
-            "snippet": "customer cannot log in",
-            "href": "/inbox/conversation/5"
-        });
-        let hit = PaletteHit::from_json(&v);
-        assert_eq!(hit.scope, "tickets");
-        assert_eq!(hit.id, 5);
-        assert_eq!(hit.title, "Login broken");
-        assert_eq!(hit.snippet, "customer cannot log in");
-        let empty = PaletteHit::from_json(&serde_json::json!({}));
-        assert_eq!(empty.id, 0);
-        assert!(empty.title.is_empty());
-    }
-
     fn seeded_palette_ctx() -> (egui::Context, CommandPalette, DbHandle) {
         let db = fixture(vec![(
             "conv",
@@ -613,7 +562,7 @@ mod tests {
             matches!(nav, Some(NavRequest::Page(crate::pages::PageKey::Inbox))),
             "DEFECT-02: Enter must confirm the selected palette hit"
         );
-        assert!(!palette.is_open());
+        assert!(!palette.open);
     }
 
     #[test]
@@ -648,7 +597,7 @@ mod tests {
         })
         .drop_without_applying_deltas();
         assert!(nav.is_none(), "the stale hit must not be confirmed");
-        assert!(palette.is_open(), "the palette stays open for fresh hits");
+        assert!(palette.open, "the palette stays open for fresh hits");
         assert_eq!(palette.query, "Exportzz", "the new query was recorded");
 
         assert!(palette.hits.is_empty(), "Exportzz matches nothing");
@@ -666,7 +615,7 @@ mod tests {
         })
         .drop_without_applying_deltas();
         assert!(nav2.is_none(), "nothing to confirm on the fresh query");
-        assert!(palette.is_open(), "a dry Enter keeps the palette open");
+        assert!(palette.open, "a dry Enter keeps the palette open");
     }
 
     #[test]
@@ -694,7 +643,7 @@ mod tests {
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
-        assert!(palette.is_open());
+        assert!(palette.open);
 
         let mut move_pointer = egui::RawInput::default();
         move_pointer
@@ -718,7 +667,7 @@ mod tests {
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
-        assert!(palette.is_open(), "the press alone does not close");
+        assert!(palette.open, "the press alone does not close");
 
         let mut release = egui::RawInput::default();
         release.events.push(egui::Event::PointerButton {
@@ -732,7 +681,7 @@ mod tests {
             palette.ui(ctx, &db);
         })
         .drop_without_applying_deltas();
-        assert!(!palette.is_open(), "an outside click closes the palette");
+        assert!(!palette.open, "an outside click closes the palette");
         assert!(
             !victim_clicked.get(),
             "M19: the dismissing click must be absorbed by the catcher, \
@@ -774,7 +723,7 @@ mod tests {
         })
         .drop_without_applying_deltas();
         assert!(nav.is_none(), "nothing to confirm — no navigation");
-        assert!(palette.is_open(), "the palette stays open on a dry Enter");
+        assert!(palette.open, "the palette stays open on a dry Enter");
 
         let mut more = egui::RawInput::default();
         more.events.push(egui::Event::Text("x".into()));

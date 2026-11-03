@@ -9,7 +9,7 @@ mod send;
 use send::ensure_recipient_updated_at;
 pub(crate) use send::send_batch;
 
-pub const M023_TO_M025_SQL: &str = r#"
+pub(crate) const M023_TO_M025_SQL: &str = r#"
     -- M023: saved_segments
     CREATE TABLE IF NOT EXISTS saved_segments (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,7 +104,7 @@ pub fn list_dnc(conn: &Connection) -> Result<Vec<(i64, String, String)>> {
     Ok(rows)
 }
 
-pub const PERSONALIZATION_VARIABLES: [&str; 6] = [
+pub(crate) const PERSONALIZATION_VARIABLES: [&str; 6] = [
     "first_name",
     "last_name",
     "company",
@@ -211,7 +211,7 @@ pub(crate) fn apply_m031(conn: &Connection) -> Result<()> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CampaignDetail {
+pub(crate) struct CampaignDetail {
     pub id: i64,
     pub name: String,
     pub subject: String,
@@ -325,7 +325,7 @@ fn personalization_context(
     })
 }
 
-pub fn render_template(text: &str, ctx: &serde_json::Value) -> (String, Vec<String>) {
+pub(crate) fn render_template(text: &str, ctx: &serde_json::Value) -> (String, Vec<String>) {
     let mut unresolved: Vec<String> = Vec::new();
     let mut out = String::with_capacity(text.len());
     let bytes = text.as_bytes();
@@ -385,7 +385,7 @@ pub(crate) fn render_for(
     serde_json::json!({ "subject": s, "body": b, "unresolved": unresolved_s })
 }
 
-pub fn campaign_validate(conn: &Connection, campaign_id: i64) -> serde_json::Value {
+pub(crate) fn campaign_validate(conn: &Connection, campaign_id: i64) -> serde_json::Value {
     let Some(c) = get_outreach_campaign(conn, campaign_id).ok().flatten() else {
         return serde_json::json!({
             "ok": false,
@@ -869,7 +869,7 @@ fn reconcile_recipient_states(conn: &Connection, campaign_id: i64) -> (i64, i64,
     (resolved_sent, returned, still_unknown)
 }
 
-pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
+pub(crate) fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
     let tx = conn.unchecked_transaction()?;
     let sent: Vec<(i64, Option<i64>)> = {
         let mut stmt = tx.prepare(
@@ -939,7 +939,7 @@ pub fn refresh_replies(conn: &Connection, campaign_id: i64) -> Result<i64> {
     Ok(replied)
 }
 
-pub fn campaign_report_not_found() -> serde_json::Value {
+pub(crate) fn campaign_report_not_found() -> serde_json::Value {
     serde_json::json!({
         "campaign": serde_json::Value::Null,
         "totals": { "recipients": 0, "sent": 0, "failed": 0, "skipped": 0,
@@ -1032,7 +1032,7 @@ pub fn campaign_report(conn: &Connection, campaign_id: i64) -> serde_json::Value
     })
 }
 
-pub fn ensure_segments_v2(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_segments_v2(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "saved_segments", "description", "TEXT")?;
     add_column_if_missing(conn, "saved_segments", "condition_tree", "TEXT")?;
     add_column_if_missing(

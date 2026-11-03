@@ -1,6 +1,6 @@
 use super::*;
 
-pub const ATTRIBUTE_EXTRACTION_PROMPT_VERSION: &str = "attribute_extraction_v1";
+pub(crate) const ATTRIBUTE_EXTRACTION_PROMPT_VERSION: &str = "attribute_extraction_v1";
 
 const ATTRIBUTE_EXTRACTION_SYSTEM: &str = "\
 You extract structured attributes from a customer support conversation. You are part of a LOCAL-first support tool: everything you output is stored as versioned, evidence-backed local metadata - never sent to the customer.\n\
@@ -17,12 +17,15 @@ JSON shape:\n\
 {\"attributes\": [{\"attribute\": \"intent|product|feature|issue|customer_goal|response_style\", \"value\": \"...\", \"confidence\": \"high|medium|low|unknown\", \"evidence_excerpt\": \"...\", \"evidence_thread_local_id\": 123}]}";
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CustomerMessage {
+pub(crate) struct CustomerMessage {
     pub thread_local_id: i64,
     pub text: String,
 }
 
-pub fn customer_messages(conn: &Connection, conversation_id: i64) -> Result<Vec<CustomerMessage>> {
+pub(crate) fn customer_messages(
+    conn: &Connection,
+    conversation_id: i64,
+) -> Result<Vec<CustomerMessage>> {
     let mut stmt = conn.prepare(
         "SELECT id, COALESCE(body_text, '') FROM conversation_threads
          WHERE conversation_id = ?1 AND type = 'customer'
@@ -52,7 +55,7 @@ pub fn customer_messages(conn: &Connection, conversation_id: i64) -> Result<Vec<
 }
 
 #[derive(Debug, Clone)]
-pub struct PreparedComputation {
+pub(crate) struct PreparedComputation {
     pub conversation_id: i64,
     pub records: Vec<AttributeRecord>,
     pub prompt: Option<String>,
@@ -60,7 +63,7 @@ pub struct PreparedComputation {
     pub cached: Option<(i64, Value)>,
 }
 
-pub fn prepare_computation(
+pub(crate) fn prepare_computation(
     conn: &Connection,
     conversation_id: i64,
     model: &str,
@@ -106,13 +109,13 @@ pub fn prepare_computation(
 }
 
 #[derive(Debug, Clone)]
-pub struct ExtractionOutput {
+pub(crate) struct ExtractionOutput {
     pub content: String,
     pub latency_ms: u64,
     pub usage: Option<crate::ai_provider::TokenUsage>,
 }
 
-pub async fn run_extraction(
+pub(crate) async fn run_extraction(
     conn: &Connection,
     provider: &dyn LocalAiProvider,
     model: &str,
@@ -157,7 +160,7 @@ pub async fn run_extraction(
     }
 }
 
-pub fn finish_computation(
+pub(crate) fn finish_computation(
     conn: &mut Connection,
     prepared: PreparedComputation,
     fresh_output: Option<ExtractionOutput>,
@@ -257,7 +260,7 @@ fn merge_extraction(records: &mut Vec<AttributeRecord>, attrs: &[Value], ai_run_
     }
 }
 
-pub async fn compute(
+pub(crate) async fn compute(
     conn: &mut Connection,
     provider: &dyn LocalAiProvider,
     model: &str,
@@ -704,7 +707,7 @@ fn derive_signals(messages: &[CustomerMessage]) -> Option<DeterministicSignals> 
     })
 }
 
-pub fn deterministic_records(
+pub(crate) fn deterministic_records(
     conn: &Connection,
     conversation_id: i64,
 ) -> Result<Vec<AttributeRecord>> {
@@ -858,7 +861,7 @@ pub fn deterministic_records(
     Ok(out)
 }
 
-pub async fn compute_with_backend(
+pub(crate) async fn compute_with_backend(
     conn: &mut Connection,
     backend: &crate::ai_pipeline::AiBackend,
     conversation_id: i64,

@@ -285,11 +285,10 @@ const ESCALATION_MARKERS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone)]
-pub struct MessageForAnalysis {
+pub(crate) struct MessageForAnalysis {
     pub text: String,
     pub thread_local_id: Option<i64>,
     pub conversation_local_id: Option<i64>,
-    pub created_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -302,7 +301,7 @@ pub struct MessageStats {
 }
 
 #[must_use]
-pub fn compute_message_stats(messages: &[MessageForAnalysis]) -> MessageStats {
+pub(crate) fn compute_message_stats(messages: &[MessageForAnalysis]) -> MessageStats {
     let texts: Vec<&str> = messages.iter().map(|m| m.text.as_str()).collect();
     let total_len: usize = texts.iter().map(|t| t.chars().count()).sum();
     let all = texts.join("\n");
@@ -484,7 +483,7 @@ fn tone_evidence_predicate(t: &str) -> bool {
 }
 
 #[must_use]
-pub fn heuristic_signals(
+pub(crate) fn heuristic_signals(
     messages: &[MessageForAnalysis],
     stats: &MessageStats,
 ) -> Vec<InteractionSignal> {
@@ -680,15 +679,13 @@ pub fn heuristic_signals(
 }
 
 #[derive(Debug, Clone)]
-pub struct SanitizedSignals {
+pub(crate) struct SanitizedSignals {
     pub signals: Vec<InteractionSignal>,
-    pub removed: Vec<(String, String, String)>,
 }
 
 #[must_use]
 pub(crate) fn sanitize_signals(signals: Vec<InteractionSignal>) -> SanitizedSignals {
     let mut kept: Vec<InteractionSignal> = Vec::new();
-    let mut removed: Vec<(String, String, String)> = Vec::new();
     let mut seen: Vec<(String, String)> = Vec::new();
     for s in signals {
         let key = (s.dimension.clone(), s.value.clone());
@@ -696,33 +693,20 @@ pub(crate) fn sanitize_signals(signals: Vec<InteractionSignal>) -> SanitizedSign
             continue;
         }
         if !is_valid_value(&s.dimension, &s.value) {
-            removed.push((
-                s.dimension,
-                s.value,
-                "value outside observable vocabulary (possible personality label)".to_string(),
-            ));
             continue;
         }
         let has_evidence = s.evidence.as_ref().is_some_and(|e| !e.excerpt.is_empty());
         if (s.confidence == "high" || s.confidence == "medium") && !has_evidence {
-            removed.push((
-                s.dimension,
-                s.value,
-                "significant signal without evidence (spec #8)".to_string(),
-            ));
             continue;
         }
         seen.push(key);
         kept.push(s);
     }
-    SanitizedSignals {
-        signals: kept,
-        removed,
-    }
+    SanitizedSignals { signals: kept }
 }
 
 #[must_use]
-pub fn explicit_current_preference(
+pub(crate) fn explicit_current_preference(
     messages: &[MessageForAnalysis],
 ) -> Option<(String, Option<Evidence>)> {
     let all: String = messages
@@ -746,7 +730,10 @@ pub fn explicit_current_preference(
 }
 
 #[must_use]
-pub fn infer_customer_goal(signals: &[InteractionSignal], subject: Option<&str>) -> Option<String> {
+pub(crate) fn infer_customer_goal(
+    signals: &[InteractionSignal],
+    subject: Option<&str>,
+) -> Option<String> {
     let expectation = signals
         .iter()
         .find(|s| s.dimension == "expectation")
@@ -768,7 +755,7 @@ pub fn infer_customer_goal(signals: &[InteractionSignal], subject: Option<&str>)
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CurrentInteraction {
+pub(crate) struct CurrentInteraction {
     pub conversation_local_id: i64,
     pub customer_local_id: Option<i64>,
     pub is_returning_client: bool,
@@ -809,7 +796,7 @@ pub(crate) fn customer_messages(
         .collect();
     Ok(rows
         .into_iter()
-        .filter_map(|(id, body_html, body, remote_created_at, created_at)| {
+        .filter_map(|(id, body_html, body, _remote_created_at, _created_at)| {
             let raw = body_html
                 .as_deref()
                 .filter(|h| !h.is_empty())
@@ -823,7 +810,6 @@ pub(crate) fn customer_messages(
                     text,
                     thread_local_id: Some(id),
                     conversation_local_id: Some(conversation_id),
-                    created_at: remote_created_at.or(Some(created_at)),
                 })
             }
         })
@@ -987,11 +973,5 @@ mod batch30_tests {
         assert_eq!(msgs[0].text, "oldest");
         assert_eq!(msgs[1].text, "middle");
         assert_eq!(msgs[2].text, "newest");
-        for m in &msgs {
-            assert!(
-                m.created_at.is_some(),
-                "the local stamp backs the created_at field when remote is absent"
-            );
-        }
     }
 }

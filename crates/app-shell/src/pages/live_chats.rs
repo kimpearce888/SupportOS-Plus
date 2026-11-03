@@ -9,7 +9,7 @@ const LIST_COL_W: f32 = 340.0;
 const SCROLL_H: f32 = 360.0;
 
 #[derive(Clone)]
-pub struct LiveChatsModel {
+pub(crate) struct LiveChatsModel {
     chats: Vec<MirrorChat>,
     open: usize,
     ended: usize,

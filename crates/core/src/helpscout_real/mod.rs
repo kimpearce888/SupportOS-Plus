@@ -26,7 +26,7 @@ pub(crate) const HS_AUTHORIZE_URL: &str =
 const DOC_ARTICLE_FETCH_CAP: usize = 500;
 
 #[derive(Debug, Clone)]
-pub struct HsApiError {
+pub(crate) struct HsApiError {
     pub status_code: u16,
     pub message: String,
     pub friendly: String,
@@ -121,7 +121,7 @@ pub(crate) fn apply_m043(conn: &Connection) -> Result<()> {
 }
 
 #[derive(Debug, Clone)]
-pub struct RateLimitState {
+pub(crate) struct RateLimitState {
     pub limit_per_minute: i64,
     pub remaining: Option<i64>,
     pub retry_after_sec: Option<i64>,
@@ -157,7 +157,7 @@ impl HsRateLimiter {
     }
 
     #[must_use]
-    pub fn rate_limit_state(&self) -> RateLimitState {
+    pub(crate) fn rate_limit_state(&self) -> RateLimitState {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
@@ -391,10 +391,10 @@ impl core::fmt::Debug for HsCredentials {
     }
 }
 
-pub const SECRET_CLIENT_ID: &str = "helpscout_client_id";
-pub const SECRET_CLIENT_SECRET: &str = "helpscout_client_secret";
+pub(crate) const SECRET_CLIENT_ID: &str = "helpscout_client_id";
+pub(crate) const SECRET_CLIENT_SECRET: &str = "helpscout_client_secret";
 pub const SECRET_DOCS_API_KEY: &str = "helpscout_docs_api_key";
-pub const SECRET_WEBHOOK: &str = "webhook_secret";
+pub(crate) const SECRET_WEBHOOK: &str = "webhook_secret";
 pub const SECRET_OAUTH_ACCESS: &str = "helpscout_oauth_access_token";
 pub const SECRET_OAUTH_REFRESH: &str = "helpscout_oauth_refresh_token";
 
@@ -444,7 +444,7 @@ fn merge_field(env_value: String, stored: Option<Vec<u8>>) -> (String, Credentia
 }
 
 impl HsCredentials {
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         let env = crate::config::load_env_config();
         Self {
             client_id: env.helpscout.client_id,
@@ -482,7 +482,7 @@ impl HsCredentials {
     }
 
     #[must_use]
-    pub fn resolve_with(env: &Self, conn: &Connection) -> (Self, CredentialSources) {
+    pub(crate) fn resolve_with(env: &Self, conn: &Connection) -> (Self, CredentialSources) {
         let read = |key: &str| crate::settings::get_secret(conn, key).ok().flatten();
         let (client_id, client_id_src) = merge_field(env.client_id.clone(), read(SECRET_CLIENT_ID));
         let (client_secret, client_secret_src) =
@@ -2573,7 +2573,10 @@ mod r7_token_envelope_tests {
 #[cfg(test)]
 mod batch22_audit_tests {
     use super::*;
-    use crate::api_queue::DEFAULT_CONCURRENCY;
+
+    fn env_default_concurrency() -> usize {
+        crate::config::load_env_config().sync.api_concurrency.max(1) as usize
+    }
 
     fn migrated_conn() -> Connection {
         let mut conn = Connection::open_in_memory().expect("in-memory db");
@@ -2591,10 +2594,10 @@ mod batch22_audit_tests {
     #[test]
     fn api_concurrency_setting_reaches_both_provider_queues() {
         let p = provider_with(migrated_conn(), None);
-        assert_eq!(p.api_concurrency(), DEFAULT_CONCURRENCY);
+        assert_eq!(p.api_concurrency(), env_default_concurrency());
         assert_eq!(
             p.docs_queue.concurrency(),
-            DEFAULT_CONCURRENCY,
+            env_default_concurrency(),
             "the docs queue follows the same default"
         );
 
@@ -2623,7 +2626,7 @@ mod batch22_audit_tests {
             RealHelpScoutProvider::new(crate::db::DbHandle::new(conn), HsCredentials::default());
         assert_eq!(
             p.api_concurrency(),
-            DEFAULT_CONCURRENCY,
+            env_default_concurrency(),
             "garbage falls back to the default"
         );
     }

@@ -1,9 +1,9 @@
 use spp_core::mentions::MentionDirectory;
 
-pub type MentionEntry = (String, String, bool);
+pub(crate) type MentionEntry = (String, String, bool);
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Directory {
+pub(crate) struct Directory {
     pub users: Vec<(String, String)>,
     pub teams: Vec<String>,
 }
@@ -31,23 +31,6 @@ impl Directory {
     }
 
     #[must_use]
-    pub fn from_rows(users: Vec<(String, Option<String>)>, teams: Vec<String>) -> Self {
-        let mut entries: Vec<(String, String)> = users
-            .into_iter()
-            .map(|(display, mention)| {
-                let token = mention.unwrap_or_else(|| default_token(&display));
-                (format!("{display} (@{token})"), token)
-            })
-            .collect();
-        entries.sort();
-        entries.dedup();
-        Self {
-            users: entries,
-            teams,
-        }
-    }
-
-    #[must_use]
     pub fn entries(&self) -> Vec<MentionEntry> {
         let mut out: Vec<MentionEntry> = self
             .users
@@ -61,16 +44,6 @@ impl Directory {
         );
         out
     }
-}
-
-fn default_token(display: &str) -> String {
-    display
-        .split(' ')
-        .next()
-        .unwrap_or(display)
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_' || *c == '-')
-        .collect()
 }
 
 #[must_use]
@@ -142,14 +115,33 @@ mod tests {
     use super::*;
 
     fn dir() -> Directory {
-        Directory::from_rows(
-            vec![
-                ("Ada Lovelace".into(), Some("ada".into())),
-                ("Grace Hopper".into(), None),
-                ("ΚIMG".into(), None),
-            ],
-            vec!["oncall".into(), "tier2".into()],
-        )
+        // inline of the deleted `Directory::from_rows` (test-only constructor)
+        fn default_token(display: &str) -> String {
+            display
+                .split(' ')
+                .next()
+                .unwrap_or(display)
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_' || *c == '-')
+                .collect()
+        }
+        let mut entries: Vec<(String, String)> = [
+            ("Ada Lovelace".to_string(), Some("ada".to_string())),
+            ("Grace Hopper".to_string(), None),
+            ("ΚIMG".to_string(), None),
+        ]
+        .into_iter()
+        .map(|(display, mention)| {
+            let token = mention.unwrap_or_else(|| default_token(&display));
+            (format!("{display} (@{token})"), token)
+        })
+        .collect();
+        entries.sort();
+        entries.dedup();
+        Directory {
+            users: entries,
+            teams: vec!["oncall".into(), "tier2".into()],
+        }
     }
 
     #[test]

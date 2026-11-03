@@ -9,29 +9,9 @@ pub(crate) type PointId = String;
 pub(crate) type DenseVector = Vec<f32>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SparseVector {
+pub(crate) struct SparseVector {
     pub indices: Vec<u32>,
     pub values: Vec<f32>,
-}
-
-impl SparseVector {
-    #[must_use]
-    pub fn new(mut indices: Vec<u32>, mut values: Vec<f32>) -> Self {
-        assert_eq!(
-            indices.len(),
-            values.len(),
-            "sparse vector: indices and values must have the same length"
-        );
-        let mut pairs: Vec<(u32, f32)> = indices
-            .iter()
-            .zip(values.iter())
-            .map(|(&i, &v)| (i, v))
-            .collect();
-        pairs.sort_by_key(|(i, _)| *i);
-        indices = pairs.iter().map(|(i, _)| *i).collect();
-        values = pairs.iter().map(|(_, v)| *v).collect();
-        Self { indices, values }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -40,22 +20,6 @@ pub struct Filter {
 }
 
 impl Filter {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[must_use]
-    pub fn must_eq(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.must.insert(key.into(), value.into());
-        self
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.must.is_empty()
-    }
-
     #[must_use]
     pub fn matches(&self, payload: &Payload) -> bool {
         for (key, value) in &self.must {
@@ -72,7 +36,7 @@ impl Filter {
     }
 }
 
-pub type Payload = serde_json::Value;
+pub(crate) type Payload = serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Point {
@@ -83,24 +47,17 @@ pub struct Point {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ScoredPoint {
+pub(crate) struct ScoredPoint {
     pub id: PointId,
     pub score: f32,
     pub payload: Payload,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CollectionInfo {
+pub(crate) struct CollectionInfo {
     pub name: String,
     pub dense_dim: Option<usize>,
     pub point_count: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CollectionSnapshot {
-    pub name: String,
-    pub dense_dim: Option<usize>,
-    pub points: Vec<Point>,
 }
 
 pub trait VectorStore: Send + Sync {
@@ -110,8 +67,6 @@ pub trait VectorStore: Send + Sync {
 
     fn upsert(&self, collection: &str, point: Point) -> Result<()>;
 
-    fn delete(&self, collection: &str, id: &PointId) -> Result<()>;
-
     fn search_dense(
         &self,
         collection: &str,
@@ -120,19 +75,5 @@ pub trait VectorStore: Send + Sync {
         top_k: usize,
     ) -> Result<Vec<ScoredPoint>>;
 
-    fn search_sparse(
-        &self,
-        collection: &str,
-        query: &SparseVector,
-        filter: Option<&Filter>,
-        top_k: usize,
-    ) -> Result<Vec<ScoredPoint>>;
-
-    fn count(&self, collection: &str, filter: Option<&Filter>) -> Result<usize>;
-
     fn collection_info(&self, name: &str) -> Result<Option<CollectionInfo>>;
-
-    fn snapshot(&self, name: &str) -> Result<Vec<u8>>;
-
-    fn restore(&self, bytes: &[u8]) -> Result<()>;
 }

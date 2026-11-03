@@ -1,231 +1,7 @@
-use std::collections::{HashMap, HashSet};
-
 use regex::Regex;
 use serde_json::{Value, json};
-
-const DANGEROUS_CSS: &str = r"(?i)(url\s*\(|@import|expression\s*\(|position\s*:\s*(fixed|absolute)|behavior\s*:|-moz-binding|javascript\s*:)";
-
-fn allowed_tags() -> HashSet<&'static str> {
-    [
-        "a",
-        "b",
-        "i",
-        "em",
-        "strong",
-        "u",
-        "s",
-        "strike",
-        "code",
-        "pre",
-        "blockquote",
-        "p",
-        "br",
-        "div",
-        "span",
-        "ul",
-        "ol",
-        "li",
-        "table",
-        "thead",
-        "tbody",
-        "tr",
-        "td",
-        "th",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "hr",
-        "img",
-        "font",
-        "center",
-        "small",
-        "sub",
-        "sup",
-        "dl",
-        "dt",
-        "dd",
-    ]
-    .into_iter()
-    .collect()
-}
-
-fn tag_attributes() -> HashMap<&'static str, HashSet<&'static str>> {
-    let mut m = HashMap::new();
-    m.insert("a", ["href", "name", "title"].into_iter().collect());
-    m.insert(
-        "img",
-        ["src", "alt", "title", "width", "height", "style"]
-            .into_iter()
-            .collect(),
-    );
-    m.insert("span", ["style"].into_iter().collect());
-    m.insert("div", ["style"].into_iter().collect());
-    m.insert("p", ["style"].into_iter().collect());
-    m.insert(
-        "table",
-        ["style", "border", "cellpadding", "cellspacing", "align"]
-            .into_iter()
-            .collect(),
-    );
-    m.insert(
-        "td",
-        ["style", "colspan", "rowspan", "align", "valign"]
-            .into_iter()
-            .collect(),
-    );
-    m.insert(
-        "th",
-        ["style", "colspan", "rowspan", "align", "valign"]
-            .into_iter()
-            .collect(),
-    );
-    m.insert("font", ["color", "face", "size"].into_iter().collect());
-    m.insert("blockquote", ["style", "cite"].into_iter().collect());
-    m
-}
-
-pub fn sanitize_thread_html(dirty: &str) -> String {
-    let dangerous_css = Regex::new(DANGEROUS_CSS).expect("static regex");
-    let pre = strip_data_text_html_images(dirty);
-    let mut builder = ammonia::Builder::new();
-    builder.tags(allowed_tags());
-    builder.tag_attributes(tag_attributes());
-    builder.url_schemes(
-        ["http", "https", "mailto", "tel", "data", "cid"]
-            .into_iter()
-            .collect(),
-    );
-    builder.url_relative(ammonia::UrlRelative::Custom(Box::new(
-        deny_protocol_relative,
-    )));
-    builder.link_rel(Some("noopener noreferrer nofollow"));
-    builder.set_tag_attribute_value("a", "target", "_blank");
-    builder.attribute_filter(move |element, attribute, value| {
-        if attribute == "style" {
-            if value.is_empty() {
-                return None;
-            }
-            let clip: String = value.chars().take(2000).collect();
-            let decoded = match normalize_css_for_blocklist(&clip) {
-                Some(d) => d,
-                None => return None,
-            };
-            if dangerous_css.is_match(&decoded) {
-                return None;
-            }
-            return Some(std::borrow::Cow::Owned(clip));
-        }
-        if element == "img" && attribute == "src" && value.trim().starts_with("data:text/html") {
-            return None;
-        }
-        if attribute == "href" && element != "img" {
-            let lower = value.trim().to_ascii_lowercase();
-            if lower.starts_with("data:") || lower.starts_with("cid:") {
-                return None;
-            }
-        }
-        Some(std::borrow::Cow::Borrowed(value))
-    });
-    builder.clean(&pre).to_string()
-}
-
-fn normalize_css_for_blocklist(value: &str) -> Option<String> {
-    const CSS_DECODE_PASSES: usize = 64;
-    let comment_re = Regex::new(r"(?s)/\*.*?\*/").expect("static css comment regex");
-    let escape_re =
-        Regex::new(r"\\(?:[0-9A-Fa-f]{1,6}[ \t\r\n]?|[\s\S])").expect("static css escape regex");
-    let mut current = comment_re.replace_all(value, "").into_owned();
-    for _ in 0..CSS_DECODE_PASSES {
-        if !current.contains('\\') {
-            return Some(current);
-        }
-        let next = escape_re
-            .replace_all(&current, |caps: &regex::Captures<'_>| -> String {
-                let m = caps.get(0).expect("whole match").as_str();
-                let body = &m[1..];
-                let hex: String = body.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
-                if hex.is_empty() {
-                    return body
-                        .chars()
-                        .next()
-                        .map(|c| c.to_string())
-                        .unwrap_or_default();
-                }
-                u32::from_str_radix(&hex, 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                    .map(|c| c.to_string())
-                    .unwrap_or_default()
-            })
-            .into_owned();
-        if next == current {
-            return Some(current);
-        }
-        current = next;
-    }
-    if current.contains('\\') {
-        None
-    } else {
-        Some(current)
-    }
-}
-
-const IMG_START_TAG_RE: &str = r#"(?is)<img\b(?:[^>"']|"[^"]*"|'[^']*')*>"#;
-
-const SRC_ATTR_RE: &str = r#"(?is)\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#;
-
-fn deny_protocol_relative(url: &str) -> Option<std::borrow::Cow<'_, str>> {
-    if url.starts_with("//") {
-        None
-    } else {
-        Some(std::borrow::Cow::Borrowed(url))
-    }
-}
-
-fn strip_data_text_html_images(dirty: &str) -> std::borrow::Cow<'_, str> {
-    if !dirty.to_ascii_lowercase().contains("<img") {
-        return std::borrow::Cow::Borrowed(dirty);
-    }
-    let img_tag = Regex::new(IMG_START_TAG_RE).expect("static img tag regex");
-    let src_attr = Regex::new(SRC_ATTR_RE).expect("static src attr regex");
-    img_tag.replace_all(dirty, |caps: &regex::Captures<'_>| -> String {
-        let tag = caps
-            .get(0)
-            .map(|m| m.as_str().to_string())
-            .unwrap_or_default();
-        let is_data_text_html = src_attr.captures(&tag).is_some_and(|m| {
-            let value = m
-                .get(1)
-                .or_else(|| m.get(2))
-                .or_else(|| m.get(3))
-                .map(|v| v.as_str())
-                .unwrap_or_default();
-            value
-                .trim()
-                .to_ascii_lowercase()
-                .starts_with("data:text/html")
-        });
-        if is_data_text_html {
-            String::new()
-        } else {
-            tag
-        }
-    })
-}
-
-pub fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct SsrfCheckResult {
+pub(crate) struct SsrfCheckResult {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -397,7 +173,7 @@ fn ipv6_reason(groups: &[u32]) -> Option<String> {
     None
 }
 
-pub fn literal_ip_reason(ip: &str) -> Option<String> {
+pub(crate) fn literal_ip_reason(ip: &str) -> Option<String> {
     if is_ipv4_literal(ip) {
         return ipv4_reason(ip);
     }
@@ -436,7 +212,7 @@ fn hostname_reason(host: &str) -> Option<String> {
     None
 }
 
-pub fn check_url_literal(raw_url: &str) -> SsrfCheckResult {
+pub(crate) fn check_url_literal(raw_url: &str) -> SsrfCheckResult {
     let parsed = match url::Url::parse(raw_url) {
         Ok(u) => u,
         Err(e) => return SsrfCheckResult::refused(format!("invalid URL: {e}"), None),
@@ -527,14 +303,14 @@ pub(crate) async fn validate_ssrf_full_async(raw_url: &str) -> crate::error::Res
     }
 }
 
-pub struct RedactionPattern {
+pub(crate) struct RedactionPattern {
     pub name: &'static str,
     pub regex: Regex,
     pub replacement: &'static str,
     pub prefix: Option<Regex>,
 }
 
-pub fn redaction_patterns() -> Vec<RedactionPattern> {
+pub(crate) fn redaction_patterns() -> Vec<RedactionPattern> {
     vec![
         RedactionPattern {
             name: "card_number",
@@ -602,116 +378,6 @@ pub(crate) fn redact_text(text: &str, enabled: bool) -> (String, Vec<Value>) {
         }
     }
     (out, redactions)
-}
-
-#[cfg(test)]
-mod batch24_audit50_tests {
-    use super::*;
-
-    fn style_survives(style: &str) -> bool {
-        let dirty = format!(r#"<span style="{style}">hi</span>"#);
-        let clean = sanitize_thread_html(&dirty);
-        clean.contains("style=")
-    }
-
-    #[test]
-    fn audit50_comment_bypass_is_blocked() {
-        assert!(
-            !style_survives("background: ur/*x*/l(javascript:alert(1))"),
-            "a comment inside 'url(' must not bypass the blocklist"
-        );
-        assert!(
-            !style_survives("color:red; @im/* */port 'evil.css'"),
-            "a comment inside '@import' must not bypass the blocklist"
-        );
-        assert!(
-            !style_survives("width: expr/* */ession(alert(1))"),
-            "a comment inside 'expression(' must not bypass the blocklist"
-        );
-        assert!(
-            !style_survives("position /* */: fixed"),
-            "a comment before the colon must not bypass the blocklist"
-        );
-    }
-
-    #[test]
-    fn audit50_css_escape_bypass_is_blocked() {
-        assert!(
-            !style_survives("background: \\75 rl(javascript:alert(1))"),
-            "'\\75 rl(' decodes to 'url(' and must be blocked"
-        );
-        assert!(
-            !style_survives("background: \\75rl(javascript:alert(1))"),
-            "'\\75rl(' decodes to 'url(' and must be blocked"
-        );
-        assert!(
-            !style_survives("behavior\\3a url(#default#time2)"),
-            "'behavior\\3a' decodes to 'behavior:' and must be blocked"
-        );
-        assert!(
-            !style_survives("color: \\65 xpression(alert(1))"),
-            "'\\65 xpression(' decodes to 'expression(' and must be blocked"
-        );
-        assert!(
-            !style_survives("background: url(\\6a avascript:alert(1))"),
-            "an escaped scheme inside url() is still a javascript: url"
-        );
-    }
-
-    #[test]
-    fn audit50_layered_escape_bypass_is_blocked() {
-        assert!(
-            !style_survives("background: \\5c\\75 rl(javascript:alert(1))"),
-            "layered escapes resolving to 'url(' must be blocked"
-        );
-        let mut deep = String::from("background: ");
-        for _ in 0..80 {
-            deep.push_str("\\5c");
-        }
-        deep.push_str("75 rl(javascript:alert(1))");
-        assert!(
-            !style_survives(&deep),
-            "escape layering beyond the decode bound must be rejected"
-        );
-    }
-
-    #[test]
-    fn audit50_benign_styles_survive() {
-        assert!(style_survives("color: red; font-size: 12px"));
-        assert!(style_survives("margin-top: 4px; text-align: center"));
-        assert!(style_survives("content: \"\\2014\""));
-        assert!(style_survives(
-            "font-family: \"Helvetica Neue\", sans-serif"
-        ));
-    }
-
-    #[test]
-    fn audit50_normalize_decodes_the_css_engine_view() {
-        assert_eq!(
-            normalize_css_for_blocklist("ur/*x*/l(").as_deref(),
-            Some("url(")
-        );
-        assert_eq!(
-            normalize_css_for_blocklist("\\75 rl(").as_deref(),
-            Some("url(")
-        );
-        assert_eq!(
-            normalize_css_for_blocklist("\\5c\\75 rl(").as_deref(),
-            Some("url(")
-        );
-        assert_eq!(
-            normalize_css_for_blocklist("behavior\\3a x").as_deref(),
-            Some("behavior:x")
-        );
-        assert_eq!(
-            normalize_css_for_blocklist("color/*c*/: red").as_deref(),
-            Some("color: red")
-        );
-        assert_eq!(
-            normalize_css_for_blocklist("font-size: 12px").as_deref(),
-            Some("font-size: 12px")
-        );
-    }
 }
 
 #[cfg(test)]

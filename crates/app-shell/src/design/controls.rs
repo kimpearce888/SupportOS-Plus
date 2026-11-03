@@ -88,7 +88,7 @@ pub fn card<R>(
     frame.show(ui, add_contents)
 }
 
-pub fn card_titled<R>(
+pub(crate) fn card_titled<R>(
     ui: &mut egui::Ui,
     title: &str,
     hint: Option<&str>,
@@ -107,7 +107,7 @@ pub fn card_titled<R>(
     })
 }
 
-pub fn section_title(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn section_title(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
             .size(15.0)
@@ -124,7 +124,7 @@ pub fn hint_text(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-pub fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
+pub(crate) fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
     if pages <= 1 {
         return 0;
     }

@@ -6,10 +6,7 @@ use std::sync::{Arc, Mutex, Once};
 use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
-use crate::vectorstore::{
-    CollectionInfo, CollectionSnapshot, DenseVector, Filter, Point, PointId, ScoredPoint,
-    SparseVector, VectorStore,
-};
+use crate::vectorstore::{CollectionInfo, Filter, Point, PointId, ScoredPoint, VectorStore};
 
 pub(crate) const VECTOR_COLLECTION: &str = "supportos_vectors";
 
@@ -118,15 +115,7 @@ fn vec_to_blob(vector: &[f32]) -> Vec<u8> {
     out
 }
 
-fn blob_to_vec(bytes: &[u8]) -> DenseVector {
-    let (chunks, _) = bytes.as_chunks::<4>();
-    chunks
-        .iter()
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect()
-}
-
-pub(crate) struct SqliteVecStore {
+pub struct SqliteVecStore {
     conn: Mutex<Connection>,
 }
 
@@ -176,11 +165,11 @@ impl SqliteVecStore {
         Ok(())
     }
 
-    pub fn open_default(data_dir: &Path) -> Result<Self> {
+    pub(crate) fn open_default(data_dir: &Path) -> Result<Self> {
         Self::open(&store_dir(data_dir).join("vectors.db"))
     }
 
-    pub fn prune_family_except(
+    pub(crate) fn prune_family_except(
         &self,
         collection: &str,
         entity_type: &str,
@@ -293,7 +282,11 @@ impl SqliteVecStore {
         Ok(Some(usize::try_from(count).unwrap_or(0)))
     }
 
-    pub fn count_by_entity_type(&self, collection: &str, entity_type: &str) -> Result<usize> {
+    pub(crate) fn count_by_entity_type(
+        &self,
+        collection: &str,
+        entity_type: &str,
+    ) -> Result<usize> {
         let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM vec_payload WHERE collection = ?1 AND entity_type = ?2",
@@ -437,23 +430,6 @@ impl VectorStore for SqliteVecStore {
         Ok(())
     }
 
-    fn delete(&self, collection: &str, id: &PointId) -> Result<()> {
-        let id = numeric_point_id(id)?;
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
-        conn.execute(
-            &format!(
-                "DELETE FROM {} WHERE point_id = ?1",
-                vec_table_for(collection)
-            ),
-            params![id],
-        )?;
-        conn.execute(
-            "DELETE FROM vec_payload WHERE collection = ?1 AND point_id = ?2",
-            params![collection, id],
-        )?;
-        Ok(())
-    }
-
     fn search_dense(
         &self,
         collection: &str,
@@ -502,36 +478,6 @@ impl VectorStore for SqliteVecStore {
         Ok(out)
     }
 
-    fn search_sparse(
-        &self,
-        _collection: &str,
-        _query: &SparseVector,
-        _filter: Option<&Filter>,
-        _top_k: usize,
-    ) -> Result<Vec<ScoredPoint>> {
-        Ok(Vec::new())
-    }
-
-    fn count(&self, collection: &str, filter: Option<&Filter>) -> Result<usize> {
-        let Some(filter) = filter else {
-            return self.try_point_count(collection).map(|c| c.unwrap_or(0));
-        };
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
-        let mut stmt =
-            conn.prepare("SELECT payload_json FROM vec_payload WHERE collection = ?1")?;
-        let rows: Vec<String> = stmt
-            .query_map(params![collection], |r| r.get(0))?
-            .filter_map(|row| row.ok())
-            .collect();
-        drop(stmt);
-        drop(conn);
-        Ok(rows
-            .iter()
-            .filter_map(|j| serde_json::from_str::<serde_json::Value>(j).ok())
-            .filter(|payload| filter.matches(payload))
-            .count())
-    }
-
     fn collection_info(&self, name: &str) -> Result<Option<CollectionInfo>> {
         let Some(dim) = self.dim_for(name)? else {
             return Ok(None);
@@ -542,54 +488,6 @@ impl VectorStore for SqliteVecStore {
             dense_dim: Some(dim),
             point_count: count,
         }))
-    }
-
-    fn snapshot(&self, name: &str) -> Result<Vec<u8>> {
-        let Some(dim) = self.dim_for(name)? else {
-            return Err(Error::Config(format!("collection '{name}' does not exist")));
-        };
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT v.point_id, v.embedding, p.payload_json
-               FROM {} v LEFT JOIN vec_payload p
-                 ON p.collection = ?1 AND p.point_id = v.point_id",
-            vec_table_for(name)
-        ))?;
-        let rows: Vec<(i64, Option<Vec<u8>>, Option<String>)> = stmt
-            .query_map(params![name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-            .filter_map(|row| row.ok())
-            .collect();
-        drop(stmt);
-        drop(conn);
-
-        let points: Vec<Point> = rows
-            .into_iter()
-            .map(|(id, embedding, payload_json)| Point {
-                id: id.to_string(),
-                dense: embedding.map(|blob| blob_to_vec(&blob)),
-                sparse: None,
-                payload: payload_json
-                    .and_then(|j| serde_json::from_str(&j).ok())
-                    .unwrap_or(serde_json::Value::Null),
-            })
-            .collect();
-        let snapshot = CollectionSnapshot {
-            name: name.to_string(),
-            dense_dim: Some(dim),
-            points,
-        };
-        serde_json::to_vec(&snapshot)
-            .map_err(|e| Error::Config(format!("snapshot serialization failed: {e}")))
-    }
-
-    fn restore(&self, bytes: &[u8]) -> Result<()> {
-        let snapshot: CollectionSnapshot = serde_json::from_slice(bytes)
-            .map_err(|e| Error::Config(format!("snapshot deserialization failed: {e}")))?;
-        self.create_collection(&snapshot.name, snapshot.dense_dim)?;
-        for point in snapshot.points {
-            self.upsert(&snapshot.name, point)?;
-        }
-        Ok(())
     }
 }
 
@@ -873,59 +771,6 @@ mod tests {
     }
 
     #[test]
-    fn create_count_upsert_delete_roundtrip() {
-        let (_dir, store) = seeded_store("roundtrip", 2);
-        assert_eq!(
-            store.try_point_count(VECTOR_COLLECTION).expect("count"),
-            Some(0)
-        );
-
-        store
-            .upsert(
-                VECTOR_COLLECTION,
-                point(1, vec![1.0, 0.0], "knowledge_chunk", 10),
-            )
-            .expect("upsert 1");
-        store
-            .upsert(
-                VECTOR_COLLECTION,
-                point(2, vec![0.0, 1.0], "docs_chunk", 20),
-            )
-            .expect("upsert 2");
-        store
-            .upsert(
-                VECTOR_COLLECTION,
-                point(2, vec![0.0, 1.0], "docs_chunk", 20),
-            )
-            .expect("upsert 2 again");
-
-        assert_eq!(
-            store.try_point_count(VECTOR_COLLECTION).expect("count"),
-            Some(2)
-        );
-        assert_eq!(
-            store
-                .count_by_entity_type(VECTOR_COLLECTION, "knowledge_chunk")
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            store
-                .count_by_entity_type(VECTOR_COLLECTION, "docs_chunk")
-                .unwrap(),
-            1
-        );
-
-        store
-            .delete(VECTOR_COLLECTION, &"1".to_string())
-            .expect("delete");
-        assert_eq!(
-            store.try_point_count(VECTOR_COLLECTION).expect("count"),
-            Some(1)
-        );
-    }
-
-    #[test]
     fn dimension_mismatch_is_an_error_and_rebuild_is_explicit() {
         let (_dir, store) = seeded_store("dims", 2);
         let err = store
@@ -981,49 +826,17 @@ mod tests {
             )
             .expect("upsert");
 
-        let filter = Filter::new().must_eq("entity_type", "docs_chunk");
+        let filter = Filter {
+            must: std::collections::HashMap::from([(
+                "entity_type".to_string(),
+                "docs_chunk".to_string(),
+            )]),
+        };
         let hits = store
             .search_dense(VECTOR_COLLECTION, &[1.0, 0.0], Some(&filter), 5)
             .expect("filtered search");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, "2");
-    }
-
-    #[test]
-    fn sparse_search_is_empty_by_design() {
-        let (_dir, store) = seeded_store("sparse", 2);
-        let hits = store
-            .search_sparse(
-                VECTOR_COLLECTION,
-                &crate::vectorstore::SparseVector::new(vec![0], vec![1.0]),
-                None,
-                5,
-            )
-            .expect("sparse search");
-        assert!(hits.is_empty());
-    }
-
-    #[test]
-    fn snapshot_and_restore_roundtrip() {
-        let dir_a = temp_data_dir("snap-a");
-        let dir_b = temp_data_dir("snap-b");
-        let a = SqliteVecStore::open_default(&dir_a).expect("open a");
-        a.create_collection(VECTOR_COLLECTION, Some(2))
-            .expect("create");
-        a.upsert(VECTOR_COLLECTION, point(1, vec![1.0, 0.0], "k", 1))
-            .expect("upsert");
-        a.upsert(VECTOR_COLLECTION, point(2, vec![0.0, 1.0], "k", 2))
-            .expect("upsert");
-
-        let bytes = a.snapshot(VECTOR_COLLECTION).expect("snapshot");
-        let b = SqliteVecStore::open_default(&dir_b).expect("open b");
-        b.restore(&bytes).expect("restore");
-        assert_eq!(b.try_point_count(VECTOR_COLLECTION).unwrap(), Some(2));
-        let hits = b
-            .search_dense(VECTOR_COLLECTION, &[1.0, 0.0], None, 1)
-            .expect("search restored");
-        assert_eq!(hits[0].id, "1");
-        assert_eq!(hits[0].payload["entity_type"], "k");
     }
 
     #[test]
@@ -1064,27 +877,6 @@ mod tests {
             .expect("search");
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].payload["entity_type"], "knowledge_chunk");
-    }
-
-    #[test]
-    fn count_with_generic_filter_scans_payloads() {
-        let (_dir, store) = seeded_store("countfilter", 2);
-        store
-            .upsert(VECTOR_COLLECTION, point(1, vec![1.0, 0.0], "k", 1))
-            .expect("upsert");
-        store
-            .upsert(VECTOR_COLLECTION, point(2, vec![0.0, 1.0], "d", 2))
-            .expect("upsert");
-
-        let all = store.count(VECTOR_COLLECTION, None).expect("count all");
-        assert_eq!(all, 2);
-        let filtered = store
-            .count(
-                VECTOR_COLLECTION,
-                Some(&Filter::new().must_eq("entity_type", "d")),
-            )
-            .expect("count filtered");
-        assert_eq!(filtered, 1);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use crate::icons::Icon;
 
 mod controls;
 use controls::chip_impl;
-pub use controls::{card, card_titled, hint_text, pager, section_title};
+pub(crate) use controls::{card, card_titled, hint_text, pager, section_title};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Tokens {
@@ -62,7 +62,7 @@ const fn rgb(r: u8, g: u8, b: u8) -> egui::Color32 {
     egui::Color32::from_rgb(r, g, b)
 }
 
-pub const LIGHT: Tokens = Tokens {
+pub(crate) const LIGHT: Tokens = Tokens {
     background: rgb(244, 244, 245),
     sidebar: rgb(250, 250, 250),
     card: rgb(255, 255, 255),
@@ -111,7 +111,7 @@ pub const LIGHT: Tokens = Tokens {
     scrim: egui::Color32::from_rgba_premultiplied(0, 0, 0, 71),
 };
 
-pub const DARK: Tokens = Tokens {
+pub(crate) const DARK: Tokens = Tokens {
     background: rgb(9, 9, 11),
     sidebar: rgb(12, 12, 14),
     card: rgb(24, 24, 27),
@@ -179,12 +179,11 @@ pub(crate) fn tokens_for(ctx: &egui::Context) -> &'static Tokens {
 }
 
 pub mod scale {
-    pub mod space {
+    pub(crate) mod space {
         pub(crate) const SP1: f32 = 4.0;
         pub(crate) const SP2: f32 = 8.0;
-        pub const SP3: f32 = 12.0;
-        pub const SP4: f32 = 16.0;
-        pub const SP7: f32 = 32.0;
+        pub(crate) const SP3: f32 = 12.0;
+        pub(crate) const SP4: f32 = 16.0;
         pub(crate) const CLUSTER: f32 = 6.0;
         /// Card horizontal pad (DC §3 DS-C-02).
         pub(crate) const PAD_CARD: f32 = 14.0;
@@ -201,13 +200,11 @@ pub mod scale {
         pub(crate) const LEAD: f32 = 14.0;
         pub(crate) const SECTION: f32 = 15.0;
         pub(crate) const SECTION_BIG: f32 = 18.0;
-        pub const STAT: f32 = 20.0;
-        pub const STAT_BIG: f32 = 26.0;
+        pub(crate) const STAT: f32 = 20.0;
+        pub(crate) const STAT_BIG: f32 = 26.0;
         pub(crate) const TITLE: f32 = 22.0;
     }
-    pub mod radius {
-        pub const XL: f32 = 12.0;
-    }
+    pub(crate) mod radius {}
 }
 
 pub fn install(ctx: &egui::Context) {
@@ -249,7 +246,7 @@ pub fn install(ctx: &egui::Context) {
 }
 
 #[must_use]
-pub fn light_visuals() -> egui::Visuals {
+pub(crate) fn light_visuals() -> egui::Visuals {
     let mut v = egui::Visuals::light();
     let t = &LIGHT;
     v.dark_mode = false;
@@ -288,7 +285,7 @@ pub fn light_visuals() -> egui::Visuals {
 }
 
 #[must_use]
-pub fn dark_visuals() -> egui::Visuals {
+pub(crate) fn dark_visuals() -> egui::Visuals {
     let mut v = egui::Visuals::dark();
     let t = &DARK;
     v.dark_mode = true;
@@ -562,7 +559,7 @@ pub(crate) fn tone_colors(ui: &egui::Ui, tone: BadgeTone) -> (egui::Color32, egu
     tone_colors_of(tokens(ui), tone)
 }
 
-pub fn tone_colors_of(t: &Tokens, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
+pub(crate) fn tone_colors_of(t: &Tokens, tone: BadgeTone) -> (egui::Color32, egui::Color32) {
     match tone {
         BadgeTone::Neutral => (t.muted, t.neutral_foreground),
         BadgeTone::Success => (t.success_soft, t.success_foreground),
@@ -2260,11 +2257,9 @@ mod tests {
     #[test]
     fn dc_v1_scales_and_type_roles_are_frozen() {
         assert_eq!(scale::space::SP1, 4.0);
-        assert_eq!(scale::space::SP7, 32.0);
         assert_eq!(scale::space::CLUSTER, 6.0);
         assert_eq!(scale::text::BODY, 13.5);
         assert_eq!(scale::text::TITLE, 22.0);
-        assert_eq!(scale::radius::XL, 12.0);
         let ctx = egui::Context::default();
         install(&ctx);
         for theme in [egui::Theme::Light, egui::Theme::Dark] {

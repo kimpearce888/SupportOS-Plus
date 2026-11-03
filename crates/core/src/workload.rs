@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::interaction_signals::round2;
 
-pub const CAPACITY_SETTING_KEY: &str = "capacity_model";
+pub(crate) const CAPACITY_SETTING_KEY: &str = "capacity_model";
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CapacityWeights {
@@ -21,7 +21,7 @@ pub struct CapacityModel {
     pub weights: CapacityWeights,
 }
 
-pub fn default_capacity_model() -> CapacityModel {
+pub(crate) fn default_capacity_model() -> CapacityModel {
     CapacityModel {
         default_max_open: 25,
         per_user_max: std::collections::BTreeMap::new(),
@@ -44,11 +44,11 @@ impl CapacityModel {
     }
 }
 
-pub fn parse_capacity_model(value: &serde_json::Value) -> Option<CapacityModel> {
+pub(crate) fn parse_capacity_model(value: &serde_json::Value) -> Option<CapacityModel> {
     validate_capacity_model(value).ok()
 }
 
-pub fn validate_capacity_model(
+pub(crate) fn validate_capacity_model(
     value: &serde_json::Value,
 ) -> std::result::Result<CapacityModel, Vec<String>> {
     let mut issues = Vec::new();

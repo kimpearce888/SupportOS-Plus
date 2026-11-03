@@ -17,7 +17,7 @@ impl EventBus {
     }
 
     #[must_use]
-    pub fn default_capacity() -> usize {
+    pub(crate) fn default_capacity() -> usize {
         256
     }
 

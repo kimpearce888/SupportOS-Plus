@@ -3,7 +3,7 @@ use std::io::ErrorKind;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-pub const LOCK_FILE_NAME: &str = "instance.lock";
+pub(crate) const LOCK_FILE_NAME: &str = "instance.lock";
 
 #[derive(Debug)]
 pub enum AcquireError {

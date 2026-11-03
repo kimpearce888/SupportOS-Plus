@@ -1114,7 +1114,7 @@ impl ReportsPage {
         }
     }
 
-    pub fn delete_saved_report(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
+    pub(crate) fn delete_saved_report(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         match db.with_write(|conn| spp_core::reports::delete_saved_report(conn, id)) {
             Ok(true) => {
                 self.b_note = Some((true, "deleted".into()));

@@ -25,7 +25,7 @@ pub const SUPPORTED_LANGUAGES: &[(&str, &str)] = &[
     ("sv", "Swedish"),
 ];
 
-pub fn language_name(code: &str) -> String {
+pub(crate) fn language_name(code: &str) -> String {
     SUPPORTED_LANGUAGES
         .iter()
         .find(|(c, _)| *c == code)
@@ -374,7 +374,7 @@ fn email_span(chars: &[char], at: usize) -> Option<(usize, usize)> {
     Some((start, i))
 }
 
-pub fn detect_language(text: &str) -> Value {
+pub(crate) fn detect_language(text: &str) -> Value {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return json!({
@@ -575,7 +575,7 @@ fn purpose_prompt(purpose: &str) -> &'static str {
     }
 }
 
-pub type ChatFn<'a> = &'a dyn Fn(
+pub(crate) type ChatFn<'a> = &'a dyn Fn(
     Vec<crate::ai_provider::ChatMessage>,
     f64,
     u32,

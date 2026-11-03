@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 use crate::error::{Error, Result};
 use crate::migrations::add_column_if_missing;
 
-pub const MAX_ROWS_PER_CONNECTOR: usize = 5000;
+pub(crate) const MAX_ROWS_PER_CONNECTOR: usize = 5000;
 const MAX_ROW_BYTES: usize = 32_000;
 const HTTP_TIMEOUT_MS: u64 = 10_000;
 const HTTP_MAX_BYTES: u64 = 10 * 1024 * 1024;
@@ -749,7 +749,7 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
     }
 }
 
-pub fn parse_csv(text: &str, max_rows: usize) -> Vec<Value> {
+pub(crate) fn parse_csv(text: &str, max_rows: usize) -> Vec<Value> {
     let mut records: Vec<Vec<String>> = Vec::new();
     let mut field = String::new();
     let mut record: Vec<String> = Vec::new();

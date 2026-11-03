@@ -155,7 +155,7 @@ fn rebuild_table(conn: &Connection, table: &str, rb: &Rebuild<'_>) -> Result<()>
     Ok(())
 }
 
-pub fn apply_m044(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m044(conn: &Connection) -> Result<()> {
     if table_exists(conn, "docs")? {
         if table_exists(conn, "docs_articles")? {
             conn.execute_batch("DROP TABLE docs;")?;
@@ -209,7 +209,7 @@ pub fn apply_m044(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn apply_m045(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m045(conn: &Connection) -> Result<()> {
     if crate::sync_schema::column_exists(conn, "conversation_threads", "actor_id")? {
         rebuild_table(
             conn,
@@ -301,7 +301,7 @@ pub fn apply_m045(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn apply_m046(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m046(conn: &Connection) -> Result<()> {
     rebuild_customers(conn)?;
 
     if !fk_declared(conn, "attachments", "thread_id")? {
@@ -707,7 +707,7 @@ pub fn apply_m046(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn apply_m047(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m047(conn: &Connection) -> Result<()> {
     if crate::sync_schema::column_exists(conn, "conversations", "mailbox_id")? {
         rebuild_table(
             conn,

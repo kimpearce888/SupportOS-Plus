@@ -20,19 +20,19 @@ const CHANNELS: [(&str, &str); 3] = [
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NameCount {
+pub(crate) struct NameCount {
     pub name: String,
     pub count: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DailyPoint {
+pub(crate) struct DailyPoint {
     pub date: String,
     pub value: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChannelMetric {
+pub(crate) struct ChannelMetric {
     pub channel: String,
     pub count: i64,
     pub first_response_avg_min: Option<i64>,
@@ -40,7 +40,7 @@ pub struct ChannelMetric {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MailboxComparison {
+pub(crate) struct MailboxComparison {
     pub mailbox_id: i64,
     pub name: String,
     pub new_conversations: i64,
@@ -429,7 +429,7 @@ pub fn mailboxes(conn: &Connection) -> Vec<(i64, String)> {
 }
 
 #[must_use]
-pub fn radar_alerts(conn: &Connection) -> Vec<serde_json::Value> {
+pub(crate) fn radar_alerts(conn: &Connection) -> Vec<serde_json::Value> {
     spp_core::analytics::issue_radar_impl(conn)
 }
 

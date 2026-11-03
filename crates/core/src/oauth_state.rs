@@ -2,7 +2,7 @@ use rusqlite::{Connection, params};
 
 use crate::error::{Error, Result};
 
-pub const STATE_TTL_SECONDS: i64 = 600;
+pub(crate) const STATE_TTL_SECONDS: i64 = 600;
 
 pub(crate) fn ensure_oauth_states_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(

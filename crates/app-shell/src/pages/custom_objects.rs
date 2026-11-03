@@ -251,7 +251,7 @@ impl CustomObjectsPage {
         }
     }
 
-    pub fn delete_type(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
+    pub(crate) fn delete_type(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::custom_objects::delete_type(conn, id));
         match &result {
             Ok(_) => {
@@ -326,7 +326,7 @@ impl CustomObjectsPage {
         }
     }
 
-    pub fn delete_object(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
+    pub(crate) fn delete_object(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::custom_objects::delete_object(conn, id));
         if let Err(e) = &result {
             self.error = Some(e.to_string());

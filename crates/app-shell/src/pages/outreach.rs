@@ -303,7 +303,7 @@ impl OutreachPage {
         }
     }
 
-    pub fn delete_segment(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
+    pub(crate) fn delete_segment(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
         let result = db.with_write(|conn| spp_core::outreach::delete_segment(conn, id));
         if let Err(e) = &result {
             self.set_error(e.to_string());

@@ -93,7 +93,7 @@ pub struct ConvRef {
     pub mailbox_id: Option<i64>,
 }
 
-pub fn conv_by_local_id(conn: &Connection, id: i64) -> Option<ConvRef> {
+pub(crate) fn conv_by_local_id(conn: &Connection, id: i64) -> Option<ConvRef> {
     conn.query_row(
         "SELECT id, remote_id, mailbox_local_id FROM conversations WHERE id = ?1",
         params![id],
@@ -187,7 +187,7 @@ pub struct AttachmentRow {
     pub state: Option<String>,
 }
 
-pub fn attachment_by_id(conn: &Connection, id: i64) -> Option<AttachmentRow> {
+pub(crate) fn attachment_by_id(conn: &Connection, id: i64) -> Option<AttachmentRow> {
     conn.query_row(
         "SELECT id, remote_id, thread_id, conversation_id, filename, mime_type,
                 local_path, state

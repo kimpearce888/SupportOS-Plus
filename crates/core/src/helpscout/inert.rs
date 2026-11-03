@@ -13,7 +13,7 @@ impl Default for EmptyHelpScoutProvider {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct InertWorld {
+pub(crate) struct InertWorld {
     pub me: HsUser,
     pub mailboxes: Vec<HsMailbox>,
     pub users: Vec<HsUser>,

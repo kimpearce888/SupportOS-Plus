@@ -6296,3 +6296,30 @@ CORRECTION: kb3's "185 tests" double-counted the live_chats overlap;
 canonical is 175 = 173 + 2, re-proven. Churn: 100 files, +541/−447.
 Open: A1-3b remainder (651, re-censused), response_state_sql.rs 3 fns
 (KEEP). ai records synced.
+
+---
+
+## kb5 — A1-3b completion: 649 narrows + compiler-certified deletions (2026-11-02)
+
+The A1-3b remainder executed to completion per the kb3 playbook: 649
+pub→pub(crate) narrows (incl. 17 `pub async fn` census blind-spot
+items), then the compiler re-proof at scale — confirming kb4's
+finding that most census "consumers" were mentions inside other dead
+code. Deleted as compiler-certified: the entire encrypted_sync bundle
+surface (1,047 lines → single live fn), the security HTML-sanitizer
+surface, 9 catalog enums orphaned by kb2 (workspace.rs died whole),
+notification_prefs, 3 side_threads row structs, vectorstore dead
+trait methods + 4 test-only-consumer tests, the crypto scrypt wrapper
+(its 4 tests rewritten to fixed keys — they cover LIVE encrypt/
+decrypt), and ~20 further dead items + 7 write-never-read in-memory
+fields. Net: 112 files, +542/−2,816. Three census blind spots closed
+(pub async fn; mixed-name re-export lines; variant-payload types).
+THREE self-inflicted NO-TOUCH violations (response_state_sql mod
+re-narrowed by the applier + one fn region cut once) self-caught and
+restored byte-identical, disclosed in full. Verification all green:
+check/clippy 0, gates identical, core lib 467/0/3 (census reconciles
+exactly: −20/−1 = 21 deleted tests), app-shell 241/0, xtask 11/0,
+kittest 24 targets / 175 unique / 0 failed, 171 goldens ZERO drift.
+Residual for kb6: never-read DB-adjacent struct fields (field surgery
+per kb2 precedent) + re-narrowing their reverted struct headers. ai
+records synced.

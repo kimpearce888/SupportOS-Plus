@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 use crate::sync_schema::table_exists;
 
-pub fn apply_m040(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m040(conn: &Connection) -> Result<()> {
     create_missing_reference_tables(conn)?;
     add_missing_reference_columns(conn)?;
     create_missing_reference_indexes(conn)?;

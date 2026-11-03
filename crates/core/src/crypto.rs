@@ -1,30 +1,10 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
-use scrypt::scrypt;
 
 use crate::error::{Error, Result};
 
-pub const SALT_LEN: usize = 16;
 pub(crate) const NONCE_LEN: usize = 12;
-pub(crate) const KEY_LEN: usize = 32;
-
-const SCRYPT_R: u32 = 8;
-const SCRYPT_P: u32 = 1;
-
-pub fn derive_key(password: &[u8], salt: &[u8], log_n: u8) -> Result<[u8; KEY_LEN]> {
-    let params = scrypt::Params::new(log_n, SCRYPT_R, SCRYPT_P)
-        .map_err(|e| Error::Config(format!("invalid scrypt params: {e}")))?;
-    let mut key = [0u8; KEY_LEN];
-    scrypt(password, salt, &params, &mut key)
-        .map_err(|e| Error::Config(format!("scrypt derivation failed: {e}")))?;
-    Ok(key)
-}
-
-pub fn random_salt() -> [u8; SALT_LEN] {
-    let mut salt = [0u8; SALT_LEN];
-    rand::fill(&mut salt[..]);
-    salt
-}
+pub const KEY_LEN: usize = 32;
 
 pub(crate) fn write_key_file(path: &std::path::Path, key: &[u8; KEY_LEN]) -> Result<()> {
     if path.exists() {
@@ -112,12 +92,7 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_roundtrip() {
-        let key = derive_key(
-            b"correct horse battery staple".as_slice(),
-            &[7; SALT_LEN],
-            15,
-        )
-        .unwrap();
+        let key: [u8; KEY_LEN] = [7u8; KEY_LEN];
         let (nonce, ciphertext) = encrypt(&key, b"local-first support data").unwrap();
         let plaintext = decrypt(&key, &nonce, &ciphertext).unwrap();
         assert_eq!(plaintext, b"local-first support data");
@@ -125,15 +100,15 @@ mod tests {
 
     #[test]
     fn wrong_password_fails_to_decrypt() {
-        let key = derive_key(b"passphrase-a".as_slice(), &[9; SALT_LEN], 15).unwrap();
+        let key: [u8; KEY_LEN] = [9u8; KEY_LEN];
         let (nonce, ciphertext) = encrypt(&key, b"secret").unwrap();
-        let other_key = derive_key(b"passphrase-b".as_slice(), &[9; SALT_LEN], 15).unwrap();
+        let other_key: [u8; KEY_LEN] = [11u8; KEY_LEN];
         assert!(decrypt(&other_key, &nonce, &ciphertext).is_err());
     }
 
     #[test]
     fn tampered_ciphertext_fails_to_decrypt() {
-        let key = derive_key(b"p".as_slice(), &[1; SALT_LEN], 15).unwrap();
+        let key: [u8; KEY_LEN] = [1u8; KEY_LEN];
         let (nonce, mut ciphertext) = encrypt(&key, b"secret").unwrap();
         ciphertext[0] ^= 0xff;
         assert!(decrypt(&key, &nonce, &ciphertext).is_err());
@@ -141,7 +116,7 @@ mod tests {
 
     #[test]
     fn short_nonce_is_rejected() {
-        let key = derive_key(b"p".as_slice(), &[1; SALT_LEN], 15).unwrap();
+        let key: [u8; KEY_LEN] = [1u8; KEY_LEN];
         assert!(decrypt(&key, &[0u8; 8], b"x").is_err());
     }
 }

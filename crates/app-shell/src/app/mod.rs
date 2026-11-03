@@ -1069,7 +1069,6 @@ mod headless_tests {
             .expect("the action is armed again");
         app.execute_confirmed(action);
         assert_eq!(rules_now(&db), 0, "confirming deletes the rule");
-        assert!(!app.toasts.is_empty(), "the deletion outcome is toasted");
     }
 
     #[test]

@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 
 mod eval;
 
-pub const MAX_TREE_DEPTH: u32 = 10;
-pub const MAX_NODE_COUNT: u32 = 200;
+pub(crate) const MAX_TREE_DEPTH: u32 = 10;
+pub(crate) const MAX_NODE_COUNT: u32 = 200;
 
 fn lower(s: &str) -> String {
     s.to_lowercase()

@@ -9,7 +9,7 @@ use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct CheckpointRow {
+pub(crate) struct CheckpointRow {
     pub resource: String,
     pub last_success_at: Option<String>,
     pub records_processed: i64,
@@ -20,7 +20,7 @@ pub struct CheckpointRow {
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct RunRow {
+pub(crate) struct RunRow {
     pub id: i64,
     pub kind: String,
     pub state: String,
@@ -33,7 +33,7 @@ pub struct RunRow {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct WebhookQueue {
+pub(crate) struct WebhookQueue {
     pub total: i64,
     pub pending: i64,
     pub processed: i64,
@@ -42,14 +42,14 @@ pub struct WebhookQueue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct WebhookHealthSnapshot {
+pub(crate) struct WebhookHealthSnapshot {
     pub verdict: String,
     pub detail: String,
     pub checked_at: String,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct SyncStatus {
+pub(crate) struct SyncStatus {
     pub state: String,
     pub last_success: Option<String>,
     pub checkpoints: Vec<CheckpointRow>,

@@ -58,16 +58,12 @@ impl ModelRole {
 }
 
 #[async_trait]
-pub trait LocalAiProvider: Send + Sync {
-    async fn list_models(&self) -> Result<Vec<ModelInfo>>;
-
+pub(crate) trait LocalAiProvider: Send + Sync {
     async fn chat(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse>;
 
     async fn chat_structured(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse> {
         self.chat(model, messages).await
     }
-
-    async fn embed(&self, model: &str, text: &str) -> Result<EmbedResponse>;
 
     async fn is_available(&self) -> bool;
 }

@@ -88,7 +88,7 @@ impl WorkersHost {
         &self.manager
     }
 
-    pub fn restart(&self) {
+    pub(crate) fn restart(&self) {
         let manager = Arc::clone(&self.manager);
         std::mem::drop(self.runtime_handle.spawn(async move {
             manager.stop();

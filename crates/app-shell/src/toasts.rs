@@ -8,7 +8,7 @@ use crate::icons::Icon;
 const MAX_PASS_GAP: Duration = Duration::from_millis(1600);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToastKind {
+pub(crate) enum ToastKind {
     Success,
     Error,
     Warning,
@@ -27,7 +27,7 @@ impl ToastKind {
     }
 
     #[must_use]
-    pub fn auto_dismiss(self) -> Duration {
+    pub(crate) fn auto_dismiss(self) -> Duration {
         match self {
             Self::Success | Self::Info => Duration::from_secs(4),
             Self::Warning => Duration::from_secs(6),
@@ -46,7 +46,7 @@ impl ToastKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct Toast {
+pub(crate) struct Toast {
     pub kind: ToastKind,
     pub message: String,
     pub detail: Option<String>,
@@ -55,7 +55,7 @@ pub struct Toast {
 }
 
 #[derive(Debug, Default)]
-pub struct Toasts {
+pub(crate) struct Toasts {
     stack: Vec<Toast>,
 }
 
@@ -63,16 +63,6 @@ impl Toasts {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.stack.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.stack.is_empty()
     }
 
     pub fn push(&mut self, kind: ToastKind, message: impl Into<String>, detail: Option<String>) {
@@ -172,11 +162,11 @@ mod tests {
     #[test]
     fn push_stack_and_expiry() {
         let mut toasts = Toasts::new();
-        assert!(toasts.is_empty());
+        assert!(toasts.stack.is_empty());
         toasts.success("saved");
         toasts.error("boom");
         toasts.push(ToastKind::Warning, "careful", Some("detail".into()));
-        assert_eq!(toasts.len(), 3);
+        assert_eq!(toasts.stack.len(), 3);
         assert_eq!(toasts.stack[0].message, "saved");
         assert_eq!(toasts.stack[1].kind, ToastKind::Error);
         assert_eq!(toasts.stack[2].detail.as_deref(), Some("detail"));
@@ -187,7 +177,7 @@ mod tests {
             toast.remaining = Duration::ZERO;
         }
         toasts.stack.retain(|t| t.remaining > Duration::ZERO);
-        assert!(toasts.is_empty());
+        assert!(toasts.stack.is_empty());
     }
 
     #[test]
@@ -215,7 +205,11 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.run_pass(egui::RawInput::default(), |ctx| toasts.ui(ctx))
             .drop_without_applying_deltas();
-        assert_eq!(toasts.len(), 1, "the error toast survives the hidden hour");
+        assert_eq!(
+            toasts.stack.len(),
+            1,
+            "the error toast survives the hidden hour"
+        );
         let remaining = toasts.stack[0].remaining;
         assert_eq!(
             remaining,
@@ -236,7 +230,11 @@ mod tests {
         }
         ctx.run_pass(egui::RawInput::default(), |ctx| toasts.ui(ctx))
             .drop_without_applying_deltas();
-        assert_eq!(toasts.len(), 1, "the toast survives the return from hidden");
+        assert_eq!(
+            toasts.stack.len(),
+            1,
+            "the toast survives the return from hidden"
+        );
         assert!(
             toasts.stack[0].remaining + MAX_PASS_GAP >= ToastKind::Error.auto_dismiss(),
             "at most one heartbeat burned: {} left of {}",
@@ -260,7 +258,7 @@ mod tests {
                 .drop_without_applying_deltas();
         }
         assert!(
-            toasts.is_empty(),
+            toasts.stack.is_empty(),
             "6 s of visible passes expire a 4 s toast"
         );
     }

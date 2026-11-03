@@ -6,8 +6,6 @@
     missing_docs
 )]
 
-pub use spp_catalog;
-
 pub mod activity;
 pub mod ai_attributes;
 pub mod ai_center;
@@ -22,7 +20,7 @@ pub mod ai_prompts;
 pub(crate) mod ai_provider;
 pub(crate) mod ai_tools;
 pub mod analytics;
-pub mod api_queue;
+pub(crate) mod api_queue;
 pub mod audit;
 pub mod automation;
 pub mod backup_service;
@@ -35,7 +33,7 @@ pub mod connection_doctor;
 pub mod connectors;
 pub mod conversation_ops;
 pub mod copilot;
-pub mod crypto;
+pub(crate) mod crypto;
 pub mod custom_objects;
 pub mod customer_events;
 pub mod customers;
@@ -43,7 +41,7 @@ pub mod data_reset;
 pub mod db;
 pub mod digest;
 pub mod embeddings;
-pub mod encrypted_sync;
+pub(crate) mod encrypted_sync;
 pub mod error;
 pub mod event_bus;
 pub mod events;
@@ -53,7 +51,7 @@ pub mod inbox;
 pub mod incident_workspace;
 pub mod intelligence_features;
 pub mod interaction_engine;
-pub mod interaction_signals;
+pub(crate) mod interaction_signals;
 pub(crate) mod issue_impact;
 pub mod jobs;
 pub mod knowledge_store;
@@ -63,7 +61,6 @@ pub mod maintenance;
 pub mod mentions;
 pub mod migrations;
 pub mod mirror;
-pub mod notification_prefs;
 pub(crate) mod notification_sweep;
 pub mod notifications;
 pub mod oauth_state;
@@ -82,7 +79,7 @@ pub(crate) mod rrf;
 pub mod sandbox;
 pub(crate) mod saved_views;
 pub mod search;
-pub mod security;
+pub(crate) mod security;
 pub mod segment;
 pub mod settings;
 pub mod sla;
@@ -93,7 +90,7 @@ pub(crate) mod textutil;
 pub mod ticket_ops;
 pub(crate) mod ticket_states;
 pub mod translation;
-pub mod vectorstore;
+pub(crate) mod vectorstore;
 pub mod vectorstore_sqlitevec;
 pub mod version_check;
 pub mod webhook;
@@ -102,7 +99,7 @@ pub mod webhook_health;
 pub mod workers;
 pub mod workload;
 
-pub use migrations::{
+pub(crate) use migrations::{
     ai_analysis, ai_features, data_tools, db_breadth, intelligence, mirror_parity, mirror_tables,
     side_threads,
 };

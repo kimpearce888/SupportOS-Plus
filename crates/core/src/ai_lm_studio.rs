@@ -12,12 +12,12 @@ pub(crate) const LM_STUDIO_BASE_URL: &str = "http://127.0.0.1:1234/v1";
 pub(crate) const LM_STUDIO_DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 #[must_use]
-pub fn normalize_v1_base_url(url: &str) -> String {
+pub(crate) fn normalize_v1_base_url(url: &str) -> String {
     format!("{}/v1", crate::embeddings::normalize_lm_base_url(url))
 }
 
 #[derive(Debug, Clone)]
-pub struct LmStudioProvider {
+pub(crate) struct LmStudioProvider {
     client: OpenAiCompatibleClient,
 }
 
@@ -26,20 +26,10 @@ impl LmStudioProvider {
     pub(crate) fn with_client(client: OpenAiCompatibleClient) -> Self {
         Self { client }
     }
-
-    pub fn with_base_url_and_timeout(base_url: impl Into<String>, timeout_ms: u64) -> Self {
-        Self {
-            client: OpenAiCompatibleClient::new_with_timeout(base_url, timeout_ms),
-        }
-    }
 }
 
 #[async_trait]
 impl LocalAiProvider for LmStudioProvider {
-    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        self.client.list_models().await
-    }
-
     async fn chat(&self, model: &str, messages: &[ChatMessage]) -> Result<ChatResponse> {
         self.client.chat(model, messages).await
     }
@@ -63,10 +53,6 @@ impl LocalAiProvider for LmStudioProvider {
             usage: res.usage,
             finish_reason: None,
         })
-    }
-
-    async fn embed(&self, model: &str, text: &str) -> Result<EmbedResponse> {
-        self.client.embed(model, text).await
     }
 
     async fn is_available(&self) -> bool {
@@ -339,17 +325,17 @@ fn build_http_client(timeout_ms: u64) -> reqwest::Client {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ModelsResponse {
+pub(crate) struct ModelsResponse {
     pub data: Vec<OpenAiModel>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OpenAiModel {
+pub(crate) struct OpenAiModel {
     pub id: String,
 }
 
 #[must_use]
-pub fn infer_model_role(model: OpenAiModel) -> ModelInfo {
+pub(crate) fn infer_model_role(model: OpenAiModel) -> ModelInfo {
     let role = if model.id.to_lowercase().contains("embed") {
         ModelRole::Embedding
     } else {
@@ -363,7 +349,7 @@ fn is_false(v: &bool) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ChatCompletionRequest {
+pub(crate) struct ChatCompletionRequest {
     pub model: String,
     pub messages: Vec<ChatCompletionMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -377,13 +363,16 @@ pub struct ChatCompletionRequest {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ChatCompletionMessage {
+pub(crate) struct ChatCompletionMessage {
     pub role: String,
     pub content: String,
 }
 
 #[must_use]
-pub fn build_chat_request_body(model: &str, messages: &[ChatMessage]) -> ChatCompletionRequest {
+pub(crate) fn build_chat_request_body(
+    model: &str,
+    messages: &[ChatMessage],
+) -> ChatCompletionRequest {
     ChatCompletionRequest {
         model: model.to_string(),
         messages: messages
@@ -417,7 +406,7 @@ pub(crate) struct ChatTool {
 }
 
 #[derive(Debug, Clone)]
-pub struct ToolCall {
+pub(crate) struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: String,
@@ -456,20 +445,20 @@ pub(crate) struct ChatOpts {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChatCompletionResponse {
+pub(crate) struct ChatCompletionResponse {
     pub model: String,
     pub choices: Vec<ChatChoice>,
     pub usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChatChoice {
+pub(crate) struct ChatChoice {
     pub message: ChatChoiceMessage,
     pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChatChoiceMessage {
+pub(crate) struct ChatChoiceMessage {
     #[serde(default)]
     pub content: Option<String>,
     #[serde(default)]
@@ -477,28 +466,26 @@ pub struct ChatChoiceMessage {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RawToolCall {
+pub(crate) struct RawToolCall {
     pub id: String,
-    #[serde(default)]
-    pub r#type: Option<String>,
     pub function: RawToolCallFunction,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RawToolCallFunction {
+pub(crate) struct RawToolCallFunction {
     pub name: String,
     #[serde(default)]
     pub arguments: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-pub struct OpenAiUsage {
+pub(crate) struct OpenAiUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
 }
 
-pub fn parse_chat_response(resp: ChatCompletionResponse) -> Result<ChatResponse> {
+pub(crate) fn parse_chat_response(resp: ChatCompletionResponse) -> Result<ChatResponse> {
     let Some(first) = resp.choices.first() else {
         return Err(Error::Config(
             "LM Studio chat returned no choices (malformed 200 body)".into(),
@@ -524,13 +511,13 @@ pub fn parse_chat_response(resp: ChatCompletionResponse) -> Result<ChatResponse>
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct EmbeddingRequest {
+pub(crate) struct EmbeddingRequest {
     pub model: String,
     pub input: String,
 }
 
 #[must_use]
-pub fn build_embed_request_body(model: &str, text: &str) -> EmbeddingRequest {
+pub(crate) fn build_embed_request_body(model: &str, text: &str) -> EmbeddingRequest {
     EmbeddingRequest {
         model: model.to_string(),
         input: text.to_string(),
@@ -538,19 +525,19 @@ pub fn build_embed_request_body(model: &str, text: &str) -> EmbeddingRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct EmbeddingResponse {
+pub(crate) struct EmbeddingResponse {
     pub model: String,
     pub data: Vec<EmbeddingData>,
     pub usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct EmbeddingData {
+pub(crate) struct EmbeddingData {
     pub embedding: Vec<f32>,
 }
 
 #[must_use]
-pub fn parse_embed_response(resp: EmbeddingResponse) -> EmbedResponse {
+pub(crate) fn parse_embed_response(resp: EmbeddingResponse) -> EmbedResponse {
     let vector = resp
         .data
         .first()

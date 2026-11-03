@@ -238,7 +238,7 @@ pub fn latest_golden_runs(conn: &Connection, limit: usize) -> Vec<GoldenRunRow> 
     .unwrap_or_default()
 }
 
-pub fn golden_context_fingerprint(conn: &Connection) -> String {
+pub(crate) fn golden_context_fingerprint(conn: &Connection) -> String {
     let roles = crate::ai_hub::load_roles(conn)
         .map(|r| serde_json::to_string(&r).unwrap_or_default())
         .unwrap_or_default();

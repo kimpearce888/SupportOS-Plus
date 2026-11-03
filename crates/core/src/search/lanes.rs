@@ -170,7 +170,11 @@ fn has_filters(f: &SearchFilters) -> bool {
         || f.assignee_id.is_some_and(|v| v != 0)
 }
 
-pub fn search_customers(conn: &Connection, query: &str, limit: i64) -> Result<Vec<SearchHit>> {
+pub(crate) fn search_customers(
+    conn: &Connection,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<SearchHit>> {
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -223,7 +227,7 @@ pub fn search_customers(conn: &Connection, query: &str, limit: i64) -> Result<Ve
 }
 
 #[allow(clippy::ref_option)]
-pub fn search_knowledge_raw(
+pub(crate) fn search_knowledge_raw(
     conn: &Connection,
     query: &str,
     visibility: Option<&str>,
@@ -359,7 +363,11 @@ pub fn search_saved_replies(conn: &Connection, query: &str, limit: i64) -> Resul
     Ok(rows)
 }
 
-pub fn search_ai_analyses(conn: &Connection, query: &str, limit: i64) -> Result<Vec<SearchHit>> {
+pub(crate) fn search_ai_analyses(
+    conn: &Connection,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<SearchHit>> {
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }

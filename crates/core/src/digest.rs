@@ -110,7 +110,7 @@ pub fn digest_by_id(conn: &Connection, id: i64) -> Option<DigestRow> {
 }
 
 #[must_use]
-pub fn latest_digest_created_at(conn: &Connection) -> Option<String> {
+pub(crate) fn latest_digest_created_at(conn: &Connection) -> Option<String> {
     conn.query_row(
         "SELECT created_at FROM ai_digests ORDER BY id DESC LIMIT 1",
         [],

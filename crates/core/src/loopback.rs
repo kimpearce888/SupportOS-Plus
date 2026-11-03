@@ -29,7 +29,7 @@ const MAX_HEADERS: usize = 64;
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Request {
+pub(crate) struct Request {
     pub method: String,
     pub path: String,
     pub query: String,
@@ -99,20 +99,20 @@ impl Response {
     }
 }
 
-pub struct LoopbackCtx {
+pub(crate) struct LoopbackCtx {
     pub db: DbHandle,
     pub port: u16,
     pub oauth: Option<Arc<dyn OAuthCompletion>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectedIdentity {
+pub(crate) struct ConnectedIdentity {
     pub name: String,
     pub email: Option<String>,
     pub remote_id: i64,
 }
 
-pub trait OAuthCompletion: Send + Sync {
+pub(crate) trait OAuthCompletion: Send + Sync {
     fn complete(&self, code: &str) -> std::result::Result<ConnectedIdentity, String>;
 }
 
@@ -199,7 +199,7 @@ pub fn listener_answers(port: u16) -> bool {
     String::from_utf8_lossy(&buf[..n]).contains("supportos-loopback")
 }
 
-pub fn handle_request(req: &Request, ctx: &LoopbackCtx) -> Response {
+pub(crate) fn handle_request(req: &Request, ctx: &LoopbackCtx) -> Response {
     match (req.method.as_str(), req.path.as_str()) {
         ("POST", "/webhook") => handle_webhook(req, ctx),
         ("GET", "/oauth/callback") => handle_callback(req, ctx),

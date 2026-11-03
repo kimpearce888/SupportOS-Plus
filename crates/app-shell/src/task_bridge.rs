@@ -6,14 +6,14 @@ use spp_core::event_bus::EventBus;
 use spp_core::events::ServerEvent;
 use tokio::sync::broadcast::error::RecvError;
 
-pub struct TaskBridge {
+pub(crate) struct TaskBridge {
     queue: Arc<Mutex<VecDeque<ServerEvent>>>,
     _worker: std::thread::JoinHandle<()>,
 }
 
 impl TaskBridge {
     #[must_use]
-    pub fn spawn(bus: &EventBus, ctx: &egui::Context) -> Self {
+    pub(crate) fn spawn(bus: &EventBus, ctx: &egui::Context) -> Self {
         let ctx = ctx.clone();
         Self::spawn_with(bus, move || ctx.request_repaint())
     }
@@ -45,14 +45,9 @@ impl TaskBridge {
         }
     }
 
-    pub fn drain(&self) -> Vec<ServerEvent> {
+    pub(crate) fn drain(&self) -> Vec<ServerEvent> {
         let mut guard = lock(&self.queue);
         guard.drain(..).collect()
-    }
-
-    #[must_use]
-    pub fn pending(&self) -> usize {
-        lock(&self.queue).len()
     }
 }
 
@@ -68,13 +63,18 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
 
+    fn pending(bridge: &TaskBridge) -> usize {
+        // inline of the deleted lib accessor (test-only observer)
+        lock(&bridge.queue).len()
+    }
+
     fn wait_for_pending(bridge: &TaskBridge, want: usize) {
         let deadline = Instant::now() + Duration::from_secs(5);
-        while bridge.pending() < want {
+        while pending(bridge) < want {
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for {want} events ({} pending)",
-                bridge.pending()
+                pending(bridge)
             );
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -120,7 +120,7 @@ mod tests {
             "second event must be the second emit"
         );
         assert!(bridge.drain().is_empty());
-        assert_eq!(bridge.pending(), 0);
+        assert_eq!(pending(&bridge), 0);
     }
 
     #[test]

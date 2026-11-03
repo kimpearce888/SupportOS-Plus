@@ -166,7 +166,7 @@ pub(super) fn ensure_recipient_updated_at(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub async fn send_batch(
+pub(crate) async fn send_batch(
     conn: &crate::db::DbHandle,
     provider: &Arc<dyn crate::helpscout::HelpScoutProvider>,
     campaign_id: i64,

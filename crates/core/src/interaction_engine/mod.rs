@@ -6,9 +6,10 @@ use crate::interaction_signals::{CurrentInteraction, InteractionSignal, MessageS
 use crate::quality::is_closing_acknowledgment;
 
 mod baseline;
-pub use baseline::{
-    build_profile, comparison_baseline, compute_changes, compute_outcome, detect_repeat_issue,
-    heuristic_recommendation, outcome_summary, rebuild_baseline,
+pub use baseline::build_profile;
+pub(crate) use baseline::{
+    comparison_baseline, compute_changes, compute_outcome, detect_repeat_issue,
+    heuristic_recommendation, rebuild_baseline,
 };
 
 struct ForbiddenPattern {
@@ -70,7 +71,7 @@ fn forbidden_patterns() -> &'static [ForbiddenPattern] {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TextScan {
+pub(crate) struct TextScan {
     pub ok: bool,
     pub warnings: Vec<String>,
 }
@@ -123,7 +124,7 @@ pub struct BehaviorBaseline {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct InteractionChange {
+pub(crate) struct InteractionChange {
     pub dimension: String,
     pub baseline_value: String,
     pub current_value: String,
@@ -153,7 +154,7 @@ pub struct SupportApproach {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct OutcomeComputed {
+pub(crate) struct OutcomeComputed {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort_score: Option<f64>,
     pub friction: String,
@@ -203,7 +204,7 @@ pub struct SupportOutcomeSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RelatedConversation {
+pub(crate) struct RelatedConversation {
     pub local_id: i64,
     pub number: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -211,7 +212,7 @@ pub struct RelatedConversation {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RepeatIssue {
+pub(crate) struct RepeatIssue {
     pub detected: bool,
     pub related_conversations: Vec<RelatedConversation>,
 }
@@ -882,7 +883,7 @@ pub(crate) fn upsert_outcome(
 }
 
 #[derive(Debug, Clone)]
-pub struct OutcomeRow {
+pub(crate) struct OutcomeRow {
     pub conversation_id: i64,
     pub resolved_after_first_response: Option<i64>,
     pub follow_up_count: i64,

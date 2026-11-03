@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-pub const DATA_DIR_NAME: &str = "supportos-plus";
+pub(crate) const DATA_DIR_NAME: &str = "supportos-plus";
 
 pub const DB_FILE_NAME: &str = "supportos-plus.db";
 

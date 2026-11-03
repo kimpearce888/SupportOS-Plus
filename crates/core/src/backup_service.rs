@@ -51,7 +51,7 @@ fn cached_verify(full_path: &Path) -> bool {
     verified
 }
 
-pub fn verify_backup(backup_path: &Path) -> bool {
+pub(crate) fn verify_backup(backup_path: &Path) -> bool {
     Connection::open_with_flags(backup_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .and_then(|test| test.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)))
         .map(|v| v == "ok")

@@ -6,12 +6,12 @@ use crate::ai_pipeline::AiBackend;
 use crate::error::Result;
 use crate::settings;
 
-pub const SETTINGS_ENDPOINTS: &str = "ai_endpoints";
-pub const SETTINGS_ROLES: &str = "ai_model_roles";
-pub const ENDPOINT_KEY_PREFIX: &str = "ai_endpoint_key_";
+pub(crate) const SETTINGS_ENDPOINTS: &str = "ai_endpoints";
+pub(crate) const SETTINGS_ROLES: &str = "ai_model_roles";
+pub(crate) const ENDPOINT_KEY_PREFIX: &str = "ai_endpoint_key_";
 
-pub const DEFAULT_LMSTUDIO_URL: &str = "http://127.0.0.1:1234/v1";
-pub const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434/v1";
+pub(crate) const DEFAULT_LMSTUDIO_URL: &str = "http://127.0.0.1:1234/v1";
+pub(crate) const DEFAULT_OLLAMA_URL: &str = "http://127.0.0.1:11434/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AiRole {

@@ -20,7 +20,7 @@ pub(crate) fn apply_m050(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn ensure_tables(conn: &Connection) -> Result<()> {
+pub(crate) fn ensure_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

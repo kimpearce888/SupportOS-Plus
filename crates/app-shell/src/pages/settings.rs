@@ -40,7 +40,7 @@ impl Tab {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GeneralSettings {
+pub(crate) struct GeneralSettings {
     pub sync_interval_minutes: i64,
     pub api_concurrency: i64,
     pub ai_enabled: bool,
@@ -76,7 +76,7 @@ impl Default for GeneralSettings {
 
 impl GeneralSettings {
     #[must_use]
-    pub fn load(conn: &rusqlite::Connection) -> Self {
+    pub(crate) fn load(conn: &rusqlite::Connection) -> Self {
         let defaults = Self::default();
         Self {
             sync_interval_minutes: spp_core::settings::get_i64(
@@ -183,7 +183,7 @@ impl GeneralSettings {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct HelpScoutStatus {
+pub(crate) struct HelpScoutStatus {
     pub configured: bool,
     pub credentials: bool,
     pub sources: spp_core::helpscout_real::CredentialSources,
@@ -191,7 +191,7 @@ pub struct HelpScoutStatus {
 }
 
 #[must_use]
-pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
+pub(crate) fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
     let tokens: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM oauth_tokens WHERE access_token IS NOT NULL",
@@ -210,7 +210,7 @@ pub fn helpscout_status(conn: &rusqlite::Connection) -> HelpScoutStatus {
 }
 
 #[derive(Debug, Clone)]
-pub struct BusinessHoursRow {
+pub(crate) struct BusinessHoursRow {
     pub mailbox_id: i64,
     pub name: String,
     pub configured: bool,
@@ -225,7 +225,7 @@ pub struct BusinessHoursRow {
 type HoursConfigRow = (String, String, i64, i64, Option<i64>, Option<i64>);
 
 #[must_use]
-pub fn load_business_hours(conn: &rusqlite::Connection) -> Vec<BusinessHoursRow> {
+pub(crate) fn load_business_hours(conn: &rusqlite::Connection) -> Vec<BusinessHoursRow> {
     let mut rows: std::collections::HashMap<i64, HoursConfigRow> = std::collections::HashMap::new();
     if let Ok(mut stmt) = conn.prepare(
         "SELECT mailbox_local_id, timezone, days, start_minute, end_minute,
@@ -317,7 +317,7 @@ fn parse_weekdays(raw: &str) -> spp_core::Result<String> {
     })
 }
 
-pub fn save_business_hours(
+pub(crate) fn save_business_hours(
     conn: &rusqlite::Connection,
     row: &BusinessHoursRow,
 ) -> spp_core::Result<()> {
@@ -2128,7 +2128,7 @@ impl Default for SettingsPage {
 }
 
 #[must_use]
-pub fn minutes_label(minutes: i64) -> String {
+pub(crate) fn minutes_label(minutes: i64) -> String {
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
 }
 

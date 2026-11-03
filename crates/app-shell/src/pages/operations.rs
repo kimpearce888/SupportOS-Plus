@@ -27,7 +27,7 @@ impl Tab {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Severity {
+pub(crate) enum Severity {
     Critical,
     Warning,
     Info,
@@ -44,7 +44,7 @@ impl Severity {
 }
 
 #[must_use]
-pub fn tile_label(tile: OperationsTileKey) -> &'static str {
+pub(crate) fn tile_label(tile: OperationsTileKey) -> &'static str {
     match tile {
         OperationsTileKey::Unassigned => "Unassigned",
         OperationsTileKey::NeedsFirstResponse => "Needs first response",
@@ -66,7 +66,7 @@ pub fn tile_label(tile: OperationsTileKey) -> &'static str {
 }
 
 #[must_use]
-pub fn tile_description(tile: OperationsTileKey) -> &'static str {
+pub(crate) fn tile_description(tile: OperationsTileKey) -> &'static str {
     match tile {
         OperationsTileKey::Unassigned => "Active conversations with no agent assigned.",
         OperationsTileKey::NeedsFirstResponse => "Conversations where no agent has replied yet.",
@@ -92,7 +92,7 @@ pub fn tile_description(tile: OperationsTileKey) -> &'static str {
 }
 
 #[must_use]
-pub fn tile_severity(tile: OperationsTileKey) -> Severity {
+pub(crate) fn tile_severity(tile: OperationsTileKey) -> Severity {
     match tile.severity() {
         "critical" => Severity::Critical,
         "warning" => Severity::Warning,
@@ -101,7 +101,7 @@ pub fn tile_severity(tile: OperationsTileKey) -> Severity {
 }
 
 #[must_use]
-pub fn tile_drills_into_inbox(tile: OperationsTileKey) -> bool {
+pub(crate) fn tile_drills_into_inbox(tile: OperationsTileKey) -> bool {
     matches!(
         tile,
         OperationsTileKey::Unassigned
@@ -114,7 +114,7 @@ pub fn tile_drills_into_inbox(tile: OperationsTileKey) -> bool {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct TileView {
+pub(crate) struct TileView {
     pub key: OperationsTileKey,
     pub count: u32,
 }
@@ -126,7 +126,7 @@ impl TileView {
 }
 
 #[must_use]
-pub fn group_tiles(tiles: &[TileView]) -> Vec<(Severity, Vec<TileView>)> {
+pub(crate) fn group_tiles(tiles: &[TileView]) -> Vec<(Severity, Vec<TileView>)> {
     let mut out: Vec<(Severity, Vec<TileView>)> = Vec::new();
     for band in [Severity::Critical, Severity::Warning, Severity::Info] {
         let group: Vec<TileView> = tiles
@@ -142,7 +142,9 @@ pub fn group_tiles(tiles: &[TileView]) -> Vec<(Severity, Vec<TileView>)> {
 }
 
 #[must_use]
-pub fn tiles_from_snapshot(snapshot: &spp_core::operations::OperationsSnapshot) -> Vec<TileView> {
+pub(crate) fn tiles_from_snapshot(
+    snapshot: &spp_core::operations::OperationsSnapshot,
+) -> Vec<TileView> {
     OperationsTileKey::ALL
         .into_iter()
         .filter_map(|key| {
@@ -153,7 +155,7 @@ pub fn tiles_from_snapshot(snapshot: &spp_core::operations::OperationsSnapshot) 
         .collect()
 }
 
-pub fn adjust_capacity(
+pub(crate) fn adjust_capacity(
     conn: &rusqlite::Connection,
     model: &mut CapacityModel,
     user_id: i64,
@@ -891,7 +893,7 @@ impl OperationsPage {
         }
     }
 
-    pub fn delete_saved_reply(
+    pub(crate) fn delete_saved_reply(
         &mut self,
         db: &DbHandle,
         mailbox_remote_id: i64,

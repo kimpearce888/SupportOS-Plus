@@ -262,7 +262,7 @@ pub(crate) fn affected_organizations(
 }
 
 #[must_use]
-pub fn list_related(conn: &Connection, incident_id: i64) -> Vec<Value> {
+pub(crate) fn list_related(conn: &Connection, incident_id: i64) -> Vec<Value> {
     let rows: Vec<(String, i64, Option<String>, String)> = conn
         .prepare(
             "SELECT target_kind, target_local_id, note, linked_at
@@ -312,7 +312,7 @@ fn label_for(conn: &Connection, kind: &str, id: i64) -> String {
 }
 
 #[must_use]
-pub fn list_refs(conn: &Connection, incident_id: i64) -> Vec<Value> {
+pub(crate) fn list_refs(conn: &Connection, incident_id: i64) -> Vec<Value> {
     conn.prepare(
         "SELECT id, incident_id, system, reference, url, title, status, notes, created_at
          FROM incident_refs WHERE incident_id = ?1 ORDER BY id",
@@ -386,7 +386,7 @@ pub fn list_notes(conn: &Connection, incident_id: i64, limit: i64) -> Vec<Value>
 }
 
 #[must_use]
-pub fn list_events(conn: &Connection, incident_id: i64, limit: i64) -> Vec<Value> {
+pub(crate) fn list_events(conn: &Connection, incident_id: i64, limit: i64) -> Vec<Value> {
     conn.prepare(
         "SELECT id, incident_id, event_type, actor_user_local_id, occurred_at, detail, source
          FROM incident_events WHERE incident_id = ?1

@@ -5,7 +5,7 @@ use crate::design::{self, Tokens};
 pub type Point = [f64; 2];
 
 #[must_use]
-pub fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egui::Pos2>> {
+pub(crate) fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egui::Pos2>> {
     if points.len() < 2 {
         return None;
     }
@@ -103,7 +103,11 @@ fn paint_frame(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
 }
 
 #[must_use]
-pub fn area_fill_mesh(points: &[egui::Pos2], baseline_y: f32, fill: egui::Color32) -> egui::Mesh {
+pub(crate) fn area_fill_mesh(
+    points: &[egui::Pos2],
+    baseline_y: f32,
+    fill: egui::Color32,
+) -> egui::Mesh {
     let mut mesh = egui::Mesh::default();
     for pair in points.windows(2) {
         let (a, b) = (pair[0], pair[1]);

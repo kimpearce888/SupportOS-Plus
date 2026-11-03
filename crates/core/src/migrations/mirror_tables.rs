@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 use crate::migrations::add_column_if_missing;
 
-pub fn apply_m039(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m039(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS knowledge_sources (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,7 +234,7 @@ pub fn apply_m039(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn apply_m062_customer_chats(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m062_customer_chats(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS customer_chats (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,

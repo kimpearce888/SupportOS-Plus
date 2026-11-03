@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub fn apply_m010(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_m010(conn: &Connection) -> Result<()> {
     {
         let mut stmt = conn.prepare("PRAGMA table_info(ai_attributes)")?;
         let has_new_shape = stmt

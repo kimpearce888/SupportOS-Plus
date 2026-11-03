@@ -14,10 +14,8 @@ pub(crate) const PRIORITY_SYNC: u8 = 2;
 pub(crate) const PRIORITY_ANALYTICS: u8 = 3;
 pub(crate) const PRIORITY_INDEXING: u8 = 4;
 
-pub const DEFAULT_CONCURRENCY: usize = 2;
-
 #[derive(Default)]
-pub struct ApiQueueStats {
+pub(crate) struct ApiQueueStats {
     pub queued: AtomicI64,
     pub active: AtomicI64,
     pub dispatched: AtomicI64,

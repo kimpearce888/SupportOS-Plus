@@ -9,7 +9,7 @@ use crate::icons::Icon;
 
 const ROW_HEIGHT: f32 = 32.0;
 
-pub const INCIDENT_STATUSES: [&str; 5] = [
+pub(crate) const INCIDENT_STATUSES: [&str; 5] = [
     "investigating",
     "identified",
     "fix_in_progress",
@@ -17,7 +17,7 @@ pub const INCIDENT_STATUSES: [&str; 5] = [
     "resolved",
 ];
 
-pub const INCIDENT_SEVERITIES: [&str; 4] = ["sev1", "sev2", "sev3", "sev4"];
+pub(crate) const INCIDENT_SEVERITIES: [&str; 4] = ["sev1", "sev2", "sev3", "sev4"];
 
 pub struct IncidentsPage {
     filter_status: Option<String>,

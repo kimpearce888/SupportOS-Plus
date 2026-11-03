@@ -1,7 +1,7 @@
 use super::*;
 
 #[must_use]
-pub fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
+pub(crate) fn invalidated_pages(event: &ServerEvent) -> Vec<PageKey> {
     match event {
         ServerEvent::RatingReceived(_) => {
             vec![PageKey::Dashboard, PageKey::Customers, PageKey::Reports]

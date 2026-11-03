@@ -339,7 +339,7 @@ pub fn list_types(conn: &Connection) -> Result<Vec<TypeDetail>> {
         .collect()
 }
 
-pub fn get_type(conn: &Connection, type_id: i64) -> Result<Option<TypeDetail>> {
+pub(crate) fn get_type(conn: &Connection, type_id: i64) -> Result<Option<TypeDetail>> {
     let row = conn
         .query_row(
             "SELECT id, name, slug, description, created_at, updated_at, provenance

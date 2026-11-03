@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Result;
 use crate::migrations::add_column_if_missing;
 
-pub const M015_TO_M019_SQL: &str = r#"
+pub(crate) const M015_TO_M019_SQL: &str = r#"
     -- M015: known_issues + known_issue_links
     CREATE TABLE IF NOT EXISTS known_issues (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,7 +184,7 @@ pub fn get_sla_config(conn: &Connection, mailbox_id: i64) -> Result<Option<SlaCo
     }
 }
 
-pub fn record_sla_breach(
+pub(crate) fn record_sla_breach(
     conn: &Connection,
     conversation_id: i64,
     breach_type: &str,
@@ -547,7 +547,7 @@ pub fn link_incident_conversation(
     Ok(created)
 }
 
-pub fn record_incident_event(
+pub(crate) fn record_incident_event(
     conn: &Connection,
     incident_id: i64,
     event_type: &str,
@@ -623,7 +623,7 @@ fn persist_breach(conn: &Connection, conversation_id: i64, breach_type: &str) ->
     Ok(true)
 }
 
-pub fn sweep_sla_breaches(conn: &Connection) -> Result<usize> {
+pub(crate) fn sweep_sla_breaches(conn: &Connection) -> Result<usize> {
     let alerts = crate::sla::sla_alerts(conn)?;
     let mut recorded = 0usize;
     for row in &alerts.alerts {
@@ -701,7 +701,7 @@ pub fn sweep_unmonitored_sla(conn: &Connection) -> Result<usize> {
     Ok(recorded)
 }
 
-pub fn sweep_doc_freshness(conn: &Connection) -> Result<usize> {
+pub(crate) fn sweep_doc_freshness(conn: &Connection) -> Result<usize> {
     let stale_days = crate::settings::get_int(conn, "freshness_stale_days", 180)?.max(1);
     let pruned = conn.execute(
         "DELETE FROM knowledge_doc_freshness

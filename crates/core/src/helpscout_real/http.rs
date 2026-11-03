@@ -232,7 +232,7 @@ impl RealHelpScoutProvider {
         }
     }
 
-    pub async fn token_request(
+    pub(crate) async fn token_request(
         &self,
         form: &[(&str, &str)],
     ) -> std::result::Result<Value, HsApiError> {
@@ -271,7 +271,7 @@ impl RealHelpScoutProvider {
             })
     }
 
-    pub fn save_tokens(
+    pub(crate) fn save_tokens(
         &self,
         access_token: &str,
         refresh_token: Option<&str>,
@@ -299,7 +299,7 @@ impl RealHelpScoutProvider {
         Ok(())
     }
 
-    pub async fn refresh_tokens(&self, refresh_token: &str) -> Result<String> {
+    pub(crate) async fn refresh_tokens(&self, refresh_token: &str) -> Result<String> {
         let v = self
             .token_request(&[
                 ("grant_type", "refresh_token"),
@@ -327,7 +327,7 @@ impl RealHelpScoutProvider {
         Ok(access)
     }
 
-    pub async fn exchange_code(&self, code: &str) -> Result<String> {
+    pub(crate) async fn exchange_code(&self, code: &str) -> Result<String> {
         let v = self
             .token_request(&[("grant_type", "authorization_code"), ("code", code)])
             .await
@@ -376,7 +376,7 @@ impl RealHelpScoutProvider {
         self.request_pri(path, method, body, priority).await
     }
 
-    pub async fn request_pri(
+    pub(crate) async fn request_pri(
         &self,
         path: &str,
         method: &str,

@@ -261,8 +261,8 @@ use derived::derived_edges_touching;
 pub(crate) const GRAPH_MAX_NEIGHBOR_EDGES: usize = 200;
 pub const GRAPH_MAX_SUBGRAPH_NODES: usize = 250;
 pub const GRAPH_MAX_SUBGRAPH_DEPTH: u32 = 2;
-pub const GRAPH_MAX_SEARCH_PER_KIND: usize = 10;
-pub const GRAPH_MAX_SEARCH_TOTAL: usize = 80;
+pub(crate) const GRAPH_MAX_SEARCH_PER_KIND: usize = 10;
+pub(crate) const GRAPH_MAX_SEARCH_TOTAL: usize = 80;
 
 fn kind_label(kind: GraphNodeKind) -> &'static str {
     match kind {

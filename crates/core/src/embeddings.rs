@@ -29,7 +29,7 @@ pub fn content_hash(text: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-pub const EMBED_PASS_LIMIT: i64 = 60;
+pub(crate) const EMBED_PASS_LIMIT: i64 = 60;
 
 fn is_js_whitespace(c: char) -> bool {
     c.is_whitespace() || c == '\u{feff}'
@@ -293,7 +293,7 @@ pub(crate) fn apply_m061_knowledge_chunk_attempts(conn: &Connection) -> Result<(
 }
 
 #[must_use]
-pub fn encode_f32_le(vector: &[f32]) -> Vec<u8> {
+pub(crate) fn encode_f32_le(vector: &[f32]) -> Vec<u8> {
     let mut out = Vec::with_capacity(vector.len() * 4);
     for f in vector {
         out.extend_from_slice(&f.to_le_bytes());
@@ -316,7 +316,7 @@ fn update_chunk_embedding(
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LmStudioEmbeddingSettings {
+pub(crate) struct LmStudioEmbeddingSettings {
     pub base_url: String,
     pub embedding_model: Option<String>,
     pub timeout_ms: u64,
@@ -376,16 +376,16 @@ pub(crate) fn normalize_lm_base_url(url: &str) -> String {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct EmbeddingsResponseBody {
+pub(crate) struct EmbeddingsResponseBody {
     pub data: Vec<EmbeddingsResponseItem>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct EmbeddingsResponseItem {
+pub(crate) struct EmbeddingsResponseItem {
     pub embedding: Vec<f32>,
 }
 
-pub async fn embed_texts(
+pub(crate) async fn embed_texts(
     base_url: &str,
     model: &str,
     texts: &[String],

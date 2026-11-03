@@ -1,5 +1,5 @@
 use super::*;
-pub fn config_to_json(config: &ReportBuilderConfig) -> serde_json::Value {
+pub(crate) fn config_to_json(config: &ReportBuilderConfig) -> serde_json::Value {
     let filters = {
         let mut f = serde_json::Map::new();
         if let Some(v) = &config.filters.mailbox_local_ids {

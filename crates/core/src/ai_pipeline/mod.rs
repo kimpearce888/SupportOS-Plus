@@ -22,10 +22,7 @@ use crate::error::Result;
 use crate::search::apply_fts_migration;
 
 mod interaction;
-pub use interaction::{
-    AnalyzeInteractionOutcome, ProcessNewTicketResult, analyze_interaction,
-    build_interaction_strategy_block, extract_provided_facts,
-};
+pub(crate) use interaction::{analyze_interaction, build_interaction_strategy_block};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LmStudioError {
@@ -188,7 +185,7 @@ impl AiBackend {
 }
 
 #[derive(Debug)]
-pub struct ChatJsonResult {
+pub(crate) struct ChatJsonResult {
     pub json: Option<serde_json::Value>,
     pub raw: Option<String>,
     pub latency_ms: u64,
@@ -410,7 +407,7 @@ pub struct CachedRun {
     pub created_at: String,
 }
 
-pub fn find_cached_run(
+pub(crate) fn find_cached_run(
     conn: &Connection,
     kind: &str,
     input_hash: &str,
@@ -439,7 +436,7 @@ pub fn input_hash(conversation_id: i64, content_signature: &str) -> String {
     hex(&hasher.finalize())
 }
 
-pub fn get_analysis_signature(conn: &Connection, conversation_id: i64) -> String {
+pub(crate) fn get_analysis_signature(conn: &Connection, conversation_id: i64) -> String {
     let (n, max_id): (i64, i64) = conn
         .query_row(
             "SELECT COUNT(*), COALESCE(MAX(t.id),0) FROM conversation_threads t
@@ -528,7 +525,7 @@ pub(crate) fn get_latest_analysis(
     }))
 }
 
-pub fn save_analysis(
+pub(crate) fn save_analysis(
     conn: &Connection,
     run_id: i64,
     conversation_id: i64,
@@ -604,7 +601,7 @@ fn sources_for_run(conn: &Connection, run_id: i64) -> Result<Vec<AiSourceRef>> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiDraftRecord {
+pub(crate) struct AiDraftRecord {
     pub id: i64,
     pub conversation_id: i64,
     pub content: String,
@@ -618,7 +615,7 @@ pub struct AiDraftRecord {
     pub state: String,
 }
 
-pub struct CreateDraftOpts<'a> {
+pub(crate) struct CreateDraftOpts<'a> {
     pub run_id: Option<i64>,
     pub mode: &'a str,
     pub model: Option<&'a str>,
@@ -627,7 +624,7 @@ pub struct CreateDraftOpts<'a> {
     pub sources: &'a [AiSourceRef],
 }
 
-pub fn create_draft(
+pub(crate) fn create_draft(
     conn: &Connection,
     conversation_id: i64,
     content: &str,
@@ -670,7 +667,7 @@ pub fn create_draft(
     Ok(id)
 }
 
-pub fn get_draft(conn: &Connection, id: i64) -> Result<Option<AiDraftRecord>> {
+pub(crate) fn get_draft(conn: &Connection, id: i64) -> Result<Option<AiDraftRecord>> {
     let row = conn
         .query_row(
             "SELECT id, conversation_id, content, mode, model, prompt_version, created_at,
@@ -787,14 +784,14 @@ fn levenshtein(a: &str, b: &str) -> usize {
     prev[n]
 }
 
-pub struct UpsertMemoryOpts<'a> {
+pub(crate) struct UpsertMemoryOpts<'a> {
     pub source: &'a str,
     pub origin: &'a str,
     pub conversation_id: Option<i64>,
     pub confidence: &'a str,
 }
 
-pub fn upsert_memory(
+pub(crate) fn upsert_memory(
     conn: &Connection,
     customer_id: i64,
     key: &str,
@@ -1282,7 +1279,7 @@ fn parse_draft_verification(json: Option<&serde_json::Value>) -> DraftVerificati
 }
 
 #[must_use]
-pub fn rewrite_instruction(instruction: &str) -> &'static str {
+pub(crate) fn rewrite_instruction(instruction: &str) -> &'static str {
     match instruction {
         "shorten" => {
             "Rewrite the reply to be roughly half as long while keeping every essential fact."
@@ -1682,7 +1679,7 @@ pub async fn cluster_issues(
 }
 
 #[derive(Debug, Clone)]
-pub struct ClusterUpsert {
+pub(crate) struct ClusterUpsert {
     pub title: String,
     pub summary: String,
     pub category: Option<String>,
@@ -1693,7 +1690,7 @@ pub struct ClusterUpsert {
     pub conversation_ids: Vec<i64>,
 }
 
-pub fn upsert_cluster(conn: &Connection, c: &ClusterUpsert) -> Result<i64> {
+pub(crate) fn upsert_cluster(conn: &Connection, c: &ClusterUpsert) -> Result<i64> {
     let known_issue_id = c.known_issue_id.filter(|id| {
         conn.query_row(
             "SELECT COUNT(*) FROM known_issues WHERE id = ?1",

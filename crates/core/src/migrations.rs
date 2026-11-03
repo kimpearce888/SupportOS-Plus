@@ -1,12 +1,12 @@
 use rusqlite::Connection;
-pub mod ai_analysis;
-pub mod ai_features;
-pub mod data_tools;
-pub mod db_breadth;
+pub(crate) mod ai_analysis;
+pub(crate) mod ai_features;
+pub(crate) mod data_tools;
+pub(crate) mod db_breadth;
 pub mod intelligence;
-pub mod mirror_parity;
-pub mod mirror_tables;
-pub mod side_threads;
+pub(crate) mod mirror_parity;
+pub(crate) mod mirror_tables;
+pub(crate) mod side_threads;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Migration {
@@ -15,7 +15,7 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-pub const MIGRATIONS: &[Migration] = &[
+pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
         label: "initial_schema",

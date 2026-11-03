@@ -5,16 +5,16 @@ use crate::error::Result;
 use crate::mentions::{build_mention_directory, parse_mentions};
 use crate::notifications::{NotificationInput, record_notification};
 
-pub const CURSOR_KEY: &str = "notif_event_cursor";
+pub(crate) const CURSOR_KEY: &str = "notif_event_cursor";
 
-pub const SWEEP_AT_KEY: &str = "notif_sweep_at";
+pub(crate) const SWEEP_AT_KEY: &str = "notif_sweep_at";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SweepOutcome {
+pub(crate) struct SweepOutcome {
     pub created: u32,
 }
 
-pub fn first_sync_settled(conn: &Connection) -> Result<bool> {
+pub(crate) fn first_sync_settled(conn: &Connection) -> Result<bool> {
     let state = crate::sync_engine::get_state(conn);
     Ok(!matches!(
         state.as_str(),
