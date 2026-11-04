@@ -1,11 +1,12 @@
-# ONE-SHOT (Batch AU-2 closure): regenerate the seven automation goldens that
-# wave 1's AU2-1 form changes shifted (trigger vocabulary, Set priority
-# removal, Send note addition). The CI kittest job on f526f5b was already red
-# for exactly these seven — wave 2 inherited that drift. Same D11 path as the
-# identity goldens: this sandbox cannot render (no Vulkan ICD, no root);
-# the baselines regenerate here with UPDATE_SNAPSHOTS=1. DELETE THIS FILE
-# after the baselines are committed.
-name: au2-automation-regen (one-shot)
+# ONE-SHOT (Batch AU-2 closure, second pass): regenerate ALL kittest goldens
+# against the current program. Context: cargo test fail-fast stopped the CI
+# kittest job at the automation suite since wave 1, so suites after it were
+# never diff-locked against the wave-1/wave-2 program changes, and the
+# earlier partial regen commits did not land. This run re-renders every suite
+# with UPDATE_SNAPSHOTS=1 and uploads the whole snapshots directory (new,
+# .old backup and .diff images) so every changed golden can be diff-audited
+# before the result is committed. DELETE THIS FILE after the baselines land.
+name: au2-full-regen (one-shot)
 on:
   workflow_dispatch: {}
 permissions:
@@ -34,7 +35,7 @@ jobs:
           sudo apt-get install -y mesa-vulkan-drivers
           ls /usr/share/vulkan/icd.d/
 
-      - name: Regenerate the automation goldens (UPDATE_SNAPSHOTS=1)
+      - name: Regenerate every kittest golden (UPDATE_SNAPSHOTS=1)
         env:
           WGPU_BACKEND: vulkan
           UPDATE_SNAPSHOTS: "1"
@@ -43,12 +44,11 @@ jobs:
           test -n "$ICD" || { echo "no lavapipe ICD found"; exit 1; }
           echo "Using lavapipe ICD: $ICD"
           export VK_DRIVER_FILES="$ICD" VK_ICD_FILENAMES="$ICD"
-          cargo test --locked -p supportos-plus-app-shell --features kittest-ui \
-            --test kittest_automation_page r3_automation
+          cargo test --locked -p supportos-plus-app-shell --features kittest-ui
 
-      - name: Upload regenerated baselines
+      - name: Upload the whole snapshots directory
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: au2-automation-baselines
-          path: crates/app-shell/tests/snapshots/r3_automation_*
+          name: au2-full-baselines
+          path: crates/app-shell/tests/snapshots/
           if-no-files-found: error
