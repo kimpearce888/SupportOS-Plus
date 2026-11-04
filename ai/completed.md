@@ -6860,3 +6860,100 @@ external services; first run initializes the SQLite store under
 **Engagement state:** Batch REL-2 complete; ledger synced (this record +
 progress.md); RS-4 remains the active queued batch (held, not started, Rule 6)
 and resumes on the owner's `continue`. Rule 8 STOP.
+
+## Batch REC-1 — ledger reconciliation: plan/progress/completed vs repo facts (facts-vs-fictions audit) — 2026-11-04
+
+Owner directive: check plan.md, progress.md, completed.md and the current repo
+state; determine what remains unfinished; separate facts from fictions (the
+owner suspected the plan carried stale or outright wrong pending items).
+Read-only audit: no program code touched. Evidence re-gathered from the pushed
+files, git state and the live GitHub API at HEAD `c9a2289` — nothing from
+memory.
+
+**Method.** All three ledgers read in full (plan.md 611 lines; progress.md
+1,940; completed.md 6,863); every active/pending/parked/held marker grepped;
+every completion claim cross-checked against the completion records, the tags,
+the workflow runs and the release via the GitHub API.
+
+### Facts (verified)
+
+1. **The work queue is empty — zero pending items anywhere.** Every program in
+   the ledger is consumed and carries a completion record in completed.md:
+   the v2-blueprint batches 1–15 (released v1.4.0→v1.7.0); the v1.7.0
+   clean-audit items 1–165 (batches 16–36, incl. 56/150/151 wired per the
+   owner's batch-36 decision); the Design-System Reskin RS-01..RS-21 + the
+   RS-4 rejection wave + RS-4-11 + Gate G4 (owner verdict: accepted,
+   2026-10-30) + RS-6 (v1.9.1); the refactor program RF-1..RF-11 + FINISH;
+   KB-1 (both known bugs fixed), AUDIT-1, KB-2..KB-7 ("zero live candidates
+   survive"); REL-1 (v1.9.2); AU-1 (10/10); AU-2 (15/15, both waves, "Batch
+   AU-2 is drained"); REL-2 (v1.9.3 published and live-verified). The AU-2
+   wave-2 record closes with "next queued work waits on the owner's
+   `continue`" — and there is no queued work behind it.
+2. **Repo state matches the records.** main = `c9a2289` = origin/main (0/0);
+   workspace version 1.9.3 (Cargo.toml:11); CHANGELOG `[1.9.3] — 2026-11-04`;
+   tags v1.9.0–v1.9.3 on origin (v1.9.2→`a53273d`, v1.9.3→`5b3a8a8`); latest
+   release v1.9.3 live (draft=false, prerelease=false; 4 assets: AppImage,
+   deb, SHA256SUMS.txt, BUILD-INFO.txt); GitHub API: Release run
+   `41883619992` success, CI success on `5b3a8a8`, `4a8db7e` and the ledger
+   commit `c9a2289`; decisions D1–D12 all present.
+3. **AU-2 closed with full disclosure** (the kittest inherited-drift story, 22
+   regenerated goldens diff-audited, ~149 byte-identical) and REL-2 closed
+   with live-verified assets (`sha256sum -c` OK from downloaded bytes).
+
+### Fictions (stale/false ledger text — the source of the "too many pending items" impression)
+
+- **F1 — progress.md "## Active items": "Batch RS-4 (items RS-4-1..RS-4-10) —
+  active".** FALSE. RS-4 completed and verified 2026-10-30 (completed.md,
+  "Batch RS-4 completion record (Rule 4)" — all ten items), RS-4-11 followed
+  (Batch RS-5), G4 closed accepted, and plan.md's G4-closure note states the
+  reskin program fully consumed, "Nothing is open." The stale line
+  propagated: the Batch REL-2 record's closing sentence ("RS-4 remains the
+  active queued batch (held, not started, Rule 6)") and the `c9a2289` commit
+  message repeat it. **That sentence is hereby superseded by this record:**
+  no batch is active or held; nothing resumes on `continue` because nothing
+  is queued. The Active-items block in progress.md is corrected in this
+  commit (the only ledger edit of this batch).
+- **F2 — progress.md is an archive mislabeled as an active queue.** 23 batch
+  sections (RS-4, RS-6, RF-1..RF-11, KB-1, AUDIT-1, KB-2..KB-7, REL-1, AU-1;
+  ~1,930 lines) sit under the title "active items", yet every one has a
+  completion record in completed.md. Rules 4/7 say completed items leave
+  progress.md; only KB-2..KB-6 carry header-level completion markers, so on
+  a skim the file reads as a huge pending backlog. This file — not plan.md —
+  is where the "too many pending items" impression comes from. The sections
+  are retained for now (several batches' full item texts — e.g. the
+  RF-6..RF-11 census lists — exist nowhere else); their disposition
+  (explicit archive labelling vs relocation into completed.md appendices)
+  awaits the owner's direction.
+- **F3 — plan.md is titled "TODO" / "## Items" but holds zero open items.**
+  611 lines of historical narrative; the queue-closed statements live in the
+  Notes (v1.7.0 queue fully consumed), the G4 closure ("Nothing is open")
+  and FINISH ("plan.md has no open items"). Misleading packaging, not false
+  content.
+- **F4 — plan.md's three "stays parked" notes (items 56/150/151).** Stale:
+  resolved 2026-10-25 (batch 36, the owner's "wire it" decision; the Notes
+  confirm). Chronologically layered text contradicts itself within one file.
+- **F5 — plan.md RF section: "Known production bugs stay LIST-ONLY … never
+  fixed inside this program."** True only as an RF-program scope rule; both
+  bugs were fixed by KB-1 on the owner's explicit post-FINISH directive
+  (2026-11-01). A skimmer would read two open bugs; there are none.
+- **F6 — cosmetic trail gaps.** AU-1-9's record says the confirmed findings
+  were "written into plan.md as Batch AU-2 items 1..15", but plan.md holds
+  only the one-line drain header (the item texts lived transiently in
+  progress.md per Rule 2 and survive in the AU-2 completion records);
+  plan.md has no REL-2 section (the batch was opened directly via
+  progress.md). No open work behind either gap.
+
+### Open items
+
+- **Work: none.** The only recorded, owner-accepted disclosures (not work
+  items): the G4 blind test 5/10 (pre-registered bar not met, owner-accepted),
+  SUS n=1, no external audit; AU2-7's disclosed `/knowledge?doc=` limitation
+  (no per-document reader exists in the program).
+- **Ledger hygiene (the sole remediation candidate, awaiting owner
+  direction):** F1 is corrected in this commit; F2–F5 await the owner's
+  disposition choice (archive-label or slim progress.md; annotate or
+  restructure plan.md's historical narrative). No code, batch, or feature
+  work is implied by any of it.
+
+Rule 8 STOP — nothing to continue to; the next work item requires a new owner
+directive.

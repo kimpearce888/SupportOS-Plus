@@ -5,9 +5,15 @@
 
 ## Active items
 
-**Batch RS-4 (items RS-4-1..RS-4-10)** — active, moved from plan.md per Rule 2
-(2026-10-30). Source: the owner's G4 rejection; root-cause reproduction and
-disposition in the G4-verdict addendum (completed.md, 2026-10-30).
+**None.** No batch is active and none is held. The former declaration here —
+"Batch RS-4 active" — was stale fiction, corrected by Batch REC-1 (ledger
+reconciliation, 2026-11-04, record in completed.md): RS-4 completed and was
+verified 2026-10-30 (completed.md, "Batch RS-4 completion record (Rule 4)"),
+the reskin program closed at the accepted Gate G4, and every batch after it
+down to REL-2 (v1.9.3) is completed and recorded. The batch sections below
+this block are historical transcripts of completed work (each has its
+completion record in completed.md), retained pending the owner's archival
+decision — they are NOT open items.
 
 ## Batch RS-4 — G4-rejection fix wave (owner-directed, 2026-10-30)
 
