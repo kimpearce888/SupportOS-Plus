@@ -999,13 +999,15 @@ mod tests {
         assert_eq!(page.dnc[0].0, 9);
         assert_eq!(page.dnc[0].1, "asked politely");
 
-        let on_dnc = db.with_read(|conn| spp_core::outreach::is_on_dnc(conn, 9));
-        assert!(on_dnc.expect("dnc check"));
+        // AU2-13: the dead is_on_dnc convenience was deleted; the round-trip
+        // is asserted through list_dnc, the API the program itself uses.
+        let on_dnc = db.with_read(spp_core::outreach::list_dnc);
+        assert!(on_dnc.expect("dnc list").iter().any(|(id, _, _)| *id == 9));
 
         page.remove_dnc(&db, 9).ok();
         assert!(page.dnc.is_empty());
-        let after = db.with_read(|conn| spp_core::outreach::is_on_dnc(conn, 9));
-        assert!(!after.expect("dnc check 2"));
+        let after = db.with_read(spp_core::outreach::list_dnc);
+        assert!(after.expect("dnc list 2").iter().all(|(id, _, _)| *id != 9));
     }
 
     #[test]

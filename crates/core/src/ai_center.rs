@@ -1,23 +1,7 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::CopilotTool;
 use crate::error::Result;
-
-pub const M009_SQL: &str = r#"
-    CREATE TABLE IF NOT EXISTS ai_settings (
-        id              INTEGER PRIMARY KEY CHECK (id = 1),
-        provider_kind   TEXT NOT NULL DEFAULT 'none',
-        chat_model      TEXT,
-        embedding_model TEXT,
-        embedding_dim   INTEGER,
-        base_url        TEXT,
-        updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-    );
-    INSERT OR IGNORE INTO ai_settings (id, provider_kind) VALUES (1, 'none');
-
-    UPDATE app_state SET schema_version = 9 WHERE id = 1;
-"#;
 
 pub fn apply_m009(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -166,11 +150,6 @@ pub fn set_base_url(conn: &Connection, url: &str) -> Result<()> {
         params![url],
     )?;
     Ok(())
-}
-
-#[must_use]
-pub fn copilot_tool_allowlist() -> &'static [CopilotTool] {
-    &CopilotTool::ALL
 }
 
 #[must_use]

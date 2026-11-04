@@ -5,15 +5,15 @@ use crate::error::{Error, Result};
 pub(crate) const RELEASES_API: &str =
     "https://api.github.com/repos/kimpearce888/SupportOS-Plus/releases/latest";
 
+// AU2-15 (owner disposition D11): the release check is manual-only BY DESIGN —
+// the sole program caller is the Settings page's "check now" action; no
+// boot-time or periodic check is scheduled, so an offline or firewalled
+// machine never phones GitHub unprompted. The module only parses what that
+// surface consumes (tag_name); name/published_at/html_url used to be
+// deserialized and dropped on the floor.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ReleaseInfo {
     pub tag_name: String,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub published_at: Option<String>,
-    #[serde(default)]
-    pub html_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

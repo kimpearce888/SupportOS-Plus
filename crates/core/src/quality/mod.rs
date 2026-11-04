@@ -209,7 +209,7 @@ fn repeated_questions(conn: &Connection, days: i64) -> Vec<RepeatedQuestion> {
                              AND conversation_id IS NOT NULL
                            GROUP BY conversation_id)
                AND json_extract(response_json, '$.primary_question') IS NOT NULL
-               AND created_at >= datetime('now', '-' || ?1 || ' days')",
+               AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-' || ?1 || ' days')",
         ) else {
             return Vec::new();
         };
@@ -998,7 +998,7 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
                         COALESCE(c2.remote_created_at, c2.created_at)
                  FROM conversations c2
                  WHERE c2.customer_local_id = ?1 AND c2.deleted_at IS NULL AND c2.id <> ?2
-                   AND COALESCE(c2.remote_created_at, c2.created_at) >= datetime('now', '-90 days')
+                   AND COALESCE(c2.remote_created_at, c2.created_at) >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days')
                    AND EXISTS (SELECT 1 FROM conversation_tags ct1
                                JOIN conversation_tags ct2 ON ct2.conversation_id = c2.id
                                JOIN tags tg ON tg.id = ct1.tag_id AND tg.id = ct2.tag_id
@@ -1026,7 +1026,7 @@ pub(crate) fn analyze_friction(conn: &Connection, conversation_id: i64) -> Vec<V
                                       AND c2.deleted_at IS NULL
                                       AND c2.id <> ?1
                                       AND COALESCE(c2.remote_created_at, c2.created_at)
-                                          >= datetime('now', '-90 days'))
+                                          >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days'))
                      ORDER BY tg.name LIMIT 1",
                     params![conversation_id, customer_local],
                     |r| r.get(0),

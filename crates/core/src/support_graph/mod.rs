@@ -295,7 +295,7 @@ pub fn graph_stats(conn: &Connection) -> Result<Value> {
             json!({"kind": kind.as_str(), "label": kind_label(kind), "count": count(sql)})
         })
         .collect();
-    let edge_specs: [(&str, &str, &str); 18] = [
+    let edge_specs: [(&str, &str, &str); 17] = [
         (
             "belongs_to",
             "helpscout_mirror",
@@ -360,11 +360,6 @@ pub fn graph_stats(conn: &Connection) -> Result<Value> {
             "cites",
             "ai_derived",
             "SELECT 1 FROM ai_sources s JOIN ai_runs r ON r.id = s.run_id WHERE s.source_type = 'knowledge_document' AND r.conversation_id IS NOT NULL",
-        ),
-        (
-            "collaborated_on",
-            "human_local",
-            "SELECT 1 FROM side_thread_participants stp JOIN side_threads st ON st.id = stp.side_thread_id",
         ),
         (
             "about_product",

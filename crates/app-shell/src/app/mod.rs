@@ -234,9 +234,22 @@ impl ShellApp {
                 self.issue_radar.open_known_tab();
             }
             NavRequest::Confirm(request) => {
-                let dialog = request.dialog();
-                self.pending_confirm = Some(request.action);
-                self.dialog = Some(dialog);
+                // AU2-12: a second confirm request while one is armed must
+                // not silently overwrite the pending destructive action —
+                // the first dialog stays live until it is answered.
+                if self.pending_confirm.is_some() {
+                    tracing::warn!(
+                        dialog = %request.dialog().title,
+                        "confirm request ignored: a destructive confirm is already armed"
+                    );
+                } else {
+                    let dialog = request.dialog();
+                    // The armed confirm takes over the input: an open palette
+                    // must not linger over (or under) it.
+                    self.palette.close();
+                    self.pending_confirm = Some(request.action);
+                    self.dialog = Some(dialog);
+                }
             }
         }
     }
@@ -413,7 +426,7 @@ impl ShellApp {
         );
         ui.add_space(10.0);
 
-        if palette_trigger(ui).clicked() {
+        if self.dialog.is_none() && palette_trigger(ui).clicked() {
             self.palette.toggle();
         }
         ui.add_space(12.0);
@@ -485,9 +498,10 @@ impl ShellApp {
                 }
                 self.theme.apply(ui.ctx());
             }
-            if design::button_with_icon(ui, Icon::Search, "Search  ⌘K", ButtonVariant::Outline)
-                .on_hover_text("command palette (Ctrl/Cmd+K)")
-                .clicked()
+            if self.dialog.is_none()
+                && design::button_with_icon(ui, Icon::Search, "Search  ⌘K", ButtonVariant::Outline)
+                    .on_hover_text("command palette (Ctrl/Cmd+K)")
+                    .clicked()
             {
                 self.palette.toggle();
             }
@@ -655,7 +669,7 @@ impl ShellApp {
             )
             .show(ui, |ui| self.header_ui(ui));
 
-        if let Some(nav) = self.palette.ui(ui.ctx(), &self.db) {
+        if let Some(nav) = self.palette.ui(ui.ctx(), &self.db, self.dialog.is_some()) {
             self.apply_nav(nav);
         }
         if let Some(dialog) = &mut self.dialog {

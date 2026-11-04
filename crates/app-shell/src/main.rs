@@ -65,7 +65,13 @@ fn main() {
             std::process::exit(1);
         }
     };
-    tracing::info!("background workers started (job, webhook, embedding, maintenance timers)");
+    // AU2-13f: the log used to name a "webhook, embedding" timer set that
+    // does not exist; name the real WorkerManager timer set instead.
+    tracing::info!(
+        "background workers started (job loop, adaptive auto-sync, maintenance, \
+         stale-job sweep, notification/customer-event/intelligence sweeps, \
+         connector refresh timers)"
+    );
     let _workers = workers;
 
     let env = spp_core::config::load_env_config();

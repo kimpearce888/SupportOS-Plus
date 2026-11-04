@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 pub(crate) mod ai_analysis;
 pub(crate) mod ai_features;
+pub(crate) mod cleanup;
 pub(crate) mod data_tools;
 pub(crate) mod db_breadth;
 pub mod intelligence;
@@ -188,11 +189,6 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         "#,
     },
 ];
-
-#[must_use]
-pub fn find(version: u32) -> Option<Migration> {
-    MIGRATIONS.iter().find(|m| m.version == version).copied()
-}
 
 #[must_use]
 pub fn latest_version() -> u32 {

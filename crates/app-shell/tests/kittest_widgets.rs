@@ -301,7 +301,6 @@ fn armed_confirm_requires_two_clicks_dark() {
 
 struct InboxIdentity {
     installed: bool,
-    quoted_open: bool,
     sent: Vec<String>,
     inserted: usize,
 }
@@ -324,7 +323,6 @@ fn harness_identity(dark: bool) -> Harness<'static, InboxIdentity> {
             },
             InboxIdentity {
                 installed: false,
-                quoted_open: false,
                 sent: Vec::new(),
                 inserted: 0,
             },
@@ -334,55 +332,70 @@ fn harness_identity(dark: bool) -> Harness<'static, InboxIdentity> {
 fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
     use spp_shell::design::{self, ComposerMode, ComposerState, MessageRole};
 
+    // AU2-13a: the string-body `message_card` wrapper was deleted — the
+    // fixture now drives the same `message_card_with` form the inbox and
+    // live-chat pages use. The body closure replicates the old wrapper's
+    // rendering (LEAD-size foreground label) so only the removals of the
+    // dead quoted_history/file_chip/cop_similar surface change the frame.
+    fn body_label(ui: &mut egui::Ui, body: &str) {
+        let t = design::tokens(ui);
+        ui.label(
+            egui::RichText::new(body)
+                .size(design::scale::text::LEAD)
+                .color(t.foreground),
+        );
+    }
+
     design::day_divider(ui, "Today");
 
-    design::message_card(
+    design::message_card_with(
         ui,
         MessageRole::Customer,
         "Marta Silva",
+        None,
         "10:02",
-        "The export button does nothing on the dashboard.",
-        |ui| {
-            design::file_chip(ui, icons::Icon::Download, "export-log.txt", "24 KB");
-        },
+        |ui| body_label(ui, "The export button does nothing on the dashboard."),
+        |_| {},
     );
-    design::message_card(
+    design::message_card_with(
         ui,
         MessageRole::Agent,
         "Kim Pearce",
+        None,
         "10:05",
-        "Thanks — reproducing now. Can you share the report id?",
+        |ui| body_label(ui, "Thanks — reproducing now. Can you share the report id?"),
         |_| {},
     );
-    design::message_card(
+    design::message_card_with(
         ui,
         MessageRole::Note,
         "Kim Pearce",
+        None,
         "10:06",
-        "Likely the v2 export path — flagged for the data track.",
+        |ui| {
+            body_label(
+                ui,
+                "Likely the v2 export path — flagged for the data track.",
+            )
+        },
         |_| {},
     );
-    design::message_card(
+    design::message_card_with(
         ui,
         MessageRole::Ai,
         "Support AI",
+        None,
         "10:07",
-        "Draft: this matches the known export regression fixed in v1.8.4.",
+        |ui| {
+            body_label(
+                ui,
+                "Draft: this matches the known export regression fixed in v1.8.4.",
+            )
+        },
         |ui| {
             let _ = design::button(ui, "insert as reply", ButtonVariant::Outline);
         },
     );
-
-    design::quoted_history(ui, "quoted", &mut s.quoted_open, 2, |ui| {
-        design::message_card(
-            ui,
-            MessageRole::Customer,
-            "Marta Silva",
-            "Yesterday",
-            "Older thread message.",
-            |_| {},
-        );
-    });
 
     if design::cop_suggest(
         ui,
@@ -394,15 +407,6 @@ fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
         &["insert", "edit"],
     )
     .is_some()
-    {
-        s.inserted += 1;
-    }
-    if design::cop_similar(
-        ui,
-        "Export stuck at 0%",
-        "Fixed by retrying after the sync completes.",
-    )
-    .clicked()
     {
         s.inserted += 1;
     }

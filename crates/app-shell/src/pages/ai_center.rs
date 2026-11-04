@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use super::{ConfirmRequest, NavRequest};
 use eframe::egui;
 use spp_core::ai_attributes::AttributeDistribution;
-use spp_core::catalog::AiAttributeKey;
 use spp_core::db::DbHandle;
 
 use crate::design::{self, BadgeTone, ButtonVariant};
@@ -1862,14 +1861,6 @@ fn job_status_tone(status: &str) -> BadgeTone {
     }
 }
 
-#[must_use]
-pub fn attribute_catalog() -> Vec<(&'static str, &'static str, &'static str)> {
-    AiAttributeKey::ALL
-        .iter()
-        .map(|k| (k.as_str(), k.label(), k.value_type().as_str()))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1930,17 +1921,6 @@ mod tests {
         assert_eq!(jobs[0].run_type, "ticket_analysis");
         assert_eq!(jobs[0].conversation_id, Some(7));
         assert_eq!(jobs[0].model.as_deref(), Some("qwen-7b"));
-    }
-
-    #[test]
-    fn attribute_catalog_covers_all_keys() {
-        let catalog = attribute_catalog();
-        assert_eq!(catalog.len(), AiAttributeKey::ALL.len());
-        for (key, label, value_type) in &catalog {
-            assert!(!key.is_empty());
-            assert!(!label.is_empty());
-            assert!(!value_type.is_empty());
-        }
     }
 
     #[test]

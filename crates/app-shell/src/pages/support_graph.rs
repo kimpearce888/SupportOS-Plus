@@ -93,6 +93,10 @@ impl SupportGraphPage {
         }
     }
 
+    // AU2-13a (census disposition "gate"): this hook exists only for the
+    // kittest suites — the program itself never seeds a search. Gated to the
+    // kittest-ui feature so release builds carry no test surface.
+    #[cfg(feature = "kittest-ui")]
     pub fn kittest_seed_search(&mut self, db: &DbHandle, query: &str) {
         self.query = query.to_string();
         self.query_edit = query.to_string();

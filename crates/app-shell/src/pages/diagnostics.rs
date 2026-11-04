@@ -568,12 +568,19 @@ mod tests {
     fn audit_trail_card_lists_recorded_changes() {
         let db = fixture(Vec::new());
         db.with_write(|conn| {
-            spp_core::audit::audit(
+            // AU2-13: the dead AuditEntry builders (with_conversation_id /
+            // with_before_state) were deleted; the seeding goes through the
+            // program's own conversation-scoped audit API instead.
+            spp_core::jobs::audit(
                 conn,
-                &spp_core::audit::AuditEntry::user("update_status")
-                    .with_conversation_id(1)
-                    .with_before_state(serde_json::json!({"status": "open"}))
-                    .with_after_state(serde_json::json!({"status": "closed"})),
+                "user",
+                "update_status",
+                Some(1),
+                Some("{\"status\":\"open\"}"),
+                Some("{\"status\":\"closed\"}"),
+                None,
+                None,
+                false,
             )
             .expect("audit row");
             conn.execute(

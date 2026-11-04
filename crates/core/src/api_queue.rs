@@ -3,8 +3,6 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use serde_json::{Value, json};
-
 use crate::error::{Error, Result};
 use crate::helpscout_real::HsRateLimiter;
 
@@ -14,27 +12,13 @@ pub(crate) const PRIORITY_SYNC: u8 = 2;
 pub(crate) const PRIORITY_ANALYTICS: u8 = 3;
 pub(crate) const PRIORITY_INDEXING: u8 = 4;
 
+/// AU2-13e: the write-only stats counters (dispatched/completed/failed/
+/// high_water) and the consumer-less snapshot() were deleted; the queue keeps
+/// only the counters its own scheduling actually reads.
 #[derive(Default)]
 pub(crate) struct ApiQueueStats {
     pub queued: AtomicI64,
     pub active: AtomicI64,
-    pub dispatched: AtomicI64,
-    pub completed: AtomicI64,
-    pub failed: AtomicI64,
-    pub high_water: AtomicI64,
-}
-
-impl ApiQueueStats {
-    pub fn snapshot(&self) -> Value {
-        json!({
-            "queued": self.queued.load(Ordering::Relaxed),
-            "active": self.active.load(Ordering::Relaxed),
-            "dispatched": self.dispatched.load(Ordering::Relaxed),
-            "completed": self.completed.load(Ordering::Relaxed),
-            "failed": self.failed.load(Ordering::Relaxed),
-            "highWater": self.high_water.load(Ordering::Relaxed),
-        })
-    }
 }
 
 struct ActiveSlot {
@@ -99,10 +83,6 @@ impl ApiQueue {
         self.concurrency.load(Ordering::Relaxed)
     }
 
-    pub fn snapshot(&self) -> Value {
-        self.stats.snapshot()
-    }
-
     pub async fn enqueue<T>(
         &self,
         priority: u8,
@@ -121,9 +101,6 @@ impl ApiQueue {
             self.stats
                 .queued
                 .store(items.len() as i64, Ordering::Relaxed);
-            self.stats
-                .high_water
-                .fetch_max(items.len() as i64, Ordering::Relaxed);
         }
         self.pump();
         let slot = match permit_rx.try_recv() {
@@ -135,16 +112,7 @@ impl ApiQueue {
             Some(s) => s,
             None => return Err(Error::Other("API queue shut down before dispatch".into())),
         };
-        let res = fut.await;
-        match res {
-            Ok(_) => {
-                self.stats.completed.fetch_add(1, Ordering::Relaxed);
-            }
-            Err(_) => {
-                self.stats.failed.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        res
+        fut.await
     }
 
     fn pump(&self) {
@@ -175,7 +143,6 @@ impl ApiQueue {
                 }
                 return;
             }
-            self.stats.dispatched.fetch_add(1, Ordering::Relaxed);
             self.stats.active.fetch_add(1, Ordering::Relaxed);
             self.stats
                 .queued

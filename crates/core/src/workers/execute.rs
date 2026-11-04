@@ -16,27 +16,6 @@ impl WorkerManager {
         let outcome: Result<()> = async {
             let mut composer_result: Option<String> = None;
             match kind {
-                "initial_sync" => {
-                    self.run_engine(|e| async move {
-                        e.initial_sync(crate::events::SyncTrigger::Manual)
-                            .await
-                            .map(|_| ())
-                    })
-                    .await?;
-                    self.on_after_initial_sync();
-                }
-                "incremental_sync" => {
-                    self.run_engine(|e| async move {
-                        e.incremental_sync(crate::events::SyncTrigger::Manual)
-                            .await
-                            .map(|_| ())
-                    })
-                    .await?;
-                }
-                "reconciliation" => {
-                    self.run_engine(|e| async move { e.reconcile().await.map(|_| ()) })
-                        .await?;
-                }
                 "sync_conversation" | "sync_conversation_merge" => {
                     if let Some(remote) = num("remoteId").or_else(|| num("conversationId")) {
                         self.run_engine(|e| async move { e.sync_single_conversation(remote).await.map(|_| ()) })
@@ -199,16 +178,6 @@ impl WorkerManager {
                         events_total = summary.events_total,
                         "Activity rebuilt from the thread mirror (rebuildAll)"
                     );
-                }
-                "rebuild_embeddings" => {
-                    {
-                        let conn = self.lock();
-                        conn.execute(
-                            "UPDATE knowledge_chunks SET embedding_state = 'not_indexed'",
-                            [],
-                        )?;
-                        jobs::enqueue_on(&conn, "embeddings", "embed_knowledge_chunks", "{}", 4, 2)?;
-                    }
                 }
                 "outreach_send_batch" => {
                     if let Some(campaign_id) = num("campaignId") {
@@ -419,14 +388,6 @@ impl WorkerManager {
                 }
                 "download_recent_attachments" => {
                     self.run_attachment_downloads().await;
-                }
-                "sync.conversations" => {
-                    self.run_engine(|e| async move {
-                        e.incremental_sync(crate::events::SyncTrigger::Manual)
-                            .await
-                            .map(|_| ())
-                    })
-                    .await?;
                 }
                 #[cfg(test)]
                 "__test_panic" => {
@@ -2316,6 +2277,17 @@ impl WorkerManager {
                     None,
                     None,
                 );
+                drop(conn);
+                // AU2-11: the failed run also stored a fresh outcome — pages
+                // (Settings wh_outcome, SyncHealth) must be told to reload it.
+                // Same refresh signal the non-healed success path emits.
+                use crate::events::ServerEvent;
+                self.bus.emit(&ServerEvent::sync_completed(
+                    "incremental",
+                    0,
+                    0,
+                    crate::events::SyncTrigger::Refresh,
+                ));
                 Err(e)
             }
         }

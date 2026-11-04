@@ -110,16 +110,6 @@ impl AuditEntry {
         self.after_state = Some(state);
         self
     }
-
-    pub fn with_before_state(mut self, state: Value) -> Self {
-        self.before_state = Some(state);
-        self
-    }
-
-    pub fn with_conversation_id(mut self, conversation_id: i64) -> Self {
-        self.conversation_id = Some(conversation_id);
-        self
-    }
 }
 
 pub fn audit(conn: &Connection, entry: &AuditEntry) -> Result<()> {
@@ -428,11 +418,19 @@ mod tests {
             [],
         )
         .expect("seed non-json audit row");
-        audit(
+        // AU2-13: with_conversation_id builder deleted — seed via the
+        // program's conversation-scoped audit API (stores after_state
+        // verbatim, which list_audit parses back as JSON).
+        crate::jobs::audit(
             &conn,
-            &AuditEntry::user("tag_added")
-                .with_conversation_id(8)
-                .with_after_state(json!({"tag": "vip"})),
+            "user",
+            "tag_added",
+            Some(8),
+            None,
+            Some("{\"tag\":\"vip\"}"),
+            None,
+            None,
+            false,
         )
         .expect("json audit row");
 

@@ -148,7 +148,6 @@ mod tests {
     #[test]
     fn retention_prunes_stale_translation_cache_rows() {
         let conn = migrated();
-        crate::translation::ensure_translation_schema(&conn).expect("translation schema");
         conn.execute(
             "INSERT INTO translation_cache
                  (cache_key, source_lang, target_lang, purpose, source_text,
@@ -184,7 +183,6 @@ mod tests {
     #[test]
     fn retention_disabled_prunes_nothing() {
         let conn = migrated();
-        crate::translation::ensure_translation_schema(&conn).expect("translation schema");
         conn.execute(
             "INSERT INTO translation_cache
                  (cache_key, source_lang, target_lang, purpose, source_text,

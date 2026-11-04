@@ -382,3 +382,39 @@ batch opener, the decision is taken in-code this batch and recorded here.
   the parked job with `approved:true` (the existing worker branch then executes the
   action and records the run); `reject()` flips the status and deletes the parked job.
 - Evidence base: program code only (D9 policy), HEAD daff746.
+
+## D11 — AU2-13 dead-surface dispositions + AU2-15 manual-only (owner-decision gates taken in-code, 2026-11-04)
+
+Per the owner's standing fix directive and the wave-2 opener, the decision
+gates inside AU2-13/AU2-15 were taken in-code this batch and recorded here.
+
+- **Design-system dead widgets (message_card, quoted_history, file_chip,
+  cop_similar): DELETED, not gated.** The census grouped them with
+  `attribute_catalog`, which wave 1 deleted outright; both test-only callers
+  of `message_card` were migrated to `message_card_with` (made pub) with a
+  body closure byte-identical to the deleted wrapper's rendering, so the
+  inbox/live-chats rendering path is untouched and exactly two identity
+  goldens shift. Baselines regenerate CI-side via a one-shot
+  UPDATE_SNAPSHOTS kittest run (this sandbox has no Vulkan ICD and no root —
+  local regen is impossible), and the final HEAD's diff-lock job remains the
+  proof gate.
+- **Vector per-entity count (count_by_entity + cascade count_by_entity_type):
+  BOTH deleted.** The program never counts vectors per entity; the only
+  non-test caller was xtask's `vector-count` diagnostic, which now reads the
+  store's plain `vec_payload` table directly (no sqlite-vec extension
+  needed), and the store tests assert against the store file itself —
+  file-state assertions, stronger than the API round-trip they replace.
+- **kittest_seed_search: gated to `kittest-ui`**, exactly as the census
+  note prescribed ("gate"): it is a test hook; release builds carry no test
+  surface, and the kittest suites keep working unchanged.
+- **The 16 created-never-used tables (+ the never-written side_threads
+  family): DROPPED by boot step m063** (schema_version 54) rather than by
+  editing historical migrations — upgraded databases and fresh installs
+  converge on the same final shape, and the drop is idempotent
+  (`DROP TABLE IF EXISTS`).
+- **AU2-15 version_check: manual-only is the intended design.** The sole
+  program caller is the Settings "check now" thread; scheduling a boot-time
+  or periodic check would add unprompted GitHub traffic for every machine,
+  which the current UX does not ask for. The intent now lives in code, and
+  `ReleaseInfo` parses only the field the program consumes (`tag_name`).
+- Evidence base: program code only (D9 policy), wave-2 tree.

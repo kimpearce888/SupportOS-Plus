@@ -262,14 +262,32 @@ fn run_vector_count(data_dir: &str, db: Option<&str>) -> anyhow::Result<()> {
     println!("vector-count: total points  {total}");
 
     if total > 0 {
-        let knowledge =
-            index.count_by_entity(spp_core::embeddings::entity_type_for("knowledge_chunks"));
-        let docs = index.count_by_entity(spp_core::embeddings::entity_type_for("docs_chunks"));
-        let conversations =
-            index.count_by_entity(spp_core::embeddings::entity_type_for("conversation_chunks"));
-        println!("vector-count:   knowledge_chunk     {knowledge}");
-        println!("vector-count:   docs_chunk          {docs}");
-        println!("vector-count:   conversation_chunk  {conversations}");
+        // AU2-13a: the per-entity count API on the vector store was deleted
+        // as program-dead; the diagnostic reads the store's payload table
+        // directly (a plain table — no sqlite-vec extension needed).
+        let store_db = store_dir.join("vectors.db");
+        match rusqlite::Connection::open_with_flags(
+            &store_db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) {
+            Ok(conn) => {
+                let mut stmt = conn.prepare(
+                    "SELECT entity_type, COUNT(*) FROM vec_payload
+                     WHERE collection = 'supportos_vectors'
+                     GROUP BY entity_type ORDER BY entity_type",
+                )?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<(String, i64)>>>()?;
+                if rows.is_empty() {
+                    println!("vector-count:   (no payload rows)");
+                }
+                for (entity_type, count) in rows {
+                    println!("vector-count:   {entity_type:<20}{count}");
+                }
+            }
+            Err(e) => println!("vector-count:   (store unreadable: {e})"),
+        }
     }
 
     let db_path = db.map(String::from).unwrap_or_else(|| {

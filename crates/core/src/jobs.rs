@@ -115,15 +115,23 @@ pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<O
         return Ok(None);
     };
 
-    tx.execute(
+    // AU2-14: guard the claim on the status the row was selected with, so a
+    // concurrent claimer (or a state flip between select and update) can never
+    // re-claim a job that is no longer queued. Unreachable under the
+    // single-writer lane today; the guard makes the invariant local.
+    let claimed = tx.execute(
         "UPDATE jobs
             SET status = 'running',
                 started_at = datetime('now'),
                 attempt = ?1
-          WHERE id = ?2",
+          WHERE id = ?2 AND status = 'queued'",
         params![attempt + 1, id],
     )?;
     tx.commit()?;
+
+    if claimed == 0 {
+        return Ok(None);
+    }
 
     Ok(Some(ClaimedJob { id, kind, payload }))
 }

@@ -169,7 +169,22 @@ impl CommandPalette {
         self.selected = 0;
     }
 
-    pub fn ui(&mut self, ctx: &egui::Context, db: &DbHandle) -> Option<NavRequest> {
+    pub fn ui(
+        &mut self,
+        ctx: &egui::Context,
+        db: &DbHandle,
+        input_locked: bool,
+    ) -> Option<NavRequest> {
+        // AU2-12: a live confirm dialog owns the keyboard. The palette must
+        // not consume ⌘K or Escape while a destructive confirm is armed (one
+        // Esc press used to close the palette AND cancel the armed confirm),
+        // and it must never sit on top of the dialog.
+        if input_locked {
+            if self.open {
+                self.close();
+            }
+            return None;
+        }
         self.toggle_shortcut(ctx);
         if !self.open {
             return None;
@@ -547,7 +562,7 @@ mod tests {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
         ctx.run_pass(egui::RawInput::default(), |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(
@@ -558,7 +573,7 @@ mod tests {
         let mut typing = egui::RawInput::default();
         typing.events.push(egui::Event::Text("Export".into()));
         ctx.run_pass(typing, |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert_eq!(palette.query, "Export");
@@ -573,13 +588,13 @@ mod tests {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
         ctx.run_pass(egui::RawInput::default(), |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         let mut typing = egui::RawInput::default();
         typing.events.push(egui::Event::Text("Export".into()));
         ctx.run_pass(typing, |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
 
@@ -593,7 +608,7 @@ mod tests {
         });
         let mut nav = None;
         ctx.run_pass(enter, |ctx| {
-            nav = palette.ui(ctx, &db);
+            nav = palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
 
@@ -609,14 +624,14 @@ mod tests {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
         ctx.run_pass(egui::RawInput::default(), |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
 
         let mut typing = egui::RawInput::default();
         typing.events.push(egui::Event::Text("Export".into()));
         ctx.run_pass(typing, |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(!palette.hits.is_empty(), "the fixture matches Export");
@@ -632,7 +647,7 @@ mod tests {
         });
         let mut nav = None;
         ctx.run_pass(type_and_enter, |ctx| {
-            nav = palette.ui(ctx, &db);
+            nav = palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(nav.is_none(), "the stale hit must not be confirmed");
@@ -650,7 +665,7 @@ mod tests {
         });
         let mut nav2 = None;
         ctx.run_pass(enter, |ctx| {
-            nav2 = palette.ui(ctx, &db);
+            nav2 = palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(nav2.is_none(), "nothing to confirm on the fresh query");
@@ -679,7 +694,7 @@ mod tests {
 
         ctx.run_pass(egui::RawInput::default(), |ctx| {
             render_victim(ctx, &victim_clicked);
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(palette.open);
@@ -690,7 +705,7 @@ mod tests {
             .push(egui::Event::PointerMoved(victim_pos));
         ctx.run_pass(move_pointer, |ctx| {
             render_victim(ctx, &victim_clicked);
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
 
@@ -703,7 +718,7 @@ mod tests {
         });
         ctx.run_pass(press, |ctx| {
             render_victim(ctx, &victim_clicked);
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(palette.open, "the press alone does not close");
@@ -717,7 +732,7 @@ mod tests {
         });
         ctx.run_pass(release, |ctx| {
             render_victim(ctx, &victim_clicked);
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(!palette.open, "an outside click closes the palette");
@@ -733,14 +748,14 @@ mod tests {
         let (ctx, mut palette, db) = seeded_palette_ctx();
 
         ctx.run_pass(egui::RawInput::default(), |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
 
         let mut typing = egui::RawInput::default();
         typing.events.push(egui::Event::Text("zzzznomatch".into()));
         ctx.run_pass(typing, |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(
@@ -758,7 +773,7 @@ mod tests {
         });
         let mut nav = None;
         ctx.run_pass(enter, |ctx| {
-            nav = palette.ui(ctx, &db);
+            nav = palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert!(nav.is_none(), "nothing to confirm — no navigation");
@@ -767,7 +782,7 @@ mod tests {
         let mut more = egui::RawInput::default();
         more.events.push(egui::Event::Text("x".into()));
         ctx.run_pass(more, |ctx| {
-            palette.ui(ctx, &db);
+            palette.ui(ctx, &db, false);
         })
         .drop_without_applying_deltas();
         assert_eq!(

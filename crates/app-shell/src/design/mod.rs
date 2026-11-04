@@ -1578,35 +1578,11 @@ pub enum MessageRole {
     Ai,
 }
 
-/// DC: DS-C-20 Message Card (role-typed) — r-xl card, md role avatar +
-pub fn message_card<R>(
-    ui: &mut egui::Ui,
-    role: MessageRole,
-    name: &str,
-    time: &str,
-    body: &str,
-    actions: impl FnOnce(&mut egui::Ui) -> R,
-) {
-    let t = tokens(ui);
-    message_card_with(
-        ui,
-        role,
-        name,
-        None,
-        time,
-        |ui| {
-            ui.label(
-                egui::RichText::new(body)
-                    .size(scale::text::LEAD)
-                    .color(t.foreground),
-            );
-        },
-        actions,
-    );
-}
-
-/// DC: DS-C-20 Message Card, rich-body form. `role_label` overrides the
-pub(crate) fn message_card_with<B, A, R>(
+/// DC: DS-C-20 Message Card, role-typed rich-body form. `role_label`
+/// overrides the name for AI cards. AU2-13a: the string-body convenience
+/// wrapper (`message_card`) was deleted — every caller composes the body
+/// through this form, exactly like the inbox and live-chat pages do.
+pub fn message_card_with<B, A, R>(
     ui: &mut egui::Ui,
     role: MessageRole,
     name: &str,
@@ -1714,78 +1690,6 @@ pub fn day_divider(ui: &mut egui::Ui, label: &str) {
         ui.painter()
             .line_segment([r2.min, r2.max], egui::Stroke::new(1.0, t.border));
     });
-}
-
-/// DC: DS-C-20 quoted-history collapse — "N earlier messages" toggle above
-pub fn quoted_history(
-    ui: &mut egui::Ui,
-    id_salt: &str,
-    open: &mut bool,
-    count: usize,
-    items: impl FnOnce(&mut egui::Ui),
-) {
-    let t = tokens(ui);
-    let label = format!("{} earlier messages", count);
-    let txt = if *open {
-        format!("hide {}", label)
-    } else {
-        format!("show {}", label)
-    };
-    if button(ui, &txt, ButtonVariant::Text).clicked() {
-        *open = !*open;
-    }
-    if *open {
-        egui::Frame::new().show(ui, |ui| {
-            ui.painter().rect_stroke(
-                ui.max_rect(),
-                egui::CornerRadius::ZERO,
-                egui::Stroke::new(1.0, t.border),
-                egui::StrokeKind::Inside,
-            );
-            ui.vertical(|ui| {
-                ui.add_space(2.0);
-                items(ui);
-            });
-        });
-    }
-    let _ = id_salt;
-}
-
-/// DC: DS-C-20 attachment chip — file icon + name + 11px size inside a
-pub fn file_chip(ui: &mut egui::Ui, icon: Icon, name: &str, size: &str) -> egui::Response {
-    let t = tokens(ui);
-    ui.horizontal(|ui| {
-        egui::Frame::new()
-            .fill(t.card)
-            .stroke(egui::Stroke::new(1.0, t.border))
-            .corner_radius(egui::CornerRadius::same(8))
-            .inner_margin(egui::Margin::symmetric(11, 0))
-            .show(ui, |ui| {
-                ui.set_min_size(egui::vec2(0.0, 32.0));
-                ui.vertical_centered_justified(|ui| {
-                    ui.add_space(4.0);
-                });
-                ui.horizontal(|ui| {
-                    icon.show(ui, 13.0, t.muted_foreground);
-                    ui.label(
-                        egui::RichText::new(name)
-                            .size(scale::text::SMALL_HALF)
-                            .color(t.foreground),
-                    );
-                    ui.label(
-                        egui::RichText::new(size)
-                            .size(scale::text::META)
-                            .color(t.muted_foreground),
-                    );
-                });
-            });
-        ui.interact(
-            ui.min_rect(),
-            egui::Id::unique(("spp-file-chip", name)),
-            egui::Sense::hover(),
-        )
-    })
-    .response
 }
 
 /// DC: DS-C-21 composer modes — Reply (primary surface) | Note (amber).
@@ -2052,42 +1956,6 @@ pub fn cop_suggest(
             }
         });
     clicked
-}
-
-/// DC: DS-C-22 copilot similar-question row — 12.5px question + 11.5px
-pub fn cop_similar(ui: &mut egui::Ui, question: &str, resolution: &str) -> egui::Response {
-    let t = tokens(ui);
-    ui.add_space(2.0);
-    let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 44.0), egui::Sense::click());
-    ui.painter().line_segment(
-        [
-            egui::pos2(rect.left(), rect.top()),
-            egui::pos2(rect.right(), rect.top()),
-        ],
-        egui::Stroke::new(1.0, t.border),
-    );
-    ui.painter().text(
-        egui::pos2(rect.left(), rect.top() + 12.0),
-        egui::Align2::LEFT_TOP,
-        question,
-        egui::FontId::proportional(scale::text::SMALL_HALF),
-        if resp.hovered() {
-            t.foreground
-        } else {
-            t.muted_foreground
-        },
-    );
-    ui.painter().text(
-        egui::pos2(rect.left(), rect.top() + 28.0),
-        egui::Align2::LEFT_TOP,
-        resolution,
-        egui::FontId::proportional(scale::text::META_HALF),
-        t.muted_foreground,
-    );
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, question.to_owned()));
-    ui.advance_cursor_after_rect(rect);
-    resp
 }
 
 /// DC: DS-C-22 copilot chat bubble — assistant = AI-violet surface,

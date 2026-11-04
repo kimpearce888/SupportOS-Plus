@@ -18,6 +18,9 @@ path = "src/bin/xtask.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
+# AU2-13a: the vector-count diagnostic reads the vec_payload table directly
+# (the per-entity count API on the vector store was deleted as program-dead).
+rusqlite.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 # Item 158: the release path executes the downloaded appimagetool, so the
 # pinned checksum is verified with the same hash crate the core uses.

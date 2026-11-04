@@ -511,7 +511,7 @@ fn waiting_stats(
 ) -> Result<SlaWaitingStats> {
     let mut stmt = conn.prepare(
         "SELECT COALESCE(
-             (SELECT MAX(COALESCE(t.remote_created_at, t.created_at))
+             (SELECT MAX(strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(t.remote_created_at, t.created_at)))
                 FROM conversation_threads t
                WHERE t.conversation_id = c.id
                  AND t.type = 'customer'
@@ -669,7 +669,7 @@ pub fn sla_alerts(conn: &Connection) -> Result<SlaAlerts> {
                 .query_row(
                     "SELECT created_at FROM conversation_threads
                      WHERE conversation_id = ?1 AND type = 'customer' AND deleted_at IS NULL
-                     ORDER BY created_at DESC LIMIT 1",
+                     ORDER BY strftime('%Y-%m-%dT%H:%M:%fZ', created_at) DESC LIMIT 1",
                     [r.id],
                     |row| row.get(0),
                 )

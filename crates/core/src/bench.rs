@@ -641,7 +641,7 @@ fn bench_db_operations_on_large_dataset() {
 
     let vec_dir = dir.join("vector");
     std::fs::create_dir_all(&vec_dir).expect("vec dir");
-    let index = crate::vectorstore_sqlitevec::VectorIndex::new(vec_dir, true);
+    let index = crate::vectorstore_sqlitevec::VectorIndex::new(vec_dir.clone(), true);
     assert!(index.ensure_collection(VECTOR_DIM), "collection created");
 
     let (t_upsert, ok) = timeit("vector upsert (3000 x 384, batches of 250)", || {
@@ -676,7 +676,23 @@ fn bench_db_operations_on_large_dataset() {
     assert_eq!(hits.len(), 20, "KNN must return the top-k");
     assert!(t_knn.as_millis() < 5_000, "vector KNN: {t_knn:?}");
 
-    let (t_count, count) = timeit("vector count_by_entity", || index.count_by_entity("thread"));
+    // AU2-13a: the count_by_entity wrapper was deleted (the program never
+    // counts per entity) — the bench measures the raw vec_payload scan.
+    let (t_count, count) = timeit("vector count (vec_payload scan)", || {
+        let conn = rusqlite::Connection::open_with_flags(
+            vec_dir.join("vectors").join("vectors.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("open the vector store");
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM vec_payload WHERE collection = ?1 AND entity_type = 'thread'",
+                rusqlite::params![crate::vectorstore_sqlitevec::VECTOR_COLLECTION],
+                |r| r.get(0),
+            )
+            .expect("count vec_payload rows");
+        usize::try_from(n).unwrap_or(0)
+    });
     assert_eq!(count, N_VECTOR_POINTS);
     assert!(t_count.as_millis() < 5_000, "count: {t_count:?}");
 

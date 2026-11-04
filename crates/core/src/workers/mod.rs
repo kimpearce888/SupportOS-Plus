@@ -853,7 +853,8 @@ impl WorkerManager {
         let Some(engine) = self.engine.clone() else {
             return 0;
         };
-        let result = if state == "NEW" {
+        let initial_pull = state == "NEW";
+        let result = if initial_pull {
             tracing::info!(state, "first sync: starting the initial pull");
             engine.initial_sync(crate::events::SyncTrigger::Auto).await
         } else {
@@ -863,6 +864,13 @@ impl WorkerManager {
         };
         match result {
             Ok(results) => {
+                // AU2-13: the post-initial follow-ups used to hang off the
+                // producer-less "initial_sync" job arm (deleted); they now run
+                // where the program actually pulls the account for the first
+                // time.
+                if initial_pull {
+                    self.on_after_initial_sync();
+                }
                 let processed: i64 = results.iter().map(|r| r.processed).sum();
                 tracing::debug!(processed, operation = "auto_sync", "Adaptive tick finished");
                 processed
@@ -900,8 +908,56 @@ impl WorkerManager {
         let bus = self.bus.clone();
         let provider_kind = self.provider.kind().to_string();
         let result = tokio::task::spawn_blocking(move || -> Result<()> {
+            // AU2-14: the backup block runs FIRST. It used to sit behind the
+            // trend/retention steps in the `?`-chain, so any failure up there
+            // silently disabled backups — the one maintenance output that
+            // must never depend on the rest of the chain succeeding.
             let conn = db_handle.write_guard();
-            crate::maintenance::compute_trends(&conn)?;
+            let backup_hours =
+                crate::settings::get_i64(&conn, "backup_interval_hours", 24).unwrap_or(24);
+            let mut backup_due = false;
+            if backup_hours > 0 {
+                let backups_dir = data_dir.join("backups");
+                let backups = crate::backup_service::list_backups(&backups_dir);
+                let newest = backups.first();
+                backup_due = match newest {
+                    None => true,
+                    Some(b) => {
+                        let created = b
+                            .get("created_at")
+                            .and_then(|v| v.as_str())
+                            .and_then(parse_iso_to_unix);
+                        match created {
+                            Some(ts) => std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64 - ts >= backup_hours * 3600)
+                                .unwrap_or(true),
+                            None => true,
+                        }
+                    }
+                };
+            }
+            drop(conn);
+            if backup_due {
+                let backups_dir = data_dir.join("backups");
+                let long_conn = db_handle.long_op_guard();
+                let result = crate::backup_service::backup(&long_conn, &backups_dir);
+                if result.ok {
+                    tracing::info!(operation = "backup", "Automatic backup created");
+                }
+            }
+            let backups_dir = data_dir.join("backups");
+            let pruned = crate::backup_service::prune_backups(&backups_dir, 20);
+            if pruned > 0 {
+                tracing::info!(operation = "backup", pruned, "Pruned old backups");
+            }
+            let conn = db_handle.write_guard();
+            // AU2-14: a trends failure no longer aborts the chain — every
+            // step behind the old `?` (webhook cadence, sweeps, retention)
+            // used to be skipped with it.
+            if let Err(e) = crate::maintenance::compute_trends(&conn) {
+                tracing::warn!(error = %e, operation = "maintenance", "compute_trends failed");
+            }
             let _ = crate::maintenance::refresh_products(&conn);
             enqueue_activity_rebuild_repair_once(&conn);
             if crate::ai_hub::ai_feature_enabled(&conn, "issue_clustering")
@@ -981,45 +1037,6 @@ impl WorkerManager {
                 let _ = crate::jobs::enqueue_on(&conn, "sync", "webhook_health_check", "{}", 3, 2);
             }
             let _ = crate::notification_sweep::sweep(&conn, Some(&bus));
-            let backup_hours =
-                crate::settings::get_i64(&conn, "backup_interval_hours", 24).unwrap_or(24);
-            let mut backup_due = false;
-            if backup_hours > 0 {
-                let backups_dir = data_dir.join("backups");
-                let backups = crate::backup_service::list_backups(&backups_dir);
-                let newest = backups.first();
-                backup_due = match newest {
-                    None => true,
-                    Some(b) => {
-                        let created = b
-                            .get("created_at")
-                            .and_then(|v| v.as_str())
-                            .and_then(parse_iso_to_unix);
-                        match created {
-                            Some(ts) => std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs() as i64 - ts >= backup_hours * 3600)
-                                .unwrap_or(true),
-                            None => true,
-                        }
-                    }
-                };
-            }
-            drop(conn);
-            if backup_due {
-                let backups_dir = data_dir.join("backups");
-                let long_conn = db_handle.long_op_guard();
-                let result = crate::backup_service::backup(&long_conn, &backups_dir);
-                if result.ok {
-                    tracing::info!(operation = "backup", "Automatic backup created");
-                }
-            }
-            let backups_dir = data_dir.join("backups");
-            let pruned = crate::backup_service::prune_backups(&backups_dir, 20);
-            if pruned > 0 {
-                tracing::info!(operation = "backup", pruned, "Pruned old backups");
-            }
-            let conn = db_handle.write_guard();
             let retention_days = crate::settings::get_i64(&conn, "retention_days", 0).unwrap_or(0);
             let removed = crate::maintenance::enforce_retention(&conn, retention_days)?;
             if removed > 0 {

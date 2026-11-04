@@ -18,13 +18,6 @@ pub fn open(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn open_with_migrations(path: &Path) -> Result<Connection> {
-    let mut conn = open(path)?;
-    ensure_migrations_table(&conn)?;
-    crate::migrations::run_all(&mut conn)?;
-    Ok(conn)
-}
-
 pub fn ensure_migrations_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
@@ -134,14 +127,6 @@ impl DbHandle {
         }
     }
 
-    #[must_use]
-    pub fn reader_pool_size(&self) -> usize {
-        match &*self.lane {
-            Lane::Single(_) => 0,
-            Lane::Pooled { readers, .. } => readers.len(),
-        }
-    }
-
     pub fn with_read<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
         match &*self.lane {
             Lane::Single(conn) => {
@@ -185,11 +170,6 @@ impl DbHandle {
     #[must_use]
     pub fn file_path(&self) -> Option<PathBuf> {
         db_file_path(&self.write_guard())
-    }
-
-    #[must_use]
-    pub fn is_shared_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.lane, &other.lane)
     }
 }
 
@@ -309,7 +289,8 @@ mod tests {
     fn clones_share_the_connection() {
         let handle = setup();
         let clone = handle.clone();
-        assert!(handle.is_shared_with(&clone));
+        // AU2-13: the test-only is_shared_with accessor was deleted; the
+        // sharing invariant is proven by the observable mirror effect below.
         clone.with_write(|conn| {
             conn.execute("INSERT INTO probe (v) VALUES (1)", [])
                 .expect("insert");
@@ -324,7 +305,6 @@ mod tests {
     fn in_memory_handle_has_no_file_path() {
         let handle = setup();
         assert_eq!(handle.file_path(), None);
-        assert_eq!(handle.reader_pool_size(), 0);
     }
 
     #[test]
@@ -345,7 +325,6 @@ mod tests {
         conn.execute_batch("CREATE TABLE probe (v INTEGER);")
             .expect("create probe table");
         let handle = DbHandle::new(conn);
-        assert_eq!(handle.reader_pool_size(), READER_POOL_SIZE);
 
         handle.with_write(|conn| {
             conn.execute("INSERT INTO probe (v) VALUES (5)", [])

@@ -2,8 +2,6 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::error::Result;
-
 pub const SUPPORTED_LANGUAGES: &[(&str, &str)] = &[
     ("en", "English"),
     ("es", "Spanish"),
@@ -35,25 +33,6 @@ pub(crate) fn language_name(code: &str) -> String {
 
 fn is_supported(code: &str) -> bool {
     SUPPORTED_LANGUAGES.iter().any(|(c, _)| *c == code)
-}
-
-pub fn ensure_translation_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS translation_cache (
-            cache_key        TEXT PRIMARY KEY,
-            source_lang      TEXT NOT NULL,
-            target_lang      TEXT NOT NULL,
-            purpose          TEXT NOT NULL DEFAULT 'general'
-                CHECK (purpose IN ('customer_inbound','agent_draft','general')),
-            source_text      TEXT NOT NULL,
-            translated_text  TEXT NOT NULL,
-            model            TEXT,
-            created_at       TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_translation_cache_created
-            ON translation_cache(created_at DESC);",
-    )?;
-    Ok(())
 }
 
 struct ScriptRange {

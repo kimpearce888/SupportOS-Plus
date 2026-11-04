@@ -281,6 +281,11 @@ const BOOT_STEPS: &[BootStep] = &[
         label: "m062_customer_chats_upgrade_guard",
         apply: crate::mirror_tables::apply_m062_customer_chats,
     },
+    BootStep {
+        version: 54,
+        label: "m063_drop_orphan_tables",
+        apply: crate::migrations::cleanup::apply_m063_drop_orphan_tables,
+    },
 ];
 
 fn apply_boot_steps(conn: &mut Connection, steps: &[BootStep]) -> Result<()> {

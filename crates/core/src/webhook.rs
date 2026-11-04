@@ -78,14 +78,33 @@ pub(crate) fn insert_webhook_event(
     hasher.update(format!("{event_type}:{payload}"));
     let hash = hex::encode(hasher.finalize());
 
-    let existing: Option<i64> = conn
+    let existing: Option<(i64, String, i64)> = conn
         .query_row(
-            "SELECT id FROM webhook_events WHERE event_hash = ?1",
+            "SELECT id, processing_state, attempts FROM webhook_events WHERE event_hash = ?1",
             params![hash],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
-    if let Some(id) = existing {
+    if let Some((id, state, attempts)) = existing {
+        // AU2-14: a Help Scout redelivery of an event whose retry budget is
+        // exhausted must not be swallowed as a duplicate — it is the
+        // platform's explicit "try again". Reset the budget and requeue it.
+        // Genuinely processed / in-flight / still-retryable events stay
+        // deduplicated.
+        if state == "failed" && attempts >= 5 {
+            conn.execute(
+                "UPDATE webhook_events SET processing_state = 'pending',
+                     processing_error = NULL, attempts = 0, received_at = ?2
+                   WHERE id = ?1",
+                params![
+                    id,
+                    chrono::Utc::now()
+                        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                        .to_string()
+                ],
+            )?;
+            return Ok((id, false));
+        }
         return Ok((id, true));
     }
 

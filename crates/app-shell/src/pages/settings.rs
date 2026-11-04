@@ -663,6 +663,29 @@ impl SettingsPage {
             );
             let _ = conn.execute("DELETE FROM oauth_tokens", []);
         });
+        // AU2-11: the tokens are gone — the in-session provider must be
+        // deactivated too, or every queued call keeps firing with the dead
+        // handle and lands 401s until restart (the same transition
+        // clear_helpscout_credentials already performs).
+        if let Some(handle) = self.provider.clone() {
+            let previous_kind = handle.deactivate();
+            db.with_write(|conn| {
+                spp_core::sync_engine::on_provider_kind_transition(
+                    conn,
+                    Some(previous_kind.as_str()),
+                    "empty",
+                );
+                let _ = spp_core::settings::set_string(conn, "provider_kind", "empty");
+                let _ = spp_core::audit::log_event(
+                    conn,
+                    "info",
+                    "connect",
+                    "Help Scout disconnected: tokens deleted, provider deactivated in-session",
+                    None,
+                    None,
+                );
+            });
+        }
         self.message = Some("Disconnected. Local data is fully preserved.".into());
         self.reload(db);
     }
@@ -882,6 +905,12 @@ impl SettingsPage {
     }
 
     fn reset_workspace(&mut self, db: &DbHandle) {
+        // AU2-11: pause the background workers BEFORE the wipe — otherwise the
+        // auto-sync timer re-pulls the account within a minute while the
+        // message claims the re-pull happens on next start.
+        if let Some(workers) = &self.workers {
+            workers.pause();
+        }
         let result = db.with_write(|conn| {
             spp_core::data_reset::reset_workspace_data(conn, self.data_dir.as_deref())
         });
@@ -889,7 +918,8 @@ impl SettingsPage {
             Ok(report) => {
                 self.message = Some(format!(
                     "workspace data deleted: {} rows across {} tables, {} vector \
-                     entries. Restart SupportOS+ so every view reloads clean{}.",
+                     entries. Background sync is paused — restart SupportOS+ so \
+                     every view reloads clean{}.",
                     report.rows_deleted,
                     report.tables_cleared,
                     report.vectors_dropped,
@@ -1005,14 +1035,28 @@ impl SettingsPage {
             Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
         ) && let Some(tab) = Tab::ALL.get(i)
         {
+            // AU2-11: feedback belongs to the tab that produced it — a stale
+            // message/error must not glue above every tab until restart.
+            if self.tab != *tab {
+                self.message = None;
+                self.error = None;
+            }
             self.tab = *tab;
             self.reload(db);
         }
-        if let Some(message) = &self.message {
-            design::success_text(ui, message);
-        }
-        if let Some(err) = &self.error {
-            design::error_text(ui, &format!("error: {err}"));
+        if self.message.is_some() || self.error.is_some() {
+            ui.horizontal(|ui| {
+                if let Some(message) = &self.message {
+                    design::success_text(ui, message);
+                }
+                if let Some(err) = &self.error {
+                    design::error_text(ui, &format!("error: {err}"));
+                }
+                if ui.small_button("dismiss").clicked() {
+                    self.message = None;
+                    self.error = None;
+                }
+            });
         }
         ui.add_space(4.0);
 

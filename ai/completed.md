@@ -6662,3 +6662,104 @@ confidence for the AU2-1 approval loop rests on the existing worker branch
 the schema/SQL review of the new requeue path recorded here.
 
 Rule 8 STOP — remaining Batch AU-2 items AU2-11..AU2-15 stay queued in plan.md.
+
+## Batch AU-2 — confirmed AU-1 findings, fix wave 2 (items AU2-11..AU2-15 completed and verified, 2026-11-04)
+
+The final five AU-2 items, verified at the wave-2 tree with program-code-only
+evidence (D9 policy). Owner decisions carried inside AU2-13/AU2-15 were taken
+in-code per the standing fix directive and recorded as decisions.md D11.
+
+1. **AU2-11 (settings page feedback lifecycle)** — tab switches now clear
+   `message`/`error` (feedback belongs to the tab that produced it) and a
+   `dismiss` button clears them in place, so stale feedback can no longer glue
+   above every tab until restart; `disconnect_helpscout` now deactivates the
+   in-session provider handle (same `on_provider_kind_transition` +
+   `provider_kind=empty` transition as `clear_helpscout_credentials`) — no more
+   queued calls firing 401s after an explicit disconnect;
+   `reset_workspace` pauses the WorkersHost BEFORE the wipe (new synchronous
+   `WorkersHost::pause`), and the message now says background sync is paused
+   until restart instead of falsely promising the re-pull happens on next
+   start; the webhook-health job's failure path now emits `SyncCompleted`
+   (same refresh signal as the non-healed success path) so Settings
+   `wh_outcome` / SyncHealth reload the fresh outcome after a failed
+   "check now".
+2. **AU2-12 (palette/overlay input arbitration)** — a live confirm dialog now
+   owns the keyboard: `palette.ui` takes `input_locked` and closes itself
+   without consuming anything when a destructive confirm is armed; arming a
+   confirm closes the palette and the ⌘K palette-trigger + Search buttons are
+   gated while the dialog is up; a second `NavRequest::Confirm` while one is
+   armed is rejected with a warn log instead of silently overwriting the
+   pending action. One Esc can no longer close the palette AND cancel the
+   armed confirm (the palette is closed and locked before the dialog can see
+   a key).
+3. **AU2-13 (AU-1 dead-surface census, disposition per group — D11)** —
+   (a) dead items deleted: db.rs `open_with_migrations`/`reader_pool_size`/
+   `is_shared_with`; audit.rs `with_before_state`/`with_conversation_id`
+   (their unit/fixture seeds moved to the program's own `jobs::audit`
+   conversation-scoped API); ai_center.rs `M009_SQL` +
+   `copilot_tool_allowlist`; migrations/intelligence.rs `M014_SQL` const
+   (the real `apply_m014` stays); migrations.rs `find`;
+   response_state_sql.rs count trio; translation.rs
+   `ensure_translation_schema` (m040 owns creation); outreach `is_on_dnc`;
+   app-shell `attribute_catalog`; support_graph `kittest_seed_search`
+   (gated to `kittest-ui` per the census note — release builds carry no test
+   surface); design/mod.rs `message_card`/`quoted_history`/`file_chip`/
+   `cop_similar` deleted (`message_card_with` made pub — the kittest identity
+   fixture now drives the exact form inbox/live_chats use, body rendering
+   byte-identical, so only the removed dead widgets change the frame);
+   vectorstore `count_by_entity` + cascade `count_by_entity_type` deleted —
+   the per-entity count now lives where it is actually used: xtask
+   `vector-count` reads `vec_payload` directly (a plain table) and the store
+   tests assert against the store file itself; (b) the five producer-less
+   execute_job arms (`initial_sync`/`incremental_sync`/`reconciliation`/
+   `rebuild_embeddings`/`sync.conversations`) deleted; the post-initial-sync
+   follow-ups now run where the program actually pulls the account first time
+   (auto-sync NEW branch calls `on_after_initial_sync`); (c) the 16
+   created-never-used tables (plus the never-written side_threads family,
+   whose permanently-empty support_graph reads were removed with it) are
+   dropped by new boot step m063 `apply_m063_drop_orphan_tables`
+   (schema_version 54) so upgraded DBs and fresh installs converge;
+   `data_reset` KEEP_TABLES no longer names dropped tables; (d)
+   encrypted_sync.rs name-only stub deleted (module removed; m044 stops
+   creating its log table); (e) api_queue write-only stats counters +
+   consumer-less `snapshot()` deleted; (f) boot log now names the real
+   WorkerManager timer set; (g) `workers_host::restart` retains its task
+   JoinHandle (panics surfaced, aborted on shutdown) and serializes
+   overlapping restarts through a gate.
+4. **AU2-14 (low-confidence hygiene, verified-then-fixed)** — quality
+   day-windows compare on the same format (`strftime('%Y-%m-%dT%H:%M:%fZ')`
+   bounds, three sites); SLA picks the last customer message with
+   `MAX(strftime(...))` / `ORDER BY strftime(...)` instead of string MAX over
+   mixed precision (two sites); `jobs::claim_next` guards its UPDATE on
+   `status = 'queued'` (invariant made local; unreachable under the
+   single-writer lane); webhook redelivery of an event whose retry budget is
+   exhausted (state=failed, attempts>=5) resets the budget and requeues
+   instead of being swallowed as a duplicate; the 6-hourly maintenance chain
+   now runs the backup block FIRST and demoted `compute_trends` to a
+   non-fatal warn — no future failure up the chain can silently disable
+   backups again.
+5. **AU2-15 (version_check manual-only — owner call, D11)** — manual-only is
+   the intended design: the module documents it in code (the sole program
+   caller is the Settings "check now" thread; no boot/periodic check, so an
+   offline machine never phones GitHub unprompted) and `ReleaseInfo` now
+   parses only `tag_name` — the never-read `name`/`published_at`/`html_url`
+   deserialization surface is gone.
+
+**Verification (Rule 5)** — all gates re-run at the wave-2 tree, all green:
+`cargo check --workspace --all-targets` clean; `cargo fmt --all` applied /
+`--check` clean; `cargo clippy --workspace --all-targets -- -D warnings` zero
+diagnostics; `cargo clippy -p supportos-plus-core --all-targets --features
+sandbox -- -D warnings` zero diagnostics; core **452/0/3**; core+sandbox
+**460/0/3**; app-shell **239/0**; xtask **11/0** (+2 elsewhere, all green);
+doc-tests **0/0**. Environment disclosures: 4 GB no-swap sandbox (lto=off
+user-config for local runs only — repo files untouched); one disk-full event
+(`No space left on device`) resolved by clearing the local incremental
+compilation cache, tests re-run green. Kittest note: the identity-frame
+change from the four deleted design widgets shifts exactly two diff-locked
+goldens (`r2c_inbox_identity_light/dark`); this sandbox has no Vulkan ICD and
+no root, so the baselines are regenerated CI-side (lavapipe, the same
+rasterizer family that produced them) via a one-shot UPDATE_SNAPSHOTS run
+recorded in D11; the final HEAD's kittest diff-lock job is the proof gate.
+
+Rule 8 STOP — Batch AU-2 is drained; next queued work waits on the owner's
+`continue`.

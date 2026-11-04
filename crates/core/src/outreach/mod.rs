@@ -79,15 +79,6 @@ pub fn remove_from_dnc(conn: &Connection, customer_id: i64) -> Result<bool> {
     Ok(rows > 0)
 }
 
-pub fn is_on_dnc(conn: &Connection, customer_id: i64) -> Result<bool> {
-    let exists: i64 = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM do_not_contact WHERE customer_id = ?1)",
-        params![customer_id],
-        |r| r.get(0),
-    )?;
-    Ok(exists != 0)
-}
-
 pub fn list_dnc(conn: &Connection) -> Result<Vec<(i64, String, String)>> {
     let mut stmt = conn.prepare(
         "SELECT customer_id, reason, created_at FROM do_not_contact ORDER BY created_at DESC",

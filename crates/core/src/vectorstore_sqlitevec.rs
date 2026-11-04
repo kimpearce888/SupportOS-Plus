@@ -243,20 +243,6 @@ impl SqliteVecStore {
         Ok(Some(usize::try_from(count).unwrap_or(0)))
     }
 
-    pub(crate) fn count_by_entity_type(
-        &self,
-        collection: &str,
-        entity_type: &str,
-    ) -> Result<usize> {
-        let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM vec_payload WHERE collection = ?1 AND entity_type = ?2",
-            params![collection, entity_type],
-            |r| r.get(0),
-        )?;
-        Ok(usize::try_from(count).unwrap_or(0))
-    }
-
     fn payload_of(&self, collection: &str, point_id: &PointId) -> Result<serde_json::Value> {
         let conn = self.conn.lock().expect("sqlite-vec store mutex poisoned");
         let json: Option<String> = conn
@@ -632,15 +618,6 @@ impl VectorIndex {
             .ok()
     }
 
-    pub fn count_by_entity(&self, entity_type: &str) -> usize {
-        let Some(store) = self.store_handle() else {
-            return 0;
-        };
-        store
-            .count_by_entity_type(VECTOR_COLLECTION, entity_type)
-            .unwrap_or(0)
-    }
-
     pub(crate) fn drop_collection(&self) -> bool {
         let Some(store) = self.store_handle() else {
             return false;
@@ -694,6 +671,25 @@ mod tests {
             .create_collection(VECTOR_COLLECTION, Some(dim))
             .expect("create collection");
         (dir, store)
+    }
+
+    /// AU2-13a: the per-entity count is asserted against the store file
+    /// itself (a plain read over vec_payload), not through a dedicated
+    /// count API — the program never counts vectors per entity.
+    fn count_payload_rows(dir: &std::path::Path, entity_type: &str) -> usize {
+        let conn = rusqlite::Connection::open_with_flags(
+            dir.join("vectors").join("vectors.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .expect("open the vector store file");
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM vec_payload WHERE collection = ?1 AND entity_type = ?2",
+                params![VECTOR_COLLECTION, entity_type],
+                |r| r.get(0),
+            )
+            .expect("count vec_payload rows");
+        usize::try_from(n).unwrap_or(0)
     }
 
     #[test]
@@ -795,7 +791,6 @@ mod tests {
             vector: vec![1.0, 0.0],
             payload: serde_json::json!({"entity_type": "k"}),
         }]));
-        assert_eq!(index.count_by_entity("k"), 0);
 
         let index = VectorIndex::new(&dir, true);
         assert!(index.enabled());
@@ -825,8 +820,10 @@ mod tests {
         assert!(index.upsert(&points));
 
         assert_eq!(index.try_point_count().expect("count"), Some(2));
-        assert_eq!(index.count_by_entity("knowledge_chunk"), 1);
-        assert_eq!(index.count_by_entity("docs_chunk"), 1);
+        // AU2-13a: counting went through the deleted count_by_entity wrapper;
+        // the same fact is asserted against the store file itself.
+        assert_eq!(count_payload_rows(&dir, "knowledge_chunk"), 1);
+        assert_eq!(count_payload_rows(&dir, "docs_chunk"), 1);
 
         let hits = index.search(&[1.0, 0.0], 2);
         assert_eq!(hits.len(), 2);
@@ -838,7 +835,7 @@ mod tests {
 
     #[test]
     fn audit60_prune_family_except_removes_only_orphans_of_that_family() {
-        let (_dir, store) = seeded_store("prune60", 2);
+        let (dir, store) = seeded_store("prune60", 2);
         for (point_id, entity_id) in [(1, 100), (2, 100), (3, 101)] {
             store
                 .upsert(
@@ -865,15 +862,12 @@ mod tests {
             "the surviving knowledge point and the docs point remain"
         );
         assert_eq!(
-            store
-                .count_by_entity_type(VECTOR_COLLECTION, "knowledge_chunk")
-                .unwrap(),
-            1
+            count_payload_rows(&dir, "knowledge_chunk"),
+            1,
+            "the surviving knowledge point and the docs point remain"
         );
         assert_eq!(
-            store
-                .count_by_entity_type(VECTOR_COLLECTION, "docs_chunk")
-                .unwrap(),
+            count_payload_rows(&dir, "docs_chunk"),
             1,
             "other families are never touched by the sweep"
         );
@@ -922,14 +916,14 @@ mod tests {
             ]),
             "upsert both points"
         );
-        assert_eq!(index.count_by_entity("knowledge_chunk"), 2);
+        assert_eq!(count_payload_rows(&dir, "knowledge_chunk"), 2);
 
         let live = [namespaced_chunk_point_id("knowledge_chunk", 9).unwrap()];
         let removed = index
             .prune_orphaned_points("knowledge_chunk", &live)
             .expect("the enabled store sweeps");
         assert_eq!(removed, 1);
-        assert_eq!(index.count_by_entity("knowledge_chunk"), 1);
+        assert_eq!(count_payload_rows(&dir, "knowledge_chunk"), 1);
 
         let disabled = VectorIndex::new(&dir, false);
         let live = [namespaced_chunk_point_id("knowledge_chunk", 9).unwrap()];
@@ -943,7 +937,7 @@ mod tests {
 
     #[test]
     fn audit21_namespaced_point_ids_keep_chunk_families_apart() {
-        let (_dir, store) = seeded_store("audit21-ns", 2);
+        let (dir, store) = seeded_store("audit21-ns", 2);
         let knowledge_id = namespaced_chunk_point_id("knowledge_chunk", 7).expect("namespaced id");
         let conversation_id =
             namespaced_chunk_point_id("conversation_chunk", 7).expect("namespaced id");
@@ -968,17 +962,11 @@ mod tests {
             "both families' chunk 7 must coexist"
         );
         assert_eq!(
-            store
-                .count_by_entity_type(VECTOR_COLLECTION, "knowledge_chunk")
-                .unwrap(),
-            1
+            count_payload_rows(&dir, "knowledge_chunk"),
+            1,
+            "both families' chunk 7 must coexist"
         );
-        assert_eq!(
-            store
-                .count_by_entity_type(VECTOR_COLLECTION, "conversation_chunk")
-                .unwrap(),
-            1
-        );
+        assert_eq!(count_payload_rows(&dir, "conversation_chunk"), 1);
         assert_eq!(
             store
                 .payload_of(VECTOR_COLLECTION, &knowledge_id.to_string())

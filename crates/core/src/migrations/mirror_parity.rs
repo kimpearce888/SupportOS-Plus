@@ -203,8 +203,6 @@ pub(crate) fn apply_m044(conn: &Connection) -> Result<()> {
         }
     }
 
-    crate::encrypted_sync::ensure_log_table(conn)?;
-
     let _ = conn.execute("UPDATE app_state SET schema_version = 44 WHERE id = 1", []);
     Ok(())
 }

@@ -252,30 +252,6 @@ pub(super) fn derived_edges_touching(
                     local_id,
                 ));
             }
-            {
-                let mut stmt = conn.prepare(
-                    "SELECT DISTINCT stp.user_local_id, st.created_at
-                     FROM side_thread_participants stp
-                     JOIN side_threads st ON st.id = stp.side_thread_id
-                     WHERE st.conversation_id = ?1 LIMIT ?2",
-                )?;
-                let rows = stmt.query_map(params![local_id, BRANCH_CAP], |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
-                })?;
-                for row in rows {
-                    let (agent, created_at) = row?;
-                    push(DerivedEdge {
-                        relation: "collaborated_on",
-                        origin: "human_local",
-                        source_kind: GraphNodeKind::Agent,
-                        source_id: agent,
-                        target_kind: kind,
-                        target_id: local_id,
-                        note: None,
-                        at: created_at,
-                    });
-                }
-            }
         }
         GraphNodeKind::KnownIssue => {
             let product_name: Option<String> = conn
@@ -520,30 +496,6 @@ pub(super) fn derived_edges_touching(
             }
         }
         GraphNodeKind::Agent => {
-            {
-                let mut stmt = conn.prepare(
-                    "SELECT DISTINCT st.conversation_id, st.created_at
-                     FROM side_thread_participants stp
-                     JOIN side_threads st ON st.id = stp.side_thread_id
-                     WHERE stp.user_local_id = ?1 LIMIT ?2",
-                )?;
-                let rows = stmt.query_map(params![local_id, BRANCH_CAP], |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
-                })?;
-                for row in rows {
-                    let (conv, created_at) = row?;
-                    push(DerivedEdge {
-                        relation: "collaborated_on",
-                        origin: "human_local",
-                        source_kind: kind,
-                        source_id: local_id,
-                        target_kind: GraphNodeKind::Conversation,
-                        target_id: conv,
-                        note: None,
-                        at: created_at,
-                    });
-                }
-            }
             for conv in many_i64(
                 "SELECT id FROM conversations WHERE assignee_local_id = ?1 AND deleted_at IS NULL LIMIT ?2",
                 &[&local_id, &BRANCH_CAP],

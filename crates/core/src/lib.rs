@@ -41,7 +41,6 @@ pub mod data_reset;
 pub mod db;
 pub mod digest;
 pub mod embeddings;
-pub(crate) mod encrypted_sync;
 pub mod error;
 pub mod event_bus;
 pub mod events;
