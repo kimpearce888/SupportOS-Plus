@@ -7005,3 +7005,57 @@ code, no tests, no product files touched.
 
 Rule 8 STOP — the ledger is in order; the next work item requires a new
 owner directive.
+
+## Batch GA-1 — api_queue decoupled from helpscout_real (the graphify-audit cycle) — completed and verified 2026-11-04
+
+Owner directive: "yes, continue" on the graphify knowledge-graph audit report
+(run on this repo at `681a1d3` with Graphify-Labs/graphify v0.9.102, code-only
+AST extraction, zero API cost, outputs outside the repo). The audit surfaced
+one real structural defect: a 2-file module cycle — `api_queue.rs:7` imported
+`crate::helpscout_real::HsRateLimiter` while `helpscout_real/mod.rs:7` imported
+`ApiQueue` back — coupling the generic priority queue (PRIORITY_*) to one
+provider. Two further graph findings cleared against source before any edit
+(error.rs self-loop = extractor artifact, zero self-references in source;
+app/mod.rs <-> lib.rs = idiomatic `pub mod` + re-export pattern) and one minor
+smell was noted and deliberately left untouched (the shared JSON field helpers
+defined inside the pages/queries.rs page module, re-exported via mod.rs:352 —
+an intentional, consistently-imported pattern).
+
+**GA-1-1 (`crates/core/src/api_queue.rs` + `crates/core/src/helpscout_real/mod.rs`).**
+`pub trait QueueRateLimiter: Send + Sync { fn wait_time_ms(&self, is_write: bool) -> i64 }`
+defined consumer-side in api_queue.rs; the queue field and constructor now take
+`Arc<dyn QueueRateLimiter>`; `HsRateLimiter` implements the trait in
+helpscout_real — the inherent `wait_time_ms` body moved into the impl (the
+inherent had no callers outside the queue, so a delegating inherent would have
+been dead code under `-D warnings`); the `RealHelpScoutProvider::new`
+construction site coerces explicitly (`Arc::clone(&limiter) as
+Arc<dyn QueueRateLimiter>` — `Arc::clone`'s generic unifies with the expected
+trait-object type and blocks the implicit unsize coercion; the sibling
+`Arc::new(HsRateLimiter::new(None))` docs-queue call coerces implicitly).
+Dependency now points one way: helpscout_real -> api_queue. Zero caller
+changes elsewhere: the queue's only limiter interaction was the single
+`wait_time_ms(is_write)` call in pump(), and api_queue's only importer was
+helpscout_real.
+
+**Verification (Rule 5)** — all mechanical, re-run at the working tree:
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- Tests, foreground per-crate, baselines exact: core 452 passed / 0 failed /
+  3 ignored (incl. the full it_helpscout integration suite through the trait);
+  app-shell 239 / 0 (kittest lanes are CI-only, as in REL-2); catalog 0 (no
+  tests exist); xtask 11 / 0.
+- Dependency check: `rg "helpscout_real" crates/core/src/api_queue.rs` hits
+  doc comments only; the use-block imports std + error exclusively.
+- Graphify re-verification: the knowledge graph rebuilt from the fixed tree
+  (6,639 nodes / 17,813 edges / 244 communities) — the report's Import Cycles
+  section no longer lists `api_queue <-> helpscout_real`; the two remaining
+  entries are the pre-verified benign artifacts. Outputs in
+  /tmp/spp-graph-after/ (outside the repo).
+- Scope: `git diff --stat` = the two .rs files + ai/plan.md + ai/progress.md
+  (+ this record). No other code, no version bump (releases remain REL's job).
+- Environment note: one build attempt hit ENOSPC (the sandbox's 4 GB disk —
+  target/debug/incremental at 1.1 GB); the cache was deleted, no output lost,
+  gates re-run green with CARGO_INCREMENTAL=0 for the remaining suites.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive.

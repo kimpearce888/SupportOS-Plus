@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::api_queue::{
     ApiQueue, PRIORITY_ANALYTICS, PRIORITY_INDEXING, PRIORITY_INTERACTIVE, PRIORITY_SYNC,
-    PRIORITY_USER_SEND,
+    PRIORITY_USER_SEND, QueueRateLimiter,
 };
 use crate::error::{Error, Result};
 
@@ -250,7 +250,30 @@ impl HsRateLimiter {
         self.persist(&state);
     }
 
-    pub(crate) fn wait_time_ms(&self, _is_write: bool) -> i64 {
+    pub fn snapshot(&self) -> Value {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let mut sends = self
+            .send_timestamps
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        sends.retain(|t| now_ms - t < 60_000);
+        json!({
+            "limitPerMinute": state.limit_per_minute,
+            "remaining": state.remaining,
+            "retryAfterSec": state.retry_after_sec,
+            "updatedAt": state.updated_at,
+            "inFlightWindow": sends.len(),
+        })
+    }
+}
+
+/// GA-1: the limiter is consumed through the queue's `QueueRateLimiter`
+/// trait, so the dependency points one way (helpscout_real -> api_queue)
+/// and the former `api_queue.rs -> helpscout_real::HsRateLimiter` import
+/// (the module cycle the graphify audit surfaced) is gone.
+impl QueueRateLimiter for HsRateLimiter {
+    fn wait_time_ms(&self, _is_write: bool) -> i64 {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if let (Some(retry), Some(0)) = (state.retry_after_sec, state.remaining)
@@ -276,23 +299,6 @@ impl HsRateLimiter {
             }
         }
         0
-    }
-
-    pub fn snapshot(&self) -> Value {
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        let state = self.state.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        let mut sends = self
-            .send_timestamps
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        sends.retain(|t| now_ms - t < 60_000);
-        json!({
-            "limitPerMinute": state.limit_per_minute,
-            "remaining": state.remaining,
-            "retryAfterSec": state.retry_after_sec,
-            "updatedAt": state.updated_at,
-            "inFlightWindow": sends.len(),
-        })
     }
 }
 
@@ -599,7 +605,8 @@ impl RealHelpScoutProvider {
     pub fn new(db: crate::db::DbHandle, credentials: HsCredentials) -> Self {
         let limiter = Arc::new(HsRateLimiter::new(Some(db.clone())));
         let concurrency = stored_api_concurrency(&db);
-        let queue = ApiQueue::new(Arc::clone(&limiter), concurrency);
+        let queue =
+            ApiQueue::new(Arc::clone(&limiter) as Arc<dyn QueueRateLimiter>, concurrency);
         let docs_queue = ApiQueue::new(Arc::new(HsRateLimiter::new(None)), concurrency);
         Self {
             client: reqwest::Client::builder()

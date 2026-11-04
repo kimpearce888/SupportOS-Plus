@@ -7,8 +7,13 @@
 ## Active items
 
 **None.** No batch is active and none is held (authoritative, 2026-11-04,
-Batches REC-1 + HYG-1). The queue in `plan.md` is empty; the engagement sits
-at a Rule 8 STOP awaiting the owner's next directive.
+post-Batch GA-1). The queue in `plan.md` is empty; the engagement sits at a
+Rule 8 STOP awaiting the owner's next directive.
+
+Batch GA-1 (item GA-1-1: decouple `api_queue` from `helpscout_real`) moved
+through this file per Rules 2 and 4 on 2026-11-04 — opened on the owner's
+"yes, continue" after the graphify audit, completed and verified the same
+session; completion record in `completed.md`.
 
 Historical note (REC-1): the "Batch RS-4 active" declaration that stood here
 was stale fiction — RS-4 completed and was verified 2026-10-30 (completion

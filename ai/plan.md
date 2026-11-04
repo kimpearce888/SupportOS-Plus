@@ -7,7 +7,7 @@
 
 ## Queue state
 
-**EMPTY — no open items (authoritative, 2026-11-04, Batches REC-1 + HYG-1).**
+**EMPTY — no open items (authoritative, 2026-11-04, post-Batch GA-1).**
 
 Every program recorded in the engagement is consumed and has its completion
 record in `completed.md`: the v2-blueprint batches 1–15 (v1.4.0→v1.7.0); the
@@ -28,3 +28,9 @@ resumes on `continue` until new work is queued here by the owner.
 - New work opens only on an owner directive: it is written into this file as
   numbered items, moved ten at a time to `progress.md` (Rule 2), and leaves
   for `completed.md` only after verification (Rules 4–5).
+- Batch GA-1 (item GA-1-1: decouple `api_queue` from `helpscout_real`) was
+  opened here 2026-11-04 on the owner's "yes, continue" after the graphify
+  knowledge-graph audit surfaced the `api_queue.rs <-> helpscout_real/mod.rs`
+  module cycle, moved to `progress.md` per Rule 2, completed and verified the
+  same session, and left for `completed.md` at the Rule 4 sync. The queue is
+  empty again; the graphify outputs live outside the repo (`/tmp/spp-graph/`).

@@ -4,7 +4,18 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use crate::error::{Error, Result};
-use crate::helpscout_real::HsRateLimiter;
+
+/// Rate-limit hook the queue consults before dispatching an item (GA-1).
+/// Defined on the consumer side so the generic queue stays provider-agnostic:
+/// this module must not import a concrete provider's limiter (the
+/// `api_queue.rs <-> helpscout_real/mod.rs` module cycle the graphify audit
+/// surfaced). `helpscout_real::HsRateLimiter` is the production impl; any
+/// other limiter can be supplied through the same trait.
+pub trait QueueRateLimiter: Send + Sync {
+    /// Milliseconds the queue must wait before dispatching; `0` dispatches
+    /// immediately.
+    fn wait_time_ms(&self, is_write: bool) -> i64;
+}
 
 pub(crate) const PRIORITY_USER_SEND: u8 = 0;
 pub(crate) const PRIORITY_INTERACTIVE: u8 = 1;
@@ -44,7 +55,7 @@ struct QueueItem {
 pub struct ApiQueue {
     items: Mutex<Vec<QueueItem>>,
     stats: ApiQueueStats,
-    limiter: Arc<HsRateLimiter>,
+    limiter: Arc<dyn QueueRateLimiter>,
     concurrency: AtomicUsize,
     seq: AtomicU64,
     timer_armed: AtomicBool,
@@ -52,7 +63,7 @@ pub struct ApiQueue {
 }
 
 impl ApiQueue {
-    pub fn new(limiter: Arc<HsRateLimiter>, concurrency: usize) -> Arc<Self> {
+    pub fn new(limiter: Arc<dyn QueueRateLimiter>, concurrency: usize) -> Arc<Self> {
         let q = Arc::new(Self {
             items: Mutex::new(Vec::new()),
             stats: ApiQueueStats::default(),
