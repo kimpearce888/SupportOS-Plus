@@ -393,7 +393,7 @@ impl InboxPage {
         if !self.list_loaded {
             self.reload_list(db);
         }
-        if self.selected.is_some() && self.detail.is_none() {
+        if self.selected.is_some() && self.detail.is_none() && self.detail_error.is_none() {
             self.reload_detail(db);
         }
     }
@@ -453,10 +453,18 @@ impl InboxPage {
                 self.detail_error = None;
             }
             Some(Ok(None)) => {
+                // AU2-6: terminal state — the conversation row is gone (deleted).
+                // Keeping `selected` here would re-query every frame forever.
                 self.detail = None;
                 self.detail_error = None;
+                self.selected = None;
+                self.assign_pick = None;
+                self.set_status_message("Conversation not found — it may have been deleted.", true);
             }
             Some(Err(e)) => {
+                // AU2-6: keep the error sticky (with the ensure_loaded gate) so a
+                // persistent read failure cannot spin the query every frame; the
+                // user retries by clicking the conversation again.
                 self.detail = None;
                 self.detail_error = Some(e.to_string());
             }
@@ -706,6 +714,7 @@ impl InboxPage {
         }
         self.selected = Some(id);
         if switching {
+            self.assign_pick = None;
             if let Some(stash) = self.drafts.get(&id).cloned() {
                 self.composer_mode = stash.mode;
                 self.composer_body = stash.body;
@@ -723,6 +732,11 @@ impl InboxPage {
         self.status_message = None;
         self.status_message_at = None;
         self.pending_ai = None;
+        // AU2-4: the body was replaced from the stash (or cleared) — the caret
+        // captured for @-mentions pointed into the previous draft and must not
+        // survive the switch (stale byte offsets can land mid-char → panic).
+        self.mention_caret = 0;
+        self.mention_active = 0;
         self.coaching_review = None;
         self.qa_review = None;
         self.assistant_session = None;
@@ -1829,6 +1843,9 @@ impl InboxPage {
                     self.composer_mode = ComposerMode::Reply;
                     self.inserted_draft = None;
                     self.composer_body = report.suggested_reply.clone();
+                    // AU2-4: out-of-band body replacement — stale mention caret.
+                    self.mention_caret = 0;
+                    self.mention_active = 0;
                     self.draft_saved = false;
                 }
                 ui.add_space(design::scale::space::SP2);
@@ -1845,6 +1862,9 @@ impl InboxPage {
                             self.composer_mode = ComposerMode::Reply;
                             self.inserted_draft = Some((draft_id, draft.clone()));
                             self.composer_body = draft.clone();
+                            // AU2-4: out-of-band body replacement — stale mention caret.
+                            self.mention_caret = 0;
+                            self.mention_active = 0;
                             self.draft_saved = false;
                         }
                         Some(1) => {
@@ -2001,6 +2021,9 @@ impl InboxPage {
         {
             self.inserted_draft = Some((draft_id, draft.clone()));
             self.composer_body = draft;
+            // AU2-4: out-of-band body replacement — stale mention caret.
+            self.mention_caret = 0;
+            self.mention_active = 0;
             self.set_status_message("Latest AI draft inserted — review before sending.", false);
         } else if let Some(text) = self.copilot.as_ref().map(|r| r.suggested_reply.clone()) {
             if text.trim().is_empty() {
@@ -2009,6 +2032,9 @@ impl InboxPage {
             }
             self.inserted_draft = None;
             self.composer_body = text;
+            // AU2-4: out-of-band body replacement — stale mention caret.
+            self.mention_caret = 0;
+            self.mention_active = 0;
             self.set_status_message("Suggested reply inserted — review before sending.", false);
         } else {
             self.set_status_message(
@@ -2078,6 +2104,9 @@ impl InboxPage {
                         match result {
                             Some(text) if !text.trim().is_empty() => {
                                 self.composer_body = text;
+                                // AU2-4: out-of-band body replacement — stale mention caret.
+                                self.mention_caret = 0;
+                                self.mention_active = 0;
                                 self.set_status_message(
                                     "Composer updated by the AI transform.",
                                     false,
@@ -2351,6 +2380,9 @@ impl InboxPage {
                 if let Some((_, text)) = self.saved_replies.get(index) {
                     let text = text.clone();
                     self.composer_edited(text);
+                    // AU2-4: out-of-band body replacement — stale mention caret.
+                    self.mention_caret = 0;
+                    self.mention_active = 0;
                     self.draft_saved = true;
                 }
             }
@@ -2401,6 +2433,10 @@ impl InboxPage {
                                 let completed =
                                     apply_completion(&body, start, token, self.mention_caret);
                                 self.composer_body = completed;
+                                // AU2-4: the @-token was consumed — drop the caret
+                                // so the popup closes and no stale offset survives.
+                                self.mention_caret = 0;
+                                self.mention_active = 0;
                             }
                         }
                     });
@@ -2415,6 +2451,10 @@ impl InboxPage {
                 {
                     let completed = apply_completion(&body, start, token, self.mention_caret);
                     self.composer_body = completed;
+                    // AU2-4: the @-token was consumed — drop the caret
+                    // so the popup closes and no stale offset survives.
+                    self.mention_caret = 0;
+                    self.mention_active = 0;
                 }
             }
         }

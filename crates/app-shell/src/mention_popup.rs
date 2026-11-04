@@ -46,9 +46,25 @@ impl Directory {
     }
 }
 
+/// Snap a byte offset down to the nearest `char_boundary` of `value`.
+///
+/// A caret captured from a previous draft state can point into the middle of a
+/// multi-byte char after an out-of-band body replacement (saved-reply insert,
+/// AI draft insert, AI transform); slicing at such an offset would panic.
+/// Snapping to the floor boundary keeps every downstream slice total.
 #[must_use]
+pub(crate) fn floor_char_boundary(value: &str, mut idx: usize) -> usize {
+    if idx >= value.len() {
+        return value.len();
+    }
+    while idx > 0 && !value.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
 pub(crate) fn caret_query(value: &str, caret: usize) -> Option<(String, usize)> {
-    let upto = &value[..caret.min(value.len())];
+    let upto = &value[..floor_char_boundary(value, caret)];
     let mut idx = None;
     for (i, ch) in upto.char_indices().rev() {
         if ch == '@' {
@@ -91,7 +107,8 @@ pub(crate) fn filter_matches(dir: &Directory, query: &str) -> Vec<MentionEntry> 
 
 #[must_use]
 pub(crate) fn apply_completion(value: &str, start: usize, token: &str, caret: usize) -> String {
-    let caret = caret.min(value.len());
+    let start = floor_char_boundary(value, start.min(value.len()));
+    let caret = floor_char_boundary(value, caret.min(value.len()));
     let after = &value[caret..];
     let sep = if after.is_empty() || after.starts_with(' ') {
         ""

@@ -61,6 +61,18 @@ pub fn enqueue_on(
     Ok(conn.last_insert_rowid())
 }
 
+/// True when at least one queued (not yet claimed) job of `kind` exists on `queue`.
+/// Used by UI callers to coalesce repeated triggers (e.g. per-keystroke commits).
+pub fn has_pending(conn: &Connection, queue: &str, kind: &str) -> Result<bool> {
+    ensure_jobs_table(conn)?;
+    let pending: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM jobs WHERE queue = ?1 AND type = ?2 AND status = 'queued'",
+        params![queue, kind],
+        |r| r.get(0),
+    )?;
+    Ok(pending > 0)
+}
+
 pub(crate) fn claim_next(conn: &mut Connection, queue: Option<&str>) -> Result<Option<ClaimedJob>> {
     let tx = conn.transaction()?;
     type ClaimRow = (i64, String, String, i64);

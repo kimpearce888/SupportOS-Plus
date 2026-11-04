@@ -23,6 +23,14 @@ pub struct OrganizationsPage {
 }
 
 impl OrganizationsPage {
+    /// AU2-9: replace the click-time "syncing…" note with the completion
+    /// outcome (the note used to stick forever once set).
+    pub(crate) fn sync_finished(&mut self, outcome: &str) {
+        if !self.sync_note.is_empty() {
+            self.sync_note = outcome.to_string();
+        }
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self {

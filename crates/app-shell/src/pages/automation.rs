@@ -8,19 +8,20 @@ use crate::pages::{ConfirmRequest, NavRequest};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TriggerKind {
-    StatusChanged,
-    TagAdded,
-    SlaRisk,
+    NewConversation,
+    CustomerReply,
 }
 
 impl TriggerKind {
-    const ALL: [Self; 3] = [Self::StatusChanged, Self::TagAdded, Self::SlaRisk];
+    // AU2-1/D10: the creation form offers exactly the engine's fire vocabulary.
+    // The legacy M007 triggers (status_changed/tag_added/sla_risk) have no
+    // emitter in program code — offering them created rules that could never fire.
+    const ALL: [Self; 2] = [Self::NewConversation, Self::CustomerReply];
 
     fn label(self) -> &'static str {
         match self {
-            Self::StatusChanged => "Status changed",
-            Self::TagAdded => "Tag added",
-            Self::SlaRisk => "SLA at risk",
+            Self::NewConversation => "New conversation",
+            Self::CustomerReply => "Customer reply",
         }
     }
 }
@@ -31,16 +32,16 @@ enum ActionKind {
     AddTag,
     SendNote,
     ChangeStatus,
-    SetPriority,
 }
 
 impl ActionKind {
-    const ALL: [Self; 5] = [
+    // AU2-1/D10: only actions the engine executes. SetPriority was removed —
+    // the engine has no handler and silently recorded "completed" no-ops.
+    const ALL: [Self; 4] = [
         Self::Assign,
         Self::AddTag,
         Self::SendNote,
         Self::ChangeStatus,
-        Self::SetPriority,
     ];
 
     fn label(self) -> &'static str {
@@ -49,7 +50,6 @@ impl ActionKind {
             Self::AddTag => "Add tag",
             Self::SendNote => "Send note",
             Self::ChangeStatus => "Change status",
-            Self::SetPriority => "Set priority",
         }
     }
 }
@@ -67,6 +67,9 @@ pub(crate) fn trigger_description(trigger: &Trigger) -> String {
         }
         Trigger::TagAdded { tag } => format!("tag '{tag}' added"),
         Trigger::SlaRisk => "SLA at risk".into(),
+        // AU2-1/D10: the engine's fire vocabulary.
+        Trigger::NewConversation => "a new customer conversation starts".into(),
+        Trigger::CustomerReply => "the customer replies on a conversation".into(),
     }
 }
 
@@ -125,15 +128,11 @@ pub struct AutomationPage {
     show_new_rule: bool,
     new_name: String,
     trigger_kind: TriggerKind,
-    trigger_from: String,
-    trigger_to: String,
-    trigger_tag: String,
     action_kind: ActionKind,
     action_assignee: String,
     action_tag: String,
     action_note: String,
     action_status: String,
-    action_priority: String,
     error: Option<String>,
 }
 
@@ -146,16 +145,12 @@ impl AutomationPage {
             approvals: Vec::new(),
             show_new_rule: false,
             new_name: String::new(),
-            trigger_kind: TriggerKind::StatusChanged,
-            trigger_from: String::new(),
-            trigger_to: String::new(),
-            trigger_tag: String::new(),
+            trigger_kind: TriggerKind::CustomerReply,
             action_kind: ActionKind::AddTag,
             action_assignee: String::new(),
             action_tag: String::new(),
             action_note: String::new(),
             action_status: String::new(),
-            action_priority: String::new(),
             error: None,
         }
     }
@@ -195,20 +190,10 @@ impl AutomationPage {
     }
 
     fn form_trigger(&self) -> Result<Trigger, String> {
+        // AU2-1/D10: the creation form offers exactly the engine's vocabulary.
         match self.trigger_kind {
-            TriggerKind::StatusChanged => Ok(Trigger::StatusChanged {
-                from_status: optional(&self.trigger_from),
-                to_status: optional(&self.trigger_to),
-            }),
-            TriggerKind::TagAdded => {
-                if self.trigger_tag.trim().is_empty() {
-                    return Err("tag required for the tag-added trigger".into());
-                }
-                Ok(Trigger::TagAdded {
-                    tag: self.trigger_tag.trim().to_string(),
-                })
-            }
-            TriggerKind::SlaRisk => Ok(Trigger::SlaRisk),
+            TriggerKind::NewConversation => Ok(Trigger::NewConversation),
+            TriggerKind::CustomerReply => Ok(Trigger::CustomerReply),
         }
     }
 
@@ -243,12 +228,6 @@ impl AutomationPage {
             ActionKind::ChangeStatus => {
                 let status = required(&self.action_status, "status")?;
                 Ok(Action::ChangeStatus { new_status: status })
-            }
-            ActionKind::SetPriority => {
-                let priority = required(&self.action_priority, "priority")?;
-                Ok(Action::SetPriority {
-                    new_priority: priority,
-                })
             }
         }
     }
@@ -456,11 +435,11 @@ impl AutomationPage {
                                     .strong()
                                     .color(t.foreground),
                                 );
-                                let human = serde_json::from_str::<spp_core::automation::Action>(
+                                // AU2-1c: rows hold canonical engine actions —
+                                // describe both storage shapes.
+                                let human = spp_core::automation::describe_action_json(
                                     &approval.proposed_action,
-                                )
-                                .map(|a| action_description(&a))
-                                .unwrap_or_else(|_| approval.proposed_action.clone());
+                                );
                                 design::badge(ui, &human, BadgeTone::Neutral);
                                 ui.collapsing("raw proposed action", |ui| {
                                     ui.monospace(&approval.proposed_action);
@@ -526,39 +505,7 @@ impl AutomationPage {
                     }
                 });
                 ui.end_row();
-
-                match self.trigger_kind {
-                    TriggerKind::StatusChanged => {
-                        design::field_label(ui, "from → to:");
-                        ui.horizontal(|ui| {
-                            ui.add_sized(
-                                [100.0, 28.0],
-                                egui::TextEdit::singleline(&mut self.trigger_from)
-                                    .hint_text("from status"),
-                            );
-                            ui.label(
-                                egui::RichText::new("→")
-                                    .size(13.0)
-                                    .color(t.muted_foreground),
-                            );
-                            ui.add_sized(
-                                [100.0, 28.0],
-                                egui::TextEdit::singleline(&mut self.trigger_to)
-                                    .hint_text("to status"),
-                            );
-                        });
-                        ui.end_row();
-                    }
-                    TriggerKind::TagAdded => {
-                        design::field_label(ui, "tag:");
-                        ui.add_sized(
-                            [180.0, 28.0],
-                            egui::TextEdit::singleline(&mut self.trigger_tag).hint_text("tag"),
-                        );
-                        ui.end_row();
-                    }
-                    TriggerKind::SlaRisk => {}
-                }
+                // AU2-1/D10: the engine-vocabulary triggers carry no parameters.
 
                 design::field_label(ui, "action:");
                 ui.horizontal(|ui| {
@@ -606,15 +553,6 @@ impl AutomationPage {
                         );
                         ui.end_row();
                     }
-                    ActionKind::SetPriority => {
-                        design::field_label(ui, "priority:");
-                        ui.add_sized(
-                            [180.0, 28.0],
-                            egui::TextEdit::singleline(&mut self.action_priority)
-                                .hint_text("new priority"),
-                        );
-                        ui.end_row();
-                    }
                 }
             });
             if design::button(ui, "Create Rule", ButtonVariant::Primary).clicked() {
@@ -627,15 +565,6 @@ impl AutomationPage {
 impl Default for AutomationPage {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-fn optional(s: &str) -> Option<String> {
-    let trimmed = s.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
     }
 }
 
@@ -664,8 +593,8 @@ mod tests {
         let db = fixture(Vec::new());
         let mut page = page();
         page.new_name = "Escalate urgent".into();
-        page.trigger_kind = TriggerKind::TagAdded;
-        page.trigger_tag = "urgent".into();
+        // AU2-1/D10: the form now offers the engine's fire vocabulary.
+        page.trigger_kind = TriggerKind::CustomerReply;
         page.action_kind = ActionKind::ChangeStatus;
         page.action_status = "pending".into();
         page.create_rule(&db);
@@ -675,7 +604,10 @@ mod tests {
         let rule = &page.rules[0];
         assert_eq!(rule.name, "Escalate urgent");
         assert!(rule.enabled);
-        assert_eq!(trigger_description(&rule.trigger), "tag 'urgent' added");
+        assert_eq!(
+            trigger_description(&rule.trigger),
+            "the customer replies on a conversation"
+        );
         assert_eq!(action_description(&rule.action), "change status to pending");
 
         let id = rule.id.unwrap_or(0);
@@ -693,8 +625,7 @@ mod tests {
         let db = fixture(Vec::new());
         let mut page = page();
         page.new_name = "Escalate urgent".into();
-        page.trigger_kind = TriggerKind::TagAdded;
-        page.trigger_tag = "urgent".into();
+        page.trigger_kind = TriggerKind::NewConversation;
         page.action_kind = ActionKind::ChangeStatus;
         page.action_status = "pending".into();
         page.create_rule(&db);
@@ -722,20 +653,21 @@ mod tests {
     fn form_validation_rejects_empty_fields() {
         let mut page = page();
         page.new_name = "Rule".into();
-        page.trigger_kind = TriggerKind::TagAdded;
-        assert!(page.form_trigger().is_err());
-        page.trigger_kind = TriggerKind::SlaRisk;
+        // AU2-1/D10: trigger forms carry no parameters; validation lives on the
+        // action side now. The trigger form always succeeds.
+        assert!(page.form_trigger().is_ok());
         page.action_kind = ActionKind::Assign;
         page.action_assignee = "ada".into();
         assert!(page.form_action().is_err());
         page.action_kind = ActionKind::SendNote;
         assert!(page.form_action().is_err());
+        page.action_note = "  ".into();
+        assert!(page.form_action().is_err());
         page.new_name.clear();
-        page.action_kind = ActionKind::SetPriority;
-        page.action_priority = "urgent".into();
+        page.action_kind = ActionKind::ChangeStatus;
         let db = fixture(Vec::new());
         page.create_rule(&db);
-        assert!(page.error.is_some());
+        assert!(page.error.is_some(), "empty name is rejected");
     }
 
     #[test]

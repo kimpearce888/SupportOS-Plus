@@ -176,7 +176,13 @@ pub struct OperationsPage {
     error: Option<String>,
     library: Option<LibraryModel>,
     pending_confirm: Option<ConfirmRequest>,
+    /// AU2-9: when the snapshot query fails, back off instead of re-querying
+    /// every frame (the old loop hammered SQLite at refresh rate forever).
+    failed_reload_at: Option<std::time::Instant>,
 }
+
+/// AU2-9: cooldown between retries after a failed operations snapshot.
+const RELOAD_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl OperationsPage {
     #[must_use]
@@ -191,6 +197,7 @@ impl OperationsPage {
             error: None,
             library: None,
             pending_confirm: None,
+            failed_reload_at: None,
         }
     }
 
@@ -210,6 +217,7 @@ impl OperationsPage {
         self.workload = None;
         self.suggestions_loaded = false;
         self.suggestions.clear();
+        self.failed_reload_at = None;
         if let Some(library) = &mut self.library {
             library.stale = true;
         }
@@ -229,16 +237,24 @@ impl OperationsPage {
         self.snapshot = snapshot;
         self.workload = workload;
         self.capacity = capacity;
+        // AU2-9: arm the backoff only when the read failed; a successful read
+        // re-arms nothing.
+        self.failed_reload_at = self.snapshot.is_none().then(std::time::Instant::now);
+    }
+
+    fn in_backoff(&self) -> bool {
+        self.failed_reload_at
+            .is_some_and(|at| at.elapsed() < RELOAD_BACKOFF)
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
-        if self.snapshot.is_none() {
+        if self.snapshot.is_none() && !self.in_backoff() {
             self.reload(db);
         }
     }
 
     fn ensure_workload(&mut self, db: &DbHandle) {
-        if self.workload.is_none() {
+        if self.workload.is_none() && !self.in_backoff() {
             self.reload(db);
         }
         if self.workload.is_some() && !self.suggestions_loaded {

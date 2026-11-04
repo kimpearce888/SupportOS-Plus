@@ -4,6 +4,8 @@ use spp_core::search::{SearchFilters, SearchResponse};
 
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
+use crate::pages::NavRequest;
+use crate::palette::href_to_nav;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Scope {
@@ -108,7 +110,7 @@ impl SearchPage {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         design::page_header(
@@ -127,10 +129,11 @@ impl SearchPage {
                 self.query_edit = query;
             }
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (response.lost_focus()
-                && design::button(ui, "search", ButtonVariant::Primary).clicked())
-                || (response.lost_focus() && enter)
-            {
+            // AU2-3: the search button must render on every frame (it used to sit
+            // behind a `lost_focus() &&` short-circuit, so it only existed during
+            // the single frame the text field lost focus).
+            let search_clicked = design::button(ui, "search", ButtonVariant::Primary).clicked();
+            if search_clicked || (response.lost_focus() && enter) {
                 self.query = self.query_edit.clone();
                 self.response = None;
                 self.error = None;
@@ -158,7 +161,7 @@ impl SearchPage {
 
         if let Some(err) = &self.error {
             design::error_text(ui, &format!("error: {err}"));
-            return;
+            return None;
         }
         let Some(response) = &self.response else {
             if self.query.is_empty() {
@@ -178,7 +181,7 @@ impl SearchPage {
             } else {
                 ui.spinner();
             }
-            return;
+            return None;
         };
 
         design::hint_text(
@@ -205,12 +208,13 @@ impl SearchPage {
                 "(no matches)",
                 "Nothing matched this query in the selected scope.",
             );
-            return;
+            return None;
         }
         let hits = response.hits.clone();
+        let mut nav: Option<NavRequest> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for hit in &hits {
-                design::card(ui, |ui| {
+                let inner = design::card(ui, |ui| {
                     ui.horizontal(|ui| {
                         design::badge(ui, hit.scope.as_str(), BadgeTone::Neutral);
                         ui.monospace(
@@ -245,8 +249,23 @@ impl SearchPage {
                         design::hint_text(ui, hit.snippet.as_str());
                     }
                 });
+                // AU2-7: hit cards are clickable and carry the record id through
+                // the same href→nav mapping the command palette uses. The interact
+                // id derives from the card frame's stable response id.
+                let hit_response = ui.interact(
+                    inner.response.rect,
+                    inner.response.id.with("open-hit"),
+                    egui::Sense::click(),
+                );
+                if hit_response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if hit_response.clicked() {
+                    nav = href_to_nav(&hit.href);
+                }
             }
         });
+        nav
     }
 }
 

@@ -351,3 +351,34 @@ issued).
   `[m` swallow); bytes verified with od; not an anomaly.
 - **Findings land in plan.md as Batch AU-2 items**; fixes are subsequent batches per
   rule.md (ten at a time, owner says continue).
+
+## D10 — AU2-1 automation vocabulary + approval model (owner-decision gate taken in-code, 2026-11-04)
+
+The AU2-1 item carries an owner decision (intended trigger vocabulary + approval
+model). Per the owner's standing fix directive ("fix every broken feature") and the
+batch opener, the decision is taken in-code this batch and recorded here.
+
+- **Trigger vocabulary = the engine's fire vocabulary: `new_conversation` and
+  `customer_reply`.** These are the only automation triggers the program actually
+  emits (workers/execute.rs customer-thread detector → fire_trigger_for_conversation).
+  The three legacy M007 triggers (`status_changed` / `tag_added` / `sla_risk`) have no
+  emitter anywhere in program code, so rules with those triggers could never fire —
+  that mismatch was break (a). They remain parseable (stored rules keep loading) but
+  are removed from the creation form so no new never-firing rule can be created.
+- **Action vocabulary = the engine's executable kinds.** UI creation keeps Assign
+  (→ engine `assign`, `params.userId`), AddTag (→ `add_tag`, `params.tag`), Change
+  Status (→ `set_status`, `params.status`), Send Note (→ new `send_note` engine
+  handler posting an internal Help Scout note via the outbound `create_note` lane,
+  tiered higher_risk). SetPriority is removed from the form: no engine handler exists
+  (it silently recorded "completed" while doing nothing).
+- **Action shapes: the engine now accepts both stored generations.** A
+  canonicalization step at fire time maps the M007 single object (`create_rule`'s
+  shape, top-level fields) and the engine-native array of `{kind, params}` into one
+  canonical form — break (b) was that only the array shape executed.
+- **Approval model = human-in-the-loop over the parked-job machinery.** An action
+  that needs approval parks its job (`awaiting_approval`) AND inserts an
+  `automation_approvals` row (new `job_id` column) — break (c) was that the approvals
+  card read a table nothing inserted into. `approve()` flips the status and requeues
+  the parked job with `approved:true` (the existing worker branch then executes the
+  action and records the run); `reject()` flips the status and deletes the parked job.
+- Evidence base: program code only (D9 policy), HEAD daff746.

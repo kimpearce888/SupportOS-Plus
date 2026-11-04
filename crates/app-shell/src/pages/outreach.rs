@@ -540,33 +540,45 @@ impl OutreachPage {
         };
         let t = design::tokens(ui);
         design::card_titled(ui, "Campaign report", None, |ui| {
+            // AU2-10: the core nests the counters under `totals`
+            // (outreach::campaign_report) — the reader used to look for
+            // top-level keys and rendered zeros for every row.
+            let totals = report.get("totals");
+            let f64_or_dash = |v: Option<&serde_json::Value>| -> String {
+                match v.and_then(|f| f.as_f64()) {
+                    Some(n) => format!("{n}"),
+                    None => "—".to_string(),
+                }
+            };
             design::form_grid(ui, "outreach-report", |ui| {
                 for key in [
-                    "total",
+                    "recipients",
                     "sent",
                     "failed",
                     "skipped",
+                    "cancelled",
                     "replied",
                     "unknown",
-                    "remaining",
                 ] {
                     design::field_label(ui, key);
-                    ui.monospace(
-                        egui::RichText::new(i64_field(&report, key).to_string())
-                            .color(t.foreground),
-                    );
+                    let value = totals
+                        .and_then(|t| t.get(key))
+                        .and_then(|f| f.as_i64())
+                        .unwrap_or(0);
+                    ui.monospace(egui::RichText::new(value.to_string()).color(t.foreground));
                     ui.end_row();
                 }
+                design::field_label(ui, "reply_rate");
+                ui.monospace(
+                    egui::RichText::new(f64_or_dash(totals.and_then(|t| t.get("reply_rate"))))
+                        .color(t.foreground),
+                );
+                ui.end_row();
             });
             ui.add_space(4.0);
-            design::callout(
-                ui,
-                CalloutRole::Warn,
-                "The report panel reads top-level keys while the core nests \
-                 them under totals (outreach.rs:1336) — every row renders \
-                 0. Data-layer bug, out of reskin scope; documented, not \
-                 fixed here.",
-            );
+            if let Some(note) = report.get("note").and_then(|n| n.as_str()) {
+                design::callout(ui, CalloutRole::Neutral, note);
+            }
         });
     }
 

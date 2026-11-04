@@ -265,9 +265,10 @@ fn topic_facts(conn: &Connection) -> Value {
         .unwrap_or_default();
     let tags: Vec<Value> = conn
         .prepare(
-            "SELECT t.tag, COUNT(*) AS uses
-               FROM conversation_tags t
-              GROUP BY t.tag ORDER BY uses DESC LIMIT 8",
+            "SELECT t.name AS tag, COUNT(*) AS uses
+               FROM conversation_tags ct
+               JOIN tags t ON t.id = ct.tag_id
+              GROUP BY t.name ORDER BY uses DESC LIMIT 8",
         )
         .and_then(|mut stmt| {
             stmt.query_map([], |r| {

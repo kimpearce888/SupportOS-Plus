@@ -43,6 +43,10 @@ pub enum Trigger {
         tag: String,
     },
     SlaRisk,
+    /// AU2-1/D10: a conversation appears that the customer started.
+    NewConversation,
+    /// AU2-1/D10: the customer replies on an existing conversation.
+    CustomerReply,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,7 +165,50 @@ pub fn approve(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> 
          WHERE id = ?2 AND status = 'pending'",
         params![decided_by_user_id, approval_id],
     )?;
-    Ok(rows > 0)
+    if rows == 0 {
+        return Ok(false);
+    }
+    // AU2-1c: an approval must DO something — requeue the parked job with
+    // approved:true; the worker branch then executes the action and records
+    // the approved run. (Previously approve() only flipped a status while the
+    // parked job stayed parked forever.)
+    let job_id: Option<i64> = conn.query_row(
+        "SELECT job_id FROM automation_approvals WHERE id = ?1",
+        params![approval_id],
+        |r| r.get(0),
+    )?;
+    if let Some(job_id) = job_id {
+        requeue_awaiting_job(conn, job_id)?;
+    }
+    Ok(true)
+}
+
+/// Requeue a parked `automation_action_awaiting_approval` job with
+/// `approved:true`. Returns Ok(None) when the job is not parked (already
+/// handled, deleted, or unknown) — the approval status flip still stands.
+fn requeue_awaiting_job(conn: &Connection, job_id: i64) -> Result<Option<()>> {
+    let payload: Option<String> = conn
+        .query_row(
+            "SELECT payload FROM jobs
+              WHERE id = ?1 AND status = 'awaiting_approval'",
+            params![job_id],
+            |r| r.get(0),
+        )
+        .ok();
+    let Some(raw) = payload else {
+        return Ok(None);
+    };
+    let mut payload: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| crate::error::Error::Config(format!("approval payload unparsable: {e}")))?;
+    payload["approved"] = serde_json::Value::Bool(true);
+    conn.execute(
+        "UPDATE jobs
+            SET status = 'queued', payload = ?2, run_at = datetime('now'),
+                locked_by = NULL, locked_at = NULL
+          WHERE id = ?1 AND status = 'awaiting_approval'",
+        params![job_id, payload.to_string()],
+    )?;
+    Ok(Some(()))
 }
 
 pub fn reject(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> Result<bool> {
@@ -172,7 +219,22 @@ pub fn reject(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> R
          WHERE id = ?2 AND status = 'pending'",
         params![decided_by_user_id, approval_id],
     )?;
-    Ok(rows > 0)
+    if rows == 0 {
+        return Ok(false);
+    }
+    // AU2-1c: a rejected action's parked job must not linger forever.
+    let job_id: Option<i64> = conn.query_row(
+        "SELECT job_id FROM automation_approvals WHERE id = ?1",
+        params![approval_id],
+        |r| r.get(0),
+    )?;
+    if let Some(job_id) = job_id {
+        conn.execute(
+            "DELETE FROM jobs WHERE id = ?1 AND status = 'awaiting_approval'",
+            params![job_id],
+        )?;
+    }
+    Ok(true)
 }
 
 #[must_use]
@@ -182,7 +244,8 @@ pub(crate) fn risk_tier(kind: &str) -> Option<&'static str> {
         "create_ai_note" | "create_ai_draft" | "add_tag" | "manual_review_queue" => {
             Some("non_destructive")
         }
-        "set_status" | "assign" => Some("higher_risk"),
+        // AU2-1/D10: posting a note to Help Scout is an external write.
+        "set_status" | "assign" | "send_note" => Some("higher_risk"),
         _ => None,
     }
 }
@@ -204,7 +267,9 @@ pub(crate) fn ensure_main_rule_columns(conn: &Connection) -> Result<()> {
     add_column_if_missing(conn, "automation_rules", "last_run_at", "TEXT")?;
     add_column_if_missing(conn, "automation_rules", "run_count", "INTEGER DEFAULT 0")?;
     crate::intelligence_features::apply_m035(conn)?;
-    add_column_if_missing(conn, "automation_runs", "detail", "TEXT")
+    add_column_if_missing(conn, "automation_runs", "detail", "TEXT")?;
+    // AU2-1c: the approvals row remembers which parked job to requeue.
+    add_column_if_missing(conn, "automation_approvals", "job_id", "INTEGER")
 }
 
 pub(crate) fn apply_m060_automation_once_guard(conn: &Connection) -> Result<()> {
@@ -266,6 +331,8 @@ fn parse_trigger_json(raw: &str) -> Result<String> {
             Trigger::StatusChanged { .. } => "status_changed".to_string(),
             Trigger::TagAdded { .. } => "tag_added".to_string(),
             Trigger::SlaRisk => "sla_risk".to_string(),
+            Trigger::NewConversation => "new_conversation".to_string(),
+            Trigger::CustomerReply => "customer_reply".to_string(),
         });
     }
     Err(crate::error::Error::Config(format!(
@@ -337,7 +404,7 @@ fn enqueue_awaiting_approval(
         "conversationId": conversation_id,
         "action": action,
     });
-    crate::jobs::enqueue_on(
+    let job_id = crate::jobs::enqueue_on(
         conn,
         "ai",
         "automation_action_awaiting_approval",
@@ -345,7 +412,103 @@ fn enqueue_awaiting_approval(
         2,
         1,
     )?;
+    // AU2-1c: surface the parked action in the approvals queue — the approvals
+    // card reads `automation_approvals`, which nothing inserted into before
+    // (the two historical INSERT sites were #[test]-gated only).
+    conn.execute(
+        "INSERT INTO automation_approvals
+            (rule_id, conversation_id, proposed_action_json, status, job_id)
+         VALUES (?1, ?2, ?3, 'pending', ?4)",
+        params![rule_id, conversation_id, action.to_string(), job_id],
+    )?;
     Ok(())
+}
+
+/// Canonicalize a rule's stored actions into the engine-native shape
+/// `{"kind": <str>, "params": <object>}`.
+///
+/// AU2-1b: two storage generations exist — `create_rule` stores a single M007
+/// enum object with top-level fields (`{"kind":"assign","assignee_remote_id":N}`),
+/// while the engine only executed the array shape (`[{"kind":"...","params":{...}}]`),
+/// so UI-created rules never ran. Both shapes are accepted here; kinds the
+/// engine cannot execute are dropped (the caller records them as skipped).
+#[must_use]
+pub(crate) fn canonical_actions(actions: &serde_json::Value) -> Vec<serde_json::Value> {
+    let items: Vec<serde_json::Value> = match actions {
+        serde_json::Value::Array(items) => items.clone(),
+        item @ serde_json::Value::Object(_) => vec![item.clone()],
+        _ => Vec::new(),
+    };
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let kind = item.get("kind").and_then(|k| k.as_str())?;
+            // Normalize the M007 kind names to the engine vocabulary.
+            let kind = match kind {
+                "change_status" => "set_status",
+                other => other,
+            };
+            let params = if item.get("params").is_some_and(|p| p.is_object()) {
+                item.get("params").cloned().unwrap_or_default()
+            } else {
+                // M007 shape: lift the variant's top-level fields into params.
+                match kind {
+                    "assign" => serde_json::json!({
+                        "userId": item.get("assignee_remote_id")
+                            .or_else(|| item.get("userId"))?
+                    }),
+                    "add_tag" => serde_json::json!({ "tag": item.get("tag")? }),
+                    "set_status" => serde_json::json!({
+                        "status": item.get("new_status")
+                            .or_else(|| item.get("status"))?
+                    }),
+                    "send_note" => serde_json::json!({
+                        "text": item.get("body").or_else(|| item.get("text"))?
+                    }),
+                    _ => serde_json::Value::Object(serde_json::Map::new()),
+                }
+            };
+            Some(serde_json::json!({ "kind": kind, "params": params }))
+        })
+        .collect()
+}
+
+/// Human-readable description of a stored action in either shape — used by the
+/// approvals card, whose rows hold canonical engine actions.
+#[must_use]
+pub fn describe_action_json(raw: &str) -> String {
+    let parsed: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return raw.to_string(),
+    };
+    let Some(action) = canonical_actions(&parsed).into_iter().next() else {
+        return raw.to_string();
+    };
+    let kind = action.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+    let params = action.get("params").cloned().unwrap_or_default();
+    let detail = |key: &str| -> String {
+        params
+            .get(key)
+            .and_then(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .or_else(|| v.as_i64().map(|n| n.to_string()))
+            })
+            .unwrap_or_default()
+    };
+    match kind {
+        "assign" => format!("assign to user #{}", detail("userId")),
+        "add_tag" => format!("add tag '{}'", detail("tag")),
+        "set_status" => format!("change status to {}", detail("status")),
+        "send_note" => format!("post note '{}'", detail("text")),
+        "create_ai_note" => "queue an AI note".to_string(),
+        "create_ai_draft" => "queue an AI draft".to_string(),
+        "manual_review_queue" => "queue for manual review".to_string(),
+        "analyze_ticket" => "analyze the ticket".to_string(),
+        "search_similar" => "search similar conversations".to_string(),
+        "check_known_issues" => "check known issues".to_string(),
+        other => format!("action {other}"),
+    }
 }
 
 fn execute_non_destructive(
@@ -410,6 +573,29 @@ fn execute_non_destructive(
                 "UPDATE conversations SET is_unread = 1 WHERE id = ?1",
                 params![conversation_id],
             )?;
+            Ok(true)
+        }
+        // AU2-1/D10: a static internal note via the outbound create_note lane
+        // (Help Scout notes are internal — not visible to customers).
+        "send_note" => {
+            if let Some(text) = params.get("text").and_then(|t| t.as_str())
+                && !text.trim().is_empty()
+            {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                crate::conversation_ops::create_outbound_job_keyed(
+                    conn,
+                    "create_note",
+                    &serde_json::json!({
+                        "conversationId": conversation_id,
+                        "text": text,
+                    }),
+                    Some(conversation_id),
+                    Some(&format!("automation_note_{conversation_id}_{stamp}")),
+                )?;
+            }
             Ok(true)
         }
         _ => Ok(true),
@@ -827,46 +1013,41 @@ pub(crate) fn fire_trigger_for_conversation(
             )?;
             continue;
         }
-        if let Some(actions) = rule.actions.as_array() {
-            for action in actions {
-                let kind = action
-                    .get("kind")
-                    .and_then(|k| k.as_str())
-                    .unwrap_or_default();
-                let params = action
-                    .get("params")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-                let tier = risk_tier(kind).unwrap_or("read");
-                match tier {
-                    "read" => {
-                        if kind == "analyze_ticket" {
-                            if ai_enabled {
-                                let _ = crate::jobs::enqueue_on(
-                                    conn,
-                                    "ai",
-                                    "analyze_ticket",
-                                    &format!("{{\"conversationId\":{conversation_id}}}"),
-                                    3,
-                                    2,
-                                );
-                                record_run(
-                                    conn,
-                                    rule.id,
-                                    Some(conversation_id),
-                                    "completed",
-                                    &format!("Executed read action {kind}"),
-                                )?;
-                            } else {
-                                record_run(
-                                    conn,
-                                    rule.id,
-                                    Some(conversation_id),
-                                    "skipped",
-                                    "AI action analyze_ticket skipped: AI is disabled",
-                                )?;
-                            }
-                        } else {
+        // AU2-1b: canonicalize both stored action shapes (M007 single object
+        // and engine-native array) before dispatching.
+        for action in canonical_actions(&rule.actions) {
+            let kind = action
+                .get("kind")
+                .and_then(|k| k.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let params = action
+                .get("params")
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+            let Some(tier) = risk_tier(&kind) else {
+                record_run(
+                    conn,
+                    rule.id,
+                    Some(conversation_id),
+                    "skipped",
+                    &format!("Action {kind} has no engine handler — skipped"),
+                )?;
+                continue;
+            };
+            let kind = kind.as_str();
+            match tier {
+                "read" => {
+                    if kind == "analyze_ticket" {
+                        if ai_enabled {
+                            let _ = crate::jobs::enqueue_on(
+                                conn,
+                                "ai",
+                                "analyze_ticket",
+                                &format!("{{\"conversationId\":{conversation_id}}}"),
+                                3,
+                                2,
+                            );
                             record_run(
                                 conn,
                                 rule.id,
@@ -874,58 +1055,72 @@ pub(crate) fn fire_trigger_for_conversation(
                                 "completed",
                                 &format!("Executed read action {kind}"),
                             )?;
-                        }
-                    }
-                    "non_destructive" => {
-                        if rule.requires_approval && !write_enabled {
-                            enqueue_awaiting_approval(conn, rule.id, conversation_id, action)?;
+                        } else {
                             record_run(
                                 conn,
                                 rule.id,
                                 Some(conversation_id),
-                                "awaiting_approval",
-                                &format!("Action {kind} requires approval (non-destructive)"),
+                                "skipped",
+                                "AI action analyze_ticket skipped: AI is disabled",
                             )?;
-                        } else {
-                            let executed = execute_non_destructive(
-                                conn,
-                                kind,
-                                &params,
-                                conversation_id,
-                                ai_enabled,
-                            )?;
-                            if !executed {
-                                record_run(
-                                    conn,
-                                    rule.id,
-                                    Some(conversation_id),
-                                    "skipped",
-                                    &format!("AI action {kind} skipped: AI is disabled"),
-                                )?;
-                            }
-                            if executed {
-                                record_run(
-                                    conn,
-                                    rule.id,
-                                    Some(conversation_id),
-                                    "completed",
-                                    &format!("Executed {kind}"),
-                                )?;
-                            }
                         }
+                    } else {
+                        record_run(
+                            conn,
+                            rule.id,
+                            Some(conversation_id),
+                            "completed",
+                            &format!("Executed read action {kind}"),
+                        )?;
                     }
-                    _ => {
-                        enqueue_awaiting_approval(conn, rule.id, conversation_id, action)?;
+                }
+                "non_destructive" => {
+                    if rule.requires_approval && !write_enabled {
+                        enqueue_awaiting_approval(conn, rule.id, conversation_id, &action)?;
                         record_run(
                             conn,
                             rule.id,
                             Some(conversation_id),
                             "awaiting_approval",
-                            &format!(
-                                "Action {kind} is a write action and requires explicit approval"
-                            ),
+                            &format!("Action {kind} requires approval (non-destructive)"),
                         )?;
+                    } else {
+                        let executed = execute_non_destructive(
+                            conn,
+                            kind,
+                            &params,
+                            conversation_id,
+                            ai_enabled,
+                        )?;
+                        if !executed {
+                            record_run(
+                                conn,
+                                rule.id,
+                                Some(conversation_id),
+                                "skipped",
+                                &format!("AI action {kind} skipped: AI is disabled"),
+                            )?;
+                        }
+                        if executed {
+                            record_run(
+                                conn,
+                                rule.id,
+                                Some(conversation_id),
+                                "completed",
+                                &format!("Executed {kind}"),
+                            )?;
+                        }
                     }
+                }
+                _ => {
+                    enqueue_awaiting_approval(conn, rule.id, conversation_id, &action)?;
+                    record_run(
+                        conn,
+                        rule.id,
+                        Some(conversation_id),
+                        "awaiting_approval",
+                        &format!("Action {kind} is a write action and requires explicit approval"),
+                    )?;
                 }
             }
         }

@@ -396,8 +396,9 @@ impl KnowledgePage {
         match run_file_import(db, &dir, file) {
             Ok(n) => {
                 self.status_message = Some(format!("Imported {n} document(s) from file."));
-                self.documents.clear();
-                self.sources.clear();
+                // AU2-5: refetch instead of clearing under a true `loaded` latch
+                // (the table would otherwise blank until the next bus event).
+                self.reload_all(db);
             }
             Err(e) => self.error = Some(format!("Import failed: {e}")),
         }
@@ -416,8 +417,8 @@ impl KnowledgePage {
                 self.status_message = Some(format!("Imported {n} document(s)."));
                 self.import.title.clear();
                 self.import.content.clear();
-                self.documents.clear();
-                self.sources.clear();
+                // AU2-5: refetch instead of clearing under a true `loaded` latch.
+                self.reload_all(db);
             }
             Err(e) => self.error = Some(format!("Import failed: {e}")),
         }
@@ -468,23 +469,28 @@ impl KnowledgePage {
     }
 
     pub(crate) fn mark_reviewed(&mut self, db: &DbHandle, id: i64) {
-        let ok = db.with_read(|conn| spp_core::knowledge_store::mark_reviewed(conn, id));
+        // AU2-5: this is an UPDATE — it belongs on the serialized write lane,
+        // not on a pooled reader connection (SQLITE_BUSY-prone otherwise).
+        let ok = db.with_write(|conn| spp_core::knowledge_store::mark_reviewed(conn, id));
         self.status_message = Some(match ok {
             Ok(true) => format!("Document {id} marked reviewed."),
             Ok(false) => format!("Document {id} not found."),
             Err(e) => format!("Could not mark reviewed: {e}"),
         });
-        self.documents.clear();
+        // AU2-5: explicit refetch — clearing the vectors while `loaded` stays
+        // true blanked the table until the next unrelated bus event.
+        self.reload_all(db);
     }
 
     pub(crate) fn mark_verified(&mut self, db: &DbHandle, id: i64) {
-        let ok = db.with_read(|conn| spp_core::knowledge_store::mark_verified(conn, id));
+        // AU2-5: write lane (see mark_reviewed).
+        let ok = db.with_write(|conn| spp_core::knowledge_store::mark_verified(conn, id));
         self.status_message = Some(match ok {
             Ok(true) => format!("Document {id} marked verified."),
             Ok(false) => format!("Document {id} not found."),
             Err(e) => format!("Could not mark verified: {e}"),
         });
-        self.documents.clear();
+        self.reload_all(db);
     }
 
     pub(crate) fn delete_document(&mut self, db: &DbHandle, id: i64) -> spp_core::Result<()> {
@@ -503,7 +509,7 @@ impl KnowledgePage {
             Ok::<_, spp_core::error::Error>(removed)
         })?;
         self.status_message = Some(format!("Document {id} deleted."));
-        self.documents.clear();
+        self.reload_all(db);
         Ok(())
     }
 
@@ -610,6 +616,22 @@ impl KnowledgePage {
     pub(crate) fn open_article(&mut self, db: &DbHandle, id: i64) {
         self.reader = Some(id);
         self.reader_text = db.with_read(|conn| article_detail(conn, id));
+    }
+
+    /// Deep link `/knowledge?doc={id}`: land on the Documents tab (the document
+    /// list is the record view for knowledge_documents — there is no per-document
+    /// reader on that tab).
+    pub(crate) fn go_to_documents(&mut self, _id: i64) {
+        self.tab = Tab::Documents;
+        self.reader = None;
+        self.reader_text = None;
+    }
+
+    /// Deep link `/knowledge/help-center/{id}`: land on the Help Center tab with
+    /// the article reader open.
+    pub(crate) fn open_help_article(&mut self, db: &DbHandle, id: i64) {
+        self.tab = Tab::HelpCenter;
+        self.open_article(db, id);
     }
 
     pub fn ui(

@@ -287,6 +287,11 @@ impl IssueRadarPage {
         }
     }
 
+    /// Deep link `/issues?tab=known`: land on the Known tab.
+    pub(crate) fn open_known_tab(&mut self) {
+        self.tab = Tab::Known;
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 

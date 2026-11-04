@@ -247,6 +247,16 @@ pub enum NavRequest {
     InboxTile(String),
     Page(PageKey),
     Confirm(ConfirmRequest),
+    /// Deep link `/inbox/conversation/{id}` — open Inbox on that conversation.
+    OpenConversation(i64),
+    /// Deep link `/customers/{id}` — open the customer profile panel.
+    OpenCustomer(i64),
+    /// Deep link `/knowledge?doc={id}` — open Knowledge on the documents list.
+    OpenKnowledgeDoc(i64),
+    /// Deep link `/knowledge/help-center/{id}` — open the help-center article reader.
+    OpenHelpArticle(i64),
+    /// Deep link `/issues?tab=known` — open Issue Radar on the Known tab.
+    OpenKnownIssues,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

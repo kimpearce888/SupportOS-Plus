@@ -6576,3 +6576,89 @@ notification_sweep beyond approvals. These carry forward as standing risk, not o
 fix batches (ten at a time per rule.md, on the owner's `continue`).
 
 **Engagement state:** Batch AU-1 complete; ledger synced; Rule 8 STOP.
+## Batch AU-2 — confirmed AU-1 findings, fix wave 1 (items AU2-1..AU2-10 completed and verified, 2026-11-04)
+
+Source: Batch AU-1 confirmed findings. Rule 2 move recorded in progress.md (2026-11-04,
+owner `continue`). The AU2-1 owner-decision gate was taken in-code per the standing fix
+directive and recorded as **D10** (decisions.md, 2026-11-04): trigger vocabulary =
+the engine's fire vocabulary (`new_conversation`, `customer_reply`); actions limited to
+engine-executable kinds (SetPriority dropped, `send_note` wired through the outbound
+`create_note` lane at higher_risk); engine canonicalizes both stored action shapes;
+approval model = parked job + `automation_approvals` row, approve() requeues the job
+with `approved:true`, reject() deletes it. Program code only as evidence (D9).
+
+1. **AU2-1 (automation dead end-to-end)** — FIXED at all three breaks.
+   (a) triggers: core `Trigger` gains `NewConversation`/`CustomerReply`
+   (automation.rs; parse_trigger_json maps both), creation form offers exactly those
+   two (pages/automation.rs TriggerKind::ALL); legacy triggers stay parseable, are no
+   longer offered (no emitter exists). (b) action shape: `canonical_actions`
+   (automation.rs) accepts the M007 single object (lifts top-level fields into
+   `params`, normalizes `change_status`→`set_status`) and the engine-native array;
+   fire loop dispatches canonical actions; unknown kinds record an honest
+   "no engine handler — skipped" run instead of a fake "completed".
+   (c) approval loop: `enqueue_awaiting_approval` now ALSO inserts a pending
+   `automation_approvals` row (new `job_id` column via ensure_main_rule_columns);
+   `approve()` flips status and requeues the parked job with `approved:true`
+   (`requeue_awaiting_job`); `reject()` flips status and deletes the parked job; the
+   existing worker branch then executes via `execute_approved_action` and records the
+   approved run. `send_note` executes through `create_outbound_job_keyed("create_note")`.
+2. **AU2-2 (digest top_tags always empty)** — digest.rs topic_facts joins
+   `tags t ON t.id = ct.tag_id` and selects `t.name` (shape proven at
+   issue_impact.rs:150-162); `top_tags` now populated in weekly digests.
+3. **AU2-3 (Search page button unclickable)** — search.rs renders the search button
+   unconditionally (`search_clicked || (lost_focus && enter)`); the old
+   `lost_focus() && button(...)` short-circuit existed only on the one focus-loss frame.
+4. **AU2-4 (mention caret panic risk)** — mention_popup.rs gains
+   `floor_char_boundary`; `caret_query`/`apply_completion` snap stale byte offsets to
+   char boundaries (no more mid-char slice panics); inbox.rs resets
+   `mention_caret`/`mention_active` on every out-of-band body replacement (select
+   stash/clear, copilot insert, LM-draft insert, insert_ai_draft both arms, AI
+   transform, saved-reply insert, Send) and after each @-completion.
+5. **AU2-5 (knowledge read-lane writes + latch blanking)** — mark_reviewed /
+   mark_verified moved to `db.with_write` (serialized writer); mark_reviewed /
+   mark_verified / delete_document / both import paths refetch via `reload_all`
+   instead of clearing vectors under a true `loaded` latch.
+6. **AU2-6 (inbox stale assignee + deleted-selection frame loop)** — select() resets
+   `assign_pick` on switch; reload_detail Ok(None) is terminal (clears selected +
+   assign_pick, sets an explanatory status message); the ensure_loaded refetch gate
+   also honors `detail_error` so persistent read errors cannot spin per-frame.
+7. **AU2-7 (deep links broken three ways)** — NavRequest gains
+   OpenConversation/OpenCustomer/OpenKnowledgeDoc/OpenHelpArticle/OpenKnownIssues;
+   href_to_nav maps bare `/inbox` (saved replies), carries record ids for
+   `/inbox/conversation/{id}`, `/customers/{id}`, `/knowledge?doc={id}`,
+   `/knowledge/help-center/{id}`, `/issues?tab=known`; apply_nav routes each to the
+   page's record view (inbox select, customer open_profile, knowledge
+   go_to_documents/open_help_article, issue radar Known tab); Search hit cards are
+   clickable (interact on the card rect, pointing-hand cursor) and route through the
+   same href_to_nav mapping. Disclosed limitation: `/knowledge?doc={id}` lands on the
+   Documents tab — knowledge_documents have no per-document reader in the program.
+8. **AU2-8 (ai_center role-routing defects)** — the "(unset)" combo row now really
+   clears the role (`roles.set(role, None)`; the old row wrote into a throwaway
+   `None::<usize>`); hub model edits commit per change (lost_focus-only commits were
+   dropped by tab/page switches) with the golden_eval job coalesced via new
+   `jobs::has_pending`; a failed probe runtime posts "probe failed — runtime
+   unavailable" into the slot instead of panicking the thread (mutex-poison
+   tolerant delivery) so "probing…" can no longer stick forever.
+9. **AU2-9 (sync_note stuck + operations spinner loop)** — SyncCompleted updates the
+   note on all four pages (dashboard/customers/organizations/reports `sync_finished`)
+   with the outcome; operations reload arms a 10 s backoff on snapshot failure
+   (`failed_reload_at`), cleared on invalidate/success — no more per-frame re-query.
+10. **AU2-10 (outreach report all zeros)** — report_ui reads `report["totals"]`
+    (recipients/sent/failed/skipped/cancelled/replied/unknown + reply_rate, the
+    producer's real keys) and shows the producer's own data-source note; the
+    self-admitting bug callout is gone.
+
+**Verification (Rule 5)** — all gates re-run at the working tree, all green, all
+matching the v1.9.2 release baseline: `cargo check --workspace --all-targets` clean;
+`cargo fmt --all` applied / `--check` clean; `cargo clippy --workspace --all-targets
+-- -D warnings` zero diagnostics; core lib **452 passed / 0 failed / 3 ignored**;
+app-shell **240 passed / 0 failed**; xtask **11 passed / 0 failed**; catalog no tests;
+core doc-tests **0 / 0**. Local-environment disclosures: 4 GB no-swap sandbox (the
+known LTO link constraint, lto=off user-config for local runs only — repo files
+untouched), one doc-test rerun after /tmp StorageFull (environmental, passed after
+freeing space). No new test code written (owner standing rule); behavior-level
+confidence for the AU2-1 approval loop rests on the existing worker branch
+(execute_approved_action + record_approved_run, covered by core batch19 tests) plus
+the schema/SQL review of the new requeue path recorded here.
+
+Rule 8 STOP — remaining Batch AU-2 items AU2-11..AU2-15 stay queued in plan.md.

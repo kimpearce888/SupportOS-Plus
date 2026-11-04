@@ -213,6 +213,26 @@ impl ShellApp {
             NavRequest::Page(page) => {
                 self.page = page;
             }
+            NavRequest::OpenConversation(id) => {
+                self.page = PageKey::Inbox;
+                self.inbox.select(&self.db, id);
+            }
+            NavRequest::OpenCustomer(id) => {
+                self.page = PageKey::Customers;
+                self.customers.open_profile(&self.db, id);
+            }
+            NavRequest::OpenKnowledgeDoc(id) => {
+                self.page = PageKey::Knowledge;
+                self.knowledge.go_to_documents(id);
+            }
+            NavRequest::OpenHelpArticle(id) => {
+                self.page = PageKey::Knowledge;
+                self.knowledge.open_help_article(&self.db, id);
+            }
+            NavRequest::OpenKnownIssues => {
+                self.page = PageKey::IssueRadar;
+                self.issue_radar.open_known_tab();
+            }
             NavRequest::Confirm(request) => {
                 let dialog = request.dialog();
                 self.pending_confirm = Some(request.action);
@@ -558,6 +578,20 @@ impl ShellApp {
                     if let Some((kind, title, detail)) = sync_completed_toast(e) {
                         self.toasts.push(kind, title, detail);
                     }
+                    // AU2-9: the "syncing…" note set at click time was never
+                    // updated on completion — replace it with the outcome.
+                    let outcome = if e.errors > 0 {
+                        format!(
+                            "sync finished with {} error(s) — {} record(s) processed",
+                            e.errors, e.processed
+                        )
+                    } else {
+                        format!("sync finished — {} record(s) processed", e.processed)
+                    };
+                    self.dashboard.sync_finished(&outcome);
+                    self.customers.sync_finished(&outcome);
+                    self.organizations.sync_finished(&outcome);
+                    self.reports.sync_finished(&outcome);
                 }
                 spp_core::events::ServerEvent::OutboundJobFinished(e) => {
                     if e.success {
@@ -709,7 +743,9 @@ impl ShellApp {
                                     PageKey::Outreach => {
                                         nav = self.outreach.ui(ui, &self.db);
                                     }
-                                    PageKey::Search => self.search.ui(ui, &self.db),
+                                    PageKey::Search => {
+                                        nav = self.search.ui(ui, &self.db);
+                                    }
                                     PageKey::Settings => self.settings.ui(ui, &self.db),
                                     PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
                                     PageKey::Diagnostics => {

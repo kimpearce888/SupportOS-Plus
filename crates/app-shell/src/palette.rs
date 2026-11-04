@@ -44,20 +44,40 @@ pub(crate) fn move_selection(selected: usize, len: usize, delta: i64) -> usize {
 #[must_use]
 pub(crate) fn href_to_nav(href: &str) -> Option<NavRequest> {
     let rest = href.strip_prefix('/')?;
-    if let Some(id) = rest.strip_prefix("inbox/conversation/") {
-        return id
-            .parse::<i64>()
-            .ok()
-            .map(|_| NavRequest::Page(crate::pages::PageKey::Inbox));
+    let (path, query) = match rest.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (rest, None),
+    };
+    // Bare "/inbox" (core emits it for saved-reply hits) — land on the inbox page.
+    if path == "inbox" {
+        return Some(NavRequest::Page(crate::pages::PageKey::Inbox));
     }
-    if rest.starts_with("customers") {
-        return Some(NavRequest::Page(crate::pages::PageKey::Customers));
+    if let Some(id) = path.strip_prefix("inbox/conversation/") {
+        return id.parse::<i64>().ok().map(NavRequest::OpenConversation);
     }
-    if rest.starts_with("knowledge") {
+    if path == "customers" || path.starts_with("customers/") {
+        return match path.strip_prefix("customers/") {
+            Some(id) => id.parse::<i64>().ok().map(NavRequest::OpenCustomer),
+            None => Some(NavRequest::Page(crate::pages::PageKey::Customers)),
+        };
+    }
+    if path == "knowledge" || path.starts_with("knowledge/") {
+        if let Some(doc) = query.and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("doc="))) {
+            return doc.parse::<i64>().ok().map(NavRequest::OpenKnowledgeDoc);
+        }
+        if let Some(id) = path.strip_prefix("knowledge/help-center/") {
+            return id.parse::<i64>().ok().map(NavRequest::OpenHelpArticle);
+        }
         return Some(NavRequest::Page(crate::pages::PageKey::Knowledge));
     }
-    if rest.starts_with("issues") {
-        return Some(NavRequest::Page(crate::pages::PageKey::IssueRadar));
+    if path == "issues" {
+        return Some(
+            if query.is_some_and(|q| q.split('&').any(|kv| kv == "tab=known")) {
+                NavRequest::OpenKnownIssues
+            } else {
+                NavRequest::Page(crate::pages::PageKey::IssueRadar)
+            },
+        );
     }
     None
 }
@@ -439,18 +459,37 @@ mod tests {
     fn hrefs_map_to_pages() {
         assert!(matches!(
             href_to_nav("/inbox/conversation/42"),
-            Some(NavRequest::Page(crate::pages::PageKey::Inbox))
+            Some(NavRequest::OpenConversation(42))
         ));
+        assert!(
+            matches!(
+                href_to_nav("/inbox"),
+                Some(NavRequest::Page(crate::pages::PageKey::Inbox))
+            ),
+            "bare /inbox (saved-reply hits) must navigate to the inbox page"
+        );
         assert!(matches!(
             href_to_nav("/customers/9"),
+            Some(NavRequest::OpenCustomer(9))
+        ));
+        assert!(matches!(
+            href_to_nav("/customers"),
             Some(NavRequest::Page(crate::pages::PageKey::Customers))
         ));
         assert!(matches!(
             href_to_nav("/knowledge?doc=3"),
-            Some(NavRequest::Page(crate::pages::PageKey::Knowledge))
+            Some(NavRequest::OpenKnowledgeDoc(3))
         ));
         assert!(matches!(
-            href_to_nav("/issues/known/7"),
+            href_to_nav("/knowledge/help-center/5"),
+            Some(NavRequest::OpenHelpArticle(5))
+        ));
+        assert!(matches!(
+            href_to_nav("/issues?tab=known"),
+            Some(NavRequest::OpenKnownIssues)
+        ));
+        assert!(matches!(
+            href_to_nav("/issues"),
             Some(NavRequest::Page(crate::pages::PageKey::IssueRadar))
         ));
         assert!(href_to_nav("/unknown/page").is_none());
@@ -559,8 +598,8 @@ mod tests {
         .drop_without_applying_deltas();
 
         assert!(
-            matches!(nav, Some(NavRequest::Page(crate::pages::PageKey::Inbox))),
-            "DEFECT-02: Enter must confirm the selected palette hit"
+            matches!(nav, Some(NavRequest::OpenConversation(1))),
+            "DEFECT-02: Enter must confirm the selected palette hit (carrying the record id)"
         );
         assert!(!palette.open);
     }

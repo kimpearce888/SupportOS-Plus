@@ -359,8 +359,16 @@ impl AiCenterPage {
         }
         let _ = db.with_write(|conn| spp_core::ai_hub::save_roles(conn, roles));
         self.hub_roles_saved = roles.clone();
-        let _ =
-            db.with_write(|conn| spp_core::jobs::enqueue_on(conn, "ai", "golden_eval", "{}", 3, 2));
+        // AU2-8: role edits now commit per keystroke, so coalesce the
+        // verification job — skip it when one is already queued.
+        let pending = db
+            .with_read(|conn| spp_core::jobs::has_pending(conn, "ai", "golden_eval"))
+            .unwrap_or(true);
+        if !pending {
+            let _ = db.with_write(|conn| {
+                spp_core::jobs::enqueue_on(conn, "ai", "golden_eval", "{}", 3, 2)
+            });
+        }
     }
 
     fn reload_hub(&mut self, db: &DbHandle) {
@@ -1322,7 +1330,13 @@ impl AiCenterPage {
                                 .width(200.0)
                                 .selected_text(selected.clone())
                                 .show_ui(ui, |ui| {
-                                    ui.selectable_value(&mut None::<usize>, None, "(unset)");
+                                    // AU2-8: the old "(unset)" row wrote into a
+                                    // throwaway `None::<usize>` temporary, so a routed
+                                    // role could never be unrouted. Clear for real.
+                                    if ui.selectable_label(false, "(unset)").clicked() {
+                                        roles.set(role, None);
+                                        changed = true;
+                                    }
                                     for endpoint in endpoints.iter() {
                                         if endpoint.enabled
                                             && ui
@@ -1384,9 +1398,9 @@ impl AiCenterPage {
                                             .then(|| model_edit.trim().to_string()),
                                     }),
                                 );
-                                self.hub_roles = roles.clone();
-                            }
-                            if model_response.lost_focus() && roles != self.hub_roles_saved {
+                                // AU2-8: commit on every change — committing only on
+                                // lost_focus silently dropped edits when the user
+                                // switched tabs/pages before the text field defocused.
                                 self.commit_role_map(db, &roles);
                             }
                             ui.label(
@@ -1558,26 +1572,37 @@ impl AiCenterPage {
         std::thread::Builder::new()
             .name("spp-hub-probe".to_string())
             .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
+                // AU2-8: a probe-runtime failure must still clear the "probing…"
+                // row — an .expect() here panicked the thread and left the slot
+                // empty (the row showed "probing…" forever).
+                let text = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                    .expect("probe runtime");
-                let probe = runtime.block_on(spp_core::ai_hub::probe_endpoint(
-                    &url,
-                    timeout,
-                    api_key.as_deref(),
-                ));
-                let text = if probe.ok {
-                    format!(
-                        "reachable — {} model(s) · {} ms",
-                        probe.model_count, probe.latency_ms
-                    )
-                } else {
-                    format!("offline — {} ({} ms)", probe.message, probe.latency_ms)
+                {
+                    Ok(runtime) => {
+                        let probe = runtime.block_on(spp_core::ai_hub::probe_endpoint(
+                            &url,
+                            timeout,
+                            api_key.as_deref(),
+                        ));
+                        if probe.ok {
+                            format!(
+                                "reachable — {} model(s) · {} ms",
+                                probe.model_count, probe.latency_ms
+                            )
+                        } else {
+                            format!("offline — {} ({} ms)", probe.message, probe.latency_ms)
+                        }
+                    }
+                    Err(error) => format!("probe failed — runtime unavailable ({error})"),
                 };
-                if let Ok(mut guard) = slot.lock() {
-                    *guard = Some((id, text));
-                }
+                // Deliver even through a poisoned mutex (a poisoned lock would
+                // otherwise swallow every later probe result as well).
+                let mut guard = match slot.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                *guard = Some((id, text));
             })
             .ok();
     }
