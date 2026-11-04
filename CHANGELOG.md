@@ -4,6 +4,68 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.3] — 2026-11-04
+
+### Fixed — the code-truth audit findings (Batch AU-1 → Batch AU-2, all fifteen items)
+
+- **Automation works end-to-end**: rules now fire on the triggers the engine
+  actually supports (`new_conversation`, `customer_reply`), action definitions
+  are accepted in both the documented object shape and the array shape, the
+  approval loop is closed end-to-end (a parked job raises an approval, and
+  approve/reject really act on it), and the send-note action reaches outbound
+  notes.
+- **Digest top tags** join tags by id, so the report shows real tag names
+  instead of an always-empty list.
+- **Search page**: the search button is clickable (it previously rendered only
+  during a single focus-loss frame) and hit cards open their records.
+- **Mention composer**: the caret offset is reset whenever the composer body
+  is replaced out-of-band, removing a char-boundary panic risk.
+- **Knowledge**: review/verify actions run on the single-writer lane and
+  refresh the loaded view immediately instead of blanking it.
+- **Inbox**: switching conversations no longer submits a stale assignee, and
+  deleting the selected conversation no longer loops the frame reload.
+- **Deep links**: palette navigation lands on the record it named (conversations,
+  customers, knowledge documents, help articles, known issues) instead of the
+  previous selection.
+- **AI center**: the "(unset)" role row really unroutes a model, role edits
+  survive tab switches, and a failed probe surfaces an error instead of
+  hanging on "probing…".
+- **Sync notes** update when a sync completes (dashboard, customers,
+  organizations, reports), and the operations view backs off instead of
+  spinning when a snapshot fails.
+- **Outreach campaign report** shows the producer's real totals and reply
+  rate (previously an all-zeros table with a self-admitting callout).
+- **Settings**: feedback clears on tab switch and is dismissable; Disconnect
+  deactivates the in-session provider (no more 401 loops after disconnect);
+  Reset workspace pauses background sync *before* wiping and says so honestly;
+  a failed webhook health check refreshes the outcome display.
+- **Palette/dialog arbitration**: while a destructive confirm is armed, the
+  command palette stands down (no more Esc consuming races or ⌘K over a live
+  confirm), and a second confirm request is rejected instead of silently
+  overwriting the first.
+- **Verified hygiene hardening**: consistent timestamp comparisons in quality
+  day-windows and SLA last-customer-message selection; the job claim update
+  is guarded on `status = 'queued'`; an exhausted-budget webhook redelivery
+  requeues instead of being swallowed as a duplicate; the 6-hourly maintenance
+  chain runs backups **first**, so a trends/retention failure can no longer
+  silently disable backups.
+- **Version check is documented as manual-only** (Settings → "check now"):
+  no boot-time or periodic GitHub calls; the update payload parses only what
+  the page displays.
+
+### Removed — dead program surface (audit census, owner-dispositioned)
+
+- 21 dead-in-program public items (unused DB helpers, SQL constants, count
+  helpers, the redundant translation-schema creator, the design widgets never
+  rendered — the inbox identity fixture now drives the exact live form).
+- The five producer-less sync job arms; background work now runs where the
+  program actually produces it (post-initial-sync follow-ups live in the
+  auto-sync NEW branch).
+- The name-only `encrypted_sync` stub (its log table is no longer created);
+  write-only API-queue statistics.
+- 16 created-never-used tables (plus the never-written side-threads family)
+  are dropped by boot migration m063 on both upgraded and fresh databases.
+
 ## [1.9.2] — 2026-11-03
 
 ### Fixed — the two known production defects (the RF-FINISH known-bugs list, resolved in KB-1)

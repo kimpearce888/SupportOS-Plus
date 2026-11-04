@@ -8,6 +8,10 @@
 **Batch RS-4 (items RS-4-1..RS-4-10)** — active, moved from plan.md per Rule 2
 (2026-10-30). Source: the owner's G4 rejection; root-cause reproduction and
 disposition in the G4-verdict addendum (completed.md, 2026-10-30).
+**Held 2026-11-04**: the owner directed Batch REL-2 (Build & Release, v1.9.3
+from the final source) out-of-band; RS-4 items remain recorded here, not
+started and not dropped (Rule 6), resuming on the owner's `continue` after
+the release closes. Precedent: REL-1 ran as an owner-directed work order.
 
 ## Batch RS-4 — G4-rejection fix wave (owner-directed, 2026-10-30)
 
@@ -1932,5 +1936,56 @@ completed.md). AU-1-9 done: 25 confirmed findings + 21 dead items + 16 orphaned 
 6 low-confidence hygiene notes written into plan.md as Batch AU-2 items 1..15. AU-1-10
 done: completed.md Batch AU-1 record; decisions.md D9 (audit evidence policy). Rule 8
 STOP.
+
+## Batch REL-2 — release v1.9.3 from the final source (items REL-2-1..REL-2-5) — opened 2026-11-04
+
+Owner-directed Build & Release work order (2026-11-04, chat): "Build, test, and
+publish install-ready Linux `.deb` and `.AppImage` packages from the final
+repository source … Automate builds and releases through GitHub Actions where
+possible … Verification: test both packages from clean environments … Release
+integrity: publish only successfully built and tested artifacts … Do not claim
+a package is complete or ready for release if it has not been built and
+verified. Document any genuine environmental or permission blocker and
+continue."
+
+Final source = `origin/main` `4a8db7e` (CI run #224 success): it carries Batch
+AU-2 wave 1 (`fa57955`) + wave 2 (`2833686`) + the relocked kittest baselines
+(`4a8db7e`), none of which are in any published release — v1.9.2 shipped
+`a53273d`, 11 commits earlier. The ship-list is release.yml's, proven on
+v1.9.0/v1.9.1/v1.9.2 (Release runs 29/30/31, all success).
+
+1. **REL-2-1 (release prep)** — workspace version 1.9.2 → 1.9.3 (Cargo.toml +
+   Cargo.lock, all four members); CHANGELOG `[1.9.3]` section (product
+   language: the AU-2 fixes, dead-surface removal, manual-only version check);
+   decisions.md D12 (version policy); this ledger entry (Rule 2 move).
+2. **REL-2-2 (gates on the release tree)** — the release.yml gate set run
+   locally at the exact tagged content: fmt --all --check; check
+   --workspace --all-targets (zero diagnostics); clippy --locked -D warnings
+   (workspace + core/sandbox feature); test --locked --workspace + core
+   sandbox (--test-threads=1, the 4 GB recipe); gate_no_simulation;
+   gate_traceability; verify-icons.
+3. **REL-2-3 (publish)** — single commit (release prep + ledger) + annotated
+   tag `v1.9.3`; push main + tag. The unmodified release.yml then: builds in
+   an ubuntu:22.04 container (glibc 2.35 baseline) with the full gate set,
+   packages via `xtask package`/`xtask deb`, verifies the .deb on clean
+   ubuntu:22.04/24.04 + debian:12 containers (APT dependency resolution,
+   desktop entry + icons, SPP_SMOKE boot chain, 0.2.x upgrade migration,
+   Xvfb GUI launch on declared deps only, reinstall, uninstall with user-data
+   retention, purge), verifies the AppImage (smoke + Xvfb GUI launch), and
+   publishes the GitHub Release only after every lane is green.
+4. **REL-2-4 (post-publish verification)** — scrape-verify the Release run
+   (6/6 jobs success) and the published release: 4 assets present,
+   browser_download_url live-checked, sha256 re-verified from downloaded
+   bytes, BUILD-INFO commit == the tag's commit, version 1.9.3, notes carry
+   changelog + install + compatibility statements.
+5. **REL-2-5 (records + STOP)** — completed.md release record (evidence
+   table: gates, asset sizes/SHA-256, run + release links); progress.md sync;
+   Rule 8 STOP.
+
+Standing environmental disclosure (REL-1/D8, unchanged): this 4 GB no-swap
+no-root sandbox cannot run the root-requiring verify lanes (real APT install,
+desktop-file-validate, reinstall/uninstall/purge) or the release-profile LTO
+link; those lanes run in CI's clean containers — the authoritative lane that
+published v1.9.0–v1.9.2. No blocker to the release itself.
 
 

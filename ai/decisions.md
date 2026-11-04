@@ -432,3 +432,28 @@ gates inside AU2-13/AU2-15 were taken in-code this batch and recorded here.
   audited individually), ~149 came back byte-identical. The wholesale-regen
   risk (blessing unintended drift) was mitigated by auditing every changed
   golden's diff image before committing; nothing unexplained surfaced.
+
+## D12 — Release v1.9.3 from the final source (owner-directed Build & Release, 2026-11-04)
+
+- **Trigger:** owner work order — build, test, and publish install-ready Linux
+  `.deb` + `.AppImage` packages **from the final repository source**, automated
+  through GitHub Actions, with clean-environment verification and release
+  integrity (checksums, matching commit).
+- **Version:** 1.9.3 (patch). Changes since v1.9.2 are Batch AU-1 (audit) +
+  Batch AU-2 (fixes): automation end-to-end, digest tags, search button,
+  mention caret, knowledge write-lane/latch, inbox selection/assignee, deep
+  links, ai_center role routing, sync notes, outreach report totals, settings
+  feedback lifecycle + provider disconnect + reset pause, palette/confirm
+  arbitration, verified hygiene hardening (SQL time formats, jobs claim guard,
+  webhook redelivery requeue, backups-first maintenance); dead-surface removal
+  (21 dead items, producer-less job arms, encrypted_sync stub, queue stats,
+  16 orphan tables dropped by m063); version check documented manual-only
+  (D11). No API/DB-consumer behavior change beyond the recorded fixes.
+- **Pipeline:** the unmodified `release.yml` (proven v1.9.0–v1.9.2) — ubuntu:22.04
+  container build (glibc 2.35 baseline), full gate set on the tagged content,
+  `xtask package`/`xtask deb`, verify-deb matrix (ubuntu:22.04/24.04,
+  debian:12), verify-appimage, publish-after-green, live link + checksum
+  re-verification in-workflow.
+- **Execution:** single prep commit (version + CHANGELOG + ledger) on `main`,
+  annotated tag `v1.9.3` on it; the release is scrapes-verified post-publish
+  (assets, download URLs, sha256 from downloaded bytes, BUILD-INFO commit).
