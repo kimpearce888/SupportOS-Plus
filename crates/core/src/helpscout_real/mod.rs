@@ -605,8 +605,10 @@ impl RealHelpScoutProvider {
     pub fn new(db: crate::db::DbHandle, credentials: HsCredentials) -> Self {
         let limiter = Arc::new(HsRateLimiter::new(Some(db.clone())));
         let concurrency = stored_api_concurrency(&db);
-        let queue =
-            ApiQueue::new(Arc::clone(&limiter) as Arc<dyn QueueRateLimiter>, concurrency);
+        let queue = ApiQueue::new(
+            Arc::clone(&limiter) as Arc<dyn QueueRateLimiter>,
+            concurrency,
+        );
         let docs_queue = ApiQueue::new(Arc::new(HsRateLimiter::new(None)), concurrency);
         Self {
             client: reqwest::Client::builder()
