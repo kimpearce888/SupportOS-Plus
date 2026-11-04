@@ -418,3 +418,17 @@ gates inside AU2-13/AU2-15 were taken in-code this batch and recorded here.
   which the current UX does not ask for. The intent now lives in code, and
   `ReleaseInfo` parses only the field the program consumes (`tag_name`).
 - Evidence base: program code only (D9 policy), wave-2 tree.
+
+- **Addendum (2026-11-04, same batch closure): the kittest baseline path went
+  through three dispatches and deserves the full record.** (1) The identity
+  regen succeeded but its baselines commit missed the PNGs (git add omitted —
+  7285e8e carried only the workflow deletion). (2) The CI kittest job then
+  revealed inherited drift: it had been red since wave 1 at the automation
+  suite (AU2-1's form changes were never mirrored into the goldens; the
+  failure went unnoticed when that session ended) and cargo's fail-fast hid
+  every suite behind it. (3) A full-suite regen re-rendered everything: 22
+  goldens changed (identity x2, automation x7, outreach x6, search x7 — each
+  group the exact pixel-print of a recorded wave-1/wave-2 fix, diff images
+  audited individually), ~149 came back byte-identical. The wholesale-regen
+  risk (blessing unintended drift) was mitigated by auditing every changed
+  golden's diff image before committing; nothing unexplained surfaced.

@@ -6760,11 +6760,24 @@ goldens (`r2c_inbox_identity_light/dark`); this sandbox has no Vulkan ICD and
 no root, so the baselines are regenerated CI-side (lavapipe, the same
 rasterizer family that produced them) via a one-shot UPDATE_SNAPSHOTS run
 recorded in D11; the final HEAD's kittest diff-lock job is the proof gate.
-(Disclosure: the first regen dispatch failed compiling the fixture —
-`scale::text::LEAD` is a deliberately crate-private design token; the fixture
-now pins the value locally with the diff-lock flagging any token drift, and
-the check `-p supportos-plus-app-shell --features kittest-ui --tests`
-compiles the suites locally without a GPU.)
+(Disclosure, full regen path: the first regen dispatch failed compiling the
+fixture — `scale::text::LEAD` is a deliberately crate-private design token;
+the fixture now pins the value locally with the diff-lock flagging any token
+drift, and `check -p supportos-plus-app-shell --features kittest-ui --tests`
+compiles the suites locally without a GPU. The first baselines commit then
+missed the PNGs — `git add` was omitted, so 7285e8e carried only the workflow
+deletion. The CI kittest job surfaced the bigger truth: it had been failing
+at the automation suite since wave 1 (f526f5b red with the same seven tests —
+AU2-1's form changes were never mirrored into the baselines) and cargo's
+fail-fast stopped it there, so the later suites were never diff-locked at
+all. A full-suite UPDATE_SNAPSHOTS=1 run re-rendered every golden: exactly
+22 changed — identity x2 (the deleted design widgets, diff audited),
+automation x7 (AU2-1 trigger/action vocabulary + the seeded rule's canonical
+action JSON, diff audited), outreach x6 (AU2-10: the all-zeros report with
+its self-admitting callout replaced by the real producer totals, diff
+audited), search x7 (the per-frame search button fix, diff audited) — and
+the other ~149 goldens came back byte-identical, confirming the rendering is
+deterministic across runner instances and nothing else drifted.)
 
 Rule 8 STOP — Batch AU-2 is drained; next queued work waits on the owner's
 `continue`.
