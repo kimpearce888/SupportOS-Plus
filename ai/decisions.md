@@ -457,3 +457,25 @@ gates inside AU2-13/AU2-15 were taken in-code this batch and recorded here.
 - **Execution:** single prep commit (version + CHANGELOG + ledger) on `main`,
   annotated tag `v1.9.3` on it; the release is scrapes-verified post-publish
   (assets, download URLs, sha256 from downloaded bytes, BUILD-INFO commit).
+
+## D13 — Ledger structure: the three-file discipline restored (owner-directed, 2026-11-04)
+
+- **Trigger:** Batch REC-1 (facts-vs-fictions reconciliation) found the ledger
+  drifted from rule.md's file contract: progress.md held 23 completed-batch
+  transcripts (~1,930 lines) under an "active items" title with a false
+  "Batch RS-4 active" declaration, and plan.md held 611 lines of historical
+  narrative under a "TODO" title with zero open items — the source of the
+  owner's "too many pending items" impression. Owner direction on the REC-1
+  report: "do what is best to keep things in order."
+- **Decision:** restore rule.md Rule 7 literally — `plan.md` = remaining TODO
+  items only; `progress.md` = active items only; `completed.md` = completion
+  records (append-only, unchanged discipline). History is preserved, not
+  deleted: the plan.md narrative moves to `ai/archive-plan.md` and the
+  progress.md transcripts to `ai/archive-progress.md`, both byte-preserving
+  moves with provenance banners and known-stale-spot notes (Rule 6: nothing
+  discarded — every moved section has its completion record in completed.md,
+  verified section-by-section at HYG-1).
+- **Standing rule going forward:** completed batches leave progress.md at the
+  Rule 4 sync (no in-place completion annotations); new programs open in
+  plan.md as numbered items; the archive files receive nothing new — they
+  are frozen snapshots of the 2026-11-04 restructuring.

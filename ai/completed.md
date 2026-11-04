@@ -6957,3 +6957,51 @@ the workflow runs and the release via the GitHub API.
 
 Rule 8 STOP — nothing to continue to; the next work item requires a new owner
 directive.
+
+## Batch HYG-1 — ledger hygiene: the three-file discipline restored (owner-directed, 2026-11-04)
+
+Owner direction on the REC-1 report: **"do what is best to keep things in
+order."** Scope: ledger files only (rule.md's own file contract); no program
+code, no tests, no product files touched.
+
+1. **HYG-1-1 (`ai/archive-plan.md`)** — the full historical narrative of
+   plan.md (as of `6fcd8b9`, 610 lines) moved byte-identically behind a
+   provenance banner with known-stale-spot notes (the three "stays parked"
+   notes resolved by batch 36; the RF "LIST-ONLY" constraint superseded by
+   KB-1; every "moved to progress.md" line long since completed).
+2. **HYG-1-2 (`ai/archive-progress.md`)** — the 23 completed-batch
+   transcripts that had accumulated in progress.md from 2026-10-30 to
+   2026-11-03 (RS-4, RS-6, RF-1..RF-11, KB-1, AUDIT-1, KB-2..KB-7, REL-1,
+   AU-1; 1,928 lines) moved byte-identically behind a provenance banner
+   naming each section's completion record in completed.md.
+3. **HYG-1-3 (`ai/plan.md`)** — rewritten as the live TODO queue: the
+   authoritative queue-state section (EMPTY, all programs consumed, nothing
+   pending/parked/held) + pointers to the archives, completed.md and
+   decisions.md + the Rule-2/4/5 workflow note for future work.
+4. **HYG-1-4 (`ai/progress.md`)** — slimmed to the active-items file only:
+   the "None" state (kept from REC-1's correction), the REC-1 historical
+   note, and the HYG-1 relocation pointer. 1,945 → 17 lines.
+5. **HYG-1-5 (records)** — decisions.md **D13** (the restored structure +
+   the standing rule that completed batches leave progress.md at the Rule 4
+   sync) and this record. Rule 2 formality: opened and executed as a single
+   ledger pass in one commit, per the REC-1 precedent.
+
+**Verification (Rule 5)** — all mechanical, re-run at the working tree:
+- Byte preservation: `diff` of the moved portions against their `6fcd8b9`
+  sources is empty (plan.md full-file; progress.md from the "## Batch RS-4"
+  header to EOF) — zero content lost, zero altered.
+- Section integrity: exactly 23 `## Batch`-level section headers in
+  archive-progress.md; each of the 23 cross-checked to its completion
+  record in completed.md (RS-4 → "Batch RS-4 completion record (Rule 4)",
+  RS-6 → Batch RS-6, RF-1..RF-11 → their Batch RF-* records + FINISH, KB-1
+  → Batch KB-1, AUDIT-1 → Batch AUDIT-1, KB-2..KB-7 → their kb records,
+  REL-1 → Batch REL-1, AU-1 → Batch AU-1). 23/23 present.
+- Discipline restored: plan.md (20 lines) and progress.md (17 lines) contain
+  no completed-batch content; the only "active" declaration in the ledger
+  now reads None; completed.md remains append-only (the REL-2/REC-1 records
+  untouched in place, the stale RS-4 sentence superseded by REC-1, not
+  edited).
+- No code touched: `git diff --stat` shows only `ai/*.md` files.
+
+Rule 8 STOP — the ledger is in order; the next work item requires a new
+owner directive.
