@@ -337,13 +337,12 @@ fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
     // live-chat pages use. The body closure replicates the old wrapper's
     // rendering (LEAD-size foreground label) so only the removals of the
     // dead quoted_history/file_chip/cop_similar surface change the frame.
+    // scale::text::LEAD is a crate token, deliberately not pub; the value is
+    // pinned here and the snapshot diff-lock flags any token drift.
+    const LEAD: f32 = 14.0;
     fn body_label(ui: &mut egui::Ui, body: &str) {
         let t = design::tokens(ui);
-        ui.label(
-            egui::RichText::new(body)
-                .size(design::scale::text::LEAD)
-                .color(t.foreground),
-        );
+        ui.label(egui::RichText::new(body).size(LEAD).color(t.foreground));
     }
 
     design::day_divider(ui, "Today");

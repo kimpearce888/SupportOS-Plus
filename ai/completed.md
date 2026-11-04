@@ -6760,6 +6760,11 @@ goldens (`r2c_inbox_identity_light/dark`); this sandbox has no Vulkan ICD and
 no root, so the baselines are regenerated CI-side (lavapipe, the same
 rasterizer family that produced them) via a one-shot UPDATE_SNAPSHOTS run
 recorded in D11; the final HEAD's kittest diff-lock job is the proof gate.
+(Disclosure: the first regen dispatch failed compiling the fixture —
+`scale::text::LEAD` is a deliberately crate-private design token; the fixture
+now pins the value locally with the diff-lock flagging any token drift, and
+the check `-p supportos-plus-app-shell --features kittest-ui --tests`
+compiles the suites locally without a GPU.)
 
 Rule 8 STOP — Batch AU-2 is drained; next queued work waits on the owner's
 `continue`.
