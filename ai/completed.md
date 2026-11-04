@@ -6488,3 +6488,91 @@ setup).
 
 **Engagement state:** REL-1 complete — the owner's Build & Release spec is satisfied
 end-to-end. No open items remain in the ledger. Rule 8 STOP awaits owner direction.
+
+### Batch AU-1 — 2026-11-03 (code-truth audit @ `49247d5`; items AU-1-1..AU-1-10 verified)
+
+**Owner directive:** program code only is the source of truth; tests and documentation are
+not evidence and not consumers; find every issue, bug, blocker, dead code, orphan, broken/
+unwired feature, everything not done and due; repo files only (GitHub); follow rule.md; no
+answers from memory. Evidence policy recorded as decisions.md D9.
+
+**Method.** (1) Corpus pinned: 166 non-test program files in crates/{core,app-shell,catalog}/src
+(bench/it_*/mockserver/testsupport verified #[cfg(test)]-gated; xtask excluded as tooling).
+(2) Mechanical sweeps: incompleteness-marker scan (zero hard markers; 4 unreachable! all
+guarded; no dead_code stamps); pub-face census — 1,874 pub items vs non-test references
+after stripping cfg(test)/tooling-feature blocks (scripted, deterministic; 21 dead items;
+4 import-only hits discarded as census artifacts after adjudication; 1 name-collision catch:
+migrations::find inflated by Iterator::find). (3) Four independent deep-read passes (UI
+wiring, services wiring, core logic, app-shell logic). (4) Adjudication: every agent finding
+re-verified by me at file:line; conflicts resolved by reading the tree — two material
+corrections recorded below.
+
+**Adjudication highlights (honesty record).** (i) My census-led reading of
+`ensure_translation_schema` (zero callers) as a missing-creation blocker was OVERRULED:
+migrations/db_breadth.rs:327 creates `translation_cache` at boot (m040) — the function is a
+dead redundant creator, not a missing table; translation works on fresh databases.
+(ii) The automation_approvals "no program INSERT" claim was challenged by two textual INSERT
+sites (app-shell pages/automation.rs:769/832) — both verified #[test]-gated, so the
+approval-loop severance stands.
+
+**Confirmed findings (all at `49247d5`; classes: FD=feature-dead, BF=broken-feature/bug,
+UW=unwired/not-done, D=dead-in-program, O=orphaned-creation, LH=low-confidence hygiene):**
+
+| # | Class | Finding (file:line) |
+|---|---|---|
+| F1 | FD | **Automation rules can never fire/act/approve end-to-end**: trigger vocabulary mismatch (core fires new_conversation/customer_reply only, automation.rs:222-231 + execute.rs:630-642; UI creates status_changed/tag_added/sla_risk only, app-shell automation.rs:9-26; compare at automation.rs:808); action_json object-vs-array (create_rule automation.rs:92-98 vs engine as_array gate :829-831); approval loop severed (parked jobs never requeued with approved:true — automation.rs:329-349 + execute.rs:380-419; automation_approvals has no program INSERT; approve()/reject() execute nothing, automation.rs:156-176) |
+| F2 | BF | digest top_tags always empty — digest.rs:266-271 selects nonexistent t.tag; error swallowed by unwrap_or_default |
+| F3 | BF | Search page button renders only during the one-frame focus-loss (&&-short-circuit), search.rs:129-133 — click-to-search impossible |
+| F4 | BF | Outreach campaign report renders all zeros — UI reads top-level keys, core nests under totals (outreach.rs:537-570 vs outreach/mod.rs:945/1025, send.rs:494); self-admitted in UI |
+| F5 | BF | knowledge mark_reviewed/mark_verified run UPDATEs on with_read lanes (knowledge.rs:471/481; readers are full connections, db.rs:102-131) — bypasses single-writer serialization |
+| F6 | BF | knowledge actions clear vectors but keep loaded=true → table blanks until an unrelated bus event (no events emitted on those paths), knowledge.rs:396-405/470-508 |
+| F7 | BF | inbox select() never resets assign_pick (inbox.rs:693-720 vs combo :1515-1517 / submit :1529) → stale assignee submitted to Help Scout after switching conversations |
+| F8 | BF | deleted selected conversation → detail=None + selected=Some forever → reload_detail every frame (inbox.rs:396-399/447-467) |
+| F9 | BF | sync_note "syncing…" set on click, never cleared/updated on completion (dashboard.rs:523, customers.rs:336, organizations.rs:151, reports.rs:367) |
+| F10 | BF | palette saved-reply href "/inbox" unmapped → navigates nowhere (palette.rs:45-62; core emits it, search/lanes.rs:358) |
+| F11 | BF | palette mapped branches discard record ids — deep links land on previous selection (palette.rs:47-61; NavRequest has no record-selection variant, app/mod.rs:203-222) |
+| F12 | BF | Search-page hit cards are display-only; hit.href never read (search.rs:211-248) |
+| F13 | BF | ai_center "(unset)" role row writes a throwaway temp — roles can never be unrouted (:1325); probe runtime failure leaves "probing…" forever (:1561-1564); hub role edits lost on tab switch (:1366-1391) |
+| F14 | BF | mention_caret stale byte offset after out-of-band composer body replacement → char-boundary panic risk in the render path (mention_popup.rs:51/95, inbox.rs:2338/2307/2389) |
+| F15 | BF | connectors::refresh emits no event and the page latch stays loaded → rows stale until restart without HS connection (connectors.rs:328 area, app-shell connectors.rs:207-224) |
+| F16 | BF | settings message/error set in ~15 places, never cleared (settings.rs whole file) |
+| F17 | BF | disconnect_helpscout leaves the in-session provider handle live → 401 loops after explicit disconnect (settings.rs:654-668 vs :854-882) |
+| F18 | BF | workspace reset leaves workers running; auto-sync re-pulls within a minute while the message claims next-start (settings.rs:884-913 vs workers/mod.rs:213-228) |
+| F19 | UW | webhook-health job error path emits no event → settings wh_outcome stale after failed "check now" (execute.rs:2305-2321); success/healed paths do emit |
+| F20 | UW | version_check is manual-only (sole caller settings.rs:1646); html_url/published_at parsed, never displayed |
+| F21 | UW | encrypted_sync is a name-only stub: table created at boot (mirror_parity m044), zero program readers/writers (encrypted_sync.rs whole file) |
+| F22 | UW | 5 execute_job arms with no program producer: initial_sync/incremental_sync/reconciliation/rebuild_embeddings/sync.conversations (execute.rs:19/28/36/203/423; enqueue inventory exhaustive) |
+| F23 | UW | api_queue snapshot() stats have no production consumer — queue pressure unobservable (api_queue.rs:28-38/102-104); queue itself fully wired |
+| F24 | BF | Esc consumed by both palette and confirm dialog; ⌘K active over a live destructive confirm; confirm dialog non-modal, second Confirm request silently overwrites (palette.rs:112-123, overlays.rs:119-123, app/mod.rs:216-220) |
+| D1-D21 | D | Dead-in-program pub items (0 non-test refs, census): db.rs open_with_migrations/reader_pool_size/is_shared_with; audit.rs with_before_state/with_conversation_id (before-state + conversation correlation never recorded); ai_center.rs M009_SQL + copilot_tool_allowlist; migrations/intelligence.rs M014_SQL; migrations.rs find; response_state_sql.rs count_by_response_state/count_conversations_with_state/count_conversations_with_state_in_mailbox; translation.rs ensure_translation_schema; vectorstore_sqlitevec.rs count_by_entity (cascades count_by_entity_type to test-only); outreach/mod.rs is_on_dnc (DNC itself honored via inline SQL, outreach/mod.rs:415/1289); app-shell pages/ai_center.rs attribute_catalog; design/mod.rs message_card/quoted_history/file_chip/cop_similar (DC-tagged components never rendered — the composer consequently has no attachment UI); pages/support_graph.rs kittest_seed_search (ungated test-seed helper) |
+| O1 | O | 16 created-never-used tables: state_transitions, side_thread_messages, side_thread_mentions (+side_threads never written → support_graph reads permanently empty), verified_drafts, interaction_signals (table; live module writes client_current_signals), campaigns, campaign_recipients (superseded by outreach_*), support_cases, known_issue_refs, thread_participants, notification_prefs, knowledge_doc_usage, report_snapshots, daily_metrics, release_events, routing_configurations, encrypted_sync_log |
+| LH1-LH6 | LH | Low-confidence, verify-then-fix: quality day-window mixed timestamp formats (quality/mod.rs:203-212); SLA string-MAX over mixed-precision timestamps (sla.rs:512-519/668-676); unknown automation action kinds report success (automation.rs:415/869-877); webhook redelivery dedupe ignores stored state (webhook.rs:81-90); jobs claim UPDATE lacks status guard (jobs.rs:106-114; unreachable under single writer); maintenance ?-chain places backups after trend/retention — future failures there silently disable backups (workers/mod.rs:897-1035) |
+
+Also recorded (cosmetic/hygiene, not itemized above): boot log misstates the timer set
+("webhook, embedding timers" — main.rs:68); workers_host restart() drops the JoinHandle;
+Shell-page stale self-declared hint text (app/mod.rs:358-364); dead bindings app/mod.rs:100/654;
+inbox "Review draft" chip silent no-op when composer empty (:2236-2249); draft-saved label
+asserts a persistence that does not exist (composer drafts are in-memory only, inbox.rs:2358-2364);
+"knowledge_doc_usage" style minor reads; ai_evidence table read-guarded but never created
+(knowledge_store.rs:341-350 — freshness "used_in" always 0); settings restore/reset run
+blocking IO on the render thread.
+
+**Verification (Rule 5).** Every finding above carries file:line evidence re-read in the tree
+at `49247d5` during adjudication (not accepted from agent prose alone); the census is
+deterministic and re-runnable; the four deep-read passes covered all 24 pages + shell/palette/
+overlays + the full boot/service matrix (bootstrap → BOOT_STEPS v3-v53 + runtime guards →
+workers → event bus symmetry, all WIRED except the items listed) — per-file coverage tables
+and event→invalidation maps are in the batch working notes; positive space confirmed along
+the way: settings persistence verified saved AND consumed key-by-key, all 7 ServerEvent
+variants published AND consumed, all schema tables wired except the 16 orphans + ai_evidence,
+SQL arity sweep found no placeholder/column-index mismatches.
+
+**Remaining risk (scope honesty).** ~125K LOC: mechanical sweeps complete; semantic passes
+broad but not a line-by-line absence proof; spot-check-only areas: sync_engine/loops.rs thread
+backfill, people_store/health aggregates, segment/eval.rs internals, embeddings write-back,
+notification_sweep beyond approvals. These carry forward as standing risk, not open items.
+
+**Batch AU-2 (items AU2-1..AU2-15) written to plan.md** — the confirmed findings queued for
+fix batches (ten at a time per rule.md, on the owner's `continue`).
+
+**Engagement state:** Batch AU-1 complete; ledger synced; Rule 8 STOP.

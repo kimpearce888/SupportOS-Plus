@@ -332,3 +332,22 @@ issued).
   published with both packages + SHA256SUMS.txt + BUILD-INFO.txt (commit
   a53273d); all assets downloaded live from the published URLs and
   `sha256sum -c` verified OK. The credential gate is closed.
+
+## D9 — AU-1 audit evidence policy (owner-directed, 2026-11-03)
+
+- **Program code is the sole source of truth.** Tests and all documentation (README,
+  docs/, CHANGELOG, ai/*) are not behavioral evidence and are not consumers. Anything
+  referenced only by test code is dead in the program. Census strips #[cfg(test)] mods
+  and the ui-screenshot/kittest-ui tooling features before counting references.
+- **Corpus:** 166 non-test files in crates/{core,app-shell,catalog}/src; xtask excluded
+  (dev tooling). Known census blind spots (conservative bias): derive/serde-generated
+  field consumption, macro-internal references, comment mentions counting as refs.
+- **Adjudication protocol:** every deep-read agent finding was re-verified at file:line
+  in the actual tree before acceptance; conflicting evidence wins over narrative —
+  recorded example: the translation_cache "missing creation" reading was overruled by
+  db_breadth.rs:327 (m040 boot creation), and two app-shell automation.rs INSERT sites
+  were proven #[test]-gated, confirming the approval-loop severance instead.
+- **Display artifact:** lines rendering as `#ust_use]` are `#[must_use]` (terminal ANSI
+  `[m` swallow); bytes verified with od; not an anomaly.
+- **Findings land in plan.md as Batch AU-2 items**; fixes are subsequent batches per
+  rule.md (ten at a time, owner says continue).

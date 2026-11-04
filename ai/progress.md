@@ -1911,3 +1911,24 @@ answers from memory. Evidence rules + item definitions live in the plan.md batch
 9. **AU-1-9 (adjudication)** — re-verify every candidate at HEAD (file:line, program
    code only); discard false positives with reasons; confirmed findings → plan.md items.
 10. **AU-1-10 (records + STOP)** — completed.md record + ledger sync + Rule 8 STOP.
+
+**AU-1 execution evidence (2026-11-03, HEAD 49247d5).** AU-1-1 done: corpus = 166
+non-test program files (core+app-shell+catalog); bench/it_*/mockserver/testsupport
+confirmed #[cfg(test)]-gated in lib.rs; xtask out of corpus. AU-1-2 done: zero
+todo!/unimplemented!/TODO/FIXME/XXX/HACK/"not implemented" markers in program code;
+4 unreachable! all structurally guarded (2 invariants, 1 test-file hit, 1 redundant
+defensive arm after an exhaustive outer match); no dead_code allow stamps; cfg features
+ui-screenshot/kittest-ui are tooling gates. AU-1-3 done (mechanical census, strip-first
+methodology): 1,874 pub items / 1,658 names; 21 dead-in-program items (0 non-test
+references) + 1 name-collision catch (migrations::find inflated by Iterator::find);
+4 import-only hits adjudicated as census artifacts (braced imports used by short name) —
+discarded. AU-1-4/5/7/8 done: four independent deep-read passes (UI wiring, services
+wiring, core logic, app-shell logic), every reported finding re-verified by me at
+file:line before acceptance; two agent-vs-agent conflicts adjudicated (automation_
+approvals INSERT sites are #[test]-gated → approval-loop severance CONFIRMED; my own
+census-led translation_cache blocker claim OVERRULED — migrations/db_breadth.rs:327
+creates the table at boot (m040) → downgraded to dead-redundant-creator, recorded in
+completed.md). AU-1-9 done: 25 confirmed findings + 21 dead items + 16 orphaned tables +
+6 low-confidence hygiene notes written into plan.md as Batch AU-2 items 1..15. AU-1-10
+done: completed.md Batch AU-1 record; decisions.md D9 (audit evidence policy). Rule 8
+STOP.

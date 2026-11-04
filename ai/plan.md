@@ -604,3 +604,114 @@ answer from the current tree, never from memory.
 whole corpus. The semantic reads (AU-1-4/5/7/8) are broad, high-signal passes, not a
 line-by-line proof of absence; anything found lands in plan.md, and remaining risk is
 stated in the batch record.
+
+---
+
+## Batch AU-2 — confirmed AU-1 findings, queued for fix batches (items AU2-1..AU2-15; written 2026-11-03, awaiting owner `continue`)
+
+Every item below was verified at HEAD `49247d5` with program-code-only evidence (see
+completed.md Batch AU-1 for the full finding table). Order = severity then blast radius.
+
+1. **AU2-1 (automation feature dead end-to-end — three independent breaks).**
+   (a) trigger vocabulary: core fires only `new_conversation`/`customer_reply`
+   (automation.rs:222-231, sole program fire site workers/execute.rs:630-642) while the
+   UI creates only `status_changed`/`tag_added`/`sla_risk` rules (app-shell
+   pages/automation.rs:9-26) → `rule.trigger != fired` always (automation.rs:808);
+   (b) action shape: `create_rule` stores a single JSON object (automation.rs:92-98) but
+   the engine only executes array-shaped `action_json` (automation.rs:829-831) → actions
+   never run; (c) approval loop severed: risky actions park jobs
+   (`automation_action_awaiting_approval`, payload lacks `approved`, automation.rs:329-349;
+   execute.rs:380-419 parks; nothing requeues with `approved:true`), the approvals card
+   reads `automation_approvals` which NO program code inserts into (the two INSERT sites
+   are #[test]-gated), and `approve()`/`reject()` only flip status without executing
+   anything (automation.rs:156-176). Owner decision needed: intended trigger vocabulary +
+   approval model; then wire all three breaks.
+2. **AU2-2 (digest top_tags always empty)** — digest.rs:266-271 selects `t.tag` from
+   `conversation_tags` (columns are conversation_id/tag_id only) → prepare fails,
+   `.unwrap_or_default()` swallows → `top_tags: []` in every weekly digest. Fix: join
+   `tags t ON t.id = ct.tag_id` (shape proven at issue_impact.rs:150-162).
+3. **AU2-3 (Search page button unclickable)** — search.rs:129-133: `response.lost_focus()
+   && design::button(...)` short-circuits; the button renders only on the one-frame focus
+   loss. Render unconditionally (pattern exists at support_graph.rs:191).
+4. **AU2-4 (render-path panic risk: mention caret)** — mention_popup.rs:51/95 slice the
+   composer body at a byte offset captured from a previous draft state (inbox.rs:2338);
+   out-of-band body replacement (saved-reply insert, AI draft insert, AI transform)
+   leaves a stale byte offset → `byte index is not a char boundary` panic when a multibyte
+   char spans it. Fix: reset mention_caret on every out-of-band body change +
+   is_char_boundary-safe slicing.
+5. **AU2-5 (knowledge page: writes on the read lane + latch blanking)** —
+   mark_reviewed/mark_verified execute UPDATEs via `db.with_read` (knowledge.rs:471/481;
+   readers are full connections, db.rs:102-131 → bypasses single-writer serialization,
+   SQLITE_BUSY-prone); after import/review/delete the vectors are cleared but `loaded`
+   stays true → the table blanks to "(no documents)" until the next unrelated bus event
+   (no event is emitted by those paths; embed completion emits none either). Fix: with_write
+   + set loaded=false (or explicit refetch).
+6. **AU2-6 (inbox: stale assignee + deleted-selection frame loop)** — select() does not
+   reset `assign_pick` (inbox.rs:693-720; combo writes :1515-1517, submit :1529) → picking
+   an assignee on conversation A then opening B submits the stale pick to Help Scout; when
+   reload_detail returns Ok(None) the selected id stays Some while detail stays None →
+   reload_detail re-runs every frame forever (:396-399 + :447-467). Fix: reset pick in
+   select(); terminal clear-selection state on Ok(None).
+7. **AU2-7 (deep links broken three ways)** — palette: bare `/inbox` unmapped
+   (palette.rs:45-62; core emits it for saved replies, search/lanes.rs:358) → saved-reply
+   hits navigate nowhere; every mapped branch discards the record id → palette hits land on
+   the page's previous selection; Search-page hit cards are display-only (no Sense::click,
+   search.rs:211-248). Fix: map the href, carry ids through NavRequest, make cards clickable.
+8. **AU2-8 (ai_center role-routing defects)** — the "(unset)" row writes a throwaway
+   `None::<usize>` temp → a routed role can never be unrouted (:1325); a failed probe
+   runtime leaves the row at "probing…" forever (:1561-1564); hub role text edits commit
+   only on lost_focus → tab/page switch silently drops them (:1366-1391).
+9. **AU2-9 (sync_note stuck + operations spinner loop)** — `sync_note = "syncing…"` is
+   set on click and never updated/cleared on completion (dashboard.rs:523, customers.rs:336,
+   organizations.rs:151, reports.rs:367); operations ensure_loaded re-queries every frame
+   with no backoff on persistent snapshot errors (operations.rs:218-250).
+10. **AU2-10 (outreach campaign report renders all zeros — self-documented)** — the panel
+    reads top-level keys while core nests them under `totals` (app-shell outreach.rs:537-570
+    vs core outreach/mod.rs:945/1025, send.rs:494); an in-UI callout admits the bug. Fix the
+    reader (or flatten the producer).
+11. **AU2-11 (settings page feedback lifecycle)** — `message`/`error` are set in ~15 places
+    and never cleared (stale feedback glues above every tab until restart);
+    disconnect_helpscout deletes tokens but leaves the in-session provider handle live
+    (settings.rs:654-668 vs clear_helpscout_credentials :854-882) → repeated 401s after
+    explicit disconnect; workspace reset leaves workers running so auto-sync re-pulls within
+    a minute while the message claims it happens on next start (settings.rs:884-913 vs
+    workers/mod.rs:213-228); the webhook-health job's error path emits no event so
+    `wh_outcome` goes stale after a failed "check now" (execute.rs:2305-2321).
+12. **AU2-12 (palette/overlay input arbitration)** — Esc is consumed by both the palette and
+    the confirm dialog (palette.rs:112-123, overlays.rs:119-123) → one Esc closes the palette
+    AND cancels an armed destructive confirm; ⌘K opens the palette over a live confirm; the
+    confirm dialog is non-modal and a second NavRequest::Confirm silently overwrites the
+    pending action (app/mod.rs:216-220).
+13. **AU2-13 (program dead-surface cleanup — the AU-1 census, owner disposition per group).**
+    (a) 21 dead items: db.rs open_with_migrations/reader_pool_size/is_shared_with,
+    audit.rs with_before_state/with_conversation_id, ai_center.rs M009_SQL +
+    copilot_tool_allowlist, migrations/intelligence.rs M014_SQL, migrations.rs find,
+    response_state_sql.rs count trio, translation.rs ensure_translation_schema (redundant —
+    m040 creates the table; folding into apply_runtime_guards is the alternative),
+    vectorstore_sqlitevec.rs count_by_entity (+cascade count_by_entity_type),
+    outreach/mod.rs is_on_dnc, app-shell pages/ai_center.rs attribute_catalog + design/mod.rs
+    message_card/quoted_history/file_chip/cop_similar, pages/support_graph.rs
+    kittest_seed_search (gate #[cfg(test)]); (b) 5 execute_job arms with no program producer:
+    initial_sync/incremental_sync/reconciliation/rebuild_embeddings/sync.conversations
+    (execute.rs:19/28/36/203/423); (c) 16 created-never-used tables (state_transitions,
+    side_thread_messages/mentions (+ side_threads never written → support_graph reads
+    permanently empty), verified_drafts, interaction_signals (table), campaigns,
+    campaign_recipients, support_cases, known_issue_refs, thread_participants,
+    notification_prefs, knowledge_doc_usage, report_snapshots, daily_metrics, release_events,
+    routing_configurations, encrypted_sync_log) — delete the creation or wire the feature;
+    (d) encrypted_sync.rs is a name-only stub; (e) api_queue stats snapshot has no consumer;
+    (f) boot log misstates the timer set ("webhook, embedding timers" — main.rs:68);
+    (g) workers_host restart() drops the JoinHandle (workers_host.rs:91-97).
+14. **AU2-14 (low-confidence hygiene — verify-then-fix)** — quality day-window compares
+    'T'-separated vs space-separated timestamps → over-inclusive boundary
+    (quality/mod.rs:203-212); SLA "last customer message" via string MAX over mixed
+    precision (sla.rs:512-519, 668-676); unknown automation action kinds report success
+    (automation.rs:415/869-877); webhook redelivery of permanently-failed events swallowed
+    as duplicates (webhook.rs:81-90); jobs claim UPDATE lacks a status guard (jobs.rs:106-114,
+    unreachable under the single-writer lane); the 6-hourly maintenance `?`-chain places
+    backups after trend/retention steps → any future failure there silently disables backups
+    (workers/mod.rs:897-1035).
+15. **AU2-15 (version_check manual-only — owner call)** — sole program caller is the
+    settings "check now" thread (settings.rs:1646); no boot-time or periodic check;
+    ReleaseInfo.html_url/published_at parsed but never displayed. Decide: schedule it,
+    surface it, or document manual-only as intended.
