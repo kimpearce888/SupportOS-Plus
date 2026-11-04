@@ -6781,3 +6781,82 @@ deterministic across runner instances and nothing else drifted.)
 
 Rule 8 STOP — Batch AU-2 is drained; next queued work waits on the owner's
 `continue`.
+### Batch REL-2 — 2026-11-04 (release commit `5b3a8a8`, tag `v1.9.3`, Release run `41883619992`: success)
+
+**Owner-directed Build & Release — SupportOS+ 1.9.3 published from the final
+source.** The owner's work order (build, test, publish install-ready Linux
+`.deb` + `.AppImage` from the final repository source; GitHub Actions; clean-
+environment verification; release integrity; no unverified claims) is closed
+with the following evidence.
+
+**REL-2-1 — release prep (commit `5b3a8a8`)**: workspace version 1.9.2 → 1.9.3
+(Cargo.toml + Cargo.lock; lock verified: 578 packages, only the four member
+versions changed, zero dependency drift); CHANGELOG `## [1.9.3] — 2026-11-04`
+in product language (the fifteen AU-2 fixes, dead-surface removal, manual-only
+version check); decisions.md D12 (version policy); progress.md Rule-2 opener.
+Content rationale: final source `4a8db7e` carries Batch AU-1 + AU-2 waves 1–2
+and the relocked kittest baselines — none of it was in any published release
+(v1.9.2 shipped `a53273d`, 11 commits back).
+
+**REL-2-2 — gates at the exact tagged content (local, 4 GB no-swap recipe)**:
+fmt --all --check clean; check --locked --workspace --all-targets zero
+diagnostics (2m31s); clippy --locked -D warnings zero (workspace 31s; core +
+sandbox feature 41s); tests --locked --test-threads=1: app-shell **239/0**
+(161s), catalog 0/0, core **452/0/3** (311s), core+sandbox **460/0/3**
+(311s), xtask **11/0**, doc-tests **0/0**; gate_no_simulation clean;
+gate_traceability OK (23 routes / 20 DC tags / 27 ids); verify-icons clean.
+Disclosures: the disk-full remedy from the wave-2 record repeated (Phase-A
+target cleanup → full test-profile rebuild); one environment SIGKILL of a
+detached full-suite run (silent, mid-suite — the same watchdog class as the
+no-root sandbox has shown before) → resumed per-crate in foreground, every
+phase green; CI run #225 on `5b3a8a8` (incl. the kittest lavapipe diff-lock
+lane) independently **success**.
+
+**REL-2-3 — publish (Release run `41883619992`, run 32: success, 33.5 min,
+6/6 jobs)** — the unmodified release.yml on tag push: build + full gate set +
+package in an ubuntu:22.04 container (glibc 2.35 baseline); verify-deb matrix
+green on **ubuntu:22.04, ubuntu:24.04, debian:12** (APT dependency
+resolution, package metadata, desktop entry + icons, desktop-file-validate,
+SPP_SMOKE boot chain incl. first-run initialization, 0.2.x → 1.x data-
+directory upgrade migration, Xvfb GUI launch on declared dependencies only,
+reinstall, uninstall with user-data retention, purge); verify-appimage green
+(smoke + Xvfb GUI launch, self-contained runtime); publish-after-green with
+in-workflow live link + checksum re-verification.
+
+**REL-2-4 — post-publish verification (independent, from this sandbox)**:
+published release https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.3
+— tag `v1.9.3`, "SupportOS+ 1.9.3", draft=false, prerelease=false,
+target = `5b3a8a81abcd15c85ffc7f94fa368d5b411106ed` (== final source commit,
+verified byte-for-byte against the local checkout HEAD). All four assets
+downloaded live from their browser_download_url:
+
+| Asset | Size | SHA-256 |
+|---|---|---|
+| `SupportOS-Plus-1.9.3-x86_64.AppImage` | 12,798,456 B | `5a97da170a570e1d7f07dea560d7ec73e4f68d708817249ebf6b322bde272cd3` |
+| `supportos-plus_1.9.3_amd64.deb` | 10,184,462 B | `b9e77a04968e2ec6df74b6c61c8c691ee7ad94a6854b67274a3b23831e4e2fed` |
+| `SHA256SUMS.txt` | 200 B | (checksum list itself, verified against both packages) |
+| `BUILD-INFO.txt` | 187 B | version 1.9.3, commit `5b3a8a8…`, ubuntu:22.04 container (glibc 2.35 baseline) |
+
+`sha256sum -c SHA256SUMS.txt` → both packages **OK** (checksums recomputed
+from the downloaded bytes match the published list). `.deb` metadata re-read
+from the downloaded artifact: Package `supportos-plus`, Version 1.9.3,
+Section utils, Architecture amd64, Installed-Size 30,217 KB, full Depends
+stack (libc6 >= 2.35, X11/xkb/GL/EGL/GLES/Wayland client set), Homepage,
+description; payload carries `/usr/bin/supportos-plus`,
+`/usr/share/applications/supportos-plus.desktop`, hicolor icons
+(1024/256/128/32). AppImage re-read: ELF 64-bit x86-64 (type-2 runtime).
+Release notes carry the `[1.9.3]` changelog section, install instructions
+(APT one-liner / chmod+x AppImage), system requirements (x86_64, glibc 2.35+,
+Ubuntu 22.04 LTS+ / Debian 12+, desktop session, ~200 MB) and the
+verified-in-CI statement.
+
+**Compatibility declaration (shipped in the release notes)**: x86_64 only;
+glibc >= 2.35 (Ubuntu 22.04 LTS / 24.04 LTS, Debian 12+); X11 or Wayland
+desktop; GL driver (Mesa or vendor) — the glow renderer is the default, wgpu
+opt-in via `SPP_RENDERER=wgpu`; no compilation, no dev tools, no Docker, no
+external services; first run initializes the SQLite store under
+`$XDG_DATA_HOME/supportos-plus` by itself.
+
+**Engagement state:** Batch REL-2 complete; ledger synced (this record +
+progress.md); RS-4 remains the active queued batch (held, not started, Rule 6)
+and resumes on the owner's `continue`. Rule 8 STOP.
