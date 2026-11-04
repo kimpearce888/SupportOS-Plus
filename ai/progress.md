@@ -1932,3 +1932,70 @@ completed.md). AU-1-9 done: 25 confirmed findings + 21 dead items + 16 orphaned 
 6 low-confidence hygiene notes written into plan.md as Batch AU-2 items 1..15. AU-1-10
 done: completed.md Batch AU-1 record; decisions.md D9 (audit evidence policy). Rule 8
 STOP.
+
+## Batch AU-2 — confirmed AU-1 findings, fix wave 1 (items AU2-1..AU2-10, moved from plan.md per Rule 2 on owner `continue`, 2026-11-04)
+
+Source: Batch AU-1 confirmed findings (completed.md, 2026-11-03), each verified at HEAD
+`49247d5` with program-code-only evidence. Order = severity then blast radius. Items:
+
+1. **AU2-1 (automation feature dead end-to-end — three independent breaks).**
+   (a) trigger vocabulary: core fires only `new_conversation`/`customer_reply`
+   (automation.rs:222-231, sole program fire site workers/execute.rs:630-642) while the
+   UI creates only `status_changed`/`tag_added`/`sla_risk` rules (app-shell
+   pages/automation.rs:9-26) → `rule.trigger != fired` always (automation.rs:808);
+   (b) action shape: `create_rule` stores a single JSON object (automation.rs:92-98) but
+   the engine only executes array-shaped `action_json` (automation.rs:829-831) → actions
+   never run; (c) approval loop severed: risky actions park jobs
+   (`automation_action_awaiting_approval`, payload lacks `approved`, automation.rs:329-349;
+   execute.rs:380-419 parks; nothing requeues with `approved:true`), the approvals card
+   reads `automation_approvals` which NO program code inserts into (the two INSERT sites
+   are #[test]-gated), and `approve()`/`reject()` only flip status without executing
+   anything (automation.rs:156-176). Owner decision needed: intended trigger vocabulary +
+   approval model; then wire all three breaks.
+2. **AU2-2 (digest top_tags always empty)** — digest.rs:266-271 selects `t.tag` from
+   `conversation_tags` (columns are conversation_id/tag_id only) → prepare fails,
+   `.unwrap_or_default()` swallows → `top_tags: []` in every weekly digest. Fix: join
+   `tags t ON t.id = ct.tag_id` (shape proven at issue_impact.rs:150-162).
+3. **AU2-3 (Search page button unclickable)** — search.rs:129-133: `response.lost_focus()
+   && design::button(...)` short-circuits; the button renders only on the one-frame focus
+   loss. Render unconditionally (pattern exists at support_graph.rs:191).
+4. **AU2-4 (render-path panic risk: mention caret)** — mention_popup.rs:51/95 slice the
+   composer body at a byte offset captured from a previous draft state (inbox.rs:2338);
+   out-of-band body replacement (saved-reply insert, AI draft insert, AI transform)
+   leaves a stale byte offset → `byte index is not a char boundary` panic when a multibyte
+   char spans it. Fix: reset mention_caret on every out-of-band body change +
+   is_char_boundary-safe slicing.
+5. **AU2-5 (knowledge page: writes on the read lane + latch blanking)** —
+   mark_reviewed/mark_verified execute UPDATEs via `db.with_read` (knowledge.rs:471/481;
+   readers are full connections, db.rs:102-131 → bypasses single-writer serialization,
+   SQLITE_BUSY-prone); after import/review/delete the vectors are cleared but `loaded`
+   stays true → the table blanks to "(no documents)" until the next unrelated bus event
+   (no event is emitted by those paths; embed completion emits none either). Fix: with_write
+   + set loaded=false (or explicit refetch).
+6. **AU2-6 (inbox: stale assignee + deleted-selection frame loop)** — select() does not
+   reset `assign_pick` (inbox.rs:693-720; combo writes :1515-1517, submit :1529) → picking
+   an assignee on conversation A then opening B submits the stale pick to Help Scout; when
+   reload_detail returns Ok(None) the selected id stays Some while detail stays None →
+   reload_detail re-runs every frame forever (:396-399 + :447-467). Fix: reset pick in
+   select(); terminal clear-selection state on Ok(None).
+7. **AU2-7 (deep links broken three ways)** — palette: bare `/inbox` unmapped
+   (palette.rs:45-62; core emits it for saved replies, search/lanes.rs:358) → saved-reply
+   hits navigate nowhere; every mapped branch discards the record id → palette hits land on
+   the page's previous selection; Search-page hit cards are display-only (no Sense::click,
+   search.rs:211-248). Fix: map the href, carry ids through NavRequest, make cards clickable.
+8. **AU2-8 (ai_center role-routing defects)** — the "(unset)" row writes a throwaway
+   `None::<usize>` temp → a routed role can never be unrouted (:1325); a failed probe
+   runtime leaves the row at "probing…" forever (:1561-1564); hub role text edits commit
+   only on lost_focus → tab/page switch silently drops them (:1366-1391).
+9. **AU2-9 (sync_note stuck + operations spinner loop)** — `sync_note = "syncing…"` is
+   set on click and never updated/cleared on completion (dashboard.rs:523, customers.rs:336,
+   organizations.rs:151, reports.rs:367); operations ensure_loaded re-queries every frame
+   with no backoff on persistent snapshot errors (operations.rs:218-250).
+10. **AU2-10 (outreach campaign report renders all zeros — self-documented)** — the panel
+    reads top-level keys while core nests them under `totals` (app-shell outreach.rs:537-570
+    vs core outreach/mod.rs:945/1025, send.rs:494); an in-UI callout admits the bug. Fix the
+    reader (or flatten the producer).
+
+**Decision note (AU2-1):** the owner's standing directive is to fix every broken
+feature; the trigger-vocabulary/approval-model decision is taken in-code this batch and
+recorded in decisions.md (D10) — no owner round-trip available mid-batch.
