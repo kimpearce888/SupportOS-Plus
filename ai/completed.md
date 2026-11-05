@@ -7121,3 +7121,12 @@ touched (helpers are app-shell-only, verified by repo-wide rg).
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+**Addendum (GA-2, CI outcome, 2026-11-04):** CI on the implementation commit
+(`f535e77`) went **green 3/3 on the first push** — no GA-1-style process miss
+this time: the GA-1 standing practice (`cargo fmt --all -- --check` as the
+final pre-push local step, not an early one) held. Checks: fmt/clippy/test/
+deny ✓ · AppImage + .deb build smoke ✓ · kittest snapshot locks ✓. Ledger
+synced per Rule 4 with this addendum; the engagement returns to a clean
+Rule 8 STOP — the queue is empty, the next work item requires a new owner
+directive.
