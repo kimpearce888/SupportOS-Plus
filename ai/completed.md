@@ -7211,3 +7211,67 @@ second consecutive batch. Checks: fmt/clippy/test/deny ✓ · AppImage + .deb
 build smoke ✓ · kittest snapshot locks ✓. Ledger synced per Rule 4 with this
 addendum; the engagement returns to a clean Rule 8 STOP — the queue is empty,
 the next work item requires a new owner directive.
+
+## Batch DENY-1 — deny lane: zero warnings (the reviewdog-battery findings) — completed and verified 2026-11-05
+
+**Owner:** "continue" on the reviewdog verification battery closeout.
+Context recorded for the instrument chain: the owner had directed a
+Tauri-WebDriver "check everything again" pass; the source audit showed
+tauri-driver inapplicable (the Tauri app was deleted at the Phase 4 cutover —
+zero tauri references in any manifest or source file, README:193 documents
+the eframe/egui replacement), so the battery ran as a full local re-run of
+every CI lane at 1c50e4f (toolchain 1.99.1 pinned) plus the SPP_SMOKE
+boot-chain E2E (rc=0). The `cargo deny` lane, run locally with a prebuilt
+cargo-deny 0.20.2 (current latest; CI's taiki-e install resolves latest at
+runtime), passed but emitted three warnings — the findings this batch
+consumes.
+
+**Findings (all three tool-flagged, each verified against the graph before
+touching anything):**
+1. `warning[yanked]` — async-executor 1.14.0 is yanked on crates.io;
+   chain: accesskit_unix ← egui-winit ← eframe (the Linux accessibility
+   stack). cargo-deny's own suggestion: `cargo update -p async-executor`.
+2. `warning[unnecessary-skip]` — the `bitflags` bans skip ("1.x legacy
+   alongside 2.x") is dead: `cargo tree -i bitflags@1.3.2` prints nothing
+   for the checked graph (x86_64-unknown-linux-gnu), and the version does
+   not exist in the sandbox-feature graph either; bitflags 1.3.2 sits in
+   Cargo.lock only behind a target/feature edge no checked configuration
+   activates (cargo tree itself points at non-checked targets).
+3. `warning[license-not-encountered]` — the `CDLA-Permissive-2.0` allowance
+   matches nothing (zero CDLA mentions in Cargo.lock).
+
+**Items (Rule 2: opened in plan.md, moved through progress.md):**
+- DENY-1-1: drop the dead `bitflags` skip line — the [bans] block's own
+  drop-policy ("when an upstream dedupes one of them, drop the line; CI
+  stays green — the skip is then simply unused"), applied on the tool's
+  explicit flag rather than an upstream dedupe.
+- DENY-1-2: drop the unused `CDLA-Permissive-2.0` allowance.
+- DENY-1-3: `cargo update -p async-executor` 1.14.0 → 1.14.1 — the exact
+  suggested patch bump; dry-run verified a single-package move (no
+  collateral lock churn).
+
+**Verification (fresh container after the mid-session sandbox recycle —
+rustup + pinned toolchain 1.99.1 reinstalled, repo re-cloned at 1c50e4f;
+disclosed):**
+- `cargo deny --locked check advisories licenses bans`: **rc=0 with zero
+  warnings** — "advisories ok, bans ok, licenses ok"; no yanked, skip, or
+  license notes remain.
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`: clean
+  (14.2s warm — the bump recompiled only the a11y-stack crates).
+- Tests, foreground per-crate, baselines exact: core 452 / 0 / 3 (406s);
+  app-shell 239 / 0 lib (216s) + style_lint 2 / 0 + the 24 kittest suites
+  0/0 (feature-gated, as designed); catalog 0; xtask 11 / 0; doc-tests
+  0 / 0 everywhere.
+- Gates: no-simulation clean; traceability OK (23 routes / 20 DC tags /
+  27 ids).
+- `cargo fmt --all -- --check` as the FINAL pre-push local step: clean
+  (GA-1 standing practice).
+- Scope: `git diff --stat` = deny.toml (2 lines), Cargo.lock (one package),
+  ai/plan.md, ai/progress.md, this record. Zero source files touched; no
+  API change, no behavior change.
+- Known-lane limit (unchanged by this batch): the kittest snapshot job is
+  not locally runnable in this sandbox (zero Vulkan ICDs, no libEGL, no
+  sudo); it remains CI-covered and green at the base commit.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive. (CI addendum to follow at the push.)

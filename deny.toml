@@ -32,7 +32,6 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "MPL-2.0",
-    "CDLA-Permissive-2.0",
     "BSL-1.0",
     "CC0-1.0",
     # egui's bundled fonts (epaint_default_fonts): emoji + Ubuntu family.
@@ -79,7 +78,6 @@ skip = [
     { crate = "inout", reason = "transitive: crypto-stack generations from different upstreams" },
     { crate = "sha2", reason = "workspace uses 0.11; egui/accesskit tree still pulls 0.10" },
     # Ecosystem-wide library generations.
-    { crate = "bitflags", reason = "transitive: 1.x legacy alongside 2.x" },
     { crate = "cpufeatures", reason = "transitive: generations from different upstreams" },
     { crate = "euclid", reason = "transitive: generations from different upstreams" },
     { crate = "foldhash", reason = "transitive: generations from different upstreams" },

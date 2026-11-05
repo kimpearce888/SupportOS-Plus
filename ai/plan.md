@@ -7,7 +7,7 @@
 
 ## Queue state
 
-**EMPTY — no open items (authoritative, 2026-11-05, post-Batch RW-1).**
+**EMPTY — no open items (authoritative, 2026-11-05, post-Batch DENY-1).**
 
 Every program recorded in the engagement is consumed and has its completion
 record in `completed.md`: the v2-blueprint batches 1–15 (v1.4.0→v1.7.0); the
@@ -18,7 +18,8 @@ KB-2..KB-7; REL-1 (v1.9.2); AU-1 (10/10); AU-2 (15/15); REL-2 (v1.9.3,
 published and live-verified). Nothing is pending, parked, or held; nothing
 resumes on `continue` until new work is queued here by the owner. The
 tool-audit batches GA-1/GA-2 (graphify knowledge-graph audit) and RW-1
-(repowise code-health audit) are consumed the same way.
+(repowise code-health audit) are consumed the same way, as is DENY-1 (the
+deny-lane hygiene batch opened from the reviewdog verification battery).
 
 ## Notes
 
@@ -53,3 +54,12 @@ tool-audit batches GA-1/GA-2 (graphify knowledge-graph audit) and RW-1
   the same session, left for `completed.md` at the Rule 4 sync; queue empty
   again. The repowise index stays outside the repo (`<worktree>/.repowise/`,
   untracked).
+- Batch DENY-1 (items DENY-1-1..3: make the deny lane warning-free) opened
+  here 2026-11-05 on the owner's "continue" after the reviewdog verification
+  battery (reviewdog v0.21.2 check of 1c50e4f — tauri-driver inapplicable
+  since the Phase 4 cutover, so the battery was a full local CI-lane re-run
+  plus SPP_SMOKE) surfaced three cargo-deny warnings: yanked
+  async-executor 1.14.0, a dead `bitflags` bans skip, and an unmatched
+  `CDLA-Permissive-2.0` license allowance. Moved to `progress.md` per
+  Rule 2, completed and verified the same session, left for `completed.md`
+  at the Rule 4 sync; queue empty again.
