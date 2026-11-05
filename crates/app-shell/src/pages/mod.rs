@@ -346,14 +346,16 @@ impl PageKey {
     }
 }
 
+mod json_fields;
 mod queries;
 
+pub(crate) use json_fields::{i64_field, opt_str_field, str_field};
 pub(crate) use queries::invalidated_pages;
-pub(crate) use queries::{i64_field, opt_str_field, str_field};
 
 #[cfg(test)]
 mod tests {
-    use super::queries::{i64_field, invalidated_pages, opt_str_field, str_field};
+    use super::json_fields::{i64_field, opt_str_field, str_field};
+    use super::queries::invalidated_pages;
     use super::*;
 
     #[test]

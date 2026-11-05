@@ -7,7 +7,7 @@
 
 ## Queue state
 
-**EMPTY — no open items (authoritative, 2026-11-04, post-Batch GA-1).**
+**EMPTY — no open items (authoritative, 2026-11-04, post-Batch GA-2).**
 
 Every program recorded in the engagement is consumed and has its completion
 record in `completed.md`: the v2-blueprint batches 1–15 (v1.4.0→v1.7.0); the
@@ -34,3 +34,10 @@ resumes on `continue` until new work is queued here by the owner.
   module cycle, moved to `progress.md` per Rule 2, completed and verified the
   same session, and left for `completed.md` at the Rule 4 sync. The queue is
   empty again; the graphify outputs live outside the repo (`/tmp/spp-graph/`).
+- Batch GA-2 (item GA-2-1: give the shared JSON field helpers a neutral home)
+  opened here 2026-11-04 on the owner's "continue" — the graphify audit's
+  remaining candidate: `str_field`/`i64_field`/`opt_str_field` were defined
+  inside the `pages/queries.rs` page module while 9+ sibling pages consume
+  them through the `pages` re-export (mod.rs:352). Moved to
+  `progress.md` per Rule 2, completed and verified the same session, left for
+  `completed.md` at the Rule 4 sync; queue empty again.

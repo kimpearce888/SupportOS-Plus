@@ -7072,3 +7072,52 @@ kittest snapshot locks ✓). The two test-bearing checks on `8b6ed28` had
 already passed (AppImage/.deb ✓, kittest ✓) — only the format step failed.
 Lesson carried into practice: every post-edit tree gets `cargo fmt --all --
 --check` as the final local step before push, not an early one.
+
+## Batch GA-2 — neutral home for the shared JSON field helpers (the graphify-audit smell) — completed and verified 2026-11-04
+
+Owner directive: "continue" on the GA-1 closeout (the one remaining candidate
+from the graphify audit). The audit's "surprising connection" flagged
+`notifications.rs` tests reaching `i64_field()` in the sibling page module
+`queries.rs`; source verification showed it was an intentional, consistently
+imported pattern — but the helpers' *definition* lived inside a page module
+while 9+ sibling pages consume them through the `pages` re-export.
+
+**GA-2-1 (`crates/app-shell/src/pages/{json_fields.rs (new), mod.rs, queries.rs}`).**
+`str_field`/`i64_field`/`opt_str_field` (17 lines, verbatim bodies) moved out
+of `pages/queries.rs` (was lines 67–83, the file's tail) into the new neutral
+module `pages/json_fields.rs` with module + item docs referencing GA-2.
+`mod.rs` now declares `mod json_fields;` and the re-export line changed from
+`pub(crate) use queries::{i64_field, opt_str_field, str_field}` to
+`pub(crate) use json_fields::{...}` — **the import contract is unchanged**:
+every consumer's `use super::{i64_field, opt_str_field, str_field}` (9+ pages
+at top level, `use super::super::{...}` inside nested test modules) resolves
+through the same re-export path and needed zero edits. The one direct-path
+import (`mod.rs` tests: `use super::queries::{i64_field, invalidated_pages,
+opt_str_field, str_field}`) split into `use super::json_fields::{...}` +
+`use super::queries::invalidated_pages`. queries.rs itself needed no import
+change (its `use super::*;` glob picks the re-exports up; it never calls the
+helpers). The `value_field_helpers` test stays in `mod.rs` — it exercises
+exactly the re-export consumption path. No core/catalog/xtask surface
+touched (helpers are app-shell-only, verified by repo-wide rg).
+
+**Verification (Rule 5)** — all mechanical, re-run at the working tree:
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (4.92s,
+  core cached — unchanged since GA-1).
+- Tests, foreground per-crate, baselines exact: core 452 / 0 / 3; app-shell
+  239 / 0; catalog 0 (no tests); xtask 11 / 0.
+- **fmt --check as the FINAL pre-push local step** (the GA-1 standing
+  practice): clean.
+- Graphify re-verification: graph rebuilt from the fixed tree (6,640 nodes /
+  17,813 edges / 250 communities) — all three helpers resolve to
+  `crates/app-shell/src/pages/json_fields.rs` (node ids
+  `crates_app_shell_src_pages_json_fields_*`), Import Cycles unchanged (the
+  two pre-verified benign artifacts only, no new cycles). One disclosed
+  hiccup: the first extract attempt died on a cache write with the sandbox
+  disk at 98% (ENOSPC family); the incremental second pass completed cleanly
+  (241 files cached, 0 re-extracted). Outputs in /tmp/spp-graph-ga2/.
+- Scope: `git diff --stat` = pages/mod.rs (6 lines), pages/queries.rs (-18),
+  pages/json_fields.rs (new, 29) + ai/plan.md + ai/progress.md (+ this
+  record). No behavior change anywhere — a definition relocation only.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive.
