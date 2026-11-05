@@ -7130,3 +7130,76 @@ deny ✓ · AppImage + .deb build smoke ✓ · kittest snapshot locks ✓. Ledge
 synced per Rule 4 with this addendum; the engagement returns to a clean
 Rule 8 STOP — the queue is empty, the next work item requires a new owner
 directive.
+
+## Batch RW-1 — connectors: no more blocking I/O on the async runtime (the repowise-audit defect) — completed and verified 2026-11-05
+
+Owner directive: "continue" on the repowise-audit closeout (repowise,
+repowise-dev/repowise v0.60.1, installed from PyPI and run locally against
+3845e10 — zero-LLM lanes: health/performance/dead-code/doc-drift/security/
+change-risk). The audit's performance lane surfaced exactly one real defect,
+verified against source before any edit: `fetch_rows`
+(`crates/core/src/connectors.rs`) is an `async fn` awaited from the
+background worker loop (`workers/mod.rs:1130` → `refresh` → `refresh_inner`
+→ `fetch_rows`) yet made blocking calls on the shared tokio runtime —
+`std::fs::metadata` + `std::fs::read_to_string` in the `local_json` and
+`csv` branches, and synchronous rusqlite (`open_with_flags` READ_ONLY →
+COUNT → prepare → query_map) in the `sqlite` branch. Every other audit
+lane verified clean or benign: `hot_path_sync_io` (9) all legitimate sync
+contexts (xtask packaging, db open, config migration, backup restore,
+fatal handler); `nested_loop_with_io` production hit
+(`sync_engine::persist_thread_details`) small-N inside the sync
+transaction; the 315 error_handling findings all low severity with
+spot-checked false positives; the 4 dead-code findings false positives
+(`richtext.rs` test-module SpanStyle helpers); doc-drift (25) confined to
+the frozen ledger archives (expected under D13); security clean bill
+(0 findings, 293 commits / 4,550 blobs, tree + full history).
+
+**RW-1-1 (`Cargo.toml` (workspace), `crates/core/src/connectors.rs`).**
+- tokio workspace features: added `"fs"` (additive; `tokio::fs` is the
+  idiomatic non-blocking fs surface).
+- New private helper `read_capped(data_dir, file)`: `jail_resolve` →
+  `tokio::fs::metadata` → 10MB cap → `tokio::fs::read_to_string`, awaited
+  end to end; error messages byte-identical to the pre-RW-1 blocking
+  version ("file error: {e}" / "file too large ({}MB > 10MB cap)" /
+  "read error: {e}"). Also deduplicates the stat→cap→read prologue the
+  `local_json` and `csv` branches had carried verbatim (the audit's DRY
+  note).
+- `local_json` + `csv` branches: one `read_capped(...).await?` line each;
+  parse/normalize logic untouched.
+- `sqlite` branch: the whole rusqlite read moved into
+  `tokio::task::spawn_blocking` — the codebase's established pattern
+  (workers/execute.rs uses it 8×) — with owned `abs`/`table` moved in,
+  JoinError mapped exactly like workers/execute.rs
+  (`.map_err(|e| Error::Other(e.to_string().into()))??`), the pure
+  validation (jail_resolve + table-name charset check) still sync before
+  the hop, and error strings preserved ("sqlite open: {e}" /
+  "sqlite read: {e}" / "invalid table name").
+- `http` branch untouched (already fully async: SSRF validation, reqwest,
+  chunked stream with mid-stream cap).
+- Public surface unchanged: `fetch_rows`/`refresh`/`refresh_inner`
+  signatures identical; the only behavior delta is that the blocking hops
+  now yield to the executor.
+
+**Verification (Rule 5)** — all mechanical, re-run at the working tree
+(fresh build: the sandbox `target/` had been deleted for disk headroom
+after the audit pushed the root volume to 100%; disclosed):
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (3m08s,
+  from scratch).
+- Tests, foreground per-crate, baselines exact: core 452 / 0 / 3;
+  app-shell 239 / 0 (+2 integration tests green); catalog 0 (no tests);
+  xtask 11 / 0.
+- `cargo fmt --all` then `cargo fmt --all -- --check` as the FINAL
+  pre-push local step: clean (GA-1 standing practice).
+- Repowise re-verification: `repowise health --recompute` over the fixed
+  working tree — **blocking_sync_in_async: 4 → 0 across the whole repo**;
+  the remaining `connectors.rs` markers are the pre-existing structural/
+  low-severity ones (large_method/complex_method on the already-large
+  function, io_in_loop ×2 on refresh_inner's transactional INSERT loop,
+  low-severity error_handling) — none introduced by this batch; the
+  prologue dedup removed duplication, added none.
+- Scope: `git diff --stat` = Cargo.toml (1 line), connectors.rs
+  (69+/59−) + ai/plan.md + ai/progress.md + this record. No API change,
+  no behavior change beyond the blocking hops now awaiting.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive.

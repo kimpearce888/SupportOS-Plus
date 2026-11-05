@@ -36,7 +36,7 @@ chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
 # sync (broadcast event bus, oneshot channels). net/io come in through
 # reqwest's own dependency via feature unification; fs/process/signal
 # have zero call sites.
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "fs"] }
 
 rusqlite = { version = "0.40", features = ["bundled"] }
 

@@ -490,6 +490,27 @@ impl CleanPath for Path {
 
 type NormalizedRow = (String, Map<String, Value>);
 
+/// Reads a jailed connector file without blocking the async runtime
+/// (RW-1): resolve inside the connectors folder, stat + size-cap, then
+/// read to string — all via `tokio::fs` so every hop awaits instead of
+/// stalling the shared executor. Error messages are byte-identical to
+/// the pre-RW-1 blocking version.
+async fn read_capped(data_dir: &Path, file: &str) -> Result<String> {
+    let abs = jail_resolve(data_dir, file)?;
+    let stat = tokio::fs::metadata(&abs)
+        .await
+        .map_err(|e| Error::Config(format!("file error: {e}")))?;
+    if stat.len() > HTTP_MAX_BYTES {
+        return Err(Error::Config(format!(
+            "file too large ({}MB > 10MB cap)",
+            stat.len() / 1024 / 1024
+        )));
+    }
+    tokio::fs::read_to_string(&abs)
+        .await
+        .map_err(|e| Error::Config(format!("read error: {e}")))
+}
+
 async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<NormalizedRow>> {
     let kind = connector.get("kind").and_then(|v| v.as_str()).unwrap_or("");
     let config = connector.get("config").cloned().unwrap_or(Value::Null);
@@ -501,34 +522,14 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
     match kind {
         "local_json" => {
             let file = config.get("file").and_then(|v| v.as_str()).unwrap_or("");
-            let abs = jail_resolve(data_dir, file)?;
-            let stat =
-                std::fs::metadata(&abs).map_err(|e| Error::Config(format!("file error: {e}")))?;
-            if stat.len() > HTTP_MAX_BYTES {
-                return Err(Error::Config(format!(
-                    "file too large ({}MB > 10MB cap)",
-                    stat.len() / 1024 / 1024
-                )));
-            }
-            let text = std::fs::read_to_string(&abs)
-                .map_err(|e| Error::Config(format!("read error: {e}")))?;
+            let text = read_capped(data_dir, file).await?;
             let payload: Value = serde_json::from_str(&text)
                 .map_err(|e| Error::Config(format!("invalid JSON: {e}")))?;
             normalize_rows(payload, key_column.as_deref(), "the JSON root")
         }
         "csv" => {
             let file = config.get("file").and_then(|v| v.as_str()).unwrap_or("");
-            let abs = jail_resolve(data_dir, file)?;
-            let stat =
-                std::fs::metadata(&abs).map_err(|e| Error::Config(format!("file error: {e}")))?;
-            if stat.len() > HTTP_MAX_BYTES {
-                return Err(Error::Config(format!(
-                    "file too large ({}MB > 10MB cap)",
-                    stat.len() / 1024 / 1024
-                )));
-            }
-            let text = std::fs::read_to_string(&abs)
-                .map_err(|e| Error::Config(format!("read error: {e}")))?;
+            let text = read_capped(data_dir, file).await?;
             let rows = parse_csv(&text, MAX_ROWS_PER_CONNECTOR);
             normalize_rows(Value::Array(rows), key_column.as_deref(), "CSV rows")
         }
@@ -545,42 +546,51 @@ async fn fetch_rows(connector: &Value, data_dir: &Path) -> Result<Vec<Normalized
             if !valid {
                 return Err(Error::Config("invalid table name".into()));
             }
-            let sqlite =
-                Connection::open_with_flags(&abs, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                    .map_err(|e| Error::Config(format!("sqlite open: {e}")))?;
-            let count: i64 = sqlite
-                .query_row(&format!("SELECT COUNT(*) FROM \"{table}\""), [], |r| {
-                    r.get(0)
-                })
-                .map_err(|e| Error::Config(format!("sqlite read: {e}")))?;
-            let limit = count.min(MAX_ROWS_PER_CONNECTOR as i64);
-            let mut stmt = sqlite.prepare(&format!("SELECT * FROM \"{table}\" LIMIT {limit}"))?;
-            let col_count = stmt.column_count();
-            let names: Vec<String> = (0..col_count)
-                .filter_map(|i| stmt.column_name(i).ok().map(str::to_string))
-                .collect();
-            let rows: Vec<Value> = stmt
-                .query_map([], |row| {
-                    let mut obj = Map::new();
-                    for (i, name) in names.iter().enumerate() {
-                        let v: Value = match row.get_ref(i) {
-                            Ok(rusqlite::types::ValueRef::Null) => Value::Null,
-                            Ok(rusqlite::types::ValueRef::Integer(n)) => json!(n),
-                            Ok(rusqlite::types::ValueRef::Real(f)) => json!(f),
-                            Ok(rusqlite::types::ValueRef::Text(t)) => {
-                                json!(String::from_utf8_lossy(t))
-                            }
-                            Ok(rusqlite::types::ValueRef::Blob(b)) => {
-                                json!(String::from_utf8_lossy(b))
-                            }
-                            Err(_) => Value::Null,
-                        };
-                        obj.insert(name.clone(), v);
-                    }
-                    Ok(Value::Object(obj))
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
+            // RW-1: rusqlite is synchronous; run the whole read on the
+            // blocking pool (the established workers/execute.rs pattern)
+            // instead of stalling the shared async executor.
+            let table = table.to_string();
+            let rows: Vec<Value> = tokio::task::spawn_blocking(move || -> Result<Vec<Value>> {
+                let sqlite =
+                    Connection::open_with_flags(&abs, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                        .map_err(|e| Error::Config(format!("sqlite open: {e}")))?;
+                let count: i64 = sqlite
+                    .query_row(&format!("SELECT COUNT(*) FROM \"{table}\""), [], |r| {
+                        r.get(0)
+                    })
+                    .map_err(|e| Error::Config(format!("sqlite read: {e}")))?;
+                let limit = count.min(MAX_ROWS_PER_CONNECTOR as i64);
+                let mut stmt =
+                    sqlite.prepare(&format!("SELECT * FROM \"{table}\" LIMIT {limit}"))?;
+                let col_count = stmt.column_count();
+                let names: Vec<String> = (0..col_count)
+                    .filter_map(|i| stmt.column_name(i).ok().map(str::to_string))
+                    .collect();
+                Ok(stmt
+                    .query_map([], |row| {
+                        let mut obj = Map::new();
+                        for (i, name) in names.iter().enumerate() {
+                            let v: Value = match row.get_ref(i) {
+                                Ok(rusqlite::types::ValueRef::Null) => Value::Null,
+                                Ok(rusqlite::types::ValueRef::Integer(n)) => json!(n),
+                                Ok(rusqlite::types::ValueRef::Real(f)) => json!(f),
+                                Ok(rusqlite::types::ValueRef::Text(t)) => {
+                                    json!(String::from_utf8_lossy(t))
+                                }
+                                Ok(rusqlite::types::ValueRef::Blob(b)) => {
+                                    json!(String::from_utf8_lossy(b))
+                                }
+                                Err(_) => Value::Null,
+                            };
+                            obj.insert(name.clone(), v);
+                        }
+                        Ok(Value::Object(obj))
+                    })?
+                    .filter_map(|r| r.ok())
+                    .collect())
+            })
+            .await
+            .map_err(|e| Error::Other(e.to_string().into()))??;
             normalize_rows(Value::Array(rows), key_column.as_deref(), "table rows")
         }
         "http" => {

@@ -7,7 +7,7 @@
 
 ## Queue state
 
-**EMPTY — no open items (authoritative, 2026-11-04, post-Batch GA-2).**
+**EMPTY — no open items (authoritative, 2026-11-05, post-Batch RW-1).**
 
 Every program recorded in the engagement is consumed and has its completion
 record in `completed.md`: the v2-blueprint batches 1–15 (v1.4.0→v1.7.0); the
@@ -16,7 +16,9 @@ RS-01..RS-21 + the RS-4 rejection wave + RS-4-11 + Gate G4 (accepted) + RS-6
 (v1.9.1); the refactor program RF-1..RF-11 + FINISH; KB-1, AUDIT-1,
 KB-2..KB-7; REL-1 (v1.9.2); AU-1 (10/10); AU-2 (15/15); REL-2 (v1.9.3,
 published and live-verified). Nothing is pending, parked, or held; nothing
-resumes on `continue` until new work is queued here by the owner.
+resumes on `continue` until new work is queued here by the owner. The
+tool-audit batches GA-1/GA-2 (graphify knowledge-graph audit) and RW-1
+(repowise code-health audit) are consumed the same way.
 
 ## Notes
 
@@ -41,3 +43,13 @@ resumes on `continue` until new work is queued here by the owner.
   them through the `pages` re-export (mod.rs:352). Moved to
   `progress.md` per Rule 2, completed and verified the same session, left for
   `completed.md` at the Rule 4 sync; queue empty again.
+- Batch RW-1 (item RW-1-1: connectors must not block the async runtime)
+  opened here 2026-11-05 on the owner's "continue" after the repowise
+  (repowise-dev/repowise v0.60.1) code-health audit of 3845e10 surfaced the
+  one real defect: `fetch_rows` (async, awaited from the background worker
+  loop at workers/mod.rs:1130) made blocking `std::fs` calls (local_json +
+  csv branches) and synchronous rusqlite calls (sqlite branch) on the shared
+  tokio runtime. Moved to `progress.md` per Rule 2, completed and verified
+  the same session, left for `completed.md` at the Rule 4 sync; queue empty
+  again. The repowise index stays outside the repo (`<worktree>/.repowise/`,
+  untracked).
