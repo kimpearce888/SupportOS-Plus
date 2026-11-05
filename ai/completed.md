@@ -7275,3 +7275,11 @@ disclosed):**
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive. (CI addendum to follow at the push.)
+
+CI outcome addendum (appended to the DENY-1 record, append-only): the
+implementation commit 5aa4c23 went green 3/3 on the first push
+(fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · kittest snapshot
+locks ✓) — the GA-1 standing practice (cargo fmt --all -- --check as the
+final pre-push local step) held for the third consecutive batch, and the
+deny lane is now warning-free end to end (no yanked-advisory note, no dead
+skip, no unmatched allowance). Rule 8 STOP.
