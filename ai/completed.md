@@ -7059,3 +7059,16 @@ helpscout_real.
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+**Addendum (GA-1, CI outcome, 2026-11-04):** the first push (`8b6ed28`)
+failed CI's Format-check step — a process miss, disclosed: `cargo fmt
+--check` had been run before the coercion edit but was not re-run after it,
+so the pushed tree carried a hand-split line rustfmt rejects
+(helpscout_real/mod.rs:605; CI wanted the multi-line `ApiQueue::new` arg form
+after the `as Arc<dyn QueueRateLimiter>` cast). Fix commit `fa8236c` applied
+`cargo fmt --all` (6 lines), re-verified fmt + clippy locally, and CI went
+**green 3/3** on it (fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ ·
+kittest snapshot locks ✓). The two test-bearing checks on `8b6ed28` had
+already passed (AppImage/.deb ✓, kittest ✓) — only the format step failed.
+Lesson carried into practice: every post-edit tree gets `cargo fmt --all --
+--check` as the final local step before push, not an early one.
