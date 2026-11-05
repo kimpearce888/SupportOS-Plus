@@ -63,3 +63,20 @@ deny-lane hygiene batch opened from the reviewdog verification battery).
   `CDLA-Permissive-2.0` license allowance. Moved to `progress.md` per
   Rule 2, completed and verified the same session, left for `completed.md`
   at the Rule 4 sync; queue empty again.
+- Batch REL-3 (release v1.9.4 from the final source) opened here 2026-11-05
+  on the owner's Build-and-Release directive: workspace 1.9.3 → 1.9.4
+  (Cargo.toml + Cargo.lock, the four member entries; the recycled sandbox
+  has no Rust toolchain and ~1.7 GB free disk, so the bump was applied and
+  verified mechanically — tomllib re-parse: exactly the four member package
+  versions changed, 620 packages, zero stray 1.9.3 — and the Release
+  workflow's `--locked` runs revalidate the lock against the manifest on
+  the tagged content before packaging), CHANGELOG [1.9.4] in product
+  language (RW-1: local connector reads moved off the async runtime;
+  DENY-1: supply-chain gate warning-free), the release.yml extraction
+  commands simulated locally (version awk → 1.9.4; changelog section awk →
+  the full [1.9.4] section). Moved to `progress.md` per Rule 2; the
+  annotated tag v1.9.4 triggers release.yml (gates + package + 3-distro
+  .deb verification incl. APT dependency resolution / upgrade / uninstall
+  + AppImage verification + publish-after-green with per-asset link and
+  checksum re-verification); completed and verified the same session,
+  record left for `completed.md` at the Rule 4 sync.

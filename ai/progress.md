@@ -7,7 +7,7 @@
 ## Active items
 
 **None.** No batch is active and none is held (authoritative, 2026-11-05,
-post-Batch DENY-1). The queue in `plan.md` is empty; the engagement sits at
+post-Batch REL-3). The queue in `plan.md` is empty; the engagement sits at
 a Rule 8 STOP awaiting the owner's next directive.
 
 Batch GA-1 (item GA-1-1: decouple `api_queue` from `helpscout_real`) moved
@@ -29,6 +29,11 @@ Batch DENY-1 (items DENY-1-1..3: make the deny lane warning-free) moved
 through this file the same way on 2026-11-05 — opened on the owner's
 "continue" after the reviewdog verification battery, completed and verified
 the same session; record in `completed.md`.
+
+Batch REL-3 (release v1.9.4 from the final source) moved through this file
+the same way on 2026-11-05 — opened on the owner's Build-and-Release
+directive, completed and verified the same session; record in
+`completed.md`.
 
 Historical note (REC-1): the "Batch RS-4 active" declaration that stood here
 was stale fiction — RS-4 completed and was verified 2026-10-30 (completion

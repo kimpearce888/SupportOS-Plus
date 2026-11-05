@@ -4,6 +4,23 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.4] — 2026-11-05
+
+### Fixed — background sync no longer stalls on local connectors
+
+- **Local data sources read off the async runtime**: fetching rows from
+  local JSON/CSV files and SQLite sources used to issue blocking
+  filesystem and database calls on the shared async runtime, so a large
+  file or a slow disk would freeze every other background task (sync,
+  automation, digests) until the read finished. File reads are now async
+  with a 10 MB safety cap, and the SQLite read runs on a dedicated
+  blocking thread — a slow connector no longer holds the rest of the
+  background work hostage. Error messages are unchanged.
+- **Supply-chain gate warning-free**: refreshed a yanked transitive crate
+  (`async-executor` 1.14.0 → 1.14.1) and dropped two stale packaging
+  allowlist entries; the cargo-deny gate now passes with zero warnings.
+  No application behavior change.
+
 ## [1.9.3] — 2026-11-04
 
 ### Fixed — the code-truth audit findings (Batch AU-1 → Batch AU-2, all fifteen items)
