@@ -7283,3 +7283,86 @@ locks ✓) — the GA-1 standing practice (cargo fmt --all -- --check as the
 final pre-push local step) held for the third consecutive batch, and the
 deny lane is now warning-free end to end (no yanked-advisory note, no dead
 skip, no unmatched allowance). Rule 8 STOP.
+
+---
+
+## Batch REL-3 — Build & Release v1.9.4 from the final source (2026-11-05)
+
+**Owner directive:** build, test, and publish install-ready Linux `.deb` and
+`.AppImage` packages from the final repository source; versioned GitHub
+Release with both packages attached, checksums, compatibility, and verified
+download links; packages must be self-contained and launch-ready with no
+dev tools, manual dependency handling, or first-run setup.
+
+**Items:**
+- REL-3-1: workspace version 1.9.3 → 1.9.4 (Cargo.toml + Cargo.lock).
+- REL-3-2: CHANGELOG `[1.9.4]` section in product language.
+- REL-3-3: annotated tag `v1.9.4` on the release commit.
+- REL-3-4: publish + live post-publish verification of the GitHub Release.
+
+**Release commit:** `f35c463` (main tip at push; RW-1 + DENY-1 included —
+neither was in any published release before this one).
+
+**Version bump verification (no Rust toolchain in the recycled sandbox,
+~1.7 GB free disk — disclosed; all build/test gates therefore ran in
+release.yml on the exact tagged content, as REL-2 established):**
+- Cargo.lock hand-bumped via a name-keyed script, tomllib re-parse: exactly
+  the four member package versions changed (app-shell, catalog, core,
+  xtask → 1.9.4), 620 packages total, zero stray `1.9.3` strings.
+- release.yml's own extraction commands simulated locally: the version awk
+  prints `1.9.4`; the changelog section awk returns the full `[1.9.4]`
+  section (17 lines).
+
+**CI Release run 42006886538 (tag push, ~29 min, 6/6 jobs green):**
+- build + test + package (ubuntu:22.04): no-simulation + traceability
+  gates, fmt, clippy ×2 `--locked -D warnings`, workspace tests, release
+  build with the Landlock/seccomp parse sandbox, xtask AppImage + .deb
+  packaging, versioned dist staging with SHA256SUMS.txt + BUILD-INFO.txt.
+- verify .deb on clean ubuntu:22.04, ubuntu:24.04 and debian:12 containers:
+  checksum integrity, APT install with automatic dependency resolution,
+  package metadata + desktop entry (`desktop-file-validate`) + all four
+  icon sizes, SPP_SMOKE boot chain, 0.2.x→1.x data-directory upgrade
+  migration (in-place, data preserved), GUI launch under Xvfb with only
+  declared dependencies (rc=124 = alive at timeout), reinstall mechanics,
+  uninstall with user-data retention, purge record cleared.
+- verify AppImage: checksum integrity, APPIMAGE_EXTRACT_AND_RUN boot-chain
+  smoke, GUI launch under Xvfb.
+- publish-after-green: release created, then every asset URL re-downloaded
+  in-workflow and checksum-verified against the uploaded bytes.
+
+**Live post-publish verification (this sandbox, independent of CI):**
+- Release `v1.9.4` = "SupportOS+ 1.9.4", draft=false, prerelease=false,
+  target_commitish = `f35c463…` (== final source HEAD).
+- All four assets downloaded live (AppImage 12,806,648 B; .deb 10,175,014 B;
+  SHA256SUMS.txt; BUILD-INFO.txt); `sha256sum -c SHA256SUMS.txt`: both
+  packages OK (AppImage `a0395aea…e443`, .deb `a5c9cd64…742a`).
+- BUILD-INFO.txt: version 1.9.4, commit `f35c463578f9…` == tag target ==
+  main tip; built on ubuntu:22.04 (glibc 2.35 baseline) at
+  2026-11-05T10:27:04Z.
+- `.deb` inspection: Package supportos-plus, Version 1.9.4, arch amd64,
+  19 declared Depends led by `libc6 (>= 2.35)` (APT resolves all of them —
+  CI proved it on three clean distro containers); contents = /usr/bin
+  binary + applications/supportos-plus.desktop + hicolor icons (all four
+  sizes, CI-verified) + copyright.
+- `.deb` extracted (dpkg-deb -x, no install) and smoke-run in this sandbox:
+  SPP_SMOKE rc=0 — all 54 migrations, boot services, background workers,
+  loopback listener (graceful OS-assigned port fallback), automatic backup,
+  24 pages / 4222 shapes rendered headlessly, clean exit; first-run
+  initialization created the database on its own.
+- AppImage `APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1`: rc=0, identical boot
+  chain (54 migrations, 24 pages / 4222 shapes); structure contains AppRun
+  + supportos-plus.desktop + icon for desktop-menu integration.
+- Release notes: 9/9 content checks — `[1.9.4]` changelog section, both
+  exact SHA-256 hashes, commit binding, both install commands, system
+  requirements (x86_64, glibc 2.35+, Ubuntu 22.04 LTS+/Debian 12+,
+  desktop session + GPU driver, ~200 MB), CI-verified list, no-manual-setup
+  statement.
+
+**Environmental limits disclosed (honest scope):** no sudo in this sandbox
+→ APT-install/uninstall/upgrade lanes ran only in CI's clean containers
+(green ×3 distros); no Vulkan ICD → local GUI launch impossible, covered by
+CI's four Xvfb GUI lanes on the exact artifacts (green). Everything else
+was verified live in this sandbox from the published bytes.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive.
