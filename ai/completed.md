@@ -7203,3 +7203,11 @@ after the audit pushed the root volume to 100%; disclosed):
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+**Addendum (RW-1, CI outcome, 2026-11-05):** CI on the implementation commit
+(`7cf30be`) went **green 3/3 on the first push** — the GA-1 standing practice
+(`cargo fmt --all -- --check` as the final pre-push local step) held for the
+second consecutive batch. Checks: fmt/clippy/test/deny ✓ · AppImage + .deb
+build smoke ✓ · kittest snapshot locks ✓. Ledger synced per Rule 4 with this
+addendum; the engagement returns to a clean Rule 8 STOP — the queue is empty,
+the next work item requires a new owner directive.
