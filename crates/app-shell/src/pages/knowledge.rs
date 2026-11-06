@@ -337,6 +337,10 @@ pub struct KnowledgePage {
     publish_collection_pick: Option<i64>,
     query_gaps: Vec<(String, i64)>,
     stale_docs_tracked: u32,
+    /// UX-18: one-shot flag — the empty-state CTA force-expands the import
+    /// disclosure on its next render. The user's own toggles live in egui's
+    /// persistent state and are never overridden.
+    import_force_open: bool,
 }
 
 impl KnowledgePage {
@@ -368,6 +372,7 @@ impl KnowledgePage {
             publish_collection_pick: None,
             query_gaps: Vec::new(),
             stale_docs_tracked: 0,
+            import_force_open: false,
         }
     }
 
@@ -517,8 +522,24 @@ impl KnowledgePage {
         let mut file_action: Option<String> = None;
         let mut manual_submit = false;
         let mut refresh = false;
+        // UX-18: the disclosure starts expanded on a first-run empty
+        // Documents tab (default_open only seeds egui's persistent state,
+        // so later user toggles always win), and the empty-state CTA can
+        // force it back open exactly once per click.
+        let header_id = ui.make_persistent_id(egui::IdSalt::new("Import documents"));
+        if self.import_force_open {
+            let mut state =
+                egui::containers::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    header_id,
+                    self.documents.is_empty(),
+                );
+            state.set_open(true);
+            state.store(ui.ctx());
+            self.import_force_open = false;
+        }
         egui::CollapsingHeader::new("Import documents")
-            .default_open(false)
+            .default_open(self.documents.is_empty())
             .show(ui, |ui| {
                 if self.import.files.is_none() {
                     self.reload_importable();
@@ -543,7 +564,7 @@ impl KnowledgePage {
                 }
                 let files = self.import.files.clone().unwrap_or_default();
                 if files.is_empty() {
-                    design::hint_text(ui, "(no importable files in the folder)");
+                    design::hint_text(ui, "No importable files in the folder");
                 }
                 for file in files {
                     ui.horizontal(|ui| {
@@ -643,7 +664,7 @@ impl KnowledgePage {
         design::page_header(
             ui,
             "Knowledge",
-            Some("local documents, sources, freshness, and the help center"),
+            Some("Documents, sources, freshness, and the Help Center"),
             |ui| {
                 if design::button_with_icon(
                     ui,
@@ -727,12 +748,18 @@ impl KnowledgePage {
         self.import_ui(ui, db);
         ui.add_space(8.0);
         if self.documents.is_empty() {
-            design::empty_state(
+            // UX-18: the empty state carries the import action instead of
+            // pointing at a collapsed disclosure 70px above it.
+            if design::empty_state_cta(
                 ui,
                 Icon::BookOpen,
-                "(no documents)",
-                "Import a document to get started.",
-            );
+                "No documents yet",
+                "Import a file, paste text, or sync the Help Center — imported \
+                 documents power search and AI answers.",
+                "Import Documents",
+            ) {
+                self.import_force_open = true;
+            }
             return None;
         }
         let mut action: Option<(i64, String, &str)> = None;
@@ -740,7 +767,7 @@ impl KnowledgePage {
             design::table(
                 ui,
                 "knowledge-documents",
-                &["title", "source", "visibility", "chunks", "actions"],
+                &["Title", "Source", "Visibility", "Chunks", "Actions"],
                 26.0,
                 |ui| {
                     let t = design::tokens(ui);
@@ -763,14 +790,14 @@ impl KnowledgePage {
                         );
                         design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
                         ui.horizontal(|ui| {
-                            if design::button(ui, "mark reviewed", ButtonVariant::Outline).clicked()
+                            if design::button(ui, "Mark Reviewed", ButtonVariant::Outline).clicked()
                             {
                                 action = Some((id, str_field(doc, "title"), "reviewed"));
                             }
-                            if design::button(ui, "verify", ButtonVariant::Outline).clicked() {
+                            if design::button(ui, "Verify", ButtonVariant::Outline).clicked() {
                                 action = Some((id, str_field(doc, "title"), "verify"));
                             }
-                            if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
+                            if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
                                 action = Some((id, str_field(doc, "title"), "delete"));
                             }
                         });
@@ -799,7 +826,7 @@ impl KnowledgePage {
             design::empty_state(
                 ui,
                 Icon::BookOpen,
-                "(no sources)",
+                "No sources yet",
                 "Sources appear when documents are imported.",
             );
             return;
@@ -808,7 +835,7 @@ impl KnowledgePage {
             design::table(
                 ui,
                 "knowledge-sources",
-                &["name", "kind", "visibility", "documents", "created"],
+                &["Name", "Kind", "Visibility", "Documents", "Created"],
                 26.0,
                 |ui| {
                     let t = design::tokens(ui);
@@ -1299,7 +1326,7 @@ impl KnowledgePage {
                         format!("status: {status_label}"),
                     )
                 });
-            if design::button(ui, "apply", ButtonVariant::Outline).clicked() {
+            if design::button(ui, "Apply", ButtonVariant::Outline).clicked() {
                 self.filter.collection = self.collection_pick;
                 self.filter.status = self.status_pick.clone();
                 self.filter.query = None;
@@ -1316,7 +1343,7 @@ impl KnowledgePage {
             if response.changed() {
                 self.search_edit = search;
             }
-            if design::button(ui, "search", ButtonVariant::Primary).clicked() {
+            if design::button(ui, "Search", ButtonVariant::Primary).clicked() {
                 let trimmed = self.search_edit.trim();
                 self.filter.query = if trimmed.is_empty() {
                     None
@@ -1356,7 +1383,7 @@ impl KnowledgePage {
                 |ui| {
                     ui.horizontal_wrapped(|ui| {
                         if self.query_gaps.is_empty() {
-                            design::hint_text(ui, "(no zero-hit searches recorded)");
+                            design::hint_text(ui, "No zero-hit searches recorded");
                         }
                         for (q, hits) in &self.query_gaps {
                             design::badge(ui, &format!("{q} ×{hits}"), BadgeTone::Warning);
@@ -1382,7 +1409,7 @@ impl KnowledgePage {
             design::empty_state(
                 ui,
                 Icon::BookOpen,
-                "(no articles match)",
+                "No articles match",
                 "Adjust the collection, status, or search terms.",
             );
             return;
@@ -1392,7 +1419,7 @@ impl KnowledgePage {
             design::table(
                 ui,
                 "docs-articles",
-                &["article", "collection", "status", "views", ""],
+                &["Article", "Collection", "Status", "Views", ""],
                 26.0,
                 |ui| {
                     let t = design::tokens(ui);
@@ -1416,7 +1443,7 @@ impl KnowledgePage {
                         };
                         design::badge(ui, article.status.as_str(), tone);
                         design::td_num(ui, &article.views.to_string());
-                        if design::button(ui, "read", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, "Read", ButtonVariant::Outline).clicked() {
                             open = Some(article.id);
                         }
                         ui.end_row();

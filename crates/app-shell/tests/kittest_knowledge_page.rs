@@ -177,7 +177,7 @@ fn r3_knowledge_help_center_tab_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("read").next().is_some(),
+        h.get_all_by_label("Read").next().is_some(),
         "the Help center tab must show the articles' read act"
     );
     h.snapshot("r3_knowledge_help_center_tab_light");
