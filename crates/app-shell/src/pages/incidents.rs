@@ -311,12 +311,14 @@ impl IncidentsPage {
 
         let subtitle = if (self.rows.len() as i64) < self.total {
             format!(
-                "showing first {} of {} incident(s) — the list has no pager",
+                "Showing the first {} of {} incidents",
                 self.rows.len(),
                 self.total
             )
+        } else if self.total == 1 {
+            "1 incident".to_string()
         } else {
-            format!("{} incident(s)", self.total)
+            format!("{} incidents", self.total)
         };
 
         design::page_header(ui, "Incidents", Some(&subtitle), |ui| {
@@ -338,6 +340,9 @@ impl IncidentsPage {
         let apply = design::filter_bar(
             ui,
             |ui| {
+                // UX-17: the two dropdowns carry visible labels — two bare
+                // "Any" combos were indistinguishable.
+                design::field_label(ui, "Status:");
                 let prev_status = self.filter_status.clone();
                 let status_label = self.filter_status.clone().unwrap_or_else(|| "Any".into());
                 egui::ComboBox::from_id_salt("incident-filter-status")
@@ -364,6 +369,7 @@ impl IncidentsPage {
                 if self.filter_status != prev_status {
                     self.reload_list(db);
                 }
+                design::field_label(ui, "Severity:");
                 let prev_severity = self.filter_severity.clone();
                 let severity_label = self.filter_severity.clone().unwrap_or_else(|| "Any".into());
                 egui::ComboBox::from_id_salt("incident-filter-severity")
@@ -391,7 +397,7 @@ impl IncidentsPage {
                     self.reload_list(db);
                 }
                 let prev_open_only = self.filter_open_only;
-                ui.checkbox(&mut self.filter_open_only, "open only");
+                ui.checkbox(&mut self.filter_open_only, "Open only");
                 if self.filter_open_only != prev_open_only {
                     self.reload_list(db);
                 }
@@ -402,7 +408,7 @@ impl IncidentsPage {
                 );
                 self.filter_query = q;
             },
-            "apply",
+            "Apply",
         );
         if apply.clicked() {
             self.applied_query = self.filter_query.trim().to_string();
@@ -418,17 +424,44 @@ impl IncidentsPage {
         let rows = self.rows.clone();
         let mut pick: Option<i64> = None;
         if rows.is_empty() {
-            design::empty_state(
+            // UX-17: the empty state must match reality — "no filters set"
+            // is a first-run state, not a filter mismatch.
+            let filters_active = self.filter_status.is_some()
+                || self.filter_severity.is_some()
+                || self.filter_open_only
+                || !self.applied_query.trim().is_empty();
+            if filters_active {
+                design::empty_state(
+                    ui,
+                    Icon::AlertTriangle,
+                    "No incidents match these filters",
+                    "Adjust or clear the filters, or create a new incident.",
+                );
+                ui.vertical_centered(|ui| {
+                    if design::button(ui, "Clear Filters", ButtonVariant::Outline).clicked() {
+                        self.filter_status = None;
+                        self.filter_severity = None;
+                        self.filter_open_only = false;
+                        self.filter_query.clear();
+                        self.applied_query.clear();
+                        self.reload_list(db);
+                    }
+                    ui.add_space(4.0);
+                });
+            } else if design::empty_state_cta(
                 ui,
                 Icon::AlertTriangle,
-                "No incidents match",
-                "Adjust the filters or create a new incident.",
-            );
+                "No incidents yet",
+                "Track outages and recurring problems — create your first incident.",
+                "New Incident",
+            ) {
+                self.show_new = true;
+            }
         } else {
             design::data_table(
                 ui,
                 "incidents",
-                &["code", "title", "severity", "status", "conversations", ""],
+                &["Code", "Title", "Severity", "Status", "Conversations", ""],
                 rows.len(),
                 ROW_HEIGHT,
                 |ui, i| {
@@ -484,7 +517,7 @@ impl IncidentsPage {
                         egui::vec2(70.0, ROW_HEIGHT),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
-                            if design::button(ui, "open", ButtonVariant::Outline)
+                            if design::button(ui, "Open", ButtonVariant::Outline)
                                 .on_hover_text(format!(
                                     "open {code} — linked conversations, notes, releases"
                                 ))
@@ -609,7 +642,7 @@ impl IncidentsPage {
                                     self.link_conversation = link;
                                 }
                             });
-                            if design::button(ui, "link", ButtonVariant::Primary).clicked() {
+                            if design::button(ui, "Link", ButtonVariant::Primary).clicked() {
                                 self.link(db);
                             }
                         },
@@ -677,7 +710,7 @@ impl IncidentsPage {
                                 egui::TextEdit::multiline(&mut self.new_note)
                                     .hint_text("write an incident note…"),
                             );
-                            if design::button(ui, "add note", ButtonVariant::Primary).clicked() {
+                            if design::button(ui, "Add Note", ButtonVariant::Primary).clicked() {
                                 self.add_note(db);
                             }
                         },
@@ -734,7 +767,7 @@ impl IncidentsPage {
                 ui.end_row();
             });
             ui.add_space(design::scale::space::SP1);
-            if design::button(ui, "create incident", ButtonVariant::Primary)
+            if design::button(ui, "Create Incident", ButtonVariant::Primary)
                 .on_hover_text("create with the fields above")
                 .clicked()
             {

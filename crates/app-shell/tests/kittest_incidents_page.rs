@@ -263,7 +263,7 @@ fn r3_incidents_open_detail_light() {
             },
         );
     h.run_ok();
-    h.get_all_by_label("open")
+    h.get_all_by_label("Open")
         .next()
         .expect("the first row's open act")
         .click();
