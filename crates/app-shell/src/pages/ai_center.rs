@@ -1416,11 +1416,6 @@ impl AiCenterPage {
             },
         );
         ui.add_space(4.0);
-        design::quirk(
-            ui,
-            "Reskin fix (presentation): the routing combo showed its index number \
-             ('0', '1'), not the endpoint name. Names now.",
-        );
         ui.add_space(6.0);
 
         design::card_titled(

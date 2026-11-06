@@ -211,12 +211,6 @@ impl NotificationsPage {
                 });
             }
         });
-        design::quirk(
-            ui,
-            "Reskin fix (presentation): unread was a '● ' character inside \
-             the badge text (notifications.rs:197-208) — now a real state \
-             dot; raw UTC survives in the hover title.",
-        );
         if let Some(id) = toggled {
             self.toggle_read(db, id);
         }

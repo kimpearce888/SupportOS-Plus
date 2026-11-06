@@ -462,13 +462,6 @@ impl OperationsPage {
             },
         );
         ui.add_space(10.0);
-        design::quirk(
-            ui,
-            "Reskin fix (presentation): the pre-rebuild build swapped the Load/Pressure \
-             columns — % under 'Load', weighted number under 'Pressure'. Labels match the \
-             values now.",
-        );
-
         if suggestions.is_empty() {
             design::card_titled(
                 ui,
@@ -823,12 +816,6 @@ impl OperationsPage {
         if wf_rows.is_empty() {
             design::hint_text(ui, "no workflows mirrored yet");
         }
-        design::quirk(
-            ui,
-            "Reskin companion (R3): these saved replies are also insertable from the Inbox \
-             composer — already prototyped in the Inbox After view.",
-        );
-
         match action {
             LibraryAction::None => {}
             LibraryAction::NewReply => {

@@ -654,11 +654,6 @@ impl IssueRadarPage {
                 }
             },
         );
-        design::quirk(
-            ui,
-            "Raw severity tokens (critical/warning/info) — the engine's own \
-             strings; info keeps the Warning tone exactly as the current build.",
-        );
         ui.add_space(design::scale::space::SP2);
         let sla = self.sla.clone();
         let Some(sla) = sla else {
