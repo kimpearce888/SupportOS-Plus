@@ -102,54 +102,67 @@ impl OnboardingPage {
         );
 
         let status = self.status.clone().unwrap_or_default();
-        design::card_titled(ui, "Setup status", None, |ui| {
-            let t = design::tokens(ui);
-            let rows = [
-                ("step:", status.step.clone(), status.step == "complete"),
-                (
-                    "onboarding complete:",
-                    status.completed.to_string(),
-                    status.completed,
-                ),
-                (
-                    "conversations:",
-                    status.conversations.to_string(),
-                    status.conversations > 0,
-                ),
-                (
-                    "Help Scout credentials:",
-                    status.hs_configured.to_string(),
-                    status.hs_configured,
-                ),
-                (
-                    "sync state:",
-                    status.sync_state.clone(),
-                    status.sync_state == "receiving",
-                ),
-            ];
-            for (key, value, ok) in rows {
-                ui.horizontal(|ui| {
-                    design::status_dot(
-                        ui,
-                        if ok {
-                            crate::design::BadgeTone::Success
-                        } else {
-                            crate::design::BadgeTone::Neutral
-                        },
-                        false,
-                    );
-                    ui.label(
-                        egui::RichText::new(key)
-                            .size(13.5)
-                            .strong()
-                            .color(t.foreground),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.monospace(egui::RichText::new(value).color(t.foreground));
+        // UX-4: present setup as a step checklist instead of a raw key–value
+        // status dump — same data, human progression.
+        let credentials_step = status.hs_configured;
+        let sync_step = status.conversations > 0 || status.sync_state == "receiving";
+        let complete_step = status.completed;
+        design::card_titled(
+            ui,
+            "Setup checklist",
+            Some("three steps and the workspace is yours"),
+            |ui| {
+                let t = design::tokens(ui);
+                let steps: [(&str, &str, bool, &str); 3] = [
+                    (
+                        "1. Connect Help Scout",
+                        "Add your app credentials in Settings → Help Scout.",
+                        credentials_step,
+                        "Done — credentials are configured.",
+                    ),
+                    (
+                        "2. Pull your history",
+                        "Run the initial sync to mirror conversations, customers \
+                         and docs into this machine.",
+                        sync_step,
+                        "Done — your Help Scout history is in the local mirror.",
+                    ),
+                    (
+                        "3. Finish setup",
+                        "Mark onboarding complete once the first sync looks right.",
+                        complete_step,
+                        "Done — setup is complete.",
+                    ),
+                ];
+                for (title, todo, done, done_note) in steps {
+                    ui.horizontal(|ui| {
+                        design::status_dot(
+                            ui,
+                            if done {
+                                crate::design::BadgeTone::Success
+                            } else {
+                                crate::design::BadgeTone::Neutral
+                            },
+                            false,
+                        );
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(title)
+                                    .size(14.0)
+                                    .strong()
+                                    .color(t.foreground),
+                            );
+                            ui.label(
+                                egui::RichText::new(if done { done_note } else { todo })
+                                    .size(design::scale::text::SMALL)
+                                    .color(t.muted_foreground),
+                            );
+                        });
                     });
-                });
-            }
-        });
+                    ui.add_space(6.0);
+                }
+            },
+        );
 
         if let Some(message) = &self.message {
             design::success_text(ui, &format!("status: {message}"));
