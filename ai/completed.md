@@ -7366,3 +7366,42 @@ was verified live in this sandbox from the published bytes.
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+---
+
+## Batch HYG-2 — CHANGELOG link-reference completeness (2026-11-05/06)
+
+**Owner directive:** "continue" with the queue empty post-REL-3. The
+continue ran an honest read-only post-release consistency sweep; the single
+finding became this batch.
+
+**Sweep results (all clean except one finding):**
+- Zero stale `1.9.3` strings outside ledger/CHANGELOG history (product,
+  packaging, and docs surfaces are version-clean at 1.9.4).
+- README install section is version-parameterized (`<version>` filenames)
+  and already matches the published asset naming exactly.
+- GitHub: 0 open issues/PRs; last 8 workflow runs all success.
+- CHANGELOG header/tag triangle: 23 version headers, 23 origin tags —
+  exact 1:1 (`git ls-remote` cross-check).
+- **Finding:** the file declares Keep-a-Changelog format but only 3 of 23
+  version headers carried a link reference (`[1.1.0]`, `[1.0.0]`,
+  `[0.2.0]`) — 20 missing, every one backed by an existing tag (zero 404
+  risk).
+
+**Fix (commit `118378e`):** added the 20 missing link references in
+descending order above `[1.1.0]` (1.9.4 → 1.1.1), keeping one sorted block.
+Docs-only: CHANGELOG +20 lines, ledger +19; no source, no lock, no
+packaging surface.
+
+**Verification:**
+- Header/ref parity 23/23, zero orphans in either direction (mechanical
+  regex census).
+- All 23 reference URLs live-checked: HTTP 200 each.
+- CI run `42134855363` on `118378e`: 3/3 green (fmt/clippy/test/deny ✓ ·
+  AppImage + .deb build smoke ✓ · kittest snapshot locks ✓).
+- (Context note: the recycled sandbox wiped the clone mid-sweep; re-cloned
+  at `d306caa` — zero state lost, everything lives on GitHub per the
+  ledger principle. The sweep re-ran from the fresh clone.)
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive.
