@@ -2260,110 +2260,138 @@ impl SettingsPage {
     }
 
     fn backups_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        design::card_titled_wide(ui, "Backups & export", None, |ui| {
+        // UX-32: the tab no longer opens with a card that repeats its own
+        // name. Two purposeful cards instead: safe actions (create/export)
+        // above, restore in its own card below — separated like the Help
+        // Scout tab's danger zone, so the destructive control never sits
+        // beside the export buttons it used to share a row with.
+        design::card_titled_wide(ui, "Back up or export your data", None, |ui| {
             ui.horizontal(|ui| {
                 if design::button_with_icon(
                     ui,
                     Icon::Download,
-                    "create backup",
+                    "Create Backup",
                     ButtonVariant::Primary,
                 )
+                .on_hover_text("a full copy of the local database, kept as a restore point")
                 .clicked()
                 {
                     self.create_backup(db);
                 }
-                if design::button(ui, "Export JSON", ButtonVariant::Secondary).clicked() {
+                // UX-32: the exports wore the flat Secondary gray, which
+                // read as disabled next to the primary button — Outline
+                // (bordered, like every secondary action in the header)
+                // keeps them clearly enabled.
+                if design::button(ui, "Export JSON", ButtonVariant::Outline)
+                    .on_hover_text(
+                        "the whole workspace as one JSON file — for keeping \
+                             or moving data elsewhere",
+                    )
+                    .clicked()
+                {
                     self.export_json(db);
                 }
-                if design::button(ui, "Export Conversations CSV", ButtonVariant::Secondary)
+                if design::button(ui, "Export Conversations CSV", ButtonVariant::Outline)
+                    .on_hover_text("one row per conversation — for spreadsheets")
                     .clicked()
                 {
                     self.export_csv(db);
                 }
             });
-            ui.add_space(8.0);
-            let backups = self.backups.clone();
-            if backups.is_empty() {
-                design::hint_text(ui, "(no backups yet)");
-                return;
-            }
-            egui::ScrollArea::vertical()
-                .id_salt("settings-backups")
-                .show(ui, |ui| {
-                    let t = design::tokens(ui);
-                    for backup in &backups {
-                        ui.horizontal(|ui| {
-                            ui.monospace(
-                                egui::RichText::new(str_field(backup, "file")).color(t.foreground),
-                            );
-                            // UX-22: metadata in user terms — "2.0 MB" and
-                            // "3h ago" instead of raw bytes and an RFC3339
-                            // stamp; the exact values stay one hover away.
-                            let size_bytes = i64_field(backup, "size_bytes");
-                            ui.label(
-                                egui::RichText::new(human_bytes(size_bytes))
-                                    .small()
-                                    .color(design::tokens(ui).muted_foreground),
-                            )
-                            .on_hover_text(format!("{size_bytes} bytes"));
-                            if let Some(created) = backup.get("created_at").and_then(|a| a.as_str())
-                            {
-                                let rel = relative_time(created);
-                                let label = if rel == created {
-                                    created.to_string()
-                                } else {
-                                    rel
-                                };
+        });
+        ui.add_space(10.0);
+        let backups = self.backups.clone();
+        design::card_titled_wide(
+            ui,
+            "Restore a backup",
+            Some("replaces the current database"),
+            |ui| {
+                if backups.is_empty() {
+                    design::hint_text(ui, "No backups yet — create one above.");
+                    return;
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("settings-backups")
+                    .show(ui, |ui| {
+                        let t = design::tokens(ui);
+                        for backup in &backups {
+                            ui.horizontal(|ui| {
+                                ui.monospace(
+                                    egui::RichText::new(str_field(backup, "file"))
+                                        .color(t.foreground),
+                                );
+                                // UX-22: metadata in user terms — "2.0 MB" and
+                                // "3h ago" instead of raw bytes and an RFC3339
+                                // stamp; the exact values stay one hover away.
+                                let size_bytes = i64_field(backup, "size_bytes");
                                 ui.label(
-                                    egui::RichText::new(label)
+                                    egui::RichText::new(human_bytes(size_bytes))
                                         .small()
                                         .color(design::tokens(ui).muted_foreground),
                                 )
-                                .on_hover_text(created);
-                            }
-                            // UX-22: restore replaces the live database — a
-                            // destructive action, so it wears the danger
-                            // variant and arms a confirmation below (never a
-                            // one-click apply).
-                            if design::button(ui, "Restore", ButtonVariant::Destructive)
-                                .on_hover_text(
-                                    "replaces the current database with this backup \
-                                     (a confirmation step follows) — restart the app \
-                                     afterwards",
-                                )
-                                .clicked()
-                                && let Some(dir) = &self.backups_dir
-                            {
-                                let path = dir.join(str_field(backup, "file"));
-                                self.restore_armed = Some(path.display().to_string());
-                            }
-                        });
-                        ui.add_space(2.0);
-                    }
-                });
-            if let Some(path) = self.restore_armed.clone() {
-                ui.add_space(6.0);
-                design::error_text(
-                    ui,
-                    &format!(
-                        "Restore this backup? The current database will be REPLACED \
-                         by \u{201c}{path}\u{201d} (the file is verified first). Restart \
-                         SupportOS+ afterwards to use it.",
-                        path = path.rsplit('/').next().unwrap_or(&path),
-                    ),
-                );
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
-                        self.restore_armed = None;
-                    }
-                    if design::button(ui, "Really Restore", ButtonVariant::Destructive).clicked() {
-                        self.restore_armed = None;
-                        self.restore_backup(db, &path);
-                    }
-                });
-            }
-        });
+                                .on_hover_text(format!("{size_bytes} bytes"));
+                                if let Some(created) =
+                                    backup.get("created_at").and_then(|a| a.as_str())
+                                {
+                                    let rel = relative_time(created);
+                                    let label = if rel == created {
+                                        created.to_string()
+                                    } else {
+                                        rel
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(label)
+                                            .small()
+                                            .color(design::tokens(ui).muted_foreground),
+                                    )
+                                    .on_hover_text(created);
+                                }
+                                // UX-22: restore replaces the live database — a
+                                // destructive action, so it wears the danger
+                                // variant and arms a confirmation below (never a
+                                // one-click apply).
+                                if design::button(ui, "Restore", ButtonVariant::Destructive)
+                                    .on_hover_text(
+                                        "replaces the current database with this backup \
+                                         (a confirmation step follows) — restart the app \
+                                         afterwards",
+                                    )
+                                    .clicked()
+                                    && let Some(dir) = &self.backups_dir
+                                {
+                                    let path = dir.join(str_field(backup, "file"));
+                                    self.restore_armed = Some(path.display().to_string());
+                                }
+                            });
+                            ui.add_space(2.0);
+                        }
+                    });
+                if let Some(path) = self.restore_armed.clone() {
+                    ui.add_space(6.0);
+                    design::error_text(
+                        ui,
+                        &format!(
+                            "Restore this backup? The current database will be REPLACED \
+                             by \u{201c}{path}\u{201d} (the file is verified first). Restart \
+                             SupportOS+ afterwards to use it.",
+                            path = path.rsplit('/').next().unwrap_or(&path),
+                        ),
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                            self.restore_armed = None;
+                        }
+                        if design::button(ui, "Really Restore", ButtonVariant::Destructive)
+                            .clicked()
+                        {
+                            self.restore_armed = None;
+                            self.restore_backup(db, &path);
+                        }
+                    });
+                }
+            },
+        );
     }
 }
 
