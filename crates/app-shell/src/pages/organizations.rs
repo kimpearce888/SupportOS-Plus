@@ -183,7 +183,7 @@ impl OrganizationsPage {
                     self.filter_edit = edit;
                 }
             },
-            "filter",
+            "Filter",
         );
         if apply.clicked() {
             self.filter = self.filter_edit.clone();
@@ -208,7 +208,7 @@ impl OrganizationsPage {
             design::data_table(
                 ui,
                 "organizations",
-                &["organization", "domains", "customers", "conversations", ""],
+                &["Organization", "Domains", "Customers", "Conversations", ""],
                 orgs.len(),
                 ROW_HEIGHT,
                 |ui, i| {
@@ -216,6 +216,13 @@ impl OrganizationsPage {
                     let id = i64_field(org, "id");
                     let name = str_field(org, "name");
                     let domains = domains_text(org);
+                    // UX-19: a blank cell explains nothing — name the
+                    // absence so the column reads as intentional.
+                    let domains = if domains.is_empty() {
+                        "No domains yet".to_string()
+                    } else {
+                        domains
+                    };
                     let customers = i64_field(org, "customer_count");
                     let conversations = i64_field(org, "conversation_count");
                     let t = design::tokens(ui);
@@ -259,7 +266,7 @@ impl OrganizationsPage {
                         egui::vec2(70.0, ROW_HEIGHT),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
-                            if design::button(ui, "open", ButtonVariant::Outline)
+                            if design::button(ui, "Open", ButtonVariant::Outline)
                                 .on_hover_text(format!(
                                     "open {name} — members, domains and conversation counts"
                                 ))
@@ -281,7 +288,7 @@ impl OrganizationsPage {
 
         ui.add_space(design::scale::space::SP2);
         design::card_titled(ui, "New organization", None, |ui| {
-            design::form_row(ui, "name", |ui| {
+            design::form_row(ui, "Name", |ui| {
                 let mut name = self.new_name.clone();
                 let response = ui.add_sized(
                     [240.0, 28.0],
@@ -291,7 +298,7 @@ impl OrganizationsPage {
                     self.new_name = name;
                 }
             });
-            design::form_row(ui, "domains", |ui| {
+            design::form_row(ui, "Domains", |ui| {
                 let mut domains = self.new_domains.clone();
                 let response = ui
                     .add_sized(
@@ -304,7 +311,7 @@ impl OrganizationsPage {
                 }
             });
             ui.add_space(design::scale::space::SP1);
-            if design::button(ui, "create organization", ButtonVariant::Primary)
+            if design::button(ui, "Create Organization", ButtonVariant::Primary)
                 .on_hover_text("create with the name + domains above")
                 .clicked()
             {

@@ -529,7 +529,7 @@ fn render_customers_page(dark: bool, width: f32, name: &str) {
             },
         );
     h.run_ok();
-    h.get_all_by_label("search")
+    h.get_all_by_label("Search")
         .next()
         .expect("the FilterBar's search apply")
         .click();
@@ -588,12 +588,12 @@ fn r3_customers_open_detail_light() {
             },
         );
     h.run_ok();
-    h.get_all_by_label("search")
+    h.get_all_by_label("Search")
         .next()
         .expect("the FilterBar's search apply")
         .click();
     h.run_ok();
-    h.get_all_by_label("open")
+    h.get_all_by_label("Open")
         .next()
         .expect("the first row's open act")
         .click();
@@ -627,7 +627,7 @@ fn organizations_open_detail_light() {
             },
         );
     h.run_ok();
-    h.get_all_by_label("open")
+    h.get_all_by_label("Open")
         .next()
         .expect("the first row's open act")
         .click();

@@ -371,7 +371,7 @@ impl CustomersPage {
                 enter_apply =
                     response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             },
-            "search",
+            "Search",
         );
         if apply.clicked() || enter_apply {
             let trimmed = self.search_edit.trim();
@@ -401,7 +401,7 @@ impl CustomersPage {
             design::data_table(
                 ui,
                 "customers",
-                &["name", "email", "conversations", "last contact", ""],
+                &["Name", "Email", "Conversations", "Last Contact", ""],
                 rows.len(),
                 ROW_HEIGHT,
                 |ui, i| {
@@ -436,7 +436,9 @@ impl CustomersPage {
                     dt_cell(
                         ui,
                         140.0,
-                        egui::RichText::new(row.last_contact.as_deref().unwrap_or("—"))
+                        // UX-19: "—" carried no meaning — an absent contact
+                        // date is explicit information, so say it.
+                        egui::RichText::new(row.last_contact.as_deref().unwrap_or("Never"))
                             .size(design::scale::text::SMALL_HALF)
                             .color(t.muted_foreground),
                         false,
@@ -445,7 +447,7 @@ impl CustomersPage {
                         egui::vec2(70.0, ROW_HEIGHT),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
-                            if design::button(ui, "open", ButtonVariant::Outline)
+                            if design::button(ui, "Open", ButtonVariant::Outline)
                                 .on_hover_text(format!(
                                     "open {} — conversations, support health and the AI \
                                      interaction profile",
