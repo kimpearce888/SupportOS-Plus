@@ -384,16 +384,25 @@ impl SyncHealthPage {
             _ => crate::design::BadgeTone::Warning,
         };
         let state_label = status.state.clone();
+        // UX-20: the hero line carried a developer note ("never shows
+        // relative time — forensic value"). Keep the exact timestamp (it is
+        // the forensic record) but say it in user language, with the
+        // relative age next to it so freshness is readable at a glance.
+        let last_success = match status.last_success.as_deref() {
+            Some(iso) => {
+                let rel = crate::pages::relative_time(iso);
+                if rel == iso {
+                    iso.to_string()
+                } else {
+                    format!("{iso} · {rel}")
+                }
+            }
+            None => "never synced".to_string(),
+        };
         design::hero(
             ui,
             &status.state,
-            &format!(
-                "last success: {} · never shows relative time — forensic value",
-                status
-                    .last_success
-                    .clone()
-                    .unwrap_or_else(|| "(never)".into())
-            ),
+            &format!("Last success: {last_success}"),
             |ui| {
                 design::badge(ui, &state_label, state_tone);
             },
@@ -473,19 +482,27 @@ impl SyncHealthPage {
                     "The checkpoint table fills after the first successful sync.",
                 );
             } else {
+                // UX-20: bounded height gives the list its own scrollbar
+                // (a scroll affordance) instead of running off the viewport.
                 egui::ScrollArea::vertical()
                     .id_salt("sync-checkpoints")
+                    .max_height(300.0)
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        design::table(
+                        // UX-20: `table_stretched` distributes the width so the
+                        // last column keeps its values beside its header —
+                        // the old content-hugging grid right-pinned "last
+                        // success" values to the far screen edge.
+                        design::table_stretched(
                             ui,
                             "sync-checkpoint-table",
                             &[
-                                "resource",
-                                "status",
-                                "processed",
-                                "failed",
-                                "retries",
-                                "last success",
+                                "Resource",
+                                "Status",
+                                "Processed",
+                                "Failed",
+                                "Retries",
+                                "Last Success",
                             ],
                             26.0,
                             |ui| {
@@ -504,10 +521,18 @@ impl SyncHealthPage {
                                     design::td_num(ui, &cp.records_processed.to_string());
                                     design::td_num(ui, &cp.records_failed.to_string());
                                     design::td_num(ui, &cp.retry_count.to_string());
-                                    design::td_num(
-                                        ui,
-                                        &cp.last_success_at.clone().unwrap_or_else(|| "—".into()),
-                                    );
+                                    let last =
+                                        cp.last_success_at.clone().unwrap_or_else(|| "—".into());
+                                    ui.monospace(egui::RichText::new(last.as_str()).size(12.5))
+                                        .on_hover_text(if last == "—" {
+                                            "This resource has never completed a sync.".to_string()
+                                        } else {
+                                            format!(
+                                                "{} ({})",
+                                                last,
+                                                crate::pages::relative_time(&last)
+                                            )
+                                        });
                                     ui.end_row();
                                 }
                             },
@@ -526,10 +551,14 @@ impl SyncHealthPage {
                     "Runs appear here after the first sync.",
                 );
             } else {
+                // UX-20: bounded height so the runs list scrolls in place
+                // instead of being clipped at the viewport edge.
                 egui::ScrollArea::vertical()
                     .id_salt("sync-runs")
+                    .max_height(320.0)
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        design::table(
+                        design::table_stretched(
                             ui,
                             "sync-run-table",
                             &[
