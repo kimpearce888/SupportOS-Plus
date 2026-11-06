@@ -1019,7 +1019,9 @@ impl SettingsPage {
         design::page_header(
             ui,
             "Settings",
-            Some("local configuration, persisted in the settings table"),
+            Some(
+                "Workspace preferences, connections, and local data — everything stays on this machine",
+            ),
             |_| {},
         );
         if let Some(i) = design::tabs(
@@ -1052,7 +1054,7 @@ impl SettingsPage {
                 if let Some(err) = &self.error {
                     design::error_text(ui, &format!("error: {err}"));
                 }
-                if ui.small_button("dismiss").clicked() {
+                if ui.small_button("Dismiss").clicked() {
                     self.message = None;
                     self.error = None;
                 }
@@ -1081,9 +1083,9 @@ impl SettingsPage {
                 ui.add(egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440))
                     .labelled_by(interval_label.id)
                     .on_hover_text(
-                        "1.4.0 R8: the sync polls every 30 s while the account is busy, \
-                     then backs off by doubling toward this ceiling when quiet. \
-                     Every send triggers an immediate poll.",
+                        "The sync polls every 30 s while the account is busy, then \
+                         backs off by doubling toward this ceiling when quiet. Every \
+                         send triggers an immediate poll.",
                     );
                 ui.end_row();
                 let concurrency_label = design::field_label(ui, "api concurrency:");
@@ -1100,8 +1102,8 @@ impl SettingsPage {
                         }
                     });
                 combo.response.labelled_by(log_label.id).on_hover_text(
-                    "Clean-audit item 138: drives the real tracing filter — \
-                     applied at boot from the saved value and immediately on save.",
+                    "Drives the real logging filter — applied at boot from the \
+                     saved value and immediately on save.",
                 );
                 ui.end_row();
                 let lang_label = design::field_label(ui, "agent language:");
@@ -1199,7 +1201,7 @@ impl SettingsPage {
             }
             if self.update_running {
                 ui.spinner();
-            } else if design::button(ui, "check for updates", ButtonVariant::Outline).clicked() {
+            } else if design::button(ui, "Check for Updates", ButtonVariant::Outline).clicked() {
                 self.start_update_check();
             }
             ui.label(
@@ -1212,7 +1214,7 @@ impl SettingsPage {
             );
         });
         ui.add_space(10.0);
-        if design::button(ui, "save settings", ButtonVariant::Primary).clicked() {
+        if design::button(ui, "Save Settings", ButtonVariant::Primary).clicked() {
             self.general = Some(general.clone());
             self.save_general(db);
         }
@@ -1289,7 +1291,7 @@ impl SettingsPage {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if status.configured
-                        && design::button(ui, "disconnect", ButtonVariant::Destructive)
+                        && design::button(ui, "Disconnect", ButtonVariant::Destructive)
                             .on_hover_text("drops the stored tokens; local data is fully preserved")
                             .clicked()
                     {
@@ -1300,7 +1302,7 @@ impl SettingsPage {
                         && !self.hs_connecting
                         && design::button(
                             ui,
-                            "connect with client credentials (recommended)",
+                            "Connect with Client Credentials (Recommended)",
                             ButtonVariant::Primary,
                         )
                         .on_hover_text(
@@ -1341,7 +1343,7 @@ impl SettingsPage {
                             ui.add_space(4.0);
                             if design::button(
                                 ui,
-                                "open the authorization page in the browser",
+                                "Open the Authorization Page in the Browser",
                                 ButtonVariant::Outline,
                             )
                             .clicked()
@@ -1422,7 +1424,7 @@ impl SettingsPage {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.hs_show_secrets, "show secrets");
-                    if design::button(ui, "save credentials", ButtonVariant::Primary).clicked() {
+                    if design::button(ui, "Save Credentials", ButtonVariant::Primary).clicked() {
                         self.save_helpscout_credentials(db);
                     }
                     let any_stored = status.sources.client_id.is_set()
@@ -1430,7 +1432,12 @@ impl SettingsPage {
                         || status.sources.webhook_secret.is_set()
                         || status.sources.docs_api_key.is_set();
                     if any_stored
-                        && design::button(ui, "clear stored", ButtonVariant::Destructive).clicked()
+                        && design::button(
+                            ui,
+                            "Clear Stored Credentials",
+                            ButtonVariant::Destructive,
+                        )
+                        .clicked()
                     {
                         self.clear_helpscout_credentials(db);
                     }
@@ -1476,10 +1483,10 @@ impl SettingsPage {
                 )
                 .labelled_by(relay_label.id);
                 ui.horizontal(|ui| {
-                    if design::button(ui, "save relay URL", ButtonVariant::Outline).clicked() {
+                    if design::button(ui, "Save Relay URL", ButtonVariant::Outline).clicked() {
                         self.save_webhook_relay_url(db);
                     }
-                    if design::button(ui, "check now", ButtonVariant::Primary).clicked() {
+                    if design::button(ui, "Check Now", ButtonVariant::Primary).clicked() {
                         self.queue_webhook_health_check(db);
                     }
                 });
@@ -1542,7 +1549,7 @@ impl SettingsPage {
                      rules, saved views and replies, custom object types.",
                 );
                 if !self.purge_armed {
-                    if design::button(ui, "delete all workspace data", ButtonVariant::Destructive)
+                    if design::button(ui, "Delete All Workspace Data", ButtonVariant::Destructive)
                         .clicked()
                     {
                         self.purge_armed = true;
@@ -1554,12 +1561,12 @@ impl SettingsPage {
                     );
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if design::button(ui, "cancel", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
                             self.purge_armed = false;
                         }
                         if design::button(
                             ui,
-                            "really delete everything",
+                            "Really Delete Everything",
                             ButtonVariant::Destructive,
                         )
                         .clicked()
@@ -1622,7 +1629,7 @@ impl SettingsPage {
                 } else {
                     let live = self.provider.as_ref().is_some_and(|p| p.is_real());
                     if live
-                        && design::button(ui, "run the checks", ButtonVariant::Outline)
+                        && design::button(ui, "Run the Checks", ButtonVariant::Outline)
                             .on_hover_text(
                                 "verifies the whole connection chain right now: \
                                  network, credentials, token, identity, mailboxes, \
@@ -1923,7 +1930,7 @@ impl SettingsPage {
                     ui.end_row();
                 });
                 ui.add_space(8.0);
-                if design::button(ui, "save", ButtonVariant::Primary).clicked() {
+                if design::button(ui, "Save", ButtonVariant::Primary).clicked() {
                     self.save_lmstudio(db);
                 }
             },
@@ -1935,7 +1942,10 @@ impl SettingsPage {
             ui,
             "Vector index",
             Some(
-                "Dense vectors live in SQLite next to the application database (decision D4: the chunk count is far below the 100k gate). The index follows the qdrant_enabled setting; searches fall back to FTS5 when disabled.",
+                "Semantic search stores document vectors in a local database \
+                 beside your app data. Keep this on for meaning-based search; \
+                 keyword search still works when it is off. Changes apply on \
+                 the next start.",
             ),
             |ui| {
                 if self.vector_store_path.is_empty() {
@@ -2020,7 +2030,7 @@ impl SettingsPage {
                             } else {
                                 design::badge(ui, "not configured", BadgeTone::Neutral);
                             }
-                            if design::button(ui, "edit", ButtonVariant::Outline).clicked() {
+                            if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
                                 edit = Some(row.clone());
                             }
                         });
@@ -2068,7 +2078,7 @@ impl SettingsPage {
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if design::button(ui, "save hours", ButtonVariant::Primary).clicked() {
+                if design::button(ui, "Save Hours", ButtonVariant::Primary).clicked() {
                     let result = db.with_write(|conn| save_business_hours(conn, &row));
                     match result {
                         Ok(()) => {
@@ -2079,7 +2089,7 @@ impl SettingsPage {
                         Err(e) => self.error = Some(e.to_string()),
                     }
                 }
-                if design::button(ui, "cancel", ButtonVariant::Ghost).clicked() {
+                if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
                     self.hours_edit = None;
                 }
             });
@@ -2102,10 +2112,10 @@ impl SettingsPage {
                 {
                     self.create_backup(db);
                 }
-                if design::button(ui, "export JSON", ButtonVariant::Secondary).clicked() {
+                if design::button(ui, "Export JSON", ButtonVariant::Secondary).clicked() {
                     self.export_json(db);
                 }
-                if design::button(ui, "export conversations CSV", ButtonVariant::Secondary)
+                if design::button(ui, "Export Conversations CSV", ButtonVariant::Secondary)
                     .clicked()
                 {
                     self.export_csv(db);
@@ -2134,7 +2144,7 @@ impl SettingsPage {
                             {
                                 design::hint_text(ui, created);
                             }
-                            if design::button(ui, "restore", ButtonVariant::Outline)
+                            if design::button(ui, "Restore", ButtonVariant::Outline)
                                 .on_hover_text("restores the database file — restart the app after")
                                 .clicked()
                                 && let Some(dir) = &self.backups_dir
@@ -2158,10 +2168,10 @@ impl SettingsPage {
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if design::button(ui, "cancel", ButtonVariant::Ghost).clicked() {
+                    if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
                         self.restore_armed = None;
                     }
-                    if design::button(ui, "really restore", ButtonVariant::Destructive).clicked() {
+                    if design::button(ui, "Really Restore", ButtonVariant::Destructive).clicked() {
                         self.restore_armed = None;
                         self.restore_backup(db, &path);
                     }

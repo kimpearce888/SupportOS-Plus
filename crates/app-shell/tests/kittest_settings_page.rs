@@ -117,7 +117,7 @@ fn r3_settings_helpscout_tab_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("save credentials").next().is_some(),
+        h.get_all_by_label("Save Credentials").next().is_some(),
         "the credentials form must carry its save act"
     );
     h.snapshot("r3_settings_helpscout_tab_light");
