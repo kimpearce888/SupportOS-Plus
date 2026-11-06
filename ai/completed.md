@@ -7405,3 +7405,109 @@ packaging surface.
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+---
+
+## Batch UXA-1 — UX audit fix wave 1 (items UX-1..UX-9 + UX-25 completed and verified, 2026-11-06)
+
+**Owner:** the autonomous UX/UI audit directive — audit the SupportOS+
+repo, find and fix every frontend UX/UI/layout/design defect with
+before/after evidence per item; frontend-only per the scope contract
+(`ux-audit/reports/scope.md`); work directly on `main`, small
+issue-tagged commits, `git pull --rebase` before pushing; batches of
+exactly ten per `ai/rule.md` with a STOP after each batch.
+
+**Program context:** Phase 0–2 of the audit ran first (worklog:
+`ux-audit/reports/worklog.md`): scope contract, journey map
+(`ux-audit/reports/journey-map.md` — every page + shell journeys driven
+under Xvfb 1920×1080 with synthetic input + VLM verification; OAuth and
+webhook relay verified live against the Help Scout test account), and the
+issue census (`ux-audit/reports/issues.md` — 35 findings incl. 3
+backend-blocked logged UX-26B/34/35, plus 3 investigated false
+positives). Batch UXA-1 consumed the ten highest-severity fixable items.
+
+**Items (Rule 2: opened in plan.md, moved through progress.md):**
+- UX-1 (blocker): internal dev-note footnotes (`design::quirk`) shipped in
+  production UI — all page-level call sites removed (connectors, ai_center,
+  issue_radar, notifications, operations, dashboard, reports); the widget
+  itself stays in the design system (kittest_widgets coverage).
+- UX-2 (blocker): Automation page debug note + header-only rules table →
+  note removed, real empty state ("No automation rules yet" + what rules
+  do + where review actions park).
+- UX-3 (major): Shell page stale ported-pages checklist → runtime-info
+  presentation ("app runtime information" + hint, middle-truncated DB
+  path at 72 chars, "Where things live" orientation card).
+- UX-4 (major): Onboarding raw key–value dump → three-step checklist with
+  per-step todo/done copy from the same status data.
+- UX-5 (major): metric cards hugging 150px → `metric_card_w` +
+  row-width grids on Dashboard (12 cards) and Reports.
+- UX-6 (major): tables at 25–40% width → `table_stretched` +
+  `data_table` width distribution (Customers, Organizations, Incidents,
+  Connectors, Automation, customer-conversations).
+- UX-7 (major): Settings narrow ~600–900px column → `card_titled_wide`
+  on every settings surface, all tabs.
+- UX-8 (major): Inbox fixed-330px list → proportional 30% (330–520px),
+  user-resizable (300–640px).
+- UX-9 (major): charts with no axes → `line_chart_axes`: y min/max
+  labels, x endpoint dates, gridlines, hover readout (guide line +
+  flipping value bubble); wired on Dashboard + Reports.
+- UX-25 (major): browser OAuth flow unreachable (disclosure gated on
+  `!configured` while `begin_oauth` needs the active provider that exists
+  only when connected — verified by racing an in-flight connect) →
+  disclosure renders whenever credentials exist; verified live in the
+  fixed build while CONNECTED (green badge + expanded "advanced: browser
+  authorization flow" with the begin button); misleading copy replaced.
+  Side-fix en route [UX-27 partial]: inbox search box takes the free row
+  width (was a fixed 140px truncating its hint).
+
+**Implementation commits (11, one per page/design-system group):**
+57c9a03 (design-system variants) · 18d6852 (shell) · 36e48fd (onboarding)
+· cf91880 (dev-note removals) · b09b258 (automation) · 72b5977
+(connectors) · c83e646 (tables) · 0561a46 (dashboard/reports/chart) ·
+0ba3100 (settings wide) · b990f0c (settings OAuth disclosure) · cc71c84
+(inbox) — format `fix(ui): <what> on <where> [ISSUE-ID]` per the owner's
+directive; settings.rs deliberately split across 0ba3100/b990f0c so UX-7
+and UX-25 are separately revertable (intermediate state compile-checked).
+
+**Verification (this sandbox, toolchain 1.99.1 pinned):**
+- `cargo fmt --all -- --check`: clean (GA-1 standing practice, final
+  pre-push step).
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`: clean.
+- Tests: app-shell lib 239/239; xtask 11/11 incl.
+  `no_secret_key_artifacts_anywhere_in_the_repo` (audit secrets live only
+  in gitignored `ux-audit/scripts/`).
+- **kittest snapshot locks — made locally runnable this batch**: DENY-1's
+  standing disclosure ("no Vulkan ICD, no sudo") was worked around by
+  downloading the `mesa-vulkan-drivers` .deb and extracting lavapipe
+  locally (`VK_DRIVER_FILES` + `LD_LIBRARY_PATH`); all 24 suites +
+  style_lint ran diff-locked against the committed baselines. 89 snapshot
+  baselines drifted; the drift list was audited one-by-one — every drift
+  maps to an intended fix (r2a widget harness ×4 via data_table;
+  automation ×7; connectors ×7; customers/organizations/incidents ×7
+  each; dashboard ×7 + reports ×6; inbox ×6 + copilot ×3; issue_radar ×6
+  + notifications ×7 + operations workload ×1 via the dev-note removals;
+  onboarding ×7; settings ×7). Baselines regenerated with
+  UPDATE_SNAPSHOTS=1, then the full suite re-ran diff-locked GREEN —
+  the diff-locked-twice discipline.
+- `SPP_SMOKE=1`: rc=0 (boot chain + 24 pages rendered headlessly).
+- Per-item before/after screenshot evidence at 1920×1080 (light; +
+  Dashboard dark): 13 after-shots, each verified for page identity
+  (header read-back) and theme (luma scan); UX-25's shot verified for
+  connected-state + expanded disclosure. Evidence dirs are gitignored by
+  design; referenced by path from `ux-audit/reports/issues.md`.
+- Evidence-integrity disclosure: a theme-toggle miss mid-run darkened 11
+  after-shots; caught by the luma verification, all re-shot light before
+  any item was marked fixed. The palette-driven navigator proved
+  unreliable on this dataset (conversation subjects outmatched page
+  names for queries like "reports"); sidebar-row navigation with
+  verification was used instead.
+- Scope: 14 source files under `crates/app-shell/src/` + 89 kittest
+  baselines + ledger/gitignore. Zero backend, API, schema, CI, workflow,
+  packaging or Cargo.lock changes (`--locked` throughout).
+
+**Backend-blocked findings logged, not queued** (per the scope contract):
+UX-26B (webhook secret hard cap in core), UX-34 (Operations tiles have
+no nav target from core data), UX-35 (raw job-error strings from core).
+
+Rule 8 STOP — batch UXA-1 of ten is complete; the queue holds UXA-2
+(items UX-10 onward). Resume on the owner's "continue".

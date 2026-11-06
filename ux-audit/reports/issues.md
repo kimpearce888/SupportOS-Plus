@@ -1,0 +1,70 @@
+# UX Audit Issues — SupportOS+ v1.9.4 (baseline d306caa)
+
+Severity: blocker / major / minor / polish. Status: open → fixed (with commit)
+/ blocked-by-backend / won't-fix. Evidence: `ux-audit/before/…` screenshots
+(gitignored, referenced by path).
+
+## Systemic (multi-page)
+
+| ID | Sev | Issue | Pages | Evidence | Root cause (file) | Status |
+|---|---|---|---|---|---|---|
+| UX-1 | blocker | Internal dev note "A-5 (D5-0): …" rendered in production UI | Connectors | before/pages/connectors__default.png | pages/connectors.rs | **fixed (UXA-1)** — all `design::quirk` dev-note call sites removed from production pages (connectors, automation, ai_center, issue_radar, notifications, operations, dashboard, reports); after/pages/connectors__default.png |
+| UX-2 | blocker | Developer debug note "Reskin fix (presentation): … proposed_action_json …" shipped in user UI; large empty unexplained container below | Automation | before/pages/automation__default.png | pages/automation.rs | **fixed (UXA-1)** — note removed + real empty state for the rules table; after/pages/automation__default.png |
+| UX-3 | major | Internal TODO/stale-checklist text exposed to end users; page ~70% empty | Shell | before/pages/shell__default.png | pages (shell view) | **fixed (UXA-1)** — runtime-info presentation + workspace orientation card; after/pages/shell__default.png |
+| UX-4 | major | Onboarding presented as raw key–value debug dump; no step checklist/progression; ~45% dead space | Onboarding | before/pages/onboarding__default.png | pages/onboarding.rs | **fixed (UXA-1)** — three-step checklist with done/todo copy; after/pages/onboarding__default.png |
+| UX-5 | major | Metric cards grid uses only ~40% of content width at 1920 (fixed 150px min-width cards); ~900px dead space right of grid | Dashboard | before/pages/dashboard__dark.png | design/mod.rs metric_card + pages/dashboard.rs grid | **fixed (UXA-1)** — `metric_card_w` + row-width grid on Dashboard and Reports; after/pages/dashboard__default.png |
+| UX-6 | major | Tables occupy 25–40% of width, huge dead zone right/below | Customers, Organizations | before/pages/customers__default.png, organizations__default.png | pages table layout | **fixed (UXA-1)** — shared `table_stretched` + `data_table` width distribution (also fixes Connectors/Automation/Incidents tables); after/pages/customers__default.png, organizations__default.png |
+| UX-7 | major | All Settings tabs confine content to a narrow (~600–900px) left column; ~60–75% dead space; inconsistent card widths | Settings (6 tabs) | before/pages/settings__*.png | pages/settings.rs | **fixed (UXA-1)** — `card_titled_wide` on every settings card (all tabs); after/pages/settings__default.png |
+| UX-8 | major | Inbox conversation list ~26% width with undefined list/detail split; dead space | Inbox | before/pages/inbox__conversation-open.png | pages/inbox.rs | **fixed (UXA-1)** — proportional (30%, 330–520px) user-resizable list panel; after/pages/inbox__default.png, inbox__conversation-open.png |
+| UX-9 | major | Charts have no axes, ticks, gridlines, or hover values — 2-point line unreadable/unverifiable | Dashboard, Reports, Issue Radar | before/pages/reports__default.png | chart.rs | **fixed (UXA-1)** — `line_chart_axes`: y min/max labels, x endpoint dates, gridlines, hover readout; after/pages/dashboard__default.png, reports__default.png |
+| UX-10 | minor | Casing inconsistency: lowercase buttons/labels ("save credentials", "send", "edit", "connect with client credentials") vs Title Case elsewhere | Global | many | design/mod.rs + pages | open |
+| UX-11 | minor | Dev jargon in user copy: "local configuration, persisted in the settings table" (Settings subtitle), "decision D4: the chunk count…" (Vector tab), "qdrant_enabled" | Settings | before/pages/settings__vector.png | pages/settings.rs | open |
+| UX-12 | minor | Dark theme: section labels + page subtitles too dim (borderline contrast); surfaces (filter panel / cards / background) nearly identical dark grays; active filter chips too subtle | All (dark) | before/pages/dashboard__dark.png | palette.rs / theme tokens | open |
+
+## Page-specific
+
+| ID | Sev | Issue | Page | Evidence | Root cause | Status |
+|---|---|---|---|---|---|---|
+| UX-13 | major | 18/18 identical job-failure notifications, no grouping/dedup/action; raw error text with localhost URL, no truncation or code formatting | Notifications | before/pages/notifications__default.png | pages/notifications.rs | open |
+| UX-14 | major | Highest-count tiles (Sync problems 55, Failed jobs 18) not clickable — no path to act; subtitle claims all tiles filter the inbox but only arrow-marked ones do | Operations | before/pages/operations__default.png | pages/operations.rs | open |
+| UX-15 | major | "+ Try 'export'" CTA in search empty state is confusing/nonsensical; scope selector has no visible selected state | Search | before/pages/search__default.png | pages/search.rs | open |
+| UX-16 | major | Empty state dead ends: no CTA where the copy references an action (Live chats → webhook relay; Custom Objects → "Create a type"; Outreach → campaign creation; Support Graph → import/connect) | Live chats, Custom Objects, Outreach, Support Graph | respective before/pages | page files | open |
+| UX-17 | major | Incidents empty state contradicts visible state: "No incidents match / adjust the filters" with zero filters applied; two unlabeled "Any" dropdowns | Incidents | before/pages/incidents__default.png | pages/incidents.rs | open |
+| UX-18 | major | Knowledge empty-state CTA is plain text; primary action hidden in a disconnected disclosure | Knowledge | before/pages/knowledge__default.md | pages/knowledge.rs | open |
+| UX-19 | major | CONVERSATIONS / LAST CONTACT columns all "—" with no explanation (Customers); DOMAINS / CUSTOMERS columns empty (Organizations) | Customers, Organizations | before/screens | page table columns | open |
+| UX-20 | major | Sync Health: "last success" header/values misaligned (values detached at far edge); recent-runs table clipped at viewport with no scroll indication | Sync Health | before/pages/sync_health__default.png | pages/sync_health.rs | open |
+| UX-21 | major | Diagnostics: 36 errors/1 warning counts have no path to the actual errors; sync reports trailing column detached | Diagnostics | before/pages/diagnostics__default.png | pages/diagnostics.rs | open |
+| UX-22 | major | Backups: destructive "restore" has no confirmation affordance and no danger styling; metadata shows raw bytes + raw ISO timestamp | Settings/Backups | before/pages/settings__backups.png | pages/settings.rs | open |
+| UX-23 | major | LM Studio tab: dead-end instruction "Test the connection from the AI Center page" (no link); no validation/labels on empty fields | Settings/LM Studio | before/pages/settings__lmstudio.png | pages/settings.rs | open |
+| UX-24 | major | Vector index tab: static "✓ enabled" text with no toggle; no refresh/rebuild/copy affordances | Settings/Vector | before/pages/settings__vector.png | pages/settings.rs | open |
+| UX-25 | major | Browser OAuth flow is effectively unreachable: disclosure only renders when disconnected, but begin_oauth requires an active provider (dropped on disconnect). Only reachable during an in-flight connect — verified by racing the window | Settings/Help Scout | before/pages/settings__oauth-link.png | pages/settings.rs (disclosure condition `!status.configured && status.credentials`) | **fixed (UXA-1)** — disclosure renders whenever credentials exist (`status.credentials`), so the flow is reachable while connected; misleading copy replaced; after/pages/settings__oauth-connected.png |
+| UX-26 | major | Webhook-secret copy claims "the platform caps webhook secrets at 40 characters" — **verified false**: Help Scout stores 48+ chars; the cap is the app's own (core/webhook.rs SECRET_CAP). Misleading copy; long secrets silently truncate and then FAIL verification against what Help Scout actually signs | Settings/Help Scout | live probe evidence (401 with 48-char, 200 with 40-char) | copy in pages/settings.rs; cap itself in core (backend) | open (frontend copy fix; cap removal = blocked-by-backend UX-26B) |
+| UX-27 | minor | Inbox: search placeholder truncated without ellipsis ("search conversat…"); "unassigned" italic-outline pill vs "Active" filled chip inconsistency; Cc/Bcc fields clipped at window bottom; row-4 sender/subject crowding | Inbox | before/pages/inbox__conversation-open.png | pages/inbox.rs | partial (UXA-1): search box now takes the free row width (no truncation) — landed with the UX-8 panel work; pill/Cc/Bcc/row-crowding remain for UXA-2 |
+| UX-28 | minor | Dashboard: filter card fixed width, left-aligned with dead space right; "By tag" last row clipped at viewport; chart caption "16 → 2" ambiguous | Dashboard | before/00-boot/first-run__1920x1080.png | pages/dashboard.rs | open |
+| UX-29 | minor | Settings/Hours: no explanation of what business hours do; "not configured" badge has no warning tone; "edit" lowercase | Settings/Hours | before/pages/settings__hours.png | pages/settings.rs | open |
+| UX-30 | minor | Settings/Sync&AI: checkbox row styling inconsistent; numeric inputs cramped; no per-card save or dirty indicator; single floating save button easy to miss | Settings/Sync&AI | before/pages/settings__syncai.png | pages/settings.rs | open |
+| UX-31 | minor | Command palette: selected-row subtitle low-contrast on highlight; possible text bleed-through on selected row | Palette | before/pages/palette__search.png | palette.rs | open |
+| UX-32 | polish | Settings/Backups: export buttons look disabled (ghost styling); header duplicates tab name; no danger-zone separation | Settings/Backups | before/pages/settings__backups.png | pages/settings.rs | open |
+| UX-33 | polish | Bell icon (top bar) is icon-only (needs tooltip); "synced Ns ago" pill lacks context of what synced | Shell | screenshots | app/chrome.rs | open |
+
+## Backend-blocked (not fixable in frontend; logged per constraints)
+
+| ID | Issue | Evidence | Suggested backend change |
+|---|---|---|---|
+| UX-26B | Webhook secret hard cap at 40 chars (SECRET_CAP in core/webhook.rs) silently truncates longer secrets; Help Scout itself imposes no such cap (verified: stored 48 chars). Real deliveries signed with the full secret fail verification | live probe: 48-char → 401, 40-char → 200 | Remove or raise the cap (verify all 48+ chars) in `crates/core/src/webhook.rs::effective_secret` |
+| UX-34 | "Operations drill-down" tiles (Sync problems, Failed jobs) have no navigation target — the counts exist in core but no NavRequest maps them to Diagnostics/Sync Health views | operations page audit | Expose nav actions from the tiles (frontend can then wire buttons if core provides the routing data — currently the tile data has no drill-down field) |
+| UX-35 | Notifications raw error strings (localhost LM Studio URL, internal job names) come verbatim from core job failures | notifications page audit | Consider structured error payloads (code + message) so the frontend can present friendly text |
+
+## Won't fix (with reason)
+
+- None at this time (candidates will be re-evaluated in Phase 3/4).
+
+## False positives (investigated, not bugs)
+
+- "Stray ✕ glyph floating on Dashboard" — the Xvfb default X-shaped mouse
+  cursor in screenshots, not an app element (verified: glyph follows the
+  pointer; hidden thereafter via root-window transparent cursor).
+- "Sidebar nav text clipped under search box" — normal scroll-boundary
+  clipping of a partially scrolled row in the nav ScrollArea.
+- "Ctrl+K palette doesn't render" — sandbox artifact: no window manager →
+  no input focus. After XSetInputFocus the palette opens fine.
