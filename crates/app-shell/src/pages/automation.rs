@@ -328,7 +328,22 @@ impl AutomationPage {
                 egui::ScrollArea::vertical()
                     .id_salt("automation-rules")
                     .show(ui, |ui| {
-                        design::table(
+                        // UX-2: a header-only table with no rows reads as a
+                        // broken component — give the empty case a real
+                        // empty state instead.
+                        if rules.is_empty() {
+                            design::empty_state(
+                                ui,
+                                Icon::Zap,
+                                "No automation rules yet",
+                                "Create a rule with \"New Rule\" above — enabled \
+                                 rules act on incoming conversations \
+                                 automatically; actions that need review park \
+                                 in the approvals queue below.",
+                            );
+                            return;
+                        }
+                        design::table_stretched(
                             ui,
                             "automation-rule-table",
                             &["name", "when", "then", ""],
@@ -460,12 +475,6 @@ impl AutomationPage {
                         }
                     });
             },
-        );
-        design::quirk(
-            ui,
-            "Reskin fix (presentation): approval rows led with the raw \
-             proposed_action_json. Human-readable action first, raw JSON \
-             collapsible.",
         );
         if let Some((id, approve)) = decided {
             self.decide(db, id, approve);
