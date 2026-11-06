@@ -183,8 +183,8 @@ fn r3_notifications_mentions_tab_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("unread").next().is_some(),
-        "the read mention rows must carry their unread act"
+        h.get_all_by_label("Mark Unread").next().is_some(),
+        "the read mention rows must carry their mark-unread act"
     );
     h.snapshot("r3_notifications_mentions_tab_light");
 }

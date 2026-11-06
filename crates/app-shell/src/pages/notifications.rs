@@ -2,6 +2,7 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::notifications::{ListOptions, NotificationRecord};
 
+use super::relative_time;
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -20,6 +21,90 @@ impl Tab {
             Self::All => "All",
             Self::Mentions => "Mentions",
             Self::Unread => "Unread",
+        }
+    }
+}
+
+/// UX-13: one visual card per distinct (type, title, body) notification —
+/// identical repeats (e.g. the same job failing 18 times) collapse into a
+/// single row with a ×N count instead of 18 byte-identical cards.
+#[derive(Debug, Clone)]
+struct NotificationGroup {
+    records: Vec<NotificationRecord>,
+}
+
+impl NotificationGroup {
+    fn key(record: &NotificationRecord) -> (String, String, String) {
+        (
+            record.notification_type.as_str().to_string(),
+            record.title.as_str().to_string(),
+            record.body.clone().unwrap_or_default(),
+        )
+    }
+
+    fn push(&mut self, record: NotificationRecord) {
+        self.records.push(record);
+    }
+
+    fn count(&self) -> usize {
+        self.records.len()
+    }
+
+    fn any_unread(&self) -> bool {
+        self.records.iter().any(|r| r.read_at.is_none())
+    }
+
+    fn ids(&self) -> Vec<i64> {
+        self.records.iter().map(|r| r.id).collect()
+    }
+
+    fn latest(&self) -> &NotificationRecord {
+        self.records
+            .iter()
+            .max_by(|a, b| a.created_at.cmp(&b.created_at))
+            .unwrap_or(&self.records[0])
+    }
+
+    fn sample(&self) -> &NotificationRecord {
+        &self.records[0]
+    }
+}
+
+fn group_records(records: &[NotificationRecord]) -> Vec<NotificationGroup> {
+    let mut groups: Vec<((String, String, String), NotificationGroup)> = Vec::new();
+    for record in records {
+        let key = NotificationGroup::key(record);
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, group)) => group.push(record.clone()),
+            None => {
+                let mut group = NotificationGroup {
+                    records: Vec::new(),
+                };
+                group.push(record.clone());
+                groups.push((key, group));
+            }
+        }
+    }
+    groups.into_iter().map(|(_, g)| g).collect()
+}
+
+/// UX-13: friendly label for the raw internal notification type — no more
+/// snake_case enums (`job_failure`) leaking into the UI.
+fn type_label(notification_type: &str) -> String {
+    match notification_type {
+        "job_failure" => "Job failure".to_string(),
+        "mentioned" => "Mention".to_string(),
+        "campaign_reply" => "Campaign reply".to_string(),
+        "sync_failure" => "Sync failure".to_string(),
+        "sync_completed" => "Sync completed".to_string(),
+        "rating_received" => "Rating".to_string(),
+        other => {
+            let mut text = other.replace('_', " ");
+            if let Some(first) = text.get(0..1) {
+                let upper = first.to_uppercase();
+                text.replace_range(0..1, &upper);
+            }
+            text
         }
     }
 }
@@ -93,21 +178,17 @@ impl NotificationsPage {
         }
     }
 
-    fn toggle_read(&mut self, db: &DbHandle, id: i64) {
+    fn toggle_group(&mut self, db: &DbHandle, ids: &[i64], read: bool) {
         let me = db
             .with_read(spp_core::notifications::me_user_local_id)
             .ok()
             .flatten();
-        let read = self
-            .records
-            .iter()
-            .chain(self.mentions.iter())
-            .find(|r| r.id == id)
-            .map(|r| r.read_at.is_none())
-            .unwrap_or(true);
-        let result = db.with_write(|conn| spp_core::notifications::mark_read(conn, id, me, read));
-        if let Err(e) = result {
-            self.error = Some(e.to_string());
+        for id in ids {
+            let result =
+                db.with_write(|conn| spp_core::notifications::mark_read(conn, *id, me, read));
+            if let Err(e) = result {
+                self.error = Some(e.to_string());
+            }
         }
         self.reload(db);
     }
@@ -129,7 +210,7 @@ impl NotificationsPage {
 
         let subtitle = format!("{} total · {} unread", self.total, self.unread);
         design::page_header(ui, "Notifications", Some(subtitle.as_str()), |ui| {
-            if design::button(ui, "mark all read", ButtonVariant::Text).clicked() {
+            if design::button(ui, "Mark All Read", ButtonVariant::Text).clicked() {
                 self.mark_all_read(db);
             }
         });
@@ -166,53 +247,93 @@ impl NotificationsPage {
             return;
         }
 
-        let mut toggled: Option<i64> = None;
+        // UX-13: collapse identical notifications into one card per group so
+        // a repeated failure reads as "×18", not as 18 duplicate cards.
+        let groups = group_records(&rows);
+        let mut toggled: Option<(Vec<i64>, bool)> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for record in &rows {
+            for group in &groups {
+                let unread = group.any_unread();
+                let sample = group.sample();
+                let latest = group.latest();
                 design::card(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let unread = record.read_at.is_none();
                         if unread {
                             design::status_dot(ui, BadgeTone::Info, false);
                         }
-                        let tone = if record.severity == "error" {
+                        let tone = if sample.severity == "error" {
                             BadgeTone::Destructive
                         } else {
                             BadgeTone::Info
                         };
-                        design::badge(ui, record.notification_type.as_str(), tone);
+                        design::badge(ui, &type_label(sample.notification_type.as_str()), tone);
+                        if group.count() > 1 {
+                            design::page_counter(ui, &format!("×{}", group.count()));
+                        }
+                        let span = if group.count() > 1 {
+                            format!(
+                                "{} · latest {}",
+                                relative_time(sample.created_at.as_str()),
+                                relative_time(latest.created_at.as_str())
+                            )
+                        } else {
+                            relative_time(sample.created_at.as_str())
+                        };
                         ui.label(
-                            egui::RichText::new(relative_time(&record.created_at))
+                            egui::RichText::new(span)
                                 .small()
                                 .color(design::tokens(ui).muted_foreground),
                         )
-                        .on_hover_text(record.created_at.as_str());
+                        .on_hover_text(latest.created_at.as_str());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if design::button(
                                 ui,
-                                if unread { "mark read" } else { "unread" },
+                                if unread { "Mark Read" } else { "Mark Unread" },
                                 ButtonVariant::Text,
                             )
+                            .on_hover_text(if group.count() > 1 {
+                                format!("applies to all {} in this group", group.count())
+                            } else {
+                                "toggle this notification".to_string()
+                            })
                             .clicked()
                             {
-                                toggled = Some(record.id);
+                                toggled = Some((group.ids(), !unread));
                             }
                         });
                     });
                     ui.label(
-                        egui::RichText::new(record.title.as_str())
+                        egui::RichText::new(sample.title.as_str())
                             .size(13.5)
                             .strong()
                             .color(design::tokens(ui).foreground),
                     );
-                    if let Some(body) = &record.body {
-                        design::hint_text(ui, body.as_str());
+                    if let Some(body) = &sample.body {
+                        // UX-13: raw error payloads stay verbatim but render as
+                        // truncated code with the full text one hover away.
+                        let t = design::tokens(ui);
+                        let galley = egui::WidgetText::from(
+                            egui::RichText::new(body.as_str())
+                                .monospace()
+                                .size(design::scale::text::SMALL)
+                                .color(t.muted_foreground),
+                        )
+                        .into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Truncate),
+                            ui.available_width(),
+                            egui::TextStyle::Small,
+                        );
+                        let (id, rect) = ui.allocate_space(galley.size());
+                        ui.painter().galley(rect.min, galley, t.muted_foreground);
+                        ui.advance_cursor_after_rect(rect);
+                        let _ = id;
                     }
                 });
             }
         });
-        if let Some(id) = toggled {
-            self.toggle_read(db, id);
+        if let Some((ids, read)) = toggled {
+            self.toggle_group(db, &ids, read);
         }
     }
 }
@@ -223,56 +344,9 @@ impl Default for NotificationsPage {
     }
 }
 
-fn relative_time(created_at: &str) -> String {
-    let now = spp_core::business_hours::now_iso_millis();
-    let Some(minutes) = spp_core::business_hours::wall_minutes_between(created_at, &now) else {
-        return created_at.to_string();
-    };
-    match calendar_day_diff(created_at, &now) {
-        Some(0) => format_intraday_minutes(minutes),
-        Some(-1) => "Yesterday".to_string(),
-        Some(days) if days < -1 => format!("{}d ago", -days),
-        _ => created_at.to_string(),
-    }
-}
-
-fn format_intraday_minutes(minutes: f64) -> String {
-    if minutes < 1.0 {
-        "just now".to_string()
-    } else if minutes < 60.0 {
-        format!("{}m ago", minutes as i64)
-    } else {
-        format!("{}h ago", (minutes / 60.0) as i64)
-    }
-}
-
-fn calendar_day_diff(a_iso: &str, b_iso: &str) -> Option<i64> {
-    let (ay, am, ad) = date_parts(a_iso)?;
-    let (by, bm, bd) = date_parts(b_iso)?;
-    Some(days_from_civil(ay, am, ad) - days_from_civil(by, bm, bd))
-}
-
-fn date_parts(iso: &str) -> Option<(i64, i64, i64)> {
-    let mut it = iso.get(..10)?.split('-');
-    Some((
-        it.next()?.parse().ok()?,
-        it.next()?.parse().ok()?,
-        it.next()?.parse().ok()?,
-    ))
-}
-
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::format_intraday_minutes;
     use super::super::i64_field;
     use super::*;
     use crate::testsupport::fixture;
@@ -324,11 +398,11 @@ mod tests {
         page.reload(&db);
         assert_eq!(page.unread, 1);
 
-        page.toggle_read(&db, 1);
-        assert_eq!(page.unread, 0, "toggle flips to read");
+        page.toggle_group(&db, &[1], true);
+        assert_eq!(page.unread, 0, "explicit mark-read flips to read");
 
-        page.toggle_read(&db, 1);
-        assert_eq!(page.unread, 1, "toggle flips back to unread");
+        page.toggle_group(&db, &[1], false);
+        assert_eq!(page.unread, 1, "explicit mark-unread flips back");
     }
 
     #[test]
@@ -387,7 +461,7 @@ mod tests {
             "the Mentions tab still renders the row"
         );
 
-        page.toggle_read(&db, 1);
+        page.toggle_group(&db, &[1], false);
         let read_at: Option<String> = db
             .with_read(|conn| {
                 conn.query_row("SELECT read_at FROM notifications WHERE id = 1", [], |r| {
@@ -405,6 +479,60 @@ mod tests {
     fn i64_field_helper_still_reads_plain_values() {
         let v = serde_json::json!({"total": 7});
         assert_eq!(i64_field(&v, "total"), 7);
+    }
+
+    #[test]
+    fn ux13_identical_notifications_collapse_into_one_group() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            set_me(conn);
+            for i in 0..18 {
+                seed_notification(
+                    conn,
+                    100 + i,
+                    "job_failure",
+                    "Background job failed (ai/analyze_ticket)",
+                    false,
+                );
+            }
+            seed_notification(conn, 200, "mentioned", "Ada mentioned you", true);
+        });
+        let mut page = NotificationsPage::new();
+        page.reload(&db);
+        let groups = group_records(&page.records);
+        assert_eq!(groups.len(), 2, "18 identical rows collapse to one group");
+        let failure = groups
+            .iter()
+            .find(|g| g.sample().notification_type.as_str() == "job_failure")
+            .expect("failure group");
+        assert_eq!(failure.count(), 18);
+        assert!(failure.any_unread());
+        assert_eq!(failure.ids().len(), 18);
+    }
+
+    #[test]
+    fn ux13_group_toggle_flips_every_record_in_the_group() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            set_me(conn);
+            seed_notification(conn, 1, "job_failure", "same failure", false);
+            seed_notification(conn, 2, "job_failure", "same failure", false);
+        });
+        let mut page = NotificationsPage::new();
+        page.reload(&db);
+        let groups = group_records(&page.records);
+        let ids = groups[0].ids();
+        page.toggle_group(&db, &ids, true);
+        assert_eq!(page.unread, 0, "both group members flip to read");
+        page.toggle_group(&db, &ids, false);
+        assert_eq!(page.unread, 2, "both group members flip back");
+    }
+
+    #[test]
+    fn ux13_type_labels_are_human() {
+        assert_eq!(type_label("job_failure"), "Job failure");
+        assert_eq!(type_label("mentioned"), "Mention");
+        assert_eq!(type_label("some_new_kind"), "Some new kind");
     }
 
     #[test]
