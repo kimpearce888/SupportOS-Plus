@@ -5,6 +5,20 @@ use crate::pages::NavRequest;
 
 pub(crate) const MAX_HITS: usize = 12;
 
+/// UX-31: hit-row height. The old 40px row centered the title on the row
+/// midline while anchoring the snippet to the bottom — the two galleys
+/// overlapped by several pixels, which read as ghosted/bleeding text on the
+/// highlighted row. 46px gives every row two clean bands.
+pub(crate) const PALETTE_ROW_HEIGHT: f32 = 46.0;
+
+/// UX-31: vertical center of the badge+title band, measured from the row
+/// top (the badge is taller than the title galley, so the band bottom is
+/// governed by the badge).
+const TITLE_LINE_CENTER: f32 = 15.0;
+
+/// UX-31: breathing room between the snippet band and the row bottom.
+const SNIPPET_BOTTOM_PAD: f32 = 5.0;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PaletteHit {
     pub scope: String,
@@ -127,6 +141,17 @@ impl CommandPalette {
 
     pub fn close(&mut self) {
         self.open = false;
+    }
+
+    /// Screenshot-harness hook (ui-screenshot only): open the palette on a
+    /// pre-seeded query, so a shot can land on the mid-search state (hits
+    /// listed, first row selected) instead of the empty "Type to search"
+    /// state. Walks the same open+search path a typed query takes.
+    #[cfg(feature = "ui-screenshot")]
+    pub(crate) fn open_with_query(&mut self, query: &str, db: &DbHandle) {
+        self.open();
+        self.query = query.to_string();
+        self.run_search(db);
     }
 
     pub(crate) fn toggle_shortcut(&mut self, ctx: &egui::Context) {
@@ -288,7 +313,7 @@ impl CommandPalette {
                 } else {
                     egui::ScrollArea::vertical()
                         .id_salt("palette-hits")
-                        .show_rows(ui, 40.0, hits.len(), |ui, range| {
+                        .show_rows(ui, PALETTE_ROW_HEIGHT, hits.len(), |ui, range| {
                             for (idx, hit) in hits[range.clone()].iter().enumerate() {
                                 let global_idx = range.start + idx;
                                 let selected = self.selected == global_idx;
@@ -327,7 +352,7 @@ impl CommandPalette {
 
 fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui::Response {
     let t = crate::design::tokens(ui);
-    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 40.0));
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), PALETTE_ROW_HEIGHT));
     let response = ui.interact(
         rect,
         auto_id.with(("palette-hit", hit.scope.as_str(), hit.id)),
@@ -344,6 +369,11 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(8), fill);
     }
+    // UX-31: two strictly separated bands — badge+title on the top line,
+    // snippet anchored at the bottom. The old layout centered the title on
+    // the row midline, so long titles crossed into the bottom-anchored
+    // snippet and read as ghosted/bleeding text.
+    let title_line_center = rect.min.y + TITLE_LINE_CENTER;
     let title = egui::WidgetText::from(
         egui::RichText::new(hit.title.as_str())
             .size(13.5)
@@ -373,14 +403,16 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
         egui::TextStyle::Small,
     );
     let scope_w = scope_galley.size().x + 16.0;
+    // The badge is vertically centered on the title line (UX-31: it used to
+    // float on the row midline while the text block sat lower).
     let badge_rect = egui::Rect::from_min_max(
         egui::pos2(
             rect.min.x + 8.0,
-            rect.center().y - scope_galley.size().y / 2.0 - 3.0,
+            title_line_center - scope_galley.size().y / 2.0 - 3.0,
         ),
         egui::pos2(
             rect.min.x + 8.0 + scope_w,
-            rect.center().y + scope_galley.size().y / 2.0 + 3.0,
+            title_line_center + scope_galley.size().y / 2.0 + 3.0,
         ),
     );
     ui.painter()
@@ -396,7 +428,7 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
     ui.painter().galley(
         egui::pos2(
             badge_rect.max.x + 10.0,
-            rect.center().y - title.size().y / 2.0,
+            title_line_center - title.size().y / 2.0,
         ),
         title,
         if selected {
@@ -406,10 +438,18 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
         },
     );
     if !hit.snippet.is_empty() {
+        // UX-31: on the selected row the snippet shares the selection-
+        // foreground pair (the old muted gray fell to ~4.4:1 on the light
+        // selection fill, under the 4.5:1 small-text bar).
+        let snippet_fg = if selected {
+            t.selection_foreground
+        } else {
+            t.muted_foreground
+        };
         let snippet = egui::WidgetText::from(
             egui::RichText::new(hit.snippet.as_str())
                 .small()
-                .color(t.muted_foreground),
+                .color(snippet_fg),
         )
         .into_galley(
             ui,
@@ -418,9 +458,12 @@ fn palette_hit_row(ui: &mut egui::Ui, hit: &PaletteHit, selected: bool) -> egui:
             egui::TextStyle::Small,
         );
         ui.painter().galley(
-            egui::pos2(rect.min.x + 8.0, rect.max.y - snippet.size().y - 6.0),
+            egui::pos2(
+                rect.min.x + 8.0,
+                rect.max.y - SNIPPET_BOTTOM_PAD - snippet.size().y,
+            ),
             snippet,
-            t.muted_foreground,
+            snippet_fg,
         );
     }
     response.widget_info(|| {
@@ -468,6 +511,34 @@ mod tests {
         assert_eq!(move_selection(2, 5, 2), 4);
         assert_eq!(move_selection(4, 5, 1), 4, "clamped to len-1");
         assert_eq!(move_selection(3, 5, -2), 1);
+    }
+
+    #[test]
+    fn palette_row_bands_never_overlap() {
+        // UX-31: the old 40px row centered the title on the row midline
+        // (bottom edge ≈ y 28) while the snippet started at ≈ y 21 — a
+        // 7px overlap that read as ghosted text. This guard locks the
+        // two-band layout: with generously sized galleys (18px title,
+        // 20px badge, 14px snippet), every band stays clear of the next.
+        let rect =
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(560.0, PALETTE_ROW_HEIGHT));
+        let title_line_center = rect.min.y + TITLE_LINE_CENTER;
+        let title_bottom = title_line_center + 18.0 / 2.0;
+        let badge_bottom = title_line_center + 20.0 / 2.0; // badge is the taller of the pair
+        let snippet_top = rect.max.y - SNIPPET_BOTTOM_PAD - 14.0;
+        assert!(
+            snippet_top > badge_bottom,
+            "the snippet band must start strictly below the badge+title band: \
+             snippet_top {snippet_top} must exceed badge_bottom {badge_bottom}"
+        );
+        assert!(
+            snippet_top > title_bottom,
+            "the snippet band must start strictly below the title galley"
+        );
+        assert!(
+            rect.max.y - SNIPPET_BOTTOM_PAD - 14.0 >= rect.min.y,
+            "the snippet band must fit inside the row"
+        );
     }
 
     #[test]
