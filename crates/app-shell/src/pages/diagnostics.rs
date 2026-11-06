@@ -32,6 +32,18 @@ impl LevelFilter {
     }
 }
 
+/// UX-21: per-level counts taken from the full event fetch, so every filter
+/// chip can carry its count — the counts become the path to the events they
+/// describe (click "Errors 36" to see the 36 errors) instead of a dead-end
+/// subtitle line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct EventCounts {
+    all: usize,
+    errors: usize,
+    warnings: usize,
+    info: usize,
+}
+
 #[derive(Debug, Clone)]
 struct SyncRunRow {
     id: i64,
@@ -100,6 +112,7 @@ impl AuditRow {
 
 pub struct DiagnosticsPage {
     events: Option<Vec<spp_core::audit::DiagEvent>>,
+    event_counts: EventCounts,
     runs: Option<Vec<SyncRunRow>>,
     audit: Option<Vec<AuditRow>>,
     filter: LevelFilter,
@@ -112,6 +125,7 @@ impl DiagnosticsPage {
     pub fn new() -> Self {
         Self {
             events: None,
+            event_counts: EventCounts::default(),
             runs: None,
             audit: None,
             filter: LevelFilter::All,
@@ -127,10 +141,27 @@ impl DiagnosticsPage {
     }
 
     fn reload(&mut self, db: &DbHandle) {
-        let filter = self.filter;
-        let events = db.with_read(|conn| {
-            spp_core::audit::list_recent_events(conn, 200, filter.level()).unwrap_or_default()
+        // UX-21: one full fetch (no level filter) feeds both the per-level
+        // counts and the filtered view — the counts stay stable no matter
+        // which filter is active, so the chips always tell the truth about
+        // what is in the log.
+        let all = db.with_read(|conn| {
+            spp_core::audit::list_recent_events(conn, 200, None).unwrap_or_default()
         });
+        let counts = EventCounts {
+            all: all.len(),
+            errors: all.iter().filter(|e| e.level == "error").count(),
+            warnings: all.iter().filter(|e| e.level == "warn").count(),
+            info: all.iter().filter(|e| e.level == "info").count(),
+        };
+        let events = match self.filter.level() {
+            Some(level) => all
+                .iter()
+                .filter(|e| e.level == level)
+                .cloned()
+                .collect::<Vec<_>>(),
+            None => all,
+        };
         let runs = db.with_read(load_sync_runs);
         let audit = db.with_read(|conn| {
             spp_core::audit::list_audit(conn, None, 50)
@@ -140,6 +171,7 @@ impl DiagnosticsPage {
                 .collect::<Vec<_>>()
         });
         self.events = Some(events);
+        self.event_counts = counts;
         self.runs = Some(runs);
         self.audit = Some(audit);
     }
@@ -189,24 +221,49 @@ impl DiagnosticsPage {
         let runs = self.runs.clone().unwrap_or_default();
         let audit = self.audit.clone().unwrap_or_default();
 
-        let error_count = events.iter().filter(|e| e.level == "error").count();
-        let warn_count = events.iter().filter(|e| e.level == "warn").count();
+        let counts = self.event_counts;
+        // UX-21: proper pluralization — no more "event(s)" programmer
+        // notation; the error/warning counts moved onto the filter chips
+        // where they are actionable.
         let subtitle = format!(
-            "{} event(s) shown — {} error(s), {} warning(s)",
+            "{} event{} shown · newest first",
             events.len(),
-            error_count,
-            warn_count
+            if events.len() == 1 { "" } else { "s" }
         );
         let mut clear_requested = false;
         design::card_titled(ui, "Event log", Some(&subtitle), |ui| {
             ui.horizontal(|ui| {
-                for filter in [
-                    LevelFilter::All,
-                    LevelFilter::Errors,
-                    LevelFilter::Warnings,
-                    LevelFilter::Info,
+                for (filter, count) in [
+                    (LevelFilter::All, counts.all),
+                    (LevelFilter::Errors, counts.errors),
+                    (LevelFilter::Warnings, counts.warnings),
+                    (LevelFilter::Info, counts.info),
                 ] {
-                    if design::chip(ui, self.filter == filter, filter.label()).clicked() {
+                    let hover = match filter {
+                        LevelFilter::All => "Show every recorded event".to_string(),
+                        LevelFilter::Errors => {
+                            format!(
+                                "Show the {count} error event{}",
+                                if count == 1 { "" } else { "s" }
+                            )
+                        }
+                        LevelFilter::Warnings => format!(
+                            "Show the {count} warning event{}",
+                            if count == 1 { "" } else { "s" }
+                        ),
+                        LevelFilter::Info => format!(
+                            "Show the {count} info event{}",
+                            if count == 1 { "" } else { "s" }
+                        ),
+                    };
+                    if design::chip(
+                        ui,
+                        self.filter == filter,
+                        &format!("{} {count}", filter.label()),
+                    )
+                    .on_hover_text(hover)
+                    .clicked()
+                    {
                         self.filter = filter;
                         self.invalidate();
                     }
@@ -376,7 +433,7 @@ impl DiagnosticsPage {
                     );
                     return;
                 }
-                design::table(
+                design::table_stretched(
                     ui,
                     "diagnostics-runs",
                     &["Run", "Kind", "State", "Records", "Errors", "Started"],
@@ -441,21 +498,34 @@ impl DiagnosticsPage {
                          assignments are dispatched to Help Scout within seconds.",
                 );
             } else {
-                design::table(
-                    ui,
-                    "diagnostics-outbound",
-                    &["Job", "Kind", "At", "Error"],
-                    22.0,
-                    |ui| {
-                        for (id, kind, at, error) in &failed_rows {
-                            ui.monospace(egui::RichText::new(id.to_string()).size(12.5));
-                            ui.monospace(egui::RichText::new(kind.as_str()).size(12.5));
-                            ui.monospace(egui::RichText::new(at.as_str()).size(12.0).weak());
-                            ui.monospace(egui::RichText::new(error.as_str()).size(11.5).weak());
-                            ui.end_row();
-                        }
-                    },
-                );
+                // UX-21: same stretched+bounded treatment as the runs table —
+                // the trailing error column stays beside its header and the
+                // list scrolls in place instead of clipping at the viewport.
+                egui::ScrollArea::vertical()
+                    .id_salt("diagnostics-outbound-scroll")
+                    .max_height(220.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        design::table_stretched(
+                            ui,
+                            "diagnostics-outbound",
+                            &["Job", "Kind", "At", "Error"],
+                            22.0,
+                            |ui| {
+                                for (id, kind, at, error) in &failed_rows {
+                                    ui.monospace(egui::RichText::new(id.to_string()).size(12.5));
+                                    ui.monospace(egui::RichText::new(kind.as_str()).size(12.5));
+                                    ui.monospace(
+                                        egui::RichText::new(at.as_str()).size(12.0).weak(),
+                                    );
+                                    ui.monospace(
+                                        egui::RichText::new(error.as_str()).size(11.5).weak(),
+                                    );
+                                    ui.end_row();
+                                }
+                            },
+                        );
+                    });
             }
         });
         if clear_requested {
@@ -542,6 +612,29 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].level, "error");
         assert_eq!(events[0].message, "bad thing");
+    }
+
+    /// UX-21: the chip counts must describe the whole log (so "Errors 36"
+    /// is honest) while the visible list honors the active filter.
+    #[test]
+    fn level_counts_cover_the_full_log_while_the_view_filters() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            spp_core::audit::log_event(conn, "info", "sync", "i1", None, None).expect("i");
+            spp_core::audit::log_event(conn, "info", "sync", "i2", None, None).expect("i");
+            spp_core::audit::log_event(conn, "error", "sync", "e1", None, None).expect("e");
+            spp_core::audit::log_event(conn, "warn", "sync", "w1", None, None).expect("w");
+        });
+        let mut page = DiagnosticsPage::new();
+        page.filter = LevelFilter::Errors;
+        page.reload(&db);
+        let events = page.events.clone().expect("events");
+        assert_eq!(events.len(), 1, "the view narrows to errors");
+        assert_eq!(events[0].level, "error");
+        assert_eq!(page.event_counts.all, 4, "counts see the whole log");
+        assert_eq!(page.event_counts.errors, 1);
+        assert_eq!(page.event_counts.warnings, 1);
+        assert_eq!(page.event_counts.info, 2);
     }
 
     #[test]
