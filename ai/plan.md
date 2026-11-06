@@ -7,50 +7,28 @@
 
 ## Queue state
 
-**UX-audit program — 13 items open after Batch UXA-2 closed 2026-11-06
-(UXA-1 consumed UX-1..UX-9 + UX-25, UXA-2 consumed UX-10..UX-19, both
-recorded in `completed.md`; next batch UXA-3 starts at UX-20 below).**
+**UX-audit program — 3 items open after Batch UXA-3 closed 2026-11-06
+(UXA-1 consumed UX-1..UX-9 + UX-25, UXA-2 consumed UX-10..UX-19, UXA-3
+consumed UX-20..UX-30, all recorded in `completed.md`; the final batch
+UXA-4 starts at UX-31 below).**
 
 Every prior program is consumed with completion records in `completed.md`
 (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6; RF-1..11 + FINISH;
-KB/AUDIT batches; REL-1/2/3; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1). The new
-program below opens on the owner's UX-audit directive (session 2026-11-05):
+KB/AUDIT batches; REL-1/2/3; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1). The UX
+program opened on the owner's UX-audit directive (session 2026-11-05):
 discover every journey, audit every page/state at 1920×1080 (+dark theme),
 fix frontend-only defects in ten-item batches per rule.md, evidence per
 `ux-audit/reports/` (scope contract: `ux-audit/reports/scope.md`; issue
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
 
-### UX-audit queue (Batch UXA-2 CONSUMED 2026-11-06 — items UX-10..UX-19 completed and verified, record in `completed.md`; next batch UXA-3 starts at UX-20)
+### UX-audit queue (Batch UXA-3 CONSUMED 2026-11-06 — items UX-20..UX-30 completed and verified, record in `completed.md`; the final batch UXA-4 starts at UX-31)
 
-1. UX-20 (major) — Sync Health: "last success" header/value misalignment;
-    recent-runs table clipped without scroll affordance.
-2. UX-21 (major) — Diagnostics: error/warning counts not linked to the
-    log; sync-reports trailing column detached.
-3. UX-22 (major) — Backups: destructive "restore" without confirmation
-    affordance or danger styling; raw bytes/ISO timestamps.
-4. UX-23 (major) — LM Studio tab: dead-end "Test the connection from the
-    AI Center page" (no link); missing validation/labels.
-5. UX-24 (major) — Vector tab: static "✓ enabled" text, no toggle or
-    rebuild/copy affordances.
-6. UX-26 (major, frontend copy) — Webhook-secret copy claims "the platform
-    caps webhook secrets at 40 characters" — verified false against the live
-    platform (stored 48). Correct the copy; the cap itself is backend
-    (logged UX-26B, blocked).
-7. UX-27 (minor) — Inbox polish: pill style inconsistency; Cc/Bcc
-    clipping; row crowding. (Partial: the truncated search placeholder was
-    fixed with the UX-8 panel work in UXA-1.)
-8. UX-28 (minor) — Dashboard polish: filter-card width/dead space; clipped
-    "By tag" row; ambiguous chart caption.
-9. UX-29 (minor) — Hours tab: no explanation; "not configured" badge tone;
-    lowercase "edit".
-10. UX-30 (minor) — Sync&AI tab: inconsistent checkbox styling; cramped
-    numeric inputs; no dirty-state/per-card save feedback.
-11. UX-31 (minor) — Palette: selected-row subtitle contrast; possible text
+1. UX-31 (minor) — Palette: selected-row subtitle contrast; possible text
     bleed-through on the selected row.
-12. UX-32 (polish) — Backups: export buttons look disabled; duplicate
+2. UX-32 (polish) — Backups: export buttons look disabled; duplicate
     header; no danger-zone separation.
-13. UX-33 (polish) — Bell icon tooltip; "synced Ns ago" context.
+3. UX-33 (polish) — Bell icon tooltip; "synced Ns ago" context.
 
 Prior programs (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6;
 RF-1..11 + FINISH; KB/AUDIT; REL-1/2/3; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1)

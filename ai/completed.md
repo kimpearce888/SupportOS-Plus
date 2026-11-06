@@ -7604,3 +7604,101 @@ CI outcome addendum (appended to the UXA-2 record, append-only): the
 fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · kittest snapshot
 locks ✓ (the 157 regenerated baselines match CI's lavapipe rendering) —
 CI run 42166530366, completed success. Rule 8 STOP.
+
+## Batch UXA-3 — the third ten UX-audit fixes (UX-20..UX-30)
+
+Opened 2026-11-06 on the owner's "continue" after the UXA-2 Rule 8 STOP;
+moved to `progress.md` per Rule 2; implemented, verified, and closed the
+same session (Rule 4). Scope contract and per-item evidence:
+`ux-audit/reports/` (scope.md · issues.md statuses · worklog.md items
+21–28). UX-25 was already fixed in UXA-1; UX-26's backend half stays
+blocked as UX-26B.
+
+**Items (10):** UX-20 (Sync Health: `table_stretched` + bounded scroll on
+both tables, Title-Case headers, user-language hero with relative time —
+the "never shows relative time — forensic value" dev note gone), UX-21
+(Diagnostics: per-level counts ON the filter chips — "Errors 36" is the
+path to the 36 errors — from one unfiltered fetch with a new unit test;
+proper pluralization; stretched + scroll-bounded runs/outbound tables),
+UX-22 (Backups: Destructive-variant restore with "confirmation step
+follows" hover and file-naming confirmation; human_bytes + relative-time
+metadata with exact values on hover), UX-23 (LM Studio: "Open AI Center"
+button — Settings now returns Option<NavRequest>; purpose subtitle; field
+hints/hovers; base-URL validation on save), UX-24 (Vector: labelled
+semantic-search toggle wired on change; truncating + copyable store
+path), UX-26 (webhook copy tells the truth before AND after save: Help
+Scout signs with the FULL secret, SupportOS+ verifies only the first 40
+chars — no more "the platform caps…" misattribution), UX-27 (Inbox: Cc/Bcc
+above the composer body in a scroll-in-place pane; SP1 row breathing;
+"Unassigned" as plain italic text — dashed pill removed from the shared
+design::assignee widget), UX-28 (Dashboard: full-width filter card with
+one wrapped chip row; breakdown cards capped at 8 bars + "and N more…";
+named chart caption inside the frame — shared line_chart_axes, Reports
+inherit), UX-29 (Hours: purpose subtitle, Warning badge on "not
+configured", spelled-out fr/res abbreviations, self-explaining empty
+state), UX-30 (Sync & AI: uniform checkbox list, 110×26 numeric inputs
+with hovers, dirty-state save row — "Save Changes" + unsaved note vs
+"All changes saved" badge — backed by general_persisted).
+
+**Implementation commits (6, code + baselines):** b917382 (sync_health
+[UX-20]) · 118fa9d (diagnostics [UX-21]) · 3c55867 (inbox + design
+assignee [UX-27]) · d156e7a (dashboard + chart [UX-28]) · 766a1a5
+(settings tabs: backups/lmstudio/vector/helpscout/hours/syncai
+[UX-22][UX-23][UX-24][UX-26][UX-29][UX-30] + the feature-gated
+SPP_SHOT_TAB evidence hook) · 90b2c73 (46 regenerated kittest baselines,
+one atomic commit — per-commit splitting would be lossy). Format
+`fix(ui): <what> on <where> [ISSUE-ID]` per the owner's directive.
+
+**Verification (this sandbox, toolchain 1.99.1 pinned; the sandbox was
+recycled between sessions — lavapipe + libxkbcommon-x11/libxcb-xkb
+re-extracted to /home/z/mesa-lvp/extracted from .debs, no sudo):**
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`: clean
+  (re-verified after every in-session code change).
+- Tests: app-shell lib 244/244 (2 new tests: human_bytes user-facing
+  sizes, level-counts-cover-the-full-log); xtask 11/11 incl. the secrets
+  hygiene check.
+- kittest snapshot locks: all 24 suites + style_lint diff-locked GREEN
+  (exit 0, re-run a third time on the final code state after the
+  SPP_SHOT_TAB hook — it is `#[cfg(feature = "ui-screenshot")]`, compiled
+  out of kittest builds, and the re-run proves it). Drift discipline:
+  first full run --no-fail-fast produced 46 snapshot drifts across 8
+  suites + 1 REAL style-lint failure — UX-27's row breathing used
+  off-scale add_space(1.0) (DC §2.4); fixed in code to
+  design::scale::space::SP1 before any baseline regeneration, style_lint
+  2/2 after. All 46 drifts audited one-by-one, every one mapped to an
+  intended UXA-3 change (dashboard ×7, diagnostics ×7, sync_health ×7,
+  settings ×6 — the helpscout-tab golden byte-identical because UX-26 is
+  hover/save-note copy; reports ×6 = shared chart caption; inbox ×6 +
+  copilot ×3; widgets ×4 = assignee). Zero unexpected suites. Baselines
+  regenerated with UPDATE_SNAPSHOTS=1, full suite re-ran diff-locked
+  GREEN; exactly 46 goldens changed in git, one-for-one with the audited
+  list.
+- `SPP_SMOKE=1`: rc=0 (boot chain + 24 pages / 4259 shapes rendered
+  headlessly; the shape count differs from UXA-2's 5131 because the
+  recycled sandbox boots a fresh DB — the criterion is per-page
+  non-empty render, unchanged).
+- After-evidence: 11 deterministic shots at 1920×1080 via ui-screenshot
+  + the new SPP_SHOT_TAB (sync_health, diagnostics, settings
+  backups/lmstudio/vector/helpscout/hours/syncai, inbox, dashboard
+  light+dark), all rc=0, all luma-verified (10 light 244–250, 1 dark
+  26.6). The Backups shot is seeded with two real SQLite backup files
+  (random bytes fail the integrity check the restore flow runs).
+  Disclosure: VLM read-back spot-checks were 429-rate-limited all session
+  (three attempts spread over the batch — the same limit the UXA-1/UXA-2
+  sessions hit); page identity is instead verified structurally: same
+  binary, SPP_SHOT_PAGE label match, per-shot rc=0, luma theme scan,
+  and the diff-locked kittest goldens that encode the exact fixed states.
+- Scope: 11 source files under `crates/app-shell/src/` + 46 kittest
+  baselines + ledger/reports. Zero backend, API, schema, CI, workflow,
+  packaging or Cargo.lock changes (`--locked` throughout). The
+  SPP_SHOT_TAB hook is dev-harness only (feature-gated off in every
+  normal/CI build, same class as the existing SPP_SHOT_* hooks).
+
+**Backend-blocked findings stand** (logged, not queued): UX-26B (webhook
+secret cap), UX-34 (no nav target in core tile data), UX-35 (raw
+job-error strings from core).
+
+Rule 8 STOP — batch UXA-3 of ten is complete; the queue holds the final
+UX-audit batch UXA-4 (items UX-31..UX-33). Resume on the owner's
+"continue".

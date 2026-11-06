@@ -156,3 +156,93 @@
 20. Disk hygiene again: diff artifacts + incremental cache removed,
     stale test binaries stripped, registry cache cleared (rootfs was at
     98%).
+
+## Batch UXA-3 (2026-11-06, owner "continue" after the UXA-2 STOP)
+
+21. Rule-2 queueing: UX-20..UX-30 moved from ai/plan.md to
+    ai/progress.md (UX-25 already fixed in UXA-1; UX-26's backend half
+    stays blocked as UX-26B).
+22. Implementation (crates/app-shell/src/ only; no backend/CI/config;
+    the sandbox was recycled between sessions so lavapipe + the GL/X11
+    userland had to be re-extracted first — see item 26):
+    - sync_health: hero subtitle in user language + relative time
+      ("Last success: <iso> · 3h ago", dev note "forensic value" gone),
+      both tables `table_stretched` + bounded ScrollAreas, Title-Case
+      headers, hover-anchored last-success stamps (UX-20).
+    - diagnostics: EventCounts (one unfiltered fetch feeds stable
+      per-level chip counts — "Errors 36" IS the path to the errors),
+      proper pluralization, runs + failed-outbound tables stretched and
+      scroll-bounded; new unit test
+      level_counts_cover_the_full_log_while_the_view_filters (UX-21).
+    - settings/backups: Destructive restore + file-naming confirmation,
+      human_bytes + relative_time metadata with exact values on hover
+      (UX-22); lmstudio: "Open AI Center" NavRequest button (the tab can
+      now navigate — Settings returns Option<NavRequest> to the shell),
+      purpose subtitle, field hints/hovers, base-URL validation on save
+      (UX-23); vector: labelled toggle wired on change, truncating +
+      copyable store path (UX-24); helpscout: truthful 40-char copy
+      before AND after save, no "the platform" blame (UX-26); hours:
+      purpose subtitle, Warning badge, spelled-out abbreviations,
+      self-explaining empty state (UX-29); syncai/general: uniform
+      checkbox list, 110×26 DragValues with hovers, dirty-state save
+      row ("Save Changes" + note / "All changes saved" badge) backed by
+      general_persisted (UX-30).
+    - inbox: composer pane scrolls in place; Cc/Bcc above the body
+      (standard mail layout); SP1 breathing between the three list-row
+      lines (UX-27).
+    - dashboard: filter card spans content width with one wrapped chip
+      row; breakdown cards cap at 8 bars + "and N more…"; chart caption
+      inside the frame's top-right corner, named ("First X → Latest Y")
+      via the shared line_chart_axes — Reports inherit it (UX-28).
+    - design system: assignee(None) is plain italic "Unassigned" text
+      (the dashed pill read as a second chip language) (UX-27).
+    - shared helpers: human_bytes in pages/mod.rs + unit test.
+23. Evidence harness extension (dev-only, feature-gated):
+    SPP_SHOT_TAB env var in the ui-screenshot build selects the
+    Settings tab by label (set_tab_by_label) — the audit evidence needs
+    Backups/LM Studio/Vector/Help Scout/Hours/Sync&AI tab shots and no
+    click automation exists in-sandbox (no xdotool; xvfb-run needs
+    xauth). Off in every normal/CI build like the rest of the harness.
+24. Verification: fmt clean; clippy --locked --workspace --all-targets
+    -D warnings clean (re-verified after the two in-session code
+    changes below); app-shell lib 244/244 (2 new tests: human_bytes,
+    event-count coverage); xtask 11/11; SPP_SMOKE rc=0 (24 pages /
+    4259 shapes — the count differs from UXA-2's 5131 because the
+    recycled sandbox's data dir is a fresh DB, not the audit-era one;
+    the criterion is per-page non-empty render, unchanged).
+25. kittest drift discipline: first diff-locked run --no-fail-fast
+    produced 46 snapshot drifts across 8 suites + 1 style-lint failure.
+    The lint failure was REAL and fixed in code: UX-27's row breathing
+    used off-scale add_space(1.0) — DC §2.4 — replaced with
+    design::scale::space::SP1, style_lint 2/2 after. All 46 drifts
+    audited one-by-one, every one mapping to an intended UXA-3 change:
+    dashboard ×7 (UX-28), diagnostics ×7 (UX-21), sync_health ×7
+    (UX-20), settings ×6 (UX-22/23/24/29/30; helpscout-tab golden
+    byte-identical — UX-26 is hover/save-note copy, invisible in a
+    static shot), reports ×6 (shared chart caption, UX-28),
+    inbox_page ×6 + inbox_copilot ×3 (UX-27), kittest_widgets ×4
+    (assignee). Zero unexpected suites. Baselines regenerated with
+    UPDATE_SNAPSHOTS=1, full suite re-ran diff-locked GREEN (exit 0,
+    26 binaries incl. lib + style_lint); exactly 46 goldens changed in
+    git, one-for-one with the audited drift list.
+26. Environment rebuild for the recycled sandbox: mesa-vulkan-drivers
+    .deb re-downloaded + extracted to /home/z/mesa-lvp/extracted
+    (VK_DRIVER_FILES/VK_ICD_FILENAMES/LD_LIBRARY_PATH); xvfb-run
+    unusable (no xauth) → Xvfb :N -ac driven per-shot from a script
+    (the sandbox reaps background processes between commands — one
+    Xvfb lifetime per shot); libxkbcommon-x11 + libxcb-xkb .debs
+    extracted into the same prefix (egui-winit dlopens them).
+27. After-evidence: 11 shots at 1920×1080 via ui-screenshot + the new
+    SPP_SHOT_TAB (sync_health, diagnostics, settings backups/lmstudio/
+    vector/helpscout/hours/syncai, inbox, dashboard light+dark), all
+    rc=0, all luma-verified (10 light 244-250, 1 dark 26.6). Backups
+    shot seeded with two real SQLite backup files (random bytes fail
+    the integrity check the restore flow runs). VLM read-back spot
+    checks were 429-rate-limited all session (three attempts, same as
+    the UXA-1/UXA-2 sessions hit) — page identity is instead
+    structurally verified: same binary + SPP_SHOT_PAGE label match, per
+    shot rc=0, luma theme scan, distinct byte sizes, and the
+    diff-locked kittest goldens that encode the exact fixed states.
+28. Disk hygiene: incremental cache (2.4 GB) + registry cache +
+    kittest diff artifacts removed; rootfs back from 99% to a working
+    level mid-batch.
