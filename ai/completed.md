@@ -7711,3 +7711,53 @@ the re-extracted sandbox lavapipe 25.0.7, match CI's lavapipe rendering —
 the cross-Mesa risk stays closed) — CI run 42190717843, completed
 success. The GA-1 standing practice (cargo fmt --all -- --check as the
 final pre-push local step) held. Rule 8 STOP.
+
+## Batch UXA-4 — the final three UX-audit fixes (UX-31..UX-33)
+
+Opened 2026-11-06 on the owner's "continue" after the UXA-3 Rule 8 STOP
+(second sandbox recycle of the engagement: repo re-cloned at 5bde367,
+Rust 1.99.1 + lavapipe/xkb re-extracted to a persistent home prefix
+first); moved to `progress.md` per Rule 2; implemented, verified, and
+closed the same session (Rule 4). Per-item evidence:
+`ux-audit/reports/` (issues.md statuses · worklog.md items 29–36).
+
+**Items (3):** UX-31 (palette hit rows re-banded at 46px — the old 40px
+row genuinely overlapped title and subtitle galleys by ~7px, the audit's
+"bleed-through"; selected-row subtitle now uses the selection-foreground
+pair instead of ~4.4:1 muted gray; guard test
+`palette_row_bands_never_overlap`), UX-32 (Backups tab: purposeful
+"Back up or export your data" card with hover-explained, clearly-enabled
+Outline exports + "Create Backup" Title Case, and a separate "Restore a
+backup" card carrying the destructive rows and armed confirm — the Help
+Scout danger-zone pattern; no card title repeats the tab name),
+UX-33 (header: the audit's "bell" was the icon-only theme toggle — now a
+labelled Outline button "Dark"/"Light"; the freshness pill names its
+subject on its face, "Help Scout · synced Ns ago"/"syncing…"/"never
+synced", hover explains the local mirror and opens Sync Health).
+
+**Verification:** fmt clean · clippy --locked --workspace --all-targets
+-D warnings clean · app-shell lib 245/245 (1 new) · kittest suites +
+style_lint diff-locked GREEN twice on the final code (420/420 per full
+run, zero golden drift — nothing golden-locked changed this batch) ·
+xtask 11/11 · SPP_SMOKE rc=0 (24 pages / 4331 shapes) · after-evidence:
+3 luma-verified 1920×1080 shots (palette__search, settings__backups,
+shell__default) with GREEN VLM read-backs (no rate limits this session)
+— the palette shot seeded mid-search via the new feature-gated
+SPP_SHOT_PALETTE_QUERY hook, the backups shot seeded with two real
+SQLite backup files.
+
+- Scope: 3 source files under `crates/app-shell/src/` (palette.rs,
+  app/mod.rs, pages/settings.rs) + Cargo.toml harness comment + the
+  feature-gated SPP_SHOT_PALETTE_QUERY evidence hook (dev-only, off in
+  every normal/CI build) + ledger/reports. Zero backend, schema, CI,
+  workflow, packaging or Cargo.lock changes (`--locked` throughout).
+
+**With UXA-4 the UX-audit program is fully consumed**: UXA-1 (UX-1..9 +
+UX-25), UXA-2 (UX-10..19), UXA-3 (UX-20..30), UXA-4 (UX-31..33) — every
+frontend-fixable finding closed with evidence. The three
+backend-blocked findings stand logged, not queued: UX-26B (webhook
+secret cap), UX-34 (no nav target in core tile data), UX-35 (raw
+job-error strings from core).
+
+Rule 8 STOP — final batch of the program; the queue is empty. Resume
+only on a new owner directive.

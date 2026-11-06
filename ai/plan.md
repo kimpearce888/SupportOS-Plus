@@ -7,10 +7,14 @@
 
 ## Queue state
 
-**UX-audit program — 3 items open after Batch UXA-3 closed 2026-11-06
-(UXA-1 consumed UX-1..UX-9 + UX-25, UXA-2 consumed UX-10..UX-19, UXA-3
-consumed UX-20..UX-30, all recorded in `completed.md`; the final batch
-UXA-4 starts at UX-31 below).**
+**UX-audit program — CONSUMED 2026-11-06: the final batch UXA-4 (items
+UX-31..UX-33) moved to `progress.md` per Rule 2, implemented, verified,
+and closed the same session (record in `completed.md`). Every
+frontend-fixable finding is done (UXA-1: UX-1..UX-9 + UX-25, UXA-2:
+UX-10..UX-19, UXA-3: UX-20..UX-30, UXA-4: UX-31..UX-33); the queue is
+EMPTY. Backend-blocked UX-26B/UX-34/UX-35 stay logged in
+`ux-audit/reports/issues.md`. New work opens only on an owner
+directive.**
 
 Every prior program is consumed with completion records in `completed.md`
 (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6; RF-1..11 + FINISH;
@@ -22,13 +26,10 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
 
-### UX-audit queue (Batch UXA-3 CONSUMED 2026-11-06 — items UX-20..UX-30 completed and verified, record in `completed.md`; the final batch UXA-4 starts at UX-31)
+### UX-audit queue (EMPTY — final batch UXA-4: items UX-31..UX-33 moved to `progress.md` per Rule 2, 2026-11-06)
 
-1. UX-31 (minor) — Palette: selected-row subtitle contrast; possible text
-    bleed-through on the selected row.
-2. UX-32 (polish) — Backups: export buttons look disabled; duplicate
-    header; no danger-zone separation.
-3. UX-33 (polish) — Bell icon tooltip; "synced Ns ago" context.
+No queued items. Backend-blocked findings UX-26B/UX-34/UX-35 remain logged
+in `ux-audit/reports/issues.md`, not queued here.
 
 Prior programs (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6;
 RF-1..11 + FINISH; KB/AUDIT; REL-1/2/3; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1)

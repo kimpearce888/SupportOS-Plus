@@ -7,13 +7,25 @@
 ## Active items
 
 **None.** No batch is active and none is held (authoritative, 2026-11-06,
-post-Batch UXA-3). The queue in `ai/plan.md` holds the final UX-audit batch
-(UXA-4: items UX-31..UX-33, the last three findings); the engagement sits
-at a Rule 8 STOP awaiting the owner's "continue".
+post-Batch UXA-4). The final UX-audit batch closed same-session — record
+in `completed.md` — and the queue in `ai/plan.md` is empty. The
+engagement sits at a Rule 8 STOP; new work opens only on an owner
+directive.
 
-Historical batches (UXA-3, UXA-2, UXA-1, GA-1/2, RW-1, DENY-1, HYG-2,
-REL-3) moved through this file per Rules 2 and 4 and are recorded in
-`completed.md` — narratives preserved below.
+Batch UXA-4 (items UX-31..UX-33: the final three fixes of the
+owner-directed UX/UI audit program) moved through this file per Rules 2
+and 4 on 2026-11-06 — opened on the owner's "continue" after the UXA-3
+Rule 8 STOP (second sandbox recycle: repo re-cloned, toolchain and
+lavapipe/xkb prefix rebuilt first), implemented, verified (fmt/clippy/
+tests 245+420/kittest diff-locked ×2 on final code/SPP_SMOKE + 3
+luma-verified after-screenshots with GREEN VLM read-backs), completed
+the same session; record in `completed.md`. With it the UX-audit queue
+is fully consumed (backend-blocked UX-26B/34/35 stay logged in
+`ux-audit/reports/issues.md`).
+
+Historical batches (UXA-4, UXA-3, UXA-2, UXA-1, GA-1/2, RW-1, DENY-1,
+HYG-2, REL-3) moved through this file per Rules 2 and 4 and are recorded
+in `completed.md` — narratives preserved below.
 
 Batch UXA-3 (items UX-20..UX-30: the third ten fixes of the owner-directed
 UX/UI audit program) moved through this file per Rules 2 and 4 on

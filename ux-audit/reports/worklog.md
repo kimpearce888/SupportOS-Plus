@@ -246,3 +246,73 @@
 28. Disk hygiene: incremental cache (2.4 GB) + registry cache +
     kittest diff artifacts removed; rootfs back from 99% to a working
     level mid-batch.
+
+## Session 2026-11-06 (UXA-4 — the final batch, UX-31..UX-33)
+
+29. Environment rebuild #2 (the sandbox was recycled again after the
+    UXA-3 session): repo re-cloned (main @ 5bde367, clean); Rust 1.99.1
+    via rustup (clippy+rustfmt); mesa-vulkan-drivers + libxkbcommon-x11
+    + libxcb-xkb .debs re-downloaded and extracted to a persistent home
+    prefix (`~/.local/opt/vulkan-libs/`, env script exporting
+    VK_DRIVER_FILES/VK_ICD_FILENAMES/LD_LIBRARY_PATH/WGPU_BACKEND — the
+    /tmp copy lesson from item 18 applied). Owner's GitHub credentials
+    stored in the git credential helper for the batch push.
+30. Rule 2 move: UX-31..UX-33 plan.md → progress.md (final batch; the
+    UX-audit queue is now empty).
+31. UX-31 (palette rows): the audit's "text bleed-through" was real
+    geometry, not a rendering artifact — the 40px row centered the
+    13.5px title on the row midline (galley bottom ≈ y 28) while the
+    bottom-anchored small subtitle started at ≈ y 21: a ~7px overlap on
+    every row with both lines. Fixed with 46px rows in two strictly
+    separated bands (badge+title centered on a 15px-from-top line —
+    the badge no longer floats free of the title either — subtitle
+    anchored 5px above the row bottom) + selected-row subtitle in the
+    selection-foreground pair (was muted gray at ~4.4:1 on the light
+    selection fill). New guard test `palette_row_bands_never_overlap`
+    locks the band geometry; `PALETTE_ROW_HEIGHT` shared by the
+    renderer and the ScrollArea row sizer.
+32. UX-32 (Backups tab): split into two purposeful cards — "Back up or
+    export your data" (Create Backup Primary + hover-explained exports
+    now Outline so they read enabled; the flat Secondary gray read as
+    disabled; "create backup" had also escaped the UXA-2 Title Case
+    sweep) and "Restore a backup" (hint "replaces the current
+    database", the destructive rows + armed confirm; Cancel Outline per
+    the Help Scout danger-zone precedent). Card title no longer repeats
+    the tab name; empty state de-parenthesized ("No backups yet —
+    create one above.").
+33. UX-33 (header): the "bell" was the icon-only theme toggle — the
+    crescent glyph read as a notification bell in four page reports
+    (inbox/issue_radar/onboarding/notifications). Now a labelled
+    Outline button (moon/sun + "Dark"/"Light", hover keeps the switch
+    explanation); the freshness pill names its subject on its face
+    ("Help Scout · synced Ns ago" / "syncing…" / "never synced") and
+    the hover explains the local Help Scout mirror. Root cause column
+    said app/chrome.rs; header_ui actually lives in app/mod.rs.
+34. Evidence harness extension (dev-only, feature-gated like the rest):
+    SPP_SHOT_PALETTE_QUERY + CommandPalette::open_with_query so the
+    palette shot lands on the mid-search state (query typed, first hit
+    selected, subtitle bands visible) — an empty palette would not
+    evidence UX-31. Cargo.toml harness comment updated.
+35. Verification: fmt clean; clippy --locked --workspace --all-targets
+    -D warnings clean; app-shell lib 245/245 (1 new: the palette band
+    guard); kittest diff-locked GREEN **twice on the final code** (420
+    passed / 0 failed per full run — zero golden drift this batch: the
+    page suites render page widgets without the shell header, no
+    golden covers the Backups tab or the palette, so nothing
+    golden-locked changed — same class as UXA-3's hover-copy
+    invisibility); xtask 11/11; SPP_SMOKE rc=0 (24 pages / 4331
+    shapes; +72 vs UXA-3 from the labelled theme button and the longer
+    freshness pill — the per-page non-empty criterion is unchanged).
+36. After-evidence: 3 shots at 1920×1080 light via ui-screenshot under
+    Xvfb -ac (one Xvfb lifetime per shot): palette__search (query
+    "export" seeded, selected row + subtitle), settings__backups
+    (re-shot with two real SQLite backup .db files seeded — the first
+    attempt's shot() wiped the datadir before the app ran, leaving
+    only the boot-time automatic backup row), shell__default (header).
+    All rc=0, luma-verified (244.8–245.0). VLM read-backs GREEN this
+    session (no 429s): palette — subtitle clearly readable on the
+    highlight, clean vertical separation, badge aligned with the title
+    line; backups — two rows with human sizes/ages, red Restore inside
+    the separate "Restore a backup" card, outlined enabled exports;
+    shell — "Help Scout · never synced" pill, labelled "Dark" toggle,
+    no mystery icon-only button left.
