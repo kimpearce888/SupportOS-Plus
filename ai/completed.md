@@ -7598,3 +7598,9 @@ job-error strings from core).
 
 Rule 8 STOP — batch UXA-2 of ten is complete; the queue holds UXA-3
 (items UX-20 onward). Resume on the owner's "continue".
+
+CI outcome addendum (appended to the UXA-2 record, append-only): the
+13-commit push (7bb2c89..70b2da2) went green 3/3 on the first push —
+fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · kittest snapshot
+locks ✓ (the 157 regenerated baselines match CI's lavapipe rendering) —
+CI run 42166530366, completed success. Rule 8 STOP.
