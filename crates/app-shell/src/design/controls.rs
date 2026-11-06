@@ -6,12 +6,18 @@ pub(super) fn chip_impl(
     icon: Option<Icon>,
 ) -> egui::Response {
     let t = tokens(ui);
+    // UX-12/UX-15: a selected chip inverts (primary fill + strong label) so
+    // the active filter/scope is unmistakable in both themes — the old
+    // muted `selection` fill was near-identical to the resting chip.
     let fg = if selected {
-        t.selection_foreground
+        t.primary_foreground
     } else {
         t.muted_foreground
     };
-    let rich = egui::RichText::new(text).color(fg).size(13.0);
+    let mut rich = egui::RichText::new(text).color(fg).size(13.0);
+    if selected {
+        rich = rich.strong();
+    }
     let galley = egui::WidgetText::from(rich).into_galley(
         ui,
         Some(egui::TextWrapMode::Extend),
@@ -27,7 +33,7 @@ pub(super) fn chip_impl(
     let (id, rect) = ui.allocate_space(size);
     let response = ui.interact(rect, id.with(("spp-chip", text)), egui::Sense::click());
     let fill = if selected {
-        t.selection
+        t.primary
     } else if response.hovered() || response.has_focus() {
         t.accent
     } else {
@@ -157,23 +163,23 @@ pub(crate) fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
     ui.horizontal(|ui| {
         let t = tokens(ui);
         if page > 0 {
-            if button(ui, "‹ prev", ButtonVariant::Outline).clicked() {
+            if button(ui, "‹ Prev", ButtonVariant::Outline).clicked() {
                 delta = -1;
             }
         } else {
             ui.label(
-                egui::RichText::new("‹ prev")
+                egui::RichText::new("‹ Prev")
                     .small()
                     .color(t.muted_foreground),
             );
         }
         ui.label(
-            egui::RichText::new(format!("page {} of {}", page + 1, pages))
+            egui::RichText::new(format!("Page {} of {}", page + 1, pages))
                 .small()
                 .color(t.muted_foreground),
         );
         if page + 1 < pages {
-            if button(ui, "next ›", ButtonVariant::Outline).clicked() {
+            if button(ui, "Next ›", ButtonVariant::Outline).clicked() {
                 delta = 1;
             }
         } else {

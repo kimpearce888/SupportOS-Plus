@@ -113,13 +113,19 @@ pub(crate) const LIGHT: Tokens = Tokens {
 
 pub(crate) const DARK: Tokens = Tokens {
     background: rgb(9, 9, 11),
-    sidebar: rgb(12, 12, 14),
+    // UX-12: lifted off the background so the sidebar reads as its own
+    // surface instead of blending into the page behind it.
+    sidebar: rgb(16, 16, 19),
     card: rgb(24, 24, 27),
-    border: rgb(39, 39, 42),
-    border_strong: rgb(63, 63, 70),
+    // UX-12: stronger hairlines so cards/tables separate from the
+    // background instead of floating in near-identical grays.
+    border: rgb(48, 48, 53),
+    border_strong: rgb(66, 66, 72),
     foreground: rgb(250, 250, 250),
     muted: rgb(39, 39, 42),
-    muted_foreground: rgb(161, 161, 170),
+    // UX-12: secondary text (section labels, subtitles, timestamps) lifted
+    // from zinc-400 toward the foreground so 11–12px labels stay legible.
+    muted_foreground: rgb(186, 186, 196),
     accent: rgb(39, 39, 42),
     primary: rgb(250, 250, 250),
     primary_foreground: rgb(24, 24, 27),
@@ -1301,6 +1307,20 @@ pub fn empty_state_cta(
     hint: &str,
     cta_label: &str,
 ) -> bool {
+    empty_state_cta_with(ui, icon, title, hint, Icon::Plus, cta_label)
+}
+
+/// UX-16: empty state with an explicit CTA whose icon matches the action —
+/// dead ends get a next step (open settings, connect a source, …) instead
+/// of copy that references an affordance that is not there.
+pub fn empty_state_cta_with(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    title: &str,
+    hint: &str,
+    cta_icon: Icon,
+    cta_label: &str,
+) -> bool {
     let mut clicked = false;
     ui.vertical_centered(|ui| {
         ui.add_space(scale::space::SP4);
@@ -1318,7 +1338,7 @@ pub fn empty_state_cta(
         );
         hint_text(ui, hint);
         ui.add_space(scale::space::SP3);
-        clicked = button_with_icon(ui, Icon::Plus, cta_label, ButtonVariant::Primary).clicked();
+        clicked = button_with_icon(ui, cta_icon, cta_label, ButtonVariant::Primary).clicked();
         ui.add_space(scale::space::SP4);
     });
     clicked
@@ -1800,7 +1820,7 @@ pub fn composer(
 
     ui.horizontal(|ui| {
         let menu_id = egui::Id::unique(("spp-sr-menu", id_salt));
-        if button_with_icon(ui, Icon::Mail, "saved replies", ButtonVariant::Outline).clicked() {
+        if button_with_icon(ui, Icon::Mail, "Saved Replies", ButtonVariant::Outline).clicked() {
             let open = ui
                 .ctx()
                 .data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false));
@@ -1832,7 +1852,7 @@ pub fn composer(
                     }
                 });
         }
-        if button_with_icon(ui, Icon::Info, "AI draft", ButtonVariant::Outline).clicked() {
+        if button_with_icon(ui, Icon::Info, "AI Draft", ButtonVariant::Outline).clicked() {
             act = Some(ComposerAct::AiInsert);
         }
         if state.draft_saved {
@@ -1881,7 +1901,7 @@ pub fn composer(
             .truncate(),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let send_label = if note { "send note" } else { "send" };
+            let send_label = if note { "Send Note" } else { "Send" };
             let send = if note {
                 // DS-C-21: note send = amber.
 
@@ -2131,7 +2151,9 @@ mod tests {
         assert_eq!(LIGHT.card, rgb(255, 255, 255));
         assert_eq!(DARK.card, rgb(24, 24, 27));
         assert_eq!(LIGHT.sidebar, rgb(250, 250, 250));
-        assert_eq!(DARK.sidebar, rgb(12, 12, 14));
+        // UX-12: lifted from rgb(12,12,14) so the dark sidebar separates
+        // from the page background (evidence: ux-audit dashboard__dark).
+        assert_eq!(DARK.sidebar, rgb(16, 16, 19));
         assert_eq!(DARK.faint, rgb(12, 12, 14));
         assert_eq!(LIGHT.ai, rgb(124, 58, 237));
         assert_eq!(DARK.ai, rgb(167, 139, 250));

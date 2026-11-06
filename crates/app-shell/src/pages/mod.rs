@@ -352,6 +352,57 @@ mod queries;
 pub(crate) use json_fields::{i64_field, opt_str_field, str_field};
 pub(crate) use queries::invalidated_pages;
 
+/// UX-14: shared relative-time formatter (moved from the notifications page
+/// so every page can render ISO stamps in human terms — "2m ago", not
+/// `2026-11-05T22:56:25.925Z`).
+pub(crate) fn relative_time(created_at: &str) -> String {
+    let now = spp_core::business_hours::now_iso_millis();
+    let Some(minutes) = spp_core::business_hours::wall_minutes_between(created_at, &now) else {
+        return created_at.to_string();
+    };
+    match calendar_day_diff(created_at, &now) {
+        Some(0) => format_intraday_minutes(minutes),
+        Some(-1) => "Yesterday".to_string(),
+        Some(days) if days < -1 => format!("{}d ago", -days),
+        _ => created_at.to_string(),
+    }
+}
+
+pub(crate) fn format_intraday_minutes(minutes: f64) -> String {
+    if minutes < 1.0 {
+        "just now".to_string()
+    } else if minutes < 60.0 {
+        format!("{}m ago", minutes as i64)
+    } else {
+        format!("{}h ago", (minutes / 60.0) as i64)
+    }
+}
+
+fn calendar_day_diff(a_iso: &str, b_iso: &str) -> Option<i64> {
+    let (ay, am, ad) = date_parts(a_iso)?;
+    let (by, bm, bd) = date_parts(b_iso)?;
+    Some(days_from_civil(ay, am, ad) - days_from_civil(by, bm, bd))
+}
+
+fn date_parts(iso: &str) -> Option<(i64, i64, i64)> {
+    let mut it = iso.get(..10)?.split('-');
+    Some((
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+    ))
+}
+
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe
+}
+
 #[cfg(test)]
 mod tests {
     use super::json_fields::{i64_field, opt_str_field, str_field};
