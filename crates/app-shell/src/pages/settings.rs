@@ -1316,7 +1316,12 @@ impl SettingsPage {
                         ui.spinner();
                     }
                 });
-                if !status.configured && status.credentials {
+                // UX-25: the browser authorization flow must stay reachable
+                // whenever credentials exist — gating it on `!configured`
+                // made it vanish exactly when the app was connected, and
+                // after a disconnect the provider is gone, so the only way
+                // in was racing an in-flight connect.
+                if status.credentials {
                     ui.add_space(4.0);
                     ui.collapsing(
                         egui::RichText::new("advanced: browser authorization flow")
@@ -1329,8 +1334,9 @@ impl SettingsPage {
                                  registered on your custom app — it must match the \
                                  redirect URI above EXACTLY, and loopback \
                                  (localhost) redirects are undocumented on the \
-                                 platform. If the browser flow fails, use client \
-                                 credentials above instead.",
+                                 platform. This flow signs in as your Help Scout \
+                                 user; the client-credentials path above is the \
+                                 recommended default.",
                             );
                             ui.add_space(4.0);
                             if design::button(
