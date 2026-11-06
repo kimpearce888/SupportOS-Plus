@@ -947,8 +947,15 @@ impl InboxPage {
                 self.views_rail_ui(ui, db);
             });
         egui::Panel::left("inbox-list")
-            .exact_size(330.0)
-            .resizable(false)
+            // UX-8: the conversation list was a fixed 330px — too narrow for
+            // subject lines and the filter row (truncated search hint). Make
+            // it proportional to the window and user-resizable.
+            .default_size({
+                let avail = ui.available_width() - 172.0; // views rail
+                (avail * 0.30).clamp(330.0, 520.0)
+            })
+            .size_range(300.0..=640.0)
+            .resizable(true)
             .show_separator_line(false)
             .frame(egui::Frame::new().fill(t.card).inner_margin(egui::Margin {
                 left: 12,
@@ -1062,8 +1069,11 @@ impl InboxPage {
             |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let mut search = self.search_edit.clone();
+                    // UX-27: the fixed 140px truncated the hint to "search
+                    // conversat…" — take the free row width instead.
+                    let search_w = ui.available_width().clamp(140.0, 240.0);
                     let response = ui.add_sized(
-                        [140.0, 28.0],
+                        [search_w, 28.0],
                         egui::TextEdit::singleline(&mut search).hint_text("search conversations…"),
                     );
                     if response.changed() {
