@@ -840,7 +840,7 @@ fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationLis
             design::hint_text(ui, "(no conversations)");
             return;
         }
-        design::table(
+        design::table_stretched(
             ui,
             "customer-conversations",
             &["#", "subject", "status", "updated"],
