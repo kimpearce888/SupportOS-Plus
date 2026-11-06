@@ -7702,3 +7702,12 @@ job-error strings from core).
 Rule 8 STOP — batch UXA-3 of ten is complete; the queue holds the final
 UX-audit batch UXA-4 (items UX-31..UX-33). Resume on the owner's
 "continue".
+
+CI outcome addendum (appended to the UXA-3 record, append-only): the
+7-commit push (b917382..540092c) went green 3/3 on the first push —
+fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · **kittest
+snapshot locks ✓** (the locally-regenerated 46 baselines, rendered with
+the re-extracted sandbox lavapipe 25.0.7, match CI's lavapipe rendering —
+the cross-Mesa risk stays closed) — CI run 42190717843, completed
+success. The GA-1 standing practice (cargo fmt --all -- --check as the
+final pre-push local step) held. Rule 8 STOP.
