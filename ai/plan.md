@@ -80,3 +80,16 @@ deny-lane hygiene batch opened from the reviewdog verification battery).
   + AppImage verification + publish-after-green with per-asset link and
   checksum re-verification); completed and verified the same session,
   record left for `completed.md` at the Rule 4 sync.
+- Batch HYG-2 (item HYG-2-1: CHANGELOG link-reference completeness) opened
+  here 2026-11-05 on the owner's "continue" (queue empty post-REL-3, so the
+  continue ran an honest post-release consistency sweep, read-only): the
+  sweep found the CHANGELOG header/tag/ref triangle intact everywhere else
+  (zero stale 1.9.3 strings outside ledger history; README install section
+  version-parameterized; 0 open issues; last 8 workflow runs green; all 23
+  version headers have matching origin tags), but only 3 of 23 version
+  headers carry a Keep-a-Changelog link reference ([1.1.0], [1.0.0],
+  [0.2.0]) — 20 refs missing, every one backed by an existing tag, zero
+  404 risk. Fix: add the 20 refs in descending order above [1.1.0], then
+  mechanical verification (23/23 header→ref parity, every URL live-checked
+  HTTP 200). Moved to `progress.md` per Rule 2, completed and verified the
+  same session, record left for `completed.md` at the Rule 4 sync.

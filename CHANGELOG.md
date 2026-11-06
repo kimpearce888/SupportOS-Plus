@@ -1036,6 +1036,26 @@ verified end-to-end by the tag-triggered release pipeline.
 - CI: fmt + clippy (`-D warnings`) + tests + cargo-deny on every push,
   plus a package job that builds and smoke-boots both formats.
 
+[1.9.4]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.4
+[1.9.3]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.3
+[1.9.2]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.2
+[1.9.1]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.1
+[1.9.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.0
+[1.8.3]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.8.3
+[1.8.2]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.8.2
+[1.8.1]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.8.1
+[1.8.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.8.0
+[1.7.3]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.7.3
+[1.7.2]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.7.2
+[1.7.1]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.7.1
+[1.7.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.7.0
+[1.4.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.4.0
+[1.3.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.3.0
+[1.2.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.2.0
+[1.1.4]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.1.4
+[1.1.3]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.1.3
+[1.1.2]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.1.2
+[1.1.1]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.1.1
 [1.1.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.1.0
 [1.0.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.0.0
 [0.2.0]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v0.2.0
