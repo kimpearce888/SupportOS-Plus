@@ -1459,7 +1459,11 @@ pub enum AvatarSize {
     Sm,
 }
 
-/// DC: DS-C-19 Assignee — sm avatar + name, or the dashed "unassigned"
+/// DC: DS-C-19 Assignee — sm avatar + name, or quiet muted "Unassigned"
+/// text. UX-27: the unassigned state used to draw a dashed italic pill that
+/// read as a sibling of the filled status badge on the same row (two pill
+/// languages, one meaning each); it is now plain metadata text so the
+/// status badge stays the only chip-shaped state on the line.
 pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
     match name {
         Some(n) => {
@@ -1481,32 +1485,12 @@ pub fn assignee(ui: &mut egui::Ui, name: Option<&str>) {
             );
         }
         None => {
-            let t = tokens(ui);
-            let text = egui::RichText::new("unassigned")
-                .size(scale::text::META_HALF)
-                .italics()
-                .color(t.muted_foreground);
-            let galley = egui::WidgetText::from(text).into_galley(
-                ui,
-                Some(egui::TextWrapMode::Extend),
-                f32::INFINITY,
-                egui::TextStyle::Small,
+            ui.label(
+                egui::RichText::new("Unassigned")
+                    .size(scale::text::META_HALF)
+                    .italics()
+                    .color(tokens(ui).muted_foreground),
             );
-            let pad = egui::vec2(8.0, 2.0);
-            let size = galley.size() + 2.0 * pad;
-            let (rect, _id) = ui.allocate_exact_size(size, egui::Sense::hover());
-            ui.painter().rect_stroke(
-                rect,
-                egui::CornerRadius::same(9),
-                egui::Stroke::new(1.0, t.border_strong),
-                egui::StrokeKind::Inside,
-            );
-            ui.painter().galley(
-                egui::pos2(rect.min.x + pad.x, rect.center().y - galley.size().y / 2.0),
-                galley,
-                t.muted_foreground,
-            );
-            ui.advance_cursor_after_rect(rect);
         }
     }
 }

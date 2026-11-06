@@ -999,7 +999,22 @@ impl InboxPage {
                 )
                 .show(ui, |ui| {
                     if let Some(d) = detail.clone() {
-                        self.composer_pane_ui(ui, db, bus, &d);
+                        // UX-27: the composer pane used to lay out without a
+                        // scroll bound — on short windows the Cc/Bcc rows at
+                        // the bottom were clipped off-screen with no way to
+                        // reach them. The pane now scrolls in place whenever
+                        // its content would not fit, and Cc/Bcc moved above
+                        // the composer (recipients before the body, like
+                        // every mail client) so the primary controls stay
+                        // visible even in the worst case.
+                        let max_h = ui.available_height();
+                        egui::ScrollArea::vertical()
+                            .id_salt("inbox-composer-scroll")
+                            .max_height(max_h)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                self.composer_pane_ui(ui, db, bus, &d);
+                            });
                     }
                 });
         }
@@ -1283,6 +1298,12 @@ impl InboxPage {
                                     },
                                 );
                             });
+                            // UX-27: a breath between the three lines of the
+                            // row — the sender-name line used to jam against
+                            // the subject with zero leading. SP1 (the smallest
+                            // scale step) keeps the rows airy without
+                            // bloating the list.
+                            ui.add_space(design::scale::space::SP1);
                             ui.add(
                                 egui::Label::new(
                                     egui::RichText::new(&subject)
@@ -1291,6 +1312,7 @@ impl InboxPage {
                                 )
                                 .truncate(),
                             );
+                            ui.add_space(design::scale::space::SP1);
                             ui.horizontal(|ui| {
                                 let assignee_label = item.assignee_name.clone().or_else(|| {
                                     item.assigned_team_name
@@ -2361,6 +2383,28 @@ impl InboxPage {
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
+        // UX-27: Cc/Bcc render above the composer (recipient fields before
+        // the body, the standard mail layout) instead of below the send
+        // button where they clipped off the window bottom.
+        if self.composer_mode == ComposerMode::Reply {
+            ui.horizontal(|ui| {
+                let mut cc = self.composer_cc.clone();
+                ui.add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut cc).hint_text("Cc (comma-separated emails)"),
+                );
+                self.composer_cc = cc;
+            });
+            ui.horizontal(|ui| {
+                let mut bcc = self.composer_bcc.clone();
+                ui.add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::TextEdit::singleline(&mut bcc).hint_text("Bcc (comma-separated emails)"),
+                );
+                self.composer_bcc = bcc;
+            });
+            ui.add_space(4.0);
+        }
         let mut state = ComposerState {
             mode: match self.composer_mode {
                 ComposerMode::Reply => design::ComposerMode::Reply,
@@ -2405,26 +2449,6 @@ impl InboxPage {
                     self.draft_saved = true;
                 }
             }
-        }
-
-        if self.composer_mode == ComposerMode::Reply {
-            ui.horizontal(|ui| {
-                let mut cc = self.composer_cc.clone();
-                let response = ui.add_sized(
-                    [ui.available_width(), 28.0],
-                    egui::TextEdit::singleline(&mut cc).hint_text("Cc (comma-separated emails)"),
-                );
-                let _ = response;
-                self.composer_cc = cc;
-            });
-            ui.horizontal(|ui| {
-                let mut bcc = self.composer_bcc.clone();
-                ui.add_sized(
-                    [ui.available_width(), 28.0],
-                    egui::TextEdit::singleline(&mut bcc).hint_text("Bcc (comma-separated emails)"),
-                );
-                self.composer_bcc = bcc;
-            });
         }
 
         let body = self.composer_body.clone();
