@@ -262,7 +262,7 @@ impl ConnectorsPage {
         egui::ScrollArea::vertical()
             .id_salt("connector-list")
             .show(ui, |ui| {
-                design::table(
+                design::table_stretched(
                     ui,
                     "connector-table",
                     &["name", "kind", "health", "refresh", "last sync", ""],
@@ -313,12 +313,6 @@ impl ConnectorsPage {
                     },
                 );
             });
-        design::quirk(
-            ui,
-            "A-5 (DS-0): the rows/refresh/delete triple collapsed to refresh \
-             + delete (danger + confirm); the connector chip opens the rows \
-             viewer below.",
-        );
         if let Some(id) = picked {
             self.selected = Some(id);
             self.reload_rows(db, id);
