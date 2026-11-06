@@ -330,26 +330,37 @@ impl ShellApp {
     }
 
     fn shell_ui(&mut self, ui: &mut egui::Ui) {
-        design::page_header(
-            ui,
-            "Shell",
-            Some("native shell diagnostics (Phase 2 surface)"),
-            |ui| {
-                if design::button(
-                    ui,
-                    &format!("switch to {}", self.theme.toggle().label()),
-                    ButtonVariant::Outline,
-                )
-                .clicked()
-                {
-                    self.theme = self.theme.toggle();
-                    if let Err(e) = self.theme.store(&self.db) {
-                        tracing::warn!(error = %e, "failed to persist the theme setting");
-                    }
-                    self.theme.apply(ui.ctx());
+        // UX-3: this surface is an internal runtime/diagnostics view, not a
+        // user checklist — presented as "About the app" with real actions.
+        // Middle-truncate a long path so the monospace value stays readable.
+        fn shorten_path(path: &str, max: usize) -> String {
+            if path.chars().count() <= max {
+                return path.to_string();
+            }
+            let head = max / 2 - 2;
+            let tail = max - head - 1;
+            let chars: Vec<char> = path.chars().collect();
+            format!(
+                "{}…{}",
+                chars[..head].iter().collect::<String>(),
+                chars[chars.len() - tail..].iter().collect::<String>()
+            )
+        }
+        design::page_header(ui, "Shell", Some("app runtime information"), |ui| {
+            if design::button(
+                ui,
+                &format!("switch to {} theme", self.theme.toggle().label()),
+                ButtonVariant::Outline,
+            )
+            .clicked()
+            {
+                self.theme = self.theme.toggle();
+                if let Err(e) = self.theme.store(&self.db) {
+                    tracing::warn!(error = %e, "failed to persist the theme setting");
                 }
-            },
-        );
+                self.theme.apply(ui.ctx());
+            }
+        });
 
         let db_display = self
             .db_path
@@ -367,33 +378,51 @@ impl ShellApp {
                 }
             })
             .unwrap_or("unavailable");
-        design::card_titled(ui, "Runtime", None, |ui| {
-            egui::Grid::new("shell-diagnostics")
-                .num_columns(2)
-                .spacing(egui::vec2(16.0, 6.0))
-                .show(ui, |ui| {
-                    for (label, value) in [
-                        ("database", db_display),
-                        ("schema", format!("v{}", self.schema_version)),
-                        ("background events", self.events_seen.to_string()),
-                        ("last event", self.last_event.clone().unwrap_or_default()),
-                        ("sync engine", sync_kind.to_string()),
-                    ] {
-                        design::field_label(ui, label);
-                        ui.monospace(
-                            egui::RichText::new(value).color(design::tokens(ui).foreground),
-                        );
-                        ui.end_row();
-                    }
-                });
-        });
-        ui.add_space(8.0);
-        design::hint_text(
+        let db_display = shorten_path(&db_display, 72);
+        design::card_titled(
             ui,
-            "all pages ported: dashboard, inbox, operations, customers, organizations, knowledge/docs, \
-             reports, issue radar, incidents, custom objects, automation, AI center, outreach, \
-             notifications, search, support graph, connectors, sync health, settings, onboarding \
-             — stale checklist — omits live chats",
+            "Runtime",
+            Some("how this instance is doing right now"),
+            |ui| {
+                egui::Grid::new("shell-diagnostics")
+                    .num_columns(2)
+                    .spacing(egui::vec2(16.0, 6.0))
+                    .min_col_width(220.0)
+                    .show(ui, |ui| {
+                        for (label, value) in [
+                            ("database", db_display),
+                            ("schema", format!("v{}", self.schema_version)),
+                            ("background events", self.events_seen.to_string()),
+                            ("last event", self.last_event.clone().unwrap_or_default()),
+                            ("sync engine", sync_kind.to_string()),
+                        ] {
+                            design::field_label(ui, label);
+                            ui.monospace(
+                                egui::RichText::new(value).color(design::tokens(ui).foreground),
+                            );
+                            ui.end_row();
+                        }
+                    });
+            },
+        );
+        ui.add_space(10.0);
+        design::card_titled(
+            ui,
+            "Where things live",
+            Some("the rest of the workspace"),
+            |ui| {
+                let t = design::tokens(ui);
+                ui.label(
+                    egui::RichText::new(
+                        "Everything in SupportOS+ runs locally: conversations, customers \
+                         and docs mirror from Help Scout, and every page lives in the \
+                         sidebar. Use Search (Ctrl/Cmd+K) to jump anywhere, Diagnostics \
+                         for application errors, and Sync Health to watch the mirror.",
+                    )
+                    .size(design::scale::text::BODY)
+                    .color(t.foreground),
+                );
+            },
         );
     }
 
