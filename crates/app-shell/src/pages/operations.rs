@@ -3,9 +3,11 @@ use spp_core::catalog::OperationsTileKey;
 use spp_core::db::DbHandle;
 use spp_core::workload::{CapacityModel, WorkloadSnapshot};
 
+use super::relative_time;
 use super::{ConfirmRequest, NavRequest};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
+use crate::pages::PageKey;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -111,6 +113,35 @@ pub(crate) fn tile_drills_into_inbox(tile: OperationsTileKey) -> bool {
             | OperationsTileKey::Urgent
             | OperationsTileKey::HighEffort
     )
+}
+
+/// UX-14: every tile with an action gets a destination — the inbox-filter
+/// tiles drill into the filtered inbox, and the system-health tiles open
+/// the page where the failures can actually be inspected and acted on.
+#[must_use]
+pub(crate) fn tile_nav(tile: OperationsTileKey) -> Option<NavRequest> {
+    match tile {
+        OperationsTileKey::FailedJobs => Some(NavRequest::Page(PageKey::Diagnostics)),
+        OperationsTileKey::SyncProblems => Some(NavRequest::Page(PageKey::SyncHealth)),
+        OperationsTileKey::AutomationApprovals => Some(NavRequest::Page(PageKey::Automation)),
+        tile if tile_drills_into_inbox(tile) => {
+            Some(NavRequest::InboxTile(tile.as_str().to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// UX-14: the drill hint names the destination so the affordance is
+/// explicit — no more guessing which tiles are clickable.
+#[must_use]
+pub(crate) fn tile_drill_line(tile: OperationsTileKey) -> Option<&'static str> {
+    match tile {
+        OperationsTileKey::FailedJobs => Some("diagnostics →"),
+        OperationsTileKey::SyncProblems => Some("sync health →"),
+        OperationsTileKey::AutomationApprovals => Some("automation →"),
+        tile if tile_drills_into_inbox(tile) => Some("open →"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -273,8 +304,8 @@ impl OperationsPage {
             ui,
             "Operations Center",
             Some(
-                "16 tiles cover the team's current workload, SLA risk, and system health. \
-                 Click a tile to filter the inbox.",
+                "A live snapshot of workload, SLA risk, and system health. Tiles \
+                 marked with an arrow open the matching view.",
             ),
             |_| {},
         );
@@ -322,8 +353,8 @@ impl OperationsPage {
         design::hint_text(
             ui,
             &format!(
-                "generated {} · waiting threshold {threshold} min",
-                snapshot.generated_at
+                "updated {} · waiting threshold {threshold} min",
+                relative_time(snapshot.generated_at.as_str())
             ),
         );
         ui.add_space(4.0);
@@ -337,30 +368,35 @@ impl OperationsPage {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
                     for tile in group {
-                        let drills = tile_drills_into_inbox(tile.key);
                         let tone = match band {
                             Severity::Critical => BadgeTone::Destructive,
                             Severity::Warning => BadgeTone::Warning,
                             Severity::Info => BadgeTone::Info,
                         };
+                        // UX-14: drill-ability now comes from tile_nav — every
+                        // tile that can go somewhere shows its destination.
+                        let drill = tile_nav(tile.key).is_some();
+                        let drill_line = tile_drill_line(tile.key);
                         let resp = design::metric_tile(
                             ui,
                             &tile.count_label(),
                             tile_label(tile.key),
                             Some(tone),
-                            drills,
-                            drills.then_some("open →"),
+                            drill,
+                            drill_line,
                         )
                         .on_hover_text(tile_description(tile.key));
-                        if resp.clicked() && drills && nav.is_none() {
-                            nav = Some(NavRequest::InboxTile(tile.key.as_str().to_string()));
+                        if resp.clicked()
+                            && let Some(nav_request) = tile_nav(tile.key)
+                            && nav.is_none()
+                        {
+                            nav = Some(nav_request);
                         }
                     }
                 });
                 ui.add_space(6.0);
             }
         });
-        design::hint_text(ui, "(tiles marked with an arrow drill into the inbox)");
         nav
     }
 
@@ -698,7 +734,7 @@ impl OperationsPage {
         let mut action = LibraryAction::None;
 
         design::section_title(ui, "Saved replies");
-        if design::button(ui, "new saved reply", ButtonVariant::Primary).clicked() {
+        if design::button(ui, "New Saved Reply", ButtonVariant::Primary).clicked() {
             action = LibraryAction::NewReply;
         }
         let rows: Vec<SavedReplyRow> = library
@@ -714,10 +750,10 @@ impl OperationsPage {
                     row.name,
                     row.preview.as_deref().unwrap_or("(no preview)")
                 ));
-                if design::button(ui, "edit", ButtonVariant::Outline).clicked() {
+                if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
                     action = LibraryAction::EditReply(row.remote_id);
                 }
-                if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
+                if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
                     action = LibraryAction::DeleteReply(row.remote_id);
                 }
             });
@@ -755,7 +791,7 @@ impl OperationsPage {
                     ui.horizontal(|ui| {
                         if edit.name.trim().is_empty() {
                             design::hint_text(ui, "the platform requires a name");
-                        } else if design::button(ui, "save to Help Scout", ButtonVariant::Primary)
+                        } else if design::button(ui, "Save to Help Scout", ButtonVariant::Primary)
                             .clicked()
                         {
                             act = LibraryAction::SaveReply {
@@ -764,7 +800,7 @@ impl OperationsPage {
                                 text: edit.text.trim().to_string(),
                             };
                         }
-                        if design::button(ui, "cancel", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
                             act = LibraryAction::CancelEdit;
                         }
                     });
@@ -803,7 +839,7 @@ impl OperationsPage {
                 let number_ok = library.workflow_number.trim().parse::<i64>().is_ok();
                 if manual
                     && number_ok
-                    && design::button(ui, "run", ButtonVariant::Outline).clicked()
+                    && design::button(ui, "Run", ButtonVariant::Outline).clicked()
                     && let Ok(number) = library.workflow_number.trim().parse::<i64>()
                 {
                     action = LibraryAction::RunWorkflow {
