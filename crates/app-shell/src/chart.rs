@@ -116,6 +116,23 @@ pub(crate) fn line_chart_axes(
             );
         }
 
+        // UX-28: the summary caption lives inside the frame's top-right
+        // corner and names what the numbers are — the old caption floated
+        // below the chart as "new conversations · 16 → 2", detached from
+        // the card and ambiguous about which days the numbers described.
+        let caption = if points.len() > 1 {
+            format!("First {first} → Latest {last}")
+        } else {
+            format!("Single day: {first}")
+        };
+        ui.painter().text(
+            rect.right_top() + egui::vec2(-8.0, 5.0),
+            egui::Align2::RIGHT_TOP,
+            caption,
+            egui::FontId::proportional(11.5),
+            t.muted_foreground,
+        );
+
         // hover readout: nearest point gets a guide line + value bubble
         if let Some(pos) = response.hover_pos()
             && let Some((idx, nearest)) = scaled.iter().enumerate().min_by(|a, b| {
@@ -161,14 +178,6 @@ pub(crate) fn line_chart_axes(
                 t.foreground,
             );
         }
-
-        ui.painter().text(
-            rect.left_bottom() + egui::vec2(4.0, 12.0),
-            egui::Align2::LEFT_TOP,
-            format!("{label} · {first} → {last}"),
-            egui::FontId::proportional(11.5),
-            t.muted_foreground,
-        );
     } else {
         ui.painter().text(
             rect.center(),

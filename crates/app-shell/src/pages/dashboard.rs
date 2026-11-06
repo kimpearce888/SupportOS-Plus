@@ -542,8 +542,12 @@ impl DashboardPage {
             },
         );
 
+        // UX-28: the filter card spans the content width and flows its chip
+        // groups in one wrapped row — the old content-hugging card sat at
+        // ~360px and left the right two-thirds of the header row dead.
         design::card(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
                 design::field_label(ui, "Range");
                 for (d, label) in RANGES {
                     if design::chip(ui, self.scope.days == d, label).clicked() {
@@ -551,8 +555,7 @@ impl DashboardPage {
                         self.reload(db);
                     }
                 }
-            });
-            ui.horizontal(|ui| {
+                ui.add_space(14.0);
                 design::field_label(ui, "Channel");
                 for (value, label) in CHANNELS {
                     let selected = self.scope.channel.as_deref() == Some(value)
@@ -566,8 +569,7 @@ impl DashboardPage {
                         self.reload(db);
                     }
                 }
-            });
-            ui.horizontal(|ui| {
+                ui.add_space(14.0);
                 design::field_label(ui, "Mailboxes");
                 let all = self.scope.mailbox_ids.is_empty();
                 if design::chip(ui, all, "All").clicked() {
@@ -738,12 +740,19 @@ fn breakdown(ui: &mut egui::Ui, title: &str, note: &str, rows: &[NameCount]) {
         if note.is_empty() { None } else { Some(note) },
         |ui| {
             if rows.is_empty() {
-                design::hint_text(ui, "(none)");
+                design::hint_text(ui, "Nothing to show in this range.");
                 return;
             }
             let max = rows.iter().map(|r| r.count).max().unwrap_or(1).max(1);
-            for row in rows {
+            // UX-28: cap the visible bars so a long tail (a tag list with
+            // dozens of entries) cannot push the card past the viewport —
+            // the overflow is named, never hidden.
+            const VISIBLE: usize = 8;
+            for row in rows.iter().take(VISIBLE) {
                 design::bar_row(ui, &row.name, row.count, max, true);
+            }
+            if rows.len() > VISIBLE {
+                design::hint_text(ui, &format!("and {} more…", rows.len() - VISIBLE));
             }
         },
     );
