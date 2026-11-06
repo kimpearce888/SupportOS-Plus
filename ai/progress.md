@@ -7,9 +7,16 @@
 ## Active items
 
 **None.** No batch is active and none is held (authoritative, 2026-11-06,
-post-Batch UXA-1). The queue in `plan.md` holds the next UX-audit batch
-(UXA-2: items UX-10 onward, owner-directed program); the engagement sits at
+post-Batch UXA-2). The queue in `plan.md` holds the next UX-audit batch
+(UXA-3: items UX-20 onward, owner-directed program); the engagement sits at
 a Rule 8 STOP awaiting the owner's "continue".
+
+Batch UXA-2 (items UX-10..UX-19: the second ten fixes of the owner-directed
+UX/UI audit program) moved through this file per Rules 2 and 4 on
+2026-11-06 — opened on the owner's "continue" after the UXA-1 STOP,
+implemented, verified (fmt/clippy/tests/kittest diff-locked/SPP_SMOKE +
+after-screenshot evidence per item), completed the same session; record in
+`completed.md`.
 
 Batch UXA-1 (items UX-1..UX-9 + UX-25: the first ten fixes of the
 owner-directed UX/UI audit program) moved through this file per Rules 2 and

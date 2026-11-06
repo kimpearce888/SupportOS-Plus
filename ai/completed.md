@@ -7520,3 +7520,81 @@ sandbox-extracted lavapipe 25.0.7, match CI's lavapipe rendering — the
 cross-Mesa risk closed) — CI run 42148385123, completed success. The GA-1
 standing practice (cargo fmt --all -- --check as the final pre-push local
 step) held. Rule 8 STOP.
+
+## Batch UXA-2 — the second ten UX-audit fixes (UX-10..UX-19)
+
+Opened 2026-11-06 on the owner's "continue" after the UXA-1 Rule 8 STOP;
+moved to `progress.md` per Rule 2; implemented, verified, and closed the
+same session (Rule 4). Scope contract and per-item evidence:
+`ux-audit/reports/` (scope.md · issues.md statuses · worklog.md items
+15–20).
+
+**Items (10):** UX-10 (global Title-Case normalization of buttons, chips,
+tabs, pagers, and table headers across every page), UX-11 (Settings
+subtitle + Vector-tab hint rewritten in user language; "1.4.0 R8:" /
+"Clean-audit item 138:" hover-note prefixes stripped), UX-12 (dark-theme
+contrast: muted_foreground 161→186, border 39→48, border_strong 63→66,
+sidebar 12→16, selected chips invert to primary fill + strong label),
+UX-13 (notifications grouped by (type,title,body) with ×N counters, group
+mark read/unread, humanized type badges, monospace truncated error
+bodies), UX-14 (Failed jobs → Diagnostics, Sync problems → Sync Health,
+Automation approvals → Automation, each with a named drill line; truthful
+subtitle; relative "updated …" stamp), UX-15 (example-query chips replace
+the "+ Try 'export'" CTA; Scope: label + visible selected state), UX-16
+(empty-state CTAs wired to real destinations on Live chats/Custom
+Objects/Outreach/Support Graph + contradiction and pluralization fixes),
+UX-17 (labeled Status/Severity filters; filter-aware empty states with
+Clear Filters and New Incident CTAs), UX-18 (import disclosure
+auto-opens on the first-run empty state; "Import Documents" CTA),
+UX-19 ("Never" / "No domains yet" fallbacks + Title-Cased headers on
+Customers/Organizations).
+
+**Implementation commits (11, code + per-suite kittest assertion updates):**
+7bb2c89 (design system: chips, dark tokens, shared relative_time)
+· e5f27a9 (notifications) · 25d6126 (operations) · a0c2d21 (search)
+· 32b80bb (live chats/custom objects/outreach/support graph) · 1882f52
+(incidents) · c7212e8 (knowledge) · b355991 (customers/organizations)
+· 66b389e (settings copy) · 7921b69 (title-case sweep) · d66122b (157
+regenerated kittest baselines, one atomic commit because the design-token
+change drifts every page's snapshots — per-commit splitting would be
+lossy). Format `fix(ui): <what> on <where> [ISSUE-ID]` per the owner's
+directive.
+
+**Verification (this sandbox, toolchain 1.99.1 pinned):**
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --locked --workspace --all-targets -- -D warnings`: clean.
+- Tests: app-shell lib 242/242 (3 new UX-13 grouping/toggle/type-label
+  tests; the dc_v1 token-freeze test updated for the intended UX-12
+  sidebar value with an in-code note); xtask 11/11 incl. the secrets
+  hygiene check.
+- kittest snapshot locks: all 24 suites + style_lint diff-locked GREEN
+  end-to-end (exit 0). Drift discipline: the first full run's failure
+  list was bogus — the sandbox-reaped /tmp lavapipe extraction made every
+  render test panic with "No adapter found"; caught by auditing one
+  failure's panic text before regenerating anything, re-extracted
+  lavapipe to a persistent home location, re-ran: 157 real drifts, every
+  one mapped to an intended UXA-2 change (three VLM-audited diff images:
+  dashboard scope-chip = chip selected state; notifications = Mark
+  Read/Unread/All Read + grouping; hero dark = token brightening).
+  Baselines regenerated with UPDATE_SNAPSHOTS=1, 5 label-dependent
+  kittest assertions updated to the renamed buttons, full suite re-ran
+  diff-locked GREEN — the diff-locked-twice discipline.
+- `SPP_SMOKE=1`: rc=0 (boot chain + 24 pages / 5131 shapes rendered
+  headlessly).
+- After-evidence: 15 deterministic per-page screenshots at 1920×1080 via
+  the app's own `ui-screenshot` feature (SPP_SHOT_PAGE/SPP_SHOT_THEME) —
+  dashboard light+dark, notifications, operations, search, incidents,
+  customers, organizations, knowledge, custom objects, outreach, live
+  chats, support graph, settings default + vector tab. Evidence dirs are
+  gitignored by design; referenced by path from
+  `ux-audit/reports/issues.md`.
+- Scope: 27 source files under `crates/app-shell/src/` + 15 kittest test
+  files + 157 baselines + ledger/reports. Zero backend, API, schema, CI,
+  workflow, packaging or Cargo.lock changes (`--locked` throughout).
+
+**Backend-blocked findings stand** (logged, not queued): UX-26B (webhook
+secret cap), UX-34 (no nav target in core tile data), UX-35 (raw
+job-error strings from core).
+
+Rule 8 STOP — batch UXA-2 of ten is complete; the queue holds UXA-3
+(items UX-20 onward). Resume on the owner's "continue".

@@ -97,3 +97,62 @@
 - Batch UXA-1 ledger sync (completed.md, plan.md, progress.md), commit
   series (one commit per page/design-system group, issue-tagged), push,
   Rule 8 STOP.
+
+## Batch UXA-2 (2026-11-06, owner "continue" after the UXA-1 STOP)
+
+15. Rule-2 queueing: UX-10..UX-19 moved from ai/plan.md to ai/progress.md.
+16. Implementation (crates/app-shell/src/ only; no backend/CI/config):
+    - design system: dark-token contrast pass (muted_foreground/border/
+      sidebar), inverted selected-chip state, `empty_state_cta_with`,
+      Title-Case composer/pager labels; shared `relative_time` helper
+      moved to pages/mod.rs for reuse (UX-10/12/15).
+    - notifications: (type,title,body) grouping with ×N counters, group
+      read/unread, humanized type badges, monospace truncated error
+      bodies, 3 new unit tests (UX-13).
+    - operations: Failed jobs/Sync problems/Automation approvals tiles
+      navigate to Diagnostics/Sync Health/Automation with named drill
+      lines; truthful subtitle; relative "updated …" stamp (UX-14).
+    - search: example-query chips replace the "+ Try 'export'" CTA;
+      "Scope:" label (UX-15).
+    - live chats / custom objects / outreach / support graph: empty-state
+      CTAs wired to real destinations (Settings / New Type form / New
+      Campaign form / Connectors), contradiction + pluralization fixes,
+      de-jargonized subtitles (UX-16).
+    - incidents: labeled Status/Severity filters, filter-aware empty
+      states with Clear Filters + New Incident CTAs (UX-17).
+    - knowledge: import disclosure auto-opens on first-run empty state,
+      "Import Documents" CTA force-expands it, parenthesized empty
+      titles rewritten (UX-18).
+    - customers/organizations: "Never" / "No domains yet" fallbacks,
+      Title-Cased headers (UX-19).
+    - settings: user-language subtitle + Vector-tab hint, hover-note
+      dev prefixes stripped (UX-11) + full Title-Case button sweep.
+    - remaining pages (ai_center, automation, connectors, dashboard,
+      diagnostics, inbox, issue_radar, reports, sync_health): Title-Case
+      buttons, chips, tabs, and table headers (UX-10).
+17. Verification: fmt clean; clippy `--workspace --all-targets -D warnings`
+    clean; app-shell lib tests 242/242 (3 new UX-13 tests; token-freeze
+    test updated for the intended UX-12 sidebar value); xtask 11/11;
+    SPP_SMOKE rc=0 (24 pages / 5131 shapes).
+18. kittest drift discipline: lavapipe re-extracted to a persistent home
+    location (the earlier /tmp copy had been reaped mid-session, which
+    first produced a bogus all-fail "drift" list — caught by auditing
+    one failure's panic text before regenerating anything). The real
+    drift: 157 snapshots, every one mapped to an intended UXA-2 change
+    (three VLM-audited diff images: dashboard scope-chip = chip selected
+    state; notifications = Mark Read/Unread/All Read renames + grouping;
+    hero dark = token brightening). Baselines regenerated with
+    UPDATE_SNAPSHOTS=1 (plus 5 label-dependent kittest assertions
+    updated to the renamed buttons), and the full suite re-ran
+    diff-locked GREEN end-to-end (exit 0, 24 suites).
+19. After-evidence: deterministic per-page screenshots via the app's own
+    `ui-screenshot` feature (SPP_SHOT_PAGE/SPP_SHOT_THEME) — 15 shots
+    at 1920×1080 (dashboard light+dark, notifications, operations,
+    search, incidents, customers, organizations, knowledge, custom
+    objects, outreach, live chats, support graph, settings default +
+    vector tab) — no navigation flakiness, no VLM dependency for
+    capture. (Sidebar navcoord/palette driving was parked: VLM 429
+    rate-limits mid-run.)
+20. Disk hygiene again: diff artifacts + incremental cache removed,
+    stale test binaries stripped, registry cache cleared (rootfs was at
+    98%).
