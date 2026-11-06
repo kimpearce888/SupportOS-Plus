@@ -21,7 +21,8 @@ default = []
 # real shell headless under Xvfb with the software-GL glow renderer and
 # eframe's __screenshot hook, then exits after saving one PNG. Driven by env
 # vars (SPP_SHOT_PAGE / SPP_SHOT_THEME / SPP_SHOT_W / SPP_SHOT_H /
-# SPP_SHOT_SEED / SPP_SHOT_PALETTE / EFRAME_SCREENSHOT_TO).
+# SPP_SHOT_SEED / SPP_SHOT_PALETTE / SPP_SHOT_PALETTE_QUERY /
+# EFRAME_SCREENSHOT_TO).
 ui-screenshot = ["eframe/glow", "eframe/__screenshot"]
 # RS-13 kittest snapshot harness (tests/kittest_widgets.rs) — needs a
 # display (Xvfb); off in every normal/CI build, like ui-screenshot.

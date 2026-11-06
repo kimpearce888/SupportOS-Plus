@@ -515,12 +515,20 @@ impl ShellApp {
     fn header_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // UX-33: the theme toggle was a 30×30 icon-only ghost button —
+            // auditors (and users) could not tell what it did without
+            // hovering, and the crescent glyph even read as a notification
+            // bell. It now carries its target state as a labelled Outline
+            // button, consistent with the Search button beside it.
             let toggle = if self.theme == Theme::Dark {
-                (Icon::Sun, "switch to light theme")
+                (Icon::Sun, "Light", "switch to light theme")
             } else {
-                (Icon::Moon, "switch to dark theme")
+                (Icon::Moon, "Dark", "switch to dark theme")
             };
-            if design::icon_button(ui, toggle.0, ButtonVariant::Ghost, toggle.1).clicked() {
+            if design::button_with_icon(ui, toggle.0, toggle.1, ButtonVariant::Outline)
+                .on_hover_text(toggle.2)
+                .clicked()
+            {
                 self.theme = self.theme.toggle();
                 if let Err(e) = self.theme.store(&self.db) {
                     tracing::warn!(error = %e, "failed to persist the theme setting");
@@ -543,7 +551,12 @@ impl ShellApp {
                     .small();
             if ui
                 .add(freshness_btn)
-                .on_hover_text("open Sync Health (last sync, checkpoints, runs)")
+                // UX-33: the pill now says what it measures (Help Scout
+                // freshness) both on its face and in the hover.
+                .on_hover_text(
+                    "how fresh the local Help Scout mirror is — opens Sync Health \
+                     (last sync, checkpoints, runs)",
+                )
                 .clicked()
             {
                 self.page = PageKey::SyncHealth;
@@ -558,21 +571,27 @@ impl ShellApp {
     }
 
     fn freshness(&self) -> (design::BadgeTone, String) {
+        // UX-33: every label names what synced — the bare "synced Ns ago"
+        // left the pill without context (users read it as a generic, or
+        // even system, status instead of the Help Scout mirror's age).
         if self.sync.as_ref().is_some_and(|e| e.is_running()) {
-            return (design::BadgeTone::Info, "syncing…".into());
+            return (design::BadgeTone::Info, "Help Scout · syncing…".into());
         }
         let age = self
             .db
             .with_read(spp_core::sync_engine::last_sync_age_seconds);
         match age {
-            None => (design::BadgeTone::Neutral, "never synced".into()),
+            None => (
+                design::BadgeTone::Neutral,
+                "Help Scout · never synced".into(),
+            ),
             Some(age) => {
                 let label = if age < 60 {
-                    format!("synced {age}s ago")
+                    format!("Help Scout · synced {age}s ago")
                 } else if age < 3600 {
-                    format!("synced {}m ago", age / 60)
+                    format!("Help Scout · synced {}m ago", age / 60)
                 } else {
-                    format!("synced {}h ago", age / 3600)
+                    format!("Help Scout · synced {}h ago", age / 3600)
                 };
                 let tone = if age <= 120 {
                     design::BadgeTone::Success
@@ -856,7 +875,18 @@ impl ShellApp {
             tracing::warn!(error = %e, "screenshot seed failed");
         }
         if std::env::var("SPP_SHOT_PALETTE").as_deref() == Ok("1") {
-            self.palette.open();
+            // UXA-4 evidence: the audit shot that flagged UX-31 showed the
+            // palette mid-search (query typed, first hit selected, subtitles
+            // visible) — an empty palette would not evidence the row fix.
+            // SPP_SHOT_PALETTE_QUERY seeds the query and runs the search so
+            // the shot lands on the search state.
+            if let Ok(query) = std::env::var("SPP_SHOT_PALETTE_QUERY")
+                && !query.is_empty()
+            {
+                self.palette.open_with_query(&query, &self.db);
+            } else {
+                self.palette.open();
+            }
         }
     }
 }
