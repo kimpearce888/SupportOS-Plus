@@ -157,7 +157,7 @@ fn r3_live_chats_tab_switch_light() {
             },
         );
     h.run_ok();
-    h.get_by_label("show ended chats").click();
+    h.get_by_label("Ended chats").click();
     h.run_ok();
     h.run_steps(2);
     assert!(

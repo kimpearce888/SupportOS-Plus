@@ -755,7 +755,7 @@ impl ShellApp {
                                         nav = self.reports.ui(ui, &self.db, sync.as_ref());
                                     }
                                     PageKey::LiveChats => {
-                                        self.live_chats.ui(ui, &self.db);
+                                        nav = self.live_chats.ui(ui, &self.db);
                                     }
                                     PageKey::Operations => {
                                         nav = self.operations.ui(ui, &self.db);
@@ -790,7 +790,9 @@ impl ShellApp {
                                         nav = self.search.ui(ui, &self.db);
                                     }
                                     PageKey::Settings => self.settings.ui(ui, &self.db),
-                                    PageKey::SupportGraph => self.support_graph.ui(ui, &self.db),
+                                    PageKey::SupportGraph => {
+                                        nav = self.support_graph.ui(ui, &self.db);
+                                    }
                                     PageKey::Diagnostics => {
                                         nav = self.diagnostics.ui(ui, &self.db);
                                     }

@@ -2,6 +2,7 @@ use eframe::egui;
 use spp_core::chats::{self, MirrorChat, MirrorMessage, SendBlock};
 use spp_core::db::DbHandle;
 
+use super::{NavRequest, PageKey};
 use crate::design::{self, BadgeTone, ButtonVariant, CalloutRole, MessageRole};
 use crate::icons::Icon;
 
@@ -86,15 +87,17 @@ impl LiveChatsPage {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
+        // UX-16: the subtitle explains the feature in user terms — the old
+        // copy leaked webhook event names and API-shape trivia.
         design::page_header(
             ui,
             "Live chats",
             Some(
-                "Beacon chats arrive through the five beacon.chat.* webhook events — \
-                 Help Scout has no list endpoint, the webhook IS the data path.",
+                "Real-time Beacon chats from your Help Scout widget arrive here \
+                 automatically.",
             ),
             |ui| {
                 let model = self.model.as_ref().expect("loaded above");
@@ -103,11 +106,11 @@ impl LiveChatsPage {
         );
 
         ui.horizontal(|ui| {
-            design::field_label(ui, "view");
-            if design::chip(ui, !self.show_ended, "open chats").clicked() {
+            design::field_label(ui, "View:");
+            if design::chip(ui, !self.show_ended, "Open chats").clicked() {
                 self.show_ended = false;
             }
-            if design::chip(ui, self.show_ended, "show ended chats").clicked() {
+            if design::chip(ui, self.show_ended, "Ended chats").clicked() {
                 self.show_ended = true;
             }
         });
@@ -118,7 +121,7 @@ impl LiveChatsPage {
 
         let Some(model) = self.model.clone() else {
             ui.spinner();
-            return;
+            return None;
         };
         let visible: Vec<MirrorChat> = model
             .chats
@@ -128,18 +131,27 @@ impl LiveChatsPage {
             .collect();
 
         if visible.is_empty() {
-            design::empty_state(
+            // UX-16: the empty state carries the next step as a real button
+            // instead of naming Settings in dead prose.
+            if self.show_ended {
+                design::empty_state(
+                    ui,
+                    Icon::Send,
+                    "No ended chats",
+                    "Chats land here after the visitor closes the conversation.",
+                );
+            } else if design::empty_state_cta_with(
                 ui,
                 Icon::Send,
-                if self.show_ended {
-                    "No ended chats"
-                } else {
-                    "No live chats yet"
-                },
-                "Chats appear here the moment the beacon.chat.created webhook lands — \
-                 connect the webhook relay (Settings) and they will arrive on their own.",
-            );
-            return;
+                "No live chats yet",
+                "Chats appear here in real time once the webhook relay is connected \
+                 in Settings → Help Scout.",
+                Icon::Sliders,
+                "Open Settings",
+            ) {
+                return Some(NavRequest::Page(PageKey::Settings));
+            }
+            return None;
         }
 
         if ui.available_width() > 860.0 {
@@ -160,6 +172,7 @@ impl LiveChatsPage {
                 self.chat_detail_or_hint_ui(ui, db, &model);
             });
         }
+        None
     }
 
     fn chat_list_ui(&mut self, ui: &mut egui::Ui, visible: &[MirrorChat]) {
@@ -389,7 +402,7 @@ impl LiveChatsPage {
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if !self.draft.trim().is_empty() {
-                                if design::button(ui, "send", ButtonVariant::Primary).clicked() {
+                                if design::button(ui, "Send", ButtonVariant::Primary).clicked() {
                                     self.send(db, &chat.chat_id);
                                 }
                             } else {

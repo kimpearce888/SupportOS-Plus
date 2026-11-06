@@ -503,12 +503,18 @@ impl OutreachPage {
                     });
                 }
                 if campaigns.is_empty() {
-                    design::empty_state(
+                    // UX-16: the empty state carries the action it describes
+                    // instead of stranding the CTA 250px away in the header.
+                    if design::empty_state_cta(
                         ui,
                         Icon::Megaphone,
-                        "No campaigns",
-                        "Create a campaign to reach a saved segment.",
-                    );
+                        "No campaigns yet",
+                        "Campaigns send a message to a saved segment. Create your \
+                         first one to get started.",
+                        "New Campaign",
+                    ) {
+                        self.show_new = true;
+                    }
                 }
             });
         if let Some(id) = picked {
@@ -639,7 +645,7 @@ impl OutreachPage {
                     ),
                 );
             }
-            if design::button(ui, "create campaign", ButtonVariant::Primary).clicked() {
+            if design::button(ui, "Create Campaign", ButtonVariant::Primary).clicked() {
                 self.create_campaign(db);
             }
         });
@@ -674,7 +680,7 @@ impl OutreachPage {
                     .labelled_by(criteria_label.id);
                     ui.end_row();
                 });
-                if design::button(ui, "create segment", ButtonVariant::Primary).clicked() {
+                if design::button(ui, "Create Segment", ButtonVariant::Primary).clicked() {
                     self.create_segment(db);
                 }
             });
@@ -703,7 +709,7 @@ impl OutreachPage {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if design::button(ui, "delete", ButtonVariant::Destructive)
+                                    if design::button(ui, "Delete", ButtonVariant::Destructive)
                                         .clicked()
                                     {
                                         deleted = Some((
@@ -768,7 +774,7 @@ impl OutreachPage {
                     .labelled_by(reason_label.id);
                     ui.end_row();
                 });
-                if design::button(ui, "add", ButtonVariant::Primary).clicked() {
+                if design::button(ui, "Add", ButtonVariant::Primary).clicked() {
                     self.add_dnc(db);
                 }
                 ui.add_space(6.0);
@@ -786,7 +792,7 @@ impl OutreachPage {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if design::button(ui, "remove", ButtonVariant::Destructive)
+                                        if design::button(ui, "Remove", ButtonVariant::Destructive)
                                             .clicked()
                                         {
                                             self.pending_confirm =

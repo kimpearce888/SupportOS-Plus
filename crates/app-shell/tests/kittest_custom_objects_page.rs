@@ -178,7 +178,7 @@ fn r3_custom_objects_new_type_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("create type").next().is_some(),
+        h.get_all_by_label("Create Type").next().is_some(),
         "the New Type form must show the create type act"
     );
     h.snapshot("r3_custom_objects_new_type_light");

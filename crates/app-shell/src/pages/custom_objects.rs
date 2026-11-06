@@ -6,6 +6,15 @@ use super::{ConfirmRequest, NavRequest, i64_field, str_field};
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
+/// UX-16: "3 types" / "1 type" — proper pluralization for the page counts.
+fn count_noun(count: i64, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FieldType {
     Text,
@@ -344,11 +353,15 @@ impl CustomObjectsPage {
                 .get("types")
                 .and_then(|t| t.as_array())
                 .map_or(0, std::vec::Vec::len);
+            // UX-16: real pluralization — "0 type(s) · …" read as a debug
+            // string, and screen readers announce it letter by letter.
+            let objects = i64_field(report, "total_objects");
+            let links = i64_field(report, "total_links");
             format!(
-                "{} type(s) · {} object(s) · {} link(s)",
-                type_count,
-                i64_field(report, "total_objects"),
-                i64_field(report, "total_links")
+                "{} · {} · {}",
+                count_noun(i64::try_from(type_count).unwrap_or(0), "type"),
+                count_noun(objects, "object"),
+                count_noun(links, "link")
             )
         });
         design::page_header(ui, "Custom Objects", subtitle.as_deref(), |ui| {
@@ -390,7 +403,7 @@ impl CustomObjectsPage {
                             {
                                 picked = Some(t.id);
                             }
-                            if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
+                            if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
                                 deleted_type = Some((t.id, t.name.clone()));
                             }
                         });
@@ -399,12 +412,18 @@ impl CustomObjectsPage {
                         }
                     }
                     if types.is_empty() {
-                        design::empty_state(
+                        // UX-16: the empty state carries the "create a type"
+                        // action instead of only naming it in prose.
+                        if design::empty_state_cta(
                             ui,
                             Icon::Boxes,
                             "No types yet",
-                            "Create a type to start storing objects.",
-                        );
+                            "A type defines the fields your custom objects carry — \
+                             create one to start storing objects.",
+                            "New Type",
+                        ) {
+                            self.show_new_type = true;
+                        }
                     }
                 });
             if let Some(id) = picked {
@@ -425,12 +444,23 @@ impl CustomObjectsPage {
 
     fn objects_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         let Some(type_id) = self.selected_type else {
-            design::empty_state(
-                ui,
-                Icon::Boxes,
-                "Select a type",
-                "Pick a type on the left to see its objects.",
-            );
+            // UX-16: don't tell the user to "pick a type on the left" when
+            // no types exist — that instruction was impossible to follow.
+            if self.types.is_empty() {
+                design::empty_state(
+                    ui,
+                    Icon::Boxes,
+                    "Nothing to show yet",
+                    "Objects appear here once a type is created and selected.",
+                );
+            } else {
+                design::empty_state(
+                    ui,
+                    Icon::Boxes,
+                    "Select a type",
+                    "Pick a type on the left to see its objects.",
+                );
+            }
             return None;
         };
         let t = self.types.iter().find(|t| t.id == type_id)?;
@@ -461,7 +491,7 @@ impl CustomObjectsPage {
                     self.object_query = q;
                 }
             },
-            "search",
+            "Search",
         );
         if apply.clicked() {
             self.reload_objects(db);
@@ -483,7 +513,7 @@ impl CustomObjectsPage {
                                     .strong()
                                     .color(tokens.foreground),
                             );
-                            if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
+                            if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
                                 deleted =
                                     Some((i64_field(object, "id"), str_field(object, "title")));
                             }
@@ -540,7 +570,7 @@ impl CustomObjectsPage {
                 )
                 .labelled_by(label.id);
             }
-            if has_fields && design::button(ui, "create object", ButtonVariant::Primary).clicked() {
+            if has_fields && design::button(ui, "Create Object", ButtonVariant::Primary).clicked() {
                 self.create_object(db);
             }
         });
@@ -579,7 +609,7 @@ impl CustomObjectsPage {
                         egui::RichText::new(format!("{}. {}", idx + 1, draft.key))
                             .color(tokens.foreground),
                     );
-                    if design::button(ui, "remove", ButtonVariant::Destructive).clicked() {
+                    if design::button(ui, "Remove", ButtonVariant::Destructive).clicked() {
                         remove = Some(idx);
                     }
                 });
@@ -654,7 +684,7 @@ impl CustomObjectsPage {
                 self.new_fields[idx].label = label;
                 self.new_fields[idx].options = options;
             }
-            if design::button(ui, "create type", ButtonVariant::Primary).clicked() {
+            if design::button(ui, "Create Type", ButtonVariant::Primary).clicked() {
                 self.create_type(db);
             }
         });

@@ -2,6 +2,7 @@ use eframe::egui;
 use spp_core::db::DbHandle;
 use spp_core::support_graph::GraphNodeRef;
 
+use super::{NavRequest, PageKey};
 use crate::design::{self, ButtonVariant};
 use crate::icons::Icon;
 
@@ -162,14 +163,26 @@ impl SupportGraphPage {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         if self.stats.is_none() && self.stats_at.is_none_or(|t| t.elapsed().as_secs() >= 1) {
             self.stats_at = Some(std::time::Instant::now());
             self.reload_stats(db);
         }
         self.refetch_if_stale(db);
 
-        let subtitle = if let Some(stats) = &self.stats {
+        let graph_links = self.stats.as_ref().map(|stats| {
+            (
+                super::i64_field(stats, "conversation_links"),
+                super::i64_field(stats, "customer_links"),
+                super::i64_field(stats, "human_edges"),
+            )
+        });
+        // UX-16: an all-zero graph explains itself and points at the fix
+        // instead of listing empty counters like debug output.
+        let graph_empty = graph_links.is_some_and(|(a, b, c)| a + b + c == 0);
+        let subtitle = if graph_empty {
+            "No graph data yet — connect a source and sync to build links".to_string()
+        } else if let Some(stats) = &self.stats {
             format!(
                 "{} conversation links · {} customer links · {} human edges",
                 super::i64_field(stats, "conversation_links"),
@@ -192,7 +205,7 @@ impl SupportGraphPage {
                 self.query_edit = query;
             }
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if design::button(ui, "search", ButtonVariant::Primary).clicked()
+            if design::button(ui, "Search", ButtonVariant::Primary).clicked()
                 || (response.lost_focus() && enter)
             {
                 self.query = self.query_edit.clone();
@@ -208,13 +221,30 @@ impl SupportGraphPage {
         design::divider(ui);
 
         if self.query.is_empty() {
-            design::empty_state(
-                ui,
-                Icon::ShareGraph,
-                "Search the graph",
-                "Search customers, conversations, organizations, users, or incidents by name, subject, or number.",
-            );
-            return;
+            if graph_empty {
+                // UX-16: dead end → the CTA opens Connectors, where sources
+                // are actually configured.
+                if design::empty_state_cta_with(
+                    ui,
+                    Icon::ShareGraph,
+                    "No graph data yet",
+                    "The support graph links customers, conversations, organizations, \
+                     and incidents. Connect a data source and run a sync to build it.",
+                    Icon::Plug,
+                    "Connect a Data Source",
+                ) {
+                    return Some(NavRequest::Page(PageKey::Connectors));
+                }
+            } else {
+                design::empty_state(
+                    ui,
+                    Icon::ShareGraph,
+                    "Explore connections",
+                    "Search customers, conversations, organizations, users, or incidents \
+                     by name, subject, or number to see how they link.",
+                );
+            }
+            return None;
         }
 
         let results = self.results.clone();
@@ -257,7 +287,7 @@ impl SupportGraphPage {
                     design::empty_state(
                         ui,
                         Icon::ShareGraph,
-                        "(no edges)",
+                        "No links yet",
                         "This node has no links yet.",
                     );
                 } else {
@@ -296,6 +326,7 @@ impl SupportGraphPage {
                 }
             });
         }
+        None
     }
 }
 

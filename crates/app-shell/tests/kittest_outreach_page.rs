@@ -218,7 +218,7 @@ fn r3_outreach_segments_tab_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("delete").next().is_some(),
+        h.get_all_by_label("Delete").next().is_some(),
         "the segment cards must carry their delete acts"
     );
     h.snapshot("r3_outreach_segments_tab_light");
@@ -252,7 +252,7 @@ fn r3_outreach_new_campaign_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("create campaign").next().is_some(),
+        h.get_all_by_label("Create Campaign").next().is_some(),
         "the New Campaign form must show the create act"
     );
     h.snapshot("r3_outreach_new_campaign_light");
