@@ -504,7 +504,7 @@ fn composer_snapshot_dark() {
 fn composer_send_button_and_shortcut_light() {
     let mut h = harness_composer(false);
     h.run_ok();
-    h.get_by_label("send").click();
+    h.get_by_label("Send").click();
     h.run_ok();
     h.run_steps(2);
     assert_eq!(

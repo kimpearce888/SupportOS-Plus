@@ -155,14 +155,14 @@ fn r3_diagnostics_errors_filter_light() {
             },
         );
     h.run_ok();
-    h.get_all_by_label("errors")
+    h.get_all_by_label("Errors")
         .next()
         .expect("the chip")
         .click();
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("clear log").next().is_some(),
+        h.get_all_by_label("Clear Log").next().is_some(),
         "the filtered log keeps its clear act"
     );
     h.snapshot("r3_diagnostics_errors_filter_light");

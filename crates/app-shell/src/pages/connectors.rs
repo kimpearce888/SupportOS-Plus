@@ -302,7 +302,7 @@ impl ConnectorsPage {
                                 {
                                     refreshed = Some(id);
                                 }
-                                if design::button(ui, "delete", ButtonVariant::Destructive)
+                                if design::button(ui, "Delete", ButtonVariant::Destructive)
                                     .clicked()
                                 {
                                     deleted = Some((id, name.clone()));
@@ -347,7 +347,7 @@ impl ConnectorsPage {
                 if response.changed() {
                     self.rows_query = q;
                 }
-                if design::button_with_icon(ui, Icon::Search, "search", ButtonVariant::Primary)
+                if design::button_with_icon(ui, Icon::Search, "Search", ButtonVariant::Primary)
                     .clicked()
                     && let Some(id) = self.selected
                 {
@@ -429,7 +429,7 @@ impl ConnectorsPage {
                 ui.checkbox(&mut self.new_allowed_ai, "AI tools may query");
                 ui.end_row();
             });
-            if design::button(ui, "create", ButtonVariant::Primary).clicked() {
+            if design::button(ui, "Create", ButtonVariant::Primary).clicked() {
                 self.create(db);
             }
         });

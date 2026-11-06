@@ -306,7 +306,7 @@ fn r3_issue_radar_gaps_tab_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.query_by_label("approve").is_some(),
+        h.query_by_label("Approve").is_some(),
         "the Gaps tab must show the candidates' approve act"
     );
     h.snapshot("r3_issue_radar_gaps_tab_light");

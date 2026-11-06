@@ -952,10 +952,10 @@ impl ReportsPage {
                     ui.horizontal(|ui| {
                         ui.monospace(&saved.name);
                         design::hint_text(ui, &saved.created_at);
-                        if design::button(ui, "load", ButtonVariant::Outline).clicked() {
+                        if design::button(ui, "Load", ButtonVariant::Outline).clicked() {
                             self.load_saved_report(&saved.config);
                         }
-                        if design::button(ui, "delete", ButtonVariant::Destructive).clicked() {
+                        if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
                             self.pending_confirm =
                                 Some(ConfirmRequest::delete_saved_report(saved.id, &saved.name));
                         }
@@ -1380,7 +1380,7 @@ impl ReportsPage {
                     design::table(
                         ui,
                         "insights-graph",
-                        &["kind", "label", "entity", "created", ""],
+                        &["Kind", "Label", "Entity", "Created", ""],
                         24.0,
                         |ui| {
                             for node in &nodes {
@@ -1394,7 +1394,7 @@ impl ReportsPage {
                                         .unwrap_or_else(|| "—".into()),
                                 );
                                 design::td_num(ui, &node.created_at);
-                                if design::button(ui, "inspect", ButtonVariant::Outline).clicked() {
+                                if design::button(ui, "Inspect", ButtonVariant::Outline).clicked() {
                                     self.inspect_graph_node(db, node.id);
                                 }
                                 ui.end_row();

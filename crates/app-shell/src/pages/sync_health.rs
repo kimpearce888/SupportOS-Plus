@@ -522,7 +522,7 @@ impl SyncHealthPage {
                 design::empty_state(
                     ui,
                     Icon::Activity,
-                    "(no runs recorded)",
+                    "No runs recorded",
                     "Runs appear here after the first sync.",
                 );
             } else {
@@ -533,13 +533,13 @@ impl SyncHealthPage {
                             ui,
                             "sync-run-table",
                             &[
-                                "id",
-                                "kind",
-                                "state",
-                                "started",
-                                "resources",
-                                "records",
-                                "errors",
+                                "Id",
+                                "Kind",
+                                "State",
+                                "Started",
+                                "Resources",
+                                "Records",
+                                "Errors",
                             ],
                             26.0,
                             |ui| {

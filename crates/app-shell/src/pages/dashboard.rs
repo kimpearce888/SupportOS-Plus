@@ -758,7 +758,12 @@ fn channel_metrics_table(ui: &mut egui::Ui, rows: &[ChannelMetric]) {
         design::data_table(
             ui,
             "channel-metrics",
-            &["channel", "count", "first resp (min)", "resolution (min)"],
+            &[
+                "Channel",
+                "Count",
+                "First Response (min)",
+                "Resolution (min)",
+            ],
             rows.len(),
             26.0,
             |ui, i| {

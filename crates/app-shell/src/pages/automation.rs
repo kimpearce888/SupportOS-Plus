@@ -346,7 +346,7 @@ impl AutomationPage {
                         design::table_stretched(
                             ui,
                             "automation-rule-table",
-                            &["name", "when", "then", ""],
+                            &["Name", "When", "Then", ""],
                             26.0,
                             |ui| {
                                 let t = design::tokens(ui);
@@ -393,7 +393,7 @@ impl AutomationPage {
                                         {
                                             toggled = Some((id, !rule.enabled));
                                         }
-                                        if design::button(ui, "delete", ButtonVariant::Destructive)
+                                        if design::button(ui, "Delete", ButtonVariant::Destructive)
                                             .on_hover_text("asks for confirmation before deleting")
                                             .clicked()
                                         {
@@ -460,12 +460,12 @@ impl AutomationPage {
                                     ui.monospace(&approval.proposed_action);
                                 });
                                 ui.horizontal(|ui| {
-                                    if design::button(ui, "approve", ButtonVariant::Outline)
+                                    if design::button(ui, "Approve", ButtonVariant::Outline)
                                         .clicked()
                                     {
                                         decided = Some((approval.id, true));
                                     }
-                                    if design::button(ui, "reject", ButtonVariant::Destructive)
+                                    if design::button(ui, "Reject", ButtonVariant::Destructive)
                                         .clicked()
                                     {
                                         decided = Some((approval.id, false));

@@ -160,7 +160,7 @@ fn r3_connectors_new_connector_light() {
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("create").next().is_some(),
+        h.get_all_by_label("Create").next().is_some(),
         "the New Connector form must show the create act"
     );
     h.snapshot("r3_connectors_new_connector_light");

@@ -659,7 +659,7 @@ impl AiCenterPage {
             if (design::button_with_icon(
                 ui,
                 Icon::Send,
-                if busy { "thinking…" } else { "send" },
+                if busy { "Thinking…" } else { "Send" },
                 ButtonVariant::Primary,
             )
             .clicked()
@@ -960,7 +960,7 @@ impl AiCenterPage {
                     design::hint_text(ui, &text);
                 }
             }
-            if design::button(ui, "test connection", ButtonVariant::Primary).clicked() {
+            if design::button(ui, "Test Connection", ButtonVariant::Primary).clicked() {
                 self.test_connection();
             }
         });
@@ -1169,7 +1169,7 @@ impl AiCenterPage {
                             }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if !endpoint.builtin
-                                    && design::button(ui, "remove", ButtonVariant::Ghost)
+                                    && design::button(ui, "Remove", ButtonVariant::Ghost)
                                         .on_hover_text("remove the endpoint, its envelope key and its role assignments")
                                         .clicked()
                                 {
@@ -1178,11 +1178,11 @@ impl AiCenterPage {
                                     });
                                     self.reload_hub(db);
                                 }
-                                if design::button(ui, "set key", ButtonVariant::Outline).clicked() {
+                                if design::button(ui, "Set Key", ButtonVariant::Outline).clicked() {
                                     self.key_edit_for = Some(endpoint.id.clone());
                                     self.key_edit_value.clear();
                                 }
-                                if design::button(ui, "probe", ButtonVariant::Outline)
+                                if design::button(ui, "Probe", ButtonVariant::Outline)
                                     .on_hover_text("list models once — the green/red light for this endpoint")
                                     .clicked()
                                 {
@@ -1198,7 +1198,7 @@ impl AiCenterPage {
                                     egui::TextEdit::singleline(&mut self.key_edit_value)
                                         .password(true),
                                 );
-                                if design::button(ui, "save key", ButtonVariant::Primary).clicked() {
+                                if design::button(ui, "Save Key", ButtonVariant::Primary).clicked() {
                                     let id = endpoint.id.clone();
                                     let value = self.key_edit_value.trim().to_string();
                                     db.with_write(|conn| {
@@ -1216,7 +1216,7 @@ impl AiCenterPage {
                                     self.key_edit_for = None;
                                     self.key_edit_value.clear();
                                 }
-                                if design::button(ui, "cancel", ButtonVariant::Ghost).clicked() {
+                                if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
                                     self.key_edit_for = None;
                                     self.key_edit_value.clear();
                                 }
@@ -1285,7 +1285,7 @@ impl AiCenterPage {
                             );
                             ui.end_row();
                         });
-                    if design::button(ui, "add endpoint", ButtonVariant::Primary).clicked() {
+                    if design::button(ui, "Add Endpoint", ButtonVariant::Primary).clicked() {
                         self.add_endpoint(db);
                     }
                 });
@@ -1448,7 +1448,7 @@ impl AiCenterPage {
                 if ai_on {
                     if design::button(
                         ui,
-                        "global kill switch: AI is ON — click to disable all AI",
+                        "Global Kill Switch: AI Is On — Click to Disable All AI",
                         ButtonVariant::Outline,
                     )
                     .on_hover_text("disables every AI feature and every endpoint call at once")
@@ -1458,7 +1458,7 @@ impl AiCenterPage {
                     }
                 } else if design::button(
                     ui,
-                    "global kill switch: AI is OFF — click to re-enable",
+                    "Global Kill Switch: AI Is Off — Click to Re-enable All AI",
                     ButtonVariant::Primary,
                 )
                 .clicked()

@@ -15,10 +15,10 @@ enum LevelFilter {
 impl LevelFilter {
     fn label(self) -> &'static str {
         match self {
-            Self::All => "all",
-            Self::Errors => "errors",
-            Self::Warnings => "warnings",
-            Self::Info => "info",
+            Self::All => "All",
+            Self::Errors => "Errors",
+            Self::Warnings => "Warnings",
+            Self::Info => "Info",
         }
     }
 
@@ -213,11 +213,11 @@ impl DiagnosticsPage {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if !events.is_empty()
-                        && design::button(ui, "clear log", ButtonVariant::Destructive).clicked()
+                        && design::button(ui, "Clear Log", ButtonVariant::Destructive).clicked()
                     {
                         clear_requested = true;
                     }
-                    if design::button(ui, "refresh", ButtonVariant::Outline).clicked() {
+                    if design::button(ui, "Refresh", ButtonVariant::Outline).clicked() {
                         self.invalidate();
                     }
                 });
@@ -285,7 +285,7 @@ impl DiagnosticsPage {
             design::table(
                 ui,
                 "diagnostics-audit",
-                &["when", "actor", "action", "conversation", "ai"],
+                &["When", "Actor", "Action", "Conversation", "AI"],
                 24.0,
                 |ui| {
                     for row in &audit {
@@ -379,7 +379,7 @@ impl DiagnosticsPage {
                 design::table(
                     ui,
                     "diagnostics-runs",
-                    &["run", "kind", "state", "records", "errors", "started"],
+                    &["Run", "Kind", "State", "Records", "Errors", "Started"],
                     24.0,
                     |ui| {
                         for run in &runs {
@@ -444,7 +444,7 @@ impl DiagnosticsPage {
                 design::table(
                     ui,
                     "diagnostics-outbound",
-                    &["job", "kind", "at", "error"],
+                    &["Job", "Kind", "At", "Error"],
                     22.0,
                     |ui| {
                         for (id, kind, at, error) in &failed_rows {

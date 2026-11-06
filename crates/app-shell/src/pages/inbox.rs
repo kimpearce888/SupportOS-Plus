@@ -1198,7 +1198,7 @@ impl InboxPage {
                         self.set_status_message("Syncing…", false);
                     }
                 }
-                if design::button(ui, "reset filters", ButtonVariant::Ghost)
+                if design::button(ui, "Reset Filters", ButtonVariant::Ghost)
                     .on_hover_text("clear every filter and reload")
                     .clicked()
                 {
@@ -1549,7 +1549,7 @@ impl InboxPage {
                             format!("assign: {assign_label}"),
                         )
                     });
-                if design::button(ui, "assign", ButtonVariant::Secondary).clicked() {
+                if design::button(ui, "Assign", ButtonVariant::Secondary).clicked() {
                     self.assign(db, bus, self.assign_pick);
                 }
             });

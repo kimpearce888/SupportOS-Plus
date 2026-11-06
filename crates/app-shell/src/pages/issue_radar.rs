@@ -471,7 +471,7 @@ impl IssueRadarPage {
             design::empty_state(
                 ui,
                 Icon::Target,
-                "(no gap candidates yet)",
+                "No gap candidates yet",
                 "Run 'Detect gaps now' — repeated unresolved patterns from resolved and reopened conversations land here with counts and examples.",
             );
             return;
@@ -582,7 +582,7 @@ impl IssueRadarPage {
         }
         if status == "open" {
             ui.horizontal(|ui| {
-                if design::button(ui, "approve", ButtonVariant::Outline).clicked() {
+                if design::button(ui, "Approve", ButtonVariant::Outline).clicked() {
                     let decided = db
                         .with_write(|conn| {
                             spp_core::quality::decide_gap(conn, id, "approved", None, None)
@@ -597,7 +597,7 @@ impl IssueRadarPage {
                     }
                 }
                 let reject_id = format!("gap-reject-{id}");
-                if design::armed_danger_button(ui, &reject_id, "reject", "confirm reject?") {
+                if design::armed_danger_button(ui, &reject_id, "Reject", "Confirm Reject?") {
                     let decided = db
                         .with_write(|conn| {
                             spp_core::quality::decide_gap(conn, id, "rejected", None, None)
@@ -625,7 +625,7 @@ impl IssueRadarPage {
                     design::empty_state(
                         ui,
                         Icon::Target,
-                        "(no alerts)",
+                        "No alerts",
                         "No AI-derived alerts for the current data.",
                     );
                 } else {
@@ -672,7 +672,7 @@ impl IssueRadarPage {
                     design::empty_state(
                         ui,
                         Icon::Clock,
-                        "(no SLA alerts)",
+                        "No SLA alerts",
                         "No conversations are breaching or at risk right now.",
                     );
                 } else {
@@ -711,7 +711,7 @@ impl IssueRadarPage {
             design::empty_state(
                 ui,
                 Icon::Boxes,
-                "(no clusters yet)",
+                "No clusters yet",
                 "Clusters appear once enough related conversations accumulate.",
             );
             return;
@@ -760,7 +760,7 @@ impl IssueRadarPage {
             design::empty_state(
                 ui,
                 Icon::AlertCircle,
-                "(no known issues)",
+                "No known issues",
                 "Create one to track recurring problems and their workarounds.",
             );
             return;
@@ -844,7 +844,7 @@ impl IssueRadarPage {
                 ui.end_row();
             });
             ui.add_space(design::scale::space::SP1);
-            if design::button(ui, "create", ButtonVariant::Primary).clicked() {
+            if design::button(ui, "Create", ButtonVariant::Primary).clicked() {
                 self.create(db);
             }
         });
