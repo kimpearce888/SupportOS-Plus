@@ -132,14 +132,14 @@ impl SearchPage {
             // AU2-3: the search button must render on every frame (it used to sit
             // behind a `lost_focus() &&` short-circuit, so it only existed during
             // the single frame the text field lost focus).
-            let search_clicked = design::button(ui, "search", ButtonVariant::Primary).clicked();
+            let search_clicked = design::button(ui, "Search", ButtonVariant::Primary).clicked();
             if search_clicked || (response.lost_focus() && enter) {
                 self.query = self.query_edit.clone();
                 self.response = None;
                 self.error = None;
                 self.reload(db);
             }
-            if design::button(ui, "clear", ButtonVariant::Text).clicked() {
+            if design::button(ui, "Clear", ButtonVariant::Text).clicked() {
                 self.query_edit.clear();
                 self.query.clear();
                 self.response = None;
@@ -147,7 +147,7 @@ impl SearchPage {
             }
         });
         ui.horizontal(|ui| {
-            design::hint_text(ui, "scope:");
+            design::field_label(ui, "Scope:");
             for scope in Scope::ALL {
                 if design::chip(ui, self.scope == scope, scope.label()).clicked() {
                     self.scope = scope;
@@ -165,19 +165,29 @@ impl SearchPage {
         }
         let Some(response) = &self.response else {
             if self.query.is_empty() {
-                if design::empty_state_cta(
+                // UX-15: the empty state explains what is searchable and
+                // offers one-click example queries — the old "+ Try 'export'"
+                // CTA invented a nonsensical action for a search page.
+                design::empty_state(
                     ui,
                     Icon::Search,
                     "Search across your workspace",
-                    "Type a query and press Enter to search conversations, knowledge, and customers.",
-                    "Try \"export\"",
-                ) {
-                    self.query_edit = "export".to_string();
-                    self.query = "export".to_string();
-                    self.response = None;
-                    self.error = None;
-                    self.reload(db);
-                }
+                    "Type a query and press Enter to search conversations, knowledge, \
+                     and customers.",
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    design::field_label(ui, "Try:");
+                    for example in ["refund", "password reset", "billing"] {
+                        if design::chip(ui, false, example).clicked() {
+                            self.query_edit = example.to_string();
+                            self.query = example.to_string();
+                            self.response = None;
+                            self.error = None;
+                            self.reload(db);
+                        }
+                    }
+                });
             } else {
                 ui.spinner();
             }
@@ -205,8 +215,9 @@ impl SearchPage {
             design::empty_state(
                 ui,
                 Icon::Search,
-                "(no matches)",
-                "Nothing matched this query in the selected scope.",
+                "No matches",
+                "Nothing matched this query in the selected scope. Try a different \
+                 term or switch the scope.",
             );
             return None;
         }

@@ -45,6 +45,16 @@ fn seeded_page() -> (SearchPage, DbHandle) {
     )
     .expect("conversation");
     conn.execute(
+        "INSERT INTO conversations (id, remote_id, number, subject, preview, status, type,
+             mailbox_local_id, assignee_local_id, customer_local_id, priority,
+             created_at, updated_at, closed_at, first_customer_message_at, local_created_at)
+         VALUES (2, 1002, 2, 'Refund requested', 'asking for a refund on the last invoice',
+                 'active', 'email', 1, 5, 9, 'none', '2026-01-01T09:30:00Z',
+                 '2026-01-01T09:30:00Z', NULL, '2026-01-01T09:30:00Z', '2026-01-01T09:30:00Z')",
+        [],
+    )
+    .expect("refund conversation");
+    conn.execute(
         "INSERT INTO knowledge_sources (id, name, kind) VALUES (1, 'guide', 'file')",
         [],
     )
@@ -143,15 +153,17 @@ fn r3_search_export_hits_light() {
             },
         );
     h.run_ok();
-    h.get_all_by_label("Try \"export\"")
+    // UX-15: the empty state offers one-click example queries; clicking one
+    // runs the search the way typing + Enter always did.
+    h.get_all_by_label("refund")
         .next()
-        .expect("the Try-export CTA")
+        .expect("an example-query chip")
         .click();
     h.run_ok();
     h.run_steps(2);
     assert!(
-        h.get_all_by_label("#1 Export broken").next().is_some(),
-        "the FTS engine must surface the seeded conversation (hit titles ride the number-subject shape)"
+        h.get_all_by_label("#2 Refund requested").next().is_some(),
+        "the example chip must run a real search and surface the seeded refund conversation"
     );
     h.snapshot("r3_search_export_hits_light");
 }
