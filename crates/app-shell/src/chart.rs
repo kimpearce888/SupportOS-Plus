@@ -42,14 +42,17 @@ pub(crate) fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egu
     )
 }
 
-pub(crate) fn line_chart(
+/// UX-9: `line_chart` with readable axes — y min/max value labels, x
+/// endpoint labels (e.g. the date range), horizontal gridlines, and a hover
+/// readout that names the nearest point.
+pub(crate) fn line_chart_axes(
     ui: &mut egui::Ui,
-    _id: &str,
     points: &[Point],
     label: &str,
+    x_endpoints: Option<(&str, &str)>,
 ) -> egui::Rect {
     let t = design::tokens(ui);
-    let (rect, _response) = ui.allocate_exact_size(
+    let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), 180.0),
         egui::Sense::hover(),
     );
@@ -64,7 +67,7 @@ pub(crate) fn line_chart(
             ))));
         let endpoints = [scaled[0], scaled[scaled.len() - 1]];
         ui.painter().add(egui::Shape::line(
-            scaled,
+            scaled.clone(),
             egui::Stroke::new(2.0, t.chart_accent),
         ));
         for point in endpoints {
@@ -72,6 +75,93 @@ pub(crate) fn line_chart(
         }
         let first = points.first().map(|p| p[1]).unwrap_or_default();
         let last = points.last().map(|p| p[1]).unwrap_or_default();
+
+        // y-axis: min/max value labels anchored to the plot edges
+        let max_y = points
+            .iter()
+            .map(|p| p[1])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_y = points.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min);
+        let axis_font = egui::FontId::proportional(10.5);
+        ui.painter().text(
+            rect.left_top() + egui::vec2(8.0, 5.0),
+            egui::Align2::LEFT_TOP,
+            format_y(max_y),
+            axis_font.clone(),
+            t.muted_foreground,
+        );
+        ui.painter().text(
+            rect.left_bottom() + egui::vec2(8.0, -18.0),
+            egui::Align2::LEFT_TOP,
+            format_y(min_y),
+            axis_font.clone(),
+            t.muted_foreground,
+        );
+
+        // x-axis: endpoint labels (dates/range) inside the frame bottom
+        if let Some((xa, xb)) = x_endpoints {
+            ui.painter().text(
+                rect.left_bottom() + egui::vec2(8.0, -5.0),
+                egui::Align2::LEFT_BOTTOM,
+                xa,
+                axis_font.clone(),
+                t.muted_foreground,
+            );
+            ui.painter().text(
+                rect.right_bottom() + egui::vec2(-8.0, -5.0),
+                egui::Align2::RIGHT_BOTTOM,
+                xb,
+                axis_font,
+                t.muted_foreground,
+            );
+        }
+
+        // hover readout: nearest point gets a guide line + value bubble
+        if let Some(pos) = response.hover_pos()
+            && let Some((idx, nearest)) = scaled.iter().enumerate().min_by(|a, b| {
+                (a.1.x - pos.x)
+                    .abs()
+                    .partial_cmp(&(b.1.x - pos.x).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            && rect.contains(*nearest)
+        {
+            ui.painter().line_segment(
+                [
+                    egui::pos2(nearest.x, rect.min.y + 6.0),
+                    egui::pos2(nearest.x, baseline_y),
+                ],
+                egui::Stroke::new(1.0, t.faint),
+            );
+            let value = points[idx][1];
+            let x_note = x_endpoints
+                .as_ref()
+                .map(|(xa, xb)| interpolate_x_note(xa, xb, idx, points.len()))
+                .unwrap_or_default();
+            let bubble = if x_note.is_empty() {
+                format!("{label} · {}", format_y(value))
+            } else {
+                format!("{label} · {x_note} · {}", format_y(value))
+            };
+            let anchor = if nearest.x > rect.center().x {
+                egui::pos2(nearest.x - 8.0, rect.min.y + 6.0)
+            } else {
+                egui::pos2(nearest.x + 8.0, rect.min.y + 6.0)
+            };
+            let align = if nearest.x > rect.center().x {
+                egui::Align2::RIGHT_TOP
+            } else {
+                egui::Align2::LEFT_TOP
+            };
+            ui.painter().text(
+                anchor,
+                align,
+                bubble,
+                egui::FontId::proportional(11.0),
+                t.foreground,
+            );
+        }
+
         ui.painter().text(
             rect.left_bottom() + egui::vec2(4.0, 12.0),
             egui::Align2::LEFT_TOP,
@@ -89,6 +179,28 @@ pub(crate) fn line_chart(
         );
     }
     rect
+}
+
+fn format_y(v: f64) -> String {
+    if v.abs() >= 1000.0 || v.fract().abs() < f64::EPSILON {
+        format!("{v:.0}")
+    } else {
+        format!("{v:.1}")
+    }
+}
+
+fn interpolate_x_note(xa: &str, xb: &str, idx: usize, len: usize) -> String {
+    if len <= 1 {
+        return xa.to_string();
+    }
+    if idx == 0 {
+        return xa.to_string();
+    }
+    if idx == len - 1 {
+        return xb.to_string();
+    }
+    // Interior point: show the fractional position between the endpoints.
+    format!("{:.0}%", (idx as f64 / (len - 1) as f64) * 100.0)
 }
 
 fn paint_frame(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {

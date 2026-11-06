@@ -453,13 +453,17 @@ impl ReportsPage {
             ("Not-good ratings", data.ratings_not_good),
             ("Unassigned", data.unassigned),
         ];
+        // UX-5: stretch the KPI cards across the full row width (same fix as
+        // the Dashboard metric grid).
+        let gap = 10.0;
+        let card_w = ((width - gap * (cols - 1) as f32) / cols as f32).max(150.0);
         egui::Grid::new("reports-overview")
             .num_columns(cols)
-            .spacing(egui::vec2(10.0, 10.0))
+            .spacing(egui::vec2(gap, gap))
             .show(ui, |ui| {
                 for row in facts.chunks(cols) {
                     for (label, value) in row {
-                        design::metric_card(ui, label, &value.to_string(), None);
+                        design::metric_card_w(ui, label, &value.to_string(), None, card_w);
                     }
                     ui.end_row();
                 }
@@ -485,7 +489,15 @@ impl ReportsPage {
                     "Nothing to plot for the selected period.",
                 );
             } else {
-                chart::line_chart(ui, "reports-daily-new", &points, "new conversations");
+                chart::line_chart_axes(
+                    ui,
+                    &points,
+                    "new conversations",
+                    Some((
+                        crate::pages::dashboard::iso_date_only(&data.range_from).as_ref(),
+                        crate::pages::dashboard::iso_date_only(&data.range_to).as_ref(),
+                    )),
+                );
             }
         });
     }
@@ -1963,12 +1975,6 @@ impl ReportsPage {
                     ui.add_space(2.0);
                 }
             },
-        );
-        design::quirk(
-            ui,
-            "Reskin honesty: this tab's badge is always 'medium'/Warning in the current build \
-             because the engine never emits 'high' (reports.rs:1997-2001). The raw severity \
-             token is shown here.",
         );
     }
 

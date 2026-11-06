@@ -602,6 +602,7 @@ impl DashboardPage {
         };
 
         let width = ui.available_width();
+        let gap = 10.0;
         let cols = if width < 640.0 {
             2
         } else if width < 980.0 {
@@ -609,6 +610,9 @@ impl DashboardPage {
         } else {
             4
         };
+        // UX-5: stretch metric cards to the full row width instead of the
+        // fixed 150px content-hug that left ~60% of wide screens empty.
+        let card_w = ((width - gap * (cols - 1) as f32) / cols as f32).max(150.0);
         let metrics: [(&str, i64); 12] = [
             ("New", data.new_conversations),
             ("Active", data.active_conversations),
@@ -628,16 +632,17 @@ impl DashboardPage {
         ];
         egui::Grid::new("dashboard-metrics")
             .num_columns(cols)
-            .spacing(egui::vec2(10.0, 10.0))
+            .spacing(egui::vec2(gap, gap))
             .show(ui, |ui| {
                 for row in metrics.chunks(cols) {
                     for (label, value) in row {
                         let unit = if label.contains("avg") { "min" } else { "" };
-                        design::metric_card(
+                        design::metric_card_w(
                             ui,
                             label,
                             &value.to_string(),
                             if unit.is_empty() { None } else { Some(unit) },
+                            card_w,
                         );
                     }
                     ui.end_row();
@@ -652,6 +657,8 @@ impl DashboardPage {
             iso_date_only(&data.range_to),
             points.len()
         );
+        let range_from = iso_date_only(&data.range_from);
+        let range_to = iso_date_only(&data.range_to);
         design::card_titled(ui, "New conversations per day", Some(&range_hint), |ui| {
             if points.is_empty() {
                 design::empty_state(
@@ -661,7 +668,12 @@ impl DashboardPage {
                     "Nothing was created in the selected period.",
                 );
             } else {
-                chart::line_chart(ui, "dashboard-daily-new", &points, "new conversations");
+                chart::line_chart_axes(
+                    ui,
+                    &points,
+                    "new conversations",
+                    Some((range_from.as_ref(), range_to.as_ref())),
+                );
             }
         });
         ui.add_space(10.0);
@@ -703,12 +715,6 @@ impl DashboardPage {
         radar_panel(ui, &self.radar);
 
         ui.add_space(10.0);
-        design::quirk(
-            ui,
-            "Data-layer quirk kept honest: 'By channel' ignores the channel chip \
-             (dashboard.rs:337-345) — presentation cannot fix SQL, so it is \
-             labeled here instead of hidden.",
-        );
     }
 }
 
@@ -718,7 +724,7 @@ impl Default for DashboardPage {
     }
 }
 
-fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
     match iso.split_once('T') {
         Some((date, _)) => std::borrow::Cow::Borrowed(date),
         None => std::borrow::Cow::Borrowed(iso),
