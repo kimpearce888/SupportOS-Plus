@@ -94,7 +94,32 @@ pub(crate) fn card_titled<R>(
     hint: Option<&str>,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
+    card_titled_sized(ui, title, hint, false, add_contents)
+}
+
+/// UX-7: full-width titled card for page-level form/list surfaces (Settings
+/// tabs) so content spans the available area instead of hugging its natural
+/// width and leaving the rest of the page dead.
+pub(crate) fn card_titled_wide<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    hint: Option<&str>,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    card_titled_sized(ui, title, hint, true, add_contents)
+}
+
+pub(crate) fn card_titled_sized<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    hint: Option<&str>,
+    wide: bool,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
     card(ui, |ui| {
+        if wide {
+            ui.set_min_width(ui.available_width());
+        }
         ui.vertical(|ui| {
             section_title(ui, title);
             if let Some(hint) = hint {

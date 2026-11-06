@@ -4,7 +4,7 @@ use crate::icons::Icon;
 
 mod controls;
 use controls::chip_impl;
-pub(crate) use controls::{card, card_titled, hint_text, pager, section_title};
+pub(crate) use controls::{card, card_titled, card_titled_wide, hint_text, pager, section_title};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Tokens {
@@ -668,8 +668,14 @@ pub fn page_header(
 
 /// DC: DS-C-03 StatTile — muted 12px label, 26px tabular value, 12px hint.
 pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&str>) {
+    metric_card_w(ui, label, value, hint, 150.0);
+}
+
+/// UX-5: metric card with an explicit minimum width so grids can stretch
+/// cards to the available content width instead of hugging at 150px.
+pub fn metric_card_w(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&str>, min_w: f32) {
     card(ui, |ui| {
-        ui.set_min_width(150.0);
+        ui.set_min_width(min_w.max(120.0));
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new(label)
@@ -949,12 +955,43 @@ pub fn table<R>(
     row_height: f32,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
+    table_impl(ui, id, headers, row_height, None, add_contents)
+}
+
+/// UX-6: full-width table — distributes the available width evenly across
+/// columns (min 90px each) so page-level lists use the whole content area
+/// instead of hugging their natural content width.
+pub fn table_stretched<R>(
+    ui: &mut egui::Ui,
+    id: &str,
+    headers: &[&str],
+    row_height: f32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let n = headers.len().max(1);
+    let spacing = 16.0;
+    let avail = ui.available_width();
+    let col_w = ((avail - spacing * (n.saturating_sub(1)) as f32) / n as f32).max(90.0);
+    table_impl(ui, id, headers, row_height, Some(col_w), add_contents)
+}
+
+fn table_impl<R>(
+    ui: &mut egui::Ui,
+    id: &str,
+    headers: &[&str],
+    row_height: f32,
+    min_col_width: Option<f32>,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
     let t = tokens(ui);
-    let grid = egui::Grid::new(egui::IdSalt::new(format!("spp-table-{id}")))
+    let mut grid = egui::Grid::new(egui::IdSalt::new(format!("spp-table-{id}")))
         .num_columns(headers.len())
         .striped(true)
         .spacing(egui::vec2(16.0, 0.0))
         .min_row_height(row_height);
+    if let Some(w) = min_col_width {
+        grid = grid.min_col_width(w);
+    }
     ui.add_space(4.0);
     grid.show(ui, |ui| {
         for header in headers {
@@ -986,6 +1023,11 @@ pub fn data_table(
     row: impl FnMut(&mut egui::Ui, usize),
 ) {
     let t = tokens(ui);
+    // UX-6: distribute the available width across columns so page-level
+    // lists span the content area instead of hugging fixed cell widths.
+    let n = headers.len().max(1);
+    let avail = ui.available_width();
+    let col_w = ((avail - 16.0 * (n.saturating_sub(1)) as f32) / n as f32).max(90.0);
     egui::Frame::new()
         .stroke(egui::Stroke::new(1.0, t.border))
         .corner_radius(egui::CornerRadius::same(10))
@@ -1018,6 +1060,7 @@ pub fn data_table(
                         .num_columns(headers.len())
                         .spacing(egui::vec2(16.0, 0.0))
                         .min_row_height(row_height)
+                        .min_col_width(col_w)
                         .show(ui, |ui| {
                             let mut row = row;
                             for i in range {
