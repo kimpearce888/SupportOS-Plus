@@ -1075,7 +1075,7 @@ impl SettingsPage {
             ui.spinner();
             return;
         };
-        design::card_titled(ui, "Synchronization", None, |ui| {
+        design::card_titled_wide(ui, "Synchronization", None, |ui| {
             design::form_grid(ui, "settings-general", |ui| {
                 let interval_label = design::field_label(ui, "max quiet sync interval (minutes):");
                 ui.add(egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440))
@@ -1133,7 +1133,7 @@ impl SettingsPage {
             });
         });
         ui.add_space(10.0);
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "AI behaviour",
             Some("safe defaults — review before enabling write actions"),
@@ -1177,7 +1177,7 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
         self.poll_update_result();
-        design::card_titled(ui, "About & updates", None, |ui| {
+        design::card_titled_wide(ui, "About & updates", None, |ui| {
             ui.label(format!("Running version: v{}", env!("CARGO_PKG_VERSION")));
             if let Some(result) = self.update_snapshot() {
                 match result {
@@ -1240,7 +1240,7 @@ impl SettingsPage {
             ),
         }
         ui.add_space(4.0);
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Help Scout connection",
             Some(
@@ -1365,7 +1365,7 @@ impl SettingsPage {
         self.connection_doctor_ui(ui);
         ui.add_space(10.0);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Help Scout credentials",
             Some(
@@ -1454,7 +1454,7 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Webhook relay & health",
             Some(
@@ -1521,7 +1521,7 @@ impl SettingsPage {
         );
         ui.add_space(10.0);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Danger zone — Workspace data",
             Some("irreversible"),
@@ -1600,7 +1600,7 @@ impl SettingsPage {
     }
 
     fn connection_doctor_ui(&mut self, ui: &mut egui::Ui) {
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Connection Doctor",
             Some(
@@ -1887,7 +1887,7 @@ impl SettingsPage {
     }
 
     fn lmstudio_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "LM Studio (local AI gateway)",
             Some("Test the connection from the AI Center page."),
@@ -1925,7 +1925,7 @@ impl SettingsPage {
     }
 
     fn vector_index_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Vector index",
             Some(
@@ -1983,7 +1983,7 @@ impl SettingsPage {
     }
 
     fn hours_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        design::card_titled(ui, "Business hours per mailbox", None, |ui| {
+        design::card_titled_wide(ui, "Business hours per mailbox", None, |ui| {
             let hours = self.hours.clone();
             let mut edit: Option<BusinessHoursRow> = None;
             egui::ScrollArea::vertical()
@@ -2033,7 +2033,7 @@ impl SettingsPage {
             return;
         };
         ui.add_space(10.0);
-        design::card_titled(ui, &format!("Edit: {}", row.name), None, |ui| {
+        design::card_titled_wide(ui, &format!("Edit: {}", row.name), None, |ui| {
             design::form_grid(ui, "settings-hours-edit", |ui| {
                 let tz_label = design::field_label(ui, "timezone:");
                 ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.timezone))
@@ -2084,7 +2084,7 @@ impl SettingsPage {
     }
 
     fn backups_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        design::card_titled(ui, "Backups & export", None, |ui| {
+        design::card_titled_wide(ui, "Backups & export", None, |ui| {
             ui.horizontal(|ui| {
                 if design::button_with_icon(
                     ui,
