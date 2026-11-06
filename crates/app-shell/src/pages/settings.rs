@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use eframe::egui;
 use spp_core::db::DbHandle;
 
-use super::{i64_field, str_field};
+use super::{NavRequest, PageKey, human_bytes, i64_field, relative_time, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -449,6 +449,21 @@ impl SettingsPage {
         self.data_dir = Some(dir);
     }
 
+    /// Screenshot-harness hook (ux-audit evidence): select a settings tab by
+    /// its user-facing label, case-insensitively. Feature-gated — the env
+    /// var is only read in `ui-screenshot` builds, never in normal ones.
+    /// Returns false when no tab label matches, so the caller can warn.
+    #[cfg(feature = "ui-screenshot")]
+    pub(crate) fn set_tab_by_label(&mut self, label: &str) -> bool {
+        for tab in Tab::ALL {
+            if tab.label().eq_ignore_ascii_case(label) {
+                self.tab = tab;
+                return true;
+            }
+        }
+        false
+    }
+
     pub(crate) fn set_backups_dir(&mut self, dir: PathBuf) {
         self.backups_dir = Some(dir);
     }
@@ -636,6 +651,17 @@ impl SettingsPage {
             self.lmstudio_chat_model.trim().to_string(),
             self.lmstudio_embedding_model.trim().to_string(),
         );
+        // UX-23: validate before persisting. An empty URL is legal (the app
+        // falls back to its default endpoint), but a non-empty value that is
+        // not an http(s) URL is the classic misconfiguration — saving it
+        // silently used to just move the failure to the first AI request.
+        if !base.is_empty() && !(base.starts_with("http://") || base.starts_with("https://")) {
+            self.message = None;
+            self.error = Some(format!(
+                "the base URL must start with http:// or https:// — got \u{201c}{base}\u{201d}"
+            ));
+            return;
+        }
         let result = db.with_write(|conn| {
             spp_core::settings::set_string(conn, "lmstudio_base_url", &base)?;
             spp_core::settings::set_string(conn, "lmstudio_chat_model", &chat)?;
@@ -703,10 +729,19 @@ impl SettingsPage {
         });
         match result {
             Ok(()) => {
+                // UX-26: the old note blamed "the platform" for the cap — live
+                // probing proved Help Scout itself stores longer secrets
+                // (48+ characters). The truncation is this app's own
+                // verification limit, so the copy says so and says what will
+                // happen, instead of misattributing the cause. (Removing the
+                // cap itself is backend work — UX-26B.)
                 let secret_note = if ws.chars().count() > spp_core::webhook::SECRET_CAP {
                     format!(
-                        " (note: the platform caps webhook secrets at {} characters — \
-                         only the first {} of yours are used)",
+                        " (note: SupportOS+ verifies webhook signatures with only \
+                         the first {} characters of the secret, but Help Scout signs \
+                         with the full secret you set there — a longer secret will \
+                         FAIL verification. Set the same secret, {} characters or \
+                         fewer, on both sides.)",
                         spp_core::webhook::SECRET_CAP,
                         spp_core::webhook::SECRET_CAP
                     )
@@ -1013,7 +1048,7 @@ impl SettingsPage {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         design::page_header(
@@ -1063,12 +1098,29 @@ impl SettingsPage {
         ui.add_space(4.0);
 
         match self.tab {
-            Tab::General => self.general_ui(ui, db),
-            Tab::HelpScout => self.helpscout_ui(ui, db),
+            Tab::General => {
+                self.general_ui(ui, db);
+                None
+            }
+            Tab::HelpScout => {
+                self.helpscout_ui(ui, db);
+                None
+            }
+            // UX-23: settings can now navigate (the LM Studio tab's "Open
+            // AI Center" act) — the page returns the request to the shell.
             Tab::LmStudio => self.lmstudio_ui(ui, db),
-            Tab::VectorIndex => self.vector_index_ui(ui, db),
-            Tab::Hours => self.hours_ui(ui, db),
-            Tab::Backups => self.backups_ui(ui, db),
+            Tab::VectorIndex => {
+                self.vector_index_ui(ui, db);
+                None
+            }
+            Tab::Hours => {
+                self.hours_ui(ui, db);
+                None
+            }
+            Tab::Backups => {
+                self.backups_ui(ui, db);
+                None
+            }
         }
     }
 
@@ -1079,18 +1131,27 @@ impl SettingsPage {
         };
         design::card_titled_wide(ui, "Synchronization", None, |ui| {
             design::form_grid(ui, "settings-general", |ui| {
+                // UX-30: explicit input sizes — the default-width DragValue
+                // was a cramped two-digit sliver that read as static text.
                 let interval_label = design::field_label(ui, "max quiet sync interval (minutes):");
-                ui.add(egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440))
-                    .labelled_by(interval_label.id)
-                    .on_hover_text(
-                        "The sync polls every 30 s while the account is busy, then \
-                         backs off by doubling toward this ceiling when quiet. Every \
-                         send triggers an immediate poll.",
-                    );
+                ui.add_sized(
+                    [110.0, 26.0],
+                    egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440),
+                )
+                .labelled_by(interval_label.id)
+                .on_hover_text(
+                    "The sync polls every 30 s while the account is busy, then \
+                     backs off by doubling toward this ceiling when quiet. Every \
+                     send triggers an immediate poll.",
+                );
                 ui.end_row();
                 let concurrency_label = design::field_label(ui, "api concurrency:");
-                ui.add(egui::DragValue::new(&mut general.api_concurrency).range(1..=8))
-                    .labelled_by(concurrency_label.id);
+                ui.add_sized(
+                    [110.0, 26.0],
+                    egui::DragValue::new(&mut general.api_concurrency).range(1..=8),
+                )
+                .labelled_by(concurrency_label.id)
+                .on_hover_text("How many Help Scout API requests may run in parallel.");
                 ui.end_row();
                 let log_label = design::field_label(ui, "log level:");
                 let combo = egui::ComboBox::from_id_salt("settings-log-level")
@@ -1140,40 +1201,37 @@ impl SettingsPage {
             "AI behaviour",
             Some("safe defaults — review before enabling write actions"),
             |ui| {
-                egui::Grid::new(egui::IdSalt::new("settings-ai"))
-                    .num_columns(2)
-                    .striped(true)
-                    .spacing(egui::vec2(16.0, 4.0))
-                    .min_row_height(24.0)
-                    .show(ui, |ui| {
-                        for (label, value) in [
-                            ("AI enabled", &mut general.ai_enabled),
-                            (
-                                "Automatic analysis",
-                                &mut general.automatic_analysis_enabled,
-                            ),
-                            (
-                                "Automatic internal notes",
-                                &mut general.automatic_note_enabled,
-                            ),
-                            (
-                                "Automatic draft replies",
-                                &mut general.automatic_draft_enabled,
-                            ),
-                            ("Automation rules", &mut general.automation_enabled),
-                            (
-                                "Automation write actions",
-                                &mut general.automation_write_actions_enabled,
-                            ),
-                            (
-                                "Attachment auto download",
-                                &mut general.attachment_auto_download,
-                            ),
-                        ] {
-                            ui.checkbox(value, label);
-                            ui.end_row();
-                        }
-                    });
+                // UX-30: one consistent checkbox list. The old striped grid
+                // alternated row backgrounds (checked rows read as plain
+                // "✓" text without a control) and broke the uniform rhythm;
+                // every row is now the same plain checkbox with even spacing.
+                for (label, value) in [
+                    ("AI enabled", &mut general.ai_enabled),
+                    (
+                        "Automatic analysis",
+                        &mut general.automatic_analysis_enabled,
+                    ),
+                    (
+                        "Automatic internal notes",
+                        &mut general.automatic_note_enabled,
+                    ),
+                    (
+                        "Automatic draft replies",
+                        &mut general.automatic_draft_enabled,
+                    ),
+                    ("Automation rules", &mut general.automation_enabled),
+                    (
+                        "Automation write actions",
+                        &mut general.automation_write_actions_enabled,
+                    ),
+                    (
+                        "Attachment auto download",
+                        &mut general.attachment_auto_download,
+                    ),
+                ] {
+                    ui.checkbox(value, label);
+                    ui.add_space(2.0);
+                }
                 ui.add_space(6.0);
             },
         );
@@ -1214,10 +1272,22 @@ impl SettingsPage {
             );
         });
         ui.add_space(10.0);
-        if design::button(ui, "Save Settings", ButtonVariant::Primary).clicked() {
-            self.general = Some(general.clone());
-            self.save_general(db);
-        }
+        // UX-30: the save row now reflects form state. A dirty form offers
+        // "Save Changes" with an unsaved-changes note; a clean one confirms
+        // "All changes saved" — the old permanently-active "Save Settings"
+        // button was easy to miss and gave no feedback either way.
+        let dirty = self.general_persisted.as_ref() != Some(&general);
+        ui.horizontal(|ui| {
+            if dirty {
+                if design::button(ui, "Save Changes", ButtonVariant::Primary).clicked() {
+                    self.general = Some(general.clone());
+                    self.save_general(db);
+                }
+                design::hint_text(ui, "You have unsaved changes on this tab.");
+            } else {
+                design::badge(ui, "All changes saved", BadgeTone::Success);
+            }
+        });
         self.general = Some(general);
     }
 
@@ -1409,7 +1479,15 @@ impl SettingsPage {
                             .password(mask)
                             .hint_text("verifies incoming Help Scout webhooks"),
                     )
-                    .labelled_by(whs_label.id);
+                    .labelled_by(whs_label.id)
+                    .on_hover_text(
+                        // UX-26: the 40-character limit is ours, not Help
+                        // Scout's — say it before the save, not after.
+                        "Help Scout signs each delivery with the FULL secret; \
+                         SupportOS+ verifies using only the first 40 characters \
+                         — keep the secret at 40 characters or fewer so \
+                         verification passes.",
+                    );
                     ui.end_row();
                     let docs_label = design::field_label(ui, "docs api key:");
                     ui.add_sized(
@@ -1899,11 +1977,17 @@ impl SettingsPage {
         }
     }
 
-    fn lmstudio_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    fn lmstudio_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
+        let mut nav = None;
         design::card_titled_wide(
             ui,
             "LM Studio (local AI gateway)",
-            Some("Test the connection from the AI Center page."),
+            Some(
+                "Point SupportOS+ at a local LM Studio server to draft replies, \
+                 summarize threads and power semantic search on this machine — \
+                 nothing goes to a hosted service. An empty URL falls back to \
+                 the default endpoint (http://127.0.0.1:1234).",
+            ),
             |ui| {
                 design::form_grid(ui, "settings-lmstudio", |ui| {
                     let base_label = design::field_label(ui, "base url:");
@@ -1912,29 +1996,59 @@ impl SettingsPage {
                         egui::TextEdit::singleline(&mut self.lmstudio_base_url)
                             .hint_text("http://localhost:1234/v1"),
                     )
-                    .labelled_by(base_label.id);
+                    .labelled_by(base_label.id)
+                    .on_hover_text(
+                        "Start the server in LM Studio (Developer tab) and paste \
+                         its local address here — usually http://localhost:1234/v1.",
+                    );
                     ui.end_row();
                     let chat_label = design::field_label(ui, "chat model:");
                     ui.add_sized(
                         [320.0, 28.0],
-                        egui::TextEdit::singleline(&mut self.lmstudio_chat_model),
+                        egui::TextEdit::singleline(&mut self.lmstudio_chat_model)
+                            .hint_text("e.g. qwen2.5-7b-instruct"),
                     )
-                    .labelled_by(chat_label.id);
+                    .labelled_by(chat_label.id)
+                    .on_hover_text(
+                        "The model name exactly as LM Studio lists it — used for \
+                         draft replies, notes and summaries.",
+                    );
                     ui.end_row();
                     let embed_label = design::field_label(ui, "embedding model:");
                     ui.add_sized(
                         [320.0, 28.0],
-                        egui::TextEdit::singleline(&mut self.lmstudio_embedding_model),
+                        egui::TextEdit::singleline(&mut self.lmstudio_embedding_model)
+                            .hint_text("e.g. text-embedding-nomic-embed-text-v1.5"),
                     )
-                    .labelled_by(embed_label.id);
+                    .labelled_by(embed_label.id)
+                    .on_hover_text(
+                        "The model that powers semantic search. It can stay empty \
+                         if you only use keyword search.",
+                    );
                     ui.end_row();
                 });
                 ui.add_space(8.0);
-                if design::button(ui, "Save", ButtonVariant::Primary).clicked() {
-                    self.save_lmstudio(db);
-                }
+                ui.horizontal(|ui| {
+                    if design::button(ui, "Save", ButtonVariant::Primary).clicked() {
+                        self.save_lmstudio(db);
+                    }
+                    // UX-23: the old subtitle was a dead end — "Test the
+                    // connection from the AI Center page" with no way to get
+                    // there. The test now sits one click from the fields it
+                    // tests.
+                    if design::button(ui, "Open AI Center", ButtonVariant::Outline)
+                        .on_hover_text(
+                            "The AI Center page shows the connection status and \
+                             runs a live test against this URL",
+                        )
+                        .clicked()
+                    {
+                        nav = Some(NavRequest::Page(PageKey::AiCenter));
+                    }
+                });
             },
         );
+        nav
     }
 
     fn vector_index_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -1957,14 +2071,35 @@ impl SettingsPage {
                 }
                 design::form_grid(ui, "settings-vector-index", |ui| {
                     design::field_label(ui, "store:");
-                    ui.monospace(
-                        egui::RichText::new(if self.vector_store_path.is_empty() {
+                    ui.horizontal(|ui| {
+                        // UX-24: the path truncates instead of overflowing on
+                        // narrow viewports, copies in one click, and shows
+                        // the full location on hover — it was a raw
+                        // unbounded monospace line before.
+                        let path = if self.vector_store_path.is_empty() {
                             "(unknown data directory)".to_string()
                         } else {
                             self.vector_store_path.clone()
-                        })
-                        .color(design::tokens(ui).foreground),
-                    );
+                        };
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(path.as_str())
+                                    .size(12.5)
+                                    .color(design::tokens(ui).foreground),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&path);
+                        if !self.vector_store_path.is_empty()
+                            && design::button(ui, "Copy Path", ButtonVariant::Ghost).clicked()
+                        {
+                            ui.ctx().output_mut(|o| {
+                                o.commands.push(egui::OutputCommand::CopyText(
+                                    self.vector_store_path.clone(),
+                                ));
+                            });
+                        }
+                    });
                     ui.end_row();
                     let prev = db
                         .with_read(|conn| {
@@ -1972,14 +2107,18 @@ impl SettingsPage {
                         })
                         .unwrap_or(true);
                     let mut enabled = prev;
-                    let toggle = ui.checkbox(&mut enabled, "vector index enabled");
-                    toggle.on_hover_text(
+                    // UX-24: a labelled control row. The bare checkbox read
+                    // as static "✓ vector index enabled" text in the audit;
+                    // the label column plus the hover explanation make the
+                    // control — and what it switches — obvious.
+                    design::field_label(ui, "semantic search:");
+                    let toggle = ui.checkbox(&mut enabled, "enabled").on_hover_text(
                         "Dense vectors are embedded and searched while enabled; searches \
                          fall back to FTS5 when disabled. Applies on the next start — \
                          the workers open the store at boot.",
                     );
                     ui.end_row();
-                    if enabled != prev {
+                    if toggle.changed() && enabled != prev {
                         let result = db.with_write(|conn| {
                             spp_core::settings::set_bool(conn, "qdrant_enabled", enabled)
                         });
@@ -1999,51 +2138,72 @@ impl SettingsPage {
     }
 
     fn hours_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
-        design::card_titled_wide(ui, "Business hours per mailbox", None, |ui| {
-            let hours = self.hours.clone();
-            let mut edit: Option<BusinessHoursRow> = None;
-            egui::ScrollArea::vertical()
-                .id_salt("settings-hours")
-                .show(ui, |ui| {
-                    for row in &hours {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(row.name.as_str())
-                                    .size(13.5)
-                                    .strong()
-                                    .color(design::tokens(ui).foreground),
-                            );
-                            if row.configured {
-                                design::badge(ui, "configured", BadgeTone::Success);
-                                design::hint_text(
-                                    ui,
-                                    &format!(
-                                        "{} · {} · {}-{} · fr {}m · res {}m",
-                                        row.timezone,
-                                        row.days,
-                                        minutes_label(row.start_minute),
-                                        minutes_label(row.end_minute),
-                                        row.first_response_target_min,
-                                        row.resolution_target_min
-                                    ),
+        // UX-29: the card explains what business hours actually drive — it
+        // was a bare table of mailboxes with no purpose statement.
+        design::card_titled_wide(
+            ui,
+            "Business hours per mailbox",
+            Some(
+                "On-time targets per mailbox — reports and coaching use these \
+                 windows to judge whether a first reply or a resolution was \
+                 fast enough. Mailboxes appear here after the first Help Scout \
+                 sync.",
+            ),
+            |ui| {
+                let hours = self.hours.clone();
+                let mut edit: Option<BusinessHoursRow> = None;
+                egui::ScrollArea::vertical()
+                    .id_salt("settings-hours")
+                    .show(ui, |ui| {
+                        for row in &hours {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(row.name.as_str())
+                                        .size(13.5)
+                                        .strong()
+                                        .color(design::tokens(ui).foreground),
                                 );
-                            } else {
-                                design::badge(ui, "not configured", BadgeTone::Neutral);
-                            }
-                            if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
-                                edit = Some(row.clone());
-                            }
-                        });
-                        ui.add_space(2.0);
-                    }
-                    if hours.is_empty() {
-                        design::hint_text(ui, "(no mailboxes synced yet)");
-                    }
-                });
-            if let Some(row) = edit {
-                self.hours_edit = Some(row);
-            }
-        });
+                                if row.configured {
+                                    design::badge(ui, "configured", BadgeTone::Success);
+                                    // UX-29: spell out the abbreviations —
+                                    // "fr 480m · res 1440m" read as noise.
+                                    design::hint_text(
+                                        ui,
+                                        &format!(
+                                            "{} · {} · {}-{} · first response {} min · resolution {} min",
+                                            row.timezone,
+                                            row.days,
+                                            minutes_label(row.start_minute),
+                                            minutes_label(row.end_minute),
+                                            row.first_response_target_min,
+                                            row.resolution_target_min
+                                        ),
+                                    );
+                                } else {
+                                    // UX-29: a warning tone — "not configured"
+                                    // is a to-do, not a neutral fact, since
+                                    // reports fall back to defaults until it
+                                    // is set.
+                                    design::badge(ui, "not configured", BadgeTone::Warning);
+                                }
+                                if design::button(ui, "Edit", ButtonVariant::Outline).clicked() {
+                                    edit = Some(row.clone());
+                                }
+                            });
+                            ui.add_space(2.0);
+                        }
+                        if hours.is_empty() {
+                            design::hint_text(
+                                ui,
+                                "No mailboxes yet — they appear here after the first Help Scout sync.",
+                            );
+                        }
+                    });
+                if let Some(row) = edit {
+                    self.hours_edit = Some(row);
+                }
+            },
+        );
 
         let Some(mut row) = self.hours_edit.clone() else {
             return;
@@ -2136,16 +2296,41 @@ impl SettingsPage {
                             ui.monospace(
                                 egui::RichText::new(str_field(backup, "file")).color(t.foreground),
                             );
-                            design::hint_text(
-                                ui,
-                                &format!("{} bytes", i64_field(backup, "size_bytes")),
-                            );
+                            // UX-22: metadata in user terms — "2.0 MB" and
+                            // "3h ago" instead of raw bytes and an RFC3339
+                            // stamp; the exact values stay one hover away.
+                            let size_bytes = i64_field(backup, "size_bytes");
+                            ui.label(
+                                egui::RichText::new(human_bytes(size_bytes))
+                                    .small()
+                                    .color(design::tokens(ui).muted_foreground),
+                            )
+                            .on_hover_text(format!("{size_bytes} bytes"));
                             if let Some(created) = backup.get("created_at").and_then(|a| a.as_str())
                             {
-                                design::hint_text(ui, created);
+                                let rel = relative_time(created);
+                                let label = if rel == created {
+                                    created.to_string()
+                                } else {
+                                    rel
+                                };
+                                ui.label(
+                                    egui::RichText::new(label)
+                                        .small()
+                                        .color(design::tokens(ui).muted_foreground),
+                                )
+                                .on_hover_text(created);
                             }
-                            if design::button(ui, "Restore", ButtonVariant::Outline)
-                                .on_hover_text("restores the database file — restart the app after")
+                            // UX-22: restore replaces the live database — a
+                            // destructive action, so it wears the danger
+                            // variant and arms a confirmation below (never a
+                            // one-click apply).
+                            if design::button(ui, "Restore", ButtonVariant::Destructive)
+                                .on_hover_text(
+                                    "replaces the current database with this backup \
+                                     (a confirmation step follows) — restart the app \
+                                     afterwards",
+                                )
                                 .clicked()
                                 && let Some(dir) = &self.backups_dir
                             {
@@ -2161,9 +2346,10 @@ impl SettingsPage {
                 design::error_text(
                     ui,
                     &format!(
-                        "Restore {}? The current database will be REPLACED by this backup \
-                         (verified first). Restart SupportOS+ afterwards to use it.",
-                        path
+                        "Restore this backup? The current database will be REPLACED \
+                         by \u{201c}{path}\u{201d} (the file is verified first). Restart \
+                         SupportOS+ afterwards to use it.",
+                        path = path.rsplit('/').next().unwrap_or(&path),
                     ),
                 );
                 ui.add_space(4.0);

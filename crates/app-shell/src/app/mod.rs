@@ -789,7 +789,9 @@ impl ShellApp {
                                     PageKey::Search => {
                                         nav = self.search.ui(ui, &self.db);
                                     }
-                                    PageKey::Settings => self.settings.ui(ui, &self.db),
+                                    PageKey::Settings => {
+                                        nav = self.settings.ui(ui, &self.db);
+                                    }
                                     PageKey::SupportGraph => {
                                         nav = self.support_graph.ui(ui, &self.db);
                                     }
@@ -838,6 +840,15 @@ impl ShellApp {
                     break;
                 }
             }
+        }
+        // Settings tabs (Sync & AI, Help Scout, LM Studio, Vector index,
+        // Business hours, Backups & export) — the audit evidence needs the
+        // tab, not just the page. Ignored when SPP_SHOT_PAGE is not Settings.
+        if let Ok(tab) = std::env::var("SPP_SHOT_TAB")
+            && !tab.is_empty()
+            && !self.settings.set_tab_by_label(&tab)
+        {
+            tracing::warn!(tab = %tab, "SPP_SHOT_TAB: no settings tab matches");
         }
         if std::env::var("SPP_SHOT_SEED").as_deref() == Ok("1")
             && let Err(e) = self.db.with_write(seed_fixture_for_screenshots)

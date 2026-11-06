@@ -378,6 +378,26 @@ pub(crate) fn format_intraday_minutes(minutes: f64) -> String {
     }
 }
 
+/// UX-22: human-readable byte sizes — "2.1 MB", not "2145280 bytes" —
+/// for user-facing metadata like backup files.
+pub(crate) fn human_bytes(bytes: i64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    if bytes < 0 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
 fn calendar_day_diff(a_iso: &str, b_iso: &str) -> Option<i64> {
     let (ay, am, ad) = date_parts(a_iso)?;
     let (by, bm, bd) = date_parts(b_iso)?;
@@ -492,6 +512,18 @@ mod tests {
         assert_eq!(opt_str_field(&v, "null"), None);
         assert_eq!(opt_str_field(&v, "missing"), None);
         assert_eq!(opt_str_field(&v, "name").as_deref(), Some("Kim"));
+    }
+
+    /// UX-22: metadata reads in user units, with the byte count exact for
+    /// small files and one decimal past KB.
+    #[test]
+    fn human_bytes_renders_user_facing_sizes() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(2_145_280), "2.0 MB");
+        assert_eq!(human_bytes(1536), "1.5 KB");
+        assert_eq!(human_bytes(3 * 1024 * 1024 * 1024), "3.0 GB");
+        assert_eq!(human_bytes(-4), "-4 B");
     }
 
     #[test]
