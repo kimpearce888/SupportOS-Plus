@@ -7511,3 +7511,12 @@ no nav target from core data), UX-35 (raw job-error strings from core).
 
 Rule 8 STOP — batch UXA-1 of ten is complete; the queue holds UXA-2
 (items UX-10 onward). Resume on the owner's "continue".
+
+CI outcome addendum (appended to the UXA-1 record, append-only): the
+12-commit push (57c9a03..ec4632d) went green 3/3 on the first push —
+fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · **kittest
+snapshot locks ✓** (the locally-regenerated baselines, rendered with the
+sandbox-extracted lavapipe 25.0.7, match CI's lavapipe rendering — the
+cross-Mesa risk closed) — CI run 42148385123, completed success. The GA-1
+standing practice (cargo fmt --all -- --check as the final pre-push local
+step) held. Rule 8 STOP.
