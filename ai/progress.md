@@ -6,11 +6,26 @@
 
 ## Active items
 
-**None.** No batch is active and none is held (authoritative, 2026-11-06,
-post-Batch UXA-4). The final UX-audit batch closed same-session — record
-in `completed.md` — and the queue in `ai/plan.md` is empty. The
-engagement sits at a Rule 8 STOP; new work opens only on an owner
-directive.
+**None.** No batch is active and none is held (authoritative, 2026-11-07,
+post-Batch UXB-1). The backend-blocked batch — UX-26B/UX-34/UX-35, pulled
+from `ux-audit/reports/issues.md` on the owner's "resolve ignored items"
+directive — moved through this file per Rules 2 and 4, was implemented,
+verified, and closed the same session (record in `completed.md`); the
+ux-audit backlog is now fully consumed. The engagement sits at a Rule 8
+STOP; new work opens only on an owner directive. One test-infra finding
+surfaced during verification (UXB-T1, sync-health golden date-tick) is
+logged in `ux-audit/reports/issues.md`, not queued.
+
+Batch UXB-1 (items UX-26B/UX-34/UX-35) moved through this file per Rules 2
+and 4 on 2026-11-07 — opened on the owner's "resolve ignored items"
+directive after the UXA-4 program close (third sandbox recycle: repo
+re-cloned at 771ed80, Rust 1.99.1 + lavapipe/xkb re-extracted to the
+persistent home prefix first), implemented with the batch scope extended
+to `crates/core/src/` by owner directive, verified (fmt/clippy/tests
+458+246+466-sandbox/kittest diff-locked ×2 on regenerated baselines/
+SPP_SMOKE 24 pages · 4338 shapes + 3 luma-verified 1920×1080 after-shots
+with GREEN VLM read-backs), completed the same session; record in
+`completed.md`.
 
 Batch UXA-4 (items UX-31..UX-33: the final three fixes of the
 owner-directed UX/UI audit program) moved through this file per Rules 2

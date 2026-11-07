@@ -7,14 +7,15 @@
 
 ## Queue state
 
-**UX-audit program — CONSUMED 2026-11-06: the final batch UXA-4 (items
+**UX-audit program — CONSUMED 2026-11-06/07: the final batch UXA-4 (items
 UX-31..UX-33) moved to `progress.md` per Rule 2, implemented, verified,
 and closed the same session (record in `completed.md`). Every
 frontend-fixable finding is done (UXA-1: UX-1..UX-9 + UX-25, UXA-2:
-UX-10..UX-19, UXA-3: UX-20..UX-30, UXA-4: UX-31..UX-33); the queue is
-EMPTY. Backend-blocked UX-26B/UX-34/UX-35 stay logged in
-`ux-audit/reports/issues.md`. New work opens only on an owner
-directive.**
+UX-10..UX-19, UXA-3: UX-20..UX-30, UXA-4: UX-31..UX-33). The three
+backend-blocked findings UX-26B/UX-34/UX-35 followed as batch UXB-1 on the
+owner's "resolve ignored items" directive (2026-11-07, per the queue
+section below); with that the ux-audit backlog is fully consumed and the
+queue is EMPTY. New work opens only on an owner directive.**
 
 Every prior program is consumed with completion records in `completed.md`
 (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6; RF-1..11 + FINISH;
@@ -26,10 +27,19 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
 
-### UX-audit queue (EMPTY — final batch UXA-4: items UX-31..UX-33 moved to `progress.md` per Rule 2, 2026-11-06)
+### UX-audit queue (EMPTY — backend batch UXB-1: items UX-26B/UX-34/UX-35 moved to `progress.md` per Rule 2, closed 2026-11-07)
 
-No queued items. Backend-blocked findings UX-26B/UX-34/UX-35 remain logged
-in `ux-audit/reports/issues.md`, not queued here.
+No queued items. The owner's "resolve ignored items" directive (2026-11-07,
+after the UXA-4 program close) pulled the three backend-blocked UX findings
+out of `ux-audit/reports/issues.md` as batch UXB-1 and moved them straight
+through Rule 2 to `progress.md` — implementation scope for that batch
+extended to `crates/core/src/` by owner directive (the UXA scope contract's
+frontend-only limit was lifted for exactly those three items). All three
+are fixed and verified (record in `completed.md`; statuses updated in
+`ux-audit/reports/issues.md`). One test-infra finding surfaced during the
+batch verification (UXB-T1: sync-health kittest goldens tick "Nd ago" at
+every UTC midnight — fixed-stamp fixture vs day-granularity relative
+display) is logged there, not queued.
 
 Prior programs (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6;
 RF-1..11 + FINISH; KB/AUDIT; REL-1/2/3; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1)

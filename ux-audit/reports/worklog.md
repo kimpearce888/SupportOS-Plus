@@ -316,3 +316,86 @@
     the separate "Restore a backup" card, outlined enabled exports;
     shell — "Help Scout · never synced" pill, labelled "Dark" toggle,
     no mystery icon-only button left.
+
+## Session 2026-11-07 (UXB-1 — the backend-blocked batch, UX-26B/UX-34/UX-35)
+
+37. Environment rebuild #3 (the sandbox was recycled again after the
+    UXA-4 session): repo re-cloned (main @ 771ed80 — UXA-4 had already
+    closed and pushed, CI run 42294959798 green; the session summary
+    claiming UXA-4 was pending was stale); Rust 1.99.1 via rustup;
+    mesa-vulkan-drivers (25.0.7-2+deb13u1, URL-encoded "+" — the plain
+    plus 404s) + libxkbcommon-x11/libxkbcommon0/libxcb-xkb re-extracted
+    to `~/.local/opt/vulkan-libs/` (env script exporting
+    VK_DRIVER_FILES/VK_ICD_FILENAMES/LD_LIBRARY_PATH/WGPU_BACKEND);
+    owner's GitHub credentials stored in the git credential helper.
+38. Batch opening: owner directive "continue … if no pending item is
+    there, resolve ignored items first" — the queue was empty (UXA-4
+    closed), so the three backend-blocked findings were pulled from
+    issues.md as Batch UXB-1, moved through Rule 2 into progress.md with
+    the scope extended to `crates/core/src/` by the same directive.
+39. UX-26B implementation: `effective_secret`/`SECRET_CAP` deleted;
+    `verify_delivery` verifies the full stored secret and falls back to
+    the 40-char prefix only when the stored secret is longer (the prefix
+    is what cap-era builds registered on the platform — accepting it is
+    strictly no weaker than the pre-fix state, which accepted nothing
+    else); `register_hook` registers the full secret; loopback passes
+    the stored secret untruncated; settings copy de-capped (hover now
+    says both sides verify with the full secret).
+40. UX-34 implementation: core FailedJobs drill `automation` →
+    `diagnostics` (Diagnostics holds the recent-failures table — the
+    stale payload contradicted the UX-14 behavior); frontend TileView
+    now carries the parsed drill (`TileDrill::Inbox | Page(PageKey)`)
+    and derives nav + drill lines from it — Repeated issue, Known issue
+    and AI escalation (core-marked inbox-drillable all along; the inbox
+    ops-filter layer already supports all 9 keys) become clickable, and
+    unknown page names degrade to inert tiles instead of dead buttons.
+41. UX-35 implementation: `sweep_failed_jobs` writes friendly titles
+    (job-type label map, no `{queue}/{job_type}` internals) and
+    classified bodies (unreachable/auth/rate_limited/bad_response/
+    misconfigured/unknown; host extracted from the reqwest "url (…)"
+    shape; LM Studio hint for localhost), with the verbatim error +
+    code + queue + job_type preserved in the notifications payload
+    column (schema pre-existed, insert/record/SELECTs now carry it);
+    the notifications page keeps the UX-13 truncated-monospace body and
+    reveals the raw detail on hover via `technical_detail()`.
+42. Verification chain: fmt clean (one clippy redundant-guard + one fmt
+    wrap fixed en route); clippy workspace --all-targets -D warnings
+    clean; core 458/458 (9 new/updated), app-shell lib 246/246 (2 new),
+    integration 2/2, sandbox lane clippy + 466/466; disk hygiene en
+    route (incremental 3.0G + registry cache + rust-docs removed after
+    a linker Bus error at 100% — CARGO_INCREMENTAL=0 for the rest).
+43. kittest drift discipline: first diff-locked run (cargo-level
+    --no-fail-fast; the libtest-level flag is rejected) drifted exactly
+    the two intended suites — operations 6 (3 tiles gaining "open →"),
+    notifications 7 (the new job-failure fixture card; the mentions
+    golden's 45px = the unread count) — audited one-for-one, diff
+    regions pixel-located to the expected UI areas. UPDATE_SNAPSHOTS=1
+    regenerated 20 goldens: the 13 intended + 7 sync-health goldens.
+44. UXB-T1 discovery (the +7): sync-health goldens re-rendered "11d
+    ago" where run 1 (minutes earlier) had matched "10d ago" — UTC
+    midnight crossed between the two runs; the fixture seeds fixed
+    2026-10-27 stamps and `relative_time` is day-granular, so those 7
+    goldens tick once per UTC midnight (a time bomb for any CI run on a
+    later calendar day; pixel-verified as a single 6×8px glyph per
+    golden). Disclosed in issues.md + completed.md, re-baselined with
+    the batch; durable fix (deterministic fixture clock) proposed, not
+    queued. Full suite then diff-locked GREEN twice (exit 0, 27 suites).
+45. SPP_SMOKE rc=0 (24 pages / 4338 shapes; +79 vs the UXA-3 baseline —
+    the three newly wired tiles' drill lines and the notifications hover
+    structure).
+46. After-evidence: 3 shots at 1920×1080 via ui-screenshot + Xvfb -ac
+    (one Xvfb lifetime per shot; /tmp/.X11-unix absent = warning-only;
+    the app datadir wiped per shot so the seed re-runs idempotently —
+    the first notifications attempt silently failed on a stale seeded
+    DB, "UNIQUE constraint failed: users.id" in the log was the tell).
+    All rc=0, luma 243.9–248.6. VLM read-backs GREEN (no 429s):
+    operations — all 16 tiles carry named affordances ("diagnostics →",
+    "sync health →", "automation →", "issue radar →", "outreach →",
+    "open →" incl. Repeated issue/Known issue/AI escalation);
+    notifications — "Background job failed: AI task" card, friendly body
+    naming localhost:1234 in a human sentence, no raw URL or "error
+    sending request" text, badge "Job failure"; settings Help Scout —
+    webhook-secret field renders, no 40-character warning anywhere. The
+    notifications shot seed extended (feature-gated) to produce the
+    job-failure card in the exact sweep shape — the sweep path itself is
+    unit-tested in core (UXA-4's SPP_SHOT_PALETTE_QUERY precedent).

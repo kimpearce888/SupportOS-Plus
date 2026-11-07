@@ -7770,3 +7770,74 @@ local zero-drift prediction held: nothing golden-locked changed this
 batch) — CI run 42294959798, completed success. The GA-1 standing
 practice (cargo fmt --all -- --check as the final pre-push local step)
 held. The UX-audit program is closed; Rule 8 STOP.
+
+## Batch UXB-1 — the backend-blocked UX-audit fixes (UX-26B/UX-34/UX-35)
+
+Opened 2026-11-07 on the owner's "continue … if no pending item is there,
+resolve ignored items first" directive after the UXA-4 program close
+(third sandbox recycle of the engagement: repo re-cloned at 771ed80, Rust
+1.99.1 + lavapipe/xkb re-extracted to the persistent home prefix, owner's
+GitHub credentials stored in the git credential helper for the batch
+push); the three items pulled from `ux-audit/reports/issues.md` per Rule 2
+with the batch scope extended to `crates/core/src/` by owner directive;
+implemented, verified, and closed the same session (Rule 4). Per-item
+evidence: `ux-audit/reports/` (issues.md backend-blocked statuses ·
+worklog.md items 37–46).
+
+**Items (3):** UX-26B (webhook secret cap — `verify_delivery` verifies
+with the FULL stored secret and keeps a legacy fallback that accepts a
+signature over the first 40 characters, so hooks registered by cap-era
+builds — whose platform-side secret IS the capped prefix — do not regress;
+`register_hook` now registers the full secret; the settings copy retired
+the 40-char warnings), UX-34 (operations drill data — core's FailedJobs
+drill corrected to `diagnostics` where the failed-jobs table lives, and
+the frontend now derives tile navigation + drill lines from core's drill
+payload instead of a hardcoded duplicate map, making the three tiles core
+already marked inbox-drillable (Repeated issue, Known issue, AI
+escalation) clickable like their siblings; unknown page names degrade to
+inert tiles), UX-35 (job-failure notifications — friendly job-type title
++ classified friendly body (unreachable/auth/rate_limited/bad_response/
+misconfigured/unknown, host extracted, LM Studio hint for localhost), the
+verbatim error + code + queue + job_type preserved in the notifications
+`payload` JSON (column existed, unused); the notifications page reveals
+the raw detail on hover).
+
+**Verification:** fmt clean · clippy --locked --workspace --all-targets
+-D warnings clean · core 458/458 (9 new/updated UX tests) · app-shell lib
+246/246 (2 new UX-34 tests) · non-kittest integration 2/2 · sandbox
+feature lane clippy + 466/466 · kittest first diff-locked run
+--no-fail-fast: exactly the two intended suites drifted (operations 6,
+notifications 7 — audited one-for-one against the batch changes; diff
+regions pixel-located: 3 tiles' new "open →" lines, the new fixture card)
+· baselines regenerated, full suite diff-locked GREEN twice (exit 0, 27
+suites) — 13 intended golden regens plus 7 disclosed sync-health regens
+from the UXB-T1 date-tick (see below) · SPP_SMOKE rc=0 (24 pages / 4338
+shapes) · after-evidence: 3 luma-verified 1920×1080 shots (operations,
+notifications, settings Help Scout) with GREEN VLM read-backs: all 16
+operations tiles now carry named drill affordances incl. "diagnostics →"
+and the three newly wired "open →" tiles; the notifications card reads
+"Background job failed: AI task" with a friendly body (no raw URL or
+error string visible; badge "Job failure"); the Help Scout tab renders
+the webhook-secret field with no 40-character warning text.
+
+- Scope: `crates/core/src/` (webhook.rs, webhook_handler.rs, loopback.rs,
+  webhook_health.rs, operations.rs, notifications.rs, notification_sweep.rs)
+  + `crates/app-shell/src/` (pages/operations.rs, pages/notifications.rs,
+  pages/settings.rs, app/mod.rs) + the kittest notifications fixture and
+  the feature-gated screenshot seed (dev-only, off in every normal/CI
+  build) + 20 kittest goldens + ledger/reports. No CI, workflow,
+  packaging or Cargo.lock changes (`--locked` throughout).
+
+**New finding disclosed (UXB-T1, test-infra, logged not queued):** the
+sync-health kittest goldens tick "Nd ago" at every UTC midnight (fixed
+2026-10-27 fixture stamps vs day-granularity `relative_time`); it fired
+mid-batch when UTC midnight crossed between the first diff-locked run and
+the baseline regen (10d → 11d, a single 6×8px glyph per golden,
+pixel-verified), and any CI run on a later calendar day than the last
+regen would fail those 7 goldens. Re-baselined with the batch; durable
+fix (deterministic clock for fixtures) proposed in
+`ux-audit/reports/issues.md`.
+
+With UXB-1 the ux-audit backlog is fully consumed: UXA-1..UXA-4 (33
+frontend findings) + UXB-1 (3 backend findings). Rule 8 STOP — the queue
+is empty; resume only on a new owner directive.
