@@ -8062,3 +8062,11 @@ passed (disk pressure; release artifacts and evidence unaffected).
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+CI outcome addendum (appended to the REL-4 record, append-only): the
+ledger-close push (9afef58..37eb33a) went green 3/3 on the first push —
+fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · kittest snapshot
+locks ✓ (the pinned clock held again, now two calendar days of CI runs
+past the Nov-7 regen) — CI run `42363630837`, completed success. Rule 8
+STOP — the queue is empty; the next work item requires a new owner
+directive.
