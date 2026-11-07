@@ -8314,3 +8314,11 @@ Verification (full battery, 2026-11-07/08):
 
 Rule 8 STOP — the queue is empty; the next work item requires a new
 owner directive.
+
+CI outcome addendum (appended to the UXE-1 record, append-only): the
+batch push (9acb6fd..e53d680) went green on the first push — CI run
+`42389418657`, completed success (fmt/clippy/test/deny ✓ · AppImage +
+.deb build smoke ✓ · kittest snapshot locks ✓ — the 173 regenerated + 3
+new responsive goldens held cross-runner through lavapipe, and the
+pinned shot clock held). Rule 8 STOP — the queue is empty; the next
+work item requires a new owner directive.
