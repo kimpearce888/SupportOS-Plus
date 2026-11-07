@@ -27,18 +27,17 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
 
-### Release queue
+### Release queue (EMPTY — Batch REL-4 closed 2026-11-07)
 
-**Batch REL-4 — Build & Release v1.9.5 from the final source** (opened
-2026-11-07 on the owner's Build-and-Release directive — the same program as
-REL-1/2/3: build, test, and publish install-ready Linux `.deb` + `.AppImage`
-packages from the final repository source, with a versioned GitHub Release,
-checksums, and verified download links). The four items (REL-4-1..REL-4-4)
-moved straight through Rule 2 to `progress.md` and are being executed the
-same session. v1.9.5 is the first release to carry the UXB-1 fixes
-(UX-26B/UX-34/UX-35 — the backend-blocked UX-audit findings) and the
-UXB-T1 deterministic shot clock; both batches' pushes were CI-green
-(runs 42319227840, 42331436125).
+No queued items. The owner's Build-and-Release directive (2026-11-07, after
+the UXB-T1 close) opened Batch REL-4 (items REL-4-1..REL-4-4: version bump
+1.9.4 → 1.9.5, CHANGELOG `[1.9.5]`, annotated tag `v1.9.5`, publish +
+verification); the items moved straight through Rule 2 to `progress.md`,
+were implemented, verified (full local battery + CI run 42359689689 green
++ Release run 42361423228 green 6/6 + live post-publish verification), and
+closed the same session (record in `completed.md`). Release **v1.9.5** is
+published at tag `v1.9.5` (target `9afef58` = main tip) with the .deb +
+AppImage, SHA-256 checksums, and per-asset link verification.
 
 ### UX-audit queue (EMPTY — test-infra batch UXB-T1 closed 2026-11-07)
 
@@ -60,8 +59,8 @@ same session (record in `completed.md`; status updated in
 UX-audit program is closed; the queue is empty.
 
 Prior programs (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6;
-RF-1..11 + FINISH; KB/AUDIT; REL-1/2/3; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1)
-are fully consumed with completion records in `completed.md`.
+RF-1..11 + FINISH; KB/AUDIT; REL-1..4; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1;
+UXA-1..4 + UXB-1 + UXB-T1) are fully consumed with completion records in `completed.md`.
 
 ## Notes
 

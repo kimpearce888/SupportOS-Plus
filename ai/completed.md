@@ -7945,3 +7945,120 @@ calendar day, the very property this batch was opened for) — CI run
 42331436125, completed success. The GA-1 standing practice (cargo fmt --all
 -- --check as the final pre-push local step) held. The UX-audit program,
 including its test-infra tail, is fully closed; Rule 8 STOP.
+
+---
+
+## Batch REL-4 — Build & Release v1.9.5 from the final source (2026-11-07)
+
+**Owner directive:** build, test, and publish install-ready Linux `.deb` and
+`.AppImage` packages from the final repository source; versioned GitHub
+Release with both packages attached, checksums, compatibility, and verified
+download links; packages must be self-contained and launch-ready with no
+dev tools, manual dependency handling, or first-run setup (same program as
+REL-1/2/3).
+
+**Items:**
+- REL-4-1: workspace version 1.9.4 → 1.9.5 (Cargo.toml + Cargo.lock).
+- REL-4-2: CHANGELOG `[1.9.5]` section in product language + link reference.
+- REL-4-3: annotated tag `v1.9.5` on the release commit (after CI green).
+- REL-4-4: publish via release.yml + live post-publish verification.
+
+**Release commit:** `9afef58` (main tip at push; carries UXB-1
+UX-26B/34/35 + UXB-T1 — none of it in any published release; v1.9.4
+shipped `f35c463`).
+
+**Local verification battery (FULL, unlike the REL-3 recycle — this
+sandbox had Rust 1.99.1 and enough disk; fifth sandbox recycle, repo
+re-cloned at fa663b3):**
+- Version bump: Cargo.toml edit + `cargo metadata` regeneration; text diff
+  shows exactly the four member-package version lines (app-shell, catalog,
+  core, xtask → 1.9.5), zero stray changes; zero stale `1.9.4` strings
+  outside ledger/CHANGELOG history.
+- Gates: no-simulation clean, traceability OK (23 routes, 20 design.rs DC
+  tags, 27 DC ids).
+- fmt `--all --check` clean; clippy `--locked --workspace --all-targets
+  -D warnings` clean (3m02s); sandbox-feature clippy lane clean (40.8s).
+- Tests: core 458/458 (+3 ignored), app-shell lib 246/246, style_lint
+  integration 2/2, xtask 11/11, sandbox lane 466/466 (+3 ignored) —
+  matching the UXB-1/UXB-T1 baselines exactly.
+- Release build on the EXACT release profile (fat LTO, codegen-units=1,
+  opt-level=s, strip; sandbox feature on): the link OOM-killed once with
+  the sandbox's co-resident Next.js dev server (~800 MB RSS); stopped it
+  (unrelated standing environment process, restartable) and the link went
+  green in 3m03s — 30.9 MB binary.
+- SPP_SMOKE rc=0 on the release binary: 54 migrations, boot services,
+  background workers, loopback listener, automatic backup, 24 pages /
+  4338 shapes (identical to the UXB-1/T1 baseline).
+- `.deb` via `xtask deb --skip-build`: 9,354,888 B local build;
+  dpkg-deb metadata (Package supportos-plus, Version 1.9.5, amd64, the
+  19-dep Depends set led by `libc6 (>= 2.35)`), contents (binary +
+  desktop entry + copyright + hicolor icons ×4), extract + SPP_SMOKE
+  rc=0 from the extracted tree.
+- AppImage preflight: `xtask package --skip-build` staged the AppDir and
+  stopped exactly at `ensure_host_libs_bundled` (the sandbox host lacks
+  libxkbcommon-x11/libxcb-xkb and has no root — disclosed); the three
+  BUNDLED_HOST_LIBS were placed from the ubuntu:22.04 archive
+  (libxkbcommon 1.4.0-1, libxcb-xkb 1.14-3ubuntu3) exactly as the step
+  copies them; appimagetool 1.9.1 downloaded at xtask's pinned URL and
+  SHA256-verified; AppImage built (12,818,936 B local) and
+  APPIMAGE_EXTRACT_AND_RUN + SPP_SMOKE rc=0.
+- release.yml extraction simulation: version awk → 1.9.5; changelog
+  section awk → the full 35-line `[1.9.5]` section.
+
+**CI on the release commit:** run `42359689689` — 3/3 green (fmt/clippy/
+test/deny, AppImage + .deb build smoke, kittest snapshot locks on the
+pinned clock) before tagging.
+
+**CI Release run `42361423228` (tag push, 6/6 jobs green):**
+- build + test + package (ubuntu:22.04, glibc 2.35 baseline): gates, fmt,
+  clippy ×2 `--locked -D warnings`, workspace tests ×2, release build
+  with the Landlock/seccomp parse sandbox, xtask AppImage + .deb
+  packaging, dist staging with SHA256SUMS.txt + BUILD-INFO.txt.
+- verify .deb on clean ubuntu:22.04, ubuntu:24.04, debian:12 containers:
+  checksum integrity, APT install with automatic dependency resolution,
+  package metadata + desktop-file-validate + all four icons, SPP_SMOKE
+  boot chain, 0.2.x→1.x data-directory upgrade migration (in-place, data
+  preserved), GUI launch under Xvfb with only declared dependencies,
+  reinstall, uninstall (user data preserved), purge.
+- verify AppImage (ubuntu-latest): checksum integrity,
+  APPIMAGE_EXTRACT_AND_RUN boot smoke, GUI launch under Xvfb.
+- publish-after-green: release created, then every asset URL
+  re-downloaded in-workflow and checksum-verified against the uploaded
+  bytes.
+
+**Live post-publish verification (this sandbox, from the published
+bytes):**
+- Release `v1.9.5` = "SupportOS+ 1.9.5", draft=false, prerelease=false,
+  target_commitish `9afef580fb4d…` == release commit == main tip; tag
+  peels to the same commit (`git rev-parse v1.9.5^{commit}`).
+- All four assets downloaded live (AppImage 12,806,648 B; .deb
+  10,208,482 B; SHA256SUMS.txt; BUILD-INFO.txt); `sha256sum -c`: both
+  packages OK (AppImage `85c319f8…cafed`, .deb `6dc0915b…b731`).
+- BUILD-INFO.txt: version 1.9.5, commit `9afef580fb4d…`, built on
+  ubuntu:22.04 at 2026-11-07T10:14:49Z.
+- Published `.deb` re-inspected (Package/Version/Architecture, 22
+  usr-tree files incl. binary + desktop + 4 icons) and extracted;
+  SPP_SMOKE rc=0 from the published bytes (54 migrations, 24 pages /
+  4338 shapes, first-run DB self-initialization).
+- Published AppImage: APPIMAGE_EXTRACT_AND_RUN + SPP_SMOKE rc=0 —
+  identical boot chain from the self-extracted runtime (AppRun path
+  resolution, bundled libs, first-run init).
+- Release notes: 11/11 content checks — `[1.9.5]` changelog section
+  (prepended), both exact SHA-256 hashes, commit binding, both install
+  command blocks, system requirements (x86_64, glibc 2.35+, Ubuntu
+  22.04 LTS+/Debian 12+), APT auto-dependency statement, CI-verified
+  list, UX-26B/UX-35 product lines.
+
+**Environmental limits disclosed (honest scope):** no sudo/root in this
+sandbox → the APT install/upgrade/uninstall lanes, desktop-file-validate
+and the Xvfb GUI launches ran only in CI's clean containers (green ×3
+distros + ubuntu-latest, on the exact published artifacts); the AppImage
+host-libs bundling step ran locally with ubuntu:22.04-archive libs (CI
+performs it natively in the ubuntu:22.04 build container — the published
+bytes are CI's, not the local preflight's); the fat-LTO link required
+stopping the sandbox's standing Next.js dev server (memory, not
+correctness); debug build artifacts were removed after all test lanes
+passed (disk pressure; release artifacts and evidence unaffected).
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive.

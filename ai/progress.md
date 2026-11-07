@@ -6,36 +6,16 @@
 
 ## Active items
 
-**Batch REL-4 — Build & Release v1.9.5 from the final source** (opened
-2026-11-07 on the owner's Build-and-Release directive; fifth sandbox
-recycle: repo re-cloned at fa663b3, Rust 1.99.1 reinstalled first — this
-time with enough disk for the full local verification battery, unlike the
-REL-3 recycle). Items pulled per Rule 2:
-
-- REL-4-1: workspace version 1.9.4 → 1.9.5 (Cargo.toml + Cargo.lock, all
-  four member packages).
-- REL-4-2: CHANGELOG `[1.9.5]` section in product language + link
-  reference (HYG-2 parity).
-- REL-4-3: annotated tag `v1.9.5` on the release commit (after its CI run
-  is green).
-- REL-4-4: publish via release.yml + live post-publish verification of the
-  GitHub Release (assets, checksums, download links, BUILD-INFO commit
-  binding, smoke runs from the published bytes).
-
-v1.9.5 is the first release to carry the UXB-1 fixes (UX-26B webhook
-secret cap, UX-34 operations drill data, UX-35 job-failure notifications)
-and the UXB-T1 deterministic shot clock; both batches' pushes were
-CI-green (runs 42319227840, 42331436125).
-
-No batch is held; the ux-audit program remains fully closed (authoritative,
-2026-11-07, post-Batch UXB-T1). The test-infra batch — UXB-T1, the kittest
-golden date-tick finding disclosed during UXB-1's verification, pulled from
-`ux-audit/reports/issues.md` on the owner's "handle UXB-T1" directive —
-moved through this file per Rules 2 and 4, was implemented, verified, and
-closed the same session (record in `completed.md`; status updated in
-`ux-audit/reports/issues.md`). With it the last open finding of the
-UX-audit program is closed. New work beyond this batch opens only on an
-owner directive.
+**None.** No batch is active and none is held (authoritative, 2026-11-07,
+post-Batch REL-4). The release batch — REL-4 (items REL-4-1..REL-4-4:
+version bump 1.9.4 → 1.9.5, CHANGELOG `[1.9.5]`, annotated tag `v1.9.5`,
+publish + verification), opened on the owner's Build-and-Release directive
+— moved through this file per Rules 2 and 4, was implemented, verified
+(full local battery + CI run 42359689689 green + Release run 42361423228
+green 6/6 + live post-publish verification from the published bytes), and
+closed the same session (record in `completed.md`). Release v1.9.5 is
+published at tag `v1.9.5` (target `9afef58` = main tip). The engagement
+sits at a Rule 8 STOP; new work opens only on an owner directive.
 
 Batch UXB-T1 (item UXB-T1) moved through this file per Rules 2 and 4 on
 2026-11-07 — opened on the owner's "handle UXB-T1" directive ~1h after
