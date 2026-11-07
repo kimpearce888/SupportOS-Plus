@@ -729,28 +729,13 @@ impl SettingsPage {
         });
         match result {
             Ok(()) => {
-                // UX-26: the old note blamed "the platform" for the cap — live
-                // probing proved Help Scout itself stores longer secrets
-                // (48+ characters). The truncation is this app's own
-                // verification limit, so the copy says so and says what will
-                // happen, instead of misattributing the cause. (Removing the
-                // cap itself is backend work — UX-26B.)
-                let secret_note = if ws.chars().count() > spp_core::webhook::SECRET_CAP {
-                    format!(
-                        " (note: SupportOS+ verifies webhook signatures with only \
-                         the first {} characters of the secret, but Help Scout signs \
-                         with the full secret you set there — a longer secret will \
-                         FAIL verification. Set the same secret, {} characters or \
-                         fewer, on both sides.)",
-                        spp_core::webhook::SECRET_CAP,
-                        spp_core::webhook::SECRET_CAP
-                    )
-                } else {
-                    String::new()
-                };
-                self.message = Some(format!(
-                    "credentials stored (encrypted) — activating the connection now…{secret_note}"
-                ));
+                // UX-26B: the app now verifies webhook signatures with the
+                // FULL stored secret (Help Scout imposes no length cap — the
+                // audit's live probe proved it stores 48+ characters), so
+                // the old "keep it at 40 characters or fewer" warning is
+                // gone: any length works as long as both sides match.
+                self.message =
+                    Some("credentials stored (encrypted) — activating the connection now…".into());
                 self.hs_client_secret.clear();
                 self.hs_webhook_secret.clear();
                 self.hs_docs_api_key.clear();
@@ -1481,12 +1466,12 @@ impl SettingsPage {
                     )
                     .labelled_by(whs_label.id)
                     .on_hover_text(
-                        // UX-26: the 40-character limit is ours, not Help
-                        // Scout's — say it before the save, not after.
-                        "Help Scout signs each delivery with the FULL secret; \
-                         SupportOS+ verifies using only the first 40 characters \
-                         — keep the secret at 40 characters or fewer so \
-                         verification passes.",
+                        // UX-26B: verification uses the full secret, same as
+                        // Help Scout — any length works, keep both sides
+                        // identical.
+                        "Help Scout signs each delivery with the full secret you \
+                         set there, and SupportOS+ verifies against the full \
+                         secret too — paste the exact same value on both sides.",
                     );
                     ui.end_row();
                     let docs_label = design::field_label(ui, "docs api key:");

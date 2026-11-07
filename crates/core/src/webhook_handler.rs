@@ -30,7 +30,9 @@ pub(crate) fn process_webhook(
         return WebhookProcessResult::SecretNotConfigured;
     }
     let valid = match provided_signature {
-        Some(sig) => webhook::verify_signature(secret, body, sig).is_ok(),
+        // UX-26B: verify with the full stored secret (legacy capped-prefix
+        // hooks are accepted inside verify_delivery's fallback).
+        Some(sig) => webhook::verify_delivery(secret, body, sig).is_ok(),
         None => false,
     };
     if !valid {

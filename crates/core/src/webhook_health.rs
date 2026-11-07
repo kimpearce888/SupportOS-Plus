@@ -96,11 +96,6 @@ pub(crate) fn cadence_due(conn: &Connection) -> Result<bool> {
     Ok(chrono::Utc::now().timestamp() - last >= CADENCE_SECS)
 }
 
-#[must_use]
-fn capped_secret(secret: &str) -> String {
-    crate::webhook::effective_secret(secret)
-}
-
 #[derive(Debug, Clone, PartialEq)]
 enum Classification {
     Healthy { hook_id: i64, extra_twins: usize },
@@ -224,9 +219,10 @@ async fn register_hook(
     events: &[String],
     secret: &str,
 ) -> Result<(i64, Vec<String>, Vec<String>)> {
-    let secret = capped_secret(secret);
+    // UX-26B: register with the FULL secret — the platform imposes no cap
+    // and signs deliveries with whatever is registered here.
     match provider
-        .create_webhook(our_url, events, &secret, HOOK_LABEL)
+        .create_webhook(our_url, events, secret, HOOK_LABEL)
         .await
     {
         Ok(id) => Ok((id, events.to_vec(), Vec::new())),
@@ -252,7 +248,7 @@ async fn register_hook(
                 "Help Scout retired some webhook events — registering the accepted intersection"
             );
             let id = provider
-                .create_webhook(our_url, &usable, &secret, HOOK_LABEL)
+                .create_webhook(our_url, &usable, secret, HOOK_LABEL)
                 .await?;
             Ok((id, usable, dropped))
         }
@@ -613,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn run_check_heals_a_dropped_hook_and_caps_the_secret() {
+    fn run_check_heals_a_dropped_hook_and_registers_the_full_secret() {
         let fake = FakeHooks {
             hooks: std::sync::Mutex::new(vec![hook(
                 5,
@@ -625,15 +621,13 @@ mod tests {
             deleted: std::sync::Mutex::new(Vec::new()),
             reject: Vec::new(),
         };
+        // UX-26B: the secret is longer than the legacy 40-char cap — the
+        // platform stores it in full, so the hook must be registered in full
+        // (cap-era builds registered the truncated prefix, which is exactly
+        // the mismatch that broke verification).
+        let secret = "a-secret-longer-than-the-old-forty-character-cap!!!!!!!!";
         let outcome = rt()
-            .block_on(async {
-                run_check(
-                    &fake,
-                    "https://relay.example.com/hook",
-                    "a-secret-longer-than-the-platforms-forty-character-cap!!!!!!!!",
-                )
-                .await
-            })
+            .block_on(async { run_check(&fake, "https://relay.example.com/hook", secret).await })
             .expect("run_check");
 
         assert!(outcome.is_healed(), "{:?}", outcome.verdict);
@@ -642,8 +636,10 @@ mod tests {
 
         let created = fake.created.lock().unwrap_or_else(|p| p.into_inner());
         assert_eq!(created.len(), 1);
-        assert_eq!(created[0].1.chars().count(), 40, "secret must be capped");
-        assert_eq!(created[0].1, "a-secret-longer-than-the-platforms-forty");
+        assert_eq!(
+            created[0].1, secret,
+            "the hook is registered with the full secret, not a capped prefix"
+        );
     }
 
     #[test]

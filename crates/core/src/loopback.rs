@@ -248,7 +248,9 @@ fn handle_webhook(req: &Request, ctx: &LoopbackCtx) -> Response {
     let signature = req.header("x-helpscout-signature");
     let event_type = req.header("x-helpscout-event").unwrap_or("unknown");
 
-    let secret = crate::webhook::effective_secret(&secret);
+    // UX-26B: no truncation — the stored secret is passed to verification in
+    // full (verify_delivery handles cap-era-registered hooks via its legacy
+    // prefix fallback).
 
     let result = ctx.db.with_write(|conn| {
         webhook_handler::process_webhook(conn, secret.as_bytes(), &req.body, signature, event_type)
@@ -1226,12 +1228,15 @@ mod batch22_audit32_tests {
     }
 
     #[test]
-    fn webhook_secret_over_the_cap_verifies_against_the_truncation() {
+    fn webhook_secret_over_the_legacy_cap_verifies_full_and_keeps_the_bridge() {
         let c = ctx();
         let key_path =
-            std::env::temp_dir().join(format!("spp-loopback-b22-key-{}.key", std::process::id()));
+            std::env::temp_dir().join(format!("spp-loopback-ux26b-key-{}.key", std::process::id()));
         crate::settings::init_master_key(&key_path).expect("init master key");
 
+        // UX-26B: a 60-char secret is stored in full and Help Scout signs
+        // with the full secret it holds — that delivery must verify (the
+        // audit's live probe 401'd exactly here).
         let long_secret: String = "s".repeat(60);
         c.db.with_write(|conn| {
             crate::settings::set_secret(conn, "webhook_secret", long_secret.as_bytes())
@@ -1239,41 +1244,44 @@ mod batch22_audit32_tests {
         .expect("store webhook secret");
 
         let body = br#"{"objectID":777}"#;
-        let effective = crate::webhook::effective_secret(&long_secret);
-        assert_eq!(effective.chars().count(), 40, "the cap applied");
+        let post = |sig: String| {
+            handle_request(
+                &request(
+                    "POST",
+                    "/webhook",
+                    &[
+                        ("X-Helpscout-Signature", &sig),
+                        ("X-Helpscout-Event", "convo.created"),
+                    ],
+                    body,
+                ),
+                &c,
+            )
+        };
 
-        let good_sig = crate::webhook::compute_signature(effective.as_bytes(), body);
-        let r = handle_request(
-            &request(
-                "POST",
-                "/webhook",
-                &[
-                    ("X-Helpscout-Signature", &good_sig),
-                    ("X-Helpscout-Event", "convo.created"),
-                ],
-                body,
-            ),
-            &c,
-        );
+        let full_sig = crate::webhook::compute_signature(long_secret.as_bytes(), body);
         assert_eq!(
-            r.status, 200,
-            "the pre-fix loopback rejected exactly this delivery (verify-full vs register-capped)"
+            post(full_sig).status,
+            200,
+            "the full-secret signature (what the platform really signs) must verify"
         );
 
-        let wrong_sig = crate::webhook::compute_signature(long_secret.as_bytes(), body);
-        let r = handle_request(
-            &request(
-                "POST",
-                "/webhook",
-                &[
-                    ("X-Helpscout-Signature", &wrong_sig),
-                    ("X-Helpscout-Event", "convo.created"),
-                ],
-                body,
-            ),
-            &c,
+        // Hooks registered by cap-era builds carry the capped prefix as
+        // their platform-side secret; those deliveries keep verifying.
+        let legacy: String = long_secret.chars().take(40).collect();
+        let legacy_sig = crate::webhook::compute_signature(legacy.as_bytes(), body);
+        assert_eq!(
+            post(legacy_sig).status,
+            200,
+            "the legacy capped-prefix signature keeps verifying (no regression)"
         );
-        assert_eq!(r.status, 401, "the full-secret signature never verified");
+
+        let wrong_sig = crate::webhook::compute_signature(b"an-unrelated-secret", body);
+        assert_eq!(
+            post(wrong_sig).status,
+            401,
+            "signatures from an unrelated secret stay rejected"
+        );
 
         let _ = std::fs::remove_file(&key_path);
     }
