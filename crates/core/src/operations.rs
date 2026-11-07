@@ -369,7 +369,9 @@ pub fn snapshot(conn: &Connection, mailbox_ids: Option<&[i64]>) -> Result<Operat
         "Failed jobs (7d)".into(),
         count_failed_jobs(conn)?,
         "warning",
-        page_drill("automation"),
+        // UX-34: failed jobs are listed on Diagnostics (the recent-failures
+        // table) — the drill must name that destination, not Automation.
+        page_drill("diagnostics"),
         Some("Background jobs that exhausted their retries in the last 7 days.".to_string()),
     ));
     let sync_problems = sync_problems(conn)?;
@@ -481,4 +483,95 @@ fn count_campaign_activity(conn: &Connection) -> Result<u32> {
         |r| r.get(0),
     )?;
     Ok(u32::try_from(n).unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("bootstrap");
+        conn
+    }
+
+    /// UX-34: the drill payload is routing data the frontend consumes, so
+    /// it must name destinations that exist and match where the underlying
+    /// lists actually live.
+    #[test]
+    fn drill_payloads_name_real_destinations() {
+        let conn = snapshot_db();
+        let snap = snapshot(&conn, None).expect("snapshot");
+        let tile = |key: &str| {
+            snap.tiles
+                .iter()
+                .find(|t| t.key == key)
+                .unwrap_or_else(|| panic!("tile {key} present"))
+        };
+
+        assert_eq!(
+            tile("failed_jobs")
+                .drill
+                .get("page")
+                .and_then(|p| p.as_str()),
+            Some("diagnostics"),
+            "failed jobs are listed on Diagnostics — the drill must say so"
+        );
+        assert_eq!(
+            tile("sync_problems")
+                .drill
+                .get("page")
+                .and_then(|p| p.as_str()),
+            Some("sync-health")
+        );
+        assert_eq!(
+            tile("automation_approvals")
+                .drill
+                .get("page")
+                .and_then(|p| p.as_str()),
+            Some("automation")
+        );
+
+        const KNOWN_PAGES: [&str; 5] = [
+            "issues",
+            "automation",
+            "diagnostics",
+            "sync-health",
+            "outreach",
+        ];
+        for t in &snap.tiles {
+            match t.drill.get("type").and_then(|v| v.as_str()) {
+                Some("page") => {
+                    let page = t.drill.get("page").and_then(|p| p.as_str()).unwrap_or("");
+                    assert!(
+                        KNOWN_PAGES.contains(&page),
+                        "tile {} drills to unknown page {page:?}",
+                        t.key
+                    );
+                }
+                Some("inbox") => {}
+                other => panic!("tile {} has drill type {other:?}", t.key),
+            }
+        }
+
+        // Every conversation tile drills into the filtered inbox — the
+        // frontend turns these into inbox ops filters.
+        for key in [
+            "unassigned",
+            "needs_first_response",
+            "customer_waiting",
+            "waiting_over_threshold",
+            "urgent",
+            "high_effort",
+            "repeated_issue",
+            "known_issue",
+            "ai_escalation",
+        ] {
+            assert_eq!(
+                tile(key).drill.get("type").and_then(|v| v.as_str()),
+                Some("inbox"),
+                "conversation tile {key} must drill into the inbox"
+            );
+        }
+    }
 }

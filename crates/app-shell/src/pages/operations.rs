@@ -102,44 +102,39 @@ pub(crate) fn tile_severity(tile: OperationsTileKey) -> Severity {
     }
 }
 
-#[must_use]
-pub(crate) fn tile_drills_into_inbox(tile: OperationsTileKey) -> bool {
-    matches!(
-        tile,
-        OperationsTileKey::Unassigned
-            | OperationsTileKey::NeedsFirstResponse
-            | OperationsTileKey::CustomerWaiting
-            | OperationsTileKey::WaitingOverThreshold
-            | OperationsTileKey::Urgent
-            | OperationsTileKey::HighEffort
-    )
+/// UX-34: where a tile drills to, parsed from core's drill payload — core
+/// owns the routing data, the frontend just renders it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TileDrill {
+    /// The filtered inbox (conversation tiles — the inbox applies the ops
+    /// filter named by the tile key).
+    Inbox,
+    /// A named page (system-health tiles — where the underlying list lives).
+    Page(PageKey),
 }
 
-/// UX-14: every tile with an action gets a destination — the inbox-filter
-/// tiles drill into the filtered inbox, and the system-health tiles open
-/// the page where the failures can actually be inspected and acted on.
-#[must_use]
-pub(crate) fn tile_nav(tile: OperationsTileKey) -> Option<NavRequest> {
-    match tile {
-        OperationsTileKey::FailedJobs => Some(NavRequest::Page(PageKey::Diagnostics)),
-        OperationsTileKey::SyncProblems => Some(NavRequest::Page(PageKey::SyncHealth)),
-        OperationsTileKey::AutomationApprovals => Some(NavRequest::Page(PageKey::Automation)),
-        tile if tile_drills_into_inbox(tile) => {
-            Some(NavRequest::InboxTile(tile.as_str().to_string()))
-        }
+/// UX-34: map a core drill page name to the page it opens. Unknown names
+/// degrade to a non-clickable tile rather than a dead button.
+fn page_key_from_drill(page: &str) -> Option<PageKey> {
+    match page {
+        "diagnostics" => Some(PageKey::Diagnostics),
+        "sync-health" => Some(PageKey::SyncHealth),
+        "automation" => Some(PageKey::Automation),
+        "issues" => Some(PageKey::IssueRadar),
+        "outreach" => Some(PageKey::Outreach),
         _ => None,
     }
 }
 
-/// UX-14: the drill hint names the destination so the affordance is
-/// explicit — no more guessing which tiles are clickable.
-#[must_use]
-pub(crate) fn tile_drill_line(tile: OperationsTileKey) -> Option<&'static str> {
-    match tile {
-        OperationsTileKey::FailedJobs => Some("diagnostics →"),
-        OperationsTileKey::SyncProblems => Some("sync health →"),
-        OperationsTileKey::AutomationApprovals => Some("automation →"),
-        tile if tile_drills_into_inbox(tile) => Some("open →"),
+/// UX-34: parse core's drill payload (`{"type":"inbox","params":{…}}` or
+/// `{"type":"page","page":"…"}`) into a navigation target. `None` means the
+/// tile has no destination (rendered inert).
+fn tile_drill_from_payload(drill: &serde_json::Value) -> Option<TileDrill> {
+    match drill.get("type").and_then(|v| v.as_str())? {
+        "inbox" => Some(TileDrill::Inbox),
+        "page" => {
+            page_key_from_drill(drill.get("page").and_then(|p| p.as_str())?).map(TileDrill::Page)
+        }
         _ => None,
     }
 }
@@ -148,11 +143,31 @@ pub(crate) fn tile_drill_line(tile: OperationsTileKey) -> Option<&'static str> {
 pub(crate) struct TileView {
     pub key: OperationsTileKey,
     pub count: u32,
+    /// UX-34: the tile's destination, parsed from core's drill payload.
+    pub drill: Option<TileDrill>,
 }
 
 impl TileView {
     fn count_label(&self) -> String {
         self.count.to_string()
+    }
+
+    /// UX-14/UX-34: the navigation request for a tile click — derived from
+    /// core's drill payload, not a hardcoded per-key table.
+    fn nav(&self) -> Option<NavRequest> {
+        match self.drill? {
+            TileDrill::Inbox => Some(NavRequest::InboxTile(self.key.as_str().to_string())),
+            TileDrill::Page(page) => Some(NavRequest::Page(page)),
+        }
+    }
+
+    /// UX-14/UX-34: the drill hint names the destination so the affordance
+    /// is explicit — no more guessing which tiles are clickable.
+    fn drill_line(&self) -> Option<String> {
+        match self.drill? {
+            TileDrill::Inbox => Some("open →".to_string()),
+            TileDrill::Page(page) => Some(format!("{} →", page.label().to_lowercase())),
+        }
     }
 }
 
@@ -180,8 +195,14 @@ pub(crate) fn tiles_from_snapshot(
         .into_iter()
         .filter_map(|key| {
             snapshot
-                .count_of(key.as_str())
-                .map(|count| TileView { key, count })
+                .tiles
+                .iter()
+                .find(|t| t.key == key.as_str())
+                .map(|t| TileView {
+                    key,
+                    count: t.count,
+                    drill: tile_drill_from_payload(&t.drill),
+                })
         })
         .collect()
 }
@@ -373,21 +394,21 @@ impl OperationsPage {
                             Severity::Warning => BadgeTone::Warning,
                             Severity::Info => BadgeTone::Info,
                         };
-                        // UX-14: drill-ability now comes from tile_nav — every
-                        // tile that can go somewhere shows its destination.
-                        let drill = tile_nav(tile.key).is_some();
-                        let drill_line = tile_drill_line(tile.key);
+                        // UX-14/UX-34: drill-ability and the destination
+                        // both come from core's drill payload — every tile
+                        // that can go somewhere shows where it goes.
+                        let drill_line = tile.drill_line();
                         let resp = design::metric_tile(
                             ui,
                             &tile.count_label(),
                             tile_label(tile.key),
                             Some(tone),
-                            drill,
-                            drill_line,
+                            drill_line.is_some(),
+                            drill_line.as_deref(),
                         )
                         .on_hover_text(tile_description(tile.key));
                         if resp.clicked()
-                            && let Some(nav_request) = tile_nav(tile.key)
+                            && let Some(nav_request) = tile.nav()
                             && nav.is_none()
                         {
                             nav = Some(nav_request);
@@ -1008,14 +1029,17 @@ mod tests {
             TileView {
                 key: OperationsTileKey::FailedJobs,
                 count: 0,
+                drill: Some(TileDrill::Page(PageKey::Diagnostics)),
             },
             TileView {
                 key: OperationsTileKey::Urgent,
                 count: 2,
+                drill: Some(TileDrill::Inbox),
             },
             TileView {
                 key: OperationsTileKey::Unassigned,
                 count: 7,
+                drill: Some(TileDrill::Inbox),
             },
         ];
         let groups = group_tiles(&tiles);
@@ -1028,6 +1052,7 @@ mod tests {
         let critical = vec![TileView {
             key: OperationsTileKey::SlaBreached,
             count: 1,
+            drill: Some(TileDrill::Page(PageKey::IssueRadar)),
         }];
         let critical_groups = group_tiles(&critical);
         assert_eq!(critical_groups.len(), 1);
@@ -1064,11 +1089,104 @@ mod tests {
     }
 
     #[test]
-    fn drill_tiles_are_exactly_the_conversation_tiles() {
-        assert!(tile_drills_into_inbox(OperationsTileKey::Unassigned));
-        assert!(tile_drills_into_inbox(OperationsTileKey::HighEffort));
-        assert!(!tile_drills_into_inbox(OperationsTileKey::FailedJobs));
-        assert!(!tile_drills_into_inbox(OperationsTileKey::CampaignActivity));
+    fn drill_navigation_comes_from_the_core_payload() {
+        // UX-34: navigation derives from core's drill payload — the shapes
+        // core actually emits, verified against real snapshots.
+        let db = fixture(vec![("conv", 1, "Help export", "active", "email", 1, 5, 9)]);
+        let snapshot = db
+            .with_read(|conn| spp_core::operations::snapshot(conn, None))
+            .expect("snapshot");
+        let tiles = tiles_from_snapshot(&snapshot);
+        let tile = |key: OperationsTileKey| {
+            tiles
+                .iter()
+                .find(|t| t.key == key)
+                .unwrap_or_else(|| panic!("{key:?} present"))
+        };
+
+        // Conversation tiles (all nine, including the three the hardcoded
+        // UX-14 map left inert) drill into the filtered inbox.
+        for key in [
+            OperationsTileKey::Unassigned,
+            OperationsTileKey::NeedsFirstResponse,
+            OperationsTileKey::CustomerWaiting,
+            OperationsTileKey::WaitingOverThreshold,
+            OperationsTileKey::Urgent,
+            OperationsTileKey::HighEffort,
+            OperationsTileKey::RepeatedIssue,
+            OperationsTileKey::KnownIssue,
+            OperationsTileKey::AiEscalation,
+        ] {
+            assert_eq!(
+                tile(key).drill,
+                Some(TileDrill::Inbox),
+                "{key:?} must be inbox-drillable"
+            );
+            assert_eq!(
+                tile(key).drill_line().as_deref(),
+                Some("open →"),
+                "{key:?} names the inbox affordance"
+            );
+        }
+
+        // System-health tiles open the page that holds the underlying list.
+        assert_eq!(
+            tile(OperationsTileKey::FailedJobs).nav(),
+            Some(NavRequest::Page(PageKey::Diagnostics)),
+            "failed jobs live on Diagnostics (UX-34 fixed the core payload)"
+        );
+        assert_eq!(
+            tile(OperationsTileKey::FailedJobs).drill_line().as_deref(),
+            Some("diagnostics →")
+        );
+        assert_eq!(
+            tile(OperationsTileKey::SyncProblems).nav(),
+            Some(NavRequest::Page(PageKey::SyncHealth))
+        );
+        assert_eq!(
+            tile(OperationsTileKey::SyncProblems)
+                .drill_line()
+                .as_deref(),
+            Some("sync health →")
+        );
+        assert_eq!(
+            tile(OperationsTileKey::AutomationApprovals).nav(),
+            Some(NavRequest::Page(PageKey::Automation))
+        );
+        // SLA and spike tiles open Issue Radar.
+        assert_eq!(
+            tile(OperationsTileKey::SlaBreached).nav(),
+            Some(NavRequest::Page(PageKey::IssueRadar))
+        );
+        assert_eq!(
+            tile(OperationsTileKey::IssueSpike).nav(),
+            Some(NavRequest::Page(PageKey::IssueRadar))
+        );
+        // Campaign activity opens Outreach.
+        assert_eq!(
+            tile(OperationsTileKey::CampaignActivity).nav(),
+            Some(NavRequest::Page(PageKey::Outreach))
+        );
+    }
+
+    #[test]
+    fn unknown_drill_payload_degrades_to_an_inert_tile() {
+        // A payload core never emits today must not crash or fake a
+        // destination — the tile simply loses its affordance.
+        let unknown_page = serde_json::json!({ "type": "page", "page": "mars-base" });
+        assert_eq!(tile_drill_from_payload(&unknown_page), None);
+        let unknown_type = serde_json::json!({ "type": "teleport" });
+        assert_eq!(tile_drill_from_payload(&unknown_type), None);
+        let empty = serde_json::json!({});
+        assert_eq!(tile_drill_from_payload(&empty), None);
+
+        let tile = TileView {
+            key: OperationsTileKey::FailedJobs,
+            count: 3,
+            drill: None,
+        };
+        assert_eq!(tile.nav(), None);
+        assert_eq!(tile.drill_line(), None);
     }
 
     #[test]
