@@ -7851,3 +7851,85 @@ regens — CI ran on the same UTC day as the regen, so the "11d ago"
 goldens held) — CI run 42319227840, completed success. The GA-1 standing
 practice (cargo fmt --all -- --check as the final pre-push local step)
 held. The UX-audit backlog is fully consumed; Rule 8 STOP.
+
+---
+
+## Batch UXB-T1 — deterministic clock for the kittest shot fixtures (closed 2026-11-07)
+
+Single-item batch (item UXB-T1), opened on the owner's "handle UXB-T1"
+directive ~1h after the UXB-1 push (2026-11-07, 01:37Z) — the test-infra
+finding disclosed during UXB-1's verification, logged-not-queued until that
+directive pulled it back out of `ux-audit/reports/issues.md` per Rule 2
+(fourth sandbox recycle: repo re-cloned at 7178153, Rust 1.99.1 +
+lavapipe/xkb re-extracted to the persistent home prefix first); implemented,
+verified, and closed the same session (Rule 4). Per-item evidence:
+`ux-audit/reports/` (issues.md UXB-T1 status · worklog.md items 47–48).
+
+**Item (1):** UXB-T1 (kittest golden date-tick) — the goldens rendered
+"Nd ago"/"Yesterday" from the wall clock (`relative_time` →
+`business_hours::now_iso_millis`) against fixed fixture stamps, ticking one
+day further at every UTC midnight; the disclosed sync-health 7 (fixed
+2026-10-27 seeds) plus, on the same clock, the operations 6 (fixture-frozen
+`generated_at` = 2026-10-27T09:59:59.123Z — the freeze pinned the seed, not
+the clock; regenerated inside UXB-1's intended set, ticking with it) and the
+notifications 8 (wall-relative `iso_days_ago` seeds — stable, but exposed to
+the same seeding/rendering midnight race that fired mid-UXB-1). Fix: a
+`kittest-ui`-gated pinned `now` in core `business_hours`
+(`KITTEST_PINNED_NOW_ISO` + `pin_now_for_kittest`, first-pin-wins,
+unparseable rejected) consulted by every clock read on the golden render
+path (`now_iso_millis`, `iso_days_ago`, `now_iso` → `effective_now()` —
+inlines to `Utc::now()` in every normal build, feature off); the three
+fixtures pin the anchor (noon UTC on 2026-11-07, the UXB-1 regen's calendar
+day — day-granular rendering pixel-identical to the current baselines, so
+pinning froze the tick with ZERO golden churn) before seeding; a new
+`kittest_clock_pin` suite proves the mechanism (anchor drives both clock
+reads; seed helper and render clock share the pinned instant; idempotent
+re-pin accepted, conflicting and unparseable anchors rejected). The suite
+earned its keep immediately: it caught that the first pin implementation
+compared `OnceLock::set`'s Err payload (the REJECTED value) against the
+candidate — a conflicting anchor would have falsely reported success while
+the clock kept the first pin (rendering still correct, the API lied) —
+fixed by comparing against `get()`.
+
+**Verification:** fmt clean (final `--check` after the last edit) · clippy
+--locked --workspace --all-targets -D warnings clean (re-run on the final
+code) · core 458/458 (re-run on the final code) · app-shell lib 246/246 ·
+non-kittest integration green · sandbox lane clippy + 466/466 (the pin
+lives behind cfg(kittest-ui), not compiled in that lane — the lane's core
+compilation is identical pre/post fix) · xtask 11/11 · feature-on clippy
+lanes clean (core --features kittest-ui; app-shell --features kittest-ui
+with the two PRE-EXISTING `too_many_arguments` lints in
+kittest_list_pages.rs:135/430 exempted — a lane CI never clippy-gates, both
+outside this diff, disclosed not fixed) · kittest lane diff-locked GREEN
+twice on the final code (all 28 suites incl. the new clock suite; 171
+goldens, ZERO .diff.png, ZERO golden churn — pinned rendering matched the
+Nov-7-regenerated baselines byte-for-byte) · clock suite 4/4 in BOTH
+parallel and --test-threads=1 modes (order-independent, self-sufficient
+tests) · SPP_SMOKE=1 rc=0 (24 pages / 4338 shapes — identical to the UXB-1
+baseline; the production binary compiles the feature off, so the only
+production-file change, business_hours.rs, is semantically unchanged there:
+`effective_now()` inlines to `Utc::now()`).
+
+Zero-churn proof chain (why the freeze holds on ANY calendar day, not just
+today): the clock suite proves every render-path read returns the pinned
+anchor exclusively (the wall clock never reaches the screenshots); the
+diff-locked runs prove pinned rendering equals the committed baselines;
+therefore on any future day the rendering is bit-identical to today's. The
+wall clock would have diverged at the next UTC midnight (the regen was
+2026-11-07 00:35:58Z; the disclosed 10d→11d glyph tick fired at the
+previous midnight under the same mechanics).
+
+- Scope: `crates/core/src/business_hours.rs` (feature-gated pin +
+  `effective_now`) + the `kittest-ui` feature wiring (core `Cargo.toml`
+  gains the feature; app-shell forwards to it — no `Cargo.lock` delta,
+  verified) + `crates/app-shell/tests/` (kittest_sync_health_page,
+  kittest_operations_page, kittest_notifications_page pin in
+  `seeded_page()`; new kittest_clock_pin.rs) + ledger/reports. No golden,
+  CI, workflow, packaging or production-code changes (`--locked`
+  throughout; reports pages' wall-relative breakdown defaults left alone —
+  empirically not rendered in any golden, CI-green across regen-day
+  boundaries, and pinning them would churn untouched baselines).
+
+With UXB-T1 the last open finding of the UX-audit program (including its
+test-infra tail) is closed. Rule 8 STOP — the queue is empty; resume only
+on a new owner directive.

@@ -55,7 +55,7 @@ Severity: blocker / major / minor / polish. Status: open → fixed (with commit)
 | UX-34 | "Operations drill-down" tiles (Sync problems, Failed jobs) have no navigation target — the counts exist in core but no NavRequest maps them to Diagnostics/Sync Health views — **FIXED (UXB-1)**: core's `FailedJobs` drill payload corrected to `diagnostics` (where the failed-jobs table lives — it said `automation`); the frontend now derives tile navigation + drill lines from core's drill payload (single source of truth), which also makes the three conversation tiles core already marked inbox-drillable (Repeated issue, Known issue, AI escalation — the inbox ops-filter layer already supported them) clickable like their siblings; unknown page names degrade to inert tiles. Tests: core `drill_payloads_name_real_destinations`, frontend `drill_navigation_comes_from_the_core_payload`, `unknown_drill_payload_degrades_to_an_inert_tile` | operations page audit | Expose nav actions from the tiles (frontend can then wire buttons if core provides the routing data — currently the tile data has no drill-down field) |
 | UX-35 | Notifications raw error strings (localhost LM Studio URL, internal job names) come verbatim from core job failures — **FIXED (UXB-1)**: `sweep_failed_jobs` now writes a friendly job-type title ("Background job failed: AI task", no `{queue}/{job_type}` internals) and a classified friendly body (unreachable/auth/rate-limited/bad-response/misconfigured/unknown, with host extracted and an LM Studio hint for localhost), while the verbatim error + code + queue + job_type move into the notifications `payload` JSON (column existed, was unused); the notifications page reveals the raw detail on hover. Tests: `classifier_maps_the_audit_seen_error_shapes`, `failed_job_notifications_carry_friendly_text_and_structured_payload`, `unknown_job_types_still_get_a_clean_title` | notifications page audit | Consider structured error payloads (code + message) so the frontend can present friendly text |
 
-### New finding surfaced during UXB-1 verification (test-infra; not queued)
+### New finding surfaced during UXB-1 verification (test-infra; **fixed in Batch UXB-T1, 2026-11-07, owner's "handle UXB-T1" directive**)
 
 - **UXB-T1 (kittest golden date-tick)**: the `kittest_sync_health_page` fixture
   seeds fixed `2026-10-27` timestamps whose "Nd ago" rendering (via
@@ -64,9 +64,21 @@ Severity: blocker / major / minor / polish. Status: open → fixed (with commit)
   fired mid-batch (run 1 pre-midnight "10d ago" matched; the UPDATE_SNAPSHOTS
   run minutes later rendered "11d ago"), producing 7 golden regens beyond
   the batch's 13 intended ones. The batch discloses and re-baselines them
-  (`11d ago`); a durable fix needs a deterministic clock for shot fixtures
-  (e.g. an env-pinned `now` read by `business_hours::now_iso_millis`) —
-  logged for the owner, not queued.
+  (`11d ago`) — **FIXED (UXB-T1)**: a `kittest-ui`-gated pinned `now` in
+  core `business_hours` (`pin_now_for_kittest` + `KITTEST_PINNED_NOW_ISO`,
+  consulted by `now_iso_millis`/`iso_days_ago`/`now_iso`; inlines to the
+  wall clock in every normal build) is pinned by the three wall-clock
+  fixtures before seeding — sync-health (the disclosed 7), operations (the
+  freeze hook pinned the seed, not the clock — its 6 goldens ticked too),
+  notifications (`iso_days_ago` seeds now anchor to the pin, closing the
+  seeding/rendering midnight race). The anchor is noon UTC on 2026-11-07,
+  the UXB-1 regen's calendar day, so the pinned rendering is
+  pixel-identical to the committed baselines — frozen with ZERO golden
+  churn (diff-locked ×2 green, no .diff.png). Tests: `kittest_clock_pin`
+  (anchor drives the clock reads; seed helper + render clock share the
+  pinned instant; idempotent re-pin, conflicting/unparseable anchors
+  rejected — this suite caught the `OnceLock::set` Err-payload bug in the
+  first implementation).
 
 ## Won't fix (with reason)
 

@@ -7,14 +7,26 @@
 ## Active items
 
 **None.** No batch is active and none is held (authoritative, 2026-11-07,
-post-Batch UXB-1). The backend-blocked batch — UX-26B/UX-34/UX-35, pulled
-from `ux-audit/reports/issues.md` on the owner's "resolve ignored items"
-directive — moved through this file per Rules 2 and 4, was implemented,
-verified, and closed the same session (record in `completed.md`); the
-ux-audit backlog is now fully consumed. The engagement sits at a Rule 8
-STOP; new work opens only on an owner directive. One test-infra finding
-surfaced during verification (UXB-T1, sync-health golden date-tick) is
-logged in `ux-audit/reports/issues.md`, not queued.
+post-Batch UXB-T1). The test-infra batch — UXB-T1, the kittest golden
+date-tick finding disclosed during UXB-1's verification, pulled from
+`ux-audit/reports/issues.md` on the owner's "handle UXB-T1" directive —
+moved through this file per Rules 2 and 4, was implemented, verified, and
+closed the same session (record in `completed.md`; status updated in
+`ux-audit/reports/issues.md`). With it the last open finding of the
+UX-audit program is closed. The engagement sits at a Rule 8 STOP; new
+work opens only on an owner directive.
+
+Batch UXB-T1 (item UXB-T1) moved through this file per Rules 2 and 4 on
+2026-11-07 — opened on the owner's "handle UXB-T1" directive ~1h after
+the UXB-1 push (fourth sandbox recycle: repo re-cloned at 7178153, Rust
+1.99.1 + lavapipe/xkb re-extracted to the persistent home prefix first),
+implemented with the batch scope on the shot-fixture clock (core
+`business_hours` pin behind the `kittest-ui` feature gate + the three
+wall-clock-dependent kittest fixtures + the new clock-pin suite), verified
+(fmt/clippy incl. both feature lanes/tests 458+246+466-sandbox+11/kittest
+diff-locked ×2 with ZERO golden churn/clock suite 4/4 in both thread
+modes/SPP_SMOKE 24 pages · 4338 shapes — identical to the UXB-1 baseline),
+completed the same session; record in `completed.md`.
 
 Batch UXB-1 (items UX-26B/UX-34/UX-35) moved through this file per Rules 2
 and 4 on 2026-11-07 — opened on the owner's "resolve ignored items"

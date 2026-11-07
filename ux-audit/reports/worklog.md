@@ -399,3 +399,41 @@
     notifications shot seed extended (feature-gated) to produce the
     job-failure card in the exact sweep shape — the sweep path itself is
     unit-tested in core (UXA-4's SPP_SHOT_PALETTE_QUERY precedent).
+47. UXB-T1 (batch opened on the owner's "handle UXB-T1", ~1h after the
+    UXB-1 push): deterministic clock for the shot fixtures. Inventory
+    first — the wall clock reaches the goldens through exactly one door
+    (`relative_time` → `business_hours::now_iso_millis`) fed by three
+    fixtures: sync-health (the disclosed fixed 2026-10-27 seeds),
+    operations (`kittest_freeze_generated_at` froze the SEED, not the
+    clock — its 6 goldens regenerated inside UXB-1's intended set were
+    ticking with sync-health's), notifications (wall-relative
+    `iso_days_ago` seeds — stable but exposed to the midnight race).
+    Reports' breakdown defaults (b_from/b_to) are wall-relative too but
+    empirically unrendered in any golden (CI green across regen-day
+    boundaries) — left alone, pinning them would churn untouched
+    baselines. Fix: `kittest-ui`-gated `pin_now_for_kittest` +
+    `KITTEST_PINNED_NOW_ISO` in core business_hours, every render-path
+    clock read through `effective_now()` (inlines to `Utc::now()` with
+    the feature off — production unchanged); the three fixtures pin
+    before seeding; anchor = 2026-11-07T12:00:00.000Z (the UXB-1 regen
+    day) so day-granular rendering is pixel-identical to the committed
+    baselines — the freeze lands with zero golden churn.
+48. UXB-T1 verification: the new kittest_clock_pin suite caught a real
+    bug in the first pin implementation — `OnceLock::set`'s Err payload
+    is the REJECTED value, not the current one, so "conflicting anchor
+    rejected" compared the candidate against itself and always passed
+    (rendering stayed correct under first-pin-wins; the API lied);
+    fixed by comparing against `get()`, and the unparseable-anchor test
+    made self-sufficient (it ran first in --test-threads=1 and read the
+    wall clock). Then: clock suite 4/4 both parallel and single-threaded;
+    kittest lane diff-locked GREEN twice (28 suites, 171 goldens, zero
+    .diff.png, zero churn — pinned rendering byte-identical to the
+    Nov-7 baselines); fmt + workspace clippy re-clean on the final code;
+    core 458/458 re-run, app-shell 246/246, sandbox lane clippy + 466/466
+    (pin not compiled there), xtask 11/11; feature-on clippy clean except
+    two PRE-EXISTING too_many_arguments lints in kittest_list_pages
+    (135/430 — a lane CI never clippy-gates, outside the diff, disclosed);
+    SPP_SMOKE rc=0 (24 pages / 4338 shapes, identical to UXB-1 —
+    production compiles the feature off). Disk hygiene en route:
+    target/debug/incremental (2.9G) removed + CARGO_INCREMENTAL=0 after
+    a linker "No space left on device" at 96%.

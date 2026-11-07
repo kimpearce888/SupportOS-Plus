@@ -27,7 +27,7 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
 
-### UX-audit queue (EMPTY — backend batch UXB-1: items UX-26B/UX-34/UX-35 moved to `progress.md` per Rule 2, closed 2026-11-07)
+### UX-audit queue (EMPTY — test-infra batch UXB-T1 closed 2026-11-07)
 
 No queued items. The owner's "resolve ignored items" directive (2026-11-07,
 after the UXA-4 program close) pulled the three backend-blocked UX findings
@@ -36,10 +36,15 @@ through Rule 2 to `progress.md` — implementation scope for that batch
 extended to `crates/core/src/` by owner directive (the UXA scope contract's
 frontend-only limit was lifted for exactly those three items). All three
 are fixed and verified (record in `completed.md`; statuses updated in
-`ux-audit/reports/issues.md`). One test-infra finding surfaced during the
-batch verification (UXB-T1: sync-health kittest goldens tick "Nd ago" at
-every UTC midnight — fixed-stamp fixture vs day-granularity relative
-display) is logged there, not queued.
+`ux-audit/reports/issues.md`). The one test-infra finding that surfaced
+during that batch's verification (UXB-T1: kittest goldens tick "Nd ago" at
+every UTC midnight — fixed-stamp fixtures vs day-granularity relative
+display) was logged-not-queued until the owner's "handle UXB-T1" directive
+(2026-11-07, ~1h after the UXB-1 push) pulled it back out as its own
+single-item batch, moved through Rule 2 to `progress.md`, and closed the
+same session (record in `completed.md`; status updated in
+`ux-audit/reports/issues.md`). With it the last open finding of the
+UX-audit program is closed; the queue is empty.
 
 Prior programs (v2-blueprint 1–15; clean-audit 1–165; RS-01..21 + RS-6;
 RF-1..11 + FINISH; KB/AUDIT; REL-1/2/3; AU-1/AU-2; GA-1/GA-2; RW-1; DENY-1)
@@ -55,6 +60,21 @@ are fully consumed with completion records in `completed.md`.
 - New work opens only on an owner directive: it is written into this file as
   numbered items, moved ten at a time to `progress.md` (Rule 2), and leaves
   for `completed.md` only after verification (Rules 4–5).
+- Batch UXB-T1 (item UXB-T1: deterministic clock for the kittest shot
+  fixtures) opened here 2026-11-07 on the owner's "handle UXB-T1" — the
+  test-infra finding disclosed during UXB-1's verification: the sync-health
+  goldens (and, on the same clock, the operations goldens' frozen
+  `generated_at` and the notifications goldens' `iso_days_ago` seeds)
+  re-render "Nd ago"/"Yesterday" one day further at every UTC midnight, so
+  any CI run on a later calendar day than the last regen fails the drift
+  gate. Fix scope: a feature-gated pinned `now` in core
+  `business_hours` (the single clock every `relative_time` render and the
+  notification seed helper read), pinned by the affected fixtures to a
+  fixed anchor on the UXB-1 regen day (2026-11-07T12:00:00.000Z — day-
+  granular rendering identical to the current baselines, so no golden
+  churn), plus a clock-pin suite proving the mechanism. Moved to
+  `progress.md` per Rule 2, completed and verified the same session, left
+  for `completed.md` at the Rule 4 sync; queue empty again.
 - Batch GA-1 (item GA-1-1: decouple `api_queue` from `helpscout_real`) was
   opened here 2026-11-04 on the owner's "yes, continue" after the graphify
   knowledge-graph audit surfaced the `api_queue.rs <-> helpscout_real/mod.rs`
