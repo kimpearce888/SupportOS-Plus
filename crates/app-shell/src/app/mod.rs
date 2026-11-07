@@ -1081,6 +1081,38 @@ fn seed_fixture_for_screenshots(conn: &mut rusqlite::Connection) -> spp_core::er
             ..Default::default()
         },
     );
+    // UX-35: a job-failure notification in the new shape — the same fields
+    // `notification_sweep::sweep_failed_jobs` produces for the audit's exact
+    // scenario (LM Studio unreachable at localhost). The sweep path itself is
+    // unit-tested in core; this seed exists so the shot exercises the card
+    // rendering: friendly title/body, structured payload on hover.
+    let _ = spp_core::notifications::record_notification(
+        conn,
+        None,
+        &spp_core::notifications::NotificationInput {
+            notification_type: spp_core::catalog::NotificationType::JobFailure,
+            severity: Some("warning"),
+            title: "Background job failed: AI task".into(),
+            body: Some(
+                "A background task could not reach the service it needs at \
+                 localhost:1234 — the connection was refused, timed out, or the \
+                 address does not resolve. If this is the AI assistant, check that \
+                 LM Studio (or your OpenAI-compatible server) is running and that \
+                 its address in Settings is correct. (Hover for the technical \
+                 detail.)"
+                    .into(),
+            ),
+            payload: Some(
+                "{\"code\":\"unreachable\",\"raw\":\"LM Studio chat failed: error \
+                 sending request for url \
+                 (http://localhost:1234/v1/chat/completions)\",\"queue\":\"ai\",\
+                 \"job_type\":\"ai\"}"
+                    .into(),
+            ),
+            dedup_key: "shot:n3".into(),
+            ..Default::default()
+        },
+    );
     let _ = spp_core::search::rebuild_indexes(conn);
     Ok(())
 }

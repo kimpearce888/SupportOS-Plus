@@ -23,11 +23,18 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
     )
     .expect("user");
     spp_core::settings::set_string(&conn, "me_remote_id", "505").expect("me");
-    let row = |id: i64, ntype: &str, sev: &str, title: &str, body: &str, read: bool, ago: i64| {
+    let row = |id: i64,
+               ntype: &str,
+               sev: &str,
+               title: &str,
+               body: &str,
+               payload: Option<&str>,
+               read: bool,
+               ago: i64| {
         conn.execute(
-            "INSERT INTO notifications (id, type, severity, title, body, target_user_id, dedup_key, created_at, read_at)
+            "INSERT INTO notifications (id, type, severity, title, body, target_user_id, dedup_key, created_at, read_at, payload)
              VALUES (?1, ?2, ?3, ?4, ?5, 5, ?6, ?7,
-                     CASE WHEN ?8 = 1 THEN ?7 ELSE NULL END)",
+                     CASE WHEN ?8 = 1 THEN ?7 ELSE NULL END, ?9)",
             rusqlite::params![
                 id,
                 ntype,
@@ -36,7 +43,8 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
                 body,
                 format!("seed-{id}"),
                 spp_core::business_hours::iso_days_ago(ago),
-                read
+                read,
+                payload
             ],
         )
         .expect("notification");
@@ -47,6 +55,7 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
         "info",
         "Customer replied on #501 Export to CSV fails on large files",
         "Is there an ETA on the fix?",
+        None,
         false,
         0,
     );
@@ -56,6 +65,7 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
         "error",
         "SLA breached on #505 Refund for duplicate charge",
         "",
+        None,
         false,
         0,
     );
@@ -65,6 +75,7 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
         "info",
         "Ada mentioned you on #490 Billing address will not save",
         "",
+        None,
         true,
         1,
     );
@@ -74,6 +85,7 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
         "info",
         "Campaign reply on Spring push",
         "",
+        None,
         true,
         2,
     );
@@ -83,6 +95,7 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
         "error",
         "Sync failed on the inbox mirror",
         "",
+        None,
         true,
         2,
     );
@@ -92,8 +105,24 @@ fn seeded_page() -> (NotificationsPage, DbHandle) {
         "info",
         "Grace mentioned you on #477 Refund window",
         "",
+        None,
         true,
         3,
+    );
+    // UX-35: a job-failure notification in the new shape — friendly title
+    // and body, verbatim error preserved in the structured payload (the
+    // card reveals it on hover).
+    row(
+        7,
+        "job_failure",
+        "warning",
+        "Background job failed: AI task",
+        "A background task could not reach the service it needs at localhost:1234 — the connection was refused, timed out, or the address does not resolve. If this is the AI assistant, check that LM Studio (or your OpenAI-compatible server) is running and that its address in Settings is correct. (Hover for the technical detail.)",
+        Some(
+            "{\"code\":\"unreachable\",\"raw\":\"LM Studio chat failed: error sending request for url (http://localhost:1234/v1/chat/completions)\",\"queue\":\"ai\",\"job_type\":\"ai\"}",
+        ),
+        false,
+        0,
     );
     (NotificationsPage::new(), DbHandle::new(conn))
 }

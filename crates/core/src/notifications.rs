@@ -59,12 +59,18 @@ pub(crate) fn apply_m005(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// UX-35: structured technical payload for notifications whose body is a
+/// friendly summary (job failures today): a JSON object such as
+/// `{"code":"unreachable","raw":"…","queue":"ai","job_type":"ai"}`.
+/// `code` is a stable machine-readable class, `raw` preserves the verbatim
+/// error for the hover/Diagnostics surfaces.
 #[derive(Debug, Clone)]
 pub struct NotificationInput<'a> {
     pub notification_type: NotificationType,
     pub severity: Option<&'a str>,
     pub title: String,
     pub body: Option<String>,
+    pub payload: Option<String>,
     pub target_user_local_id: Option<i64>,
     pub actor_user_local_id: Option<i64>,
     pub conversation_id: Option<i64>,
@@ -84,6 +90,7 @@ impl Default for NotificationInput<'_> {
             severity: None,
             title: String::new(),
             body: None,
+            payload: None,
             target_user_local_id: None,
             actor_user_local_id: None,
             conversation_id: None,
@@ -117,6 +124,24 @@ pub struct NotificationRecord {
     pub side_thread_id: Option<i64>,
     pub created_at: String,
     pub read_at: Option<String>,
+    /// UX-35: structured technical payload (see `NotificationInput::payload`).
+    pub payload: Option<String>,
+}
+
+impl NotificationRecord {
+    /// UX-35: the verbatim technical error behind a friendly notification
+    /// body, when the record carries a structured payload. Powers the
+    /// hover on the notifications page.
+    #[must_use]
+    pub fn technical_detail(&self) -> Option<String> {
+        let payload = self.payload.as_deref()?;
+        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+        value
+            .get("raw")
+            .and_then(|r| r.as_str())
+            .filter(|r| !r.is_empty())
+            .map(str::to_string)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -181,8 +206,8 @@ pub fn insert(
         "INSERT INTO notifications
             (type, severity, title, body, target_user_id, actor_user_local_id,
              conversation_id, conversation_number, customer_local_id, issue_id,
-             campaign_id, job_id, side_thread_id, dedup_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             campaign_id, job_id, side_thread_id, dedup_key, payload)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(dedup_key) DO NOTHING",
         params![
             input.notification_type.as_str(),
@@ -199,6 +224,7 @@ pub fn insert(
             input.job_id,
             input.side_thread_id,
             input.dedup_key,
+            input.payload,
         ],
     )?;
     if inserted == 0 {
@@ -212,7 +238,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<NotificationRecord>> {
         .query_row(
             "SELECT id, type, severity, title, body, target_user_id, actor_user_local_id,
                     conversation_id, conversation_number, customer_local_id, issue_id,
-                    campaign_id, job_id, side_thread_id, created_at, read_at
+                    campaign_id, job_id, side_thread_id, created_at, read_at, payload
              FROM notifications WHERE id = ?1",
             params![id],
             row_to_notification,
@@ -275,7 +301,7 @@ pub fn list(conn: &Connection, opts: &ListOptions<'_>) -> Result<NotificationLis
             "SELECT n.id, n.type, n.severity, n.title, n.body, n.target_user_id,
                     n.actor_user_local_id, n.conversation_id, n.conversation_number,
                     n.customer_local_id, n.issue_id, n.campaign_id, n.job_id,
-                    n.side_thread_id, n.created_at, n.read_at
+                    n.side_thread_id, n.created_at, n.read_at, n.payload
              FROM notifications n WHERE {where_sql}
              ORDER BY n.created_at DESC, n.id DESC LIMIT ?2 OFFSET ?3"
         ))?;
@@ -306,7 +332,7 @@ pub fn mentions_for_me(conn: &Connection, me: i64, limit: i64) -> Result<Vec<Not
     let mut stmt = conn.prepare(
         "SELECT id, type, severity, title, body, target_user_id, actor_user_local_id,
                 conversation_id, conversation_number, customer_local_id, issue_id,
-                campaign_id, job_id, side_thread_id, created_at, read_at
+                campaign_id, job_id, side_thread_id, created_at, read_at, payload
          FROM notifications
          WHERE type IN ('mentioned', 'team_mentioned') AND target_user_id = ?1
          ORDER BY created_at DESC, id DESC LIMIT ?2",
@@ -374,6 +400,7 @@ fn row_to_notification(r: &rusqlite::Row<'_>) -> rusqlite::Result<NotificationRe
         side_thread_id: r.get(13)?,
         created_at: r.get(14)?,
         read_at: r.get(15)?,
+        payload: r.get(16)?,
     })
 }
 

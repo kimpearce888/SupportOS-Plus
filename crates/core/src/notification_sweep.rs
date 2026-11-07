@@ -376,6 +376,137 @@ fn sweep_automation_approvals(
     Ok(created)
 }
 
+/// UX-35: friendly, user-facing label for an internal job type — no more
+/// snake_case identifiers (`ai`, `embed_conversation_chunks`) in
+/// notification titles. Unknown types degrade to a cleaned-up phrase.
+fn friendly_job_type(job_type: &str) -> String {
+    match job_type {
+        "ai" | "analyze_ticket" | "generate_draft" | "create_ai_note" | "review_draft"
+        | "qa_ai_layer" | "rewrite_composer" => "AI task".to_string(),
+        "sync" => "Help Scout sync".to_string(),
+        "embeddings" | "embed_conversation_chunks" | "embed_knowledge_chunks" => {
+            "knowledge embeddings".to_string()
+        }
+        "cluster_issues" => "issue clustering".to_string(),
+        "draft_article" => "article drafting".to_string(),
+        "golden_eval" => "AI quality evaluation".to_string(),
+        "rebuild_activity" | "rebuild_gaps" => "report rebuild".to_string(),
+        "saved_reply_write" => "saved reply write".to_string(),
+        "run_workflow" => "automation workflow".to_string(),
+        "webhook_health_check" => "webhook health check".to_string(),
+        "automation_action_awaiting_approval" => "automation approval".to_string(),
+        "send_chat_message" => "live chat message".to_string(),
+        "outreach_send_batch" => "campaign send".to_string(),
+        "download_recent_attachments" => "attachment downloads".to_string(),
+        other => {
+            let cleaned = other.replace('_', " ");
+            match cleaned.char_indices().next() {
+                Some((0, first)) => format!("{}{}", first.to_uppercase(), &cleaned[1..]),
+                _ => cleaned,
+            }
+        }
+    }
+}
+
+/// UX-35: pull the `host:port` out of a reqwest-style error like
+/// `… error sending request for url (http://localhost:1234/v1/chat/completions)`.
+fn extract_host(text: &str) -> Option<String> {
+    let start = text.find("url (").map(|i| i + "url (".len())?;
+    let rest = &text[start..];
+    let end = rest.find([')', ' ']).unwrap_or(rest.len());
+    let url = &rest[..end];
+    let after_scheme = url.split_once("://").map_or(url, |x| x.1);
+    let host = after_scheme.split('/').next().unwrap_or(after_scheme);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+/// UX-35: classify a raw job error into a stable machine-readable `code`
+/// plus a friendly sentence for the notification body. The raw string is
+/// preserved verbatim in the structured payload (hover / Diagnostics).
+fn classify_job_error(raw: &str) -> (&'static str, String) {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("connection refused")
+        || lower.contains("error sending request")
+        || lower.contains("failed to lookup")
+        || lower.contains("dns")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+    {
+        let host = extract_host(raw);
+        let at = host
+            .as_deref()
+            .map_or_else(String::new, |h| format!(" at {h}"));
+        let is_local = host
+            .as_deref()
+            .is_some_and(|h| h.starts_with("localhost") || h.starts_with("127.0.0.1"));
+        let hint = if is_local {
+            " If this is the AI assistant, check that LM Studio (or your OpenAI-compatible server) is running and that its address in Settings is correct."
+        } else {
+            ""
+        };
+        return (
+            "unreachable",
+            format!(
+                "A background task could not reach the service it needs{at} — \
+                 the connection was refused, timed out, or the address does not \
+                 resolve.{hint}"
+            ),
+        );
+    }
+    if lower.contains("unauthorized")
+        || lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("api key")
+        || lower.contains("credentials")
+    {
+        return (
+            "auth",
+            "A background task was rejected because its credentials were not \
+             accepted — check the connected accounts and API keys in Settings."
+                .to_string(),
+        );
+    }
+    if lower.contains("429") || lower.contains("rate limit") {
+        return (
+            "rate_limited",
+            "A background task was rate-limited by the remote service until it \
+             gave up — retry later from Diagnostics."
+                .to_string(),
+        );
+    }
+    if lower.contains("parse failed")
+        || lower.contains("deserialize")
+        || lower.contains("json")
+        || lower.contains("unexpected response")
+    {
+        return (
+            "bad_response",
+            "A background task got a response from the remote service that it \
+             could not read — the service may be misbehaving."
+                .to_string(),
+        );
+    }
+    if lower.contains("missing")
+        || lower.contains("unknown job type")
+        || lower.contains("not configured")
+    {
+        return (
+            "misconfigured",
+            "A background task could not run because it was set up incorrectly \
+             (an internal misconfiguration, not something you did)."
+                .to_string(),
+        );
+    }
+    (
+        "unknown",
+        "A background task failed after exhausting its retries.".to_string(),
+    )
+}
+
 fn sweep_failed_jobs(
     conn: &Connection,
     bus: Option<&crate::event_bus::EventBus>,
@@ -400,14 +531,29 @@ fn sweep_failed_jobs(
             continue;
         };
         let _ = completed;
+        // UX-35: the notification is a user-facing surface — the title names
+        // the job in plain language, the body is a friendly classification,
+        // and the verbatim error moves into the structured payload (shown on
+        // hover, kept for Diagnostics) instead of the body.
+        let raw = error.unwrap_or_default();
+        let (code, friendly) = classify_job_error(&raw);
         let r = record_notification(
             conn,
             bus,
             &NotificationInput {
                 notification_type: NotificationType::JobFailure,
                 severity: Some("warning"),
-                title: format!("Background job failed ({queue}/{job_type})"),
-                body: error.as_deref().map(|e| trim(e, 200)),
+                title: format!("Background job failed: {}", friendly_job_type(&job_type)),
+                body: Some(format!("{friendly} (Hover for the technical detail.)")),
+                payload: Some(
+                    serde_json::json!({
+                        "code": code,
+                        "raw": raw,
+                        "queue": queue,
+                        "job_type": job_type,
+                    })
+                    .to_string(),
+                ),
                 job_id: Some(job_id),
                 dedup_key: format!("n:jobfail:{job_id}"),
                 ..Default::default()
@@ -1057,6 +1203,141 @@ mod batch31_tests {
         assert_eq!(
             outcome.created, 5,
             "every new failure notifies, none starved by the old rows"
+        );
+    }
+}
+
+#[cfg(test)]
+mod ux35_tests {
+    use super::*;
+    use rusqlite::{Connection, params};
+
+    fn sweep_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::sync_engine::set_state(&conn, "LIVE");
+        crate::settings::set_i64(&conn, CURSOR_KEY, 0).expect("cursor");
+        crate::settings::set_string(&conn, SWEEP_AT_KEY, "2026-11-06 10:00:00").expect("sweep_at");
+        conn
+    }
+
+    fn seeded_failure(conn: &Connection, job_type: &str, queue: &str, error: &str) {
+        conn.execute(
+            "INSERT INTO jobs (queue, type, status, error, completed_at)
+             VALUES (?1, ?2, 'failed', ?3, '2026-11-06 11:00:00')",
+            params![queue, job_type, error],
+        )
+        .expect("failed job");
+    }
+
+    fn job_failure_row(conn: &Connection) -> (String, Option<String>, Option<String>) {
+        conn.query_row(
+            "SELECT title, body, payload FROM notifications
+             WHERE type = 'job_failure' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .expect("the job-failure notification")
+    }
+
+    #[test]
+    fn classifier_maps_the_audit_seen_error_shapes() {
+        // The exact shape the audit flagged: LM Studio's localhost URL
+        // arriving verbatim in a notification body.
+        let (code, friendly) = classify_job_error(
+            "LM Studio chat failed: error sending request for url \
+             (http://localhost:1234/v1/chat/completions)",
+        );
+        assert_eq!(code, "unreachable");
+        assert!(friendly.contains("localhost:1234"), "{friendly}");
+        assert!(friendly.contains("LM Studio"), "{friendly}");
+        assert!(!friendly.contains("http://"), "{friendly}");
+
+        let (code, _) = classify_job_error("request timed out");
+        assert_eq!(code, "unreachable");
+
+        let (code, _) = classify_job_error("Help Scout API unauthorized (401)");
+        assert_eq!(code, "auth");
+
+        let (code, _) = classify_job_error("429 too many requests — rate limit hit");
+        assert_eq!(code, "rate_limited");
+
+        let (code, _) = classify_job_error("LM Studio chat parse failed: expected value");
+        assert_eq!(code, "bad_response");
+
+        let (code, _) = classify_job_error("analyze_ticket missing conversationId");
+        assert_eq!(code, "misconfigured");
+
+        let (code, _) = classify_job_error("something entirely novel");
+        assert_eq!(code, "unknown");
+
+        assert_eq!(
+            extract_host("error sending request for url (https://api.helpscoutapp.com/v1/x)"),
+            Some("api.helpscoutapp.com".to_string())
+        );
+        assert_eq!(extract_host("no url here"), None);
+    }
+
+    #[test]
+    fn failed_job_notifications_carry_friendly_text_and_structured_payload() {
+        let conn = sweep_db();
+        seeded_failure(
+            &conn,
+            "ai",
+            "ai",
+            "LM Studio chat failed: error sending request for url \
+             (http://localhost:1234/v1/chat/completions)",
+        );
+
+        let outcome = sweep(&conn, None).expect("sweep");
+        assert_eq!(outcome.created, 1);
+
+        let (title, body, payload) = job_failure_row(&conn);
+        assert_eq!(
+            title, "Background job failed: AI task",
+            "no internal queue/job_type names in the title"
+        );
+        let body = body.expect("body");
+        assert!(
+            body.contains("could not reach") && body.contains("localhost:1234"),
+            "the body is the friendly classification: {body}"
+        );
+        assert!(
+            !body.contains("error sending request") && !body.contains("http://"),
+            "no raw error in the body: {body}"
+        );
+        assert!(
+            body.contains("Hover"),
+            "the body points at the hover for the technical detail: {body}"
+        );
+
+        let payload = payload.expect("payload");
+        let value: serde_json::Value = serde_json::from_str(&payload).expect("payload JSON");
+        assert_eq!(
+            value.get("code").and_then(|c| c.as_str()),
+            Some("unreachable")
+        );
+        assert_eq!(value.get("queue").and_then(|q| q.as_str()), Some("ai"));
+        assert_eq!(value.get("job_type").and_then(|j| j.as_str()), Some("ai"));
+        let raw = value.get("raw").and_then(|r| r.as_str()).expect("raw kept");
+        assert!(
+            raw.contains("http://localhost:1234"),
+            "the verbatim error is preserved in the payload: {raw}"
+        );
+    }
+
+    #[test]
+    fn unknown_job_types_still_get_a_clean_title() {
+        let conn = sweep_db();
+        seeded_failure(&conn, "some_future_job", "sync", "mystery failure");
+
+        let outcome = sweep(&conn, None).expect("sweep");
+        assert_eq!(outcome.created, 1);
+        let (title, body, _) = job_failure_row(&conn);
+        assert_eq!(title, "Background job failed: Some future job");
+        assert!(
+            body.expect("body").contains("exhausting its retries"),
+            "the unknown class falls back to a plain sentence"
         );
     }
 }

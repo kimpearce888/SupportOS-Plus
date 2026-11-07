@@ -309,8 +309,11 @@ impl NotificationsPage {
                             .color(design::tokens(ui).foreground),
                     );
                     if let Some(body) = &sample.body {
-                        // UX-13: raw error payloads stay verbatim but render as
-                        // truncated code with the full text one hover away.
+                        // UX-13: bodies render as truncated small code with
+                        // the full text one hover away. UX-35: job-failure
+                        // bodies are now friendly summaries — their hover
+                        // reveals the verbatim technical error kept in the
+                        // structured payload.
                         let t = design::tokens(ui);
                         let galley = egui::WidgetText::from(
                             egui::RichText::new(body.as_str())
@@ -327,7 +330,10 @@ impl NotificationsPage {
                         let (id, rect) = ui.allocate_space(galley.size());
                         ui.painter().galley(rect.min, galley, t.muted_foreground);
                         ui.advance_cursor_after_rect(rect);
-                        let _ = id;
+                        if let Some(detail) = sample.technical_detail() {
+                            let hover = ui.interact(rect, id, egui::Sense::hover());
+                            hover.on_hover_text(format!("Technical detail: {detail}"));
+                        }
                     }
                 });
             }
