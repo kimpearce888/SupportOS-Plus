@@ -8173,3 +8173,11 @@ directive.
 
 Rule 8 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+CI outcome addendum (appended to the UXD-1 record, append-only): the
+batch push (b9149ac..1e15797) went green on the first push — CI run
+`42375985087`, completed success (fmt/clippy/test/deny ✓ · AppImage +
+.deb build smoke ✓ · kittest snapshot locks ✓ — the 171 regenerated + 2
+new goldens held cross-runner through lavapipe, and the pinned shot clock
+held for a third calendar day of CI runs past the regen). Rule 8 STOP —
+the queue is empty; the next work item requires a new owner directive.
