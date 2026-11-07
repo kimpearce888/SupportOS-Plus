@@ -7933,3 +7933,15 @@ previous midnight under the same mechanics).
 With UXB-T1 the last open finding of the UX-audit program (including its
 test-infra tail) is closed. Rule 8 STOP — the queue is empty; resume only
 on a new owner directive.
+
+CI outcome addendum (appended to the UXB-T1 record, append-only): the
+2-commit push (aa23d21..0051a42) went green 3/3 on the first push —
+fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · **kittest snapshot
+locks ✓** (all suites incl. the new `kittest_clock_pin` passed on CI's own
+lavapipe runner against the UNCHANGED committed baselines — the pinned
+rendering matched byte-for-byte on a different machine/rasterizer, which is
+the freeze holding cross-environment; notably CI's lane now survives any
+calendar day, the very property this batch was opened for) — CI run
+42331436125, completed success. The GA-1 standing practice (cargo fmt --all
+-- --check as the final pre-push local step) held. The UX-audit program,
+including its test-infra tail, is fully closed; Rule 8 STOP.
