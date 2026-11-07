@@ -4,6 +4,41 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.5] — 2026-11-07
+
+### Fixed — the backend-blocked UX-audit findings (Batch UXB-1: UX-26B/UX-34/UX-35)
+
+- **Help Scout webhook signatures survive the old secret cap**: signing
+  secrets used to be stored truncated at 40 characters, so webhooks
+  registered by cap-era builds verified against a signature computed over
+  only part of the real secret. `verify_delivery` now verifies with the
+  full stored secret and keeps a compatibility fallback that accepts a
+  signature over the first 40 characters — hooks registered by older
+  builds keep working, and new registrations store the complete secret.
+  The settings page no longer warns about the 40-character limit.
+- **Operations tiles drill where the data actually lives**: the overview
+  tiles now take their navigation and drill-down lines from the operations
+  engine's own drill payload instead of a hardcoded copy of it, so the
+  three tiles that were already marked drillable (Repeated issue, Known
+  issue, AI escalation) are clickable like their siblings, and the
+  failed-jobs drill lands on Diagnostics — the page where the failed-jobs
+  table actually is.
+- **Job-failure notifications read like a product, not a stack trace**:
+  a failed background job now raises a notification with a friendly title
+  (the job type, e.g. "Background job failed: AI task") and a classified
+  body (unreachable / auth / rate-limited / bad response / misconfigured /
+  unknown, with the host extracted and an LM Studio hint for localhost).
+  The verbatim error, status code, queue and job type are preserved in
+  the notification payload and revealed on hover — nothing is lost, the
+  first read is just human.
+
+### Internal — deterministic test clock (Batch UXB-T1, no user-facing change)
+
+- The UI snapshot fixtures pin their clock (an anchor instant consulted
+  by every date-tick read on the render path, behind a test-only feature
+  gate), so "Nd ago" goldens no longer tick one day further at every UTC
+  midnight. Production builds are semantically unchanged.
+
 ## [1.9.4] — 2026-11-05
 
 ### Fixed — background sync no longer stalls on local connectors
@@ -1036,6 +1071,7 @@ verified end-to-end by the tag-triggered release pipeline.
 - CI: fmt + clippy (`-D warnings`) + tests + cargo-deny on every push,
   plus a package job that builds and smoke-boots both formats.
 
+[1.9.5]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.5
 [1.9.4]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.4
 [1.9.3]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.3
 [1.9.2]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.2

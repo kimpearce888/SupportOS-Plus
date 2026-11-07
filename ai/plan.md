@@ -27,6 +27,19 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
 
+### Release queue
+
+**Batch REL-4 — Build & Release v1.9.5 from the final source** (opened
+2026-11-07 on the owner's Build-and-Release directive — the same program as
+REL-1/2/3: build, test, and publish install-ready Linux `.deb` + `.AppImage`
+packages from the final repository source, with a versioned GitHub Release,
+checksums, and verified download links). The four items (REL-4-1..REL-4-4)
+moved straight through Rule 2 to `progress.md` and are being executed the
+same session. v1.9.5 is the first release to carry the UXB-1 fixes
+(UX-26B/UX-34/UX-35 — the backend-blocked UX-audit findings) and the
+UXB-T1 deterministic shot clock; both batches' pushes were CI-green
+(runs 42319227840, 42331436125).
+
 ### UX-audit queue (EMPTY — test-infra batch UXB-T1 closed 2026-11-07)
 
 No queued items. The owner's "resolve ignored items" directive (2026-11-07,
