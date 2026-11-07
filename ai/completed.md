@@ -7841,3 +7841,13 @@ fix (deterministic clock for fixtures) proposed in
 With UXB-1 the ux-audit backlog is fully consumed: UXA-1..UXA-4 (33
 frontend findings) + UXB-1 (3 backend findings). Rule 8 STOP — the queue
 is empty; resume only on a new owner directive.
+
+CI outcome addendum (appended to the UXB-1 record, append-only): the
+5-commit push (83290a0..41a62b9) went green 3/3 on the first push —
+fmt/clippy/test/deny ✓ · AppImage + .deb build smoke ✓ · **kittest
+snapshot locks ✓** (the regenerated baselines passed on CI's lavapipe,
+including the 13 intended regens and the 7 disclosed UXB-T1 date-tick
+regens — CI ran on the same UTC day as the regen, so the "11d ago"
+goldens held) — CI run 42319227840, completed success. The GA-1 standing
+practice (cargo fmt --all -- --check as the final pre-push local step)
+held. The UX-audit backlog is fully consumed; Rule 8 STOP.
