@@ -1278,7 +1278,7 @@ impl KnowledgePage {
         }
 
         ui.horizontal(|ui| {
-            design::field_label(ui, "collection:");
+            design::field_label(ui, "Collection");
             let collection_label = self
                 .collection_pick
                 .and_then(|id| {
@@ -1304,7 +1304,7 @@ impl KnowledgePage {
                         format!("collection: {collection_label}"),
                     )
                 });
-            design::field_label(ui, "status:");
+            design::field_label(ui, "Status");
             let status_label = self.status_pick.clone().unwrap_or_else(|| "Any".into());
             egui::ComboBox::from_id_salt("docs-status")
                 .selected_text(status_label.clone())

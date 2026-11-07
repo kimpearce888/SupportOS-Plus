@@ -381,14 +381,14 @@ impl ConnectorsPage {
         design::card(ui, |ui| {
             design::section_title(ui, "New Connector");
             design::form_grid(ui, "connector-new", |ui| {
-                let name_label = design::field_label(ui, "name:");
+                let name_label = design::field_label(ui, "Name");
                 ui.add_sized(
                     [220.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("connector name"),
                 )
                 .labelled_by(name_label.id);
                 ui.end_row();
-                design::field_label(ui, "kind:");
+                design::field_label(ui, "Kind");
                 ui.horizontal(|ui| {
                     for kind in Kind::ALL {
                         if design::chip(ui, self.new_kind == kind, kind.label()).clicked() {
@@ -399,7 +399,7 @@ impl ConnectorsPage {
                 ui.end_row();
                 match self.new_kind {
                     Kind::Csv => {
-                        let file_label = design::field_label(ui, "file (data dir):");
+                        let file_label = design::field_label(ui, "File (data dir)");
                         ui.add_sized(
                             [260.0, 28.0],
                             egui::TextEdit::singleline(&mut self.new_file).hint_text("billing.csv"),
@@ -409,7 +409,7 @@ impl ConnectorsPage {
                         ui.end_row();
                     }
                     Kind::Http => {
-                        let url_label = design::field_label(ui, "url:");
+                        let url_label = design::field_label(ui, "Url");
                         ui.add_sized(
                             [280.0, 28.0],
                             egui::TextEdit::singleline(&mut self.new_url).hint_text("https://…"),
@@ -418,14 +418,14 @@ impl ConnectorsPage {
                         ui.end_row();
                     }
                 }
-                let refresh_label = design::field_label(ui, "refresh seconds:");
+                let refresh_label = design::field_label(ui, "Refresh seconds");
                 ui.add_sized(
                     [140.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_refresh_seconds).hint_text("3600"),
                 )
                 .labelled_by(refresh_label.id);
                 ui.end_row();
-                design::field_label(ui, "allow AI:");
+                design::field_label(ui, "Allow AI");
                 ui.checkbox(&mut self.new_allowed_ai, "AI tools may query");
                 ui.end_row();
             });

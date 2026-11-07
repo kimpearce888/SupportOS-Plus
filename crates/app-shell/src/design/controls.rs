@@ -80,17 +80,30 @@ pub fn card<R>(
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
     let t = tokens(ui);
+    let dark = ui.visuals().dark_mode;
+    // UXE-1-1: light mode goes borderless — white cards on the zinc-244
+    // canvas separated by a soft shadow (the Linear/Stripe register);
+    // dark mode keeps the hairline (shadows are invisible on near-black)
+    // and drops the shadow entirely.
+    let (stroke, shadow) = if dark {
+        (egui::Stroke::new(1.0, t.border), egui::Shadow::NONE)
+    } else {
+        (
+            egui::Stroke::NONE,
+            egui::Shadow {
+                offset: [0, 1],
+                blur: 3,
+                spread: 0,
+                color: egui::Color32::from_black_alpha(26),
+            },
+        )
+    };
     let frame = egui::Frame::new()
         .fill(t.card)
-        .stroke(egui::Stroke::new(1.0, t.border))
+        .stroke(stroke)
         .corner_radius(10)
         .inner_margin(egui::Margin::same(14))
-        .shadow(egui::Shadow {
-            offset: [0, 1],
-            blur: 2,
-            spread: 0,
-            color: egui::Color32::from_black_alpha(if ui.visuals().dark_mode { 80 } else { 14 }),
-        });
+        .shadow(shadow);
     frame.show(ui, add_contents)
 }
 
@@ -242,12 +255,14 @@ pub(crate) fn pager(ui: &mut egui::Ui, page: u32, pages: u32) -> i32 {
                 .color(t.muted_foreground),
         );
         if page + 1 < pages {
+            // UXE-1-3: Title Case button labels — "next ›" was the one
+            // lowercase control left in the shared set.
             if button(ui, "Next ›", ButtonVariant::Outline).clicked() {
                 delta = 1;
             }
         } else {
             ui.label(
-                egui::RichText::new("next ›")
+                egui::RichText::new("Next ›")
                     .small()
                     .color(t.muted_foreground),
             );

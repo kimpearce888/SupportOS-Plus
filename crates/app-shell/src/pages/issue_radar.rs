@@ -274,10 +274,13 @@ impl IssueRadarPage {
                 if skipped.is_empty() {
                     self.notice = None;
                 } else {
+                    let linked = conversation_ids.len();
                     self.notice = Some(format!(
-                        "known issue created; linked {} conversation(s) — unknown id(s) \
+                        "known issue created; linked {} conversation{} — unknown id{} \
                          skipped: {}",
-                        conversation_ids.len(),
+                        linked,
+                        if linked == 1 { "" } else { "s" },
+                        if skipped.len() == 1 { "" } else { "s" },
                         skipped.join(", ")
                     ));
                 }
@@ -799,13 +802,13 @@ impl IssueRadarPage {
     fn new_known_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card_titled(ui, "New known issue", None, |ui| {
             design::form_grid(ui, "radar-new-known", |ui| {
-                design::field_label(ui, "title:");
+                design::field_label(ui, "Title");
                 ui.add_sized(
                     [260.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_title),
                 );
                 ui.end_row();
-                design::field_label(ui, "status:");
+                design::field_label(ui, "Status");
                 let status_label = self.new_status.clone();
                 egui::ComboBox::from_id_salt("radar-new-status")
                     .selected_text(status_label.clone())
@@ -824,18 +827,18 @@ impl IssueRadarPage {
                         )
                     });
                 ui.end_row();
-                design::field_label(ui, "symptoms:");
+                design::field_label(ui, "Symptoms");
                 ui.add(
                     egui::TextEdit::multiline(&mut self.new_symptoms).desired_width(f32::INFINITY),
                 );
                 ui.end_row();
-                design::field_label(ui, "workaround:");
+                design::field_label(ui, "Workaround");
                 ui.add(
                     egui::TextEdit::multiline(&mut self.new_workaround)
                         .desired_width(f32::INFINITY),
                 );
                 ui.end_row();
-                design::field_label(ui, "conversation ids:");
+                design::field_label(ui, "Conversation ids");
                 ui.add_sized(
                     [260.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_conversation_ids),

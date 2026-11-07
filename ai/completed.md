@@ -8181,3 +8181,136 @@ batch push (b9149ac..1e15797) went green on the first push — CI run
 new goldens held cross-runner through lavapipe, and the pinned shot clock
 held for a third calendar day of CI runs past the regen). Rule 8 STOP —
 the queue is empty; the next work item requires a new owner directive.
+
+## Batch UXE-1 — full-app design modernization (closed 2026-11-07/08)
+
+Opened on the owner's directive (screenshot report + "check the sidebar,
+the reply editor at the bottom, basically most of the layouts are not
+correctly designed, gap, padding, label alignments too many issues …
+should not look like different pages are designed differently … make it
+professional and modern, it is too much old school like an ancient build
+… should work fine on every monitor/display … make sure to fix every
+design issues"). Diagnosis (VLM audits of the owner screenshot + the
+current goldens, converged): mixed casing/label conventions per page
+(100+ lowercase `label:` field labels, lowercase buttons), three page-
+header patterns, native egui ComboBox/checkbox controls reading
+Win95-era, saturated full-fill callout cards, a copilot panel and
+composer that clipped on 1024-class displays (the composer defect
+PRESENT IN THE PRE-BATCH GOLDENS: the auto-sized bottom panel converged
+to a sliver — UX-27's scroll bound never actually contained it), fixed-
+width inbox columns (views 172 + list 330..640 + copilot 320), and no
+window minimum size.
+
+Items (all ten closed):
+
+- **UXE-1-1 — tokens & cards**: TITLE 22→18 / SECTION_BIG 18→16 (frozen-
+  scale test updated with intent), one radius scale (CARD 10 / CONTROL 8
+  / BADGE 6, widget visuals on CONTROL), borderless elevated cards in
+  light mode (soft shadow; dark keeps the hairline, drops the shadow),
+  page_header rhythm (SP3 after the header on every page), card diet in
+  message cards (16/12/13 margins → 14/11/12).
+- **UXE-1-2 — shell chrome**: brand row with inline version pill (was a
+  two-line block), one micro-label convention (11px muted sentence case
+  for sidebar groups AND the inbox views rail — "INBOX VIEWS" → "Views"),
+  30px nav rows with strong selected labels, search trigger on the nav
+  grid at 32px, theme row pinned without the orphan hairline, top bar
+  52→48px.
+- **UXE-1-3 — control set**: `design::select` (styled 32px dropdown,
+  hairline border, muted chevron, card-styled `Popup::menu`, accessible
+  name — bare `WidgetInfo::new(ComboBox)` failed the kittest
+  accessibility check), `design::switch` (deterministic pill-and-knob
+  boolean), `design::segmented` (muted track + raised active segment);
+  controls radius via widget visuals; Title Case sweep ("apply"→"Apply",
+  "filters"→"Filters", "next ›"→"Next ›", "ask"→"Ask", "thinking…"→
+  "Thinking…", checkbox labels).
+- **UXE-1-4 — responsive architecture**: window `min_inner_size` 980×600;
+  width-aware inbox columns — the views rail folds into chips below 900px
+  of content width (and folds to keep a docked copilot viable), the list
+  is proportional 280–560 resizable, the copilot docks at 300px while
+  the reader keeps a 480px floor and otherwise SWAPS IN over the reader
+  (narrow mode) instead of crushing it; the composer steps aside with
+  the reader in narrow mode. New goldens pin all three states:
+  r5_inbox_copilot_docked_1920_light, r5_inbox_copilot_narrow_1024_light,
+  r5_inbox_folded_views_800_light.
+- **UXE-1-5 — inbox list & views**: folded-views chips, styled selects
+  for mailbox/channel/tag, the search row reserves the `#` input and
+  Apply widths so the primary row composes on one line at every legal
+  list width, row anatomy with a 3px selection accent bar, "Reset
+  Filters"→"Reset", 10px row padding, en-dash ranges.
+- **UXE-1-6 — reader**: `Sides::shrink_left` header (cluster anchored
+  right, bounded truncated subject/meta — the old left-to-right row let
+  a long subject push the cluster off the edge at 800px), the toolbar as
+  two explicit rows (Status segmented control over Assignee select +
+  Assign; egui cannot wrap opaque nested groups — the wrapped-group
+  attempt clipped the Assign button at 800px), meta line de-logged
+  ("mailbox: X · priority: none" → "X · Priority: none"), note/AI
+  message cards swap full colored borders for 3px left accent bars.
+- **UXE-1-7 — composer**: one card — segmented Reply|Note header +
+  Saved-Replies dropdown (real `Popup::menu`, not the inline frame) +
+  AI Draft; To/Cc/Bcc recipient rows on aligned 28px label columns
+  before the body; AI tools (Review Draft/Shorten/Expand/Warmer/
+  Translate + language select) after the body; footer hint + primary
+  Send. ROOT-CAUSE FIX: the composer bottom panel now tracks the card's
+  measured height (`composer_panel_h`, exact_size, window-capped) — the
+  old auto-sized panel converged to a sliver and clipped the composer
+  at the window bottom on EVERY width (pre-existing in the goldens;
+  exactly the owner's screenshot complaint).
+- **UXE-1-8 — copilot**: "Local" badge in the header, the "(s)" dev
+  string pluralized properly ("N past conversation(s)" → conditional
+  plural), `cop_suggest` on the accent-bar anatomy (no full colored
+  border).
+- **UXE-1-9 — cross-page pass**: reports drops the floating-label tab
+  groups for ONE wrapped underline tab row (long tab sets wrap instead
+  of clipping — `tabs_row` now `horizontal_wrapped`); settings AI
+  behaviour/Help Scout/vector-index rows become switch rows; 100-label
+  sentence-case sweep across 13 pages (`name:`→"Name", `base url:`→
+  "Base URL", `api key:`→"API key", …); "(s)" plurals fixed in
+  automation/diagnostics/incidents/issue_radar/ai_center (+ the
+  incidents test assertion updated).
+- **UXE-1-10 — verification** (below).
+
+Verification (full battery, 2026-11-07/08):
+
+- Gates: fmt `--check` ✓; clippy workspace `--all-targets` 0 warnings ✓;
+  clippy kittest lane: only the two PRE-EXISTING `too many arguments`
+  warnings in `kittest_list_pages.rs` (verified present on HEAD via
+  stash; the file is `kittest-ui`-gated so CI's deny-warnings lane never
+  compiles it — not from this batch); clippy sandbox lane `-D warnings`
+  ✓.
+- Tests: core 458 ✓ · sandbox feature 466 ✓ · app-shell lib 246 ✓ ·
+  style lint 2 ✓ (label sweep is on-scale by construction) · xtask 11 ✓.
+- kittest: full golden regeneration (173 modified + 3 new responsive
+  goldens = 176 snapshots across 24 suites) then **diff-locked ×2, zero
+  drift**.
+- SPP_SMOKE rc=0 on the debug binary (54 migrations, boot services,
+  workers, 24 pages rendered headlessly · 4326 shapes — was 4332; the
+  restructure paints 6 fewer shapes, count is informational, no
+  assertion).
+- VLM read-backs (kittest goldens): inbox 800 folded-views **PASS**,
+  1024 narrow-copilot **PASS**, 1440 light **PASS** + dark **PASS**,
+  1920 docked — no clipping/overlap (the reviewer's "garbled summary"
+  reads are the fixture's summary+questions lists and the quoted
+  customer text, not layout); settings 1440 **PASS** (switch rows read
+  cleanly); widgets composer golden **PASS** (full card: header,
+  divider, To row, textarea, tools, footer, Send). The reviewer's
+  repeated "Reports title clipped at the left edge" claim is DISPROVEN
+  by pixel probes: title leftmost text pixel x=10, subtitle x=9, zero
+  dark pixels in columns 0–6 — the identical hallucination the UXD-1
+  record documented on the same page; pixel measurement is the primary
+  evidence, disclosed here as such.
+- Debug-loop disclosures (all fixed in-batch): the first composer
+  rewrite's `with_layout` reader-head consumed the reader's height
+  (caught by VLM read-back + pixel probes, rewritten on `Sides`);
+  the wrapped-toolbar attempt clipped the Assign button at 800px
+  (egui cannot wrap opaque nested groups — rewritten as two explicit
+  rows); the first `select` widget_info lacked an accessible name
+  (kittest accessibility check caught it).
+- Known-remaining (pre-existing, NOT from this batch, disclosed): the
+  reader's scroll-hosted cards ride ~22px wider than the composer card
+  at the right edge (reader card right ≈ x=791 vs composer ≈ x=769 at
+  800px; identical bounds in the pre-batch goldens — an egui
+  ScrollArea/scrollbar-gutter behavior, nothing clips the window);
+  candidate for a follow-up batch on owner direction.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new
+owner directive.

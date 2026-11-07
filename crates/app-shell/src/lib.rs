@@ -141,6 +141,10 @@ pub fn run(options: ShellOptions) -> Result<(), eframe::Error> {
     )]
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title("SupportOS+")
+        // UXE-1-4: the shell previously had no floor — windows could be
+        // shrunk until every multi-column page (inbox especially) clipped.
+        // 980×600 keeps the folded inbox usable at the smallest legal size.
+        .with_min_inner_size([980.0, 600.0])
         .with_inner_size([1180.0, 760.0]);
     #[cfg(feature = "ui-screenshot")]
     {

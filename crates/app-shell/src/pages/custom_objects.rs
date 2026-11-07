@@ -556,7 +556,7 @@ impl CustomObjectsPage {
             .collect();
         let has_fields = !keys.is_empty();
         design::card_titled(ui, "New object", None, |ui| {
-            let title_label = design::field_label(ui, "title:");
+            let title_label = design::field_label(ui, "Title");
             ui.add_sized(
                 [ui.available_width(), 28.0],
                 egui::TextEdit::singleline(&mut self.new_object_title).hint_text("object title"),
@@ -581,14 +581,14 @@ impl CustomObjectsPage {
         design::card(ui, |ui| {
             design::section_title(ui, "New Type");
             design::form_grid(ui, "co-new-type", |ui| {
-                let name_label = design::field_label(ui, "name:");
+                let name_label = design::field_label(ui, "Name");
                 ui.add_sized(
                     [220.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_type_name).hint_text("type name"),
                 )
                 .labelled_by(name_label.id);
                 ui.end_row();
-                let desc_label = design::field_label(ui, "description:");
+                let desc_label = design::field_label(ui, "Description");
                 ui.add_sized(
                     [260.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_type_description)
@@ -636,19 +636,19 @@ impl CustomObjectsPage {
                     egui::Grid::new(format!("co-field-grid-{idx}"))
                         .num_columns(5)
                         .show(ui, |ui| {
-                            let key_label = design::field_label(ui, "key:");
+                            let key_label = design::field_label(ui, "Key");
                             ui.add_sized(
                                 [120.0, 28.0],
                                 egui::TextEdit::singleline(&mut key).hint_text("key"),
                             )
                             .labelled_by(key_label.id);
-                            let label_label = design::field_label(ui, "label:");
+                            let label_label = design::field_label(ui, "Label");
                             ui.add_sized(
                                 [120.0, 28.0],
                                 egui::TextEdit::singleline(&mut label).hint_text("label"),
                             )
                             .labelled_by(label_label.id);
-                            design::field_label(ui, "type:");
+                            design::field_label(ui, "Type");
                             ui.horizontal(|ui| {
                                 for field_type in FieldType::ALL {
                                     if design::chip(
@@ -662,7 +662,7 @@ impl CustomObjectsPage {
                                     }
                                 }
                             });
-                            ui.checkbox(&mut self.new_fields[idx].required, "required");
+                            ui.checkbox(&mut self.new_fields[idx].required, "Required");
                             if self.new_fields[idx].field_type == FieldType::Select {
                                 ui.add_sized(
                                     [180.0, 28.0],

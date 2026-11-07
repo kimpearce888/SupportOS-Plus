@@ -1118,7 +1118,7 @@ impl SettingsPage {
             design::form_grid(ui, "settings-general", |ui| {
                 // UX-30: explicit input sizes — the default-width DragValue
                 // was a cramped two-digit sliver that read as static text.
-                let interval_label = design::field_label(ui, "max quiet sync interval (minutes):");
+                let interval_label = design::field_label(ui, "Max quiet sync interval (minutes)");
                 ui.add_sized(
                     [110.0, 26.0],
                     egui::DragValue::new(&mut general.sync_interval_minutes).range(1..=1440),
@@ -1130,7 +1130,7 @@ impl SettingsPage {
                      send triggers an immediate poll.",
                 );
                 ui.end_row();
-                let concurrency_label = design::field_label(ui, "api concurrency:");
+                let concurrency_label = design::field_label(ui, "Api concurrency");
                 ui.add_sized(
                     [110.0, 26.0],
                     egui::DragValue::new(&mut general.api_concurrency).range(1..=8),
@@ -1138,7 +1138,7 @@ impl SettingsPage {
                 .labelled_by(concurrency_label.id)
                 .on_hover_text("How many Help Scout API requests may run in parallel.");
                 ui.end_row();
-                let log_label = design::field_label(ui, "log level:");
+                let log_label = design::field_label(ui, "Log level");
                 let combo = egui::ComboBox::from_id_salt("settings-log-level")
                     .width(160.0)
                     .selected_text(general.log_level.clone())
@@ -1152,14 +1152,14 @@ impl SettingsPage {
                      saved value and immediately on save.",
                 );
                 ui.end_row();
-                let lang_label = design::field_label(ui, "agent language:");
+                let lang_label = design::field_label(ui, "Agent language");
                 ui.add_sized(
                     [220.0, 28.0],
                     egui::TextEdit::singleline(&mut general.agent_language),
                 )
                 .labelled_by(lang_label.id);
                 ui.end_row();
-                let reply_label = design::field_label(ui, "status after reply:");
+                let reply_label = design::field_label(ui, "Status after reply");
                 let reply_combo = egui::ComboBox::from_id_salt("settings-reply-status-after")
                     .width(190.0)
                     .selected_text(general.reply_status_after.clone())
@@ -1186,10 +1186,10 @@ impl SettingsPage {
             "AI behaviour",
             Some("safe defaults — review before enabling write actions"),
             |ui| {
-                // UX-30: one consistent checkbox list. The old striped grid
-                // alternated row backgrounds (checked rows read as plain
-                // "✓" text without a control) and broke the uniform rhythm;
-                // every row is now the same plain checkbox with even spacing.
+                // UX-30/UXE-1-3: one consistent control list. The old
+                // striped grid alternated row backgrounds and the plain
+                // checkbox rows read as static "✓" text; every row is
+                // now a switch row on an even rhythm.
                 for (label, value) in [
                     ("AI enabled", &mut general.ai_enabled),
                     (
@@ -1214,8 +1214,21 @@ impl SettingsPage {
                         &mut general.attachment_auto_download,
                     ),
                 ] {
-                    ui.checkbox(value, label);
-                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.label(
+                            egui::RichText::new(label)
+                                .size(design::scale::text::BODY)
+                                .color(design::tokens(ui).foreground),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let next = design::switch(ui, *value);
+                            if next != *value {
+                                *value = next;
+                            }
+                        });
+                    });
+                    ui.add_space(4.0);
                 }
                 ui.add_space(6.0);
             },
@@ -1306,7 +1319,7 @@ impl SettingsPage {
             ),
             |ui| {
                 design::form_grid(ui, "settings-helpscout", |ui| {
-                    design::field_label(ui, "credentials stored:");
+                    design::field_label(ui, "Credentials stored");
                     ui.horizontal(|ui| {
                         design::badge(
                             ui,
@@ -1325,7 +1338,7 @@ impl SettingsPage {
                         );
                     });
                     ui.end_row();
-                    design::field_label(ui, "redirect uri:");
+                    design::field_label(ui, "Redirect URI");
                     ui.horizontal(|ui| {
                         ui.monospace(
                             egui::RichText::new(status.redirect_uri.as_str())
@@ -1440,7 +1453,7 @@ impl SettingsPage {
             |ui| {
                 let mask = !self.hs_show_secrets;
                 design::form_grid(ui, "settings-hs-creds", |ui| {
-                    let cid_label = design::field_label(ui, "client id:");
+                    let cid_label = design::field_label(ui, "Client id");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_client_id)
@@ -1448,7 +1461,7 @@ impl SettingsPage {
                     )
                     .labelled_by(cid_label.id);
                     ui.end_row();
-                    let secret_label = design::field_label(ui, "client secret:");
+                    let secret_label = design::field_label(ui, "Client secret");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_client_secret)
@@ -1457,7 +1470,7 @@ impl SettingsPage {
                     )
                     .labelled_by(secret_label.id);
                     ui.end_row();
-                    let whs_label = design::field_label(ui, "webhook secret:");
+                    let whs_label = design::field_label(ui, "Webhook secret");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_webhook_secret)
@@ -1474,7 +1487,7 @@ impl SettingsPage {
                          secret too — paste the exact same value on both sides.",
                     );
                     ui.end_row();
-                    let docs_label = design::field_label(ui, "docs api key:");
+                    let docs_label = design::field_label(ui, "Docs API key");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.hs_docs_api_key)
@@ -1486,7 +1499,11 @@ impl SettingsPage {
                 });
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.hs_show_secrets, "show secrets");
+                    let next = design::switch(ui, self.hs_show_secrets);
+                    if next != self.hs_show_secrets {
+                        self.hs_show_secrets = next;
+                    }
+                    ui.label("Show secrets");
                     if design::button(ui, "Save Credentials", ButtonVariant::Primary).clicked() {
                         self.save_helpscout_credentials(db);
                     }
@@ -1539,7 +1556,7 @@ impl SettingsPage {
                  when the platform silently drops it",
             ),
             |ui| {
-                let relay_label = design::field_label(ui, "public relay URL:");
+                let relay_label = design::field_label(ui, "Public relay URL");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.webhook_public_url)
                         .hint_text("https://your-relay → forwards to this app's loopback listener"),
@@ -1579,7 +1596,7 @@ impl SettingsPage {
                             BadgeTone::Neutral
                         };
                         ui.horizontal(|ui| {
-                            design::field_label(ui, "last check:");
+                            design::field_label(ui, "Last check");
                             design::badge(ui, &outcome.verdict, tone);
                             ui.label(format!("· {}", outcome.checked_at));
                         });
@@ -1975,7 +1992,7 @@ impl SettingsPage {
             ),
             |ui| {
                 design::form_grid(ui, "settings-lmstudio", |ui| {
-                    let base_label = design::field_label(ui, "base url:");
+                    let base_label = design::field_label(ui, "Base URL");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.lmstudio_base_url)
@@ -1987,7 +2004,7 @@ impl SettingsPage {
                          its local address here — usually http://localhost:1234/v1.",
                     );
                     ui.end_row();
-                    let chat_label = design::field_label(ui, "chat model:");
+                    let chat_label = design::field_label(ui, "Chat model");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.lmstudio_chat_model)
@@ -1999,7 +2016,7 @@ impl SettingsPage {
                          draft replies, notes and summaries.",
                     );
                     ui.end_row();
-                    let embed_label = design::field_label(ui, "embedding model:");
+                    let embed_label = design::field_label(ui, "Embedding model");
                     ui.add_sized(
                         [320.0, 28.0],
                         egui::TextEdit::singleline(&mut self.lmstudio_embedding_model)
@@ -2055,7 +2072,7 @@ impl SettingsPage {
                         .unwrap_or_default();
                 }
                 design::form_grid(ui, "settings-vector-index", |ui| {
-                    design::field_label(ui, "store:");
+                    design::field_label(ui, "Store");
                     ui.horizontal(|ui| {
                         // UX-24: the path truncates instead of overflowing on
                         // narrow viewports, copies in one click, and shows
@@ -2091,21 +2108,34 @@ impl SettingsPage {
                             spp_core::settings::get_bool(conn, "qdrant_enabled", true)
                         })
                         .unwrap_or(true);
-                    let mut enabled = prev;
-                    // UX-24: a labelled control row. The bare checkbox read
-                    // as static "✓ vector index enabled" text in the audit;
-                    // the label column plus the hover explanation make the
-                    // control — and what it switches — obvious.
-                    design::field_label(ui, "semantic search:");
-                    let toggle = ui.checkbox(&mut enabled, "enabled").on_hover_text(
-                        "Dense vectors are embedded and searched while enabled; searches \
-                         fall back to FTS5 when disabled. Applies on the next start — \
-                         the workers open the store at boot.",
-                    );
+                    let enabled = prev;
+                    // UX-24/UXE-1-3: a labelled switch row. The bare
+                    // checkbox read as static "✓ vector index enabled"
+                    // text in the audit; the label plus the hover
+                    // explanation make the control — and what it
+                    // switches — obvious.
+                    design::field_label(ui, "Semantic search");
+                    let mut next = prev;
+                    ui.horizontal(|ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.label(
+                            egui::RichText::new("Enabled")
+                                .size(design::scale::text::BODY)
+                                .color(design::tokens(ui).foreground),
+                        )
+                        .on_hover_text(
+                            "Dense vectors are embedded and searched while enabled; searches \
+                             fall back to FTS5 when disabled. Applies on the next start — \
+                             the workers open the store at boot.",
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            next = design::switch(ui, enabled);
+                        });
+                    });
                     ui.end_row();
-                    if toggle.changed() && enabled != prev {
+                    if next != prev {
                         let result = db.with_write(|conn| {
-                            spp_core::settings::set_bool(conn, "qdrant_enabled", enabled)
+                            spp_core::settings::set_bool(conn, "qdrant_enabled", next)
                         });
                         match result {
                             Ok(()) => {
@@ -2196,27 +2226,27 @@ impl SettingsPage {
         ui.add_space(10.0);
         design::card_titled_wide(ui, &format!("Edit: {}", row.name), None, |ui| {
             design::form_grid(ui, "settings-hours-edit", |ui| {
-                let tz_label = design::field_label(ui, "timezone:");
+                let tz_label = design::field_label(ui, "Timezone");
                 ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.timezone))
                     .labelled_by(tz_label.id);
                 ui.end_row();
-                let days_label = design::field_label(ui, "days (0=Sun…6=Sat):");
+                let days_label = design::field_label(ui, "Days (0=Sun…6=Sat)");
                 ui.add_sized([220.0, 28.0], egui::TextEdit::singleline(&mut row.days))
                     .labelled_by(days_label.id);
                 ui.end_row();
-                let start_label = design::field_label(ui, "start (minutes):");
+                let start_label = design::field_label(ui, "Start (minutes)");
                 ui.add(egui::DragValue::new(&mut row.start_minute).range(0..=1440))
                     .labelled_by(start_label.id);
                 ui.end_row();
-                let end_label = design::field_label(ui, "end (minutes):");
+                let end_label = design::field_label(ui, "End (minutes)");
                 ui.add(egui::DragValue::new(&mut row.end_minute).range(0..=1440))
                     .labelled_by(end_label.id);
                 ui.end_row();
-                let first_resp_label = design::field_label(ui, "first response target (min):");
+                let first_resp_label = design::field_label(ui, "First response target (min)");
                 ui.add(egui::DragValue::new(&mut row.first_response_target_min).range(1..=10_000))
                     .labelled_by(first_resp_label.id);
                 ui.end_row();
-                let resolution_label = design::field_label(ui, "resolution target (min):");
+                let resolution_label = design::field_label(ui, "Resolution target (min)");
                 ui.add(egui::DragValue::new(&mut row.resolution_target_min).range(1..=100_000))
                     .labelled_by(resolution_label.id);
                 ui.end_row();

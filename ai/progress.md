@@ -1,7 +1,14 @@
 ## Active items
 
-**None.** No batch is active and none is held (authoritative, 2026-11-07,
-post-Batch UXD-1). The dashboard-layout batch — UXD-1 (items UXD-1-1..UXD-1-3:
+**None.** No batch is active and none is held (authoritative, 2026-11-08,
+post-Batch UXE-1). The full-app design-modernization batch — UXE-1 (items
+UXE-1-1..UXE-1-10, opened on the owner's "fix every design issue"
+screenshot-report directive) — moved through this file per Rules 2 and 4,
+was implemented, verified (full battery, see `completed.md`), and closed
+the same session. The engagement sits at a Rule 8 STOP; new work opens
+only on an owner directive.
+
+Batch UXD-1 (dashboard layout repair, items UXD-1-1..UXD-1-3:
 design-system width discipline, dashboard restructure per the 2024–25
 helpdesk-dashboard pattern, full verification battery) opened on the owner's
 screenshot report — moved through this file per Rules 2 and 4, was

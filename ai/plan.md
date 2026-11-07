@@ -7,6 +7,11 @@
 
 ## Queue state
 
+**Batch UXE-1 (full-app design modernization) CONSUMED 2026-11-07/08:
+items UXE-1-1..UXE-1-10 moved to `progress.md` per Rule 2, implemented,
+verified (full battery, see `completed.md`), and closed the same session.
+The queue is EMPTY again. New work opens only on an owner directive.**
+
 **Batch UXD-1 (dashboard layout repair) CONSUMED 2026-11-07: items
 UXD-1-1..UXD-1-3 moved to `progress.md` per Rule 2, implemented, verified
 (full battery, see `completed.md`), and closed the same session. The queue
@@ -34,6 +39,73 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 `ux-audit/reports/` (scope contract: `ux-audit/reports/scope.md`; issue
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
+
+### UX-design queue (EMPTY — Batch UXE-1 closed 2026-11-07/08)
+
+Opened on the owner's full-app design directive (screenshot report of the
+v1.3.5-era build + "check the sidebar, the reply editor at the bottom,
+basically most of the layouts are not correctly designed, gap, padding,
+label alignments too many issues… should not look like different pages are
+designed differently… make it professional and modern, it is too much old
+school like an ancient build… should work fine on every monitor/display").
+VLM audits of the owner screenshot + the current goldens (inbox/copilot/
+reports/settings at 1440 light) converge on: mixed casing and label
+conventions per page, ad-hoc spacing values (2/5/6/7/9/10/12/14/18/22)
+with no rhythm, three different page-header patterns, native egui
+ComboBox/checkbox controls that read Win95-era, saturated full-fill
+callouts, a Copilot panel that clips on narrow windows, fixed-width inbox
+columns (views 172 + list 330..640 + copilot 320) that break on
+1024-class displays, and no window minimum size. Fix scope — one design
+language across all 24 pages (Linear/Stripe/Zendesk-style helpdesk
+pattern), responsive from 800 to 2560:
+
+- **UXE-1-1** — token & card modernization: borderless elevated cards in
+  light mode (hairline kept for dark), one radius scale (card 10 / control
+  8 / badge 6 / chip pill), spacing-scale discipline replacing ad-hoc
+  `add_space` values, one page-header rhythm (`page_header` on every page:
+  title + subtitle + baseline-aligned right actions + consistent gap), one
+  section-title/card-header anatomy, card padding diet.
+- **UXE-1-2** — shell chrome: sidebar (brand row with inline version,
+  search trigger on the nav grid, consistent group labels, 30px nav rows,
+  active = filled selection, theme row pinned without orphan separator)
+  and top bar (48px, aligned cluster, even gaps, one bottom hairline).
+- **UXE-1-3** — modern control set: styled `select` dropdown (replaces
+  every native egui ComboBox), `switch` for boolean settings, `segmented`
+  control for ranges/statuses, uniform input heights/padding, Title Case
+  button labels everywhere ("apply" → "Apply", "‹ Prev" → "Prev").
+- **UXE-1-4** — responsive window & inbox architecture: window minimum
+  size, width-aware inbox columns (views rail folds into the list header
+  below the fold width; proportional list clamp; copilot docks as a
+  right-side overlay when the reader would fall under its floor), composer
+  scroll (UX-27) preserved; verified 800–2560.
+- **UXE-1-5** — inbox views rail + conversation list redesign: consistent
+  micro-header, view rows with count pills, uniform search row, compact
+  filter chips, one list-row anatomy (name+time / subject / assignee+
+  status) with hover and selected states on a fixed rhythm.
+- **UXE-1-6** — inbox reader redesign: reader head (subject + meta +
+  actions), action bar (status segmented + assign select), message cards
+  with an accent left bar for note/AI roles instead of full saturated
+  fills, aligned sender rows, day dividers.
+- **UXE-1-7** — composer redesign: card frame, Reply/Note segmented +
+  tool buttons header, compact recipient rows (To/Cc/Bcc), bounded body,
+  footer row (context hint + primary Send), aligned to the reader width,
+  never clipped.
+- **UXE-1-8** — copilot panel redesign: header row with close, system card
+  styling (AI accent on chips/actions only), aligned bullets, suggested
+  reply with an Insert action, internal scrolling, width clamp, no
+  horizontal clipping at any width.
+- **UXE-1-9** — cross-page consistency & copy pass: reports (single tab
+  row replacing the floating-label tab groups, KPI alignment, dead space),
+  settings (aligned form grid, switches, input column), global casing
+  sweep (Title Case buttons, sentence-case labels, no bare `label:`
+  colons, no "(s)" dev strings, no leaked placeholders), every page
+  through the same header/tabs/card components.
+- **UXE-1-10** — verification: fmt, clippy (both lanes), tests (core,
+  app-shell lib, style lint, xtask, sandbox), kittest golden regen for
+  every affected suite (expected near-total churn) + new multi-width
+  inbox goldens covering the folded-views and overlay-copilot states,
+  diff-locked ×2, SPP_SMOKE, VLM read-backs at 800/1024/1440/1920 (+2560
+  inbox) in both themes, pixel bounds probes on the responsive states.
 
 ### UX-dashboard queue (EMPTY — Batch UXD-1 closed 2026-11-07)
 

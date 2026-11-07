@@ -592,21 +592,21 @@ impl OutreachPage {
         design::card(ui, |ui| {
             design::section_title(ui, "New Campaign");
             design::form_grid(ui, "outreach-new", |ui| {
-                let name_label = design::field_label(ui, "name:");
+                let name_label = design::field_label(ui, "Name");
                 ui.add_sized(
                     [240.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("campaign name"),
                 )
                 .labelled_by(name_label.id);
                 ui.end_row();
-                let subject_label = design::field_label(ui, "subject:");
+                let subject_label = design::field_label(ui, "Subject");
                 ui.add_sized(
                     [280.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_subject).hint_text("email subject"),
                 )
                 .labelled_by(subject_label.id);
                 ui.end_row();
-                let body_label = design::field_label(ui, "body:");
+                let body_label = design::field_label(ui, "Body");
                 ui.add_sized(
                     [320.0, 90.0],
                     egui::TextEdit::multiline(&mut self.new_body)
@@ -614,7 +614,7 @@ impl OutreachPage {
                 )
                 .labelled_by(body_label.id);
                 ui.end_row();
-                let mailbox_label = design::field_label(ui, "mailbox id:");
+                let mailbox_label = design::field_label(ui, "Mailbox id");
                 ui.add_sized(
                     [140.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_mailbox),
@@ -622,7 +622,7 @@ impl OutreachPage {
                 .on_hover_text("local mailbox id (see Settings)")
                 .labelled_by(mailbox_label.id);
                 ui.end_row();
-                let segment_label = design::field_label(ui, "segment id:");
+                let segment_label = design::field_label(ui, "Segment id");
                 ui.add_sized(
                     [140.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_segment_json),
@@ -663,7 +663,7 @@ impl OutreachPage {
             design::card(ui, |ui| {
                 design::section_title(ui, "New Segment");
                 design::form_grid(ui, "outreach-new-segment", |ui| {
-                    let name_label = design::field_label(ui, "name:");
+                    let name_label = design::field_label(ui, "Name");
                     ui.add_sized(
                         [220.0, 28.0],
                         egui::TextEdit::singleline(&mut self.new_segment_name)
@@ -671,7 +671,7 @@ impl OutreachPage {
                     )
                     .labelled_by(name_label.id);
                     ui.end_row();
-                    let criteria_label = design::field_label(ui, "criteria (JSON):");
+                    let criteria_label = design::field_label(ui, "Criteria (JSON)");
                     ui.add_sized(
                         [320.0, 80.0],
                         egui::TextEdit::multiline(&mut self.new_segment_criteria),
@@ -757,7 +757,7 @@ impl OutreachPage {
             Some("Customers on this list are excluded from every campaign."),
             |ui| {
                 design::form_grid(ui, "outreach-dnc-new", |ui| {
-                    let customer_label = design::field_label(ui, "customer id:");
+                    let customer_label = design::field_label(ui, "Customer id");
                     ui.add_sized(
                         [140.0, 28.0],
                         egui::TextEdit::singleline(&mut self.new_dnc_customer)
@@ -765,7 +765,7 @@ impl OutreachPage {
                     )
                     .labelled_by(customer_label.id);
                     ui.end_row();
-                    let reason_label = design::field_label(ui, "reason:");
+                    let reason_label = design::field_label(ui, "Reason");
                     ui.add_sized(
                         [220.0, 28.0],
                         egui::TextEdit::singleline(&mut self.new_dnc_reason)

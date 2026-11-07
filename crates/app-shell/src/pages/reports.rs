@@ -393,13 +393,12 @@ impl ReportsPage {
             },
         );
         let labels: Vec<&str> = Tab::ALL.iter().map(|t| t.label()).collect();
-        if let Some(clicked) = design::tab_groups(
+        // UXE-1-9: one underline tab row — the floating group labels over
+        // the tabs ("Volume & quality", …) read as broken layout, not
+        // grouping; the tab labels carry their own meaning.
+        if let Some(clicked) = design::tabs(
             ui,
-            &[
-                ("Volume & quality", &labels[0..5]),
-                ("AI & digests", &labels[5..8]),
-                ("Platform & custom", &labels[8..11]),
-            ],
+            &labels,
             Tab::ALL.iter().position(|t| *t == self.tab).unwrap_or(0),
         ) && let Some(tab) = Tab::ALL.get(clicked)
         {
@@ -646,7 +645,7 @@ impl ReportsPage {
                     }
                 });
                 design::form_grid(ui, "sla-track-cfg", |ui| {
-                    let fr_label = design::field_label(ui, "first response hours:");
+                    let fr_label = design::field_label(ui, "First response hours");
                     if ui
                         .add(egui::TextEdit::singleline(&mut self.sla_cfg_fr).desired_width(120.0))
                         .labelled_by(fr_label.id)
@@ -655,7 +654,7 @@ impl ReportsPage {
                         self.sla_cfg_note = None;
                     }
                     ui.end_row();
-                    let res_label = design::field_label(ui, "resolution hours:");
+                    let res_label = design::field_label(ui, "Resolution hours");
                     if ui
                         .add(egui::TextEdit::singleline(&mut self.sla_cfg_res).desired_width(120.0))
                         .labelled_by(res_label.id)
@@ -823,7 +822,7 @@ impl ReportsPage {
         design::card(ui, |ui| {
             design::section_title(ui, "Report definition");
             ui.horizontal_wrapped(|ui| {
-                design::field_label(ui, "metric:");
+                design::field_label(ui, "Metric");
                 let metrics = ReportMetricKey::ALL;
                 let metric_label =
                     spp_core::catalog::reporting::metric_entry(metrics[self.b_metric]).label;
@@ -846,7 +845,7 @@ impl ReportsPage {
                             format!("metric: {metric_label}"),
                         )
                     });
-                design::field_label(ui, "grouped by:");
+                design::field_label(ui, "Grouped by");
                 let dims = ReportDimensionKey::ALL;
                 let dim_label =
                     spp_core::catalog::reporting::dimension_entry(dims[self.b_dimension]).label;
@@ -869,8 +868,8 @@ impl ReportsPage {
                             format!("grouped by: {dim_label}"),
                         )
                     });
-                ui.checkbox(&mut self.b_compare, "compare with previous period");
-                design::field_label(ui, "sort:");
+                ui.checkbox(&mut self.b_compare, "Compare with previous period");
+                design::field_label(ui, "Sort");
                 for (i, label) in ["metric ↓", "metric ↑", "label A→Z"].iter().enumerate() {
                     if design::chip(ui, self.b_sort == i, label).clicked() {
                         self.b_sort = i;
@@ -878,13 +877,13 @@ impl ReportsPage {
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                let from_label = design::field_label(ui, "from (YYYY-MM-DD):");
+                let from_label = design::field_label(ui, "From (YYYY-MM-DD)");
                 ui.add(egui::TextEdit::singleline(&mut self.b_from).desired_width(110.0))
                     .labelled_by(from_label.id);
-                let to_label = design::field_label(ui, "to:");
+                let to_label = design::field_label(ui, "To");
                 ui.add(egui::TextEdit::singleline(&mut self.b_to).desired_width(110.0))
                     .labelled_by(to_label.id);
-                let limit_label = design::field_label(ui, "limit:");
+                let limit_label = design::field_label(ui, "Limit");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.b_limit)
                         .hint_text("50")
@@ -921,7 +920,7 @@ impl ReportsPage {
                         Err(e) => Err(e),
                     });
                 }
-                let save_label = design::field_label(ui, "save as:");
+                let save_label = design::field_label(ui, "Save as");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.b_save_name)
                         .hint_text("name")
@@ -1345,7 +1344,7 @@ impl ReportsPage {
             Some("custom nodes over the support graph; neighbors come from the live human edges"),
             |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    design::field_label(ui, "kind:");
+                    design::field_label(ui, "Kind");
                     let kinds = spp_core::catalog::GraphNodeKind::ALL;
                     let kind_label = kinds[self.i_g_kind].as_str();
                     egui::ComboBox::from_id_salt("g-kind")
@@ -1363,13 +1362,13 @@ impl ReportsPage {
                                 format!("kind: {kind_label}"),
                             )
                         });
-                    let label_label = design::field_label(ui, "label:");
+                    let label_label = design::field_label(ui, "Label");
                     ui.add(egui::TextEdit::singleline(&mut self.i_g_label).desired_width(140.0))
                         .labelled_by(label_label.id);
-                    let entity_label = design::field_label(ui, "entity id:");
+                    let entity_label = design::field_label(ui, "Entity id");
                     ui.add(egui::TextEdit::singleline(&mut self.i_g_entity).desired_width(80.0))
                         .labelled_by(entity_label.id);
-                    let props_label = design::field_label(ui, "properties (JSON):");
+                    let props_label = design::field_label(ui, "Properties (JSON)");
                     ui.add(egui::TextEdit::singleline(&mut self.i_g_props).desired_width(180.0))
                         .labelled_by(props_label.id);
                     if design::button(ui, "Add node", ButtonVariant::Primary).clicked() {

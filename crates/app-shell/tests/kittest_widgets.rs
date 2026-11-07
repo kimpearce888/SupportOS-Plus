@@ -417,7 +417,18 @@ fn draw_identity(ui: &mut egui::Ui, s: &mut InboxIdentity) {
     st.draft = String::new();
     st.draft_saved = true;
     let replies = vec![String::from("Thanks for the report — we're on it.")];
-    if let Some(act) = design::composer(ui, "test", &mut st, &replies) {
+    if let Some(act) = design::composer(
+        ui,
+        "test",
+        &mut st,
+        &replies,
+        |ui| {
+            ui.label("To: kim@example.com");
+        },
+        |ui| {
+            ui.label("tools");
+        },
+    ) {
         match act {
             design::ComposerAct::Send(_, text) => s.sent.push(text),
             design::ComposerAct::SavedReply(_) | design::ComposerAct::AiInsert => s.inserted += 1,
@@ -470,7 +481,18 @@ fn harness_composer(dark: bool) -> Harness<'static, ComposerOnly> {
                 }
                 st.draft_saved = true;
                 let replies = vec![String::from("Thanks for the report — we're on it.")];
-                if let Some(act) = spp_shell::design::composer(ui, "test", &mut st, &replies) {
+                if let Some(act) = spp_shell::design::composer(
+                    ui,
+                    "test",
+                    &mut st,
+                    &replies,
+                    |ui| {
+                        ui.label("To: kim@example.com");
+                    },
+                    |ui| {
+                        ui.label("tools");
+                    },
+                ) {
                     match act {
                         spp_shell::design::ComposerAct::Send(_, text) => s.sent.push(text),
                         _ => s.inserted += 1,

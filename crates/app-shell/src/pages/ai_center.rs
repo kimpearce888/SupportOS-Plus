@@ -426,7 +426,7 @@ impl AiCenterPage {
                 if let Ok(mut guard) = status.lock() {
                     *guard = Some(match result {
                         Ok(0) => "connected · no models loaded".into(),
-                        Ok(n) => format!("connected · {n} model(s)"),
+                        Ok(n) => format!("connected · {n} model{}", if n == 1 { "" } else { "s" }),
                         Err(e) => format!("offline · {e}"),
                     });
                 }
@@ -892,7 +892,7 @@ impl AiCenterPage {
                     design::badge(ui, "disabled", BadgeTone::Neutral);
                 }
                 ui.end_row();
-                design::field_label(ui, "provider:");
+                design::field_label(ui, "Provider");
                 ui.monospace(
                     egui::RichText::new(if settings.ai_enabled {
                         "lmstudio"
@@ -902,10 +902,10 @@ impl AiCenterPage {
                     .color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "base url:");
+                design::field_label(ui, "Base URL");
                 ui.monospace(egui::RichText::new(settings.base_url.as_str()).color(t.foreground));
                 ui.end_row();
-                design::field_label(ui, "chat model:");
+                design::field_label(ui, "Chat model");
                 ui.monospace(
                     egui::RichText::new(
                         settings
@@ -916,7 +916,7 @@ impl AiCenterPage {
                     .color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "embedding model:");
+                design::field_label(ui, "Embedding model");
                 ui.monospace(
                     egui::RichText::new(
                         settings
@@ -927,12 +927,12 @@ impl AiCenterPage {
                     .color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "timeout:");
+                design::field_label(ui, "Timeout");
                 ui.monospace(
                     egui::RichText::new(format!("{} ms", settings.timeout_ms)).color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "concurrency:");
+                design::field_label(ui, "Concurrency");
                 ui.monospace(
                     egui::RichText::new(settings.concurrency.to_string()).color(t.foreground),
                 );
@@ -981,7 +981,7 @@ impl AiCenterPage {
             |ui| {
                 let ready = spp_core::ai_center::ai_features_enabled(&record);
                 ui.horizontal(|ui| {
-                    design::field_label(ui, "provider:");
+                    design::field_label(ui, "Provider");
                     for (i, kind) in spp_core::ai_center::ProviderKind::ALL.iter().enumerate() {
                         if design::chip(ui, self.ai_kind_pick == i, kind.label()).clicked() {
                             self.ai_kind_pick = i;
@@ -996,7 +996,7 @@ impl AiCenterPage {
                 });
                 ui.add_space(4.0);
                 design::form_grid(ui, "ai-record", |ui| {
-                    design::field_label(ui, "chat model:");
+                    design::field_label(ui, "Chat model");
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.ai_chat_model_edit)
@@ -1008,7 +1008,7 @@ impl AiCenterPage {
                         self.ai_form_clean = false;
                     }
                     ui.end_row();
-                    design::field_label(ui, "embedding model:");
+                    design::field_label(ui, "Embedding model");
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.ai_embed_model_edit)
@@ -1020,7 +1020,7 @@ impl AiCenterPage {
                         self.ai_form_clean = false;
                     }
                     ui.end_row();
-                    design::field_label(ui, "embedding dim:");
+                    design::field_label(ui, "Embedding dim");
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.ai_embed_dim_edit)
@@ -1032,7 +1032,7 @@ impl AiCenterPage {
                         self.ai_form_clean = false;
                     }
                     ui.end_row();
-                    design::field_label(ui, "base url:");
+                    design::field_label(ui, "Base URL");
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut self.ai_base_url_edit)
@@ -1192,7 +1192,7 @@ impl AiCenterPage {
                         });
                         if self.key_edit_for.as_deref() == Some(endpoint.id.as_str()) {
                             ui.horizontal(|ui| {
-                                design::field_label(ui, "api key:");
+                                design::field_label(ui, "API key");
                                 ui.add_sized(
                                     [280.0, 28.0],
                                     egui::TextEdit::singleline(&mut self.key_edit_value)
@@ -1254,19 +1254,19 @@ impl AiCenterPage {
                         .num_columns(2)
                         .spacing(egui::vec2(12.0, 6.0))
                         .show(ui, |ui| {
-                            design::field_label(ui, "name:");
+                            design::field_label(ui, "Name");
                             ui.add_sized(
                                 [220.0, 28.0],
                                 egui::TextEdit::singleline(&mut self.add_name),
                             );
                             ui.end_row();
-                            design::field_label(ui, "base url:");
+                            design::field_label(ui, "Base URL");
                             ui.add_sized(
                                 [280.0, 28.0],
                                 egui::TextEdit::singleline(&mut self.add_url),
                             );
                             ui.end_row();
-                            design::field_label(ui, "api key:");
+                            design::field_label(ui, "API key");
                             ui.add_sized(
                                 [280.0, 28.0],
                                 egui::TextEdit::singleline(&mut self.add_key).password(true),
@@ -1581,8 +1581,10 @@ impl AiCenterPage {
                         ));
                         if probe.ok {
                             format!(
-                                "reachable — {} model(s) · {} ms",
-                                probe.model_count, probe.latency_ms
+                                "reachable — {} model{} · {} ms",
+                                probe.model_count,
+                                if probe.model_count == 1 { "" } else { "s" },
+                                probe.latency_ms
                             )
                         } else {
                             format!("offline — {} ({} ms)", probe.message, probe.latency_ms)
@@ -1662,18 +1664,18 @@ impl AiCenterPage {
                 design::badge(ui, "AI", BadgeTone::Info);
             });
             design::form_grid(ui, "ai-analytics", |ui| {
-                design::field_label(ui, "tickets analyzed:");
+                design::field_label(ui, "Tickets analyzed");
                 ui.monospace(
                     egui::RichText::new(analytics.tickets_analyzed.to_string()).color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "analysis success rate:");
+                design::field_label(ui, "Analysis success rate");
                 ui.monospace(
                     egui::RichText::new(format!("{}%", analytics.analysis_success_rate))
                         .color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "drafts:");
+                design::field_label(ui, "Drafts");
                 ui.monospace(
                     egui::RichText::new(format!(
                         "{} total · {} accepted · {} rejected",
@@ -1682,19 +1684,19 @@ impl AiCenterPage {
                     .color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "draft edit rate:");
+                design::field_label(ui, "Draft edit rate");
                 ui.monospace(
                     egui::RichText::new(format!("{}%", analytics.draft_edit_rate))
                         .color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "verification warnings:");
+                design::field_label(ui, "Verification warnings");
                 ui.monospace(
                     egui::RichText::new(analytics.verification_warnings.to_string())
                         .color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "unsupported claim rate:");
+                design::field_label(ui, "Unsupported claim rate");
                 ui.monospace(
                     egui::RichText::new(format!("{}%", analytics.unsupported_claim_rate))
                         .color(t.foreground),

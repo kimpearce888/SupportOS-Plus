@@ -323,7 +323,11 @@ impl AutomationPage {
         design::card_titled(
             ui,
             "Rules",
-            Some(&format!("{} rule(s)", rules.len())),
+            Some(&format!(
+                "{} rule{}",
+                rules.len(),
+                if rules.len() == 1 { "" } else { "s" }
+            )),
             |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("automation-rules")
@@ -424,7 +428,11 @@ impl AutomationPage {
         design::card_titled(
             ui,
             "Pending approvals",
-            Some(&format!("{} pending approval(s)", approvals.len())),
+            Some(&format!(
+                "{} pending approval{}",
+                approvals.len(),
+                if approvals.len() == 1 { "" } else { "s" }
+            )),
             |ui| {
                 if approvals_empty {
                     design::empty_state(
@@ -498,14 +506,14 @@ impl AutomationPage {
                 );
             });
             design::form_grid(ui, "automation-new-rule", |ui| {
-                design::field_label(ui, "name:");
+                design::field_label(ui, "Name");
                 ui.add_sized(
                     [220.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_name).hint_text("rule name"),
                 );
                 ui.end_row();
 
-                design::field_label(ui, "trigger:");
+                design::field_label(ui, "Trigger");
                 ui.horizontal(|ui| {
                     for kind in TriggerKind::ALL {
                         if design::chip(ui, self.trigger_kind == kind, kind.label()).clicked() {
@@ -516,7 +524,7 @@ impl AutomationPage {
                 ui.end_row();
                 // AU2-1/D10: the engine-vocabulary triggers carry no parameters.
 
-                design::field_label(ui, "action:");
+                design::field_label(ui, "Action");
                 ui.horizontal(|ui| {
                     for kind in ActionKind::ALL {
                         if design::chip(ui, self.action_kind == kind, kind.label()).clicked() {
@@ -528,7 +536,7 @@ impl AutomationPage {
 
                 match self.action_kind {
                     ActionKind::Assign => {
-                        design::field_label(ui, "assignee id:");
+                        design::field_label(ui, "Assignee id");
                         ui.add_sized(
                             [180.0, 28.0],
                             egui::TextEdit::singleline(&mut self.action_assignee)
@@ -537,7 +545,7 @@ impl AutomationPage {
                         ui.end_row();
                     }
                     ActionKind::AddTag => {
-                        design::field_label(ui, "tag:");
+                        design::field_label(ui, "Tag");
                         ui.add_sized(
                             [180.0, 28.0],
                             egui::TextEdit::singleline(&mut self.action_tag).hint_text("tag"),
@@ -545,7 +553,7 @@ impl AutomationPage {
                         ui.end_row();
                     }
                     ActionKind::SendNote => {
-                        design::field_label(ui, "note body:");
+                        design::field_label(ui, "Note body");
                         ui.add_sized(
                             [260.0, 28.0],
                             egui::TextEdit::singleline(&mut self.action_note)
@@ -554,7 +562,7 @@ impl AutomationPage {
                         ui.end_row();
                     }
                     ActionKind::ChangeStatus => {
-                        design::field_label(ui, "status:");
+                        design::field_label(ui, "Status");
                         ui.add_sized(
                             [180.0, 28.0],
                             egui::TextEdit::singleline(&mut self.action_status)

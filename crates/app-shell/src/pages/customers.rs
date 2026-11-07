@@ -588,12 +588,12 @@ fn health_and_counts(ui: &mut egui::Ui, health: &Option<Value>, counts: &[(Strin
         if let Some(report) = health {
             let h = health_from_report(report);
             design::form_grid(ui, "customer-health", |ui| {
-                design::field_label(ui, "open conversations:");
+                design::field_label(ui, "Open conversations");
                 ui.monospace(
                     egui::RichText::new(h.open_conversations.to_string()).color(t.foreground),
                 );
                 ui.end_row();
-                design::field_label(ui, "not-good ratings (90d):");
+                design::field_label(ui, "Not-good ratings (90d)");
                 ui.monospace(
                     egui::RichText::new(h.not_good_ratings_90d.to_string()).color(t.foreground),
                 );

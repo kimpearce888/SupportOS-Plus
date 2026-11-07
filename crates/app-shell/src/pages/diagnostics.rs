@@ -329,7 +329,11 @@ impl DiagnosticsPage {
         });
         ui.add_space(10.0);
 
-        let audit_subtitle = format!("{} audited change(s) shown — newest first", audit.len());
+        let audit_subtitle = format!(
+            "{} audited change{} shown — newest first",
+            audit.len(),
+            if audit.len() == 1 { "" } else { "s" }
+        );
         design::card_titled(ui, "Audit trail", Some(&audit_subtitle), |ui| {
             if audit.is_empty() {
                 design::hint_text(

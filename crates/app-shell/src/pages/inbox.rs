@@ -257,6 +257,12 @@ pub struct InboxPage {
     status_is_error: bool,
     status_message_at: Option<std::time::Instant>,
     copilot_open: bool,
+    /// UXE-1-7: measured height of the composer card from the last frame
+    /// — drives the composer bottom panel's EXACT height. The old
+    /// auto-sized panel converged to a sliver and clipped the composer
+    /// at the window bottom (the owner's screenshot report; the defect
+    /// is present in the pre-batch goldens).
+    composer_panel_h: Option<f32>,
     copilot: Option<spp_core::ai_local::CopilotReport>,
     copilot_error: Option<String>,
     triage: Vec<TriageChip>,
@@ -328,6 +334,7 @@ impl InboxPage {
             composer_body: String::new(),
             composer_cc: String::new(),
             composer_bcc: String::new(),
+            composer_panel_h: None,
             mention_active: 0,
             mention_caret: 0,
             composer_focused: false,
@@ -929,32 +936,56 @@ impl InboxPage {
 
         let detail = self.detail.clone();
 
-        egui::Panel::left("inbox-views")
-            .exact_size(172.0)
-            .resizable(false)
-            .show_separator_line(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(t.sidebar)
-                    .inner_margin(egui::Margin {
-                        left: 10,
-                        right: 10,
-                        top: 12,
-                        bottom: 12,
-                    }),
-            )
-            .show(ui, |ui| {
-                self.views_rail_ui(ui, db);
-            });
+        // UXE-1-4: width-aware inbox architecture. The old layout hard-
+        // coded a 172px views rail + a 330px-min list + a 320px copilot
+        // panel — on 1024-class displays the reader collapsed to a sliver
+        // and the composer clipped. Columns now adapt: the views rail
+        // folds into the list header below 900px of content width, the
+        // list is proportional (280–520), and the copilot docks as a
+        // 300px panel only while the reader keeps a 480px floor — below
+        // that it swaps in over the reader (narrow mode) instead of
+        // crushing it. The rail also folds when that alone is what keeps
+        // a docked copilot viable.
+        let avail = ui.available_width();
+        const RAIL_W: f32 = 168.0;
+        const COPILOT_W: f32 = 300.0;
+        const READER_FLOOR: f32 = 480.0;
+        let rail_fits = avail >= 900.0;
+        let mut rail_w = if rail_fits { RAIL_W } else { 0.0 };
+        let list_est = ((avail - rail_w) * 0.30).clamp(280.0, 520.0);
+        if self.copilot_open {
+            let fits_with_rail = avail - rail_w - list_est >= COPILOT_W + READER_FLOOR;
+            let fits_folded = avail - list_est >= COPILOT_W + READER_FLOOR;
+            if !fits_with_rail && fits_folded {
+                rail_w = 0.0;
+            }
+        }
+
+        if rail_w > 0.0 {
+            egui::Panel::left("inbox-views")
+                .exact_size(rail_w)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(t.sidebar)
+                        .inner_margin(egui::Margin {
+                            left: 10,
+                            right: 10,
+                            top: 12,
+                            bottom: 12,
+                        }),
+                )
+                .show(ui, |ui| {
+                    self.views_rail_ui(ui, db);
+                });
+        }
         egui::Panel::left("inbox-list")
-            // UX-8: the conversation list was a fixed 330px — too narrow for
-            // subject lines and the filter row (truncated search hint). Make
-            // it proportional to the window and user-resizable.
-            .default_size({
-                let avail = ui.available_width() - 172.0; // views rail
-                (avail * 0.30).clamp(330.0, 520.0)
-            })
-            .size_range(300.0..=640.0)
+            // UX-8: the conversation list is proportional to the window
+            // and user-resizable (280–560; UXE-1-4 tightened the floor so
+            // small displays keep a reader).
+            .default_size((avail - rail_w).mul_add(0.30, 0.0).clamp(280.0, 520.0))
+            .size_range(280.0..=560.0)
             .resizable(true)
             .show_separator_line(false)
             .frame(egui::Frame::new().fill(t.card).inner_margin(egui::Margin {
@@ -964,11 +995,15 @@ impl InboxPage {
                 bottom: 8,
             }))
             .show(ui, |ui| {
-                self.list_ui(ui, db, engine);
+                self.list_ui(ui, db, engine, rail_w == 0.0);
             });
-        if self.copilot_open {
+        // After the side panels, whatever remains must host the reader
+        // (and the copilot when it fits beside it).
+        let remaining = ui.available_width();
+        let copilot_docked = self.copilot_open && remaining >= COPILOT_W + READER_FLOOR;
+        if copilot_docked {
             egui::Panel::right("inbox-copilot")
-                .exact_size(320.0)
+                .exact_size(COPILOT_W)
                 .resizable(false)
                 .show_separator_line(false)
                 .frame(
@@ -985,8 +1020,23 @@ impl InboxPage {
                     self.copilot_pane_ui(ui, db, detail.as_ref());
                 });
         }
-        if detail.is_some() {
+        // UXE-1-4: the composer is only meaningful with the reader in
+        // view — in copilot narrow mode it steps aside with the reader.
+        if detail.is_some() && !(self.copilot_open && !copilot_docked) {
+            // UXE-1-7: the panel height TRACKS the composer card (last
+            // frame's measured height, capped by the window) instead of
+            // auto-sizing — the auto panel converged to a sliver and
+            // clipped the composer at the window bottom (the owner's
+            // screenshot report; the defect was present in the pre-batch
+            // goldens despite UX-27's scroll bound). The in-panel scroll
+            // still caps the pathological case (a huge draft on a tiny
+            // window).
+            let composer_h = self
+                .composer_panel_h
+                .unwrap_or(348.0)
+                .clamp(120.0, (ui.available_height() - 12.0).max(120.0));
             egui::Panel::bottom("inbox-composer")
+                .exact_size(composer_h)
                 .frame(
                     egui::Frame::new()
                         .fill(t.background)
@@ -999,14 +1049,6 @@ impl InboxPage {
                 )
                 .show(ui, |ui| {
                     if let Some(d) = detail.clone() {
-                        // UX-27: the composer pane used to lay out without a
-                        // scroll bound — on short windows the Cc/Bcc rows at
-                        // the bottom were clipped off-screen with no way to
-                        // reach them. The pane now scrolls in place whenever
-                        // its content would not fit, and Cc/Bcc moved above
-                        // the composer (recipients before the body, like
-                        // every mail client) so the primary controls stay
-                        // visible even in the worst case.
                         let max_h = ui.available_height();
                         egui::ScrollArea::vertical()
                             .id_salt("inbox-composer-scroll")
@@ -1030,13 +1072,21 @@ impl InboxPage {
                     }),
             )
             .show(ui, |ui| {
-                self.reader_ui(ui, db, bus, detail);
+                if self.copilot_open && !copilot_docked {
+                    // UXE-1-4 narrow mode: the copilot swaps in over the
+                    // reader — never a crushed half-thread.
+                    self.copilot_pane_ui(ui, db, detail.as_ref());
+                } else {
+                    self.reader_ui(ui, db, bus, detail);
+                }
             });
     }
 
     fn views_rail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        // UXE-1-2/5: one micro-label convention across the app — 11px
+        // muted sentence case, same as the sidebar groups.
         ui.label(
-            egui::RichText::new("INBOX VIEWS")
+            egui::RichText::new("Views")
                 .size(design::scale::text::META)
                 .color(design::tokens(ui).muted_foreground),
         );
@@ -1060,8 +1110,27 @@ impl InboxPage {
         ui: &mut egui::Ui,
         db: &DbHandle,
         engine: Option<&std::sync::Arc<SyncEngine>>,
+        folded: bool,
     ) {
         let t = design::tokens(ui);
+        if folded {
+            // UXE-1-4: the views rail folded — the views ride along as
+            // chips above the list header.
+            let counts = self.view_counts;
+            ui.horizontal_wrapped(|ui| {
+                for (count, view) in counts.into_iter().zip(ViewFilter::ALL) {
+                    let selected = self.view_pick == view;
+                    let label = format!("{} {}", view.label(), count);
+                    if design::chip(ui, selected, &label).clicked() {
+                        self.view_pick = view;
+                        self.bar.view = Some(view);
+                        self.page = 0;
+                        self.reload_list(db);
+                    }
+                }
+            });
+            ui.add_space(design::scale::space::SP2);
+        }
         ui.label(
             egui::RichText::new(self.view_pick.label())
                 .size(design::scale::text::SECTION)
@@ -1071,12 +1140,12 @@ impl InboxPage {
         let subtitle = if self.total > INBOX_PAGE_SIZE {
             let from = self.page * INBOX_PAGE_SIZE + 1;
             let to = from - 1 + self.list.len() as u32;
-            format!("{from}-{to} of {} conversations", self.total)
+            format!("{from}–{to} of {} conversations", self.total)
         } else {
             format!("{} of {} conversations", self.list.len(), self.total)
         };
         design::hint_text(ui, &subtitle);
-        ui.add_space(design::scale::space::SP1);
+        ui.add_space(design::scale::space::SP2);
 
         let mut apply_entered = false;
         let apply = design::filter_bar(
@@ -1084,11 +1153,17 @@ impl InboxPage {
             |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let mut search = self.search_edit.clone();
-                    // UX-27: the fixed 140px truncated the hint to "search
-                    // conversat…" — take the free row width instead.
-                    let search_w = ui.available_width().clamp(140.0, 240.0);
+                    // UX-27/UXE-1-5: the search input reserves the `#`
+                    // input's and the Apply button's width so the primary
+                    // row composes on ONE line at every legal list width
+                    // (280px floor); the optional selects wrap below as
+                    // whole controls.
+                    const NUMBER_W: f32 = 56.0;
+                    const APPLY_W: f32 = 82.0;
+                    let row_rest = NUMBER_W + APPLY_W + 2.0 * 8.0;
+                    let search_w = (ui.available_width() - row_rest).clamp(120.0, 240.0);
                     let response = ui.add_sized(
-                        [search_w, 28.0],
+                        [search_w, 32.0],
                         egui::TextEdit::singleline(&mut search).hint_text("search conversations…"),
                     );
                     if response.changed() {
@@ -1099,7 +1174,7 @@ impl InboxPage {
                     }
                     let mut number = self.number_edit.clone();
                     let number_response = ui.add_sized(
-                        [56.0, 28.0],
+                        [NUMBER_W, 32.0],
                         egui::TextEdit::singleline(&mut number).hint_text("#"),
                     );
                     if number_response.changed() {
@@ -1110,73 +1185,66 @@ impl InboxPage {
                         apply_entered = true;
                     }
                     if self.show_filters {
-                        egui::ComboBox::from_id_salt("inbox-mailbox")
-                            .width(150.0)
-                            .selected_text(
-                                self.mailbox_pick
-                                    .and_then(|id| {
-                                        self.mailboxes
-                                            .iter()
-                                            .find(|(mid, _)| *mid == id)
-                                            .map(|(_, name)| name.clone())
-                                    })
-                                    .unwrap_or_else(|| "All mailboxes".into()),
-                            )
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.mailbox_pick, None, "All mailboxes");
-                                for (id, name) in self.mailboxes.clone() {
-                                    ui.selectable_value(&mut self.mailbox_pick, Some(id), name);
-                                }
-                            });
-                        egui::ComboBox::from_id_salt("inbox-channel")
-                            .width(120.0)
-                            .selected_text(
-                                self.channel_pick
-                                    .clone()
-                                    .map(|c| match c.as_str() {
-                                        "email" => "Email".to_string(),
-                                        "chat" => "Chat".to_string(),
-                                        other => other.to_string(),
-                                    })
-                                    .unwrap_or_else(|| "All channels".into()),
-                            )
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.channel_pick, None, "All channels");
-                                ui.selectable_value(
-                                    &mut self.channel_pick,
-                                    Some("email".into()),
-                                    "Email",
-                                );
-                                ui.selectable_value(
-                                    &mut self.channel_pick,
-                                    Some("chat".into()),
-                                    "Chat",
-                                );
-                            });
-                        egui::ComboBox::from_id_salt("inbox-tag")
-                            .width(130.0)
-                            .selected_text(
-                                self.tag_pick.clone().unwrap_or_else(|| "Any tag".into()),
-                            )
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut self.tag_pick, None, "Any tag");
-                                for tag in self.tags.clone() {
-                                    ui.selectable_value(&mut self.tag_pick, Some(tag.clone()), tag);
-                                }
-                            });
+                        // UXE-1-3/5: the native comboboxes are now styled
+                        // selects on the 32px control height.
+                        let mailbox_selected = self
+                            .mailbox_pick
+                            .and_then(|id| {
+                                self.mailboxes
+                                    .iter()
+                                    .find(|(mid, _)| *mid == id)
+                                    .map(|(_, name)| name.clone())
+                            })
+                            .unwrap_or_else(|| "All mailboxes".into());
+                        design::select(ui, "inbox-mailbox", &mailbox_selected, 150.0, |ui| {
+                            ui.selectable_value(&mut self.mailbox_pick, None, "All mailboxes");
+                            for (id, name) in self.mailboxes.clone() {
+                                ui.selectable_value(&mut self.mailbox_pick, Some(id), name);
+                            }
+                        });
+                        let channel_selected = self
+                            .channel_pick
+                            .clone()
+                            .map(|c| match c.as_str() {
+                                "email" => "Email".to_string(),
+                                "chat" => "Chat".to_string(),
+                                other => other.to_string(),
+                            })
+                            .unwrap_or_else(|| "All channels".into());
+                        design::select(ui, "inbox-channel", &channel_selected, 130.0, |ui| {
+                            ui.selectable_value(&mut self.channel_pick, None, "All channels");
+                            ui.selectable_value(
+                                &mut self.channel_pick,
+                                Some("email".into()),
+                                "Email",
+                            );
+                            ui.selectable_value(
+                                &mut self.channel_pick,
+                                Some("chat".into()),
+                                "Chat",
+                            );
+                        });
+                        let tag_selected =
+                            self.tag_pick.clone().unwrap_or_else(|| "Any tag".into());
+                        design::select(ui, "inbox-tag", &tag_selected, 130.0, |ui| {
+                            ui.selectable_value(&mut self.tag_pick, None, "Any tag");
+                            for tag in self.tags.clone() {
+                                ui.selectable_value(&mut self.tag_pick, Some(tag.clone()), tag);
+                            }
+                        });
                     }
                 });
             },
-            "apply",
+            "Apply",
         );
 
         ui.horizontal(|ui| {
             if design::button(
                 ui,
                 if self.show_filters {
-                    "hide filters"
+                    "Hide Filters"
                 } else {
-                    "filters"
+                    "Filters"
                 },
                 ButtonVariant::Text,
             )
@@ -1189,7 +1257,7 @@ impl InboxPage {
                 if design::button_with_icon(
                     ui,
                     Icon::Refresh,
-                    if syncing { "syncing…" } else { "Sync now" },
+                    if syncing { "Syncing…" } else { "Sync now" },
                     ButtonVariant::Outline,
                 )
                 .on_hover_text(
@@ -1213,7 +1281,7 @@ impl InboxPage {
                         self.set_status_message("Syncing…", false);
                     }
                 }
-                if design::button(ui, "Reset Filters", ButtonVariant::Ghost)
+                if design::button(ui, "Reset", ButtonVariant::Ghost)
                     .on_hover_text("clear every filter and reload")
                     .clicked()
                 {
@@ -1266,7 +1334,7 @@ impl InboxPage {
                     let response = egui::Frame::new()
                         .fill(fill)
                         .corner_radius(egui::CornerRadius::same(8))
-                        .inner_margin(egui::Margin::same(8))
+                        .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
@@ -1330,6 +1398,25 @@ impl InboxPage {
                             });
                         })
                         .response;
+                    // UXE-1-5: selected rows carry a 3px accent bar on the
+                    // left edge — the selected conversation is findable at
+                    // a glance, not just by a faint fill.
+                    if selected {
+                        let r = response.rect;
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(r.min.x, r.min.y),
+                                egui::pos2(r.min.x + 3.0, r.max.y),
+                            ),
+                            egui::CornerRadius {
+                                nw: 8,
+                                sw: 8,
+                                ne: 0,
+                                se: 0,
+                            },
+                            t.primary,
+                        );
+                    }
                     let response = ui
                         .interact(response.rect, row_id, egui::Sense::click())
                         .on_hover_text(item.preview.clone().unwrap_or_else(|| subject.clone()));
@@ -1453,55 +1540,61 @@ impl InboxPage {
             .filter_map(|w| w.chars().next())
             .take(2)
             .collect();
-        ui.horizontal(|ui| {
-            design::avatar(
-                ui,
-                AvatarSize::Lg,
-                &initials.to_uppercase(),
-                BadgeTone::Neutral,
-            );
-            ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "#{}  {}",
-                        detail.number,
-                        detail.subject.as_deref().unwrap_or("(no subject)")
-                    ))
-                    .size(design::scale::text::SECTION)
-                    .strong(),
-                );
-                let who = match detail.customer_email.as_deref() {
-                    Some(email) if !email.trim().is_empty() => {
-                        format!(
-                            "{} <{}>",
-                            detail.customer_name.as_deref().unwrap_or("-"),
-                            email
-                        )
-                    }
-                    _ => detail.customer_name.as_deref().unwrap_or("-").to_string(),
-                };
-                design::hint_text(
+        let subject = format!(
+            "#{}  {}",
+            detail.number,
+            detail.subject.as_deref().unwrap_or("(no subject)")
+        );
+        let who = match detail.customer_email.as_deref() {
+            Some(email) if !email.trim().is_empty() => {
+                format!(
+                    "{} <{}>",
+                    detail.customer_name.as_deref().unwrap_or("-"),
+                    email
+                )
+            }
+            _ => detail.customer_name.as_deref().unwrap_or("-").to_string(),
+        };
+        let meta = format!(
+            "{} · {} · Priority: {}",
+            who,
+            detail.mailbox_name.as_deref().unwrap_or("-"),
+            detail.priority.as_deref().unwrap_or("none"),
+        );
+        let t = design::tokens(ui);
+        // UXE-1-6: `Sides::shrink_left` lays the action cluster out first
+        // (anchored right) and gives the subject/meta block the bounded
+        // remainder — the old left-to-right row let a long subject push
+        // the cluster off the edge at narrow widths.
+        let head = egui::containers::Sides::new().shrink_left().show(
+            ui,
+            |ui| {
+                design::avatar(
                     ui,
-                    &format!(
-                        "{} · mailbox: {} · priority: {}",
-                        who,
-                        detail.mailbox_name.as_deref().unwrap_or("-"),
-                        detail.priority.as_deref().unwrap_or("none"),
-                    ),
+                    AvatarSize::Lg,
+                    &initials.to_uppercase(),
+                    BadgeTone::Neutral,
                 );
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let (tone, label) = design::status_tone(&detail.status);
-                design::badge(ui, label, tone);
-                if design::chip_with_icon(ui, self.copilot_open, Icon::Sparkles, "Copilot")
-                    .on_hover_text("Copilot: local summary, similar past issues, suggested reply")
-                    .clicked()
-                {
-                    self.copilot_open = !self.copilot_open;
-                    self.copilot = None;
-                    self.copilot_error = None;
-                    self.reload_detail(db);
-                }
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&subject)
+                                .size(design::scale::text::SECTION)
+                                .strong(),
+                        )
+                        .truncate(),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&meta)
+                                .size(design::scale::text::SMALL)
+                                .color(t.muted_foreground),
+                        )
+                        .truncate(),
+                    );
+                });
+            },
+            |ui| {
                 if design::icon_button(
                     ui,
                     Icon::Refresh,
@@ -1519,8 +1612,20 @@ impl InboxPage {
                     });
                     self.set_status_message("Refreshing from Help Scout…", false);
                 }
-            });
-        });
+                if design::chip_with_icon(ui, self.copilot_open, Icon::Sparkles, "Copilot")
+                    .on_hover_text("Copilot: local summary, similar past issues, suggested reply")
+                    .clicked()
+                {
+                    self.copilot_open = !self.copilot_open;
+                    self.copilot = None;
+                    self.copilot_error = None;
+                    self.reload_detail(db);
+                }
+                let (tone, label) = design::status_tone(&detail.status);
+                design::badge(ui, label, tone);
+            },
+        );
+        let _ = head;
     }
 
     fn action_bar_ui(
@@ -1531,19 +1636,27 @@ impl InboxPage {
         detail: &ConversationDetail,
     ) {
         design::card(ui, |ui| {
+            // UXE-1-6: the toolbar is two explicit rows — Status (segmented
+            // control) over Assignee (styled select + Assign) — replacing
+            // the old stacked rows with `status:`/`assign:` lowercase
+            // labels. egui cannot wrap opaque nested groups reliably, so
+            // the rows are explicit: deterministic at every width, and
+            // each label stays adjacent to its control.
             ui.horizontal(|ui| {
-                design::field_label(ui, "status:");
-                for status in ["active", "pending", "closed", "spam"] {
-                    if design::chip(ui, detail.status == status, status)
-                        .on_hover_text("applied locally and sent to Help Scout")
-                        .clicked()
-                    {
-                        self.change_status(db, bus, status);
-                    }
+                design::field_label(ui, "Status");
+                let statuses = ["active", "pending", "closed", "spam"];
+                let active_idx = statuses
+                    .iter()
+                    .position(|s| *s == detail.status)
+                    .unwrap_or(0);
+                if let Some(i) = design::segmented(ui, "inbox-status", &statuses, active_idx) {
+                    let status = statuses[i];
+                    self.change_status(db, bus, status);
                 }
             });
+            ui.add_space(design::scale::space::SP1);
             ui.horizontal(|ui| {
-                design::field_label(ui, "assign:");
+                design::field_label(ui, "Assignee");
                 let assign_label: String = detail
                     .assignee_name
                     .clone()
@@ -1553,24 +1666,13 @@ impl InboxPage {
                             .as_deref()
                             .map(|team| format!("team: {team}"))
                     })
-                    .unwrap_or_else(|| "unassigned".into());
-                egui::ComboBox::from_id_salt("inbox-assign")
-                    .width(200.0)
-                    .selected_text(assign_label.clone())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.assign_pick, None, "unassigned");
-                        for (id, name) in self.users.clone() {
-                            ui.selectable_value(&mut self.assign_pick, Some(id), name);
-                        }
-                    })
-                    .response
-                    .widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::Role::Button,
-                            ui.is_enabled(),
-                            format!("assign: {assign_label}"),
-                        )
-                    });
+                    .unwrap_or_else(|| "Unassigned".into());
+                design::select(ui, "inbox-assign", &assign_label, 200.0, |ui| {
+                    ui.selectable_value(&mut self.assign_pick, None, "Unassigned");
+                    for (id, name) in self.users.clone() {
+                        ui.selectable_value(&mut self.assign_pick, Some(id), name);
+                    }
+                });
                 if design::button(ui, "Assign", ButtonVariant::Secondary).clicked() {
                     self.assign(db, bus, self.assign_pick);
                 }
@@ -1637,8 +1739,8 @@ impl InboxPage {
             let chip = self.triage.iter().find(|c| c.key == key).cloned();
             if let Some(chip) = chip {
                 ui.horizontal_wrapped(|ui| {
-                    ui.strong(format!("set {}:", chip.label.to_lowercase()));
-                    if ui.button("unknown (clear)").clicked() {
+                    ui.strong(format!("Set {}:", chip.label.to_lowercase()));
+                    if ui.button("Unknown (clear)").clicked() {
                         self.override_chip_value(db, &chip, "");
                         self.editing_chip = None;
                     }
@@ -1648,7 +1750,7 @@ impl InboxPage {
                             self.editing_chip = None;
                         }
                     }
-                    if ui.button("cancel").clicked() {
+                    if ui.button("Cancel").clicked() {
                         self.editing_chip = None;
                     }
                 });
@@ -1704,9 +1806,10 @@ impl InboxPage {
                 {
                     self.copilot_open = false;
                 }
+                // UXE-1-8: the "local" nature is a badge, not prose.
+                design::badge(ui, "Local", design::BadgeTone::Neutral);
             });
         });
-        design::divider(ui);
         let Some(detail) = detail else {
             design::hint_text(
                 ui,
@@ -1787,8 +1890,13 @@ impl InboxPage {
                 design::hint_text(
                     ui,
                     &format!(
-                        "History: {} conversation(s) on file{}",
+                        "{} past conversation{} on file{}",
                         report.history.previous_conversations,
+                        if report.history.previous_conversations == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
                         report
                             .history
                             .last_contact
@@ -1991,7 +2099,7 @@ impl InboxPage {
                         }
                         if (design::button(
                             ui,
-                            if busy { "thinking…" } else { "ask" },
+                            if busy { "Thinking…" } else { "Ask" },
                             ButtonVariant::Ai,
                         )
                         .clicked()
@@ -2279,91 +2387,7 @@ impl InboxPage {
     ) {
         let conv_id = detail.id;
         let busy = self.pending_ai.is_some();
-        ui.horizontal_wrapped(|ui| {
-            if design::chip_with_icon(
-                ui,
-                false,
-                Icon::Sparkles,
-                if busy {
-                    "AI working…"
-                } else {
-                    "Review draft"
-                },
-            )
-            .on_hover_text(
-                "run the 9 deterministic coaching checks (plus the AI layer when a model is \
-                 routed) — advisory only",
-            )
-            .clicked()
-                && !busy
-                && !self.composer_body.trim().is_empty()
-            {
-                self.enqueue_composer_ai(
-                    db,
-                    "review_draft",
-                    json!({
-                        "conversationId": conv_id,
-                        "draft": self.composer_body,
-                    }),
-                    conv_id,
-                );
-            }
-            let gen_ok = db.with_read(spp_core::ai_local::generative_backend_available);
-            if gen_ok && !busy && !self.composer_body.trim().is_empty() {
-                for (instruction, label) in [
-                    ("shorten", "Shorten"),
-                    ("expand", "Expand"),
-                    ("warmer", "Warmer"),
-                ] {
-                    if design::chip(ui, false, label)
-                        .on_hover_text("rewrite the composer text with the Draft role model")
-                        .clicked()
-                    {
-                        self.enqueue_composer_ai(
-                            db,
-                            "rewrite_composer",
-                            json!({
-                                "conversationId": conv_id,
-                                "text": self.composer_body,
-                                "instruction": instruction,
-                            }),
-                            conv_id,
-                        );
-                    }
-                }
-                egui::ComboBox::from_id_salt("composer-translate-lang")
-                    .selected_text(self.translate_lang.as_str())
-                    .width(110.0)
-                    .show_ui(ui, |ui| {
-                        for (code, name) in spp_core::translation::SUPPORTED_LANGUAGES {
-                            ui.selectable_value(
-                                &mut self.translate_lang,
-                                code.to_string(),
-                                format!("{code} — {name}"),
-                            );
-                        }
-                    });
-                if design::chip(ui, false, "Translate")
-                    .on_hover_text(
-                        "translate the composer text to the picked language (cached locally)",
-                    )
-                    .clicked()
-                {
-                    let text: String = self.composer_body.chars().take(8000).collect();
-                    self.enqueue_composer_ai(
-                        db,
-                        "translate_composer",
-                        json!({
-                            "conversationId": conv_id,
-                            "text": text,
-                            "targetLang": self.translate_lang,
-                        }),
-                        conv_id,
-                    );
-                }
-            }
-        });
-        ui.add_space(design::scale::space::SP1);
+        let body_empty = self.composer_body.trim().is_empty();
 
         let mention_len = caret_query(&self.composer_body, self.mention_caret)
             .map_or(0, |(q, _)| filter_matches(&self.directory, &q).len());
@@ -2383,28 +2407,23 @@ impl InboxPage {
             .iter()
             .map(|(name, _)| name.clone())
             .collect();
-        // UX-27: Cc/Bcc render above the composer (recipient fields before
-        // the body, the standard mail layout) instead of below the send
-        // button where they clipped off the window bottom.
-        if self.composer_mode == ComposerMode::Reply {
-            ui.horizontal(|ui| {
-                let mut cc = self.composer_cc.clone();
-                ui.add_sized(
-                    [ui.available_width(), 28.0],
-                    egui::TextEdit::singleline(&mut cc).hint_text("Cc (comma-separated emails)"),
-                );
-                self.composer_cc = cc;
-            });
-            ui.horizontal(|ui| {
-                let mut bcc = self.composer_bcc.clone();
-                ui.add_sized(
-                    [ui.available_width(), 28.0],
-                    egui::TextEdit::singleline(&mut bcc).hint_text("Bcc (comma-separated emails)"),
-                );
-                self.composer_bcc = bcc;
-            });
-            ui.add_space(4.0);
+
+        // UXE-1-7: the recipient and AI-tool rows render inside the
+        // composer card through closures; tool clicks are collected into
+        // `tool` and applied after the composer returns (the closures
+        // cannot borrow `self`).
+        let mut cc = self.composer_cc.clone();
+        let mut bcc = self.composer_bcc.clone();
+        let mut translate_lang = self.translate_lang.clone();
+        let gen_ok = db.with_read(spp_core::ai_local::generative_backend_available);
+        #[derive(Clone, Copy)]
+        enum ToolAction {
+            Review,
+            Rewrite(&'static str),
+            Translate,
         }
+        let mut tool: Option<ToolAction> = None;
+
         let mut state = ComposerState {
             mode: match self.composer_mode {
                 ComposerMode::Reply => design::ComposerMode::Reply,
@@ -2415,10 +2434,134 @@ impl InboxPage {
             caret: None,
             focused: false,
         };
-        let act = design::composer(ui, "inbox", &mut state, &saved_reply_names);
+        let reply_mode = self.composer_mode == ComposerMode::Reply;
+        let to_who = match detail.customer_email.as_deref() {
+            Some(email) if !email.trim().is_empty() => format!(
+                "{} <{}>",
+                detail.customer_name.as_deref().unwrap_or("customer"),
+                email
+            ),
+            _ => detail
+                .customer_name
+                .clone()
+                .unwrap_or_else(|| "customer".into()),
+        };
+        let act = design::composer(
+            ui,
+            "inbox",
+            &mut state,
+            &saved_reply_names,
+            |ui| {
+                // UX-27/UXE-1-7: recipients before the body (the mail
+                // layout) — To is static (replies go to the customer),
+                // Cc/Bcc are compact inputs on aligned label columns.
+                if reply_mode {
+                    recipient_row_static(ui, "To", &to_who);
+                    recipient_row_input(ui, "Cc", &mut cc);
+                    recipient_row_input(ui, "Bcc", &mut bcc);
+                    ui.add_space(design::scale::space::SP2 - 2.0);
+                }
+            },
+            |ui| {
+                // UXE-1-7: AI tools live under the body — Review is always
+                // available with a draft; rewrite/translate need a routed
+                // Draft model.
+                if !busy && !body_empty {
+                    if design::chip_with_icon(ui, false, Icon::Sparkles, "Review Draft")
+                        .on_hover_text(
+                            "run the 9 deterministic coaching checks (plus the AI layer when a \
+                             model is routed) — advisory only",
+                        )
+                        .clicked()
+                    {
+                        tool = Some(ToolAction::Review);
+                    }
+                    if gen_ok {
+                        for (instruction, label) in [
+                            ("shorten", "Shorten"),
+                            ("expand", "Expand"),
+                            ("warmer", "Warmer"),
+                        ] {
+                            if design::chip(ui, false, label)
+                                .on_hover_text(
+                                    "rewrite the composer text with the Draft role model",
+                                )
+                                .clicked()
+                            {
+                                tool = Some(ToolAction::Rewrite(instruction));
+                            }
+                        }
+                        let lang_label = translate_lang.clone();
+                        design::select(ui, "composer-translate-lang", &lang_label, 110.0, |ui| {
+                            for (code, name) in spp_core::translation::SUPPORTED_LANGUAGES {
+                                ui.selectable_value(
+                                    &mut translate_lang,
+                                    code.to_string(),
+                                    format!("{code} — {name}"),
+                                );
+                            }
+                        });
+                        if design::chip(ui, false, "Translate")
+                            .on_hover_text(
+                                "translate the composer text to the picked language (cached \
+                                 locally)",
+                            )
+                            .clicked()
+                        {
+                            tool = Some(ToolAction::Translate);
+                        }
+                    }
+                }
+            },
+        );
+        self.composer_cc = cc;
+        self.composer_bcc = bcc;
+        self.translate_lang = translate_lang;
         self.composer_focused = state.focused;
+        // UXE-1-7: feed the measured card height (plus the panel margins)
+        // back for the next frame's exact panel height.
+        self.composer_panel_h = Some(ui.min_rect().height() + 18.0);
         if let Some(caret) = state.caret {
             self.mention_caret = char_index_to_byte(&state.draft, caret);
+        }
+        match tool {
+            Some(ToolAction::Review) => {
+                self.enqueue_composer_ai(
+                    db,
+                    "review_draft",
+                    json!({
+                        "conversationId": conv_id,
+                        "draft": self.composer_body,
+                    }),
+                    conv_id,
+                );
+            }
+            Some(ToolAction::Rewrite(instruction)) => {
+                self.enqueue_composer_ai(
+                    db,
+                    "rewrite_composer",
+                    json!({
+                        "conversationId": conv_id,
+                        "text": self.composer_body,
+                        "instruction": instruction,
+                    }),
+                    conv_id,
+                );
+            }
+            Some(ToolAction::Translate) => {
+                let text: String = self.composer_body.chars().take(8000).collect();
+                self.enqueue_composer_ai(
+                    db,
+                    "translate_composer",
+                    json!({
+                        "conversationId": conv_id,
+                        "text": text,
+                        "targetLang": self.translate_lang,
+                    }),
+                    conv_id,
+                );
+            }
+            None => {}
         }
         match act {
             Some(ComposerAct::Send(mode, text)) => {
@@ -2695,6 +2838,43 @@ fn truncate_chars(s: &str, max: usize) -> String {
         let cut: String = s.chars().take(max).collect();
         format!("{cut}…")
     }
+}
+
+/// UXE-1-7: composer recipient rows — a fixed 28px label column so the
+/// To/Cc/Bcc rows align on one left edge (the mail-client layout).
+fn recipient_label(ui: &mut egui::Ui, text: &str) {
+    ui.vertical(|ui| {
+        ui.set_min_width(28.0);
+        ui.label(
+            egui::RichText::new(text)
+                .size(design::scale::text::SMALL)
+                .color(design::tokens(ui).muted_foreground),
+        );
+    });
+}
+
+fn recipient_row_static(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.horizontal(|ui| {
+        recipient_label(ui, label);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(value)
+                    .size(design::scale::text::SMALL)
+                    .color(design::tokens(ui).foreground),
+            )
+            .truncate(),
+        );
+    });
+}
+
+fn recipient_row_input(ui: &mut egui::Ui, label: &str, buf: &mut String) {
+    ui.horizontal(|ui| {
+        recipient_label(ui, label);
+        ui.add_sized(
+            [ui.available_width(), 28.0],
+            egui::TextEdit::singleline(buf).hint_text("comma-separated emails"),
+        );
+    });
 }
 
 fn compact_time(iso: &str) -> String {

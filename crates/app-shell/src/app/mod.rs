@@ -428,37 +428,66 @@ impl ShellApp {
 
     fn sidebar_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
+        // UXE-1-2: brand row — logo, name, and the version pill on one
+        // line (the old two-line block crammed a tiny version label
+        // under the name with no air).
         ui.horizontal(|ui| {
-            let (id, rect) = ui.allocate_space(egui::vec2(28.0, 28.0));
+            let (id, rect) = ui.allocate_space(egui::vec2(26.0, 26.0));
             ui.painter()
                 .rect_filled(rect, egui::CornerRadius::same(7), t.primary);
             ui.painter().text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "S+",
-                egui::FontId::proportional(13.0),
+                egui::FontId::proportional(12.0),
                 t.primary_foreground,
             );
             ui.advance_cursor_after_rect(rect);
             let _ = id;
             ui.label(
                 egui::RichText::new("SupportOS+")
-                    .size(15.5)
+                    .size(14.5)
                     .strong()
                     .color(t.foreground),
             );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let v = format!("v{}", env!("CARGO_PKG_VERSION"));
+                let galley = egui::WidgetText::from(
+                    egui::RichText::new(v.as_str())
+                        .size(design::scale::text::META)
+                        .color(t.muted_foreground),
+                )
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Small,
+                );
+                let pad = egui::vec2(6.0, 2.0);
+                let size = galley.size() + 2.0 * pad;
+                let (vid, vrect) = ui.allocate_space(size);
+                ui.painter().rect_filled(
+                    vrect,
+                    egui::CornerRadius::same(design::scale::radius::BADGE),
+                    t.muted,
+                );
+                ui.painter().galley(
+                    egui::pos2(
+                        vrect.min.x + pad.x,
+                        vrect.center().y - galley.size().y / 2.0,
+                    ),
+                    galley,
+                    t.muted_foreground,
+                );
+                let _ = vid;
+            });
         });
-        ui.label(
-            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                .small()
-                .color(t.muted_foreground),
-        );
-        ui.add_space(10.0);
+        ui.add_space(design::scale::space::SP3);
 
         if self.dialog.is_none() && palette_trigger(ui).clicked() {
             self.palette.toggle();
         }
-        ui.add_space(12.0);
+        ui.add_space(design::scale::space::SP3);
 
         egui::Panel::bottom("spp-sidebar-theme")
             .show_separator_line(false)
@@ -469,7 +498,9 @@ impl ShellApp {
                 bottom: 6,
             }))
             .show(ui, |ui| {
-                ui.separator();
+                // UXE-1-2: the orphan hairline above the theme row read as
+                // a broken divider under the nav scroll — the row is its
+                // own affordance now.
                 let next = self.theme.toggle();
                 if theme_row(ui, next) {
                     self.theme = next;
@@ -494,19 +525,21 @@ impl ShellApp {
                             }
                         }
                         for (group, keys) in NAV_GROUPS {
+                            // UXE-1-2: one micro-label convention — 11px
+                            // muted, sentence case (matches the inbox
+                            // views rail) instead of strong small text.
                             ui.label(
                                 egui::RichText::new(*group)
-                                    .small()
-                                    .strong()
+                                    .size(design::scale::text::META)
                                     .color(t.muted_foreground),
                             );
-                            ui.add_space(2.0);
+                            ui.add_space(design::scale::space::SP1);
                             for key in keys.iter() {
                                 if nav_row(ui, self.page, *key) {
                                     self.page = *key;
                                 }
                             }
-                            ui.add_space(8.0);
+                            ui.add_space(design::scale::space::SP2);
                         }
                     });
             });
@@ -708,7 +741,7 @@ impl ShellApp {
             .show(ui, |ui| self.sidebar_ui(ui));
 
         egui::Panel::top("spp-header")
-            .exact_size(52.0)
+            .exact_size(48.0)
             .show_separator_line(false)
             .frame(
                 egui::Frame::new()

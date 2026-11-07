@@ -102,14 +102,19 @@ pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool
     } else {
         t.foreground
     };
-    let galley = egui::WidgetText::from(egui::RichText::new(key.label()).size(13.5).color(fg))
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Extend),
-            f32::INFINITY,
-            egui::TextStyle::Button,
-        );
-    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 32.0));
+    // UXE-1-2: 30px rows, 13px labels, selected label strong — the nav
+    // grid keeps one rhythm top to bottom.
+    let mut rich = egui::RichText::new(key.label()).size(13.0).color(fg);
+    if selected {
+        rich = rich.strong();
+    }
+    let galley = egui::WidgetText::from(rich).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 30.0));
     let response = ui.interact(rect, auto_id.with(key.label()), egui::Sense::click());
     let fill = if selected {
         t.selection
@@ -122,7 +127,7 @@ pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(6), fill);
     }
-    let icon_size = 16.0;
+    let icon_size = 15.0;
     let icon_rect = egui::Rect::from_min_max(
         egui::pos2(rect.min.x + 10.0, rect.center().y - icon_size / 2.0),
         egui::pos2(
@@ -137,7 +142,7 @@ pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool
     );
     ui.painter().galley(
         egui::pos2(
-            icon_rect.max.x + 9.0,
+            icon_rect.max.x + 8.0,
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,
@@ -164,7 +169,7 @@ pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool
 
 pub(super) fn palette_trigger(ui: &mut egui::Ui) -> egui::Response {
     let t = design::tokens(ui);
-    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 34.0));
+    let (auto_id, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 32.0));
     let response = ui
         .interact(
             rect,
@@ -188,15 +193,15 @@ pub(super) fn palette_trigger(ui: &mut egui::Ui) -> egui::Response {
         egui::StrokeKind::Inside,
     );
     let icon_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.min.x + 10.0, rect.center().y - 8.0),
-        egui::pos2(rect.min.x + 26.0, rect.center().y + 8.0),
+        egui::pos2(rect.min.x + 10.0, rect.center().y - 7.5),
+        egui::pos2(rect.min.x + 25.0, rect.center().y + 7.5),
     );
     Icon::Search.paint_at(ui.painter(), icon_rect, t.muted_foreground);
     ui.painter().text(
         egui::pos2(icon_rect.max.x + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "Search…",
-        egui::FontId::proportional(13.5),
+        egui::FontId::proportional(13.0),
         t.muted_foreground,
     );
     let kbd = "⌘K";
@@ -262,13 +267,13 @@ pub(super) fn theme_row(ui: &mut egui::Ui, next: Theme) -> bool {
             .rect_filled(rect, egui::CornerRadius::same(6), fill);
     }
     let icon_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.min.x + 10.0, rect.center().y - 8.0),
-        egui::pos2(rect.min.x + 26.0, rect.center().y + 8.0),
+        egui::pos2(rect.min.x + 10.0, rect.center().y - 7.5),
+        egui::pos2(rect.min.x + 25.0, rect.center().y + 7.5),
     );
     icon.paint_at(ui.painter(), icon_rect, t.muted_foreground);
     ui.painter().galley(
         egui::pos2(
-            icon_rect.max.x + 9.0,
+            icon_rect.max.x + 8.0,
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,

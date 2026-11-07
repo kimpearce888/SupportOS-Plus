@@ -833,7 +833,7 @@ impl OperationsPage {
 
         design::section_title(ui, "Workflows");
         ui.horizontal(|ui| {
-            let wf_label = design::field_label(ui, "conversation #:");
+            let wf_label = design::field_label(ui, "Conversation #");
             ui.add(
                 egui::TextEdit::singleline(&mut library.workflow_number)
                     .desired_width(110.0)

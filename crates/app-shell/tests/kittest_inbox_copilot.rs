@@ -231,3 +231,41 @@ fn r4_inbox_copilot_closed_1625_light() {
         "r4_inbox_copilot_closed_1625_light",
     );
 }
+
+// UXE-1-4 responsive states — the inbox columns adapt across displays:
+// 1920 keeps the views rail + a docked 300px copilot beside the reader;
+// 1024 has no room for reader+copilot side by side, so the copilot swaps
+// in over the reader (narrow mode); 800 folds the views rail into chips.
+
+#[test]
+fn r5_inbox_copilot_docked_1920_light() {
+    render_copilot_state(
+        false,
+        1920.0,
+        960.0,
+        true,
+        "r5_inbox_copilot_docked_1920_light",
+    );
+}
+
+#[test]
+fn r5_inbox_copilot_narrow_1024_light() {
+    render_copilot_state(
+        false,
+        1024.0,
+        700.0,
+        true,
+        "r5_inbox_copilot_narrow_1024_light",
+    );
+}
+
+#[test]
+fn r5_inbox_folded_views_800_light() {
+    render_copilot_state(
+        false,
+        800.0,
+        700.0,
+        false,
+        "r5_inbox_folded_views_800_light",
+    );
+}

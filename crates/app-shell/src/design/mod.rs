@@ -208,12 +208,22 @@ pub mod scale {
         pub(crate) const BODY: f32 = 13.5;
         pub(crate) const LEAD: f32 = 14.0;
         pub(crate) const SECTION: f32 = 15.0;
-        pub(crate) const SECTION_BIG: f32 = 18.0;
+        pub(crate) const SECTION_BIG: f32 = 16.0;
         pub(crate) const STAT: f32 = 20.0;
         pub(crate) const STAT_BIG: f32 = 26.0;
-        pub(crate) const TITLE: f32 = 22.0;
+        // UXE-1-1: 22px page titles read heavy against 13.5px body — the
+        // modern helpdesk register (Linear/Stripe/Zendesk) runs 16–18px
+        // semibold page titles. 18px keeps the hierarchy without shouting.
+        pub(crate) const TITLE: f32 = 18.0;
     }
-    pub(crate) mod radius {}
+    /// UXE-1-1: one radius scale — cards 10, controls (buttons/inputs/
+    /// selects/segments) 8, small elements (badges) 6, chips pill. Every
+    /// corner in the app comes from here (windows/menus keep 12/10).
+    pub(crate) mod radius {
+        pub(crate) const CARD: u8 = 10;
+        pub(crate) const CONTROL: u8 = 8;
+        pub(crate) const BADGE: u8 = 6;
+    }
 }
 
 pub fn install(ctx: &egui::Context) {
@@ -342,7 +352,7 @@ fn widget(
         bg_fill,
         weak_bg_fill: weak,
         bg_stroke: egui::Stroke::new(1.0, border),
-        corner_radius: egui::CornerRadius::same(6),
+        corner_radius: egui::CornerRadius::same(scale::radius::CONTROL),
         fg_stroke: egui::Stroke::new(1.0, fg),
         expansion: 0.0,
     }
@@ -651,6 +661,203 @@ pub fn chip_with_icon(ui: &mut egui::Ui, selected: bool, icon: Icon, text: &str)
     chip_impl(ui, selected, text, Some(icon))
 }
 
+// ── UXE-1-3: modern control set ──────────────────────────────────────────
+// One control language for the whole app: `segmented` for 2–5 exclusive
+// choices, `switch` for booleans, `select` for dropdowns. Every control
+// sits on the 32px control height, the CONTROL radius, and the same
+// hover/focus feedback as `button`.
+
+/// Segmented control — one active option in a muted track. Replaces the
+/// black-pill-among-plain-text rows (report ranges, thread status,
+/// composer mode) with the register modern SaaS uses for small
+/// exclusive choices.
+pub fn segmented(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    options: &[&str],
+    active: usize,
+) -> Option<usize> {
+    let t = tokens(ui);
+    let mut clicked = None;
+    egui::Frame::new()
+        .fill(t.muted)
+        .corner_radius(egui::CornerRadius::same(scale::radius::CONTROL))
+        .inner_margin(egui::Margin::same(2))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for (i, opt) in options.iter().enumerate() {
+                    let on = i == active;
+                    let rich = egui::RichText::new(*opt)
+                        .size(scale::text::CONTROL)
+                        .color(if on { t.foreground } else { t.muted_foreground });
+                    let rich = if on { rich.strong() } else { rich };
+                    let galley = egui::WidgetText::from(rich).into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Extend),
+                        f32::INFINITY,
+                        egui::TextStyle::Button,
+                    );
+                    let size = egui::vec2(galley.size().x + 22.0, 28.0);
+                    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                    if on {
+                        let r = egui::CornerRadius::same(scale::radius::CONTROL - 2);
+                        ui.painter().rect_filled(rect, r, t.card);
+                        if ui.visuals().dark_mode {
+                            ui.painter().rect_stroke(
+                                rect,
+                                r,
+                                egui::Stroke::new(1.0, t.border),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                    }
+                    ui.painter().galley(
+                        egui::pos2(
+                            rect.center().x - galley.size().x / 2.0,
+                            rect.center().y - galley.size().y / 2.0,
+                        ),
+                        galley,
+                        t.foreground,
+                    );
+                    focus_feedback(ui, &resp);
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::RadioButton,
+                            ui.is_enabled(),
+                            on,
+                            (*opt).to_owned(),
+                        )
+                    });
+                    if resp.clicked() {
+                        clicked = Some(i);
+                    }
+                }
+            });
+        });
+    let _ = id_salt;
+    clicked
+}
+
+/// Switch — the boolean control for settings rows. OS-style checkboxes
+/// read 2010s admin panel; the pill-and-knob switch is the modern
+/// register. Deterministic by construction (no animation): kittest
+/// goldens stay stable.
+pub fn switch(ui: &mut egui::Ui, on: bool) -> bool {
+    let t = tokens(ui);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 20.0), egui::Sense::click());
+    let track = if on { t.primary } else { t.border_strong };
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(10), track);
+    let knob_d = 14.0;
+    let cx = if on {
+        rect.max.x - 2.0 - knob_d / 2.0
+    } else {
+        rect.min.x + 2.0 + knob_d / 2.0
+    };
+    let knob = if on && ui.visuals().dark_mode {
+        t.primary_foreground
+    } else {
+        egui::Color32::WHITE
+    };
+    ui.painter()
+        .circle_filled(egui::pos2(cx, rect.center().y), knob_d / 2.0, knob);
+    if let Some(cursor) = ui.visuals().interact_cursor
+        && resp.hovered()
+    {
+        ui.ctx().set_cursor_icon(cursor);
+    }
+    focus_feedback(ui, &resp);
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::Role::Switch, ui.is_enabled(), on, "switch")
+    });
+    if resp.clicked() { !on } else { on }
+}
+
+/// Select — styled dropdown on the control surface: flat 32px control
+/// with a hairline border and a muted chevron, opening a card-styled
+/// menu. The menu closure keeps the `ui.selectable_value` ergonomics.
+pub fn select<R>(
+    ui: &mut egui::Ui,
+    id_salt: &str,
+    selected: &str,
+    width: f32,
+    menu: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::Response {
+    let t = tokens(ui);
+    let rich = egui::RichText::new(selected)
+        .size(scale::text::CONTROL)
+        .color(t.foreground);
+    let galley = egui::WidgetText::from(rich).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        (width - 46.0).max(20.0),
+        egui::TextStyle::Button,
+    );
+    let size = egui::vec2(width.max(galley.size().x + 46.0), 32.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let radius = egui::CornerRadius::same(scale::radius::CONTROL);
+    ui.painter().rect_filled(rect, radius, t.card);
+    let stroke_col = if resp.hovered() || resp.has_focus() {
+        t.border_strong
+    } else {
+        t.border
+    };
+    ui.painter().rect_stroke(
+        rect,
+        radius,
+        egui::Stroke::new(1.0, stroke_col),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().galley(
+        egui::pos2(rect.min.x + 12.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        t.foreground,
+    );
+    let chev = 13.0;
+    let chev_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.max.x - 17.0, rect.center().y),
+        egui::vec2(chev, chev),
+    );
+    Icon::ChevronDown.paint_at(ui.painter(), chev_rect, t.muted_foreground);
+    focus_feedback(ui, &resp);
+    let selected_owned = selected.to_owned();
+    resp.widget_info(|| {
+        // The accessible name comes from `label` — a bare
+        // `WidgetInfo::new(Role::ComboBox)` fails the harness
+        // accessibility check ("lacks accessible name").
+        let mut info = egui::WidgetInfo::labeled(
+            egui::Role::ComboBox,
+            ui.is_enabled(),
+            selected_owned.clone(),
+        );
+        info.current_text_value = Some(selected_owned.clone());
+        info
+    });
+    let popup_id = ui.make_persistent_id(("spp-select", id_salt));
+    egui::Popup::menu(&resp)
+        .id(popup_id)
+        .width(rect.width())
+        .frame(
+            egui::Frame::new()
+                .fill(t.card)
+                .stroke(egui::Stroke::new(1.0, t.border))
+                .corner_radius(egui::CornerRadius::same(10))
+                .inner_margin(egui::Margin::same(4))
+                .shadow(egui::Shadow {
+                    offset: [0, 8],
+                    blur: 24,
+                    spread: 0,
+                    color: egui::Color32::from_black_alpha(60),
+                }),
+        )
+        .show(|ui| {
+            ui.set_min_width(rect.width() - 8.0);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            menu(ui)
+        });
+    resp
+}
+
 pub fn page_header(
     ui: &mut egui::Ui,
     title: &str,
@@ -672,7 +879,8 @@ pub fn page_header(
             actions(ui);
         });
     });
-    ui.add_space(10.0);
+    // UXE-1-1: one header rhythm on every page — SP3 before the content.
+    ui.add_space(scale::space::SP3);
 }
 
 /// DC: DS-C-03 StatTile — muted 12px label, 26px tabular value, 12px hint.
@@ -843,7 +1051,10 @@ pub fn status_dot(ui: &mut egui::Ui, tone: BadgeTone, big: bool) {
 fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Option<usize> {
     let t = tokens(ui);
     let mut clicked = None;
-    ui.horizontal(|ui| {
+    // UXE-1-9: wrapped, not a single unbounded row — long tab sets (the
+    // reports page carries 11) wrap instead of clipping on narrow
+    // displays.
+    ui.horizontal_wrapped(|ui| {
         for (i, item) in items.iter().enumerate() {
             let global = base + i;
             let on = global == active;
@@ -895,37 +1106,6 @@ fn tabs_row(ui: &mut egui::Ui, items: &[&str], active: usize, base: usize) -> Op
 /// DC: DS-C-09 Tabs (underline) — active = 500 text + 2px primary underline
 pub fn tabs(ui: &mut egui::Ui, items: &[&str], active: usize) -> Option<usize> {
     let clicked = tabs_row(ui, items, active, 0);
-    divider(ui);
-    ui.add_space(scale::space::SP2);
-    clicked
-}
-
-/// DC: DS-C-09 grouped variant — labeled tab groups with a global index
-pub(crate) fn tab_groups(
-    ui: &mut egui::Ui,
-    groups: &[(&str, &[&str])],
-    active: usize,
-) -> Option<usize> {
-    let t = tokens(ui);
-    let mut clicked = None;
-    let mut base = 0;
-    ui.horizontal_wrapped(|ui| {
-        for (label, items) in groups {
-            ui.vertical(|ui| {
-                ui.set_min_width(0.0);
-                ui.label(
-                    egui::RichText::new(*label)
-                        .size(scale::text::META)
-                        .color(t.muted_foreground),
-                );
-                if let Some(c) = tabs_row(ui, items, active, base) {
-                    clicked = Some(c);
-                }
-            });
-            ui.add_space(22.0);
-            base += items.len();
-        }
-    });
     divider(ui);
     ui.add_space(scale::space::SP2);
     clicked
@@ -1690,35 +1870,48 @@ pub fn message_card_with<B, A, R>(
     A: FnOnce(&mut egui::Ui) -> R,
 {
     let t = tokens(ui);
-    let (bg, border) = match role {
-        MessageRole::Customer => (t.card, t.border),
-        MessageRole::Agent => (t.agent_surface, t.agent_border),
-        MessageRole::Note => (t.warning_soft, t.warning_border),
-        MessageRole::Ai => (t.ai_soft, t.ai_border),
+    // UXE-1-6: customer/agent cards sit on the standard card surface
+    // (hairline only in dark mode); note/AI cards keep their soft tint
+    // but swap the full colored border for a 3px accent bar on the left
+    // edge — the modern callout anatomy instead of the 2016 full-fill
+    // highlight box.
+    let (bg, border, accent) = match role {
+        MessageRole::Customer => (
+            t.card,
+            if ui.visuals().dark_mode {
+                Some(t.border)
+            } else {
+                None
+            },
+            None,
+        ),
+        MessageRole::Agent => (t.agent_surface, Some(t.agent_border), None),
+        MessageRole::Note => (t.warning_soft, None, Some(t.warning)),
+        MessageRole::Ai => (t.ai_soft, None, Some(t.ai)),
     };
-    egui::Frame::new()
+    let frame = egui::Frame::new()
         .fill(bg)
-        .stroke(egui::Stroke::new(1.0, border))
-        .corner_radius(egui::CornerRadius::same(12))
+        .stroke(border.map_or(egui::Stroke::NONE, |c| egui::Stroke::new(1.0, c)))
+        .corner_radius(egui::CornerRadius::same(scale::radius::CARD))
         .inner_margin(egui::Margin {
-            left: 16,
-            right: 16,
-            top: 12,
-            bottom: 13,
-        })
+            left: 14,
+            right: 14,
+            top: 11,
+            bottom: 12,
+        });
+    let resp = frame
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                let (av_role, av_bg, av_fg) = match role {
-                    MessageRole::Customer => (BadgeTone::Neutral, t.muted, t.muted_foreground),
-                    MessageRole::Agent => (BadgeTone::Neutral, t.primary, t.primary_foreground),
-                    MessageRole::Note => (BadgeTone::Warning, t.warning_soft, t.warning_foreground),
-                    MessageRole::Ai => (BadgeTone::Ai, t.ai, t.on_ai),
+                let (av_bg, av_fg) = match role {
+                    MessageRole::Customer => (t.muted, t.muted_foreground),
+                    MessageRole::Agent => (t.primary, t.primary_foreground),
+                    MessageRole::Note => (t.warning_soft, t.warning_foreground),
+                    MessageRole::Ai => (t.ai, t.on_ai),
                 };
-                let _ = av_role;
                 let (rect, _id) =
-                    ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
-                ui.painter().circle_filled(rect.center(), 14.0, av_bg);
+                    ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 12.0, av_bg);
                 let initials: String = name
                     .split_whitespace()
                     .filter_map(|w| w.chars().next())
@@ -1728,14 +1921,10 @@ pub fn message_card_with<B, A, R>(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
                     initials.to_uppercase(),
-                    egui::FontId::proportional(10.5),
+                    egui::FontId::proportional(9.5),
                     av_fg,
                 );
-                ui.label(
-                    egui::RichText::new(name)
-                        .size(scale::text::BODY + 0.5)
-                        .strong(),
-                );
+                ui.label(egui::RichText::new(name).size(scale::text::BODY).strong());
                 let role_label = role_label.unwrap_or(match role {
                     MessageRole::Customer => "Customer",
                     MessageRole::Agent => "Agent",
@@ -1749,22 +1938,39 @@ pub fn message_card_with<B, A, R>(
                 };
                 ui.label(
                     egui::RichText::new(role_label)
-                        .size(scale::text::META_HALF)
+                        .size(scale::text::META)
                         .color(role_color),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new(time)
-                            .size(scale::text::META_HALF)
+                            .size(scale::text::META)
                             .color(t.muted_foreground),
                     );
                 });
             });
-            ui.add_space(scale::space::SP2 + 1.0);
+            ui.add_space(scale::space::SP2);
             body(ui);
             ui.add_space(scale::space::SP2);
             actions(ui);
-        });
+        })
+        .response;
+    if let Some(accent) = accent {
+        let r = resp.rect;
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(r.min.x, r.min.y),
+                egui::pos2(r.min.x + 3.0, r.max.y),
+            ),
+            egui::CornerRadius {
+                nw: scale::radius::CARD,
+                sw: scale::radius::CARD,
+                ne: 0,
+                se: 0,
+            },
+            accent,
+        );
+    }
 }
 
 /// DC: DS-C-20 day divider — hairlines meeting a centered 11.5px label.
@@ -1803,141 +2009,143 @@ pub enum ComposerAct {
     AiInsert,
 }
 
-/// DC: DS-C-21 Composer — Reply|Note tabs, tool chips (saved replies menu,
+/// DC: DS-C-21 Composer (UXE-1-7 redesign) — one card: Reply|Note
+/// segmented header with the tool buttons (Saved Replies dropdown, AI
+/// Draft), optional recipient rows (`before_body`), the bounded
+/// textarea, optional tool chips (`after_body`), and the footer (context
+/// hint left, primary Send right).
+#[allow(clippy::too_many_lines)]
 pub fn composer(
     ui: &mut egui::Ui,
     id_salt: &str,
     state: &mut ComposerState,
     saved_replies: &[String],
+    before_body: impl FnOnce(&mut egui::Ui),
+    after_body: impl FnOnce(&mut egui::Ui),
 ) -> Option<ComposerAct> {
     use egui::RichText as R;
     let t = tokens(ui);
     let mut act = None;
     let note = state.mode == ComposerMode::Note;
 
-    // Mode tabs (DS-C-21 Reply|Note).
-    ui.horizontal(|ui| {
-        for (mode, label) in [(ComposerMode::Reply, "Reply"), (ComposerMode::Note, "Note")] {
-            let on = state.mode == mode;
-            let text = R::new(label).size(scale::text::BODY).color(if on {
-                t.foreground
-            } else {
-                t.muted_foreground
-            });
-            let text = if on { text.strong() } else { text };
-            if ui
-                .add(
-                    egui::Button::new(text)
-                        .fill(egui::Color32::TRANSPARENT)
-                        .stroke(egui::Stroke::NONE)
-                        .min_size(egui::vec2(0.0, 34.0)),
-                )
-                .clicked()
-            {
-                state.mode = mode;
-            }
-            if on {
-                let rect = ui.max_rect();
-                ui.painter().rect_filled(
-                    egui::Rect::from_min_max(
-                        egui::pos2(rect.left(), rect.bottom() - 2.0),
-                        egui::pos2(rect.left() + 40.0, rect.bottom()),
-                    ),
-                    egui::CornerRadius::ZERO,
-                    t.primary,
-                );
-            }
-        }
-    });
+    card(ui, |ui| {
+        ui.set_width(ui.available_width());
 
-    ui.horizontal(|ui| {
-        let menu_id = egui::Id::unique(("spp-sr-menu", id_salt));
-        if button_with_icon(ui, Icon::Mail, "Saved Replies", ButtonVariant::Outline).clicked() {
-            let open = ui
-                .ctx()
-                .data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false));
-            ui.ctx().data_mut(|d| d.insert_temp(menu_id, !open));
-        }
-        if ui
-            .ctx()
-            .data(|d| d.get_temp::<bool>(menu_id).unwrap_or(false))
-        {
-            egui::Frame::new()
-                .fill(t.card)
-                .stroke(egui::Stroke::new(1.0, t.border))
-                .corner_radius(egui::CornerRadius::same(10))
-                .inner_margin(egui::Margin::same(5))
-                .show(ui, |ui| {
-                    ui.set_min_width(240.0);
-                    for (i, reply) in saved_replies.iter().enumerate() {
-                        if ui
-                            .add(
-                                egui::Button::new(R::new(reply).size(scale::text::SMALL_HALF))
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE),
-                            )
-                            .clicked()
-                        {
-                            act = Some(ComposerAct::SavedReply(i));
-                            ui.ctx().data_mut(|d| d.insert_temp(menu_id, false));
-                        }
-                    }
-                });
-        }
-        if button_with_icon(ui, Icon::Info, "AI Draft", ButtonVariant::Outline).clicked() {
-            act = Some(ComposerAct::AiInsert);
-        }
-        if state.draft_saved {
+        // Header: Reply|Note segmented left, tools right.
+        ui.horizontal(|ui| {
+            let mode_idx = usize::from(note);
+            if let Some(i) = segmented(
+                ui,
+                &format!("composer-mode-{id_salt}"),
+                &["Reply", "Note"],
+                mode_idx,
+            ) {
+                state.mode = if i == 0 {
+                    ComposerMode::Reply
+                } else {
+                    ComposerMode::Note
+                };
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    R::new("draft saved")
+                if state.draft_saved {
+                    ui.label(
+                        R::new("Draft saved")
+                            .size(scale::text::META)
+                            .color(t.muted_foreground),
+                    );
+                }
+                if button_with_icon(ui, Icon::Sparkles, "AI Draft", ButtonVariant::Outline)
+                    .on_hover_text("insert the latest LM Studio draft for this conversation")
+                    .clicked()
+                {
+                    act = Some(ComposerAct::AiInsert);
+                }
+                let sr = button_with_icon(ui, Icon::Mail, "Saved Replies", ButtonVariant::Outline)
+                    .on_hover_text("pick a saved reply template");
+                let popup_id = ui.make_persistent_id(("spp-sr-menu", id_salt));
+                egui::Popup::menu(&sr)
+                    .id(popup_id)
+                    .width(280.0)
+                    .frame(
+                        egui::Frame::new()
+                            .fill(t.card)
+                            .stroke(egui::Stroke::new(1.0, t.border))
+                            .corner_radius(egui::CornerRadius::same(10))
+                            .inner_margin(egui::Margin::same(4))
+                            .shadow(egui::Shadow {
+                                offset: [0, 8],
+                                blur: 24,
+                                spread: 0,
+                                color: egui::Color32::from_black_alpha(60),
+                            }),
+                    )
+                    .show(|ui| {
+                        ui.set_min_width(270.0);
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        if saved_replies.is_empty() {
+                            ui.label(
+                                R::new("No saved replies yet")
+                                    .size(scale::text::SMALL_HALF)
+                                    .color(t.muted_foreground),
+                            );
+                        }
+                        for (i, reply) in saved_replies.iter().enumerate() {
+                            if ui
+                                .button(R::new(reply).size(scale::text::SMALL_HALF))
+                                .clicked()
+                            {
+                                act = Some(ComposerAct::SavedReply(i));
+                            }
+                        }
+                    });
+            });
+        });
+        ui.add_space(scale::space::SP2);
+        divider(ui);
+
+        before_body(ui);
+
+        // Textarea (note mode = amber surface, DS-C-21).
+        let edit = egui::TextEdit::multiline(&mut state.draft)
+            .id_salt(format!("spp-composer-{id_salt}"))
+            .hint_text(if note {
+                "add an internal note…"
+            } else {
+                "write a reply…"
+            })
+            .desired_width(ui.available_width())
+            .min_size(egui::vec2(0.0, 96.0))
+            .font(egui::TextStyle::Body);
+        let edit = if note {
+            edit.background_color(t.warning_soft)
+        } else {
+            edit
+        };
+        let out = edit.show(ui);
+        state.focused = out.response.has_focus();
+        state.caret = out.cursor_range.map(|range| range.primary.index.0);
+
+        after_body(ui);
+
+        // Footer: context hint left, send right.
+        ui.horizontal(|ui| {
+            let context = if note {
+                "note — visible to teammates only · Ctrl+Enter sends"
+            } else {
+                "reply — sent to the customer · Ctrl+Enter sends"
+            };
+            ui.add(
+                egui::Label::new(
+                    R::new(context)
                         .size(scale::text::META)
                         .color(t.muted_foreground),
-                );
-            });
-        }
-    });
-
-    // Textarea (note mode = amber surface, DS-C-21).
-    let edit = egui::TextEdit::multiline(&mut state.draft)
-        .id_salt(format!("spp-composer-{id_salt}"))
-        .hint_text(if note {
-            "add an internal note…"
-        } else {
-            "write a reply…"
-        })
-        .desired_width(ui.available_width())
-        .min_size(egui::vec2(0.0, 92.0))
-        .font(egui::TextStyle::Body);
-    let edit = if note {
-        edit.background_color(t.warning_soft)
-    } else {
-        edit
-    };
-    let out = edit.show(ui);
-    state.focused = out.response.has_focus();
-    state.caret = out.cursor_range.map(|range| range.primary.index.0);
-
-    ui.horizontal(|ui| {
-        let context = if note {
-            "note — visible to teammates only · Ctrl+Enter sends"
-        } else {
-            "reply — sent to the customer · Ctrl+Enter sends"
-        };
-        ui.add(
-            egui::Label::new(
-                R::new(context)
-                    .size(scale::text::META_HALF)
-                    .color(t.muted_foreground),
-            )
-            .truncate(),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let send_label = if note { "Send Note" } else { "Send" };
-            let send = if note {
-                // DS-C-21: note send = amber.
-
-                {
+                )
+                .truncate(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let send_label = if note { "Send Note" } else { "Send" };
+                let send = if note {
+                    // DS-C-21: note send = amber solid.
                     let g = egui::WidgetText::from(
                         R::new(send_label).color(t.on_ai).size(scale::text::CONTROL),
                     )
@@ -1947,10 +2155,13 @@ pub fn composer(
                         f32::INFINITY,
                         egui::TextStyle::Button,
                     );
-                    let size = egui::vec2(g.size().x + 28.0, 30.0);
+                    let size = egui::vec2(g.size().x + 28.0, 32.0);
                     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-                    ui.painter()
-                        .rect_filled(rect, egui::CornerRadius::same(8), t.warning);
+                    ui.painter().rect_filled(
+                        rect,
+                        egui::CornerRadius::same(scale::radius::CONTROL),
+                        t.warning,
+                    );
                     ui.painter().galley(
                         egui::pos2(
                             rect.center().x - g.size().x / 2.0,
@@ -1963,16 +2174,16 @@ pub fn composer(
                         egui::WidgetInfo::labeled(egui::Role::Button, true, send_label.to_owned())
                     });
                     resp
+                } else {
+                    button_with_icon(ui, Icon::Send, send_label, ButtonVariant::Primary)
+                };
+                let ctrl_enter = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+                if send.clicked() || ctrl_enter {
+                    act = Some(ComposerAct::Send(state.mode, state.draft.clone()));
+                    state.draft.clear();
+                    state.draft_saved = false;
                 }
-            } else {
-                button_with_icon(ui, Icon::Send, send_label, ButtonVariant::Primary)
-            };
-            let ctrl_enter = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
-            if send.clicked() || ctrl_enter {
-                act = Some(ComposerAct::Send(state.mode, state.draft.clone()));
-                state.draft.clear();
-                state.draft_saved = false;
-            }
+            });
         });
     });
     act
@@ -2004,10 +2215,11 @@ pub fn cop_suggest(
 ) -> Option<usize> {
     let t = tokens(ui);
     let mut clicked = None;
-    egui::Frame::new()
+    // UXE-1-8: same anatomy as the note/AI message cards — soft tint, no
+    // full colored border, 3px AI accent bar on the left edge.
+    let resp = egui::Frame::new()
         .fill(t.ai_soft)
-        .stroke(egui::Stroke::new(1.0, t.ai_border))
-        .corner_radius(egui::CornerRadius::same(10))
+        .corner_radius(egui::CornerRadius::same(scale::radius::CARD))
         .inner_margin(egui::Margin::same(12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -2020,7 +2232,7 @@ pub fn cop_suggest(
                         .color(t.ai_foreground),
                 );
             });
-            ui.add_space(7.0);
+            ui.add_space(scale::space::SP2 - 2.0);
             for bullet in bullets {
                 ui.horizontal(|ui| {
                     ui.painter().circle_filled(
@@ -2040,7 +2252,7 @@ pub fn cop_suggest(
                 });
             }
             if !actions.is_empty() {
-                ui.add_space(7.0);
+                ui.add_space(scale::space::SP2 - 2.0);
                 ui.horizontal(|ui| {
                     for (i, a) in actions.iter().enumerate() {
                         if button(ui, a, ButtonVariant::Outline).clicked() {
@@ -2049,7 +2261,22 @@ pub fn cop_suggest(
                     }
                 });
             }
-        });
+        })
+        .response;
+    let r = resp.rect;
+    ui.painter().rect_filled(
+        egui::Rect::from_min_max(
+            egui::pos2(r.min.x, r.min.y),
+            egui::pos2(r.min.x + 3.0, r.max.y),
+        ),
+        egui::CornerRadius {
+            nw: scale::radius::CARD,
+            sw: scale::radius::CARD,
+            ne: 0,
+            se: 0,
+        },
+        t.ai,
+    );
     clicked
 }
 
@@ -2224,7 +2451,13 @@ mod tests {
         assert_eq!(scale::space::SP1, 4.0);
         assert_eq!(scale::space::CLUSTER, 6.0);
         assert_eq!(scale::text::BODY, 13.5);
-        assert_eq!(scale::text::TITLE, 22.0);
+        // UXE-1-1: TITLE 22 → 18 (modern helpdesk register) and
+        // SECTION_BIG 18 → 16 (detail headers sit under the page title).
+        assert_eq!(scale::text::TITLE, 18.0);
+        assert_eq!(scale::text::SECTION_BIG, 16.0);
+        assert_eq!(scale::radius::CARD, 10);
+        assert_eq!(scale::radius::CONTROL, 8);
+        assert_eq!(scale::radius::BADGE, 6);
         let ctx = egui::Context::default();
         install(&ctx);
         for theme in [egui::Theme::Light, egui::Theme::Dark] {

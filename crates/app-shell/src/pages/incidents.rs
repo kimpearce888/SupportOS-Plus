@@ -239,9 +239,11 @@ impl IncidentsPage {
                     None
                 } else {
                     Some(format!(
-                        "incident created; linked {} conversation(s) — unknown or \
-                         nonexistent id(s) skipped: {}",
+                        "incident created; linked {} conversation{} — unknown or \
+                         nonexistent id{} skipped: {}",
                         linked_count,
+                        if linked_count == 1 { "" } else { "s" },
+                        if missing.len() == 1 { "" } else { "s" },
                         missing.join(", ")
                     ))
                 };
@@ -724,13 +726,13 @@ impl IncidentsPage {
     fn new_incident_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         design::card_titled(ui, "New Incident", None, |ui| {
             design::form_grid(ui, "incident-new", |ui| {
-                design::field_label(ui, "title:");
+                design::field_label(ui, "Title");
                 ui.add_sized(
                     [260.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_title).hint_text("incident title"),
                 );
                 ui.end_row();
-                design::field_label(ui, "status:");
+                design::field_label(ui, "Status");
                 egui::ComboBox::from_id_salt("incident-new-status")
                     .width(170.0)
                     .selected_text(self.new_status.clone())
@@ -740,7 +742,7 @@ impl IncidentsPage {
                         }
                     });
                 ui.end_row();
-                design::field_label(ui, "severity:");
+                design::field_label(ui, "Severity");
                 egui::ComboBox::from_id_salt("incident-new-severity")
                     .width(170.0)
                     .selected_text(self.new_severity.clone())
@@ -750,14 +752,14 @@ impl IncidentsPage {
                         }
                     });
                 ui.end_row();
-                design::field_label(ui, "description:");
+                design::field_label(ui, "Description");
                 ui.add_sized(
                     [320.0, 70.0],
                     egui::TextEdit::multiline(&mut self.new_description)
                         .hint_text("what is happening"),
                 );
                 ui.end_row();
-                design::field_label(ui, "conversation ids:");
+                design::field_label(ui, "Conversation ids");
                 ui.add_sized(
                     [260.0, 28.0],
                     egui::TextEdit::singleline(&mut self.new_conversation_ids)
@@ -858,7 +860,7 @@ mod tests {
         assert!(note.contains("999"), "the nonexistent id is named: {note}");
         assert!(note.contains("abc"), "the unparseable id is named: {note}");
         assert!(
-            note.contains("linked 1 conversation(s)"),
+            note.contains("linked 1 conversation —"),
             "the kept count is stated: {note}"
         );
         assert_eq!(page.conversations.len(), 1, "the valid id still links");
