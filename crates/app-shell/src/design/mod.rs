@@ -1906,7 +1906,12 @@ pub fn message_card_with<B, A, R>(
                 let (av_bg, av_fg) = match role {
                     MessageRole::Customer => (t.muted, t.muted_foreground),
                     MessageRole::Agent => (t.primary, t.primary_foreground),
-                    MessageRole::Note => (t.warning_soft, t.warning_foreground),
+                    // UXE-2-3: the soft-tint circle was INVISIBLE on the
+                    // note card (warning_soft on warning_soft — bare
+                    // floating initials). The card-surface chip keeps the
+                    // note avatar quiet like the Customer role's while
+                    // staying visible in both themes.
+                    MessageRole::Note => (t.card, t.warning_foreground),
                     MessageRole::Ai => (t.ai, t.on_ai),
                 };
                 let (rect, _id) =

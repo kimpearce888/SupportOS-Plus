@@ -7,6 +7,21 @@
 
 ## Queue state
 
+**Batch UXE-2 (post-recycle verify-and-fix) CONSUMED 2026-11-08: items
+UXE-2-1..UXE-2-4 moved to `progress.md` per Rule 2, implemented,
+verified (full battery, see `completed.md`), and closed the same session.
+The queue is EMPTY again. New work opens only on an owner directive.**
+The batch was opened on the owner's post-recycle directive ("you have to
+fix not change. you have to fix what we have to make sure that is
+working as expected, introducing new things are totally prohibited").
+Outcome for the record: HEAD verified working as expected after the
+fifth recycle (full battery + zero-drift golden locks); UXE-1's disclosed
+"known-remaining" reader/composer misalignment DISPROVEN on HEAD (stale
+pre-batch measurement — pixel-proven aligned at every width); the real
+defect found and fixed instead was the invisible Note-card avatar
+(one token pair, no new dependencies); one new overflow regression
+golden added. Details in `completed.md`.
+
 **Batch UXE-1 (full-app design modernization) CONSUMED 2026-11-07/08:
 items UXE-1-1..UXE-1-10 moved to `progress.md` per Rule 2, implemented,
 verified (full battery, see `completed.md`), and closed the same session.
@@ -39,6 +54,46 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 `ux-audit/reports/` (scope contract: `ux-audit/reports/scope.md`; issue
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
+
+### UX-fix queue (EMPTY — Batch UXE-2 closed 2026-11-08)
+
+Opened on the owner's post-recycle directive ("you have to fix not
+change. you have to fix what we have to make sure that is working as
+expected, introducing new things are totally prohibited" — rejecting a
+proposed tech-stack change; the fix stayed inside the existing Rust/egui
+codebase and design system). Scope: prove the current HEAD (8a89ebd, the
+UXE-1 design-modernized state with green CI run 42389418657) still works
+as expected after the fifth sandbox recycle, then close the one
+known-remaining defect UXE-1 disclosed. CONSUMED 2026-11-08: all four
+items moved to `progress.md` per Rule 2, implemented, verified, and
+closed the same session (record in `completed.md`):
+
+- **UXE-2-1** — post-recycle HEAD verification: dev prefix rebuilt (Rust
+  1.99.1 per rust-toolchain.toml, lavapipe + env at
+  `~/.local/opt/vulkan-libs`), then the full battery unchanged on HEAD:
+  fmt `--check`; clippy workspace `--all-targets` (known: the two
+  pre-existing `kittest_list_pages.rs` warnings on the kittest lane
+  only); clippy sandbox lane `-D warnings`; tests core/sandbox/app-shell
+  lib/style lint/xtask; kittest diff-locked ×2 (no UPDATE_SNAPSHOTS —
+  the committed baselines must hold); SPP_SMOKE.
+- **UXE-2-2** — golden read-backs of the design-modernization states
+  (inbox 800 folded-views / 1024 narrow-copilot / 1440 light + dark /
+  1920 docked, widgets composer) against the UXE-1 acceptance criteria:
+  no clipping/overlap, aligned cards, modern anatomy — with pixel probes
+  as primary evidence where a reviewer read-back is ambiguous.
+- **UXE-2-3** — fix the known-remaining reader/composer right-edge
+  misalignment (UXE-1's disclosed follow-up candidate): the reader's
+  scroll-hosted cards ride ~22px wider than the composer card at the
+  right edge (reader card right ≈ x=791 vs composer ≈ x=769 at 800px;
+  identical bounds in the pre-UXE-1 goldens — an egui ScrollArea
+  scrollbar-gutter behavior, nothing clips the window). Fix inside the
+  existing design system (no new components/deps): the reader scroll
+  content and the composer card must land on the same right edge;
+  regenerate the affected goldens.
+- **UXE-2-4** — post-fix battery: fmt/clippy (both lanes)/tests (core,
+  app-shell lib, style lint, xtask, sandbox), kittest diff-locked ×2 on
+  the regenerated baselines, SPP_SMOKE, ledger close per Rules 4–5,
+  push, CI green (Rule 8).
 
 ### UX-design queue (EMPTY — Batch UXE-1 closed 2026-11-07/08)
 

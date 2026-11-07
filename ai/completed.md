@@ -8322,3 +8322,80 @@ batch push (9acb6fd..e53d680) went green on the first push — CI run
 new responsive goldens held cross-runner through lavapipe, and the
 pinned shot clock held). Rule 8 STOP — the queue is empty; the next
 work item requires a new owner directive.
+
+## Batch UXE-2 — post-recycle verify-and-fix (closed 2026-11-08)
+
+Opened on the owner's post-recycle directive ("you have to fix not
+change. you have to fix what we have to make sure that is working as
+expected, introducing new things are totally prohibited" — issued after
+a proposed tech-stack change was rejected; the fix stayed inside the
+existing Rust/egui codebase and design system, zero new dependencies,
+zero new components). Fifth sandbox recycle: repo re-cloned at 8a89ebd
+(main tip = the UXE-1 close), Rust 1.99.1 + lavapipe/xkb prefix rebuilt
+first (~/.local/opt/vulkan-libs, the established recycle procedure).
+
+Items (all four closed):
+
+- **UXE-2-1 — post-recycle HEAD verification**: the full battery,
+  unchanged, on HEAD before any edit — no-simulation + traceability
+  gates ✓; fmt `--check` ✓; verify-icons ✓; clippy workspace
+  `--all-targets -D warnings` 0 ✓; clippy sandbox lane `-D warnings` 0 ✓;
+  clippy kittest lane: only the two pre-existing `kittest_list_pages.rs`
+  `too many arguments` warnings (the known state; CI's kittest lane runs
+  tests, not clippy); workspace tests 717 ✓ (core 458 · xtask 11 · style
+  lint 2 · app-shell lib 246); sandbox-feature tests 466 ✓; kittest
+  diff-locked ×2 — 28 suites, 430 tests, ZERO drift against the committed
+  UXE-1 baselines through the rebuilt lavapipe (cross-recycle
+  reproducibility of the design-modernization goldens proven on this
+  machine); SPP_SMOKE rc=0 (boot chain + shell/renderer). The UXE-1
+  state works as expected after the recycle.
+- **UXE-2-2 — golden read-backs** (VLM + pixel probes as primary
+  evidence): r3 inbox 800 light — cards aligned, no edge clipping; the
+  reviewer's search-row "overlap" claim DISPROVEN by zoomed re-read
+  (placeholder ellipsis inside its own field); the "odd yellow strip"
+  at the fold pixel-proven to be the next note card's rounded top cut
+  by the scroll viewport (corner-arc geometry + edge fade, zero text
+  pixels). Unchanged goldens (1024/1440 light+dark, 1920 docked,
+  narrow-copilot, folded-views) are pixel-identical to the UXE-1-verified
+  baselines by the zero-drift lock — stronger than re-reading them.
+  r2c composer golden: the reviewer's "stray tools / sent_text= strings"
+  and "missing Cc/Bcc" are TEST-FIXTURE artifacts, verified against the
+  fixture source (placeholder closures + the send-behavior readout in a
+  720×520 harness; the real composer's To/Cc/Bcc + AI-tools rows render
+  in the r3 goldens).
+- **UXE-2-3 — the disclosed follow-up candidate, resolved
+  evidence-first**: pixel probes DISPROVE UXE-1's "known-remaining"
+  reader/composer right-edge misalignment on HEAD — reader cards and
+  the composer card land on the same right edge at every width (769/770
+  at 800, 993/994 at 1024, 1409/1410 at 1440); the disclosed 791-vs-769
+  bounds exist only in the PRE-UXE-1 goldens (verified from git history
+  at 9acb6fd) — the disclosure was a stale pre-batch measurement, and
+  egui 0.37's default floating ScrollStyle (`floating_allocated_width:
+  0`) means no content reflow when the reader's bar appears either. The
+  REAL defect the read-backs found in the same component: the Note
+  message card's avatar circle was INVISIBLE (`t.warning_soft` circle on
+  a `t.warning_soft` card fill — bare floating initials, the one role
+  breaking the avatar anatomy; zoomed VLM read + pixel probes). Fixed in
+  `design::message_card_with`: the Note avatar is now the card-surface
+  chip `(t.card, t.warning_foreground)` — clearly visible in light
+  (white circle, amber initials), subtly visible in dark exactly like
+  the Customer role's quiet chip, no new tokens. Plus ONE new regression
+  golden `r5_inbox_reader_overflow_800_light` (16-entry thread; the
+  fold falls mid-card) pinning the previously un-exercised
+  reader-overflow state: cards keep the composer card's exact width at
+  the fold (pixel-proven 769/770 both regions), the cut is a clean
+  rounded-corner scroll clip (the reviewer's "squeezed" claim disproven
+  by the corner-arc pixels). Golden drift: exactly 7 baselines
+  regenerated (the note-card-bearing goldens: r2c_inbox_identity
+  light+dark, r3_inbox 800 light / 1024 light+dark / 1440 light+dark;
+  r3_inbox 800_dark unchanged — its note card rides below the fold) + 1
+  new baseline.
+- **UXE-2-4 — post-fix battery**: gates ✓; fmt ✓; verify-icons ✓;
+  clippy workspace `-D warnings` 0 ✓; clippy sandbox 0 ✓; clippy kittest
+  lane: the two pre-existing warnings only ✓; workspace tests 717 ✓;
+  sandbox tests 466 ✓; kittest diff-locked ×2 on the regenerated
+  baselines — 28 suites, 431 tests (430 + the new overflow lock), zero
+  drift both runs ✓; SPP_SMOKE rc=0 on the rebuilt binary ✓.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new
+owner directive.

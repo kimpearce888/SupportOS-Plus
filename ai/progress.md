@@ -1,12 +1,13 @@
 ## Active items
 
 **None.** No batch is active and none is held (authoritative, 2026-11-08,
-post-Batch UXE-1). The full-app design-modernization batch — UXE-1 (items
-UXE-1-1..UXE-1-10, opened on the owner's "fix every design issue"
-screenshot-report directive) — moved through this file per Rules 2 and 4,
-was implemented, verified (full battery, see `completed.md`), and closed
-the same session. The engagement sits at a Rule 8 STOP; new work opens
-only on an owner directive.
+post-Batch UXE-2). The post-recycle verify-and-fix batch — UXE-2 (items
+UXE-2-1..UXE-2-4, opened on the owner's "fix what we have to make sure
+that is working as expected, introducing new things are totally
+prohibited" directive) — moved through this file per Rules 2 and 4, was
+implemented, verified (full battery, see `completed.md`), and closed the
+same session. The engagement sits at a Rule 8 STOP; new work opens only
+on an owner directive.
 
 Batch UXD-1 (dashboard layout repair, items UXD-1-1..UXD-1-3:
 design-system width discipline, dashboard restructure per the 2024–25

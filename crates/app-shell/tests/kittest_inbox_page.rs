@@ -282,6 +282,90 @@ fn render_inbox_page(dark: bool, width: f32, name: &str) {
     h.snapshot(name);
 }
 
+// UXE-2-3: the r3 fixtures' 4-entry thread never overflows the reader,
+// so the scroll-active state (thread clipped at the fold, cards that
+// must NOT reflow when the bar rides the edge — egui 0.37's default
+// floating bar allocates zero width) is pinned by no golden. This
+// fixture seeds a 16-entry thread (2026-02-15 block + the standard
+// 2026-02-16 block, one day divider) so the fold falls inside the
+// 02-15 block: the lock proves the reader cards keep the composer
+// card's exact width at the fold instead of shrinking by a scrollbar
+// gutter.
+fn seeded_page_overflow() -> (InboxPage, DbHandle, EventBus) {
+    let (page, db, bus) = seeded_page();
+    // 12 entries across 2026-02-15 (each round = 4 kinds, 3 rounds) so the
+    // thread overflows the 900px viewport with the fold inside this block;
+    // the 02-16 block (incl. the note card) follows below the fold.
+    let mut entries: Vec<(&str, &str, String)> = Vec::new();
+    for round in 0..3 {
+        for (kind, from) in [
+            ("customer_message", "customer"),
+            ("reply", "user"),
+            ("note", "user"),
+            ("ai_draft", "Support AI"),
+        ] {
+            let n = entries.len();
+            entries.push((
+                kind,
+                from,
+                format!("2026-02-15T{:02}:{:02}:00.000Z", 8 + round, n * 3),
+            ));
+        }
+    }
+    db.with_write(|conn| {
+        for (i, (kind, from, at)) in entries.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO conversation_threads (conversation_id, type, body_text, from_type,
+                     state, created_by_user_id, created_by_customer_id, created_at)
+                 VALUES (1, ?1, ?2, ?3, 'published',
+                     CASE WHEN ?3 = 'user' THEN 5 ELSE NULL END,
+                     CASE WHEN ?3 = 'customer' THEN 9 ELSE NULL END, ?4)",
+                rusqlite::params![
+                    kind,
+                    format!("Overflow entry {}: {} from {}.", i + 1, kind, from),
+                    from,
+                    at,
+                ],
+            )
+            .expect("overflow thread");
+        }
+    });
+    (page, db, bus)
+}
+
+fn render_inbox_page_overflow(dark: bool, width: f32, name: &str) {
+    let (page, db, bus) = seeded_page_overflow();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(width, 900.0))
+        .with_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        })
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db, &s.bus, None);
+            },
+            InboxPageState {
+                installed: false,
+                page,
+                db,
+                bus,
+            },
+        );
+    h.run_ok();
+    h.snapshot(name);
+}
+
+#[test]
+fn r5_inbox_reader_overflow_800_light() {
+    render_inbox_page_overflow(false, 800.0, "r5_inbox_reader_overflow_800_light");
+}
+
 #[test]
 fn r3_inbox_page_1440_light() {
     render_inbox_page(false, 1440.0, "r3_inbox_page_1440_light");
