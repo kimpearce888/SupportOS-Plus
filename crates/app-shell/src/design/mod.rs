@@ -3,8 +3,11 @@ use eframe::egui;
 use crate::icons::Icon;
 
 mod controls;
+use controls::CARD_PAD_X;
 use controls::chip_impl;
-pub(crate) use controls::{card, card_titled, card_titled_wide, hint_text, pager, section_title};
+pub(crate) use controls::{
+    card, card_titled, card_titled_exact, card_titled_wide, hint_text, pager, section_title,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Tokens {
@@ -677,11 +680,21 @@ pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&st
     metric_card_w(ui, label, value, hint, 150.0);
 }
 
-/// UX-5: metric card with an explicit minimum width so grids can stretch
-/// cards to the available content width instead of hugging at 150px.
-pub fn metric_card_w(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&str>, min_w: f32) {
+/// UXD-1: metric card whose `outer_w` is the card's OUTER width — the
+/// frame padding is subtracted inside, so a grid that computes its column
+/// width from the page's available width and passes it here gets cards
+/// that land exactly on the column math (the old inner-width semantics
+/// made every card 28px wider than the caller's math, so a 4-column row
+/// overflowed by 82px and clipped its last column off-screen).
+pub fn metric_card_w(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &str,
+    hint: Option<&str>,
+    outer_w: f32,
+) {
     card(ui, |ui| {
-        ui.set_min_width(min_w.max(120.0));
+        ui.set_min_width((outer_w - CARD_PAD_X).max(96.0));
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new(label)
@@ -1020,6 +1033,20 @@ pub fn td_num(ui: &mut egui::Ui, text: &str) {
 }
 
 /// DC: DS-C-05 DataTable — bordered r-lg wrap, uppercase muted header on
+/// a sidebar-colored strip, scrollable Grid body.
+///
+/// UXD-1: columns are the INTEGER exact-fit width `col_w` on BOTH the
+/// header strip and the body grid (`min_col_width` + `max_col_width`),
+/// so (a) headers sit over their columns, (b) a long cell value wraps
+/// instead of widening its column, and (c) the per-column pixel rounding
+/// (each fractional cell rect rounds up ~0.5px; a 9-column table drifted
+/// +4px past its card, stretching the card and the page bounding box —
+/// the feed of the old scroll-runaway) can no longer accumulate: integer
+/// columns round losslessly. The grid is hosted in a Ui pinned to the
+/// card's inner width so the table frame stays flush with its card. The
+/// 90px readability floor applies only when `n` columns of it still fit
+/// the available width; on narrow panels the exact fit wins over the
+/// floor.
 pub fn data_table(
     ui: &mut egui::Ui,
     id: &str,
@@ -1033,11 +1060,25 @@ pub fn data_table(
     // lists span the content area instead of hugging fixed cell widths.
     let n = headers.len().max(1);
     let avail = ui.available_width();
-    let col_w = ((avail - 16.0 * (n.saturating_sub(1)) as f32) / n as f32).max(90.0);
+    // The table frame carries a 1px stroke on each side; only the remainder
+    // is column space.
+    let inner = (avail - 2.0).max(60.0);
+    let exact = (inner - 16.0 * (n.saturating_sub(1)) as f32) / n as f32;
+    let floor_fits = 90.0 * n as f32 + 16.0 * (n.saturating_sub(1)) as f32 <= inner;
+    let col_w = if floor_fits {
+        exact.max(90.0)
+    } else {
+        exact.max(40.0)
+    }
+    .floor()
+    .max(40.0);
     egui::Frame::new()
         .stroke(egui::Stroke::new(1.0, t.border))
         .corner_radius(egui::CornerRadius::same(10))
         .show(ui, |ui| {
+            // Pin the table to the full card width so the frame stays
+            // flush with its card however the integer columns fall.
+            ui.set_min_width(inner);
             egui::Frame::new()
                 .fill(t.sidebar)
                 .corner_radius(egui::CornerRadius {
@@ -1047,17 +1088,23 @@ pub fn data_table(
                     se: 0,
                 })
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for header in headers {
-                            ui.label(
-                                egui::RichText::new(header.to_uppercase())
-                                    .size(scale::text::META)
-                                    .strong()
-                                    .color(t.muted_foreground),
-                            );
-                            ui.add_space(16.0);
-                        }
-                    });
+                    egui::Grid::new(egui::IdSalt::new(format!("spp-dt-{id}-head")))
+                        .num_columns(n)
+                        .spacing(egui::vec2(16.0, 0.0))
+                        .min_col_width(col_w)
+                        .max_col_width(col_w)
+                        .min_row_height(row_height)
+                        .show(ui, |ui| {
+                            for header in headers {
+                                ui.label(
+                                    egui::RichText::new(header.to_uppercase())
+                                        .size(scale::text::META)
+                                        .strong()
+                                        .color(t.muted_foreground),
+                                );
+                            }
+                            ui.end_row();
+                        });
                 });
             egui::ScrollArea::vertical()
                 .id_salt(format!("spp-dt-{id}"))
@@ -1067,6 +1114,7 @@ pub fn data_table(
                         .spacing(egui::vec2(16.0, 0.0))
                         .min_row_height(row_height)
                         .min_col_width(col_w)
+                        .max_col_width(col_w)
                         .show(ui, |ui| {
                             let mut row = row;
                             for i in range {

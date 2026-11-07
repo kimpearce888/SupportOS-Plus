@@ -1,21 +1,21 @@
-# progress.md — active items
-
-> Exactly ten active items at any time, per `rule.md` (batch size raised from
-> five by the owner, 2026-10-23). Items move here from `plan.md` (Rule 2) and
-> leave for `completed.md` only after verification (Rule 5).
-
 ## Active items
 
 **None.** No batch is active and none is held (authoritative, 2026-11-07,
-post-Batch REL-4). The release batch — REL-4 (items REL-4-1..REL-4-4:
-version bump 1.9.4 → 1.9.5, CHANGELOG `[1.9.5]`, annotated tag `v1.9.5`,
-publish + verification), opened on the owner's Build-and-Release directive
-— moved through this file per Rules 2 and 4, was implemented, verified
-(full local battery + CI run 42359689689 green + Release run 42361423228
-green 6/6 + live post-publish verification from the published bytes), and
-closed the same session (record in `completed.md`). Release v1.9.5 is
-published at tag `v1.9.5` (target `9afef58` = main tip). The engagement
-sits at a Rule 8 STOP; new work opens only on an owner directive.
+post-Batch UXD-1). The dashboard-layout batch — UXD-1 (items UXD-1-1..UXD-1-3:
+design-system width discipline, dashboard restructure per the 2024–25
+helpdesk-dashboard pattern, full verification battery) opened on the owner's
+screenshot report — moved through this file per Rules 2 and 4, was
+implemented, verified (gates, fmt, clippy ×2, tests 458+246+2+11+466, kittest
+diff-locked ×2 on 173 goldens incl. two new 1920 dashboard locks, pixel-probe
+bounds proof, SPP_SMOKE 24 pages · 4332 shapes), and closed the same session
+(record in `completed.md`). The engagement sits at a Rule 8 STOP; new work
+opens only on an owner directive.
+
+Batch REL-4 (items REL-4-1..REL-4-4) is CLOSED (moved through this file
+per Rules 2 and 4, implemented, verified — full local battery + CI run
+42359689689 green + Release run 42361423228 green 6/6 + live post-publish
+verification — record in `completed.md`). Release v1.9.5 is published at
+tag `v1.9.5` (target `9afef58`).
 
 Batch UXB-T1 (item UXB-T1) moved through this file per Rules 2 and 4 on
 2026-11-07 — opened on the owner's "handle UXB-T1" directive ~1h after

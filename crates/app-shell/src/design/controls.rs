@@ -94,6 +94,45 @@ pub fn card<R>(
     frame.show(ui, add_contents)
 }
 
+/// UXD-1: horizontal padding a `card` frame adds around its contents —
+/// `inner_margin::same(14)` twice PLUS the 1px stroke on each side (egui
+/// frame sizing: `content + inner_margin + 2 * stroke.width`). Width math
+/// that must land a card on an exact OUTER width subtracts this.
+pub(crate) const CARD_PAD_X: f32 = 30.0;
+
+/// UXD-1: vertical padding a `card` frame adds around its contents
+/// (same margin + stroke accounting as `CARD_PAD_X`).
+pub(crate) const CARD_PAD_Y: f32 = 30.0;
+
+/// UXD-1: card with an exact OUTER width (and optional exact OUTER
+/// minimum height). Responsive grids compute the column width from the
+/// page's available width and hand it here; the frame padding is
+/// subtracted inside so the painted card lands exactly on the requested
+/// width. The inner Ui is also CAPPED at that width (`set_max_width`),
+/// so width-filling children (bar rows, charts) see the card's own
+/// width, never the unbounded remaining row/panel width that egui hands
+/// out inside `Grid` cells and `horizontal` rows — the old pattern
+/// (`set_min_width` only, on the caller-computed width) inflated such
+/// children frame over frame until cards left the viewport. The optional
+/// `min_h` lets a side panel stretch to a taller sibling's height (the
+/// dashboard's Issue-radar column next to the trend chart).
+pub(crate) fn card_exact_wh<R>(
+    ui: &mut egui::Ui,
+    outer_w: f32,
+    min_h: Option<f32>,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    card(ui, |ui| {
+        let inner_w = (outer_w - CARD_PAD_X).max(80.0);
+        ui.set_min_width(inner_w);
+        ui.set_max_width(inner_w);
+        if let Some(h) = min_h {
+            ui.set_min_height((h - CARD_PAD_Y).max(0.0));
+        }
+        add_contents(ui)
+    })
+}
+
 pub(crate) fn card_titled<R>(
     ui: &mut egui::Ui,
     title: &str,
@@ -126,6 +165,30 @@ pub(crate) fn card_titled_sized<R>(
         if wide {
             ui.set_min_width(ui.available_width());
         }
+        ui.vertical(|ui| {
+            section_title(ui, title);
+            if let Some(hint) = hint {
+                hint_text(ui, hint);
+            }
+            ui.add_space(6.0);
+            add_contents(ui)
+        })
+        .inner
+    })
+}
+
+/// UXD-1: titled card with an exact OUTER width (and optional exact OUTER
+/// minimum height) — the sized entry point responsive grids and hero rows
+/// use so every card in a row shares the computed column width.
+pub(crate) fn card_titled_exact<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    hint: Option<&str>,
+    outer_w: f32,
+    min_h: Option<f32>,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    card_exact_wh(ui, outer_w, min_h, |ui| {
         ui.vertical(|ui| {
             section_title(ui, title);
             if let Some(hint) = hint {

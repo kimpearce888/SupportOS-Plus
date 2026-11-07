@@ -271,6 +271,24 @@ fn r3_dashboard_page_1440_light() {
 }
 
 #[test]
+fn r3_dashboard_page_1440_dark() {
+    render_dashboard_page(true, 1440.0, "r3_dashboard_page_1440_dark");
+}
+
+/// UXD-1-3: wide-desktop lock — the owner's bug report was a wide window
+/// (cards enlarging until they left a ~2300px viewport), so the dashboard
+/// now carries a 1920 tier next to the 800/1024/1440 locks.
+#[test]
+fn r3_dashboard_page_1920_light() {
+    render_dashboard_page(false, 1920.0, "r3_dashboard_page_1920_light");
+}
+
+#[test]
+fn r3_dashboard_page_1920_dark() {
+    render_dashboard_page(true, 1920.0, "r3_dashboard_page_1920_dark");
+}
+
+#[test]
 fn r3_dashboard_page_1024_light() {
     render_dashboard_page(false, 1024.0, "r3_dashboard_page_1024_light");
 }
@@ -278,11 +296,6 @@ fn r3_dashboard_page_1024_light() {
 #[test]
 fn r3_dashboard_page_800_light() {
     render_dashboard_page(false, 800.0, "r3_dashboard_page_800_light");
-}
-
-#[test]
-fn r3_dashboard_page_1440_dark() {
-    render_dashboard_page(true, 1440.0, "r3_dashboard_page_1440_dark");
 }
 
 #[test]

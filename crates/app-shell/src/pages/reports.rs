@@ -453,10 +453,13 @@ impl ReportsPage {
             ("Not-good ratings", data.ratings_not_good),
             ("Unassigned", data.unassigned),
         ];
-        // UX-5: stretch the KPI cards across the full row width (same fix as
-        // the Dashboard metric grid).
+        // UX-5: stretch the KPI cards across the full row width (same fix
+        // as the Dashboard metric grid). UXD-1: `metric_card_w` takes the
+        // card's OUTER width and the math is floored to integers — egui
+        // rounds fractional widget rects per column and the drift
+        // accumulates across a row.
         let gap = 10.0;
-        let card_w = ((width - gap * (cols - 1) as f32) / cols as f32).max(150.0);
+        let card_w = ((width - gap * (cols - 1) as f32) / cols as f32).floor();
         egui::Grid::new("reports-overview")
             .num_columns(cols)
             .spacing(egui::vec2(gap, gap))

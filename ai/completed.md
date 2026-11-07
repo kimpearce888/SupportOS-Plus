@@ -8070,3 +8070,106 @@ locks ✓ (the pinned clock held again, now two calendar days of CI runs
 past the Nov-7 regen) — CI run `42363630837`, completed success. Rule 8
 STOP — the queue is empty; the next work item requires a new owner
 directive.
+
+## Batch UXD-1 — 2026-11-07 — Dashboard layout repair (owner screenshot report)
+
+**UXD-1-1 — design-system width discipline.**
+- Work: `metric_card_w` (and the `metric_card` 150px default) now treat their
+  width as the card's OUTER width — the 14px inner margin AND the 1px stroke
+  on each side (egui frame sizing: `content + inner_margin + 2·stroke.width`)
+  are subtracted inside; the old inner-width semantics made every card 30px
+  wider than the callers' column math, so a 4-column KPI row overflowed by
+  90px and clipped its last column at every width. `data_table` now computes
+  INTEGER exact-fit column widths (`min_col_width` = `max_col_width` =
+  `floor(exact)`), hosts its grids in a Ui pinned to the card's inner width,
+  and lays the header strip on the same bounded grid (headers sit over their
+  columns; long cell values wrap instead of widening columns; the old
+  unconditional 90px floor let a 9-column table exceed its card below
+  ~950px, and fractional column rects each rounded up ~0.5px — a measured
+  +4px page-bounding-box drift that fed the scroll-runaway). New
+  `card_exact_wh`/`card_titled_exact` helpers (controls.rs) land a card on
+  an exact outer width (and optional exact min height) with the inner Ui
+  CAPPED (`set_max_width`) so width-filling children (bar rows, charts) see
+  the card's width, never the unbounded remaining panel width egui hands
+  out inside Grid cells and horizontal rows.
+- Root cause (from the owner's screenshot + the checked-in goldens, which
+  had baked the broken layout in): `bar_row`/`data_table`/`metric_card_w`
+  read `ui.available_width()` inside `egui::Grid` cells, where egui 0.37
+  hands cells the unbounded remaining panel width (last column: to the
+  grid's right edge; other columns: the previous frame's grown column width
+  — a positive feedback loop), so breakdown bars and KPI cards inflated
+  frame over frame until columns left the viewport; combined with the page
+  `ScrollArea::auto_shrink([false; 2])` persisting the inflated content
+  width, the whole page (chart caption included) ran off-screen — exactly
+  the owner's "cards enlarging or moving to the right side, few cards out
+  of screen".
+
+**UXD-1-2 — dashboard restructure (research applied).**
+- Research: 2024–25 helpdesk/analytics dashboard pattern (Help Scout,
+  Zendesk, Linear, Stripe, Vercel — LLM design-spec pass): KPI stat row →
+  trend chart + insight side panel (65/35-class split) → equal-width
+  breakdown grid → full-width data tables; equal widths, left alignment,
+  consistent gutters, capped bar lists; responsive tiers for desktop
+  800–2560px.
+- Work (`crates/app-shell/src/pages/dashboard.rs`): responsive KPI grid
+  (2/3/4/6 columns by content width; 12 tiles regrouped volume → workload
+  → responsiveness → happiness; the unit folded into the label so every
+  tile is two lines and rows align; 12 divides by 2/3/4/6 so no tier leaves
+  a ragged row); 62/38 hero row (New-conversations chart + Issue-radar
+  panel side-by-side from 1000px, the radar card stretched to the chart
+  card's measured height; stacked full-width below); breakdowns on an
+  equal-width top-aligned 1/2/3-column grid (`horizontal_top` rows — the
+  old `egui::Grid` vertically centered shorter cells mid-row) with the
+  UX-28 eight-bar cap kept; channel-metrics + mailbox-comparison tables
+  full-width below (headers Title-Case); the by-channel card's dev-facing
+  `dashboard.rs:337-345` note reworded to product language ("every channel
+  is listed — the Channel filter scopes the other cards, not this one");
+  all width math floored to integers (egui rounds fractional widget rects
+  per column and the drift accumulates). `reports.rs` KPI grid re-floored
+  to the new outer-width semantics.
+
+**UXD-1-3 — verification (full battery, all green).**
+- Gates: no-simulation ✓, traceability ✓ (23 routes, 20 DC tags).
+- fmt `--all --check` ✓; clippy ×2 `--locked -D warnings` (workspace
+  `--all-targets` 51s; sandbox lane 39s) ✓.
+- Tests: core 458/458 (3 ignored, baseline match) ✓; app-shell lib 246/246
+  ✓; style lint 2/2 ✓; xtask 11/11 ✓; sandbox lane 466/466 ✓;
+  `verify-icons` ✓.
+- kittest: 173 goldens (171 + two NEW 1920 light/dark dashboard locks —
+  the owner's report was a wide window). Regen (UPDATE_SNAPSHOTS=1) for the
+  helper-affected suites (dashboard, reports, knowledge, incidents,
+  list_pages=customers+organizations, widgets) then **diff-locked ×2, zero
+  drift across all 24 suites**.
+- Objective bounds proof (pixel probes on every changed golden, alpha
+  channel): dashboard goldens at 800/1024/1440/1920 × light/dark + scope
+  chip + empty-DB probes at 700/1440/2000 — opaque content bounds
+  left=8/right=8 EXACTLY (the kittest central-panel frame fill strip that
+  betrayed the old bounding-box overflow is gone); KPI tiles measure 227px
+  ×6 uniform, hero cards 876+536, breakdown cards 466×3 uniform (1440
+  dark). VLM read-backs: structural reads confirm the 6-col KPI grid,
+  chart+side-panel hero, equal-width breakdown rows, product-language
+  note, clean 10px gutters ("PASS" on the 800 light read); the model's
+  right-edge-clipping claims on 1440/1920 are disproven by the pixel
+  probes above (known VLM edge hallucination; the caption it flagged sits
+  8px inside the chart rect by construction) — pixel measurement is the
+  primary evidence, disclosed here as such.
+- SPP_SMOKE rc=0 on the debug binary (54 migrations, 24 pages, 4332
+  shapes — was 4338; the restructure paints 6 fewer shapes, the count is
+  informational, no assertion).
+- **Newly-diagnosed, NOT fixed in this batch (pre-existing, disclosed):**
+  pixel probes show pre-existing right-edge overflow (identical bounds at
+  HEAD) on Reports 800/1024 (its own `table_stretched` helper keeps the
+  unconditional 90px floor + fractional columns — same defect class as the
+  fixed `data_table`), Incidents 800 + incidents/customers/organizations
+  detail goldens, and customers_detail (left=0). All bounds match HEAD
+  exactly — zero regression from this batch; candidates for a follow-up
+  batch on owner direction.
+- Environment notes: fifth sandbox recycle — Mesa lavapipe re-extracted
+  to /home/z/mesa-lvp (apt-get download + dpkg -x, no root, env script
+  committed to nothing); disk pressure twice (kittest link bus-error at
+  100% full) — cleared by deleting target/release + target/debug/
+  incremental (1.9–2.8GB), CARGO_INCREMENTAL=0 for the test lanes; the
+  600s workspace-test single run was split per-crate instead.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new owner
+directive.

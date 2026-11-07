@@ -19,6 +19,14 @@ const CHANNELS: [(&str, &str); 3] = [
     ("chat", "Chat (Beacon)"),
 ];
 
+/// UXD-1-2: product-language disclosure of the by-channel card's quirk —
+/// the old hint leaked a dev-facing `dashboard.rs:337-345` source
+/// reference into the UI. The behavior is unchanged (the card lists every
+/// channel regardless of the channel chip; asserted by the scope-chip
+/// kittest), only the wording is user-facing now.
+const CHANNEL_NOTE: &str =
+    "every channel is listed — the Channel filter scopes the other cards, not this one";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NameCount {
     pub name: String,
@@ -603,55 +611,72 @@ impl DashboardPage {
             }
         };
 
+        // UXD-1-2: the page follows the 2024–25 helpdesk-dashboard pattern
+        // (Help Scout / Zendesk / Linear / Stripe / Vercel): KPI stat row →
+        // trend chart + insight side panel → equal-width breakdown grid →
+        // full-width data tables. Every card width below is computed from
+        // the page's own available width and handed to the exact-width
+        // card helpers, so nothing reads the unbounded widths egui gives
+        // out inside grid cells — the frame-over-frame inflation that used
+        // to push cards off-screen cannot re-trigger.
         let width = ui.available_width();
         let gap = 10.0;
-        let cols = if width < 640.0 {
-            2
-        } else if width < 980.0 {
+
+        // KPI row: equal-width responsive tiles (2/3/4/6 columns by
+        // content width). All twelve tiles are two lines — the unit lives
+        // in the label, not a third hint line — so every tile in a row is
+        // the same height and the rows align. 12 divides by 2/3/4/6, so
+        // no tier leaves a ragged last row.
+        let kpi_cols = if width >= 1400.0 {
+            6
+        } else if width >= 900.0 {
+            4
+        } else if width >= 620.0 {
             3
         } else {
-            4
+            2
         };
-        // UX-5: stretch metric cards to the full row width instead of the
-        // fixed 150px content-hug that left ~60% of wide screens empty.
-        let card_w = ((width - gap * (cols - 1) as f32) / cols as f32).max(150.0);
+        let card_w = ((width - gap * (kpi_cols - 1) as f32) / kpi_cols as f32).floor();
         let metrics: [(&str, i64); 12] = [
+            // volume
             ("New", data.new_conversations),
             ("Active", data.active_conversations),
             ("Pending", data.pending_conversations),
             ("Closed", data.closed_conversations),
+            // workload
             ("Unassigned", data.unassigned),
             ("Backlog (7d stale)", data.backlog),
             ("Replies sent", data.replies_sent),
             (
-                "First response avg",
+                "First response (min)",
                 data.first_response_avg_min.unwrap_or(0),
             ),
+            // responsiveness
+            ("Resolution avg (min)", data.resolution_avg_min.unwrap_or(0)),
+            // happiness
             ("Great ratings", data.ratings_great),
             ("Okay ratings", data.ratings_okay),
             ("Not-good ratings", data.ratings_not_good),
-            ("Resolution avg", data.resolution_avg_min.unwrap_or(0)),
         ];
         egui::Grid::new("dashboard-metrics")
-            .num_columns(cols)
+            .num_columns(kpi_cols)
             .spacing(egui::vec2(gap, gap))
             .show(ui, |ui| {
-                for row in metrics.chunks(cols) {
+                for row in metrics.chunks(kpi_cols) {
                     for (label, value) in row {
-                        let unit = if label.contains("avg") { "min" } else { "" };
-                        design::metric_card_w(
-                            ui,
-                            label,
-                            &value.to_string(),
-                            if unit.is_empty() { None } else { Some(unit) },
-                            card_w,
-                        );
+                        design::metric_card_w(ui, label, &value.to_string(), None, card_w);
                     }
                     ui.end_row();
                 }
             });
-        ui.add_space(10.0);
+        ui.add_space(gap);
 
+        // Hero row: the conversations-per-day trend chart with the
+        // Issue-radar panel beside it (62/38 — the chart keeps enough
+        // width for its hover readout, the alerts get a real column).
+        // Side-by-side from 1000px of content width; below that the two
+        // stack full-width. The radar card stretches to the chart card's
+        // height so the row reads as one band.
         let points = daily_new_points(data);
         let range_hint = format!(
             "{} → {} · {} points",
@@ -661,62 +686,83 @@ impl DashboardPage {
         );
         let range_from = iso_date_only(&data.range_from);
         let range_to = iso_date_only(&data.range_to);
-        design::card_titled(ui, "New conversations per day", Some(&range_hint), |ui| {
-            if points.is_empty() {
-                design::empty_state(
+        if width >= 1000.0 {
+            // Integer widths: egui rounds fractional widget rects per
+            // column, and the drift accumulates across a row — flooring
+            // the column math keeps every row ending inside the content
+            // area at every width.
+            let chart_w = ((width - gap) * 0.62).floor();
+            let radar_w = (width - chart_w - gap).floor();
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                let chart = design::card_titled_exact(
                     ui,
-                    Icon::BarChart,
-                    "no conversations in range",
-                    "Nothing was created in the selected period.",
+                    "New conversations per day",
+                    Some(&range_hint),
+                    chart_w,
+                    None,
+                    |ui| {
+                        chart_body(ui, &points, range_from.as_ref(), range_to.as_ref());
+                    },
                 );
-            } else {
-                chart::line_chart_axes(
-                    ui,
-                    &points,
-                    "new conversations",
-                    Some((range_from.as_ref(), range_to.as_ref())),
-                );
-            }
-        });
-        ui.add_space(10.0);
-
-        let breakdown_cols = if width < 760.0 { 1 } else { 2 };
-        egui::Grid::new("dashboard-breakdowns")
-            .num_columns(breakdown_cols)
-            .spacing(egui::vec2(10.0, 10.0))
-            .show(ui, |ui| {
-                for row in [
-                    ("By mailbox", &data.by_mailbox, ""),
-                    ("By tag", &data.by_tag, ""),
-                    (
-                        "By channel",
-                        &data.by_channel,
-                        "ignores the channel chip by design (dashboard.rs:337-345)",
-                    ),
-                    ("By agent", &data.by_agent, ""),
-                    ("By team", &data.by_team, ""),
-                ]
-                .chunks(breakdown_cols)
-                {
-                    for (title, rows, note) in row {
-                        breakdown(ui, title, note, rows);
-                    }
-                    ui.end_row();
-                }
-                channel_metrics_table(ui, &data.channel_metrics);
-                if breakdown_cols == 2 {
-                    ui.label("");
-                }
-                ui.end_row();
+                let chart_h = chart.response.rect.height();
+                radar_panel(ui, &self.radar, radar_w, Some(chart_h));
             });
-        ui.add_space(10.0);
+        } else {
+            design::card_titled_exact(
+                ui,
+                "New conversations per day",
+                Some(&range_hint),
+                width,
+                None,
+                |ui| {
+                    chart_body(ui, &points, range_from.as_ref(), range_to.as_ref());
+                },
+            );
+            ui.add_space(gap);
+            radar_panel(ui, &self.radar, width, None);
+        }
+        ui.add_space(gap);
+
+        // Breakdown grid: equal-width cards, top-aligned rows, 1/2/3
+        // columns by content width. (3 columns start at 900px so a column
+        // is never narrower than the bar-row minimum; 2 columns start at
+        // 560px for the same reason.)
+        let breakdown_cols = if width >= 900.0 {
+            3
+        } else if width >= 560.0 {
+            2
+        } else {
+            1
+        };
+        let breakdown_w =
+            ((width - gap * (breakdown_cols - 1) as f32) / breakdown_cols as f32).floor();
+        let breakdown_cards: [(&str, &[NameCount], &str); 5] = [
+            ("By mailbox", &data.by_mailbox, ""),
+            ("By tag", &data.by_tag, ""),
+            ("By channel", &data.by_channel, CHANNEL_NOTE),
+            ("By agent", &data.by_agent, ""),
+            ("By team", &data.by_team, ""),
+        ];
+        for (i, row) in breakdown_cards.chunks(breakdown_cols).enumerate() {
+            if i > 0 {
+                ui.add_space(gap);
+            }
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for (title, rows, note) in row {
+                    breakdown(ui, title, note, rows, breakdown_w);
+                }
+            });
+        }
+        ui.add_space(gap);
+
+        // Full-width data tables (detailed records live at the bottom of
+        // the page; both are bounded by the card they sit in).
+        channel_metrics_table(ui, &data.channel_metrics);
+        ui.add_space(gap);
 
         comparison_table(ui, &data.mailbox_comparison);
-        ui.add_space(10.0);
-
-        radar_panel(ui, &self.radar);
-
-        ui.add_space(10.0);
     }
 }
 
@@ -733,11 +779,37 @@ pub(crate) fn iso_date_only(iso: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-fn breakdown(ui: &mut egui::Ui, title: &str, note: &str, rows: &[NameCount]) {
-    design::card_titled(
+/// UXD-1-2: the trend-chart card body — empty state when the range has
+/// no conversations, the axis-labeled line chart otherwise.
+fn chart_body(ui: &mut egui::Ui, points: &[chart::Point], range_from: &str, range_to: &str) {
+    if points.is_empty() {
+        design::empty_state(
+            ui,
+            Icon::BarChart,
+            "no conversations in range",
+            "Nothing was created in the selected period.",
+        );
+    } else {
+        chart::line_chart_axes(
+            ui,
+            points,
+            "new conversations",
+            Some((range_from, range_to)),
+        );
+    }
+}
+
+/// UXD-1-2: breakdown card on an exact outer width — every card in the
+/// grid shares the computed column width, so rows align and no card can
+/// outgrow its column (the old content-hugging cards made the empty
+/// "By team" card a ~170px sliver next to full-width siblings).
+fn breakdown(ui: &mut egui::Ui, title: &str, note: &str, rows: &[NameCount], outer_w: f32) {
+    design::card_titled_exact(
         ui,
         title,
         if note.is_empty() { None } else { Some(note) },
+        outer_w,
+        None,
         |ui| {
             if rows.is_empty() {
                 design::hint_text(ui, "Nothing to show in this range.");
@@ -810,15 +882,15 @@ fn comparison_table(ui: &mut egui::Ui, rows: &[MailboxComparison]) {
             ui,
             "mailbox-comparison",
             &[
-                "mailbox",
-                "new",
-                "active",
-                "closed",
-                "backlog",
-                "first resp (min)",
-                "resolution (min)",
-                "great",
-                "ratings",
+                "Mailbox",
+                "New",
+                "Active",
+                "Closed",
+                "Backlog",
+                "First resp (min)",
+                "Resolution (min)",
+                "Great",
+                "Ratings",
             ],
             rows.len(),
             26.0,
@@ -853,11 +925,16 @@ fn comparison_table(ui: &mut egui::Ui, rows: &[MailboxComparison]) {
     });
 }
 
-fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value]) {
-    design::card_titled(
+/// UXD-1-2: the Issue-radar panel — an exact-width card (stretched to
+/// the hero chart's height when they share a row) so it reads as the
+/// insight column of the trend chart, not a footnote at the page bottom.
+fn radar_panel(ui: &mut egui::Ui, alerts: &[serde_json::Value], outer_w: f32, min_h: Option<f32>) {
+    design::card_titled_exact(
         ui,
         "Issue radar",
         Some("AI-derived alerts from local conversation data"),
+        outer_w,
+        min_h,
         |ui| {
             if alerts.is_empty() {
                 design::empty_state(

@@ -7,6 +7,14 @@
 
 ## Queue state
 
+**Batch UXD-1 (dashboard layout repair) CONSUMED 2026-11-07: items
+UXD-1-1..UXD-1-3 moved to `progress.md` per Rule 2, implemented, verified
+(full battery, see `completed.md`), and closed the same session. The queue
+is EMPTY again. Root cause for the record: the width-unbounded widgets
+inside `egui::Grid` cells (see the UX-dashboard queue section below) plus
+the 30px frame padding the old `metric_card_w` semantics never accounted
+for. New work opens only on an owner directive.**
+
 **UX-audit program — CONSUMED 2026-11-06/07: the final batch UXA-4 (items
 UX-31..UX-33) moved to `progress.md` per Rule 2, implemented, verified,
 and closed the same session (record in `completed.md`). Every
@@ -26,6 +34,40 @@ fix frontend-only defects in ten-item batches per rule.md, evidence per
 `ux-audit/reports/` (scope contract: `ux-audit/reports/scope.md`; issue
 detail: `ux-audit/reports/issues.md`). Backend-blocked findings are logged
 there, not queued here.
+
+### UX-dashboard queue (EMPTY — Batch UXD-1 closed 2026-11-07)
+
+Opened on the owner's dashboard screenshot report (cards enlarging / moving
+right, cards out of screen, cards not well aligned; "fix the dashboard
+design and make it modern, do a research how should it look and apply it,
+it should not break on any screen size for desktop"). Diagnosis: the
+width-unbounded widgets inside `egui::Grid` cells (see the queue-state
+preamble) plus the 28px frame padding that `metric_card_w`'s callers never
+accounted for (a 4-column KPI row overflows by exactly 4×28−30 ≈ 82px, so
+the last column clips at every width). Fix scope:
+
+- **UXD-1-1** — design-system width discipline: `metric_card_w` treats its
+  width as the card's OUTER width (frame padding subtracted inside);
+  `data_table` gets adaptive bounded columns (`min_col_width`/`max_col_width`
+  pairs so the table can never exceed its card at any width, header strip
+  laid out on the same column grid so headers align with columns); new
+  `card_exact_w`/`card_titled_exact_w` helpers land cards on an exact outer
+  width (+ optional exact min height for side panels).
+- **UXD-1-2** — dashboard restructure per the 2024–25 helpdesk-dashboard
+  pattern (Help Scout/Zendesk/Linear/Stripe/Vercel: KPI tiles → trend chart
+  + insight side panel → equal-width breakdown grid → full-width tables):
+  responsive KPI grid (2/3/4/6 columns by content width, unit folded into
+  labels so every tile is two lines and rows align), 62/38 hero row (trend
+  chart + Issue-radar panel stretched to the chart's height, stacking below
+  1000px), breakdown cards on an equal-width 1/2/3-column grid with
+  top-aligned rows, channel-metrics + mailbox-comparison tables full width,
+  and the by-channel card's dev-facing `dashboard.rs:337-345` note reworded
+  into product language.
+- **UXD-1-3** — verification: fmt/clippy (both lanes)/tests (core, app-shell
+  lib, style lint, xtask, sandbox), kittest golden regen for every
+  design-helper-affected suite + two new wide (1920) dashboard goldens,
+  diff-locked re-run ×2, SPP_SMOKE, and VLM alignment read-backs of the
+  regenerated dashboard goldens at 800/1024/1440/1920.
 
 ### Release queue (EMPTY — Batch REL-4 closed 2026-11-07)
 
