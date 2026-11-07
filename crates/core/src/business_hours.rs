@@ -196,7 +196,7 @@ pub(crate) fn sla_status(minutes: Option<f64>, target_min: Option<i64>) -> SlaVe
 
 #[must_use]
 pub fn now_iso_millis() -> String {
-    now_iso_millis_at(Utc::now())
+    now_iso_millis_at(effective_now())
 }
 
 #[must_use]
@@ -206,7 +206,7 @@ pub fn now_iso_millis_at(now: chrono::DateTime<Utc>) -> String {
 
 #[must_use]
 pub fn iso_days_ago(days: i64) -> String {
-    iso_days_ago_at(days, Utc::now())
+    iso_days_ago_at(days, effective_now())
 }
 
 #[must_use]
@@ -219,7 +219,61 @@ pub fn iso_days_ago_at(days: i64, now: chrono::DateTime<Utc>) -> String {
 }
 
 pub(crate) fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    effective_now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+// UXB-T1: deterministic clock for the kittest shot fixtures. The golden
+// screenshots render relative times ("11d ago", "Yesterday") from this
+// module's wall-clock reads; against the fixtures' fixed stamps those
+// strings tick one day further at every UTC midnight, so any CI run on a
+// later calendar day than the last baseline regen fails the drift gate
+// (it fired mid-UXB-1 when UTC midnight crossed between two runs). Under
+// the `kittest-ui` feature — forwarded from the app-shell test harness
+// only, off in every normal build — the fixtures pin `now` to a fixed
+// anchor and every clock read above reports the anchor instead.
+#[cfg(feature = "kittest-ui")]
+static PINNED_NOW: std::sync::OnceLock<chrono::DateTime<Utc>> = std::sync::OnceLock::new();
+
+/// The shot-fixture clock anchor (UXB-T1): noon UTC on 2026-11-07, the
+/// calendar day the current goldens were last regenerated on (UXB-1,
+/// a4e5bf6, 00:35:58Z). Every day-granular relative rendering under this
+/// pin is identical to those baselines — pinning freezes the date-tick
+/// with zero golden churn.
+#[cfg(feature = "kittest-ui")]
+pub const KITTEST_PINNED_NOW_ISO: &str = "2026-11-07T12:00:00.000Z";
+
+/// Pin the clock read by `now_iso_millis` / `iso_days_ago` / `now_iso` to
+/// `iso` (UXB-T1, kittest shot fixtures only — compiled under the
+/// `kittest-ui` feature, which no normal build enables). Returns `true`
+/// when the effective pin equals `iso` after the call; a second, different
+/// anchor is rejected (first pin wins) so parallel fixtures in one test
+/// binary cannot silently disagree.
+#[cfg(feature = "kittest-ui")]
+#[doc(hidden)]
+#[must_use]
+pub fn pin_now_for_kittest(iso: &str) -> bool {
+    let Some(pinned) = parse_instant_ms(iso).and_then(chrono::DateTime::from_timestamp_millis)
+    else {
+        return false;
+    };
+    // `OnceLock::set` hands back the REJECTED value on Err, not the current
+    // one — compare against `get()` to honor "first pin wins".
+    if PINNED_NOW.set(pinned).is_ok() {
+        return true;
+    }
+    PINNED_NOW.get().is_some_and(|current| *current == pinned)
+}
+
+/// The clock every golden-render-path read goes through: the pinned anchor
+/// when the kittest fixtures set one, the wall clock otherwise (i.e. in
+/// every normal build, where the feature is off and this inlines to
+/// `Utc::now`).
+fn effective_now() -> chrono::DateTime<Utc> {
+    #[cfg(feature = "kittest-ui")]
+    if let Some(pinned) = PINNED_NOW.get() {
+        return *pinned;
+    }
+    Utc::now()
 }
 
 #[cfg(test)]

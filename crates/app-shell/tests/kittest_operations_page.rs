@@ -25,6 +25,16 @@ fn stamp(days_ago: i64, time: &str) -> String {
 fn seeded_page() -> (OperationsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
+    // UXB-T1: pin the shot clock so `kittest_freeze_generated_at`'s fixed
+    // 2026-10-27 stamp renders the same "generated Nd ago" on every
+    // calendar day (the freeze alone pinned the seed, not the clock — the
+    // goldens still ticked at each UTC midnight).
+    assert!(
+        spp_core::business_hours::pin_now_for_kittest(
+            spp_core::business_hours::KITTEST_PINNED_NOW_ISO
+        ),
+        "the shot clock must pin to the golden anchor"
+    );
 
     conn.execute(
         "INSERT INTO users (id, remote_id, first_name, last_name, email, mention)

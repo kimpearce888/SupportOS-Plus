@@ -49,6 +49,11 @@ version = "=0.1.9"
 # feature-flagged)". Off by default: the sandbox hardens untrusted
 # document parsing and is exercised in CI (`--features sandbox`).
 [features]
+# UXB-T1: deterministic clock for the kittest shot fixtures — compiled only
+# when the app-shell test harness forwards its `kittest-ui` feature (off in
+# every normal/CI build, like the harness's own gate). Guards the pinned
+# `now` in business_hours that freezes the goldens' "Nd ago" date-tick.
+kittest-ui = []
 sandbox = ["dep:landlock", "dep:seccompiler", "dep:libc"]
 
 [target.'cfg(target_os = "linux")'.dependencies]

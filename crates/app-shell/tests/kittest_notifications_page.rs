@@ -16,6 +16,17 @@ struct NotificationsPageState {
 fn seeded_page() -> (NotificationsPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
+    // UXB-T1: pin the shot clock BEFORE the `iso_days_ago` seeding so the
+    // seeds anchor to the same instant the page renders against — fully
+    // deterministic "just now"/"Yesterday"/"Nd ago" strings (the wall-
+    // relative seeds were stable, but exposed to the same UTC-midnight race
+    // that fired mid-UXB-1).
+    assert!(
+        spp_core::business_hours::pin_now_for_kittest(
+            spp_core::business_hours::KITTEST_PINNED_NOW_ISO
+        ),
+        "the shot clock must pin to the golden anchor"
+    );
     conn.execute(
         "INSERT INTO users (id, remote_id, first_name, last_name, email, mention)
          VALUES (5, 505, 'Ada', 'Lovelace', 'ada@example.com', 'ada')",

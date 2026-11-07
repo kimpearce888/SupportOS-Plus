@@ -26,7 +26,9 @@ default = []
 ui-screenshot = ["eframe/glow", "eframe/__screenshot"]
 # RS-13 kittest snapshot harness (tests/kittest_widgets.rs) — needs a
 # display (Xvfb); off in every normal/CI build, like ui-screenshot.
-kittest-ui = []
+# UXB-T1: forwards to core so the shot fixtures can pin business_hours'
+# clock (the goldens' "Nd ago" date-tick freeze).
+kittest-ui = ["supportos-plus-core/kittest-ui"]
 
 [dependencies]
 eframe.workspace = true
