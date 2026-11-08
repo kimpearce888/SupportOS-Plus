@@ -5,6 +5,51 @@
 
 ## Completed
 
+
+### Batch CI-1 — 2026-11-08 (retry-with-backoff for the appimagetool download; CI flakiness fix)
+
+**CI-1-1 — Packaging lane must survive transient CDN failures**
+- Context: CI run 42465641980 on `af6d3ae` (the UXG-1 batch push) failed
+  in the AppImage job — not a code failure: the Rust release build
+  finished clean in 3m48s, and the fmt/clippy/test/deny and kittest
+  jobs passed on the same commit; the single appimagetool download
+  attempt was killed by GitHub's own release CDN returning a 504
+  Gateway Time-out. Live probing confirmed the asset is still served
+  with the exact pinned sha256 (15,092,216 bytes, `ed4ce84f…84eb0`
+  verified byte-for-byte) but the CDN is flapping — intermittent 504s
+  mixed with 200s (~1-in-3 failing from this sandbox's edge at probe
+  time). The download also cannot be satisfied from a cache:
+  Swatinem/rust-cache's save-side sweep drops non-cargo files under
+  `target/` (the failed run had a full 707 MB cache hit yet still
+  downloaded), so every packaging run fetches the tool fresh.
+- Work: `crates/xtask/src/package.rs` — the single-shot
+  `client.get(...).send()?.error_for_status()?.bytes()?` in
+  `download_appimagetool` became `fetch_appimagetool_with_retry`: 5
+  attempts with 5s/15s/45s/90s backoff (155s total wait; at the observed
+  1-in-3 failure rate the cumulative download failure odds drop to
+  ~0.4%, and the all-attempts-fail worst case adds only ~3.4 min against
+  the 60/90-min job budgets). Retries cover only transient outcomes —
+  5xx responses, HTTP 408/429, transport errors, and body-read failures
+  (policy factored into `is_retryable_status`, a pure function over
+  `StatusCode`); non-transient statuses (404 etc.) still fail fast with
+  the pinned URL in the message. Every successful read still lands in
+  the same `verify_appimagetool` sha256 gate immediately after, so the
+  trust story is unchanged. No new dependencies, no workflow edits.
+- Tests: two new unit tests — `appimagetool_retry_policy_retries_only_
+  transient_statuses` (500/502/503/504/408/429 retryable; 200/204/301/
+  400/401/403/404/410 fail-fast) and `appimagetool_retry_schedule_stays_
+  inside_ci_job_budgets` (schedule shape: strictly increasing, 4 waits →
+  5 attempts, 155s total, far under any job budget).
+- Verification (recycled sandbox, toolchain reinstalled at the exact
+  1.99.1 pin): no-simulation gate OK; traceability gate OK (23 routes,
+  27 DC ids); `cargo fmt --all --check` OK; `verify-icons` OK;
+  `cargo clippy --locked --workspace --all-targets -- -D warnings` OK;
+  tests 459 (core) + 247 (app-shell) + 13 (xtask, incl. the 2 new) + 467
+  (core sandbox lane) — 0 failures; `cargo clippy --locked -p
+  supportos-plus-core --all-targets --features sandbox -- -D warnings`
+  OK; `cargo deny check advisories licenses bans` all ok; live CDN probe
+  verified the pinned URL serves the pinned bytes. The kittest drift
+  gate is unaffected by an xtask-only change and runs in CI unchanged.
 ### Batch 1 — 2026-10-18 (commit `560a5ce`, CI run `39112162370`: success)
 
 **1. Add `LICENSE` (MIT, matching manifests)**

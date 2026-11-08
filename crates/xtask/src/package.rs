@@ -27,6 +27,12 @@ const APPIMAGETOOL_URL: &str = "https://github.com/AppImage/appimagetool/release
                                 1.9.1/appimagetool-x86_64.AppImage";
 const APPIMAGETOOL_SHA256: &str =
     "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0";
+// CI-1-1: waits between download attempts — 5 tries total, 155s of
+// backoff, trivially inside the 60/90-min CI and release job budgets. The
+// observed CDN failure is flapping (intermittent 504s among 200s), so the
+// attempt count dominates: at a 1-in-3 failure rate, five tries leave a
+// ~0.4% chance the whole download still fails.
+const APPIMAGETOOL_RETRY_BACKOFF_SECS: &[u64] = &[5, 15, 45, 90];
 
 const BUNDLED_HOST_LIBS: &[&str] = &[
     "libxkbcommon.so.0",
@@ -521,16 +527,65 @@ fn download_appimagetool(dest: &Path) -> anyhow::Result<()> {
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(300))
         .build()?;
-    let bytes = client
-        .get(APPIMAGETOOL_URL)
-        .send()?
-        .error_for_status()?
-        .bytes()?;
+    let bytes = fetch_appimagetool_with_retry(&client)?;
     install_tool_bytes(dest, &bytes).inspect_err(|_| {
         let _ = fs::remove_file(dest.with_extension("part"));
     })?;
     eprintln!("package: appimagetool cached at {}", dest.display());
     Ok(())
+}
+
+/// Whether an HTTP status is worth retrying: 5xx (the GitHub release CDN
+/// occasionally 504s mid-request), 408 and 429. Pure over `StatusCode` so
+/// the policy is unit-testable without touching the network.
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    status.is_server_error()
+        || status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+}
+
+/// CI-1-1: downloads the pinned appimagetool, retrying transient upstream
+/// failures with backoff so one gateway blip (a 504 killed CI run
+/// 42465641980 after a clean 3m48s release build) cannot sink a full
+/// packaging run. Non-transient statuses (404 and friends) fail fast with
+/// the pinned URL in the message; every successful read still lands in the
+/// same sha256 gate that runs immediately after this returns.
+fn fetch_appimagetool_with_retry(client: &reqwest::blocking::Client) -> anyhow::Result<Vec<u8>> {
+    let attempts = APPIMAGETOOL_RETRY_BACKOFF_SECS.len() + 1;
+    let mut last_err = String::new();
+    for attempt in 1..=attempts {
+        match client.get(APPIMAGETOOL_URL).send() {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    match resp.bytes() {
+                        Ok(body) => return Ok(body.to_vec()),
+                        Err(e) => last_err = format!("response body read failed: {e}"),
+                    }
+                } else if is_retryable_status(status) {
+                    last_err = format!("upstream returned HTTP {status}");
+                } else {
+                    anyhow::bail!(
+                        "appimagetool download got HTTP {status}, which is not transient — \
+                         refusing to retry the pinned URL {APPIMAGETOOL_URL}"
+                    );
+                }
+            }
+            Err(e) => last_err = format!("request failed: {e}"),
+        }
+        if attempt < attempts {
+            let wait = APPIMAGETOOL_RETRY_BACKOFF_SECS[attempt - 1];
+            eprintln!(
+                "package: appimagetool download attempt {attempt}/{attempts} failed \
+                 ({last_err}); retrying in {wait}s…"
+            );
+            std::thread::sleep(Duration::from_secs(wait));
+        }
+    }
+    anyhow::bail!(
+        "appimagetool download failed after {attempts} attempts: {last_err} \
+         (pinned URL {APPIMAGETOOL_URL})"
+    )
 }
 
 fn install_tool_bytes(dest: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -786,6 +841,41 @@ mod tests {
             appimage_arch().expect("host arch"),
             appimage_arch_for(std::env::consts::ARCH).expect("host arch")
         );
+    }
+
+    #[test]
+    fn appimagetool_retry_policy_retries_only_transient_statuses() {
+        let retryable = [500, 502, 503, 504, 408, 429];
+        let fatal = [200, 204, 301, 400, 401, 403, 404, 410];
+        for code in retryable {
+            let status = reqwest::StatusCode::from_u16(code).expect("parse retryable");
+            assert!(is_retryable_status(status), "HTTP {code} must be retryable");
+        }
+        for code in fatal {
+            let status = reqwest::StatusCode::from_u16(code).expect("parse fatal");
+            assert!(
+                !is_retryable_status(status),
+                "HTTP {code} must fail fast, not retry"
+            );
+        }
+    }
+
+    #[test]
+    fn appimagetool_retry_schedule_stays_inside_ci_job_budgets() {
+        // 5 attempts (first try + 4 retries), 155s of total waiting — the
+        // packaging jobs carry 60/90-minute timeouts, so even the all-attempts-
+        // fail worst case (~3.4 min of 504s + backoff) is a rounding error
+        // against them.
+        let waits = APPIMAGETOOL_RETRY_BACKOFF_SECS;
+        assert_eq!(waits.len(), 4, "four backoff waits → five attempts");
+        assert!(waits.iter().all(|w| *w > 0), "every wait is positive");
+        assert!(
+            waits.windows(2).all(|pair| pair[1] > pair[0]),
+            "backoff strictly increases"
+        );
+        let total: u64 = waits.iter().sum();
+        assert_eq!(total, 155, "155s total backoff");
+        assert!(total < 60 * 10, "far under any job budget");
     }
 
     #[test]

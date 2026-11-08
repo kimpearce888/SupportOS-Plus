@@ -1,6 +1,6 @@
 ## Active items
 
-(none — Batch UXG-1 closed 2026-11-08, record in `completed.md`; Rule 8
+(none — Batch CI-1 closed 2026-11-08, record in `completed.md`; Rule 8
 STOP, the queue is empty, new work opens only on an owner directive.)
 
 Batch UXG-1 (all-display design discipline + cross-page consistency

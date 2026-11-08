@@ -7,6 +7,15 @@
 
 ## Queue state
 
+**Batch CI-1 (packaging lane must survive transient CDN failures)
+CONSUMED 2026-11-08: item CI-1-1 moved to `progress.md` per Rule 2,
+implemented (`fetch_appimagetool_with_retry` — 5 attempts, 5s/15s/45s/90s
+backoff, transient-only retry policy, same sha256 gate), verified (full
+local battery: gates, fmt, clippy ×2 lanes, tests 459+247+13+467,
+cargo-deny, live CDN probe), and closed the same session; record in
+`completed.md`. The queue is EMPTY again. New work opens only on an
+owner directive.**
+
 **Batch UXG-1 (all-display design discipline + cross-page consistency
 sweep) CONSUMED 2026-11-08: items UXG-1-1..UXG-1-10 moved to
 `progress.md` per Rule 2, implemented, verified (full battery incl. two
