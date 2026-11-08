@@ -7,6 +7,28 @@
 
 ## Queue state
 
+**Batch UXF-1 (AI Center layout repair + golden-eval functional fix)
+CONSUMED 2026-11-08: items UXF-1-1..UXF-1-8 + the owner-correction item
+UXF-2-1 moved to `progress.md` per Rule 2, implemented, verified (full
+battery incl. two shared-system root-cause fixes the verification
+surfaced — the badge/chip phantom Grid cell and the data_table CELL_PAD —
+with 65 goldens regenerated + 4 new locks; see `completed.md`), and
+closed the same session. The queue is EMPTY again. New work opens only
+on an owner directive.** Sixth sandbox recycle for the record: repo
+re-cloned at 1a60476 (UXE-2 close), Rust 1.99.1 + lavapipe/xkb prefix
+rebuilt, HEAD verified rendering-clean before any edit.
+
+**Deferred candidates (queue, owner direction needed): UXF-1-4 (chrome
+header balance — right-only 48px toolbar), UXF-1-5 (table width-defect
+class sweep — the remaining natural-width `design::table`/
+`table_stretched` page-level lists on reports/knowledge/operations/
+diagnostics/automation/connectors/sync_health; the UXD-1-disclosed
+known-remaining right-edge overflow on Reports 800/1024 and the detail
+goldens), customers "Last Contact" raw-ISO timestamps ellipsizing in
+their 140px column (pre-existing, verified in the pre-batch goldens),
+and the incidents page header showing the incident count twice (subtitle
++ page_counter).**
+
 **Batch UXE-2 (post-recycle verify-and-fix) CONSUMED 2026-11-08: items
 UXE-2-1..UXE-2-4 moved to `progress.md` per Rule 2, implemented,
 verified (full battery, see `completed.md`), and closed the same session.
@@ -21,6 +43,71 @@ pre-batch measurement — pixel-proven aligned at every width); the real
 defect found and fixed instead was the invisible Note-card avatar
 (one token pair, no new dependencies); one new overflow regression
 golden added. Details in `completed.md`.
+
+### UX-fix queue (EMPTY — Batch UXF-1 closed 2026-11-08)
+
+Opened on the owner's "Fix these issues" directive (two fresh
+screenshots: the AI Center Jobs tab — a narrow "Recent AI runs" card
+hugging ~35% of the content column with the rest dead; the AI Center
+Usage tab — sections as raw uncased text hugging the left, a 27-line
+golden-set error dump, inconsistent empty states). All items moved to
+`progress.md` per Rule 2, implemented, verified, and closed the same
+session (record in `completed.md`); UXF-1-4 and UXF-1-5 were
+scope-deferred by the owner's mid-batch correction and stay queue
+candidates above:
+
+- **UXF-1-1** — Jobs tab: the "Recent AI runs" card gets width
+  discipline (full content-column width, the `card_titled_wide` register
+  UX-7 established) and the natural-width `design::table` Grid migrates
+  to `design::data_table` (exact integer columns, header strip,
+  90px-floor-gated) so the table spans the card; kill the unbounded
+  `show_rows` ScrollArea that leaves dead card space; the card header
+  (icon + title + badge) lands on one aligned baseline.
+- **UXF-1-2** — Usage tab: the three sections (Per-feature usage /
+  Draft feedback / Golden-set evals) become full-width titled cards with
+  one vertical rhythm (SP-scale, no off-scale gaps); the usage ledger
+  Grid migrates to `data_table`; empty states use the shared
+  `empty_state_slim` component (no bare hint_text sections); the
+  golden-set runs render as contained run blocks — pass badge + backend
+  + run meta on one row, per-case errors collapsed into a mono error
+  list inside the block (no 27 raw lines floating on the page).
+- **UXF-1-3** — Health / Analytics / Attributes / Copilot tabs: same
+  width discipline (full-width cards) so all six tabs share one anatomy;
+  the Attributes catalog nested-card list gets SP rhythm; the Analytics
+  metric form aligns with the Jobs/Usage register.
+- **UXF-1-4** — App chrome header (both screenshots flag it): the 48px
+  top bar carries only right-aligned controls today — add the active
+  page's label on the left (window-level context, the modern helpdesk
+  breadcrumb register) so the bar reads balanced; no new components,
+  label + tokens only. **SCOPE-DEFERRED 2026-11-08: the owner's
+  correction ("it is not the design issue, read the failed statements
+  there") redirected the batch to the functional failure (UXF-2-1,
+  done+verified); this chrome item moves back to the queue below as a
+  candidate on owner direction — adding unrequested chrome is not part
+  of a fix mandate.**
+- **UXF-1-5** — Table width-defect class sweep (the UXD-1-disclosed
+  known-remaining): migrate the remaining natural-width `design::table`
+  page-level lists (reports ×5, knowledge ×3, operations, diagnostics)
+  and the `table_stretched` callers with the unconditional 90px floor
+  (automation, connectors, customers detail, sync_health ×2) to
+  `design::data_table` so no page-level list can overflow or hug at any
+  width. **SCOPE-DEFERRED 2026-11-08 with UXF-1-4 (same owner
+  correction — the functional fix took the batch; this sweep stays a
+  queue candidate below).**
+- **UXF-1-6** — Responsive proof: pixel-probe the changed goldens at
+  800/1024/1440 (opaque bounds left=right within the content column),
+  VLM read-backs of the AI Center tabs (Jobs seeded with rows, Usage
+  with a failing golden run) at 1440 light + 800 light against the
+  owner's acceptance ("professional and modern … works on every
+  display").
+- **UXF-1-7** — New golden locks: a seeded Jobs-tab golden (rows in the
+  table, not the empty state) and a Usage-tab golden with a failing
+  golden-set run (the error-block render) so both fixed states are
+  diff-locked forever.
+- **UXF-1-8** — Full battery: fmt/clippy (both lanes)/tests (core,
+  app-shell lib, style lint, xtask, sandbox)/kittest diff-locked ×2 on
+  regenerated baselines/SPP_SMOKE, ledger close per Rules 4–5, push, CI
+  green (Rule 8).
 
 **Batch UXE-1 (full-app design modernization) CONSUMED 2026-11-07/08:
 items UXE-1-1..UXE-1-10 moved to `progress.md` per Rule 2, implemented,

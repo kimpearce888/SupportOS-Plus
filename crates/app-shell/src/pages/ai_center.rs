@@ -548,18 +548,21 @@ impl AiCenterPage {
             );
             return;
         }
-        ui.horizontal(|ui| {
-            ui.set_min_width(ui.available_width());
-            egui::ScrollArea::vertical()
-                .id_salt("copilot-sessions")
-                .max_height(420.0)
-                .show(ui, |ui| {
-                    design::section_title(ui, "Sessions");
-                    if design::button(ui, "New chat", ButtonVariant::Outline).clicked() {
-                        self.copilot_session = None;
-                        self.copilot_messages.clear();
-                        self.copilot_error = None;
-                    }
+        // UXF-1-3: session chips wrap (the old plain `horizontal` could
+        // not — a long session list ran its chips past the right edge on
+        // narrow displays) and the block reads as one contained section
+        // instead of a floating divider.
+        egui::ScrollArea::vertical()
+            .id_salt("copilot-sessions")
+            .max_height(420.0)
+            .show(ui, |ui| {
+                design::section_title(ui, "Sessions");
+                if design::button(ui, "New chat", ButtonVariant::Outline).clicked() {
+                    self.copilot_session = None;
+                    self.copilot_messages.clear();
+                    self.copilot_error = None;
+                }
+                ui.horizontal_wrapped(|ui| {
                     for session in self.copilot_sessions.clone() {
                         let id = session.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
                         let title: String = session
@@ -584,7 +587,7 @@ impl AiCenterPage {
                         }
                     }
                 });
-        });
+            });
         design::divider(ui);
         design::section_title(ui, "Chat");
         if let Some(err) = self.copilot_error.clone() {
@@ -736,144 +739,155 @@ impl AiCenterPage {
         self.draft_states = draft_states;
         self.edit_stats = edit_stats;
 
-        design::section_title(ui, "Per-feature usage — last 30 days");
-        if ledger30.is_empty() {
-            design::hint_text(
-                ui,
-                "No completed model runs yet. Tokens, latency and estimated cost appear here as features run.",
-            );
-        } else {
-            egui::ScrollArea::vertical()
-                .id_salt("usage-ledger")
-                .max_height(260.0)
-                .show(ui, |ui| {
-                    egui::Grid::new("usage-ledger-grid")
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for label in [
-                                "day",
-                                "feature",
-                                "model",
-                                "runs",
-                                "prompt tok",
-                                "completion tok",
-                                "latency s",
-                                "est cost",
-                            ] {
-                                design::field_label(ui, label);
-                            }
-                            ui.end_row();
-                            for row in &ledger30 {
-                                ui.monospace(row.day.as_str());
-                                ui.monospace(row.feature.as_str());
-                                ui.monospace(row.model.as_str());
-                                ui.monospace(row.runs.to_string());
-                                ui.monospace(row.prompt_tokens.to_string());
-                                ui.monospace(row.completion_tokens.to_string());
-                                ui.monospace(format!(
+        // UXF-1-2: the three Usage sections share one anatomy — full-width
+        // titled cards on the 10px card rhythm (the dashboard/settings
+        // register). The old raw section_titles + hint_text floated
+        // uncased on the page background and hugged the left third of
+        // the content column on wide displays (owner screenshot report).
+        design::card_titled_wide(
+            ui,
+            "Per-feature usage — last 30 days",
+            Some("tokens, latency and estimated cost per feature, from the local ledger"),
+            |ui| {
+                if ledger30.is_empty() {
+                    design::empty_state_slim(
+                        ui,
+                        Icon::Sparkles,
+                        "No completed model runs yet",
+                        "Numbers appear here as features run.",
+                    );
+                } else {
+                    let t = design::tokens(ui);
+                    design::data_table(
+                        ui,
+                        "usage-ledger",
+                        &[
+                            "day",
+                            "feature",
+                            "model",
+                            "runs",
+                            "prompt tok",
+                            "completion tok",
+                            "latency s",
+                            "est cost",
+                        ],
+                        ledger30.len(),
+                        24.0,
+                        |ui, i| {
+                            let row = &ledger30[i];
+                            ui.monospace(egui::RichText::new(row.day.as_str()).color(t.foreground));
+                            ui.monospace(
+                                egui::RichText::new(row.feature.as_str()).color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(row.model.as_str()).color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(row.runs.to_string()).color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(row.prompt_tokens.to_string())
+                                    .color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(row.completion_tokens.to_string())
+                                    .color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(format!(
                                     "{:.1}",
                                     row.latency_ms_total as f64 / 1000.0
-                                ));
-                                ui.monospace(format!("${:.4}", row.est_cost_usd));
-                                ui.end_row();
-                            }
-                        });
-                });
-        }
-        ui.add_space(8.0);
-
-        design::section_title(ui, "Draft feedback (edit rate)");
-        let (rows, edited, avg_distance) = self.edit_stats;
-        let (drafts, accepted, rejected) = self.draft_states;
-        ui.horizontal(|ui| {
-            design::badge(ui, &format!("{drafts} drafts"), BadgeTone::Neutral);
-            design::badge(ui, &format!("{accepted} accepted"), BadgeTone::Success);
-            design::badge(ui, &format!("{rejected} rejected"), BadgeTone::Warning);
-            design::badge(ui, &format!("{rows} feedback rows"), BadgeTone::Info);
-            if rows > 0 {
-                design::badge(
-                    ui,
-                    &format!(
-                        "{:.0}% edited (>20 chars)",
-                        100.0 * edited as f64 / rows as f64
-                    ),
-                    BadgeTone::Info,
-                );
-                design::badge(
-                    ui,
-                    &format!("avg edit distance {avg_distance:.0}"),
-                    BadgeTone::Neutral,
-                );
-            }
-        });
-        design::hint_text(
-            ui,
-            "Accept, edit-distance and reject come from the composer send path and the draft panel — real rows, zero invention.",
+                                ))
+                                .color(t.foreground),
+                            );
+                            ui.monospace(
+                                egui::RichText::new(format!("${:.4}", row.est_cost_usd))
+                                    .color(t.foreground),
+                            );
+                        },
+                    );
+                }
+            },
         );
-        ui.add_space(8.0);
+        ui.add_space(10.0);
 
-        design::section_title(ui, "Golden-set evals (9 seeded cases)");
-        ui.horizontal(|ui| {
-            let busy = db
-                .with_read(|conn| {
+        design::card_titled_wide(
+            ui,
+            "Draft feedback (edit rate)",
+            Some(
+                "accept, edit-distance and reject come from the composer send path and the draft panel — real rows, zero invention",
+            ),
+            |ui| {
+                let (rows, edited, avg_distance) = self.edit_stats;
+                let (drafts, accepted, rejected) = self.draft_states;
+                ui.horizontal(|ui| {
+                    design::badge(ui, &format!("{drafts} drafts"), BadgeTone::Neutral);
+                    design::badge(ui, &format!("{accepted} accepted"), BadgeTone::Success);
+                    design::badge(ui, &format!("{rejected} rejected"), BadgeTone::Warning);
+                    design::badge(ui, &format!("{rows} feedback rows"), BadgeTone::Info);
+                    if rows > 0 {
+                        design::badge(
+                            ui,
+                            &format!(
+                                "{:.0}% edited (>20 chars)",
+                                100.0 * edited as f64 / rows as f64
+                            ),
+                            BadgeTone::Info,
+                        );
+                        design::badge(
+                            ui,
+                            &format!("avg edit distance {avg_distance:.0}"),
+                            BadgeTone::Neutral,
+                        );
+                    }
+                });
+            },
+        );
+        ui.add_space(10.0);
+
+        design::card_titled_wide(
+            ui,
+            "Golden-set evals (9 seeded cases)",
+            Some(
+                "the 9 seeded cases run through the real analysis prompt and re-run automatically on prompt/role changes",
+            ),
+            |ui| {
+                let busy = db.with_read(|conn| {
                     conn.query_row(
                         "SELECT COUNT(*) FROM jobs
-                          WHERE type = 'golden_eval' AND status IN ('queued','running')",
+                              WHERE type = 'golden_eval' AND status IN ('queued','running')",
                         [],
                         |r| r.get::<_, i64>(0),
                     )
                     .unwrap_or(0)
-                })
-                > 0;
-            if busy {
-                design::hint_text(ui, "golden set running…");
-            } else if design::button(ui, "Run golden set now", ButtonVariant::Outline)
-                .on_hover_text(
-                    "the 9 seeded cases run through the real analysis prompt; scores land below and re-run automatically on prompt/role changes",
-                )
-                .clicked()
-            {
-                let _ = db.with_write(|conn| {
-                    spp_core::jobs::enqueue_on(conn, "ai", "golden_eval", "{}", 3, 2)
-                });
-            }
-        });
-        if self.golden_runs.is_empty() {
-            design::hint_text(
-                ui,
-                "No eval runs recorded yet — run the golden set to score the routed Classify model.",
-            );
-        } else {
-            for run in &self.golden_runs {
-                ui.horizontal(|ui| {
-                    let tone = if run.failed == 0 {
-                        BadgeTone::Success
-                    } else if run.passed > 0 {
-                        BadgeTone::Warning
-                    } else {
-                        BadgeTone::Destructive
-                    };
-                    design::badge(
-                        ui,
-                        &format!("{}/{} passed", run.passed, run.passed + run.failed),
-                        tone,
-                    );
-                    ui.monospace(format!("backend: {}", run.backend));
-                    design::hint_text(ui, &format!("run #{} — {}", run.id, run.started_at));
-                });
-                if let Some(results) = run.results.as_array()
-                    && run.failed > 0
+                }) > 0;
+                if busy {
+                    design::hint_text(ui, "golden set running — results land below when it finishes");
+                } else if design::button(ui, "Run golden set now", ButtonVariant::Outline)
+                    .on_hover_text(
+                        "the 9 seeded cases run through the real analysis prompt; scores land below and re-run automatically on prompt/role changes",
+                    )
+                    .clicked()
                 {
-                    for case in results.iter().take(9) {
-                        let name = case.get("name").and_then(|v| v.as_str()).unwrap_or("?");
-                        let error = case.get("error").and_then(|v| v.as_str());
-                        if let Some(error) = error {
-                            design::hint_text(ui, &format!("{name}: {error}"));
-                        }
+                    let _ = db.with_write(|conn| {
+                        spp_core::jobs::enqueue_on(conn, "ai", "golden_eval", "{}", 3, 2)
+                    });
+                }
+                if self.golden_runs.is_empty() {
+                    design::empty_state_slim(
+                        ui,
+                        Icon::Sparkles,
+                        "No eval runs recorded yet",
+                        "Run the golden set to score the routed Classify model.",
+                    );
+                } else {
+                    for run in &self.golden_runs.clone() {
+                        golden_run_block(ui, run);
+                        ui.add_space(6.0);
                     }
                 }
-            }
-        }
+            },
+        );
     }
 
     fn health_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -882,8 +896,11 @@ impl AiCenterPage {
             return;
         };
         let t = design::tokens(ui);
-        design::card(ui, |ui| {
-            design::section_title(ui, "LM Studio settings");
+        // UXF-1-3: full-width card — the Health tab's cards hugged their
+        // natural width and left the right of the page dead on wide
+        // displays (same defect class the owner's screenshots report on
+        // Jobs/Usage).
+        design::card_titled_wide(ui, "LM Studio settings", None, |ui| {
             design::form_grid(ui, "ai-health", |ui| {
                 design::field_label(ui, "AI enabled:");
                 if settings.ai_enabled {
@@ -972,7 +989,7 @@ impl AiCenterPage {
         let Some(record) = self.ai_record.clone() else {
             return;
         };
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "AI provider record (ai_settings)",
             Some(
@@ -1138,7 +1155,7 @@ impl AiCenterPage {
         self.poll_probe_slot();
         let t = design::tokens(ui);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Provider hub — endpoints",
             Some("OpenAI-compatible endpoints: local LM Studio, optional Ollama, cloud BYOK"),
@@ -1293,7 +1310,7 @@ impl AiCenterPage {
         );
         ui.add_space(10.0);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Model-role routing",
             Some("every inference goes through one of five roles (blueprint Table 6)"),
@@ -1415,10 +1432,9 @@ impl AiCenterPage {
                     });
             },
         );
-        ui.add_space(4.0);
-        ui.add_space(6.0);
+        ui.add_space(10.0);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Features & kill switches",
             Some("one click each; the global switch dominates every feature"),
@@ -1471,62 +1487,58 @@ impl AiCenterPage {
         );
         ui.add_space(10.0);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Cost ledger — last 7 days",
             Some("tokens, latency and estimated spend per feature per day, from ai_runs"),
             |ui| {
                 if self.ledger.is_empty() {
-                    design::empty_state(
+                    design::empty_state_slim(
                         ui,
                         Icon::Sparkles,
-                        "no completed AI runs yet",
-                        "the ledger fills as AI runs complete",
+                        "No completed AI runs yet",
+                        "The ledger fills as AI runs complete.",
                     );
                     return;
                 }
-                egui::Grid::new("ai-hub-ledger")
-                    .num_columns(7)
-                    .striped(true)
-                    .spacing(egui::vec2(14.0, 4.0))
-                    .show(ui, |ui| {
-                        for header in [
-                            "day",
-                            "feature",
-                            "model",
-                            "runs",
-                            "tokens (p/c)",
-                            "latency",
-                            "est. cost",
-                        ] {
-                            ui.strong(
-                                egui::RichText::new(header)
-                                    .small()
-                                    .color(t.muted_foreground),
-                            );
-                        }
-                        ui.end_row();
-                        for row in self.ledger.clone() {
-                            ui.monospace(egui::RichText::new(row.day.as_str()).small());
-                            ui.monospace(egui::RichText::new(row.feature.as_str()).small());
-                            ui.monospace(egui::RichText::new(row.model.as_str()).small());
-                            ui.monospace(egui::RichText::new(row.runs.to_string()).small());
-                            ui.monospace(
-                                egui::RichText::new(format!(
-                                    "{} / {}",
-                                    row.prompt_tokens, row.completion_tokens
-                                ))
-                                .small(),
-                            );
-                            ui.monospace(
-                                egui::RichText::new(format!("{} ms", row.latency_ms_total)).small(),
-                            );
-                            ui.monospace(
-                                egui::RichText::new(format!("${:.4}", row.est_cost_usd)).small(),
-                            );
-                            ui.end_row();
-                        }
-                    });
+                let ledger = self.ledger.clone();
+                design::data_table(
+                    ui,
+                    "ai-hub-ledger",
+                    &[
+                        "day",
+                        "feature",
+                        "model",
+                        "runs",
+                        "tokens (p/c)",
+                        "latency",
+                        "est. cost",
+                    ],
+                    ledger.len(),
+                    24.0,
+                    |ui, i| {
+                        let row = &ledger[i];
+                        ui.monospace(egui::RichText::new(row.day.as_str()).color(t.foreground));
+                        ui.monospace(egui::RichText::new(row.feature.as_str()).color(t.foreground));
+                        ui.monospace(egui::RichText::new(row.model.as_str()).color(t.foreground));
+                        ui.monospace(egui::RichText::new(row.runs.to_string()).color(t.foreground));
+                        ui.monospace(
+                            egui::RichText::new(format!(
+                                "{} / {}",
+                                row.prompt_tokens, row.completion_tokens
+                            ))
+                            .color(t.foreground),
+                        );
+                        ui.monospace(
+                            egui::RichText::new(format!("{} ms", row.latency_ms_total))
+                                .color(t.foreground),
+                        );
+                        ui.monospace(
+                            egui::RichText::new(format!("${:.4}", row.est_cost_usd))
+                                .color(t.foreground),
+                        );
+                    },
+                );
             },
         );
     }
@@ -1657,58 +1669,66 @@ impl AiCenterPage {
             return;
         };
         let t = design::tokens(ui);
-        design::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
-                design::section_title(ui, "Analytics");
-                design::badge(ui, "AI", BadgeTone::Info);
-            });
-            design::form_grid(ui, "ai-analytics", |ui| {
-                design::field_label(ui, "Tickets analyzed");
-                ui.monospace(
-                    egui::RichText::new(analytics.tickets_analyzed.to_string()).color(t.foreground),
-                );
-                ui.end_row();
-                design::field_label(ui, "Analysis success rate");
-                ui.monospace(
-                    egui::RichText::new(format!("{}%", analytics.analysis_success_rate))
+        // UXF-1-3: full-width card (the Jobs/Usage register) — the old
+        // natural-width card + icon/badge header hugged the left third
+        // of the page on wide displays.
+        design::card_titled_wide(
+            ui,
+            "Analytics",
+            Some(
+                "what the local mirror records about analysis volume, draft outcomes and verification quality",
+            ),
+            |ui| {
+                design::form_grid(ui, "ai-analytics", |ui| {
+                    design::field_label(ui, "Tickets analyzed");
+                    ui.monospace(
+                        egui::RichText::new(analytics.tickets_analyzed.to_string())
+                            .color(t.foreground),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "Analysis success rate");
+                    ui.monospace(
+                        egui::RichText::new(format!("{}%", analytics.analysis_success_rate))
+                            .color(t.foreground),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "Drafts");
+                    ui.monospace(
+                        egui::RichText::new(format!(
+                            "{} total · {} accepted · {} rejected",
+                            analytics.draft_count,
+                            analytics.drafts_accepted,
+                            analytics.drafts_rejected
+                        ))
                         .color(t.foreground),
-                );
-                ui.end_row();
-                design::field_label(ui, "Drafts");
-                ui.monospace(
-                    egui::RichText::new(format!(
-                        "{} total · {} accepted · {} rejected",
-                        analytics.draft_count, analytics.drafts_accepted, analytics.drafts_rejected
-                    ))
-                    .color(t.foreground),
-                );
-                ui.end_row();
-                design::field_label(ui, "Draft edit rate");
-                ui.monospace(
-                    egui::RichText::new(format!("{}%", analytics.draft_edit_rate))
-                        .color(t.foreground),
-                );
-                ui.end_row();
-                design::field_label(ui, "Verification warnings");
-                ui.monospace(
-                    egui::RichText::new(analytics.verification_warnings.to_string())
-                        .color(t.foreground),
-                );
-                ui.end_row();
-                design::field_label(ui, "Unsupported claim rate");
-                ui.monospace(
-                    egui::RichText::new(format!("{}%", analytics.unsupported_claim_rate))
-                        .color(t.foreground),
-                );
-                ui.end_row();
-            });
-        });
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "Draft edit rate");
+                    ui.monospace(
+                        egui::RichText::new(format!("{}%", analytics.draft_edit_rate))
+                            .color(t.foreground),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "Verification warnings");
+                    ui.monospace(
+                        egui::RichText::new(analytics.verification_warnings.to_string())
+                            .color(t.foreground),
+                    );
+                    ui.end_row();
+                    design::field_label(ui, "Unsupported claim rate");
+                    ui.monospace(
+                        egui::RichText::new(format!("{}%", analytics.unsupported_claim_rate))
+                            .color(t.foreground),
+                    );
+                    ui.end_row();
+                });
+            },
+        );
         ui.add_space(10.0);
         if analytics.failure_patterns.is_empty() {
             design::hint_text(ui, "(no failure patterns)");
         } else {
-            design::card_titled(ui, "Common failure patterns", None, |ui| {
+            design::card_titled_wide(ui, "Common failure patterns", None, |ui| {
                 for (pattern, count) in &analytics.failure_patterns {
                     ui.label(
                         egui::RichText::new(format!("{pattern} · {count}"))
@@ -1723,65 +1743,51 @@ impl AiCenterPage {
     fn attributes_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
         let distributions = self.distributions.clone();
-        design::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
-                design::section_title(ui, "Catalog");
-                design::badge(ui, "AI", BadgeTone::Info);
-            });
-            design::hint_text(
-                ui,
-                "A missing attribute reads as unknown — it is never fabricated. Attributes \
-                 are local-only and never written to Help Scout.",
-            );
-            ui.add_space(6.0);
-            if distributions.is_empty() {
-                design::empty_state(
-                    ui,
-                    Icon::Sparkles,
-                    "No attribute data yet",
-                    "Run ticket analysis to populate the distributions.",
-                );
-                return;
-            }
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for dist in &distributions {
-                    design::card(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(dist.label)
-                                    .size(13.5)
-                                    .strong()
-                                    .color(t.foreground),
-                            );
-                            ui.monospace(egui::RichText::new(dist.attribute).color(t.foreground));
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "{} known / {} unknown",
-                                    dist.known, dist.unknown
-                                ))
-                                .small()
-                                .color(t.muted_foreground),
-                            );
-                        });
-                        for value in &dist.values {
-                            let share = if dist.known > 0 {
-                                value.count as f64 / dist.known as f64 * 100.0
-                            } else {
-                                0.0
-                            };
-                            ui.monospace(
-                                egui::RichText::new(format!(
-                                    "  {}: {} ({:.1}%)",
-                                    value.value, value.count, share
-                                ))
-                                .color(t.foreground),
-                            );
-                        }
-                    });
+        // UXF-1-3: full-width card + bar_row distributions (the dashboard
+        // breakdown register) — the old nested natural-width cards and
+        // indented mono value lines hugged the left and read as raw text.
+        design::card_titled_wide(
+            ui,
+            "Catalog",
+            Some(
+                "a missing attribute reads as unknown — it is never fabricated. Attributes are local-only and never written to Help Scout",
+            ),
+            |ui| {
+                if distributions.is_empty() {
+                    design::empty_state_slim(
+                        ui,
+                        Icon::Sparkles,
+                        "No attribute data yet",
+                        "Run ticket analysis to populate the distributions.",
+                    );
+                    return;
                 }
-            });
-        });
+                for dist in &distributions {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(dist.label)
+                                .size(13.5)
+                                .strong()
+                                .color(t.foreground),
+                        );
+                        ui.monospace(egui::RichText::new(dist.attribute).color(t.foreground));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} known / {} unknown",
+                                dist.known, dist.unknown
+                            ))
+                            .small()
+                            .color(t.muted_foreground),
+                        );
+                    });
+                    let max = dist.values.first().map(|v| v.count).unwrap_or(1).max(1);
+                    for value in &dist.values {
+                        design::bar_row(ui, &value.value, value.count, max, true);
+                    }
+                    ui.add_space(6.0);
+                }
+            },
+        );
     }
 
     fn jobs_ui(&mut self, ui: &mut egui::Ui) {
@@ -1791,56 +1797,54 @@ impl AiCenterPage {
                 ui,
                 Icon::Sparkles,
                 "No AI runs recorded",
-                "Ticket analysis runs will appear here.",
+                "Ticket analysis, golden-set and copilot runs appear here as features run.",
             );
             return;
         }
-        let t = design::tokens(ui);
-        design::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                Icon::Sparkles.show(ui, 16.0, t.muted_foreground);
-                design::section_title(ui, "Recent AI runs");
-                design::badge(ui, "AI", BadgeTone::Info);
-            });
-            ui.add_space(4.0);
-            egui::ScrollArea::vertical().show_rows(ui, 26.0, jobs.len(), |ui, range| {
-                design::table(
+        // UXF-1-1: full-width card + exact-column data_table — the old
+        // natural-width card/Grid hugged ~35% of the content column on
+        // wide displays (owner screenshot report) and the unbounded
+        // show_rows scroll left dead space inside the card.
+        design::card_titled_wide(
+            ui,
+            "Recent AI runs",
+            Some("the latest model runs across every AI feature"),
+            |ui| {
+                let t = design::tokens(ui);
+                design::data_table(
                     ui,
                     "ai-jobs",
                     &["id", "type", "status", "conversation", "model", "created"],
+                    jobs.len(),
                     26.0,
-                    |ui| {
-                        for job in &jobs[range] {
-                            design::td_num(ui, &job.id.to_string());
-                            ui.label(
-                                egui::RichText::new(job.run_type.as_str())
-                                    .size(13.0)
-                                    .color(t.foreground),
-                            );
-                            design::badge(ui, job.status.as_str(), job_status_tone(&job.status));
-                            ui.monospace(
-                                egui::RichText::new(
-                                    job.conversation_id
-                                        .map(|id| format!("#{id}"))
-                                        .unwrap_or_else(|| "—".into()),
-                                )
+                    |ui, i| {
+                        let job = &jobs[i];
+                        design::td_num(ui, &job.id.to_string());
+                        ui.label(
+                            egui::RichText::new(job.run_type.as_str())
+                                .size(13.0)
                                 .color(t.foreground),
-                            );
-                            ui.monospace(
-                                egui::RichText::new(
-                                    job.model.clone().unwrap_or_else(|| "—".into()),
-                                )
+                        );
+                        design::badge(ui, job.status.as_str(), job_status_tone(&job.status));
+                        ui.monospace(
+                            egui::RichText::new(
+                                job.conversation_id
+                                    .map(|id| format!("#{id}"))
+                                    .unwrap_or_else(|| "—".into()),
+                            )
+                            .color(t.foreground),
+                        );
+                        ui.monospace(
+                            egui::RichText::new(job.model.clone().unwrap_or_else(|| "—".into()))
                                 .color(t.foreground),
-                            );
-                            ui.monospace(
-                                egui::RichText::new(job.created_at.as_str()).color(t.foreground),
-                            );
-                            ui.end_row();
-                        }
+                        );
+                        ui.monospace(
+                            egui::RichText::new(job.created_at.as_str()).color(t.foreground),
+                        );
                     },
                 );
-            });
-        });
+            },
+        );
     }
 }
 
@@ -1856,6 +1860,64 @@ fn job_status_tone(status: &str) -> BadgeTone {
         "failed" => BadgeTone::Destructive,
         _ => BadgeTone::Neutral,
     }
+}
+
+/// UXF-1-2: one contained block per golden run — pass badge, backend and
+/// run meta on one header row, then the failed cases grouped by distinct
+/// error (identical failures collapse to one mono line instead of
+/// stacking up to nine raw hint lines straight on the page — the owner
+/// screenshot's 27-line dump). The frame is the DS-C-15 callout register
+/// (muted fill, CONTROL radius) so it reads as a contained sub-block of
+/// its card in both themes.
+fn golden_run_block(ui: &mut egui::Ui, run: &spp_core::ai_eval::GoldenRunRow) {
+    let t = design::tokens(ui);
+    egui::Frame::new()
+        .fill(t.muted)
+        .corner_radius(egui::CornerRadius::same(design::scale::radius::CONTROL))
+        .inner_margin(egui::Margin::same(10))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let tone = if run.failed == 0 {
+                    BadgeTone::Success
+                } else if run.passed > 0 {
+                    BadgeTone::Warning
+                } else {
+                    BadgeTone::Destructive
+                };
+                design::badge(
+                    ui,
+                    &format!("{}/{} passed", run.passed, run.passed + run.failed),
+                    tone,
+                );
+                ui.monospace(
+                    egui::RichText::new(format!("backend: {}", run.backend)).color(t.foreground),
+                );
+                design::hint_text(ui, &format!("run #{} — {}", run.id, run.started_at));
+            });
+            if run.failed > 0
+                && let Some(results) = run.results.as_array()
+            {
+                let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+                for case in results.iter().take(9) {
+                    let name = case.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                    let error = case
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(no error recorded)");
+                    match groups.iter_mut().find(|(e, _)| *e == error) {
+                        Some((_, names)) => names.push(name),
+                        None => groups.push((error, vec![name])),
+                    }
+                }
+                for (error, names) in groups {
+                    ui.monospace(
+                        egui::RichText::new(format!("{} — {}", names.join(", "), error))
+                            .small()
+                            .color(t.muted_foreground),
+                    );
+                }
+            }
+        });
 }
 
 #[cfg(test)]

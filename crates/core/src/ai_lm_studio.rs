@@ -176,7 +176,28 @@ impl OpenAiCompatibleClient {
             temperature: opts.temperature,
             max_tokens: opts.max_tokens,
             response_format: if opts.json_mode {
-                Some(serde_json::json!({ "type": "json_object" }))
+                // UXF-2-1: LM Studio rejects OpenAI's legacy
+                // `{"type":"json_object"}` with HTTP 400 ("response_format.type'
+                // must be 'json_schema' or 'text'") — every failing
+                // golden_eval / ticket_analysis run in the owner's
+                // screenshot report died on exactly this. The portable
+                // form is `json_schema` with a permissive object schema:
+                // every json_mode caller wants "a JSON object, shape up
+                // to the model", which `{"type":"object"}` expresses
+                // without pinning properties. `strict` is deliberately
+                // omitted — LM Studio accepts the schema either way (the
+                // grammar allows any object), and OpenAI-compatible
+                // cloud endpoints treat an unset strict as hint-mode, so
+                // one payload works across LM Studio, Ollama and BYOK.
+                // The response side already tolerates fenced/free-form
+                // output via `extract_json`.
+                Some(serde_json::json!({
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "structured_output",
+                        "schema": { "type": "object" }
+                    }
+                }))
             } else {
                 None
             },

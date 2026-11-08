@@ -104,7 +104,80 @@ fn chat_with_opts_roundtrip_json_mode_and_usage() {
     let body: serde_json::Value = serde_json::from_str(&mock.hits()[0].body).expect("request json");
     assert_eq!(body["temperature"], 0.2);
     assert_eq!(body["max_tokens"], 128);
-    assert_eq!(body["response_format"]["type"], "json_object");
+    // UXF-2-1: json_mode must speak the json_schema form — LM Studio
+    // rejects the legacy json_object type with HTTP 400 (the failing-run
+    // root cause in the owner's screenshot report).
+    assert_eq!(body["response_format"]["type"], "json_schema");
+    assert_eq!(
+        body["response_format"]["json_schema"]["name"],
+        "structured_output"
+    );
+    assert_eq!(
+        body["response_format"]["json_schema"]["schema"]["type"],
+        "object"
+    );
+}
+
+#[test]
+fn golden_set_passes_against_an_lm_studio_strict_response_format_server() {
+    // UXF-2-1 end-to-end regression lock: reproduces the owner-reported
+    // production failure — a server that behaves like LM Studio (HTTP 400
+    // unless response_format.type is 'json_schema' or 'text') failed
+    // EVERY golden case while the client still sent OpenAI's legacy
+    // {"type":"json_object"}. With the json_schema fix the whole 9-case
+    // seeded set passes; if anyone reverts the payload, this goes 0/9.
+    let mock =
+        crate::mockserver::MockServer::start(Arc::new(|req: &crate::mockserver::MockRequest| {
+            if req.method == "POST" && req.path == "/v1/chat/completions" {
+                let body: serde_json::Value =
+                    serde_json::from_str(&req.body).unwrap_or(serde_json::Value::Null);
+                let ty = body["response_format"]["type"].as_str().unwrap_or("");
+                if !body["response_format"].is_null() && ty != "json_schema" && ty != "text" {
+                    return crate::mockserver::MockResponse::json(
+                        400,
+                        r#"{"error":"response_format.type' must be 'json_schema' or 'text'"}"#,
+                    );
+                }
+                return crate::mockserver::MockResponse::json(
+                    200,
+                    chat_body(
+                        r#"{"summary":"Customer asks how to reset the password.",
+                            "intent":"account_access",
+                            "customer_goal":"reset the password"}"#,
+                    ),
+                );
+            }
+            crate::mockserver::MockResponse::json(404, r#"{"error":"no"}"#)
+        }))
+        .expect("mock server");
+
+    let backend = crate::ai_pipeline::AiBackend::LmStudio {
+        client: OpenAiCompatibleClient::new(mock.url()),
+        model: Some("test-model".into()),
+        endpoint_id: None,
+    };
+    let mut conn = rusqlite::Connection::open_in_memory().expect("db");
+    crate::bootstrap::apply_all(&mut conn).expect("migrations");
+
+    let rt = runtime();
+    let summary = rt
+        .block_on(crate::ai_eval::run_golden_set(&conn, &backend))
+        .expect("golden set runs");
+    assert_eq!(
+        summary.get("passed").and_then(|v| v.as_i64()),
+        Some(9),
+        "all 9 seeded cases pass once the server accepts the request: {summary}"
+    );
+    assert_eq!(
+        summary.get("failed").and_then(|v| v.as_i64()),
+        Some(0),
+        "zero failures: {summary}"
+    );
+    let runs = crate::ai_eval::latest_golden_runs(&conn, 1);
+    assert_eq!(runs.len(), 1, "one persisted run row");
+    assert_eq!(runs[0].backend, "test-model");
+    assert_eq!(runs[0].passed, 9);
+    assert_eq!(runs[0].failed, 0);
 }
 
 #[test]

@@ -8407,3 +8407,114 @@ batch push (8a89ebd..dd9ea29) went green on the first push — CI run
 note-card baselines + the new r5_inbox_reader_overflow_800_light lock
 held cross-runner through lavapipe). Rule 8 STOP — the queue is empty;
 the next work item requires a new owner directive.
+
+## Batch UXF-1 — AI Center layout repair + golden-eval functional fix (closed 2026-11-08)
+
+Opened on the owner's "Fix these issues" directive (two fresh AI Center
+screenshots: the Jobs tab — a narrow "Recent AI runs" card hugging ~35% of
+the content column; the Usage tab — raw uncased sections and a 27-line
+golden-set error dump). Sixth sandbox recycle: repo re-cloned at 1a60476
+(UXE-2 close, CI run 42413290650 green), Rust 1.99.1 + lavapipe/xkb prefix
+rebuilt, HEAD verified rendering-clean before any edit (ai_center suite
+7/7, zero golden drift). Mid-batch the owner's scope correction ("it is
+not the design issue, read the failed statements there") added UXF-2-1
+(the functional root cause) and deferred UXF-1-4/UXF-1-5 back to the
+queue. Items (all closed):
+
+- **UXF-1-1 — Jobs tab**: the "Recent AI runs" card is now
+  `card_titled_wide` (full content-column width) hosting a `data_table`
+  (exact integer columns, header strip, 90px-floor-gated); the unbounded
+  `show_rows` ScrollArea is gone; card header lands on one aligned
+  baseline. Golden drift across the responsive proofs: the card spans
+  [9,w-2] = 99.7–99.9% of the page area at 800/1024/1440 light+dark
+  (pre-batch golden pixel-proven to carry the owner's defect — a
+  630px card hugging left at 1440, span 0.44).
+- **UXF-1-2 — Usage tab**: the three sections (Per-feature usage / Draft
+  feedback / Golden-set evals) are full-width titled cards on one SP
+  rhythm (pixel-proven 18px card gaps); the ledger is a `data_table`;
+  empty states use the shared `empty_state_slim`; golden runs render as
+  contained `golden_run_block`s — pass badge + backend + run meta on one
+  row, per-case errors grouped into a mono list inside the block (the
+  owner-reported 27-line dump state, collapsed).
+- **UXF-1-3 — Health/Analytics/Attributes/Copilot tabs**: same
+  `card_titled_wide` width discipline; all six tabs share one anatomy
+  (the six regenerated page goldens lock it at 800/1024/1440 light+dark).
+- **UXF-2-1 — the REAL failure in the owner's screenshots** (owner scope
+  correction): every golden_eval / ticket_analysis run died with
+  `config error: LM Studio chat request failed (HTTP 400 Bad Request):
+  {"error":"response_format.type' must be 'json_schema' or 'text'"}` —
+  `chat_with_opts` sent OpenAI's legacy `{"type":"json_object"}`, which
+  LM Studio rejects. json_mode now sends the portable `json_schema` form
+  (`{"type":"json_schema","json_schema":{"name":"structured_output",
+  "schema":{"type":"object"}}}`, `strict` omitted); wire format locked by
+  the updated it_lm_studio roundtrip test + a new end-to-end regression
+  lock (`golden_set_passes_against_an_lm_studio_strict_response_format_server`
+  — a mock server that 400s like LM Studio unless the schema form is
+  used). Affects every json_mode caller: chat_json, chat_structured,
+  chat_qa json_mode lanes.
+- **UXF-1-6 — responsive proof**: pixel probes at 800/1024/1440 light+dark
+  (card span ratios, margin symmetry, table-spans-card: the Jobs header
+  strip = card width − 2×14px padding, exact at both widths) + VLM
+  read-backs (Jobs seeded 1440+800 full-table audits, incidents/customers
+  trio, diagnostics, copilot docked 1920, usage failing-run). Adjudicated
+  read-back flags: ID right-alignment under a left header = GitHub
+  standard (focused re-read: ACCEPTABLE); "page title clipped at top" =
+  harness artifact (ink starts y=13, the real app carries the 48px chrome
+  above); the inbox fold "yellow fragment" = the UXE-2-2 pre-adjudicated
+  scroll-viewport corner-arc cut; the "void below content" = a page
+  shorter than the 900px viewport.
+- **UXF-1-7 — new golden locks**: seeded Jobs-tab goldens (12 failed
+  golden_eval rows in the table) at 1440+800 and Usage-tab failing-run
+  goldens (the 0/9 LM-Studio-400 run) at 1440+800 — both fixed states
+  diff-locked forever.
+- **UXF-1-8 — full battery**: gates (no-simulation, traceability) ✓; fmt
+  ✓; verify-icons ✓; clippy workspace `-D warnings` 0 ✓; clippy sandbox
+  lane 0 ✓; workspace tests 718 ✓ (core 459 incl. the new regression
+  lock · app-shell lib 246 · xtask 11 · style lint 2); sandbox tests 467
+  ✓; kittest diff-locked ×2 on the final baselines — 25 suites + lib,
+  435 tests, ZERO drift both runs, zero artifacts ✓; SPP_SMOKE rc=0 ✓.
+
+**Two shared-system root-cause fixes surfaced by this batch's
+verification** (the golden-eval work migrated the Jobs/Usage tables onto
+`data_table`, and the read-backs caught what the old natural-width
+rendering had hidden for every table in the app):
+
+1. **`design::badge` / `chip_impl` consumed a phantom second Grid cell** —
+   both called `allocate_space` AND `advance_cursor_after_rect`; linear
+   layouts set the cursor absolutely from the rect (the second call is an
+   idempotent no-op — which is why every non-grid golden stayed
+   pixel-identical), but egui Grids advance INCREMENTALLY per allocation,
+   so a badge/chip in a table cell ate the next column: every following
+   cell shifted right and the last column clipped at the window edge (the
+   Jobs `created` column showed one character at 1440; the same latent
+   defect existed in the customers conversations table, the connectors
+   chip column, and three diagnostics tables). Fix: drop the redundant
+   advance (one widget, one cell). 61 goldens regenerated across the
+   affected suites (ai_center, customers/organizations/incidents,
+   connectors, diagnostics, knowledge help-center tab, dashboard 800,
+   inbox 800 + reader-overflow + copilot states, widgets demo) — each
+   verified by pixel probe or VLM read-back as the intended realignment.
+2. **`data_table` header/body grids started flush at the table stroke**
+   — labels ~2px from the border, last column butting the right edge.
+   Fix: CELL_PAD 10px inner margins on the header strip and the body
+   frame (one shared pad so the exact integer columns still line up; the
+   column math sizes against the padded cell area). Pixel-proven: "ID"
+   label now 14px inside the strip, header and body column origins agree
+   within glyph-bearing noise, created text ends 65px inside the padded
+   cell edge at 1440.
+
+Also fixed en route: the new UXF-1-7 fixture seeded `golden_test_runs`
+without `started_at`, letting the column DEFAULT (wall-clock now) drift
+the rendered raw stamp run-to-run — the exact nondeterminism class
+UXB-T1 closed for the other suites; the fixture now pins the stamp
+explicitly (2026-11-05T23:52:07.412Z) and the suite is diff-locked ×2.
+
+**Queue candidates for the owner (pre-existing, out of this batch's
+scope, verified present in the pre-batch goldens): customers "Last
+Contact" raw-ISO timestamps ellipsize in their 140px column; the
+incidents page header shows the incident count twice (subtitle +
+page_counter). Alongside the deferred UXF-1-4 (chrome header balance)
+and UXF-1-5 (legacy `design::table` width sweep).**
+
+Rule 8 STOP — the queue is empty; the next work item requires a new
+owner directive.

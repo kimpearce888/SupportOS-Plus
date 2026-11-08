@@ -71,7 +71,12 @@ pub(super) fn chip_impl(
             text.to_owned(),
         )
     });
-    ui.advance_cursor_after_rect(rect);
+    // UXF-1-1: no trailing `advance_cursor_after_rect` — `allocate_space`
+    // above already advanced the cursor. The redundant second advance is a
+    // no-op in linear layouts but Grids advance per allocation, so a chip
+    // in a `design::table` cell (the connectors list) consumed a phantom
+    // second column, shifting every following cell right. One widget, one
+    // cell.
     response
 }
 

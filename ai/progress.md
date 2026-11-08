@@ -1,13 +1,21 @@
 ## Active items
 
-**None.** No batch is active and none is held (authoritative, 2026-11-08,
-post-Batch UXE-2). The post-recycle verify-and-fix batch — UXE-2 (items
-UXE-2-1..UXE-2-4, opened on the owner's "fix what we have to make sure
-that is working as expected, introducing new things are totally
-prohibited" directive) — moved through this file per Rules 2 and 4, was
-implemented, verified (full battery, see `completed.md`), and closed the
-same session. The engagement sits at a Rule 8 STOP; new work opens only
-on an owner directive.
+(none — Batch UXF-1 closed 2026-11-08, record in `completed.md`; Rule 8
+STOP, the queue is empty, new work opens only on an owner directive.)
+
+Batch UXF-1 (AI Center layout repair + golden-eval functional fix, items
+UXF-1-1..UXF-1-8 + the owner-correction item UXF-2-1) moved through this
+file per Rules 2 and 4 on 2026-11-08 — opened on the owner's "Fix these
+issues" directive (two AI Center screenshots), implemented (Jobs/Usage/
+Health/Analytics/Attributes/Copilot width discipline via
+`card_titled_wide` + `data_table`; the contained golden-run blocks; the
+UXF-2-1 LM Studio json_schema wire fix with its regression lock), and —
+driven by the UXF-1-6 read-backs — two shared-system root-cause fixes
+(the badge/chip phantom Grid cell; the data_table CELL_PAD), verified
+(gates, fmt, clippy ×2, tests 459+246+11+2 / 467-sandbox, kittest
+diff-locked ×2 on 435 tests with 65 regenerated + 4 new goldens,
+SPP_SMOKE, pixel probes + VLM read-backs), and closed the same session
+(record in `completed.md`).
 
 Batch UXD-1 (dashboard layout repair, items UXD-1-1..UXD-1-3:
 design-system width discipline, dashboard restructure per the 2024–25

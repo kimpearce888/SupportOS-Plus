@@ -618,7 +618,13 @@ pub fn badge(ui: &mut egui::Ui, text: &str, tone: BadgeTone) -> egui::Response {
         fg,
     );
     let response = ui.interact(rect, id, egui::Sense::hover());
-    ui.advance_cursor_after_rect(rect);
+    // UXF-1-1: no trailing `advance_cursor_after_rect` — `allocate_space`
+    // above already advanced the cursor once. The redundant second advance
+    // is a no-op in linear layouts (they set the cursor absolutely from the
+    // rect) but Grids advance INCREMENTALLY per allocation, so inside a
+    // `design::table`/`data_table` cell the badge consumed a phantom second
+    // column, shifting every following cell right (the Jobs table's
+    // `created` column clipped at the window edge). One widget, one cell.
     response
 }
 
@@ -1243,8 +1249,16 @@ pub fn data_table(
     // The table frame carries a 1px stroke on each side; only the remainder
     // is column space.
     let inner = (avail - 2.0).max(60.0);
-    let exact = (inner - 16.0 * (n.saturating_sub(1)) as f32) / n as f32;
-    let floor_fits = 90.0 * n as f32 + 16.0 * (n.saturating_sub(1)) as f32 <= inner;
+    // UXF-1-1: the header labels and body cells inset from the table's
+    // stroke by CELL_PAD on each side — the grids used to start flush at
+    // the border (labels ~2px from the stroke, last column butting the
+    // right edge). One shared pad keeps the header grid and the body grid
+    // on the same column origin, so the exact integer columns still line
+    // up; the column math sizes against the padded cell area.
+    const CELL_PAD: f32 = 10.0;
+    let cell_area = (inner - 2.0 * CELL_PAD).max(40.0);
+    let exact = (cell_area - 16.0 * (n.saturating_sub(1)) as f32) / n as f32;
+    let floor_fits = 90.0 * n as f32 + 16.0 * (n.saturating_sub(1)) as f32 <= cell_area;
     let col_w = if floor_fits {
         exact.max(90.0)
     } else {
@@ -1261,6 +1275,7 @@ pub fn data_table(
             ui.set_min_width(inner);
             egui::Frame::new()
                 .fill(t.sidebar)
+                .inner_margin(egui::Margin::symmetric(CELL_PAD as i8, 0))
                 .corner_radius(egui::CornerRadius {
                     nw: 9,
                     ne: 9,
@@ -1286,21 +1301,28 @@ pub fn data_table(
                             ui.end_row();
                         });
                 });
-            egui::ScrollArea::vertical()
-                .id_salt(format!("spp-dt-{id}"))
-                .show_rows(ui, row_height, row_count, |ui, range| {
-                    egui::Grid::new(egui::IdSalt::new(format!("spp-dt-{id}-grid")))
-                        .num_columns(headers.len())
-                        .spacing(egui::vec2(16.0, 0.0))
-                        .min_row_height(row_height)
-                        .min_col_width(col_w)
-                        .max_col_width(col_w)
-                        .show(ui, |ui| {
-                            let mut row = row;
-                            for i in range {
-                                row(ui, i);
-                                ui.end_row();
-                            }
+            // The body grid rides the SAME CELL_PAD margins so its columns
+            // land exactly under the header's (both grids start at the
+            // same inset and use the same integer col_w).
+            egui::Frame::new()
+                .inner_margin(egui::Margin::symmetric(CELL_PAD as i8, 0))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt(format!("spp-dt-{id}"))
+                        .show_rows(ui, row_height, row_count, |ui, range| {
+                            egui::Grid::new(egui::IdSalt::new(format!("spp-dt-{id}-grid")))
+                                .num_columns(headers.len())
+                                .spacing(egui::vec2(16.0, 0.0))
+                                .min_row_height(row_height)
+                                .min_col_width(col_w)
+                                .max_col_width(col_w)
+                                .show(ui, |ui| {
+                                    let mut row = row;
+                                    for i in range {
+                                        row(ui, i);
+                                        ui.end_row();
+                                    }
+                                });
                         });
                 });
         });
