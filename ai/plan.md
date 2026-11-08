@@ -10,7 +10,10 @@
 **Batch CI-1 (packaging lane must survive transient CDN failures)
 CONSUMED 2026-11-08: items CI-1-1 and CI-1-2 moved to `progress.md` per
 Rule 2, implemented, verified, and closed the same session; record in
-`completed.md`. The batch reopened once mid-flight: the verification CI
+`completed.md`. CI run 42473244597 on the batch push `de2c13c` green
+3/3 — the previously failing AppImage job passed with both downloads
+(appimagetool + type-2 runtime) going through the pinned retry-hardened
+path and the pack succeeding via --runtime-file. The batch reopened once mid-flight: the verification CI
 push (run 42472196649 on ca95343) proved CI-1-1 works — the download
 survived three consecutive transient failures (503, transport error,
 504) and succeeded on attempt 4 — but then surfaced the second
