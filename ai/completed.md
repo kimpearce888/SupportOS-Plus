@@ -8518,3 +8518,11 @@ and UXF-1-5 (legacy `design::table` width sweep).**
 
 Rule 8 STOP — the queue is empty; the next work item requires a new
 owner directive.
+
+CI outcome addendum (appended to the UXF-1 record, append-only): the
+batch push (1a60476..e40dd63) went green on the first push — CI run
+`42447950175`, completed success 3/3 (fmt/clippy/test/deny ✓ · AppImage +
+.deb build smoke ✓ · kittest snapshot locks ✓ — the 65 regenerated
+baselines + the 4 new UXF-1-7 locks held cross-runner through lavapipe).
+Rule 8 STOP — the queue is empty; the next work item requires a new
+owner directive.
