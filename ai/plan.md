@@ -8,13 +8,18 @@
 ## Queue state
 
 **Batch CI-1 (packaging lane must survive transient CDN failures)
-CONSUMED 2026-11-08: item CI-1-1 moved to `progress.md` per Rule 2,
-implemented (`fetch_appimagetool_with_retry` — 5 attempts, 5s/15s/45s/90s
-backoff, transient-only retry policy, same sha256 gate), verified (full
-local battery: gates, fmt, clippy ×2 lanes, tests 459+247+13+467,
-cargo-deny, live CDN probe), and closed the same session; record in
-`completed.md`. The queue is EMPTY again. New work opens only on an
-owner directive.**
+CONSUMED 2026-11-08: items CI-1-1 and CI-1-2 moved to `progress.md` per
+Rule 2, implemented, verified, and closed the same session; record in
+`completed.md`. The batch reopened once mid-flight: the verification CI
+push (run 42472196649 on ca95343) proved CI-1-1 works — the download
+survived three consecutive transient failures (503, transport error,
+504) and succeeded on attempt 4 — but then surfaced the second
+single-shot download in the lane: appimagetool's own type-2 runtime
+fetch, which cannot be retried from outside the tool. CI-1-2 therefore
+pins the runtime (frozen type2-runtime tag 20251108, sha256 per arch,
+retry-hardened, cached under target/tools) and passes it via
+--runtime-file so appimagetool never touches the network. The queue is
+EMPTY again. New work opens only on an owner directive.**
 
 **Batch UXG-1 (all-display design discipline + cross-page consistency
 sweep) CONSUMED 2026-11-08: items UXG-1-1..UXG-1-10 moved to

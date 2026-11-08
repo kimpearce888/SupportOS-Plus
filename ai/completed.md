@@ -50,6 +50,46 @@
   OK; `cargo deny check advisories licenses bans` all ok; live CDN probe
   verified the pinned URL serves the pinned bytes. The kittest drift
   gate is unaffected by an xtask-only change and runs in CI unchanged.
+
+**CI-1-2 — Pin the type-2 runtime; appimagetool must go offline**
+- Context: the verification push for CI-1-1 (CI run 42472196649 on
+  `ca95343`) proved the retry works — the appimagetool download survived
+  three consecutive transient failures (503, transport error, 504,
+  each logged with the attempt counter) and succeeded on attempt 4 — but
+  the job then died at the next single-shot network call:
+  appimagetool's own fetch of the type-2 runtime it embeds into every
+  AppImage ("Failed to download runtime file, please download the
+  runtime manually from https://github.com/AppImage/type2-runtime/
+  releases and pass it to appimagetool with --runtime-file"). That
+  download lives inside the external tool with no retry and no env-var
+  override — the only lever is supplying the file ourselves.
+- Work: `crates/xtask/src/package.rs` — new `APPIMAGE_RUNTIMES` pin
+  table (x86_64 + aarch64, both pinned to the frozen type2-runtime
+  release tag `20251108` — never the rolling `continuous` tag, whose
+  assets are rebuilt without notice and would break the checksum pin;
+  sha256 `2fca8b44…260d` / `00cbdfcf…7444`, verified against live
+  downloads); `resolve_appimage_runtime` resolves/verifies/caches the
+  runtime under `target/tools/runtime-<arch>` beside appimagetool; the
+  retry fetch was generalized from `fetch_appimagetool_with_retry` into
+  `fetch_pinned_with_retry(client, url, label)` (same 5-attempt
+  5/15/45/90s policy) and `download_pinned_asset` + `verify_pinned_file`
+  now serve both the tool and the runtime with one code path; the
+  appimagetool invocation gained `--runtime-file <pinned runtime>` so
+  the tool makes zero network calls of its own.
+- Tests: `appimage_runtime_pins_cover_both_ci_arches_on_one_frozen_tag`
+  (official-repo URL prefix, no `continuous`, 64-hex sha per row, URL
+  asset name matches its arch row, both arches resolve, unmapped arches
+  fail, one shared frozen tag).
+- Verification: fmt/clippy (-D warnings)/tests re-run green (xtask 14
+  passed incl. the new lock); live functional check of the exact new
+  invocation shape — downloaded both pinned artifacts (checksums
+  verified), built a minimal AppDir, ran `ARCH=x86_64
+  APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1 appimagetool --runtime-file
+  runtime-x86_64 <AppDir> <out>` → Success, and the output AppImage's
+  ELF BuildID (`a87aaf5d…`) matches the pinned runtime's BuildID
+  (proving the pinned runtime is what got embedded), and the resulting
+  AppImage executes under APPIMAGE_EXTRACT_AND_RUN (the same mode the
+  CI smoke step uses).
 ### Batch 1 — 2026-10-18 (commit `560a5ce`, CI run `39112162370`: success)
 
 **1. Add `LICENSE` (MIT, matching manifests)**
