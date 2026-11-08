@@ -22,11 +22,7 @@ pub(crate) fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egu
     if (max_x - min_x).abs() < f64::EPSILON || (max_y - min_y).abs() < f64::EPSILON {
         return None;
     }
-    let inset = 6.0;
-    let inner = egui::Rect::from_min_max(
-        egui::pos2(rect.min.x + inset, rect.min.y + inset),
-        egui::pos2(rect.max.x - inset, rect.max.y - inset),
-    );
+    let inner = plot_inner(rect);
     Some(
         points
             .iter()
@@ -39,6 +35,20 @@ pub(crate) fn scale_points(points: &[Point], rect: egui::Rect) -> Option<Vec<egu
                 )
             })
             .collect(),
+    )
+}
+
+/// UXG-1-9: the plot's inner area — the frame minus the label bands
+/// (the y-axis max label at the top-left, the First→Latest caption at
+/// the top-right, the x-axis endpoint labels along the bottom). The old
+/// uniform 6px inset let the line's endpoints land inside those bands
+/// whenever the series' max sat at its first or last day — the endpoint
+/// dots grazed the corner labels. The 8/20/18 reservation keeps every
+/// endpoint clear of every label at every data shape.
+fn plot_inner(rect: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(rect.min.x + 8.0, rect.min.y + 20.0),
+        egui::pos2(rect.max.x - 8.0, rect.max.y - 18.0),
     )
 }
 
@@ -60,7 +70,7 @@ pub(crate) fn line_chart_axes(
     if let Some(scaled) = scale_points(points, rect) {
         paint_grid(ui, rect, t);
         let fill = t.chart_accent.gamma_multiply(0.16);
-        let baseline_y = rect.max.y - 8.0;
+        let baseline_y = plot_inner(rect).max.y;
         ui.painter()
             .add(egui::Shape::Mesh(std::sync::Arc::new(area_fill_mesh(
                 &scaled, baseline_y, fill,
@@ -245,11 +255,13 @@ pub(crate) fn area_fill_mesh(
 }
 
 fn paint_grid(ui: &mut egui::Ui, rect: egui::Rect, t: &Tokens) {
-    let inset = 8.0;
+    // UXG-1-9: gridlines live inside the plot area only — the old full-rect
+    // lines crossed the corner label bands.
+    let inner = plot_inner(rect);
     for i in 1..=3u16 {
-        let y = rect.min.y + inset + (rect.height() - 2.0 * inset) * f32::from(i) / 4.0;
+        let y = inner.min.y + inner.height() * f32::from(i) / 4.0;
         ui.painter().hline(
-            rect.min.x + inset..=rect.max.x - inset,
+            inner.min.x..=inner.max.x,
             y,
             egui::Stroke::new(1.0, t.faint),
         );
@@ -267,10 +279,33 @@ mod tests {
     #[test]
     fn scale_maps_data_space_to_pixels_bottom_left_origin() {
         let scaled = scale_points(&[[0.0, 0.0], [10.0, 10.0]], rect()).expect("scaled");
-        assert!((scaled[0].x - 6.0).abs() < 0.01, "first x at left inset");
-        assert!((scaled[0].y - 94.0).abs() < 0.01, "min y at bottom");
-        assert!((scaled[1].x - 194.0).abs() < 0.01, "max x at right inset");
-        assert!((scaled[1].y - 6.0).abs() < 0.01, "max y at top inset");
+        // UXG-1-9: the plot area is the frame minus the label bands
+        // (plot_inner: x 8..192, y 20..82 for this rect).
+        assert!((scaled[0].x - 8.0).abs() < 0.01, "first x at left inset");
+        assert!((scaled[0].y - 82.0).abs() < 0.01, "min y at plot bottom");
+        assert!((scaled[1].x - 192.0).abs() < 0.01, "max x at right inset");
+        assert!(
+            (scaled[1].y - 20.0).abs() < 0.01,
+            "max y below the label band"
+        );
+    }
+
+    #[test]
+    fn plot_inner_reserves_the_label_bands() {
+        // UXG-1-9: the corner labels live in the reserved bands — the
+        // y-axis max label (top-left, y 5..17) and the caption (top-right)
+        // never collide with the line, whatever the data shape.
+        let inner = plot_inner(rect());
+        assert!(
+            (inner.min.y - 20.0).abs() < 0.01,
+            "plot starts below the top labels"
+        );
+        assert!(
+            (inner.max.y - 82.0).abs() < 0.01,
+            "plot ends above the bottom labels"
+        );
+        assert!((inner.min.x - 8.0).abs() < 0.01);
+        assert!((inner.max.x - 192.0).abs() < 0.01);
     }
 
     #[test]

@@ -320,7 +320,7 @@ impl AutomationPage {
         let rules = self.rules.clone();
         let mut toggled: Option<(i64, bool)> = None;
         let mut delete_requested: Option<(i64, String)> = None;
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Rules",
             Some(&format!(
@@ -329,86 +329,75 @@ impl AutomationPage {
                 if rules.len() == 1 { "" } else { "s" }
             )),
             |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("automation-rules")
-                    .show(ui, |ui| {
-                        // UX-2: a header-only table with no rows reads as a
-                        // broken component — give the empty case a real
-                        // empty state instead.
-                        if rules.is_empty() {
-                            design::empty_state(
-                                ui,
-                                Icon::Zap,
-                                "No automation rules yet",
-                                "Create a rule with \"New Rule\" above — enabled \
-                                 rules act on incoming conversations \
-                                 automatically; actions that need review park \
-                                 in the approvals queue below.",
-                            );
-                            return;
-                        }
-                        design::table_stretched(
-                            ui,
-                            "automation-rule-table",
-                            &["Name", "When", "Then", ""],
-                            26.0,
-                            |ui| {
-                                let t = design::tokens(ui);
-                                for rule in &rules {
-                                    let id = rule.id.unwrap_or(0);
-                                    ui.label(
-                                        egui::RichText::new(rule.name.as_str())
-                                            .size(13.0)
-                                            .strong()
-                                            .color(t.foreground),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(trigger_description(&rule.trigger))
-                                            .size(13.0)
-                                            .color(t.foreground),
-                                    );
-                                    ui.horizontal(|ui| {
-                                        let action = action_description(&rule.action);
-                                        ui.label(
-                                            egui::RichText::new(action)
-                                                .size(13.0)
-                                                .color(t.foreground),
-                                        );
-                                        if rule.action.requires_approval() {
-                                            Icon::AlertTriangle.show(
-                                                ui,
-                                                13.0,
-                                                t.warning_foreground,
-                                            );
-                                            ui.label(
-                                                egui::RichText::new("(needs approval)")
-                                                    .small()
-                                                    .color(t.warning_foreground),
-                                            );
-                                        }
-                                    });
-                                    ui.horizontal(|ui| {
-                                        if design::chip(
-                                            ui,
-                                            rule.enabled,
-                                            if rule.enabled { "enabled" } else { "disabled" },
-                                        )
-                                        .clicked()
-                                        {
-                                            toggled = Some((id, !rule.enabled));
-                                        }
-                                        if design::button(ui, "Delete", ButtonVariant::Destructive)
-                                            .on_hover_text("asks for confirmation before deleting")
-                                            .clicked()
-                                        {
-                                            delete_requested = Some((id, rule.name.clone()));
-                                        }
-                                    });
-                                    ui.end_row();
-                                }
-                            },
+                // UX-2: a header-only table with no rows reads as a
+                // broken component — give the empty case a real
+                // empty state instead.
+                if rules.is_empty() {
+                    design::empty_state(
+                        ui,
+                        Icon::Zap,
+                        "No automation rules yet",
+                        "Create a rule with \"New Rule\" above — enabled \
+                         rules act on incoming conversations \
+                         automatically; actions that need review park \
+                         in the approvals queue below.",
+                    );
+                    return;
+                }
+                // UXG-1-5: exact-column data_table (virtualized rows built
+                // in) — the rules list spans the card at every width.
+                design::data_table(
+                    ui,
+                    "automation-rule-table",
+                    &["Name", "When", "Then", ""],
+                    rules.len(),
+                    26.0,
+                    |ui, i| {
+                        let t = design::tokens(ui);
+                        let rule = &rules[i];
+                        let id = rule.id.unwrap_or(0);
+                        ui.label(
+                            egui::RichText::new(rule.name.as_str())
+                                .size(13.0)
+                                .strong()
+                                .color(t.foreground),
                         );
-                    });
+                        ui.label(
+                            egui::RichText::new(trigger_description(&rule.trigger))
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        ui.horizontal(|ui| {
+                            let action = action_description(&rule.action);
+                            ui.label(egui::RichText::new(action).size(13.0).color(t.foreground));
+                            if rule.action.requires_approval() {
+                                Icon::AlertTriangle.show(ui, 13.0, t.warning_foreground);
+                                ui.label(
+                                    egui::RichText::new("(needs approval)")
+                                        .small()
+                                        .color(t.warning_foreground),
+                                );
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            if design::chip(
+                                ui,
+                                rule.enabled,
+                                if rule.enabled { "enabled" } else { "disabled" },
+                            )
+                            .clicked()
+                            {
+                                toggled = Some((id, !rule.enabled));
+                            }
+                            if design::button(ui, "Delete", ButtonVariant::Destructive)
+                                .on_hover_text("asks for confirmation before deleting")
+                                .clicked()
+                            {
+                                delete_requested = Some((id, rule.name.clone()));
+                            }
+                        });
+                    },
+                );
             },
         );
         if let Some((id, enabled)) = toggled {

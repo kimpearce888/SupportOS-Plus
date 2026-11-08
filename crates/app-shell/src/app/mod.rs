@@ -547,53 +547,72 @@ impl ShellApp {
 
     fn header_ui(&mut self, ui: &mut egui::Ui) {
         let t = design::tokens(ui);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // UX-33: the theme toggle was a 30×30 icon-only ghost button —
-            // auditors (and users) could not tell what it did without
-            // hovering, and the crescent glyph even read as a notification
-            // bell. It now carries its target state as a labelled Outline
-            // button, consistent with the Search button beside it.
-            let toggle = if self.theme == Theme::Dark {
-                (Icon::Sun, "Light", "switch to light theme")
-            } else {
-                (Icon::Moon, "Dark", "switch to dark theme")
-            };
-            if design::button_with_icon(ui, toggle.0, toggle.1, ButtonVariant::Outline)
-                .on_hover_text(toggle.2)
-                .clicked()
-            {
-                self.theme = self.theme.toggle();
-                if let Err(e) = self.theme.store(&self.db) {
-                    tracing::warn!(error = %e, "failed to persist the theme setting");
+        ui.horizontal(|ui| {
+            // UXG-1-8 (UXF-1-4): the active page's label lands on the left
+            // of the top bar — window-level context, the modern helpdesk
+            // breadcrumb register. The 48px bar carried only right-aligned
+            // controls, which read unbalanced (and worse the wider the
+            // display); the same anatomy as page_header (left title +
+            // baseline-aligned right actions) balances it at every width.
+            ui.label(
+                egui::RichText::new(self.page.label())
+                    .size(design::scale::text::LEAD)
+                    .strong()
+                    .color(t.foreground),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // UX-33: the theme toggle was a 30×30 icon-only ghost button —
+                // auditors (and users) could not tell what it did without
+                // hovering, and the crescent glyph even read as a notification
+                // bell. It now carries its target state as a labelled Outline
+                // button, consistent with the Search button beside it.
+                let toggle = if self.theme == Theme::Dark {
+                    (Icon::Sun, "Light", "switch to light theme")
+                } else {
+                    (Icon::Moon, "Dark", "switch to dark theme")
+                };
+                if design::button_with_icon(ui, toggle.0, toggle.1, ButtonVariant::Outline)
+                    .on_hover_text(toggle.2)
+                    .clicked()
+                {
+                    self.theme = self.theme.toggle();
+                    if let Err(e) = self.theme.store(&self.db) {
+                        tracing::warn!(error = %e, "failed to persist the theme setting");
+                    }
+                    self.theme.apply(ui.ctx());
                 }
-                self.theme.apply(ui.ctx());
-            }
-            if self.dialog.is_none()
-                && design::button_with_icon(ui, Icon::Search, "Search  ⌘K", ButtonVariant::Outline)
+                if self.dialog.is_none()
+                    && design::button_with_icon(
+                        ui,
+                        Icon::Search,
+                        "Search  ⌘K",
+                        ButtonVariant::Outline,
+                    )
                     .on_hover_text("command palette (Ctrl/Cmd+K)")
                     .clicked()
-            {
-                self.palette.toggle();
-            }
-            let (tone, label) = self.freshness();
-            let (fill, fg) = design::tone_colors(ui, tone);
-            let freshness_btn =
-                egui::Button::new(egui::RichText::new(label).size(12.0).strong().color(fg))
-                    .fill(fill)
-                    .corner_radius(egui::CornerRadius::same(6))
-                    .small();
-            if ui
-                .add(freshness_btn)
-                // UX-33: the pill now says what it measures (Help Scout
-                // freshness) both on its face and in the hover.
-                .on_hover_text(
-                    "how fresh the local Help Scout mirror is — opens Sync Health \
+                {
+                    self.palette.toggle();
+                }
+                let (tone, label) = self.freshness();
+                let (fill, fg) = design::tone_colors(ui, tone);
+                let freshness_btn =
+                    egui::Button::new(egui::RichText::new(label).size(12.0).strong().color(fg))
+                        .fill(fill)
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .small();
+                if ui
+                    .add(freshness_btn)
+                    // UX-33: the pill now says what it measures (Help Scout
+                    // freshness) both on its face and in the hover.
+                    .on_hover_text(
+                        "how fresh the local Help Scout mirror is — opens Sync Health \
                      (last sync, checkpoints, runs)",
-                )
-                .clicked()
-            {
-                self.page = PageKey::SyncHealth;
-            }
+                    )
+                    .clicked()
+                {
+                    self.page = PageKey::SyncHealth;
+                }
+            });
         });
         let rect = ui.max_rect();
         ui.painter().hline(
@@ -790,72 +809,82 @@ impl ShellApp {
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
                             ui.add_space(2.0);
-                            egui::Frame::new()
-                                .fill(egui::Color32::TRANSPARENT)
-                                .inner_margin(egui::Margin::symmetric(22, 14))
-                                .show(ui, |ui| match self.page {
-                                    PageKey::Dashboard => {
-                                        self.dashboard.ui(ui, &self.db, sync.as_ref());
-                                    }
-                                    PageKey::Customers => {
-                                        self.customers.ui(ui, &self.db, sync.as_ref());
-                                    }
-                                    PageKey::Knowledge => {
-                                        nav = self.knowledge.ui(ui, &self.db, sync.as_ref());
-                                    }
-                                    PageKey::Reports => {
-                                        nav = self.reports.ui(ui, &self.db, sync.as_ref());
-                                    }
-                                    PageKey::LiveChats => {
-                                        nav = self.live_chats.ui(ui, &self.db);
-                                    }
-                                    PageKey::Operations => {
-                                        nav = self.operations.ui(ui, &self.db);
-                                    }
-                                    PageKey::AiCenter => {
-                                        nav = self.ai_center.ui(ui, &self.db);
-                                    }
-                                    PageKey::Automation => {
-                                        nav = self.automation.ui(ui, &self.db);
-                                    }
-                                    PageKey::Connectors => {
-                                        nav = self.connectors.ui(ui, &self.db);
-                                    }
-                                    PageKey::CustomObjects => {
-                                        nav = self.custom_objects.ui(ui, &self.db);
-                                    }
-                                    PageKey::Incidents => self.incidents.ui(ui, &self.db),
-                                    PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
-                                    PageKey::Notifications => {
-                                        self.notifications.ui(ui, &self.db);
-                                    }
-                                    PageKey::Onboarding => {
-                                        self.onboarding.ui(ui, &self.db, sync.as_ref());
-                                    }
-                                    PageKey::Organizations => {
-                                        self.organizations.ui(ui, &self.db, sync.as_ref());
-                                    }
-                                    PageKey::Outreach => {
-                                        nav = self.outreach.ui(ui, &self.db);
-                                    }
-                                    PageKey::Search => {
-                                        nav = self.search.ui(ui, &self.db);
-                                    }
-                                    PageKey::Settings => {
-                                        nav = self.settings.ui(ui, &self.db);
-                                    }
-                                    PageKey::SupportGraph => {
-                                        nav = self.support_graph.ui(ui, &self.db);
-                                    }
-                                    PageKey::Diagnostics => {
-                                        nav = self.diagnostics.ui(ui, &self.db);
-                                    }
-                                    PageKey::SyncHealth => {
-                                        self.sync_health.ui(ui, &self.db, sync.as_ref());
-                                    }
-                                    PageKey::Shell => self.shell_ui(ui),
-                                    PageKey::Inbox => unreachable!("inbox handled above"),
-                                });
+                            // UXG-1-1: one content-column discipline for
+                            // every standard page — full width up to
+                            // CONTENT_MAX (1800), a centered exact-width
+                            // column above it. On 2K/4K/8K displays the
+                            // page holds professional proportions instead
+                            // of stretching to the full window; on windows
+                            // under the cap the layout is pixel-identical
+                            // to the uncapped render.
+                            design::content_column(ui, |ui| {
+                                egui::Frame::new()
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .inner_margin(egui::Margin::symmetric(22, 14))
+                                    .show(ui, |ui| match self.page {
+                                        PageKey::Dashboard => {
+                                            self.dashboard.ui(ui, &self.db, sync.as_ref());
+                                        }
+                                        PageKey::Customers => {
+                                            self.customers.ui(ui, &self.db, sync.as_ref());
+                                        }
+                                        PageKey::Knowledge => {
+                                            nav = self.knowledge.ui(ui, &self.db, sync.as_ref());
+                                        }
+                                        PageKey::Reports => {
+                                            nav = self.reports.ui(ui, &self.db, sync.as_ref());
+                                        }
+                                        PageKey::LiveChats => {
+                                            nav = self.live_chats.ui(ui, &self.db);
+                                        }
+                                        PageKey::Operations => {
+                                            nav = self.operations.ui(ui, &self.db);
+                                        }
+                                        PageKey::AiCenter => {
+                                            nav = self.ai_center.ui(ui, &self.db);
+                                        }
+                                        PageKey::Automation => {
+                                            nav = self.automation.ui(ui, &self.db);
+                                        }
+                                        PageKey::Connectors => {
+                                            nav = self.connectors.ui(ui, &self.db);
+                                        }
+                                        PageKey::CustomObjects => {
+                                            nav = self.custom_objects.ui(ui, &self.db);
+                                        }
+                                        PageKey::Incidents => self.incidents.ui(ui, &self.db),
+                                        PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
+                                        PageKey::Notifications => {
+                                            self.notifications.ui(ui, &self.db);
+                                        }
+                                        PageKey::Onboarding => {
+                                            self.onboarding.ui(ui, &self.db, sync.as_ref());
+                                        }
+                                        PageKey::Organizations => {
+                                            self.organizations.ui(ui, &self.db, sync.as_ref());
+                                        }
+                                        PageKey::Outreach => {
+                                            nav = self.outreach.ui(ui, &self.db);
+                                        }
+                                        PageKey::Search => {
+                                            nav = self.search.ui(ui, &self.db);
+                                        }
+                                        PageKey::Settings => {
+                                            nav = self.settings.ui(ui, &self.db);
+                                        }
+                                        PageKey::SupportGraph => {
+                                            nav = self.support_graph.ui(ui, &self.db);
+                                        }
+                                        PageKey::Diagnostics => {
+                                            nav = self.diagnostics.ui(ui, &self.db);
+                                        }
+                                        PageKey::SyncHealth => {
+                                            self.sync_health.ui(ui, &self.db, sync.as_ref());
+                                        }
+                                        PageKey::Shell => self.shell_ui(ui),
+                                        PageKey::Inbox => unreachable!("inbox handled above"),
+                                    });
+                            });
                         });
                 });
         }

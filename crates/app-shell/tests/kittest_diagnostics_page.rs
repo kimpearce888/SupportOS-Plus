@@ -155,9 +155,14 @@ fn r3_diagnostics_errors_filter_light() {
             },
         );
     h.run_ok();
-    h.get_all_by_label("Errors")
+    // UXG-1-5: the old exact-label query matched the runs table's header
+    // cell ("Errors") — a non-interactive label, so the click was a no-op
+    // and the golden silently captured the UNfiltered log. The chips carry
+    // their counts ("Errors 36"); the contains-query lands on the chip,
+    // which actually filters.
+    h.get_all_by_label_contains("Errors")
         .next()
-        .expect("the chip")
+        .expect("the Errors filter chip")
         .click();
     h.run_ok();
     h.run_steps(2);

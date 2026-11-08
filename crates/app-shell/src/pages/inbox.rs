@@ -1055,7 +1055,15 @@ impl InboxPage {
                             .max_height(max_h)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                self.composer_pane_ui(ui, db, bus, &d);
+                                // UXG-1-2: the composer card rides the same
+                                // reading measure as the thread above it —
+                                // on 2K/4K/8K panes both hold at 860px and
+                                // center on the same edges, instead of the
+                                // editor stretching into a multi-thousand-
+                                // pixel single line.
+                                design::centered_column(ui, design::scale::READER_MEASURE, |ui| {
+                                    self.composer_pane_ui(ui, db, bus, &d);
+                                });
                             });
                     }
                 });
@@ -1077,7 +1085,17 @@ impl InboxPage {
                     // reader — never a crushed half-thread.
                     self.copilot_pane_ui(ui, db, detail.as_ref());
                 } else {
-                    self.reader_ui(ui, db, bus, detail);
+                    // UXG-1-2: the reader content (head, action bar,
+                    // thread, triage/QA cards) holds at the reading
+                    // measure — full pane width up to 860px, a centered
+                    // reading column above it (the Gmail/Help Scout
+                    // wide-window register). Every existing ≤1440 state
+                    // sits under the cap and renders unchanged; 1920+
+                    // windows keep a readable thread instead of a wall
+                    // of text.
+                    design::centered_column(ui, design::scale::READER_MEASURE, |ui| {
+                        self.reader_ui(ui, db, bus, detail);
+                    });
                 }
             });
     }

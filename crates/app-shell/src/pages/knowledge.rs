@@ -763,49 +763,48 @@ impl KnowledgePage {
             return None;
         }
         let mut action: Option<(i64, String, &str)> = None;
-        egui::ScrollArea::vertical().show_rows(ui, 24.0, self.documents.len(), |ui, range| {
-            design::table(
-                ui,
-                "knowledge-documents",
-                &["Title", "Source", "Visibility", "Chunks", "Actions"],
-                26.0,
-                |ui| {
-                    let t = design::tokens(ui);
-                    for doc in self.documents[range].iter() {
-                        let id = i64_field(doc, "id");
-                        ui.label(
-                            egui::RichText::new(str_field(doc, "title"))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
-                        ui.label(
-                            egui::RichText::new(format!("#{}", i64_field(doc, "source_id")))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
-                        ui.label(
-                            egui::RichText::new(str_field(doc, "visibility"))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
-                        design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
-                        ui.horizontal(|ui| {
-                            if design::button(ui, "Mark Reviewed", ButtonVariant::Outline).clicked()
-                            {
-                                action = Some((id, str_field(doc, "title"), "reviewed"));
-                            }
-                            if design::button(ui, "Verify", ButtonVariant::Outline).clicked() {
-                                action = Some((id, str_field(doc, "title"), "verify"));
-                            }
-                            if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
-                                action = Some((id, str_field(doc, "title"), "delete"));
-                            }
-                        });
-                        ui.end_row();
+        // UXG-1-4: exact-column data_table (virtualized rows built in) —
+        // the document list spans the content column at every width.
+        let documents = &self.documents;
+        design::data_table(
+            ui,
+            "knowledge-documents",
+            &["Title", "Source", "Visibility", "Chunks", "Actions"],
+            documents.len(),
+            26.0,
+            |ui, i| {
+                let t = design::tokens(ui);
+                let doc = &documents[i];
+                let id = i64_field(doc, "id");
+                ui.label(
+                    egui::RichText::new(str_field(doc, "title"))
+                        .size(13.0)
+                        .color(t.foreground),
+                );
+                ui.label(
+                    egui::RichText::new(format!("#{}", i64_field(doc, "source_id")))
+                        .size(13.0)
+                        .color(t.foreground),
+                );
+                ui.label(
+                    egui::RichText::new(str_field(doc, "visibility"))
+                        .size(13.0)
+                        .color(t.foreground),
+                );
+                design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
+                ui.horizontal(|ui| {
+                    if design::button(ui, "Mark Reviewed", ButtonVariant::Outline).clicked() {
+                        action = Some((id, str_field(doc, "title"), "reviewed"));
                     }
-                },
-            );
-        });
+                    if design::button(ui, "Verify", ButtonVariant::Outline).clicked() {
+                        action = Some((id, str_field(doc, "title"), "verify"));
+                    }
+                    if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
+                        action = Some((id, str_field(doc, "title"), "delete"));
+                    }
+                });
+            },
+        );
         if let Some((id, title, what)) = action {
             match what {
                 "reviewed" => self.mark_reviewed(db, id),
@@ -831,38 +830,40 @@ impl KnowledgePage {
             );
             return;
         }
-        design::card(ui, |ui| {
-            design::table(
+        // UXG-1-4: exact-column data_table in a full-width titled card —
+        // the sources list spans the card at every width.
+        let sources = &self.sources;
+        design::card_titled_wide(ui, "Sources", None, |ui| {
+            design::data_table(
                 ui,
                 "knowledge-sources",
                 &["Name", "Kind", "Visibility", "Documents", "Created"],
+                sources.len(),
                 26.0,
-                |ui| {
+                |ui, i| {
                     let t = design::tokens(ui);
-                    for source in &self.sources {
-                        ui.label(
-                            egui::RichText::new(str_field(source, "name"))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
-                        ui.label(
-                            egui::RichText::new(str_field(source, "kind"))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
-                        ui.label(
-                            egui::RichText::new(str_field(source, "visibility"))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
-                        design::td_num(ui, &i64_field(source, "document_count").to_string());
-                        ui.label(
-                            egui::RichText::new(str_field(source, "created_at"))
-                                .size(13.0)
-                                .color(t.muted_foreground),
-                        );
-                        ui.end_row();
-                    }
+                    let source = &sources[i];
+                    ui.label(
+                        egui::RichText::new(str_field(source, "name"))
+                            .size(13.0)
+                            .color(t.foreground),
+                    );
+                    ui.label(
+                        egui::RichText::new(str_field(source, "kind"))
+                            .size(13.0)
+                            .color(t.foreground),
+                    );
+                    ui.label(
+                        egui::RichText::new(str_field(source, "visibility"))
+                            .size(13.0)
+                            .color(t.foreground),
+                    );
+                    design::td_num(ui, &i64_field(source, "document_count").to_string());
+                    ui.label(
+                        egui::RichText::new(str_field(source, "created_at"))
+                            .size(13.0)
+                            .color(t.muted_foreground),
+                    );
                 },
             );
         });
@@ -1415,42 +1416,42 @@ impl KnowledgePage {
             return;
         }
         let mut open: Option<i64> = None;
-        egui::ScrollArea::vertical().show_rows(ui, 26.0, self.articles.len(), |ui, range| {
-            design::table(
-                ui,
-                "docs-articles",
-                &["Article", "Collection", "Status", "Views", ""],
-                26.0,
-                |ui| {
-                    let t = design::tokens(ui);
-                    for article in self.articles[range].iter().cloned() {
-                        ui.label(
-                            egui::RichText::new(article.name.as_str())
-                                .size(13.0)
-                                .strong()
-                                .color(t.foreground),
-                        );
-                        ui.label(
-                            egui::RichText::new(article.collection_name.as_deref().unwrap_or("—"))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
-                        let tone = match article.status.as_str() {
-                            "published" => BadgeTone::Success,
-                            "draft" => BadgeTone::Neutral,
-                            "internal" => BadgeTone::Info,
-                            _ => BadgeTone::Neutral,
-                        };
-                        design::badge(ui, article.status.as_str(), tone);
-                        design::td_num(ui, &article.views.to_string());
-                        if design::button(ui, "Read", ButtonVariant::Outline).clicked() {
-                            open = Some(article.id);
-                        }
-                        ui.end_row();
-                    }
-                },
-            );
-        });
+        // UXG-1-4: exact-column data_table (virtualized rows built in) —
+        // the article list spans the content column at every width.
+        let articles = &self.articles;
+        design::data_table(
+            ui,
+            "docs-articles",
+            &["Article", "Collection", "Status", "Views", ""],
+            articles.len(),
+            26.0,
+            |ui, i| {
+                let t = design::tokens(ui);
+                let article = &articles[i];
+                ui.label(
+                    egui::RichText::new(article.name.as_str())
+                        .size(13.0)
+                        .strong()
+                        .color(t.foreground),
+                );
+                ui.label(
+                    egui::RichText::new(article.collection_name.as_deref().unwrap_or("—"))
+                        .size(13.0)
+                        .color(t.foreground),
+                );
+                let tone = match article.status.as_str() {
+                    "published" => BadgeTone::Success,
+                    "draft" => BadgeTone::Neutral,
+                    "internal" => BadgeTone::Info,
+                    _ => BadgeTone::Neutral,
+                };
+                design::badge(ui, article.status.as_str(), tone);
+                design::td_num(ui, &article.views.to_string());
+                if design::button(ui, "Read", ButtonVariant::Outline).clicked() {
+                    open = Some(article.id);
+                }
+            },
+        );
         if let Some(id) = open {
             self.open_article(db, id);
         }

@@ -434,7 +434,10 @@ impl OperationsPage {
 
         let suggestions = self.suggestions.clone();
         let agents = workload.agents.clone();
-        design::card_titled(
+        // UXG-1-4: exact-column data_table in a full-width titled card
+        // (virtualized rows built in) — the workload list spans the card
+        // at every width.
+        design::card_titled_wide(
             ui,
             "Team Workload",
             Some(&format!(
@@ -442,80 +445,61 @@ impl OperationsPage {
                 workload.generated_at, workload.unassigned_work
             )),
             |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("ops-workload-rows")
-                    .show_rows(ui, 24.0, agents.len(), |ui, range| {
-                        design::table(
-                            ui,
-                            "ops-workload-table",
-                            &[
-                                "Agent", "Open", "Waiting", "Capacity", "Load", "Pressure",
-                                "Actions",
-                            ],
-                            28.0,
-                            |ui| {
-                                let t = design::tokens(ui);
-                                for agent in &agents[range] {
-                                    ui.label(
-                                        egui::RichText::new(agent.display_name.as_str())
-                                            .size(13.0)
-                                            .color(t.foreground),
-                                    );
-                                    design::td_num(ui, &agent.open_workload.to_string());
-                                    design::td_num(
-                                        ui,
-                                        &agent.customer_waiting_workload.to_string(),
-                                    );
-                                    design::td_num(ui, &agent.capacity.to_string());
-                                    design::td_num(ui, &format!("{:.2}", agent.weighted_load));
-                                    design::td_num(ui, &format!("{:.0}%", agent.pressure * 100.0));
-                                    ui.horizontal(|ui| {
-                                        let mut new_model = model.clone();
-                                        if design::button(ui, "+", ButtonVariant::Outline)
-                                            .on_hover_text("Increase capacity")
-                                            .clicked()
-                                        {
-                                            let res = db.with_write(|conn| {
-                                                adjust_capacity(
-                                                    conn,
-                                                    &mut new_model,
-                                                    agent.user_local_id,
-                                                    1,
-                                                )
-                                            });
-                                            if let Err(e) = res {
-                                                self.error = Some(e);
-                                            } else {
-                                                self.capacity = Some(new_model);
-                                                self.workload = None;
-                                            }
-                                        }
-                                        if design::button(ui, "−", ButtonVariant::Outline)
-                                            .on_hover_text("Decrease capacity")
-                                            .clicked()
-                                        {
-                                            let mut new_model = model.clone();
-                                            let res = db.with_write(|conn| {
-                                                adjust_capacity(
-                                                    conn,
-                                                    &mut new_model,
-                                                    agent.user_local_id,
-                                                    -1,
-                                                )
-                                            });
-                                            if let Err(e) = res {
-                                                self.error = Some(e);
-                                            } else {
-                                                self.capacity = Some(new_model);
-                                                self.workload = None;
-                                            }
-                                        }
-                                    });
-                                    ui.end_row();
-                                }
-                            },
+                design::data_table(
+                    ui,
+                    "ops-workload-table",
+                    &[
+                        "Agent", "Open", "Waiting", "Capacity", "Load", "Pressure", "Actions",
+                    ],
+                    agents.len(),
+                    28.0,
+                    |ui, i| {
+                        let t = design::tokens(ui);
+                        let agent = &agents[i];
+                        ui.label(
+                            egui::RichText::new(agent.display_name.as_str())
+                                .size(13.0)
+                                .color(t.foreground),
                         );
-                    });
+                        design::td_num(ui, &agent.open_workload.to_string());
+                        design::td_num(ui, &agent.customer_waiting_workload.to_string());
+                        design::td_num(ui, &agent.capacity.to_string());
+                        design::td_num(ui, &format!("{:.2}", agent.weighted_load));
+                        design::td_num(ui, &format!("{:.0}%", agent.pressure * 100.0));
+                        ui.horizontal(|ui| {
+                            let mut new_model = model.clone();
+                            if design::button(ui, "+", ButtonVariant::Outline)
+                                .on_hover_text("Increase capacity")
+                                .clicked()
+                            {
+                                let res = db.with_write(|conn| {
+                                    adjust_capacity(conn, &mut new_model, agent.user_local_id, 1)
+                                });
+                                if let Err(e) = res {
+                                    self.error = Some(e);
+                                } else {
+                                    self.capacity = Some(new_model);
+                                    self.workload = None;
+                                }
+                            }
+                            if design::button(ui, "−", ButtonVariant::Outline)
+                                .on_hover_text("Decrease capacity")
+                                .clicked()
+                            {
+                                let mut new_model = model.clone();
+                                let res = db.with_write(|conn| {
+                                    adjust_capacity(conn, &mut new_model, agent.user_local_id, -1)
+                                });
+                                if let Err(e) = res {
+                                    self.error = Some(e);
+                                } else {
+                                    self.capacity = Some(new_model);
+                                    self.workload = None;
+                                }
+                            }
+                        });
+                    },
+                );
             },
         );
         ui.add_space(10.0);

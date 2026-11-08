@@ -224,6 +224,21 @@ pub mod scale {
         pub(crate) const CONTROL: u8 = 8;
         pub(crate) const BADGE: u8 = 6;
     }
+    /// UXG-1-1: the one content-column width every standard page shares.
+    /// Below the cap the page fills the available width exactly as it
+    /// always has; above it (2K/4K/8K-class displays at 100% scale —
+    /// 2560/3840/7680 logical px) the column holds at 1800 and centers,
+    /// the Linear/Stripe/Zendesk wide-monitor register: cards, tables and
+    /// forms keep professional proportions instead of stretching to
+    /// multi-thousand-pixel lines. 1800 fits the dashboard's 6-column KPI
+    /// tier (~295px tiles) and 7–9 column data tables (~180–250px
+    /// columns) — the widest layouts the design system has.
+    pub const CONTENT_MAX: f32 = 1800.0;
+    /// UXG-1-2: the reading-measure cap for reading surfaces (the inbox
+    /// reader thread and composer). 80–100 characters at body size is
+    /// ~700–860px — the Gmail/Help Scout wide-window register; past it a
+    /// thread reads as a wall of text stretched across the pane.
+    pub const READER_MEASURE: f32 = 860.0;
 }
 
 pub fn install(ctx: &egui::Context) {
@@ -889,6 +904,46 @@ pub fn page_header(
     ui.add_space(scale::space::SP3);
 }
 
+/// UXG-1-1: the shared centered-column primitive — the page (or pane)
+/// fills the available width up to `max_w`, and holds an exact-width
+/// centered column above it. Built on `scope_builder` with an exact
+/// `max_rect` child, so children read the column's width (never the
+/// unbounded pane width) and the parent cursor advances by the content
+/// actually used. Below the cap the rect IS the available rect — the
+/// layout is pixel-identical to an uncapped render.
+pub fn centered_column<R>(
+    ui: &mut egui::Ui,
+    max_w: f32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let avail = ui.available_rect_before_wrap();
+    let width = avail.width();
+    let (col, gutter) = if width.is_finite() {
+        let col = width.min(max_w).max(1.0);
+        (col, ((width - col) * 0.5).floor().max(0.0))
+    } else {
+        (max_w, 0.0)
+    };
+    let left = avail.left() + gutter;
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(left, avail.top()),
+        egui::pos2(left + col, avail.bottom()),
+    );
+    ui.scope_builder(egui::UiBuilder::new().max_rect(rect), add_contents)
+}
+
+/// UXG-1-1: the one content-column discipline every standard page shares
+/// — `centered_column` at `scale::CONTENT_MAX` (1800). The shell's
+/// non-inbox page funnel wraps every page in this, so from a 980px
+/// window to an 8K display every page renders the same width anatomy:
+/// full width to the cap, one centered column above it.
+pub fn content_column<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    centered_column(ui, scale::CONTENT_MAX, add_contents)
+}
+
 /// DC: DS-C-03 StatTile — muted 12px label, 26px tabular value, 12px hint.
 pub fn metric_card(ui: &mut egui::Ui, label: &str, value: &str, hint: Option<&str>) {
     metric_card_w(ui, label, value, hint, 150.0);
@@ -1151,65 +1206,6 @@ pub(crate) fn empty_state(ui: &mut egui::Ui, icon: Icon, title: &str, hint: &str
         hint_text(ui, hint);
         ui.add_space(18.0);
     });
-}
-
-pub fn table<R>(
-    ui: &mut egui::Ui,
-    id: &str,
-    headers: &[&str],
-    row_height: f32,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> egui::InnerResponse<R> {
-    table_impl(ui, id, headers, row_height, None, add_contents)
-}
-
-/// UX-6: full-width table — distributes the available width evenly across
-/// columns (min 90px each) so page-level lists use the whole content area
-/// instead of hugging their natural content width.
-pub fn table_stretched<R>(
-    ui: &mut egui::Ui,
-    id: &str,
-    headers: &[&str],
-    row_height: f32,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> egui::InnerResponse<R> {
-    let n = headers.len().max(1);
-    let spacing = 16.0;
-    let avail = ui.available_width();
-    let col_w = ((avail - spacing * (n.saturating_sub(1)) as f32) / n as f32).max(90.0);
-    table_impl(ui, id, headers, row_height, Some(col_w), add_contents)
-}
-
-fn table_impl<R>(
-    ui: &mut egui::Ui,
-    id: &str,
-    headers: &[&str],
-    row_height: f32,
-    min_col_width: Option<f32>,
-    add_contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> egui::InnerResponse<R> {
-    let t = tokens(ui);
-    let mut grid = egui::Grid::new(egui::IdSalt::new(format!("spp-table-{id}")))
-        .num_columns(headers.len())
-        .striped(true)
-        .spacing(egui::vec2(16.0, 0.0))
-        .min_row_height(row_height);
-    if let Some(w) = min_col_width {
-        grid = grid.min_col_width(w);
-    }
-    ui.add_space(4.0);
-    grid.show(ui, |ui| {
-        for header in headers {
-            ui.label(
-                egui::RichText::new(*header)
-                    .small()
-                    .strong()
-                    .color(t.muted_foreground),
-            );
-        }
-        ui.end_row();
-        add_contents(ui)
-    })
 }
 
 pub fn td_num(ui: &mut egui::Ui, text: &str) {
@@ -2567,10 +2563,13 @@ mod tests {
                     assert!(!clicked);
                     badge(ui, "Active", BadgeTone::Info);
                     metric_card(ui, "New", "12", Some("last 30 days"));
-                    table(ui, "smoke", &["name", "count"], 24.0, |ui| {
-                        ui.label("row");
-                        td_num(ui, "3");
-                        ui.end_row();
+                    // UXG-1-5: the legacy natural-width table helpers are
+                    // gone — every list rides the exact-column data_table.
+                    data_table(ui, "smoke", &["name", "count"], 1, 24.0, |ui, i| {
+                        if i == 0 {
+                            ui.label("row");
+                            td_num(ui, "3");
+                        }
                     });
                     empty_state(ui, Icon::Inbox, "Nothing here", "No conversations match.");
                     card_titled(ui, "A card", Some("with a hint"), |ui| {

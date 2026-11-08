@@ -269,3 +269,12 @@ fn r5_inbox_folded_views_800_light() {
         "r5_inbox_folded_views_800_light",
     );
 }
+
+/// UXG-1-2/9: the 2K tier — at 2560 the reader pane spans ~1810px after
+/// the rail and the clamped list; the reading column holds at the 860px
+/// measure and centers, instead of stretching the thread cards across
+/// the pane (the Gmail/Help Scout wide-window register).
+#[test]
+fn uxg_inbox_reader_2560_light() {
+    render_copilot_state(false, 2560.0, 960.0, false, "uxg_inbox_reader_2560_light");
+}

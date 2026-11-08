@@ -259,60 +259,68 @@ impl ConnectorsPage {
         let mut picked: Option<i64> = None;
         let mut deleted: Option<(i64, String)> = None;
         let mut refreshed: Option<i64> = None;
-        egui::ScrollArea::vertical()
-            .id_salt("connector-list")
-            .show(ui, |ui| {
-                design::table_stretched(
-                    ui,
-                    "connector-table",
-                    &["name", "kind", "health", "refresh", "last sync", ""],
-                    26.0,
-                    |ui| {
-                        let t = design::tokens(ui);
-                        for record in &connectors {
-                            let id = i64_field(record, "id");
-                            let name = str_field(record, "name");
-                            let kind = str_field(record, "kind");
-                            let health = str_field(record, "health");
-                            let refresh_method = str_field(record, "refresh_method");
-                            let last_sync =
-                                opt_str_field(record, "last_sync_at").unwrap_or_else(|| "—".into());
-                            if design::chip(ui, self.selected == Some(id), &name).clicked() {
-                                picked = Some(id);
-                            }
-                            ui.monospace(egui::RichText::new(kind).color(t.muted_foreground));
-                            ui.horizontal(|ui| {
-                                design::status_dot(ui, health_tone(&health), false);
-                                design::badge(ui, &health, health_tone(&health));
-                            });
-                            ui.label(
-                                egui::RichText::new(refresh_method)
-                                    .size(13.0)
-                                    .color(t.foreground),
-                            );
-                            ui.monospace(egui::RichText::new(last_sync).color(t.muted_foreground));
-                            ui.horizontal(|ui| {
-                                if design::button_with_icon(
-                                    ui,
-                                    Icon::Refresh,
-                                    "refresh",
-                                    ButtonVariant::Outline,
-                                )
-                                .clicked()
-                                {
-                                    refreshed = Some(id);
-                                }
-                                if design::button(ui, "Delete", ButtonVariant::Destructive)
-                                    .clicked()
-                                {
-                                    deleted = Some((id, name.clone()));
-                                }
-                            });
-                            ui.end_row();
+        // UXG-1-5: exact-column data_table (virtualized rows built in) —
+        // the connector list spans the content column at every width; the
+        // empty case gets a real empty state instead of a header-only
+        // strip (the automation register).
+        if connectors.is_empty() {
+            design::empty_state(
+                ui,
+                Icon::Plug,
+                "No connectors yet",
+                "Create a connector with \"New Connector\" above — HTTP endpoints \
+                 and CSV files attach as read-only tables the AI tools can query.",
+            );
+        } else {
+            let selected = self.selected;
+            design::data_table(
+                ui,
+                "connector-table",
+                &["name", "kind", "health", "refresh", "last sync", ""],
+                connectors.len(),
+                26.0,
+                |ui, i| {
+                    let t = design::tokens(ui);
+                    let record = &connectors[i];
+                    let id = i64_field(record, "id");
+                    let name = str_field(record, "name");
+                    let kind = str_field(record, "kind");
+                    let health = str_field(record, "health");
+                    let refresh_method = str_field(record, "refresh_method");
+                    let last_sync =
+                        opt_str_field(record, "last_sync_at").unwrap_or_else(|| "—".into());
+                    if design::chip(ui, selected == Some(id), &name).clicked() {
+                        picked = Some(id);
+                    }
+                    ui.monospace(egui::RichText::new(kind).color(t.muted_foreground));
+                    ui.horizontal(|ui| {
+                        design::status_dot(ui, health_tone(&health), false);
+                        design::badge(ui, &health, health_tone(&health));
+                    });
+                    ui.label(
+                        egui::RichText::new(refresh_method)
+                            .size(13.0)
+                            .color(t.foreground),
+                    );
+                    ui.monospace(egui::RichText::new(last_sync).color(t.muted_foreground));
+                    ui.horizontal(|ui| {
+                        if design::button_with_icon(
+                            ui,
+                            Icon::Refresh,
+                            "refresh",
+                            ButtonVariant::Outline,
+                        )
+                        .clicked()
+                        {
+                            refreshed = Some(id);
                         }
-                    },
-                );
-            });
+                        if design::button(ui, "Delete", ButtonVariant::Destructive).clicked() {
+                            deleted = Some((id, name.clone()));
+                        }
+                    });
+                },
+            );
+        }
         if let Some(id) = picked {
             self.selected = Some(id);
             self.reload_rows(db, id);

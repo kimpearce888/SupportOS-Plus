@@ -473,7 +473,7 @@ impl SyncHealthPage {
         });
         ui.add_space(8.0);
 
-        design::card_titled(ui, "Checkpoints", None, |ui| {
+        design::card_titled_wide(ui, "Checkpoints", None, |ui| {
             if status.checkpoints.is_empty() {
                 design::empty_state(
                     ui,
@@ -482,67 +482,53 @@ impl SyncHealthPage {
                     "The checkpoint table fills after the first successful sync.",
                 );
             } else {
-                // UX-20: bounded height gives the list its own scrollbar
-                // (a scroll affordance) instead of running off the viewport.
-                egui::ScrollArea::vertical()
-                    .id_salt("sync-checkpoints")
-                    .max_height(300.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        // UX-20: `table_stretched` distributes the width so the
-                        // last column keeps its values beside its header —
-                        // the old content-hugging grid right-pinned "last
-                        // success" values to the far screen edge.
-                        design::table_stretched(
-                            ui,
-                            "sync-checkpoint-table",
-                            &[
-                                "Resource",
-                                "Status",
-                                "Processed",
-                                "Failed",
-                                "Retries",
-                                "Last Success",
-                            ],
-                            26.0,
-                            |ui| {
-                                let t = design::tokens(ui);
-                                for cp in &status.checkpoints {
-                                    ui.monospace(
-                                        egui::RichText::new(cp.resource.as_str())
-                                            .size(13.0)
-                                            .color(t.foreground),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(cp.status.as_str())
-                                            .size(13.0)
-                                            .color(t.foreground),
-                                    );
-                                    design::td_num(ui, &cp.records_processed.to_string());
-                                    design::td_num(ui, &cp.records_failed.to_string());
-                                    design::td_num(ui, &cp.retry_count.to_string());
-                                    let last =
-                                        cp.last_success_at.clone().unwrap_or_else(|| "—".into());
-                                    ui.monospace(egui::RichText::new(last.as_str()).size(12.5))
-                                        .on_hover_text(if last == "—" {
-                                            "This resource has never completed a sync.".to_string()
-                                        } else {
-                                            format!(
-                                                "{} ({})",
-                                                last,
-                                                crate::pages::relative_time(&last)
-                                            )
-                                        });
-                                    ui.end_row();
-                                }
-                            },
+                // UXG-1-5: exact-column data_table (virtualized rows built
+                // in) — the checkpoint list spans the card at every width;
+                // the last column keeps its values beside its header.
+                let checkpoints = &status.checkpoints;
+                design::data_table(
+                    ui,
+                    "sync-checkpoint-table",
+                    &[
+                        "Resource",
+                        "Status",
+                        "Processed",
+                        "Failed",
+                        "Retries",
+                        "Last Success",
+                    ],
+                    checkpoints.len(),
+                    26.0,
+                    |ui, i| {
+                        let t = design::tokens(ui);
+                        let cp = &checkpoints[i];
+                        ui.monospace(
+                            egui::RichText::new(cp.resource.as_str())
+                                .size(13.0)
+                                .color(t.foreground),
                         );
-                    });
+                        ui.label(
+                            egui::RichText::new(cp.status.as_str())
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        design::td_num(ui, &cp.records_processed.to_string());
+                        design::td_num(ui, &cp.records_failed.to_string());
+                        design::td_num(ui, &cp.retry_count.to_string());
+                        let last = cp.last_success_at.clone().unwrap_or_else(|| "—".into());
+                        ui.monospace(egui::RichText::new(last.as_str()).size(12.5))
+                            .on_hover_text(if last == "—" {
+                                "This resource has never completed a sync.".to_string()
+                            } else {
+                                format!("{} ({})", last, crate::pages::relative_time(&last))
+                            });
+                    },
+                );
             }
         });
         ui.add_space(8.0);
 
-        design::card_titled(ui, "Recent runs", None, |ui| {
+        design::card_titled_wide(ui, "Recent runs", None, |ui| {
             if status.runs.is_empty() {
                 design::empty_state(
                     ui,
@@ -551,52 +537,46 @@ impl SyncHealthPage {
                     "Runs appear here after the first sync.",
                 );
             } else {
-                // UX-20: bounded height so the runs list scrolls in place
-                // instead of being clipped at the viewport edge.
-                egui::ScrollArea::vertical()
-                    .id_salt("sync-runs")
-                    .max_height(320.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        design::table_stretched(
-                            ui,
-                            "sync-run-table",
-                            &[
-                                "Id",
-                                "Kind",
-                                "State",
-                                "Started",
-                                "Resources",
-                                "Records",
-                                "Errors",
-                            ],
-                            26.0,
-                            |ui| {
-                                let t = design::tokens(ui);
-                                for run in &status.runs {
-                                    design::td_num(ui, &run.id.to_string());
-                                    ui.label(
-                                        egui::RichText::new(run.kind.as_str())
-                                            .size(13.0)
-                                            .color(t.foreground),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(run.state.as_str())
-                                            .size(13.0)
-                                            .color(t.foreground),
-                                    );
-                                    design::td_num(ui, run.started_at.as_str());
-                                    design::td_num(
-                                        ui,
-                                        &format!("{}/{}", run.resources_done, run.resources_total),
-                                    );
-                                    design::td_num(ui, &run.records_processed.to_string());
-                                    design::td_num(ui, &run.errors.to_string());
-                                    ui.end_row();
-                                }
-                            },
+                // UXG-1-5: exact-column data_table (virtualized rows built
+                // in) — the runs list spans the card at every width.
+                let runs = &status.runs;
+                design::data_table(
+                    ui,
+                    "sync-run-table",
+                    &[
+                        "Id",
+                        "Kind",
+                        "State",
+                        "Started",
+                        "Resources",
+                        "Records",
+                        "Errors",
+                    ],
+                    runs.len(),
+                    26.0,
+                    |ui, i| {
+                        let t = design::tokens(ui);
+                        let run = &runs[i];
+                        design::td_num(ui, &run.id.to_string());
+                        ui.label(
+                            egui::RichText::new(run.kind.as_str())
+                                .size(13.0)
+                                .color(t.foreground),
                         );
-                    });
+                        ui.label(
+                            egui::RichText::new(run.state.as_str())
+                                .size(13.0)
+                                .color(t.foreground),
+                        );
+                        design::td_num(ui, run.started_at.as_str());
+                        design::td_num(
+                            ui,
+                            &format!("{}/{}", run.resources_done, run.resources_total),
+                        );
+                        design::td_num(ui, &run.records_processed.to_string());
+                        design::td_num(ui, &run.errors.to_string());
+                    },
+                );
             }
         });
         ui.add_space(8.0);

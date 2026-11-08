@@ -555,8 +555,13 @@ impl ReportsPage {
         });
         ui.add_space(10.0);
 
-        design::card(ui, |ui| {
-            design::table(
+        // UXG-1-3: the SLA list migrates to the exact-column data_table
+        // (hosted in a full-width titled card, the Jobs/Usage register) —
+        // the natural-width table hugged its content and could overflow
+        // its card on narrow windows; the data_table spans the card at
+        // every width.
+        design::card_titled_wide(ui, "SLA by mailbox", None, |ui| {
+            design::data_table(
                 ui,
                 "reports-sla-table",
                 &[
@@ -568,48 +573,47 @@ impl ReportsPage {
                     "res avg (min)",
                     "waiting oldest (min)",
                 ],
+                report.mailboxes.len(),
                 28.0,
-                |ui| {
+                |ui, i| {
                     let t = design::tokens(ui);
-                    for row in &report.mailboxes {
-                        ui.label(
-                            egui::RichText::new(row.mailbox_name.as_str())
-                                .size(13.0)
-                                .strong()
-                                .color(t.foreground),
-                        );
-                        design::td_num(ui, &row.conversations_in_range.to_string());
-                        design::td_num(
-                            ui,
-                            &format!("{}/{}", row.first_response.met, row.first_response.missed),
-                        );
-                        design::td_num(
-                            ui,
-                            &row.first_response
-                                .avg_business_min
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(|| "—".into()),
-                        );
-                        design::td_num(
-                            ui,
-                            &format!("{}/{}", row.resolution.met, row.resolution.missed),
-                        );
-                        design::td_num(
-                            ui,
-                            &row.resolution
-                                .avg_business_min
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(|| "—".into()),
-                        );
-                        design::td_num(
-                            ui,
-                            &row.waiting
-                                .oldest_business_min
-                                .map(|v| v.to_string())
-                                .unwrap_or_else(|| "—".into()),
-                        );
-                        ui.end_row();
-                    }
+                    let row = &report.mailboxes[i];
+                    ui.label(
+                        egui::RichText::new(row.mailbox_name.as_str())
+                            .size(13.0)
+                            .strong()
+                            .color(t.foreground),
+                    );
+                    design::td_num(ui, &row.conversations_in_range.to_string());
+                    design::td_num(
+                        ui,
+                        &format!("{}/{}", row.first_response.met, row.first_response.missed),
+                    );
+                    design::td_num(
+                        ui,
+                        &row.first_response
+                            .avg_business_min
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "—".into()),
+                    );
+                    design::td_num(
+                        ui,
+                        &format!("{}/{}", row.resolution.met, row.resolution.missed),
+                    );
+                    design::td_num(
+                        ui,
+                        &row.resolution
+                            .avg_business_min
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "—".into()),
+                    );
+                    design::td_num(
+                        ui,
+                        &row.waiting
+                            .oldest_business_min
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "—".into()),
+                    );
                 },
             );
         });
@@ -971,7 +975,9 @@ impl ReportsPage {
             None => design::hint_text(ui, "run a report to see its rows"),
             Some(Err(e)) => design::error_text(ui, &format!("error: {e}")),
             Some(Ok(outcome)) => {
-                design::card_titled(
+                // UXG-1-3: full-width card + exact-column data_table — the
+                // outcome rows span the card at every width.
+                design::card_titled_wide(
                     ui,
                     &format!("{} — {}", outcome.metric.label, outcome.dimension.label),
                     Some(&format!(
@@ -996,8 +1002,14 @@ impl ReportsPage {
                             } else {
                                 vec!["group", "value"]
                             };
-                            design::table(ui, "b-rows", &headers, 24.0, |ui| {
-                                for row in &outcome.rows {
+                            design::data_table(
+                                ui,
+                                "b-rows",
+                                &headers,
+                                outcome.rows.len(),
+                                24.0,
+                                |ui, i| {
+                                    let row = &outcome.rows[i];
                                     ui.label(&row.dimension_label);
                                     design::td_num(
                                         ui,
@@ -1017,9 +1029,8 @@ impl ReportsPage {
                                             None => design::td_num(ui, "—"),
                                         }
                                     }
-                                    ui.end_row();
-                                }
-                            });
+                                },
+                            );
                         }
                         ui.add_space(4.0);
                         for note in &outcome.notes {
@@ -1281,7 +1292,10 @@ impl ReportsPage {
                         "(no friction scores stored — recompute to fill the table)",
                     );
                 } else {
-                    design::table(
+                    // UXG-1-3: exact-column data_table — the friction list
+                    // spans the card at every width.
+                    let friction_top = &self.i_friction_top;
+                    design::data_table(
                         ui,
                         "insights-friction",
                         &[
@@ -1292,44 +1306,43 @@ impl ReportsPage {
                             "reopens",
                             "escalated",
                         ],
+                        friction_top.len(),
                         24.0,
-                        |ui| {
-                            for (conv, score, factors) in &self.i_friction_top {
-                                design::td_num(ui, &conv.to_string());
-                                design::td_num(ui, &format!("{score:.2}"));
-                                design::td_num(
-                                    ui,
-                                    &factors
-                                        .get("message_count")
-                                        .and_then(serde_json::Value::as_u64)
-                                        .map(|v| v.to_string())
-                                        .unwrap_or_else(|| "—".into()),
-                                );
-                                design::td_num(
-                                    ui,
-                                    &factors
-                                        .get("resolution_hours")
-                                        .and_then(serde_json::Value::as_f64)
-                                        .map(|v| format!("{v:.1} h"))
-                                        .unwrap_or_else(|| "—".into()),
-                                );
-                                design::td_num(
-                                    ui,
-                                    &factors
-                                        .get("reopen_count")
-                                        .and_then(serde_json::Value::as_u64)
-                                        .map(|v| v.to_string())
-                                        .unwrap_or_else(|| "—".into()),
-                                );
-                                ui.label(
-                                    factors
-                                        .get("escalated")
-                                        .and_then(serde_json::Value::as_bool)
-                                        .map(|b| if b { "yes" } else { "no" })
-                                        .unwrap_or("—"),
-                                );
-                                ui.end_row();
-                            }
+                        |ui, i| {
+                            let (conv, score, factors) = &friction_top[i];
+                            design::td_num(ui, &conv.to_string());
+                            design::td_num(ui, &format!("{score:.2}"));
+                            design::td_num(
+                                ui,
+                                &factors
+                                    .get("message_count")
+                                    .and_then(serde_json::Value::as_u64)
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "—".into()),
+                            );
+                            design::td_num(
+                                ui,
+                                &factors
+                                    .get("resolution_hours")
+                                    .and_then(serde_json::Value::as_f64)
+                                    .map(|v| format!("{v:.1} h"))
+                                    .unwrap_or_else(|| "—".into()),
+                            );
+                            design::td_num(
+                                ui,
+                                &factors
+                                    .get("reopen_count")
+                                    .and_then(serde_json::Value::as_u64)
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| "—".into()),
+                            );
+                            ui.label(
+                                factors
+                                    .get("escalated")
+                                    .and_then(serde_json::Value::as_bool)
+                                    .map(|b| if b { "yes" } else { "no" })
+                                    .unwrap_or("—"),
+                            );
                         },
                     );
                 }
@@ -1379,27 +1392,28 @@ impl ReportsPage {
                 if nodes.is_empty() {
                     design::hint_text(ui, "(no nodes stored)");
                 } else {
-                    design::table(
+                    // UXG-1-3: exact-column data_table — the node list spans
+                    // the card at every width.
+                    design::data_table(
                         ui,
                         "insights-graph",
                         &["Kind", "Label", "Entity", "Created", ""],
+                        nodes.len(),
                         24.0,
-                        |ui| {
-                            for node in &nodes {
-                                ui.label(node.kind.as_str());
-                                ui.label(node.label.as_deref().unwrap_or("—"));
-                                design::td_num(
-                                    ui,
-                                    &node
-                                        .entity_id
-                                        .map(|e| e.to_string())
-                                        .unwrap_or_else(|| "—".into()),
-                                );
-                                design::td_num(ui, &node.created_at);
-                                if design::button(ui, "Inspect", ButtonVariant::Outline).clicked() {
-                                    self.inspect_graph_node(db, node.id);
-                                }
-                                ui.end_row();
+                        |ui, i| {
+                            let node = &nodes[i];
+                            ui.label(node.kind.as_str());
+                            ui.label(node.label.as_deref().unwrap_or("—"));
+                            design::td_num(
+                                ui,
+                                &node
+                                    .entity_id
+                                    .map(|e| e.to_string())
+                                    .unwrap_or_else(|| "—".into()),
+                            );
+                            design::td_num(ui, &node.created_at);
+                            if design::button(ui, "Inspect", ButtonVariant::Outline).clicked() {
+                                self.inspect_graph_node(db, node.id);
                             }
                         },
                     );
@@ -1718,30 +1732,31 @@ impl ReportsPage {
             );
             return;
         }
-        design::table(
+        // UXG-1-3: exact-column data_table — the ratings list spans the
+        // content column at every width.
+        design::data_table(
             ui,
             "p1-happiness-list",
             &["Rating", "Conversation", "Customer", "Comment"],
+            recent.len(),
             28.0,
-            |ui| {
-                for r in &recent {
-                    let rating = str_field(r, "rating");
-                    if rating == "great" {
-                        ui.label(egui::RichText::new("Great").color(ui.visuals().hyperlink_color));
-                    } else if rating == "not-good" {
-                        design::badge(ui, "Not good", BadgeTone::Destructive);
-                    } else {
-                        ui.label("Okay");
-                    }
-                    let number = r["conversation_number"].as_i64();
-                    design::td_num(
-                        ui,
-                        &number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
-                    );
-                    ui.label(str_field(r, "customer"));
-                    ui.label(str_field(r, "comments"));
-                    ui.end_row();
+            |ui, i| {
+                let r = &recent[i];
+                let rating = str_field(r, "rating");
+                if rating == "great" {
+                    ui.label(egui::RichText::new("Great").color(ui.visuals().hyperlink_color));
+                } else if rating == "not-good" {
+                    design::badge(ui, "Not good", BadgeTone::Destructive);
+                } else {
+                    ui.label("Okay");
                 }
+                let number = r["conversation_number"].as_i64();
+                design::td_num(
+                    ui,
+                    &number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
+                );
+                ui.label(str_field(r, "customer"));
+                ui.label(str_field(r, "comments"));
             },
         );
     }

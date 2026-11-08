@@ -265,6 +265,64 @@ fn render_dashboard_page(dark: bool, width: f32, name: &str) {
     h.snapshot(name);
 }
 
+/// UXG-1-9: the all-display tiers — 2K (2560) and 4K (3840) logical
+/// widths through the same funnel the shell renders every standard page
+/// in: the full-width CentralPanel background, then `content_column`,
+/// then the margin frame. The KPI grid keeps its 6-column tier inside a
+/// centered 1800px column instead of stretching cards to the window
+/// edge (the owner's 2K bug report class).
+fn render_dashboard_page_capped(dark: bool, width: f32, name: &str) {
+    let (page, db) = seeded_page();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(width, 900.0))
+        .with_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        })
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                let bg = design::tokens(ui).background;
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::new().fill(bg))
+                    .show_inside(ui, |ui| {
+                        design::content_column(ui, |ui| {
+                            egui::Frame::new()
+                                .fill(egui::Color32::TRANSPARENT)
+                                .inner_margin(egui::Margin::symmetric(22, 14))
+                                .show(ui, |ui| s.page.ui(ui, &s.db, None));
+                        });
+                    });
+            },
+            DashboardPageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    h.snapshot(name);
+}
+
+#[test]
+fn uxg_dashboard_capped_2560_light() {
+    render_dashboard_page_capped(false, 2560.0, "uxg_dashboard_capped_2560_light");
+}
+
+#[test]
+fn uxg_dashboard_capped_3840_light() {
+    render_dashboard_page_capped(false, 3840.0, "uxg_dashboard_capped_3840_light");
+}
+
+#[test]
+fn uxg_dashboard_capped_2560_dark() {
+    render_dashboard_page_capped(true, 2560.0, "uxg_dashboard_capped_2560_dark");
+}
+
 #[test]
 fn r3_dashboard_page_1440_light() {
     render_dashboard_page(false, 1440.0, "r3_dashboard_page_1440_light");

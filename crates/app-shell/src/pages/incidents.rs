@@ -311,16 +311,14 @@ impl IncidentsPage {
     pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         self.ensure_loaded(db);
 
+        // UXG-1-7: one count register — the counter pill carries the
+        // incident count; the subtitle describes the page's scope and only
+        // breaks into numbers for the "first X of Y" truncation case (the
+        // old subtitle repeated the count the pill already showed).
         let subtitle = if (self.rows.len() as i64) < self.total {
-            format!(
-                "Showing the first {} of {} incidents",
-                self.rows.len(),
-                self.total
-            )
-        } else if self.total == 1 {
-            "1 incident".to_string()
+            format!("Showing the first {} of {}", self.rows.len(), self.total)
         } else {
-            format!("{} incidents", self.total)
+            "Track outages and recurring problems across conversations".to_string()
         };
 
         design::page_header(ui, "Incidents", Some(&subtitle), |ui| {

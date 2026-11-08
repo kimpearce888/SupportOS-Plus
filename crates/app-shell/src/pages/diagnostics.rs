@@ -334,7 +334,7 @@ impl DiagnosticsPage {
             audit.len(),
             if audit.len() == 1 { "" } else { "s" }
         );
-        design::card_titled(ui, "Audit trail", Some(&audit_subtitle), |ui| {
+        design::card_titled_wide(ui, "Audit trail", Some(&audit_subtitle), |ui| {
             if audit.is_empty() {
                 design::hint_text(
                     ui,
@@ -343,44 +343,45 @@ impl DiagnosticsPage {
                 );
                 return;
             }
-            design::table(
+            // UXG-1-5: exact-column data_table — the audit list spans the
+            // card at every width.
+            design::data_table(
                 ui,
                 "diagnostics-audit",
                 &["When", "Actor", "Action", "Conversation", "AI"],
+                audit.len(),
                 24.0,
-                |ui| {
-                    for row in &audit {
-                        ui.monospace(
-                            egui::RichText::new(row.timestamp.as_str())
-                                .size(12.0)
-                                .weak(),
-                        );
-                        let (actor_tone, actor_label) = if row.actor == "ai" {
-                            (BadgeTone::Ai, row.actor.as_str())
-                        } else {
-                            (BadgeTone::Neutral, row.actor.as_str())
-                        };
-                        design::badge(ui, actor_label, actor_tone);
-                        ui.label(
-                            egui::RichText::new(row.action.as_str())
-                                .size(12.5)
-                                .color(design::tokens(ui).foreground),
-                        );
-                        ui.monospace(
-                            egui::RichText::new(
-                                row.conversation_id
-                                    .map_or_else(|| "—".to_string(), |cid| cid.to_string()),
-                            )
-                            .size(12.5),
-                        );
-                        let (tone, label) = if row.ai_involvement {
-                            (BadgeTone::Ai, "ai")
-                        } else {
-                            (BadgeTone::Neutral, "—")
-                        };
-                        design::badge(ui, label, tone);
-                        ui.end_row();
-                    }
+                |ui, i| {
+                    let row = &audit[i];
+                    ui.monospace(
+                        egui::RichText::new(row.timestamp.as_str())
+                            .size(12.0)
+                            .weak(),
+                    );
+                    let (actor_tone, actor_label) = if row.actor == "ai" {
+                        (BadgeTone::Ai, row.actor.as_str())
+                    } else {
+                        (BadgeTone::Neutral, row.actor.as_str())
+                    };
+                    design::badge(ui, actor_label, actor_tone);
+                    ui.label(
+                        egui::RichText::new(row.action.as_str())
+                            .size(12.5)
+                            .color(design::tokens(ui).foreground),
+                    );
+                    ui.monospace(
+                        egui::RichText::new(
+                            row.conversation_id
+                                .map_or_else(|| "—".to_string(), |cid| cid.to_string()),
+                        )
+                        .size(12.5),
+                    );
+                    let (tone, label) = if row.ai_involvement {
+                        (BadgeTone::Ai, "ai")
+                    } else {
+                        (BadgeTone::Neutral, "—")
+                    };
+                    design::badge(ui, label, tone);
                 },
             );
             egui::ScrollArea::vertical()
@@ -424,7 +425,7 @@ impl DiagnosticsPage {
         });
         ui.add_space(10.0);
 
-        design::card_titled(
+        design::card_titled_wide(
             ui,
             "Sync reports",
             Some("The outcome of every recent sync run (newest first)."),
@@ -437,36 +438,37 @@ impl DiagnosticsPage {
                     );
                     return;
                 }
-                design::table_stretched(
+                // UXG-1-5: exact-column data_table — the runs list spans
+                // the card at every width (virtualized rows built in).
+                design::data_table(
                     ui,
                     "diagnostics-runs",
                     &["Run", "Kind", "State", "Records", "Errors", "Started"],
+                    runs.len(),
                     24.0,
-                    |ui| {
-                        for run in &runs {
-                            ui.monospace(egui::RichText::new(run.id.to_string()).size(12.5));
-                            ui.monospace(egui::RichText::new(run.kind.as_str()).size(12.5));
-                            let tone = match run.state.as_str() {
-                                "LIVE" => BadgeTone::Success,
-                                "ERROR" => BadgeTone::Destructive,
-                                "NEW" => BadgeTone::Neutral,
-                                "CATCHING_UP" => BadgeTone::Info,
-                                _ => BadgeTone::Warning,
-                            };
-                            design::badge(ui, &run.state, tone);
-                            design::td_num(ui, &run.records_processed.to_string());
-                            design::td_num(ui, &run.errors.to_string());
-                            ui.monospace(
-                                egui::RichText::new(
-                                    run.finished_at
-                                        .clone()
-                                        .unwrap_or_else(|| run.started_at.clone()),
-                                )
-                                .size(12.0)
-                                .weak(),
-                            );
-                            ui.end_row();
-                        }
+                    |ui, i| {
+                        let run = &runs[i];
+                        ui.monospace(egui::RichText::new(run.id.to_string()).size(12.5));
+                        ui.monospace(egui::RichText::new(run.kind.as_str()).size(12.5));
+                        let tone = match run.state.as_str() {
+                            "LIVE" => BadgeTone::Success,
+                            "ERROR" => BadgeTone::Destructive,
+                            "NEW" => BadgeTone::Neutral,
+                            "CATCHING_UP" => BadgeTone::Info,
+                            _ => BadgeTone::Warning,
+                        };
+                        design::badge(ui, &run.state, tone);
+                        design::td_num(ui, &run.records_processed.to_string());
+                        design::td_num(ui, &run.errors.to_string());
+                        ui.monospace(
+                            egui::RichText::new(
+                                run.finished_at
+                                    .clone()
+                                    .unwrap_or_else(|| run.started_at.clone()),
+                            )
+                            .size(12.0)
+                            .weak(),
+                        );
                     },
                 );
             },
@@ -494,7 +496,7 @@ impl DiagnosticsPage {
             "{} delivered · {} queued · {} sending · {} failed",
             out_stats.confirmed, out_stats.queued, out_stats.sending, out_stats.failed
         );
-        design::card_titled(ui, "Outbound deliveries", Some(&out_subtitle), |ui| {
+        design::card_titled_wide(ui, "Outbound deliveries", Some(&out_subtitle), |ui| {
             if failed_rows.is_empty() {
                 design::hint_text(
                     ui,
@@ -502,34 +504,23 @@ impl DiagnosticsPage {
                          assignments are dispatched to Help Scout within seconds.",
                 );
             } else {
-                // UX-21: same stretched+bounded treatment as the runs table —
-                // the trailing error column stays beside its header and the
-                // list scrolls in place instead of clipping at the viewport.
-                egui::ScrollArea::vertical()
-                    .id_salt("diagnostics-outbound-scroll")
-                    .max_height(220.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        design::table_stretched(
-                            ui,
-                            "diagnostics-outbound",
-                            &["Job", "Kind", "At", "Error"],
-                            22.0,
-                            |ui| {
-                                for (id, kind, at, error) in &failed_rows {
-                                    ui.monospace(egui::RichText::new(id.to_string()).size(12.5));
-                                    ui.monospace(egui::RichText::new(kind.as_str()).size(12.5));
-                                    ui.monospace(
-                                        egui::RichText::new(at.as_str()).size(12.0).weak(),
-                                    );
-                                    ui.monospace(
-                                        egui::RichText::new(error.as_str()).size(11.5).weak(),
-                                    );
-                                    ui.end_row();
-                                }
-                            },
-                        );
-                    });
+                // UXG-1-5: exact-column data_table (virtualized rows built
+                // in) — the failed-delivery list spans the card at every
+                // width; the trailing error column stays beside its header.
+                design::data_table(
+                    ui,
+                    "diagnostics-outbound",
+                    &["Job", "Kind", "At", "Error"],
+                    failed_rows.len(),
+                    22.0,
+                    |ui, i| {
+                        let (id, kind, at, error) = &failed_rows[i];
+                        ui.monospace(egui::RichText::new(id.to_string()).size(12.5));
+                        ui.monospace(egui::RichText::new(kind.as_str()).size(12.5));
+                        ui.monospace(egui::RichText::new(at.as_str()).size(12.0).weak());
+                        ui.monospace(egui::RichText::new(error.as_str()).size(11.5).weak());
+                    },
+                );
             }
         });
         if clear_requested {

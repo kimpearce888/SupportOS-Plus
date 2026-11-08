@@ -8526,3 +8526,107 @@ batch push (1a60476..e40dd63) went green on the first push — CI run
 baselines + the 4 new UXF-1-7 locks held cross-runner through lavapipe).
 Rule 8 STOP — the queue is empty; the next work item requires a new
 owner directive.
+
+## Batch UXG-1 — 2026-11-08 — All-display design discipline + cross-page consistency sweep (items UXG-1-1..UXG-1-10)
+
+Opened on the owner's all-display directive ("work on all size of monitors
+i use a 2k one and it should also work on 4k or 8k, and all the pages
+should have been designed with same design principle, all the pages, all
+the items. please do that make everything correct"); the batch also
+consumed the four deferred queue candidates (UXF-1-4 chrome header,
+UXF-1-5 table width-defect sweep, customers "Last Contact" raw-ISO,
+incidents header count duplication). Everything inside the existing
+Rust/egui codebase and design system — no new dependencies.
+
+**UXG-1-1 — one content-column width discipline (the 2K/4K/8K fix).**
+`design::scale::CONTENT_MAX` (1800) + `design::centered_column` /
+`design::content_column` helpers (exact-`max_rect` child scope via
+`scope_builder`: full width to the cap, a centered exact-width column
+above it; below the cap the rect IS the available rect — pixel-identical
+to an uncapped render). The shell's non-inbox page funnel wraps every
+standard page in it, so all 23 standard pages share one width anatomy
+from a 980px window to an 8K display: full-width background, centered
+1800px column above ~2060px of window width. 1800 fits the dashboard's
+6-column KPI tier (~295px tiles) and 7–9 column data tables.
+
+**UXG-1-2 — inbox reader reading measure.** `design::scale::
+READER_MEASURE` (860) — the reader pane's content (head, action bar,
+thread, triage/QA cards) and the composer panel ride
+`centered_column(READER_MEASURE)`, centered in the pane: the Gmail/Help
+Scout wide-window register. Every ≤1440 golden state sits under the cap
+and renders unchanged; 1625+ states cap (5 inbox goldens regenerated).
+
+**UXG-1-3/4/5 — table width-defect sweep (UXF-1-5).** All 17 remaining
+natural-width `design::table` / `table_stretched` page-level lists
+migrated to `design::data_table` (exact integer columns, header strip,
+gated 90px floor, virtualized rows — the redundant outer ScrollAreas
+dropped): reports ×5 (SLA tab in a new full-width "SLA by mailbox"
+titled card, builder outcome rows, insights friction + graph nodes,
+happiness list), knowledge ×3 (documents, sources in a new titled card,
+articles), operations (team workload), diagnostics ×3 (audit trail, sync
+runs, outbound failures — the connectors list also gained the empty
+state the other lists already had), automation (rules), connectors,
+sync_health ×2 (checkpoints, runs), customers detail (conversations).
+The legacy `table`/`table_stretched`/`table_impl` helpers are deleted —
+zero callers remain; the design-smoke lib test renders `data_table`.
+
+**UXG-1-6 — customers "Last Contact".** The raw-ISO `last_activity_at`
+column renders through the shared `relative_time` helper ("270d ago",
+"Yesterday", "Never") — no more ellipsized ISO strings in the 140px
+column; deterministic under the kittest clock pin.
+
+**UXG-1-7 — incidents header count dedup.** The subtitle no longer
+repeats the count the `page_counter` pill already carries: the pill is
+the one count register; the subtitle describes scope ("Track outages and
+recurring problems across conversations") and only breaks into numbers
+for the "Showing the first X of Y" truncation case.
+
+**UXG-1-8 — chrome header balance (UXF-1-4).** The 48px top bar carries
+the active page's label on the left (`PageKey::label`, LEAD strong) with
+the same anatomy as `page_header` — the right-only toolbar read
+unbalanced, worse the wider the display.
+
+**UXG-1-9 — all-display locks + two verification-surfaced fixes.**
+New locks: `uxg_dashboard_capped_2560_light/dark`, `uxg_3840_light`
+(dashboard through the shell funnel composition: CentralPanel background
+→ content_column → margin frame), `uxg_reports_capped_3840_light` (SLA
+tab — the swept seven-column table at 4K), `uxg_reports_capped_
+2560_dark`, `uxg_reports_sla_tab_1440_light`, `uxg_reports_insights_
+tab_1440_light`, `uxg_inbox_reader_2560_light`; the 8K (7680) tier is
+proven by exact pixel probes in the new `kittest_wide_displays` suite
+(no multi-megabyte golden): the content column holds at CONTENT_MAX
+centered, the reading measure at READER_MEASURE centered, and the real
+inbox at 7680 keeps its reader subject inside the 860px measure and
+centered (x > 3000). Verification surfaced and fixed two real defects:
+(a) the reports SLA stats read the unpinned wall clock ("waiting oldest
+(min)" ticked every real minute — the first SLA golden drifted +31
+minutes between two runs 31 minutes apart); the reports fixture now
+pins the kittest clock (UXB-T1 mechanism) to its own anchor, and the
+default-tab goldens held unchanged; (b) the trend chart's 6px plot
+inset let the line's endpoints land inside the corner-label bands
+whenever the series' max sat at its first/last day — `plot_inner`
+reserves the label bands (8/20/18), gridlines stay inside the plot, and
+the chart unit tests pin the new geometry. The old
+`r3_diagnostics_errors_filter` test was clicking a non-interactive
+table-header label (its golden silently captured the UNfiltered log);
+the contains-query now clicks the real "Errors N" chip.
+
+**UXG-1-10 — full battery on the final code.** Gates (no-simulation,
+traceability) ✓; fmt `--all --check` ✓; verify-icons ✓; clippy workspace
+`--all-targets -D warnings` 0 ✓; clippy sandbox `-D warnings` 0 ✓; clippy
+kittest lane: only the two pre-existing `kittest_list_pages.rs` warnings
+(the documented known state) ✓; tests core 459 + app-shell 249 (incl. the
+new chart-geometry tests) + catalog/xtask 11 = 719 passed 0 failed ✓;
+sandbox-feature tests 467 ✓; kittest diff-locked ×2 on the final
+baselines — 29 suites, 447 tests, 0 failed (61 regenerated + 8 new
+goldens) ✓; SPP_SMOKE 24 pages · 4348 shapes ✓. Acceptance evidence:
+pixel probes primary — the capped column centers within 1px at 2560
+(gutters 402/403) and 3840 (1042/1043); the SLA data table's seven
+values end exactly on their seven columns' right edges (right-aligned
+register); the chart labels clear the line by 4px; VLM read-backs
+confirm the chart fix, the clean composer boundary, and the 2K dark
+dashboard (PASS) — the VLM's 4K centering/table-alignment claims were
+contradicted by the exact pixel measurements (the documented VLM
+measurement unreliability at large scales; UXE-2 precedent: pixel probes
+are primary where a read-back is ambiguous).
+

@@ -1,7 +1,23 @@
 ## Active items
 
-(none — Batch UXF-1 closed 2026-11-08, record in `completed.md`; Rule 8
+(none — Batch UXG-1 closed 2026-11-08, record in `completed.md`; Rule 8
 STOP, the queue is empty, new work opens only on an owner directive.)
+
+Batch UXG-1 (all-display design discipline + cross-page consistency
+sweep, items UXG-1-1..UXG-1-10) moved through this file per Rules 2 and
+4 on 2026-11-08 — opened on the owner's all-display directive ("work on
+all size of monitors i use a 2k one and it should also work on 4k or 8k,
+and all the pages should have been designed with same design principle,
+all the pages, all the items"), implemented (CONTENT_MAX 1800 +
+content_column in the shell funnel; READER_MEASURE 860 for the inbox
+reader/composer; the 17-table data_table sweep with the legacy helpers
+deleted; customers relative-time; incidents count dedup; the chrome
+header page label; 2560/3840 goldens + 8K pixel probes; two
+verification-surfaced fixes — the reports SLA clock pin and the chart
+label-band reservation), verified (gates, fmt, clippy ×3 lanes, tests
+719+467-sandbox, kittest diff-locked ×2 on 447 tests with 61 regenerated
++ 8 new goldens, SPP_SMOKE 24 pages · 4348 shapes, pixel probes +
+VLM read-backs), and closed the same session (record in `completed.md`).
 
 Batch UXF-1 (AI Center layout repair + golden-eval functional fix, items
 UXF-1-1..UXF-1-8 + the owner-correction item UXF-2-1) moved through this

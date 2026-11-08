@@ -7,27 +7,100 @@
 
 ## Queue state
 
-**Batch UXF-1 (AI Center layout repair + golden-eval functional fix)
-CONSUMED 2026-11-08: items UXF-1-1..UXF-1-8 + the owner-correction item
-UXF-2-1 moved to `progress.md` per Rule 2, implemented, verified (full
-battery incl. two shared-system root-cause fixes the verification
-surfaced — the badge/chip phantom Grid cell and the data_table CELL_PAD —
-with 65 goldens regenerated + 4 new locks; see `completed.md`), and
-closed the same session. The queue is EMPTY again. New work opens only
-on an owner directive.** Sixth sandbox recycle for the record: repo
-re-cloned at 1a60476 (UXE-2 close), Rust 1.99.1 + lavapipe/xkb prefix
-rebuilt, HEAD verified rendering-clean before any edit.
+**Batch UXG-1 (all-display design discipline + cross-page consistency
+sweep) CONSUMED 2026-11-08: items UXG-1-1..UXG-1-10 moved to
+`progress.md` per Rule 2, implemented, verified (full battery incl. two
+verification-surfaced fixes — the reports SLA clock pin and the chart
+label-band reservation — with 61 goldens regenerated + 8 new locks; see
+`completed.md`), and closed the same session. The queue is EMPTY again.
+New work opens only on an owner directive.** The batch consumed the four
+deferred queue candidates (UXF-1-4 chrome header balance, UXF-1-5 table
+width-defect sweep, customers "Last Contact" raw-ISO, incidents header
+count duplication) plus the new all-display width discipline
+(CONTENT_MAX 1800 centered column through the shell funnel; READER_
+MEASURE 860 for the inbox reader/composer; 2560/3840 goldens + 8K
+pixel probes).
 
-**Deferred candidates (queue, owner direction needed): UXF-1-4 (chrome
-header balance — right-only 48px toolbar), UXF-1-5 (table width-defect
-class sweep — the remaining natural-width `design::table`/
-`table_stretched` page-level lists on reports/knowledge/operations/
-diagnostics/automation/connectors/sync_health; the UXD-1-disclosed
-known-remaining right-edge overflow on Reports 800/1024 and the detail
-goldens), customers "Last Contact" raw-ISO timestamps ellipsizing in
-their 140px column (pre-existing, verified in the pre-batch goldens),
-and the incidents page header showing the incident count twice (subtitle
-+ page_counter).**
+**Deferred candidates (queue): NONE remaining — UXF-1-4 (chrome header
+balance), UXF-1-5 (table width-defect class sweep — the remaining
+natural-width `design::table`/`table_stretched` page-level lists on
+reports/knowledge/operations/diagnostics/automation/connectors/sync_
+health; the UXD-1-disclosed known-remaining right-edge overflow on
+Reports 800/1024 and the detail goldens), customers "Last Contact"
+raw-ISO timestamps ellipsizing in their 140px column, and the incidents
+page header showing the incident count twice (subtitle + page_counter)
+were all CONSUMED by Batch UXG-1 above on the owner's all-display
+directive (2026-11-08).**
+
+### UX-fix queue (EMPTY — Batch UXG-1 closed 2026-11-08)
+
+Opened on the owner's all-display directive ("work on all size of
+monitors i use a 2k one and it should also work on 4k or 8k, and all the
+pages should have been designed with same design principle, all the
+pages, all the items"); all ten items moved to `progress.md` per Rule 2,
+implemented, verified, and closed the same session (record in
+`completed.md`). Diagnosis: the non-inbox pages render at the
+full window width with no content-column cap — on a 2560-wide 2K display
+the content column is ~2300px, at 4K (3840 logical) ~3600px, at 8K
+(7680 logical) ~7400px: every card, table, chart and form stretches to
+absurd widths (the "broken on my monitor" class), and the inbox reader
+thread stretches the same way past ~1900px of pane width. Fix scope —
+one width discipline and one consistency pass over all 24 pages, inside
+the existing design system:
+
+- **UXG-1-1** — One content-column width discipline (the 2K/4K/8K fix):
+  a `design::scale::CONTENT_MAX` token (1800 — fits the dashboard's
+  6-column KPI tier and 7–9 column tables at professional column
+  widths) + a `design::content_column(ui, …)` helper (full width up to
+  the cap; a centered exact-width column above it, via an
+  exact-`max_rect` child scope). The shell's non-inbox page funnel wraps
+  every standard page in it — one principle, every page, from 720 to
+  7680 logical px; below the cap (windows ≤ ~2060px) the layout is
+  pixel-identical to today.
+- **UXG-1-2** — Inbox reader reading measure: the reader pane's content
+  (head, action bar, thread, triage/QA cards) and the composer panel cap
+  at a `READER_MEASURE` (860px) reading column, centered in the pane —
+  the Gmail/Help Scout wide-window register; unchanged below the cap
+  (every existing ≤1440 golden state), capped at 1920+ (the docked-1920
+  golden regenerates).
+- **UXG-1-3** — Table width-defect sweep A (reports): the five remaining
+  natural-width `design::table` lists on the reports page migrate to
+  `design::data_table` (header strip, exact integer columns, gated 90px
+  floor) so no reports list can overflow or hug at any width — closes
+  the UXD-1-disclosed known-remaining Reports right-edge overflow.
+- **UXG-1-4** — Table width-defect sweep B: knowledge ×3, operations ×1
+  migrate to `design::data_table`.
+- **UXG-1-5** — Table width-defect sweep C: diagnostics ×3, automation
+  ×1, connectors ×1, sync_health ×2, customers detail ×1 migrate to
+  `design::data_table` (the unconditional-90px-floor `table_stretched`
+  callers included) — with this, no page-level list uses the legacy
+  natural-width helpers anywhere.
+- **UXG-1-6** — Customers "Last Contact" column: the raw-ISO
+  `last_activity_at` stamps render through the shared `relative_time`
+  helper ("3d ago", "Yesterday") — no more ellipsized
+  `2026-02-10T08:00…` strings in the 140px column; deterministic under
+  the kittest clock pin.
+- **UXG-1-7** — Incidents page header count dedup: the subtitle and the
+  `page_counter` pill both state the incident count today — one count
+  register (the pill), the subtitle describes scope (and the
+  "showing the first X of Y" truncation case) instead of repeating it.
+- **UXG-1-8** — Chrome header balance (UXF-1-4): the 48px top bar
+  carries only right-aligned controls today — the active page's label
+  lands on the left (window-level context, the modern helpdesk
+  breadcrumb register; same anatomy as `page_header`: left title +
+  baseline-aligned right actions).
+- **UXG-1-9** — All-display proof + locks: new kittest goldens at 2560
+  (2K) and 3840 (4K logical) — dashboard + reports (a swept table page)
+  through `content_column`, and the inbox reader at 2560 — plus a 7680
+  (8K) pixel-probe test asserting the content column == CONTENT_MAX and
+  the reader thread == READER_MEASURE exactly (no giant golden); every
+  affected baseline regenerates (expected: reports/knowledge/operations/
+  diagnostics/automation/connectors/sync_health/customers table goldens
+  + the inbox 1920 docked golden).
+- **UXG-1-10** — Full battery: fmt/clippy (both lanes)/tests (core,
+  app-shell lib, style lint, xtask, sandbox)/kittest diff-locked ×2 on
+  the regenerated baselines/SPP_SMOKE, VLM read-backs at 2560/3840 both
+  themes, ledger close per Rules 4–5, push, CI green (Rule 8).
 
 **Batch UXE-2 (post-recycle verify-and-fix) CONSUMED 2026-11-08: items
 UXE-2-1..UXE-2-4 moved to `progress.md` per Rule 2, implemented,

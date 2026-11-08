@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use spp_core::db::DbHandle;
 
-use super::{i64_field, opt_str_field, str_field};
+use super::{i64_field, opt_str_field, relative_time, str_field};
 use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -438,9 +438,18 @@ impl CustomersPage {
                         140.0,
                         // UX-19: "—" carried no meaning — an absent contact
                         // date is explicit information, so say it.
-                        egui::RichText::new(row.last_contact.as_deref().unwrap_or("Never"))
-                            .size(design::scale::text::SMALL_HALF)
-                            .color(t.muted_foreground),
+                        // UXG-1-6: a raw ISO stamp ellipsizes in the 140px
+                        // column and reads as machine noise — the shared
+                        // relative-time formatter ("3d ago", "Yesterday")
+                        // keeps the column human at every width.
+                        egui::RichText::new(
+                            row.last_contact
+                                .as_deref()
+                                .map(relative_time)
+                                .unwrap_or_else(|| "Never".into()),
+                        )
+                        .size(design::scale::text::SMALL_HALF)
+                        .color(t.muted_foreground),
                         false,
                     );
                     ui.allocate_ui_with_layout(
@@ -837,33 +846,35 @@ fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent])
 
 fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationListItem]) {
     let t = design::tokens(ui);
-    design::card_titled(ui, "Conversations", None, |ui| {
+    design::card_titled_wide(ui, "Conversations", None, |ui| {
         if items.is_empty() {
             design::hint_text(ui, "(no conversations)");
             return;
         }
-        design::table_stretched(
+        // UXG-1-5: exact-column data_table — the conversation list spans
+        // the card at every width (the detail panel's own column, not the
+        // full page).
+        design::data_table(
             ui,
             "customer-conversations",
             &["#", "subject", "status", "updated"],
+            items.len(),
             26.0,
-            |ui| {
-                for item in items {
-                    design::td_num(ui, &item.number.to_string());
-                    ui.label(
-                        egui::RichText::new(item.subject.as_deref().unwrap_or("(no subject)"))
-                            .size(design::scale::text::CONTROL)
-                            .color(t.foreground),
-                    );
-                    let (tone, label) = design::status_tone(item.status.as_str());
-                    design::badge(ui, label, tone);
-                    ui.label(
-                        egui::RichText::new(item.updated_at.as_deref().unwrap_or("—"))
-                            .size(design::scale::text::CONTROL)
-                            .color(t.muted_foreground),
-                    );
-                    ui.end_row();
-                }
+            |ui, i| {
+                let item = &items[i];
+                design::td_num(ui, &item.number.to_string());
+                ui.label(
+                    egui::RichText::new(item.subject.as_deref().unwrap_or("(no subject)"))
+                        .size(design::scale::text::CONTROL)
+                        .color(t.foreground),
+                );
+                let (tone, label) = design::status_tone(item.status.as_str());
+                design::badge(ui, label, tone);
+                ui.label(
+                    egui::RichText::new(item.updated_at.as_deref().unwrap_or("—"))
+                        .size(design::scale::text::CONTROL)
+                        .color(t.muted_foreground),
+                );
             },
         );
     });
