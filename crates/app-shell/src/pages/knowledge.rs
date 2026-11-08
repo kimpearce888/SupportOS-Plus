@@ -1458,37 +1458,142 @@ impl KnowledgePage {
     }
 
     fn reader_ui(&mut self, ui: &mut egui::Ui, _db: &DbHandle, id: i64) {
-        if design::button(ui, "← back to list", ButtonVariant::Ghost).clicked() {
+        // UXH-1: the article reader rides the shared reading measure —
+        // the same READER_MEASURE column the inbox reader thread and
+        // composer hold — so back, title, meta and body read as one
+        // centered article surface instead of lines stretching across the
+        // content column on 2K/4K/8K displays.
+        let back = design::centered_column(ui, design::scale::READER_MEASURE, |ui| {
+            let back = design::button(ui, "← back to list", ButtonVariant::Ghost).clicked();
+            let Some((article, text)) = self.reader_text.clone() else {
+                design::hint_text(ui, &format!("Article {id} not found."));
+                return back;
+            };
+            design::section_title(ui, article.name.as_str());
+            design::hint_text(
+                ui,
+                &format!(
+                    "{} · {} · updated {}",
+                    article.collection_name.as_deref().unwrap_or("—"),
+                    article.status,
+                    article.updated_at.as_deref().unwrap_or("—")
+                ),
+            );
+            design::divider(ui);
+            egui::ScrollArea::vertical()
+                .id_salt("docs-reader")
+                .show(ui, |ui| {
+                    article_body_ui(ui, &text);
+                });
+            back
+        })
+        .inner;
+        if back {
             self.reader = None;
             self.reader_text = None;
-            return;
         }
-        let Some((article, text)) = self.reader_text.clone() else {
-            design::hint_text(ui, &format!("Article {id} not found."));
-            return;
-        };
-        design::section_title(ui, article.name.as_str());
-        design::hint_text(
-            ui,
-            &format!(
-                "{} · {} · updated {}",
-                article.collection_name.as_deref().unwrap_or("—"),
-                article.status,
-                article.updated_at.as_deref().unwrap_or("—")
-            ),
-        );
-        design::divider(ui);
-        egui::ScrollArea::vertical()
-            .id_salt("docs-reader")
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(text)
-                        .monospace()
-                        .size(14.0)
-                        .color(design::tokens(ui).foreground),
-                );
-            });
     }
+}
+
+/// UXH-1: split the sanitized span stream into rendering blocks at its
+/// newline separators. `html_to_spans` emits a plain all-newline span
+/// between blocks — `\n` for soft breaks and list items, `\n\n` for
+/// paragraph gaps — so the reader can lay each paragraph, heading, list
+/// item or code block out as its own flowing unit. Each block is
+/// `(gap_before, spans)`; the gap counts the newlines of the separator
+/// that preceded it (0 for the first block).
+fn article_blocks(spans: &[spp_core::richtext::Span]) -> Vec<(usize, &[spp_core::richtext::Span])> {
+    let mut blocks: Vec<(usize, &[spp_core::richtext::Span])> = Vec::new();
+    let mut start = 0usize;
+    let mut gap = 0usize;
+    for (i, span) in spans.iter().enumerate() {
+        let separator = span.style == spp_core::richtext::SpanStyle::default()
+            && span.text.chars().all(|c| c == '\n');
+        if separator {
+            if i > start {
+                blocks.push((gap, &spans[start..i]));
+                gap = 0;
+            }
+            gap = gap.max(span.text.chars().count());
+            start = i + 1;
+        }
+    }
+    if spans.len() > start {
+        blocks.push((gap, &spans[start..]));
+    }
+    blocks
+}
+
+/// UXH-1: render the synced Help Scout article body as a readable
+/// article. The stored body is HTML; it goes through the same sanitizer +
+/// span pipeline the inbox reader uses for mail bodies (the raw source is
+/// never shown), then lays out block by block — paragraphs, headings,
+/// bulleted and numbered list items, and monospace code blocks — with a
+/// paragraph rhythm between blocks. Plain-text bodies degrade to a single
+/// readable block.
+fn article_body_ui(ui: &mut egui::Ui, body: &str) {
+    let spans = spp_core::richtext::html_to_spans(body);
+    let blocks = article_blocks(&spans);
+    if blocks.is_empty() {
+        design::hint_text(ui, "This article has no body text yet.");
+        return;
+    }
+    let mut first = true;
+    for (gap, spans) in blocks {
+        if !first && gap >= 2 {
+            ui.add_space(design::scale::space::SP3);
+        }
+        first = false;
+        article_block_ui(ui, spans);
+    }
+}
+
+/// UXH-1: one block of the article body — a run of styled spans that
+/// belong to the same line group, flowing inline and wrapping as one
+/// unit. The span styling mirrors the inbox message reader (the same
+/// pipeline produced both), with heading sizes tuned for the article
+/// register: the article title is section_title (15 strong), so body
+/// headings step down h1/h2 → LEAD strong, h3+ → BODY strong — every
+/// heading outranks the 13.5px body line beside it.
+fn article_block_ui(ui: &mut egui::Ui, spans: &[spp_core::richtext::Span]) {
+    ui.horizontal_wrapped(|ui| {
+        for span in spans {
+            let mut rich =
+                egui::RichText::new(spp_core::richtext::break_long_tokens(&span.text, 40));
+            let style = &span.style;
+            if style.bold {
+                rich = rich.strong();
+            }
+            if style.italic {
+                rich = rich.italics();
+            }
+            if style.underline {
+                rich = rich.underline();
+            }
+            if style.strikethrough {
+                rich = rich.strikethrough();
+            }
+            if style.code {
+                rich = rich.monospace();
+            }
+            if style.quote {
+                rich = rich.weak();
+            }
+            if let Some(level) = style.heading {
+                let size = if level <= 2 {
+                    design::scale::text::LEAD
+                } else {
+                    design::scale::text::BODY
+                };
+                rich = rich.size(size).strong();
+            }
+            if let Some(href) = &style.link {
+                ui.hyperlink_to(rich, href.clone());
+            } else {
+                ui.label(rich);
+            }
+        }
+    });
 }
 
 impl Default for KnowledgePage {
@@ -1592,6 +1697,90 @@ mod tests {
             assert!(text.contains("export data"));
             assert!(article_detail(conn, 999).is_none());
         });
+    }
+
+    // UXH-1: the reader must lay the synced Help Scout HTML body out as
+    // readable rich text — never the raw source the owner saw.
+
+    #[test]
+    fn article_body_renders_the_reported_html_shape_without_syntax() {
+        // The owner-reported body: a <p> paragraph with an inline <code> run.
+        let spans = spp_core::richtext::html_to_spans(
+            "<p>The Mailbox API allows 400 requests per minute per token. If you \
+             exceed it, wait for the <code>Retry-After</code> seconds given in the \
+             response. Persistent 429s with low traffic usually mean a shared IP \
+             pool - contact support to have your bucket reset.</p>",
+        );
+        let blocks = article_blocks(&spans);
+        assert_eq!(blocks.len(), 1, "one paragraph, one block");
+        let (gap, block) = &blocks[0];
+        assert_eq!(*gap, 0, "the first block carries no leading gap");
+        let text: String = block.iter().map(|s| s.text.as_str()).collect();
+        assert!(
+            !text.contains('<'),
+            "no raw syntax may survive the reader path: {text:?}"
+        );
+        assert!(text.contains("Retry-After"));
+        assert!(text.contains("bucket reset"));
+        assert!(
+            block
+                .iter()
+                .any(|s| s.style.code && s.text == "Retry-After"),
+            "the inline code run keeps its monospace style"
+        );
+    }
+
+    #[test]
+    fn article_blocks_split_paragraphs_headings_lists_and_code() {
+        let spans = spp_core::richtext::html_to_spans(
+            "<h2>Setup</h2><p>First paragraph.</p><p>Second paragraph.</p>\
+             <ul><li>one</li><li>two</li></ul><pre>cargo run\n--release</pre>",
+        );
+        let blocks = article_blocks(&spans);
+        assert_eq!(
+            blocks.len(),
+            6,
+            "heading, two paragraphs, two list items, one code block"
+        );
+        assert_eq!(blocks[0].1[0].style.heading, Some(2));
+        assert_eq!(blocks[0].0, 0, "the leading block has no gap");
+        assert_eq!(blocks[1].0, 2, "paragraph gaps carry two newlines");
+        assert_eq!(blocks[2].0, 2);
+        assert!(
+            blocks[3].1[0].text.starts_with("\u{2022} "),
+            "the bullet is baked into the list item text"
+        );
+        assert_eq!(blocks[4].0, 1, "list items ride soft breaks");
+        assert!(
+            blocks[5]
+                .1
+                .iter()
+                .any(|s| s.style.code && s.text.contains('\n')),
+            "the code block keeps its internal line break"
+        );
+        for (_, block) in &blocks {
+            for span in block.iter() {
+                assert!(!span.text.contains('<'), "no raw syntax: {:?}", span.text);
+            }
+        }
+    }
+
+    #[test]
+    fn article_blocks_plain_text_body_is_one_readable_block() {
+        // Bodies that were never HTML (manual seeds) degrade to a single
+        // proportional-text block — no tags to strip, nothing to split.
+        let spans = spp_core::richtext::html_to_spans("Just a plain article body.");
+        let blocks = article_blocks(&spans);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].0, 0);
+        let text: String = blocks[0].1.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(text, "Just a plain article body.");
+    }
+
+    #[test]
+    fn article_blocks_empty_body_has_no_blocks() {
+        assert!(article_blocks(&spp_core::richtext::html_to_spans("")).is_empty());
+        assert!(article_blocks(&spp_core::richtext::html_to_spans("   \n\t ")).is_empty());
     }
 
     #[test]

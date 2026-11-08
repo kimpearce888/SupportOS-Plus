@@ -1,7 +1,21 @@
 ## Active items
 
-(none — Batch REL-5 closed 2026-11-08, record in `completed.md`; Rule 8
+(none — Batch UXH-1 closed 2026-11-09, record in `completed.md`; Rule 8
 STOP, the queue is empty, new work opens only on an owner directive.)
+
+Batch UXH-1 (item UXH-1-1: the help center article reader must render
+the synced Help Scout HTML body as a readable article, not the raw
+source) moved through this file per Rules 2 and 4 on 2026-11-09 —
+opened on the owner's screenshot report ("it should show help center
+articles in a correct way, it is showing them with html syntax"),
+implemented in `crates/app-shell/src/pages/knowledge.rs` only
+(`article_body_ui`/`article_blocks`/`article_block_ui` on the
+`spp_core::richtext::html_to_spans` pipeline, the reader riding
+`READER_MEASURE`), verified (gates, fmt, clippy ×2 lanes, tests
+251+459+467+14+2, cargo-deny, kittest diff-locked ×2 on all 24 suites +
+style lint with zero drift on the 189 existing goldens + 3 new reader
+goldens, SPP_SMOKE, VLM read-back), and closed the same session (record
+in `completed.md`).
 
 Batch UXG-1 (all-display design discipline + cross-page consistency
 sweep, items UXG-1-1..UXG-1-10) moved through this file per Rules 2 and

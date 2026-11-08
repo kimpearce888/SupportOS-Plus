@@ -182,3 +182,109 @@ fn r3_knowledge_help_center_tab_light() {
     );
     h.snapshot("r3_knowledge_help_center_tab_light");
 }
+
+// UXH-1: the article reader must render the synced Help Scout HTML body
+// as readable rich text — paragraphs, headings, list items and code runs
+// as their own styled labels — never the raw `<p>`/`<code>` source the
+// owner reported. The fixture keeps exactly one article so the one
+// "Read" button deterministically opens the HTML-bodied reader.
+fn seeded_page_with_html_article() -> (KnowledgePage, DbHandle) {
+    let (page, db) = seeded_page();
+    db.with_write(|conn| {
+        conn.execute("DELETE FROM docs_articles WHERE number IN (1, 2)", [])
+            .expect("clear the plain-text fixtures");
+        conn.execute(
+            "INSERT INTO docs_articles (collection_local_id, number, name, status, text, preview,
+                 views, words, remote_created_at, remote_updated_at)
+             VALUES (1, 3, 'API returns 429 Too Many Requests', 'published',
+                 '<h2>Rate limits</h2><p>The Mailbox API allows 400 requests per minute per \
+                  token. If you exceed it, wait for the <code>Retry-After</code> seconds given \
+                  in the response.</p><ul><li>400 requests per minute per token</li><li>Persistent \
+                  429s with low traffic usually mean a shared IP pool</li></ul><pre>curl -i \
+                  https://api.example.com/v1/boards</pre>',
+                 'The Mailbox API allows 400 requests per minute per token.', 12, 64,
+                 '2026-01-12T00:00:00.000Z', '2026-01-12T00:00:00.000Z')",
+            [],
+        )
+        .expect("html article");
+    });
+    (page, db)
+}
+
+fn render_help_center_reader(dark: bool, width: f32, name: &str) {
+    let (page, db) = seeded_page_with_html_article();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(width, 900.0))
+        .with_theme(if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        })
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db, None);
+            },
+            KnowledgePageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    h.get_all_by_label("Help center")
+        .next()
+        .expect("the Help center tab")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    h.get_all_by_label("Read")
+        .next()
+        .expect("the one article's read button")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    // The rendered rich text: the inline code run, the heading and the
+    // bulleted item each exist as their own label — in the raw-source
+    // rendering the whole body was one monospace `<p>…</p>` label and
+    // none of these exact labels could exist.
+    assert!(
+        h.get_all_by_label("Retry-After").next().is_some(),
+        "the inline code run renders as its own styled label"
+    );
+    assert!(
+        h.get_all_by_label("Rate limits").next().is_some(),
+        "the h2 heading renders as its own label"
+    );
+    assert!(
+        h.get_all_by_label(
+            "\u{2022} Persistent 429s with low traffic usually mean a shared IP pool"
+        )
+        .next()
+        .is_some(),
+        "the bulleted list item renders with its bullet"
+    );
+    h.snapshot(name);
+}
+
+#[test]
+fn uxh1_help_center_reader_html_body_1440_light() {
+    render_help_center_reader(
+        false,
+        1440.0,
+        "uxh1_help_center_reader_html_body_1440_light",
+    );
+}
+
+#[test]
+fn uxh1_help_center_reader_html_body_1440_dark() {
+    render_help_center_reader(true, 1440.0, "uxh1_help_center_reader_html_body_1440_dark");
+}
+
+#[test]
+fn uxh1_help_center_reader_html_body_800_light() {
+    render_help_center_reader(false, 800.0, "uxh1_help_center_reader_html_body_800_light");
+}

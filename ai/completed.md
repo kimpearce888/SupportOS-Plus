@@ -5,6 +5,76 @@
 
 ## Completed
 
+## Batch UXH-1 — help center articles render as articles, not HTML source (2026-11-09)
+
+**Owner directive:** the screenshot report "it should show help center
+articles in a correct way, it is showing them with html syntax" — the
+Help center article reader printed the synced `docs_articles.text` (the
+raw Help Scout Docs HTML body) verbatim in a monospace label, so
+`<p>`/`<code>` tags showed as literal text.
+
+**Items:** UXH-1-1 (single item) — render the article body through the
+app's existing sanitized rich-text pipeline.
+
+**Implementation (`crates/app-shell/src/pages/knowledge.rs` only —
+display path; the stored mirror, sync, FTS and embedding pipelines are
+untouched, so already-synced articles render correctly without a
+re-sync):**
+- `reader_ui` now rides the shared `design::centered_column` at
+  `READER_MEASURE` (860 — the same reading-measure cap the inbox reader
+  thread and composer hold), so back/title/meta/body read as one centered
+  article surface on 2K/4K/8K displays instead of stretching across the
+  1800 content column.
+- New `article_body_ui`: the body goes through
+  `spp_core::richtext::html_to_spans` — the exact ammonia-sanitized +
+  quick-xml span pipeline the inbox reader uses for HTML mail bodies
+  (allowlist tags, script/style dropped, entities decoded, links
+  captured) — never the raw source.
+- New `article_blocks`: the span stream is split at its newline
+  separators (`\n\n` = paragraph gap, `\n` = soft break/list item) into
+  rendering blocks; `article_block_ui` lays each block out as one
+  `ui.horizontal_wrapped` flowing unit with the inbox message reader's
+  span styling (bold/italic/underline/strikethrough, monospace `code`,
+  weak `blockquote`, `hyperlink_to` links, `break_long_tokens` wrap
+  safety), heading sizes tuned for the article register (h1/h2 → LEAD
+  14 strong, h3+ → BODY 13.5 strong — every heading outranks the 13.5
+  body line; the article title stays section_title 15 strong). Paragraph
+  rhythm: SP3 between paragraph-gap blocks, the 8px item spacing for
+  soft breaks. Plain-text bodies degrade to a single readable
+  proportional-text block; empty bodies show a hint.
+- Regression locks: 4 unit tests on the splitter through the real
+  pipeline (the owner-reported `<p>…<code>Retry-After</code>…</p>` shape
+  renders tag-free with the code run keeping its monospace style;
+  paragraphs/headings/bulleted+numbered lists/code blocks split with the
+  right gaps and bullets; plain-text single-block; empty → no blocks) +
+  3 kittest reader goldens (`uxh1_help_center_reader_html_body_`
+  1440 light/dark + 800 light) over an HTML-bodied fixture with
+  functional probes (the `Retry-After` code run, the `Rate limits` h2
+  and the bullet item each exist as their own label — none could exist
+  in the raw-source rendering).
+
+**Local verification battery (recycled sandbox, toolchain reinstalled at
+the exact 1.99.1 pin, lavapipe ICD extracted locally for the kittest
+lanes):**
+- Gates: no-simulation clean; traceability OK (23 routes, 20 design.rs
+  DC tags, 27 DC ids). fmt `--all --check` clean; verify-icons OK;
+  clippy `--locked --workspace --all-targets -- -D warnings` clean;
+  clippy sandbox lane clean.
+- Tests: app-shell lib 251/251 (incl. the 4 new) · core 459/459 (+3
+  ignored) · xtask 14/14 · catalog 2/2 · sandbox lane 467/467 (+3
+  ignored; one disk-full false alarm mid-battery was cleared by freeing
+  the incremental cache and re-run green) · cargo-deny advisories /
+  licenses / bans all ok.
+- Kittest drift gate: all 24 suites + style lint diff-locked green
+  (202 tests) — zero drift on the 189 existing goldens, the 3 new reader
+  goldens locked, then re-run diff-locked a second time.
+- SPP_SMOKE rc=0 (boot chain + shell/renderer verified with the new
+  reader code).
+- VLM read-back of the new 1440-light golden: no raw HTML visible;
+  title/meta/h2 heading, paragraph with monospace inline
+  `Retry-After`, bulleted two-item list and monospace code line all
+  render as formatted text in one centered readable column.
+
 ## Batch REL-5 — Build & Release v1.9.6 from the final source (2026-11-08)
 
 **Owner directive:** the standing Build-and-Release mandate (this

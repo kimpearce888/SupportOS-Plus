@@ -7,6 +7,29 @@
 
 ## Queue state
 
+**Batch UXH-1 (help center articles must render as articles, not HTML
+source) CONSUMED 2026-11-09: item UXH-1-1 moved to `progress.md` per
+Rule 2, implemented, verified, and closed the same session; record in
+`completed.md`. The Help center article reader (`KnowledgePage::
+reader_ui`) had printed the synced `docs_articles.text` — the raw Help
+Scout Docs HTML body — verbatim in a monospace label (the owner's
+screenshot report: "it should show help center articles in a correct
+way, it is showing them with html syntax"). UXH-1-1 renders the body
+through the app's existing sanitized rich-text pipeline
+(`spp_core::richtext::html_to_spans` — the same one the inbox reader
+uses for HTML mail bodies), splits the span stream into blocks at its
+newline separators so paragraphs, headings, list items and code blocks
+lay out as a readable article (proportional body, styled inline runs,
+links, monospace code) inside the shared `READER_MEASURE` reading
+column; plain-text bodies degrade to one readable block. Display-path
+fix only — the stored mirror, sync, FTS and embedding pipelines are
+untouched, so already-synced articles render correctly without a
+re-sync. Verified: full local battery (gates, fmt, clippy ×2 lanes,
+tests 251+459+467+14+2, cargo-deny, kittest diff-locked ×2 on all 24
+suites + style lint with zero drift on the 189 existing goldens + 3 new
+reader goldens, SPP_SMOKE, VLM read-back). The queue is EMPTY again.
+New work opens only on an owner directive.**
+
 **Batch REL-5 (release v1.9.6 from the final source) CONSUMED
 2026-11-08: items REL-5-1..REL-5-4 moved to `progress.md` per Rule 2,
 implemented, verified, and closed the same session; record in
