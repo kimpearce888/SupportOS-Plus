@@ -74,6 +74,10 @@ lanes):**
   title/meta/h2 heading, paragraph with monospace inline
   `Retry-After`, bulleted two-item list and monospace code line all
   render as formatted text in one centered readable column.
+- CI run 42533135570 on the batch push `d1d8436`: green 3/3 —
+  fmt/clippy/test/deny, AppImage + .deb build & smoke, and the kittest
+  snapshot drift gate (the 3 new reader goldens accepted, zero drift on
+  the 189 existing baselines) all succeeded.
 
 ## Batch REL-5 — Build & Release v1.9.6 from the final source (2026-11-08)
 
