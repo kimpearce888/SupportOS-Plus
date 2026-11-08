@@ -5,6 +5,93 @@
 
 ## Completed
 
+## Batch REL-5 — Build & Release v1.9.6 from the final source (2026-11-08)
+
+**Owner directive:** the standing Build-and-Release mandate (this
+session's "continue" after the CI-1 close) — v1.9.5 (`9afef58`) predates
+five owner-directed design batches and the packaging hardening; this
+release publishes the final source.
+
+**Items:** REL-5-1 version bump 1.9.5 → 1.9.6 · REL-5-2 CHANGELOG
+`[1.9.6]` + link ref · REL-5-3 annotated tag `v1.9.6` · REL-5-4 publish
++ live post-publish verification.
+
+**Release commit:** `81f1ccd` (main tip; carries UXD-1, UXE-1, UXE-2,
+UXF-1 + UXF-2-1, UXG-1, CI-1 — all unreleased in v1.9.5).
+
+**Local verification battery (seventh sandbox state, toolchain at the
+exact 1.99.1 pin):**
+- Version bump: root Cargo.toml (the single source of truth; members
+  are `version.workspace = true`) + Cargo.lock diff = exactly the four
+  member version lines; zero stale `1.9.5` strings in manifests, lock,
+  README, USER_MANUAL, docs.
+- Gates: no-simulation clean; traceability OK (23 routes, 20 design.rs
+  DC tags, 27 DC ids). fmt `--all --check` clean; verify-icons OK;
+  clippy `--locked --workspace --all-targets -- -D warnings` clean.
+- Tests: core 459/459 (+3 ignored) · app-shell lib 247/247 · style
+  lint 2/2 · xtask 14/14 · sandbox lane 467/467 (+3 ignored) — 1189
+  passed, 0 failed, matching the CI-1/UXG-1 baselines.
+- Release build (exact release profile, sandbox feature on): green in
+  3m21s — 31,036,528 B binary; SPP_SMOKE rc=0 (boot chain, workers,
+  loopback listener, automatic backup, 24 pages / 4348 shapes — the
+  UXG-1 baseline exactly).
+- `.deb` via `xtask deb --skip-build`: 9,393,540 B;
+  Package/Version/Architecture + the 19-dep Depends set correct;
+  extract + SPP_SMOKE rc=0 from the payload tree.
+- AppImage preflight: `xtask package --skip-build` staged the AppDir
+  and stopped exactly at `ensure_host_libs_bundled` (the sandbox host
+  lacks libxkbcommon-x11/libxcb-xkb and has no root — disclosed, same
+  as REL-4); the two missing BUNDLED_HOST_LIBS placed from the
+  ubuntu:22.04 archive (libxkbcommon-x11 1.4.0-1, libxcb-xkb
+  1.14-3ubuntu3) exactly as the step copies them; appimagetool 1.9.1 +
+  the CI-1-pinned type-2 runtime (tag 20251108) downloaded at the
+  xtask's pinned URLs, both SHA256-verified; AppImage packed with the
+  NEW `--runtime-file` invocation — 12,851,704 B local;
+  APPIMAGE_EXTRACT_AND_RUN + SPP_SMOKE rc=0.
+- release.yml extraction simulation: version awk → 1.9.6; changelog
+  section awk → the full 72-line `[1.9.6]` section.
+
+**CI on the release commit:** run `42479929932` — 3/3 green before
+tagging.
+
+**Release run `42480983095` (tag push, 6/6 jobs green):** build+test+
+package (ubuntu:22.04, glibc 2.35 baseline, dist staging with
+SHA256SUMS.txt + BUILD-INFO.txt) · verify .deb on clean ubuntu:22.04 /
+ubuntu:24.04 / debian:12 containers · verify AppImage (ubuntu-latest) ·
+publish-after-green.
+
+**Live post-publish verification (this sandbox, from the published
+bytes):**
+- Release `v1.9.6` = "SupportOS+ 1.9.6", draft=false, prerelease=false,
+  target `81f1ccd5088d…` == release commit == main tip.
+- All four assets downloaded live (AppImage 12,835,320 B; .deb
+  10,204,616 B; SHA256SUMS.txt; BUILD-INFO.txt); `sha256sum -c`: both
+  packages OK (AppImage `dd422384…71ee`, .deb `025776e2…cd77`).
+- BUILD-INFO.txt: version 1.9.6, commit `81f1ccd5088d…`, built on
+  ubuntu:22.04 at 2026-11-08T13:05:33Z.
+- Published `.deb` extracted; SPP_SMOKE rc=0 from the payload tree
+  (24 pages / 4348 shapes, first-run DB self-initialization).
+- Published AppImage: APPIMAGE_EXTRACT_AND_RUN + SPP_SMOKE rc=0 —
+  identical boot chain from the self-extracted pinned runtime.
+- Release notes: 10/10 content checks — `[1.9.6]` changelog section
+  (prepended), both exact SHA-256 hashes, commit binding, both install
+  command blocks, system requirements (x86_64, glibc 2.35+, Ubuntu
+  22.04 LTS+/Debian 12+), APT auto-dependency statement, the 2K/4K/8K
+  and LM Studio product lines.
+
+**Environmental limits disclosed (honest scope):** no sudo/root in
+this sandbox → the APT install/upgrade/uninstall lanes,
+desktop-file-validate and the Xvfb GUI launches ran only in CI's clean
+containers (green ×3 distros + ubuntu-latest, on the exact published
+artifacts); the AppImage host-libs bundling step ran locally with
+ubuntu:22.04-archive libs (CI performs it natively in the ubuntu:22.04
+build container — the published bytes are CI's, not the local
+preflight's); one disk-full event during the test lanes (incremental
+compilation artifacts) cleared by `rm -rf target/debug/incremental` +
+CARGO_INCREMENTAL=0, lanes re-run green.
+
+Rule 8 STOP — the queue is empty; the next work item requires a new
+owner directive.
 
 ### Batch CI-1 — 2026-11-08 (retry-with-backoff for the appimagetool download; CI flakiness fix)
 

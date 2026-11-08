@@ -7,9 +7,13 @@
 
 ## Queue state
 
-**Batch REL-5 (release v1.9.6 from the final source) OPENED 2026-11-08
-on the owner's standing Build-and-Release directive ("continue" after
-the CI-1 close): v1.9.5 was cut at `9afef58`, but main has since landed
+**Batch REL-5 (release v1.9.6 from the final source) CONSUMED
+2026-11-08: items REL-5-1..REL-5-4 moved to `progress.md` per Rule 2,
+implemented, verified, and closed the same session; record in
+`completed.md`. Release v1.9.6 is published at tag `v1.9.6` (target
+`81f1ccd` = main tip) with the .deb + AppImage, SHA-256 checksums, and
+per-asset live verification. (Context: opened on the owner's standing
+Build-and-Release directive ("continue" after the CI-1 close): v1.9.5 was cut at `9afef58`, but main has since landed
 five owner-directed design batches and the packaging hardening — UXD-1
 (dashboard layout repair), UXE-1 (full-app design modernization), UXE-2
 (post-recycle verify + the note-card avatar fix), UXF-1 + UXF-2-1 (AI
