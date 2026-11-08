@@ -7,6 +7,35 @@
 
 ## Queue state
 
+**Batch REL-5 (release v1.9.6 from the final source) OPENED 2026-11-08
+on the owner's standing Build-and-Release directive ("continue" after
+the CI-1 close): v1.9.5 was cut at `9afef58`, but main has since landed
+five owner-directed design batches and the packaging hardening — UXD-1
+(dashboard layout repair), UXE-1 (full-app design modernization), UXE-2
+(post-recycle verify + the note-card avatar fix), UXF-1 + UXF-2-1 (AI
+Center layout repair + the LM Studio json_schema wire fix), UXG-1 (the
+all-display design discipline: CONTENT_MAX 1800 centered column,
+READER_MEASURE 860, the 17-table data_table sweep, 2560/3840 goldens +
+8K probes — the owner's "work on all size of monitors… 2k… 4k or 8k…
+same design principle, all the pages, all the items" mandate), and CI-1
+(retry-hardened pinned downloads incl. the type-2 runtime via
+--runtime-file). None of it is in any published release. Items:**
+
+- **REL-5-1** — workspace version 1.9.5 → 1.9.6 (root Cargo.toml, the
+  single source of truth — members are `version.workspace = true`; +
+  the four member entries in Cargo.lock).
+- **REL-5-2** — CHANGELOG `[1.9.6]` section in product language + the
+  `[1.9.6]` link reference (five fixed groups: dashboard + full-app
+  modernization; AI Center layout repair; the LM Studio json_schema
+  fix; the all-display width discipline for 2K/4K/8K + one design
+  principle across all pages; note-card avatar fix) + internal note
+  for the packaging-lane hardening.
+- **REL-5-3** — annotated tag `v1.9.6` on the release commit (only
+  after CI green on the bump push).
+- **REL-5-4** — publish via release.yml (gates + package + 3-distro
+  .deb verification + AppImage verification + publish-after-green) +
+  live post-publish verification of every asset.
+
 **Batch CI-1 (packaging lane must survive transient CDN failures)
 CONSUMED 2026-11-08: items CI-1-1 and CI-1-2 moved to `progress.md` per
 Rule 2, implemented, verified, and closed the same session; record in

@@ -1,7 +1,12 @@
 ## Active items
 
-(none — Batch CI-1 closed 2026-11-08, record in `completed.md`; Rule 8
-STOP, the queue is empty, new work opens only on an owner directive.)
+Batch REL-5 (release v1.9.6 from the final source, items REL-5-1..REL-5-4)
+opened in `plan.md` per Rules 1 and 2 on 2026-11-08 — on the owner's
+standing Build-and-Release directive (the "continue" after the CI-1
+close; v1.9.5 at `9afef58` predates UXD-1/UXE-1/UXE-2/UXF-1/UXG-1/CI-1).
+IN PROGRESS: version bump 1.9.5 → 1.9.6, CHANGELOG section, full local
+battery, CI green, annotated tag, release.yml publish, live
+post-publish verification.
 
 Batch UXG-1 (all-display design discipline + cross-page consistency
 sweep, items UXG-1-1..UXG-1-10) moved through this file per Rules 2 and

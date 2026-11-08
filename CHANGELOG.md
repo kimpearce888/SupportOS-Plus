@@ -4,6 +4,78 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.6] — 2026-11-08
+
+### Fixed — the dashboard and the whole app modernized (owner-directed design program)
+
+- **The dashboard no longer breaks at any width**: the root cause of
+  cards overflowing, clipping their last column and drifting
+  off-screen was card and table sizing treating the inner width as the
+  outer width (every card was 30px wider than the layout math, and
+  table columns rounded up fractionally, accumulating drift frame over
+  frame). Cards now land on exact outer widths with integer columns,
+  and the dashboard is restructured to the modern helpdesk pattern:
+  KPI row → trend chart with insight side panel → equal-width
+  breakdowns → full-width tables, with responsive 2/3/4/6-column tiers
+  from 800 to 2560px.
+- **One modern design language across every page**: a consistent type
+  scale and one corner-radius system; elevated borderless cards in
+  light mode; styled dropdowns, switches and segmented controls
+  replacing the native widgets; Title Case buttons and sentence-case
+  field labels everywhere (100+ labels swept); a balanced sidebar,
+  views rail and top bar; the window now enforces a sensible minimum
+  size.
+- **The inbox reflows instead of breaking**: below ~900px of content
+  the views rail folds into chips, the conversation list is
+  proportional and resizable, the AI copilot docks beside the reader —
+  or swaps in over it on narrow windows instead of crushing it — and
+  the reply composer is one clean card that always fits the window
+  bottom (it previously collapsed to a sliver and clipped on every
+  width).
+
+### Fixed — AI Center: layout repair and a real functional bug
+
+- **Golden-set evals and ticket analysis work with LM Studio again**:
+  structured-output requests sent OpenAI's legacy wire format, which
+  LM Studio rejects with HTTP 400 ("response_format.type must be
+  'json_schema' or 'text'"), killing every run. Requests now use the
+  portable `json_schema` form — locked by a regression test against a
+  mock LM Studio server.
+- **All six AI Center tabs share one layout anatomy**: full-width
+  titled cards, tables that span their cards exactly, empty states
+  with the shared component, and golden-set errors collapsed into
+  contained run blocks instead of raw multi-line dumps on the page.
+
+### Fixed — one design principle on every display (2K, 4K and 8K included)
+
+- **Content columns cap and center on wide displays**: above ~2060px of
+  window width, every standard page renders a centered 1800px content
+  column on the full-width background (the professional wide-window
+  register), and the inbox reader caps at an 860px reading measure —
+  instead of cards, tables and charts stretching to absurd widths on
+  2560, 3840 or 7680px displays. Below the caps, layouts are
+  pixel-identical to before.
+- **No page-level list can overflow or hug at any width**: all
+  remaining legacy tables (reports, knowledge, operations,
+  diagnostics, automation, connectors, sync health, customer detail —
+  17 lists) migrated to the exact-width table system with aligned
+  header strips and wrapping cells.
+- **Smaller consistency fixes**: customer "Last Contact" shows
+  relative times ("3d ago", "Yesterday") instead of ellipsized raw
+  timestamps; the incidents header no longer states its count twice;
+  the top bar carries the active page's label on the left; report
+  charts keep their axis labels clear of the line at edge points; and
+  note cards show their avatar icon again (a token pair made it
+  invisible).
+
+### Internal — release packaging hardened
+
+- The packaging step now retries transient download failures with
+  backoff and pins every fetched artifact by checksum — including the
+  AppImage runtime, which is downloaded once, verified, and passed to
+  appimagetool explicitly — so a flaky release CDN can no longer sink
+  a build.
+
 ## [1.9.5] — 2026-11-07
 
 ### Fixed — the backend-blocked UX-audit findings (Batch UXB-1: UX-26B/UX-34/UX-35)
@@ -1071,6 +1143,7 @@ verified end-to-end by the tag-triggered release pipeline.
 - CI: fmt + clippy (`-D warnings`) + tests + cargo-deny on every push,
   plus a package job that builds and smoke-boots both formats.
 
+[1.9.6]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.6
 [1.9.5]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.5
 [1.9.4]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.4
 [1.9.3]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.3
