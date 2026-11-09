@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # AUD-P2-9 (I1): release tags ran none of this — in practice tags
+    # came from main so the artifacts were CI-verified by ancestry, but
+    # nothing enforced it. Tags now run the same battery (deny + the
+    # kittest drift gate + packaging) as branches.
+    tags: ['v*']
   pull_request:
 
 env:
@@ -91,8 +96,12 @@ jobs:
       # versions are denied (see the documented skip list in deny.toml),
       # and running the section here is what makes that real — bans were
       # configured once but never evaluated anywhere.
-      - name: Deny (advisories, licenses, bans)
-        run: cargo deny check advisories licenses bans
+      - name: Deny (advisories, licenses, bans, sources)
+        # AUD-P2-9 (I1): the new [sources] section fails the check on any
+        # dependency that does not come from the crates.io registry or an
+        # allow-listed git source — the graph is registry-only today, so
+        # anything else is a supply-chain surprise.
+        run: cargo deny check advisories licenses bans sources
 
   packages:
     name: AppImage + .deb build, smoke
@@ -169,8 +178,72 @@ jobs:
           path: target/deb/supportos-plus_*_amd64.deb
           if-no-files-found: error
 
-  # RS-4 (R4, G4-rejection wave): the reskin's drift lock. The 24 suites (175 tests — 173 kittest
-  # + 2 style lint — over 171 goldens) diff-lock every rebuilt page — the REAL
+  packages-arm64:
+    # AUD-P2-9 (I1): the aarch64 packaging support (arch map, pinned
+    # arm64 appimagetool + type-2 runtime, arm64 .deb naming) existed
+    # and was even asserted by tests — but no CI lane ever built it, so
+    # the "both CI arches" claims were aspirational. This lane builds
+    # and smoke-tests the arm64 artifacts natively (the repo is public,
+    # so GitHub's free ubuntu-24.04-arm runners are available). It
+    # mirrors the x86_64 packages job; the xtask resolves the arch on
+    # its own from the host.
+    name: AppImage + .deb build, smoke (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+          rustc --version
+
+      - name: Cache cargo state
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Install the libraries the AppImage bundles
+        run: sudo apt-get install -y libxkbcommon0 libxkbcommon-x11-0 libxcb-xkb1
+
+      - name: Build the AppImage (xtask package)
+        # Same xtask path as x86_64 — the host arch drives the binary,
+        # the appimagetool pin and the embedded type-2 runtime.
+        run: cargo run --locked -p supportos-plus-xtask -- package
+
+      - name: Smoke test (boot chain inside the AppImage)
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 SPP_SMOKE=1 \
+            ./target/appimage/SupportOS-Plus-aarch64.AppImage
+
+      - name: Build the .deb (xtask deb)
+        run: cargo run --locked -p supportos-plus-xtask -- deb --skip-build
+
+      - name: Inspect the .deb (control metadata)
+        run: dpkg-deb -I target/deb/supportos-plus_*_arm64.deb
+
+      - name: Smoke test (boot chain inside the extracted .deb payload)
+        run: |
+          dpkg-deb -x target/deb/supportos-plus_*_arm64.deb /tmp/deb-payload
+          SPP_SMOKE=1 /tmp/deb-payload/usr/bin/supportos-plus
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SupportOS-Plus-aarch64.AppImage
+          path: target/appimage/SupportOS-Plus-aarch64.AppImage
+          if-no-files-found: error
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supportos-plus_arm64.deb
+          path: target/deb/supportos-plus_*_arm64.deb
+          if-no-files-found: error
+
+  # RS-4 (R4, G4-rejection wave): the reskin's drift lock. The 26 suites (208 tests — 206 kittest
+  # + 2 style lint — over 197 goldens) diff-lock every rebuilt page — the REAL
   # pages over seeded
   # mirrors, 1440/1024/800 × 900, light + dark, a11y check ON — against the
   # checked-in baselines. The runner has no GPU, so the frames render through

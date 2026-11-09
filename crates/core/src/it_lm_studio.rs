@@ -393,3 +393,71 @@ fn malformed_success_body_is_a_parse_error() {
         "parse failures are labeled: {err}"
     );
 }
+
+#[test]
+fn audp2_request_timeout_budget_survives_clone_and_covers_every_lane() {
+    // AUD-P2-2 (A8): the configured budget is applied per-request on
+    // every outbound lane (chat, embed, models), so it survives a
+    // client-level builder failure — the old `.unwrap_or_default()`
+    // fallback silently produced a no-timeout client. The clone proves
+    // the budget travels with the client (it is part of the client's
+    // state, not a one-shot builder setting), and both lanes must fail
+    // fast against a server that never answers in time.
+    let mock = crate::mockserver::MockServer::start(Arc::new(
+        move |req: &crate::mockserver::MockRequest| {
+            std::thread::sleep(Duration::from_millis(800));
+            if req.path.ends_with("/embeddings") {
+                return crate::mockserver::MockResponse::json(
+                    200,
+                    json!({"data": [{"embedding": [0.1, 0.2], "index": 0}]}).to_string(),
+                );
+            }
+            crate::mockserver::MockResponse::json(200, chat_body("late"))
+        },
+    ))
+    .expect("mock server");
+    let client = OpenAiCompatibleClient::new_with_timeout(mock.url(), 150);
+    let cloned = client.clone();
+
+    let started = std::time::Instant::now();
+    let err = runtime()
+        .block_on(async { cloned.chat("m", &[user_message("hi")]).await })
+        .expect_err("the slow chat must time out");
+    assert!(
+        started.elapsed() < Duration::from_millis(1_500),
+        "the chat lane respects the budget: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        err.to_string().contains("LM Studio chat failed"),
+        "a labeled timeout error: {err}"
+    );
+
+    let started = std::time::Instant::now();
+    let err = runtime()
+        .block_on(async { cloned.embed("m", "hello").await })
+        .expect_err("the slow embed must time out");
+    assert!(
+        started.elapsed() < Duration::from_millis(1_500),
+        "the embed lane respects the budget: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        err.to_string().contains("LM Studio embed failed"),
+        "a labeled timeout error: {err}"
+    );
+
+    let started = std::time::Instant::now();
+    assert!(
+        !runtime().block_on(async {
+            use crate::ai_provider::LocalAiProvider as _;
+            LmStudioProvider::with_client(client).is_available().await
+        }),
+        "the availability probe is budgeted too"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(1_500),
+        "the models lane respects the budget: {:?}",
+        started.elapsed()
+    );
+}

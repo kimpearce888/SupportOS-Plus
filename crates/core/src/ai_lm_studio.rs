@@ -65,6 +65,14 @@ pub struct OpenAiCompatibleClient {
     base_url: String,
     http: reqwest::Client,
     api_key: Option<String>,
+    /// AUD-P2-2 (A8): the configured request budget, re-applied on
+    /// every outbound request. The client-level builder timeout stays
+    /// the first line of defense, but a builder failure used to fall
+    /// back to `Client::default()` — silently losing the timeout (and
+    /// reqwest's `Client::default()` is itself a `build().expect`, so a
+    /// broken TLS backend panicked there). Per-request timeouts make
+    /// the guarantee independent of which client got built.
+    request_timeout: Duration,
 }
 
 impl OpenAiCompatibleClient {
@@ -79,6 +87,7 @@ impl OpenAiCompatibleClient {
             base_url: normalize_v1_base_url(&base_url.into()),
             http: build_http_client(timeout_ms),
             api_key: None,
+            request_timeout: Duration::from_millis(timeout_ms.max(1)),
         }
     }
 
@@ -94,7 +103,10 @@ impl OpenAiCompatibleClient {
     }
 
     pub(crate) async fn is_available(&self) -> bool {
-        let mut req = self.http.get(format!("{}/models", self.base_url));
+        let mut req = self
+            .http
+            .get(format!("{}/models", self.base_url))
+            .timeout(self.request_timeout);
         if let Some(ref key) = self.api_key {
             req = req.bearer_auth(key);
         }
@@ -105,7 +117,10 @@ impl OpenAiCompatibleClient {
     }
 
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        let mut req = self.http.get(format!("{}/models", self.base_url));
+        let mut req = self
+            .http
+            .get(format!("{}/models", self.base_url))
+            .timeout(self.request_timeout);
         if let Some(ref key) = self.api_key {
             req = req.bearer_auth(key);
         }
@@ -134,6 +149,7 @@ impl OpenAiCompatibleClient {
         let mut req_builder = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
+            .timeout(self.request_timeout)
             .json(&request);
         if let Some(ref key) = self.api_key {
             req_builder = req_builder.bearer_auth(key);
@@ -218,6 +234,7 @@ impl OpenAiCompatibleClient {
         let mut req_builder = self
             .http
             .post(format!("{}/chat/completions", self.base_url))
+            .timeout(self.request_timeout)
             .json(&body);
         if let Some(ref key) = self.api_key {
             req_builder = req_builder.bearer_auth(key);
@@ -313,6 +330,7 @@ impl OpenAiCompatibleClient {
         let mut req_builder = self
             .http
             .post(format!("{}/embeddings", self.base_url))
+            .timeout(self.request_timeout)
             .json(&request);
         if let Some(ref key) = self.api_key {
             req_builder = req_builder.bearer_auth(key);
@@ -339,10 +357,32 @@ impl OpenAiCompatibleClient {
 }
 
 fn build_http_client(timeout_ms: u64) -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_millis(timeout_ms.max(1)))
-        .build()
-        .unwrap_or_default()
+    // AUD-P2-2 (A8): this used to end in `.unwrap_or_default()`, which
+    // "recovered" from a builder failure by silently swapping in a
+    // client with NO timeout (a hung LM Studio could then hang a job
+    // for the 30-minute stale-job sweep) — and reqwest's
+    // `Client::default()` is itself `ClientBuilder::new().build()
+    // .expect("Client::new()")`, so the only realistic builder failure
+    // (TLS backend init) would have panicked right here. Keep the
+    // constructor infallible but make the failure loud and retry once;
+    // the timeout guarantee itself no longer depends on the
+    // client-level setting because every request builder in this
+    // client also applies `.timeout(self.request_timeout)`.
+    let timeout = Duration::from_millis(timeout_ms.max(1));
+    match reqwest::Client::builder().timeout(timeout).build() {
+        Ok(client) => client,
+        Err(first) => {
+            tracing::error!(
+                error = %first,
+                "HTTP client builder failed (timeout {} ms); retrying with the same budget",
+                timeout_ms
+            );
+            reqwest::Client::builder()
+                .timeout(timeout)
+                .build()
+                .unwrap_or_default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

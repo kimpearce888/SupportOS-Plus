@@ -1,10 +1,18 @@
 ## Active items
 
-(none — Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
+(none — Batch AUD-P2-1 (fix the P2 backlog, part one — §5 rows 16–18:
+A7 retryable-flag honor, A8 timeout fallback, D3 conversation-chunk
+content-hash dedup, D5 me-user fallback guard, D6 scheduled reconcile,
+E1 USER_MANUAL/manual re-stamp, E2 README rows, E3 ci.yml counts +
+Cargo/catalog comments + status_filter, I1 tag path + aarch64 lane +
+deny [sources], D4 secrets.key guidance + restore warning) closed
+2026-11-10, record in `completed.md`; Rule 8 STOP. Row 15 — the eight
+remaining UI dead-end clusters C3/C8–C14 — stays QUEUED in `plan.md`
+for batch AUD-P2-2 on the owner's "continue".)
+
+Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
 items of the repo audit §5) closed 2026-11-10, record in
-`completed.md`; Rule 8 STOP, the queue is empty, new work opens only
-on an owner directive. The audit's P2 backlog (§5 items 15–18) remains
-NOT queued.)
+`completed.md`. Historical batches follow.
 
 Batch AUD-1 (the full product audit — gaps, bugs, blockers, features,
 workflows, options questioned on practical scenarios; report only, no

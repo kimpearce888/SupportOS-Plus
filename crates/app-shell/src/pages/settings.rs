@@ -42,6 +42,7 @@ impl Tab {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GeneralSettings {
     pub sync_interval_minutes: i64,
+    pub reconcile_interval_minutes: i64,
     pub api_concurrency: i64,
     pub ai_enabled: bool,
     pub automatic_analysis_enabled: bool,
@@ -59,6 +60,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             sync_interval_minutes: 1,
+            reconcile_interval_minutes: 1_440,
             api_concurrency: 2,
             ai_enabled: true,
             automatic_analysis_enabled: true,
@@ -85,6 +87,13 @@ impl GeneralSettings {
                 defaults.sync_interval_minutes,
             )
             .unwrap_or(defaults.sync_interval_minutes),
+            // AUD-P2-5 (D6): the scheduled-reconcile cadence.
+            reconcile_interval_minutes: spp_core::settings::get_i64(
+                conn,
+                "reconcile_interval_minutes",
+                defaults.reconcile_interval_minutes,
+            )
+            .unwrap_or(defaults.reconcile_interval_minutes),
             api_concurrency: spp_core::settings::get_i64(
                 conn,
                 "api_concurrency",
@@ -151,6 +160,11 @@ impl GeneralSettings {
 
     pub fn save(&self, conn: &rusqlite::Connection) -> spp_core::Result<()> {
         spp_core::settings::set_i64(conn, "sync_interval_minutes", self.sync_interval_minutes)?;
+        spp_core::settings::set_i64(
+            conn,
+            "reconcile_interval_minutes",
+            self.reconcile_interval_minutes,
+        )?;
         spp_core::settings::set_i64(conn, "api_concurrency", self.api_concurrency)?;
         spp_core::settings::set_bool(conn, "ai_enabled", self.ai_enabled)?;
         spp_core::settings::set_bool(
@@ -608,6 +622,9 @@ impl SettingsPage {
         let interval_before = db.with_read(|conn| {
             spp_core::settings::get_i64(conn, "sync_interval_minutes", 1).unwrap_or(1)
         });
+        let reconcile_before = db.with_read(|conn| {
+            spp_core::settings::get_i64(conn, "reconcile_interval_minutes", 1_440).unwrap_or(1_440)
+        });
         let concurrency_before = db
             .with_read(|conn| spp_core::settings::get_i64(conn, "api_concurrency", 2).unwrap_or(2));
         let level_before = db
@@ -623,13 +640,16 @@ impl SettingsPage {
         match result {
             Ok(()) => {
                 self.general_persisted = Some(general.clone());
-                if interval_before != general.sync_interval_minutes
+                if (interval_before != general.sync_interval_minutes
+                    || reconcile_before != general.reconcile_interval_minutes)
                     && let Some(workers) = self.workers.clone()
                 {
                     tracing::info!(
                         before = interval_before,
                         after = general.sync_interval_minutes,
-                        "sync interval changed: restarting background workers"
+                        reconcile_before,
+                        reconcile_after = general.reconcile_interval_minutes,
+                        "sync/reconcile interval changed: restarting background workers"
                     );
                     workers.restart();
                 }
@@ -1141,6 +1161,25 @@ impl SettingsPage {
                     "The sync polls every 30 s while the account is busy, then \
                      backs off by doubling toward this ceiling when quiet. Every \
                      send triggers an immediate poll.",
+                );
+                ui.end_row();
+                // AUD-P2-5 (D6): scheduled reconcile — the safety net
+                // for the incremental sync's 10-minute overlap window
+                // (a fast local clock can silently miss changes).
+                let reconcile_label =
+                    design::field_label(ui, "Scheduled reconcile (minutes, 0 = off)");
+                ui.add_sized(
+                    [110.0, 26.0],
+                    egui::DragValue::new(&mut general.reconcile_interval_minutes).range(0..=10_080),
+                )
+                .labelled_by(reconcile_label.id)
+                .on_hover_text(
+                    "How often a full reconcile pass runs on its own (default \
+                     1440 = daily). Incremental syncs only re-check the last \
+                     10 minutes of changes and trust this computer's clock — \
+                     the scheduled reconcile catches anything a fast clock or \
+                     a missed window let through. 0 turns the schedule off \
+                     (the Sync Health button still works).",
                 );
                 ui.end_row();
                 let concurrency_label = design::field_label(ui, "Api concurrency");
@@ -2362,6 +2401,20 @@ impl SettingsPage {
                     self.export_csv(db);
                 }
             });
+            ui.add_space(6.0);
+            // AUD-P2-10 (D4): backups carry stored credentials in
+            // encrypted form, decryptable only by this machine's
+            // secrets.key (the file next to the database). The audit
+            // found nothing told the user that — a backup copied to
+            // another computer without the key file can never unlock
+            // its credentials. Say it where backups are made.
+            design::hint_text(
+                ui,
+                "Backups include your credentials in encrypted form — they unlock \
+                 only with this computer's secrets.key file (stored next to the \
+                 database). When you copy backups elsewhere, keep a safe copy of \
+                 secrets.key with them.",
+            );
         });
         ui.add_space(10.0);
         let backups = self.backups.clone();
@@ -2436,8 +2489,10 @@ impl SettingsPage {
                         ui,
                         &format!(
                             "Restore this backup? The current database will be REPLACED \
-                             by \u{201c}{path}\u{201d} (the file is verified first). Restart \
-                             SupportOS+ afterwards to use it.",
+                             by \u{201c}{path}\u{201d} (the file is verified first). Credentials \
+                             inside it decrypt only with this machine's secrets.key — \
+                             restoring on a different computer also needs that key file. \
+                             Restart SupportOS+ afterwards to use it.",
                             path = path.rsplit('/').next().unwrap_or(&path),
                         ),
                     );
@@ -2483,6 +2538,8 @@ mod tests {
 
         let mut changed = original;
         changed.sync_interval_minutes = 15;
+        // AUD-P2-5 (D6): the scheduled-reconcile cadence round-trips too.
+        changed.reconcile_interval_minutes = 720;
         changed.ai_enabled = false;
         changed.log_level = "debug".into();
         db.with_write(|conn| changed.save(conn)).expect("save");

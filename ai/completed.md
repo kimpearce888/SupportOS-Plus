@@ -5,6 +5,175 @@
 
 ## Completed
 
+## Batch AUD-P2-1 — fix the P2 backlog, part one: the code fixes, docs and infra of the repo audit (2026-11-10)
+
+**Owner directive:** "fix P2" — §5 rows 16–18 of
+`docs/audit/repo-audit-v1.9.6.md` (row 15, the eight remaining UI
+dead-end clusters C3/C8–C14, stays queued for batch AUD-P2-2 on the
+owner's "continue"; Rule 1 caps a batch at exactly ten items).
+Constraint carried over from AUD-P0/AUD-P1 honored: fix the existing
+implementation inside the existing stack — no new frameworks, no new
+dependencies.
+
+**Items AUD-P2-1..AUD-P2-10:**
+
+- **AUD-P2-1 (A7)** — worker retry semantics now honor
+  `LmStudioError.retryable`. The generic failure catch-all in
+  `workers/execute.rs` hard-coded `let retryable = true;` (deterministic
+  AI failures burned every attempt and re-notified each time); it now
+  downcasts the boxed error through the new
+  `ai_pipeline::lm_error` helper (the `hs_error` pattern) and passes
+  the flag to `jobs::fail`, which still records the failure either way.
+  `run_ai_job` boxes the typed error instead of stringifying it (all
+  three arms), and its pre-flight "Conversation not found locally."
+  guard now carries `retryable: false` like the pipeline's own
+  not-found. The copilot lane passes `e.retryable` instead of a
+  hard-coded `false` (transient LM Studio outages never retried).
+  Tests: `audp21_lm_error_recovers_the_typed_retryable_flag`,
+  `audp21_deterministic_ai_failure_fails_the_job_terminally` (status
+  `failed`, attempt 1), `audp21_transport_ai_failure_still_requeues_for_retry`
+  (status `queued`, attempt 1).
+- **AUD-P2-2 (A8)** — `build_http_client` no longer silently falls back
+  to `reqwest::Client::default()` (which carries no timeout — and is
+  itself a `build().expect`, so the only realistic builder failure, a
+  broken TLS backend, would have panicked). The constructor stays
+  infallible: loud `tracing::error!` + one retry with the same budget,
+  and the real guarantee moved to per-request
+  `RequestBuilder::timeout` on all six outbound builders (chat, embed,
+  models/availability, post_chat_body paths) via a new
+  `request_timeout` field on `OpenAiCompatibleClient`, so the budget
+  survives any client-level fallback (and clones). Test:
+  `audp2_request_timeout_budget_survives_clone_and_covers_every_lane`
+  (chat, embed and the availability probe all fail inside 1.5 s against
+  an 800 ms-slow mock with a 150 ms budget, on a cloned client).
+- **AUD-P2-3 (D3)** — `chunk_conversation` diffs the desired chunk set
+  against the stored rows instead of the unconditional DELETE +
+  re-INSERT that reset `embedding_state` to `not_indexed` on every sync
+  touch (a status-change sync re-embedded the whole conversation
+  through LM Studio). Unchanged (index, content, kind) rows survive
+  verbatim with their embedding, state and attempt counter; changed
+  indexes are rewritten fresh; surplus indexes are deleted. The return
+  contract (desired chunk count) and the `Ok(0)`/enqueue caller
+  semantics in `sync_engine/loops.rs` are unchanged. Tests:
+  `audp23_unchanged_rechunk_preserves_embeddings` (embedding, state,
+  model and attempts all preserved across an unchanged re-chunk) and
+  `audp23_changed_content_rewrites_only_what_changed` (split → all
+  fresh pending; shrink → surplus indexes gone, single chunk again).
+- **AUD-P2-4 (D5)** — `me_user_local_id` no longer falls back to the
+  first user by id on multi-user mirrors (every me-scoped view — unread
+  badge, notification list, mark-read scope — silently became the wrong
+  agent's). The fallback now applies only when the mirror has a single
+  live user; several users + unresolved `me_remote_id` → `Ok(None)`
+  (broadcast-only view, all consumers already handle `None` via
+  `unwrap_or(-1)`). Tests: single-user fallback kept, multi-user stays
+  unresolved until `me_remote_id` resolves (then wins), soft-deleted
+  users don't inflate the live count.
+- **AUD-P2-5 (D6)** — reconcile is scheduled, not manual-only: a new
+  `scheduled_reconcile_tick` timer in `WorkerPool::start` (settings key
+  `reconcile_interval_minutes`, default 1440 = daily, clamp 0..=10080,
+  0 = off, immediate-first-tick consumed so it doesn't race the startup
+  auto-sync) closes the 10-minute incremental-overlap window that a
+  fast local clock could silently miss changes through. The tick skips
+  the empty provider, defers while a sync runs (no error spam) and
+  records an audit-log line on completion. Settings → Sync & AI gains
+  the "Scheduled reconcile (minutes, 0 = off)" row (0–10080 DragValue
+  with an explanatory hover); saving a changed value restarts the
+  background workers (the same hook as the sync-interval row). Tests:
+  empty-provider skip, defer-while-running (via the new
+  `set_running_for_tests` test support), clamping/off semantics, and
+  the extended settings round-trip.
+- **AUD-P2-6 (E1)** — USER_MANUAL.md re-stamped from "Version 1.8.0"
+  to 1.9.6 (all nine stamp sites: header, releases pointer, both
+  download tables/steps, sidebar example, footer) — the body had been
+  maintained through AUD-P1 but the stamp lied about which version it
+  described. Content rides this batch's changes: §7.1 gains the
+  secrets.key guidance (see AUD-P2-10) and the updated restore
+  confirmation text; §8.21 documents the scheduled-reconcile row; §10
+  notes the scheduled reconcile; §13 fixes the `QDRANT_ENABLED` row
+  (no effect — legacy name); §13.1 gains the `reconcile_interval_minutes`
+  lever. `manual/` (7.7 MB, previously unreferenced) gets a README that
+  marks it as the archived 1.8.0-era handover snapshot and points at
+  USER_MANUAL.md as the living manual — non-destructive, no longer
+  unexplained.
+- **AUD-P2-7 (E2)** — the three README rows fixed: `SPP_LOOPBACK_PORT`
+  default is the redirect-URI port (3000) with OS-assignment only as
+  last fallback (was "OS-assigned"); `QDRANT_URL`/`QDRANT_ENABLED` are
+  legacy names with no reader (the vector index is built-in sqlite-vec
+  toggled by the `qdrant_enabled` setting — was "Vector store
+  endpoint"); appimagetool is pinned to the official 1.9.1 release per
+  arch with sha256 (was "downloaded from the official continuous
+  release" — a test explicitly forbids `continuous`).
+- **AUD-P2-8 (E3)** — ci.yml counts comment refreshed to the verified
+  reality (26 suites — 25 kittest + style lint — 208 tests, 206 kittest
+  + 2 style lint, over 197 goldens); root Cargo.toml comments fixed
+  (tokio `fs` HAS call sites in the connectors file tailer — the old
+  comment lumped it with process/signal; the `[profile.dev]` "embedded
+  qdrant engine" rationale replaced with the true current one); the
+  catalog description drops "WASM-safe" (the wasm32 target was deleted
+  — "No I/O deps." is the real property); the vestigial
+  `status_filter` field on the search page (declared, never set)
+  removed. Verified-no-action (audit E7 claims stale): the palette
+  "issues" hint is honest — `search_known_issues` feeds the "all"
+  scope the palette searches; `design::quirk` is in production use (the
+  dashboard's by-channel disclosure); icon.ico/icns stay (CI-verified
+  assets, not drift).
+- **AUD-P2-9 (I1)** — three infra gaps closed: (1) release tags now run
+  the full battery — ci.yml `on: push` gains `tags: ['v*']` (deny +
+  the kittest drift gate + packaging were branch-only; tags came from
+  main in practice but nothing enforced it); (2) aarch64 decided by
+  building the lane: a new `packages-arm64` job on `ubuntu-24.04-arm`
+  (the repo is public, so GitHub's arm runners are free) mirrors the
+  x86_64 packaging job — build, AppImage + .deb, both smoke tests,
+  artifact uploads — making the existing "both CI arches" test claims
+  true instead of deleted; the xtask appimagetool pin became
+  arch-aware (`APPIMAGETOOL_PINS`: x86_64 unchanged
+  `ed4ce84f…`, aarch64 1.9.1
+  `f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158`,
+  sha verified against the upstream release; arch-named cache files);
+  new test `appimagetool_pins_cover_both_ci_arches_on_one_frozen_tag`;
+  (3) deny.toml gains `[sources]` (unknown-registry/unknown-git =
+  deny; the graph is crates.io-only) and the CI deny command now runs
+  `sources` too. Local `cargo deny check advisories licenses bans
+  sources` passes.
+- **AUD-P2-10 (D4)** — the restore flow now tells the truth about
+  `secrets.key`: the armed restore confirmation in Settings → Backups
+  & export adds "Credentials inside it decrypt only with this
+  computer's secrets.key — restoring on a different computer also
+  needs that key file", and the Back up or export card carries a
+  standing hint ("keep a safe copy of secrets.key with them"). The
+  guidance is written into USER_MANUAL §7.1 (the secrets.key rule:
+  same-computer vs another-computer) and §7.2 already pointed the way.
+  The six settings-page goldens regenerate accordingly.
+
+**Verification (full local battery on the batch tree):**
+
+- Gates: no-simulation gate clean; traceability gate OK (23 routes
+  covered, 20 design.rs DC tags valid, 27 DC ids, alias declared).
+- `cargo fmt --all --check` clean; `cargo xtask verify-icons` verified.
+- clippy: workspace `--all-targets -- -D warnings` clean; sandbox lane
+  (`-p supportos-plus-core --features sandbox --all-targets --
+  -D warnings`) clean.
+- Tests: core lib 502 passed / 3 ignored (pre-existing) — including
+  the 12 new audp2 tests; app-shell lib 268; xtask 15; sandbox-lane
+  filter 8; catalog doc-suite 0.
+- cargo-deny: `check advisories licenses bans sources` — all ok
+  (the new [sources] section evaluates clean).
+- kittest drift gate ×2 (UPDATE_SNAPSHOTS pass, then diff-locked
+  pass): all 26 suites green in both passes — 206 kittest + 2 style
+  lint tests, 197 goldens; exactly 6 intended golden changes
+  (settings page × 1440/1024/800 × light/dark — the new
+  scheduled-reconcile row and the D4 texts); zero unrelated drift.
+  VLM read-back of the regenerated 1440-light golden confirms the
+  "Scheduled reconcile (minutes, 0 = off)" row renders with value
+  1440 and no broken/overlapping elements.
+- ci.yml parsed and structure-verified: 4 jobs (check, packages,
+  packages-arm64 on ubuntu-24.04-arm, snapshots), push triggers
+  branches [main] + tags [v*].
+- Disk-bounded sandbox note: the kittest battery ran suite-by-suite
+  (each test binary deleted after its run) — the 9.9G sandbox cannot
+  hold all 26 linked binaries at once; per-suite execution is the
+  same tests over the same baselines.
+
 ## Batch AUD-P1-1 — fix the P1 backlog from the repo audit (2026-11-10)
 
 **Owner directive:** "continue" (the P1/P2 round offered at the AUD-P0

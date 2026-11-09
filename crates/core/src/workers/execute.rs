@@ -506,12 +506,21 @@ impl WorkerManager {
         if let Err(e) = outcome {
             let msg = e.to_string();
             let conn = self.lock();
-            let retryable = true;
-            if retryable {
-                let _ = jobs::fail(&conn, job_id, &msg, true);
-            }
+            // AUD-P2-1 (A7): the catch-all used to hard-code
+            // `let retryable = true;`, so a deterministic AI failure
+            // (unparseable model output, "conversation not found",
+            // AI disabled — all `LmStudioError { retryable: false }`)
+            // burned every attempt and re-notified each time. Honor
+            // the flag when the error is a typed LmStudioError;
+            // anything else (sqlite, io, panic-adjacent) keeps the
+            // old retry-everything behavior. `jobs::fail` marks the
+            // job failed either way — only the requeue differs.
+            let retryable = crate::ai_pipeline::lm_error(&e)
+                .map(|lm| lm.retryable)
+                .unwrap_or(true);
+            let _ = jobs::fail(&conn, job_id, &msg, retryable);
             let _ = jobs::log_error(&conn, "workers", &format!("Job {kind} failed: {msg}"));
-            tracing::warn!(operation = kind, error = %msg, "Job failed");
+            tracing::warn!(operation = kind, error = %msg, retryable, "Job failed");
         }
     }
 
@@ -835,7 +844,18 @@ impl WorkerManager {
                     Some(r) => r,
                     None => {
                         return (
-                            Err(Error::Other("Conversation not found locally.".into())),
+                            // AUD-P2-1 (A7): a missing conversation is
+                            // deterministic — the pipeline's own
+                            // "Conversation not found" carries
+                            // retryable: false, and this pre-flight
+                            // guard now agrees instead of retrying a
+                            // job that can never succeed.
+                            Err(Error::Other(Box::new(
+                                crate::ai_pipeline::LmStudioError::new(
+                                    "Conversation not found locally.",
+                                    false,
+                                ),
+                            ))),
                             None,
                             None,
                         );
@@ -852,7 +872,10 @@ impl WorkerManager {
                         )
                         .await
                         .map(|_| ())
-                        .map_err(|e| Error::Other(e.to_string().into()));
+                        // AUD-P2-1 (A7): box the typed error, don't
+                        // stringify — the failure handler downcasts it
+                        // back to read `retryable`.
+                        .map_err(|e| Error::Other(Box::new(e)));
                         (r, None, Some(remote_id))
                     }
                     AiJob::Draft => {
@@ -868,7 +891,8 @@ impl WorkerManager {
                         )
                         .await
                         .map(|_| ())
-                        .map_err(|e| Error::Other(e.to_string().into()));
+                        // AUD-P2-1 (A7): typed box, see the Analyze arm.
+                        .map_err(|e| Error::Other(Box::new(e)));
                         (r, None, Some(remote_id))
                     }
                     AiJob::Note => {
@@ -883,11 +907,9 @@ impl WorkerManager {
                         {
                             Ok(outcome) => outcome.analysis,
                             Err(e) => {
-                                return (
-                                    Err(Error::Other(e.to_string().into())),
-                                    None,
-                                    Some(remote_id),
-                                );
+                                // AUD-P2-1 (A7): typed box, see the
+                                // Analyze arm.
+                                return (Err(Error::Other(Box::new(e))), None, Some(remote_id));
                             }
                         };
                         let mut body = String::new();
@@ -1531,7 +1553,13 @@ impl WorkerManager {
             }
             Ok(Err(e)) => {
                 let conn = self.lock();
-                jobs::fail(&conn, job_id, &e.message, false)?;
+                // AUD-P2-1 (A7): copilot failures were hard-marked
+                // non-retryable — a transient LM Studio outage killed
+                // the turn on the first try while every other AI lane
+                // retried. The flag already carries the right
+                // semantics (transport -> true, deterministic ->
+                // false); pass it through.
+                jobs::fail(&conn, job_id, &e.message, e.retryable)?;
                 let _ = jobs::log_error(
                     &conn,
                     "workers",

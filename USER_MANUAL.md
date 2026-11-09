@@ -1,6 +1,6 @@
 # SupportOS+ — User Manual
 
-**Version 1.8.0** · For everyday computer users — no technical knowledge required.
+**Version 1.9.6** · For everyday computer users — no technical knowledge required.
 
 SupportOS+ is a desktop program for Linux that connects to your **Help Scout** help desk and puts your whole support operation on your own computer: your conversations, your customers, your help-center articles, your reports — plus optional AI helpers that run on your machine.
 
@@ -68,26 +68,26 @@ You do **not** need: Docker, a server, a database program, programming tools, or
 ## 3. Installing SupportOS+
 
 Both installers come from the GitHub releases page of the project:
-`https://github.com/kimpearce888/SupportOS-Plus/releases` — look for the newest version (for this manual: **v1.8.0**).
+`https://github.com/kimpearce888/SupportOS-Plus/releases` — look for the newest version (for this manual: **v1.9.6**).
 
 You will see two files:
 
 | File | Best for |
 |---|---|
-| `supportos-plus_1.8.0_amd64.deb` | Debian, Ubuntu, Linux Mint, Pop!_OS, elementary and other Debian-family systems. Installs like a normal program and adds "SupportOS+" to your applications menu. |
-| `SupportOS-Plus-1.8.0-x86_64.AppImage` | Any other Linux. One single file — no installation, just run it. |
+| `supportos-plus_1.9.6_amd64.deb` | Debian, Ubuntu, Linux Mint, Pop!_OS, elementary and other Debian-family systems. Installs like a normal program and adds "SupportOS+" to your applications menu. |
+| `SupportOS-Plus-1.9.6-x86_64.AppImage` | Any other Linux. One single file — no installation, just run it. |
 
 ### Option A — install the .deb (recommended on Debian/Ubuntu/Mint)
 
-1. Download `supportos-plus_1.8.0_amd64.deb`.
+1. Download `supportos-plus_1.9.6_amd64.deb`.
 2. Double-click the downloaded file. Your software installer opens (called "Software Install", "Package Installer" or similar). Click **Install** and enter your password if asked.
    - The installer pulls in everything the program needs (its listed system dependencies) automatically — you never have to install anything by hand.
-   - Comfortable with the terminal instead? `sudo apt install ./supportos-plus_1.8.0_amd64.deb` does the same.
+   - Comfortable with the terminal instead? `sudo apt install ./supportos-plus_1.9.6_amd64.deb` does the same.
 3. After installing, find **SupportOS+** in your applications menu and click it.
 
 ### Option B — run the AppImage (no installation)
 
-1. Download `SupportOS-Plus-1.8.0-x86_64.AppImage` into any folder (for example `Applications` in your home folder).
+1. Download `SupportOS-Plus-1.9.6-x86_64.AppImage` into any folder (for example `Applications` in your home folder).
 2. Allow it to run: right-click the file → **Properties** → **Permissions** → switch on **Allow executing file as program** (wording varies slightly by system).
 3. Double-click the file. The program starts.
 
@@ -124,7 +124,7 @@ If something prevents the program from starting at all (for example a broken dat
 
 ### The sidebar (left edge)
 
-A narrow bar with the brand **"SupportOS+"** and its version (for example `v1.8.0`), a search row, and all pages grouped under five headings:
+A narrow bar with the brand **"SupportOS+"** and its version (for example `v1.9.6`), a search row, and all pages grouped under five headings:
 
 | Group | Pages |
 |---|---|
@@ -300,7 +300,10 @@ Inside that folder:
 
 - **Automatic**: the app saves a full backup every **24 hours** and keeps the **newest 20**. No action needed from you.
 - **Manual backup**: press **"create backup"** — a message shows the file path, e.g. `backup /home/you/.local/share/supportos-plus/backups/supportos-backup-2026-10-27-….db`.
-- **Restore**: every backup in the list has a **"restore"** button. Restoring replaces your current database with the backup — the app asks twice: first the button, then a red confirmation: *"Restore <path>? The current database will be REPLACED by this backup (verified first). Restart SupportOS+ afterwards to use it."* Press **"really restore"** only if you are sure, then restart the app. Backups are verified for integrity before anything is touched, and a broken/foreign backup file is refused.
+- **What a backup can and cannot unlock (the `secrets.key` rule)**: backups contain your saved credentials (Help Scout secret, webhook secret, Docs API key) in **encrypted form**. They can only be unlocked by the `secrets.key` file that lives next to the database (see the data-folder table above). Two practical rules:
+  - **Same computer**: nothing to do — restoring works as-is, because the key file is right there.
+  - **Another computer (or after a disk loss)**: a backup alone is **not enough** — without a copy of `secrets.key` the restored credentials stay locked forever. When you copy backups somewhere safe, copy `secrets.key` with them and keep it safe (treat it like a password).
+- **Restore**: every backup in the list has a **"restore"** button. Restoring replaces your current database with the backup — the app asks twice: first the button, then a red confirmation: *"Restore <path>? The current database will be REPLACED by this backup (verified first). Credentials inside it decrypt only with this computer's secrets.key — restoring on a different computer also needs that key file. Restart SupportOS+ afterwards to use it."* Press **"really restore"** only if you are sure, then restart the app. Backups are verified for integrity before anything is touched, and a broken/foreign backup file is refused.
 - **Exports**: **"export JSON"** (all data) and **"export conversations CSV"** (a spreadsheet) write files that you can open elsewhere; the message shows the path.
 - Backup files are permission-protected (readable only by you) and their sidecar settings file never contains passwords or tokens.
 
@@ -753,6 +756,7 @@ The control panel, in six tabs. Every value is stored locally; nothing is sent a
 
 - **"Synchronization"** card:
   - **"max quiet sync interval (minutes):"** — 1–1440, default **1**. The ceiling of the automatic sync timer (it polls every 30 s while the account is busy, then backs off by doubling toward this ceiling when quiet). Changing it re-arms the timers immediately — no restart.
+  - **"scheduled reconcile (minutes, 0 = off):"** — 0–10080, default **1440 (once a day)**. How often the app runs a full reconcile pass on its own. Incremental syncs only re-check the last 10 minutes of changes and trust this computer's clock — the scheduled reconcile catches anything a fast clock or a missed window let through, so a missed change heals within a day instead of waiting for a manual **Run reconcile** (Sync Health). `0` turns the schedule off; changing the value re-arms the timer immediately — no restart.
   - **"api concurrency:"** — 1–8, default **2**. How many parallel requests hit the Help Scout API.
   - **"log level:"** — `debug` / `info` *(default)* / `warn` / `error`. Applied immediately on save.
   - **"agent language:"** — free text, default `en`. The language the AI agent works in.
@@ -838,7 +842,7 @@ No LM Studio (or no model routed)? The app degrades honestly: pages that need a 
 
 **Rate limits.** Help Scout limits API requests per minute (the app assumes 150 unless told otherwise and adapts to the real headers). If you hit the limit, the app waits and retries automatically — *"Help Scout rate limit reached. The operation will be retried automatically when the limit resets."* — and the **"rate-limit budget"** check shows what's left.
 
-**Fixing sync.** Manual buttons live on **Sync Health**: initial sync, incremental sync, reconcile (a thorough comparison), and cancel. Failures are listed in **Diagnostics**.
+**Fixing sync.** Manual buttons live on **Sync Health**: initial sync, incremental sync, reconcile (a thorough comparison), and cancel. A reconcile also runs **on a schedule** (once a day by default; see the *scheduled reconcile* setting in Settings → Sync & AI) so changes missed by a fast computer clock or a missed overlap window heal on their own. Failures are listed in **Diagnostics**.
 
 ## 11. Security and privacy
 
@@ -925,7 +929,7 @@ You never need these. They exist for special setups (scripted installs, custom p
 | `LMSTUDIO_CHAT_MODEL` / `LMSTUDIO_EMBEDDING_MODEL` | unset | Pin model names. |
 | `LMSTUDIO_TIMEOUT_MS` / `LMSTUDIO_CONCURRENCY` | `120000` / `2` | AI request timeout / parallelism. |
 | `SYNC_INTERVAL_MINUTES` / `SYNC_API_CONCURRENCY` | `1` / `2` | Fallbacks for the Sync & AI settings. |
-| `QDRANT_ENABLED` | `true` | On/off switch for the local vector search index (the Vector index tab is the friendly way). |
+| `QDRANT_ENABLED` | *no effect* | Legacy name from the removed external vector store — today's vector index is built into the app and toggled by the **Vector index** tab in Settings, not by this variable. |
 
 The program takes **no command-line arguments** — everything is configured in the app or with these variables.
 
@@ -946,6 +950,7 @@ VALUES ('ops_waiting_threshold_minutes', '120');
 | `freshness_stale_days` | `180` | Knowledge documents not touched for this many days count as **stale** in the Knowledge freshness report and Issue Radar. Read live. |
 | `freshness_unreviewed_days` | `90` | Knowledge documents unreviewed for this many days are flagged in the same reports. Read live. |
 | `freshness_low_usage_days` | `60` | Knowledge documents unused for this many days are flagged as low-usage. Read live. |
+| `reconcile_interval_minutes` | `1440` (24 h) | How often, in minutes, the scheduled reconcile pass runs on its own (the safety net for the incremental sync's 10-minute overlap window; Settings → Sync & AI exposes it too). Accepts 0–10080; `0` turns the schedule off. Read once at app start — restart (or save the Settings row, which restarts the workers) after changing. |
 | `notification_sweep_seconds` | `15` | How often, in seconds, the app scans for new notifications. Accepts 5–3600. Read once at app start — restart after changing. |
 | `customer_event_sweep_seconds` | `60` | How often, in seconds, the app scans for customer events. Accepts 15–3600. Read once at app start — restart after changing. |
 | `intelligence_sweep_seconds` | `900` | How often, in seconds, the background intelligence pass re-runs. Accepts 60–86400. Read once at app start — restart after changing. |
@@ -1019,7 +1024,7 @@ Cancel, the X, or **Esc** always cancels safely.
 
 ---
 
-*SupportOS+ 1.8.0 — this manual describes the program as built from its source code. Where the app shows exact texts, they are quoted as the program prints them.*
+*SupportOS+ 1.9.6 — this manual describes the program as built from its source code. Where the app shows exact texts, they are quoted as the program prints them.*
 
 
 

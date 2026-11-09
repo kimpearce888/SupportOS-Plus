@@ -98,3 +98,16 @@ skip = [
     { crate = "calloop-wayland-source", reason = "transitive: winit wayland-stack generations" },
     { crate = "smithay-client-toolkit", reason = "transitive: winit wayland-stack generations" },
 ]
+
+[sources]
+# AUD-P2-9 (I1): source provenance is enforced now — the section was
+# missing entirely, so `cargo deny check` never evaluated where
+# dependencies come from. The workspace graph resolves 100% from the
+# crates.io registry (no git dependencies, no vendored archives), so
+# anything arriving by an unknown registry or an unlisted git source is
+# a supply-chain surprise and fails CI (`cargo deny check ... sources`).
+# If a git dependency is ever adopted on purpose, list its org below in
+# allow-orgs (or allow-list the exact URL) with a reason, mirroring the
+# bans skip-list discipline above.
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -175,6 +175,22 @@ pub fn me_user_local_id(conn: &Connection) -> Result<Option<i64>> {
             }
         }
     }
+    // AUD-P2-4 (D5): the fallback used to grab the first user by id —
+    // on a multi-user mirror with an unresolved `me_remote_id`, every
+    // me-scoped view (unread badge, notification list, mark-read scope)
+    // silently became the wrong agent's. The fallback is only safe
+    // where "the only user is me" is actually true: a single-user
+    // mirror. With several users and no resolved me_remote_id, stay
+    // unresolved (None) — broadcast notifications still count, and
+    // targeted ones wait until Settings resolves who "me" is.
+    let live_users: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    if live_users > 1 {
+        return Ok(None);
+    }
     let fallback: Option<i64> = conn
         .query_row(
             "SELECT id FROM users WHERE deleted_at IS NULL ORDER BY id LIMIT 1",
@@ -414,5 +430,81 @@ fn truncate_chars(s: &str, max: usize) -> String {
         format!("{cut}…")
     } else {
         t.to_string()
+    }
+}
+
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_user(conn: &Connection, remote_id: i64, first: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO users (remote_id, first_name, last_name, email)
+             VALUES (?1, ?2, 'Agent', ?3)",
+            params![remote_id, first, format!("{first}@example.test")],
+        )
+        .expect("user");
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn audp24_single_user_mirror_still_falls_back_to_that_user() {
+        let conn = db();
+        let only = seed_user(&conn, 501, "Solo");
+        assert_eq!(
+            me_user_local_id(&conn).expect("resolve"),
+            Some(only),
+            "one user on the mirror: the only user is me (D5 keeps this)"
+        );
+    }
+
+    #[test]
+    fn audp24_multi_user_mirror_does_not_pretend_the_first_user_is_me() {
+        let conn = db();
+        let _first = seed_user(&conn, 601, "Ada");
+        let _second = seed_user(&conn, 602, "Grace");
+        assert_eq!(
+            me_user_local_id(&conn).expect("resolve"),
+            None,
+            "several users and no me_remote_id: stay unresolved instead of \
+             silently becoming the first agent (D5)"
+        );
+
+        // Resolving me_remote_id restores a concrete me.
+        crate::settings::set_string(&conn, "me_remote_id", "602").expect("set me");
+        let grace: i64 = conn
+            .query_row("SELECT id FROM users WHERE remote_id = 602", [], |r| {
+                r.get(0)
+            })
+            .expect("grace id");
+        assert_eq!(
+            me_user_local_id(&conn).expect("resolve"),
+            Some(grace),
+            "a resolved me_remote_id wins regardless of user count"
+        );
+    }
+
+    #[test]
+    fn audp24_deleted_users_do_not_inflate_the_live_count() {
+        let conn = db();
+        let solo = seed_user(&conn, 701, "Live");
+        let gone = seed_user(&conn, 702, "Gone");
+        conn.execute(
+            "UPDATE users SET deleted_at = datetime('now') WHERE id = ?1",
+            params![gone],
+        )
+        .expect("soft delete");
+        assert_eq!(
+            me_user_local_id(&conn).expect("resolve"),
+            Some(solo),
+            "one LIVE user (the deleted one doesn't count) — the fallback is safe"
+        );
     }
 }

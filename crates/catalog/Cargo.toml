@@ -5,7 +5,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "SupportOS+ closed-vocabulary catalog — single source of truth for DB, validation, UI. WASM-safe (no I/O deps)."
+# AUD-P2-8: "WASM-safe" named a wasm32 target that was deleted — the
+# real, current property is that the crate does no I/O, so every
+# consumer (DB, validation, UI) shares one vocabulary with no side
+# effects.
+description = "SupportOS+ closed-vocabulary catalog — single source of truth for DB, validation, UI. No I/O deps."
 
 [lib]
 name = "spp_catalog"

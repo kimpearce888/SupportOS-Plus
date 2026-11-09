@@ -7,6 +7,39 @@
 
 ## Queue state
 
+**Batch AUD-P2-1 (fix the P2 backlog, part one — the code fixes, docs
+and infra of `docs/audit/repo-audit-v1.9.6.md` §5 rows 16–18) CONSUMED
+2026-11-10: opened on the owner's "fix P2" directive. Items
+AUD-P2-1..AUD-P2-10 (A7 worker retry honors the LmStudioError
+retryable flag — catch-all downcast + typed boxing in run_ai_job +
+copilot passthrough; A8 build_http_client loud fallback + per-request
+timeouts on every lane; D3 chunk_conversation diffs against stored
+rows — unchanged chunks keep their embeddings; D5 me-user fallback
+only on single-user mirrors; D6 the scheduled reconcile timer +
+reconcile_interval_minutes setting + Settings row + restart hook;
+E1 USER_MANUAL re-stamped to 1.9.6 + manual/ archive README; E2 the
+three README rows; E3 ci.yml counts + Cargo comments + catalog
+description + dead status_filter; I1 tag-path trigger + the native
+arm64 packaging lane with an arch-aware appimagetool pin + deny.toml
+[sources]; D4 the secrets.key restore warning + backups-card hint +
+manual guidance) moved to `progress.md` per Rule 2, implemented,
+verified (full battery + kittest diff-locked ×2 with 6 intended
+settings goldens + VLM read-back), and closed the same session; record
+in `completed.md`. Constraint carried over from AUD-P0/AUD-P1 honored:
+fix the existing implementation inside the existing stack — no new
+frameworks, no new dependencies. Row 15 of the P2 tier remains QUEUED
+below for batch AUD-P2-2 (Rule 8 STOP — say "continue" to proceed).**
+
+**QUEUED (row 15, batch AUD-P2-2 on "continue"): C3 custom-object
+links + type/object edit + pager; C8 radar alert drill-downs +
+known-issue edit/status/delete + queued-job auto-refresh; C9 outreach
+segment recipient preview + targeting/DNC pickers + campaign edit;
+C10 report filter pickers + clickable happiness rows + support-graph
+node delete; C11 knowledge document reader + per-document re-ingest;
+C12 organization edit/delete + clickable members; C13 operations
+one-click assign + workflow create/edit; C14 live-chat conversation
+links + end-chat + customer navigation.**
+
 **Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
 items of `docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-10:
 opened on the owner's "continue" (offered the P1/P2 round after the

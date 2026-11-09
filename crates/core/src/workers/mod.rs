@@ -345,6 +345,40 @@ impl WorkerManager {
                 }
             });
         }
+        {
+            // AUD-P2-5 (D6): the scheduled reconcile — see
+            // `scheduled_reconcile_tick`. Default: every 24 h; 0 turns
+            // it off; changes need a worker restart (Settings does that
+            // automatically when the value changes). The first tick of
+            // a tokio interval fires immediately — consume it so the
+            // first reconcile lands a full interval after boot instead
+            // of racing the startup auto-sync.
+            let minutes = {
+                let conn = self.lock();
+                crate::settings::get_i64(&conn, "reconcile_interval_minutes", 1_440)
+                    .unwrap_or(1_440)
+                    .clamp(0, 10_080)
+            };
+            if minutes > 0 {
+                tracing::info!(
+                    operation = "start",
+                    interval_minutes = minutes,
+                    "scheduled reconcile timer armed (closes the 10-minute incremental-overlap gap)"
+                );
+                let this = self.clone();
+                self.spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(
+                        u64::try_from(minutes * 60).unwrap_or(86_400),
+                    ));
+                    interval.tick().await; // skip the immediate first tick
+                    loop {
+                        interval.tick().await;
+                        Self::contained("scheduled_reconcile", this.scheduled_reconcile_tick())
+                            .await;
+                    }
+                });
+            }
+        }
         tracing::info!(operation = "start", "Background workers started");
     }
 
@@ -864,6 +898,68 @@ impl WorkerManager {
 
     pub(crate) fn nudge_sync(&self) {
         self.sync_nudge.notify_one();
+    }
+
+    /// AUD-P2-5 (D6): the scheduled reconcile pass. The incremental
+    /// overlap is only `SYNC_OVERLAP_MINUTES` (10) and trusts the local
+    /// clock — a machine more than that ahead silently misses remote
+    /// changes until someone presses Reconcile by hand. This timer
+    /// closes the gap on a schedule (default: daily; 0 disables).
+    async fn scheduled_reconcile_tick(&self) {
+        if self.stopped.load(Ordering::SeqCst) {
+            return;
+        }
+        if self.provider.kind() == "empty" {
+            return;
+        }
+        let Some(engine) = self.engine.clone() else {
+            return;
+        };
+        if engine.is_running() {
+            tracing::debug!(
+                operation = "scheduled_reconcile",
+                "a sync is already running — reconcile deferred to the next tick"
+            );
+            return;
+        }
+        match engine.reconcile().await {
+            Ok(result) => {
+                tracing::info!(
+                    operation = "scheduled_reconcile",
+                    checked = result.checked,
+                    added = result.added,
+                    updated = result.updated,
+                    deleted = result.deleted,
+                    skipped = result.skipped,
+                    "Scheduled reconcile finished"
+                );
+                let conn = self.lock();
+                let _ = crate::audit::log_event(
+                    &conn,
+                    "info",
+                    "sync",
+                    &format!(
+                        "Scheduled reconcile: {} checked, {} added, {} updated, {} deleted",
+                        result.checked, result.added, result.updated, result.deleted
+                    ),
+                    None,
+                    None,
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    operation = "scheduled_reconcile",
+                    error = %e,
+                    "Scheduled reconcile failed"
+                );
+                let conn = self.lock();
+                let _ = crate::jobs::log_error(
+                    &conn,
+                    "sync",
+                    &format!("Scheduled reconcile failed: {e}"),
+                );
+            }
+        }
     }
 
     async fn auto_sync(&self) -> i64 {
@@ -2442,5 +2538,289 @@ mod batch28_workers_tests {
         let manager = manager(&db);
         manager.on_after_initial_sync();
         assert_eq!(jobs_of_kind(&db, "analyze_ticket"), 2, "only the live two");
+    }
+}
+
+#[cfg(test)]
+mod audp2_workers_tests {
+    use super::*;
+
+    fn temp_db() -> crate::db::DbHandle {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-workers-audp2-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::db::DbHandle::new(conn)
+    }
+
+    fn manager_with(
+        db: &crate::db::DbHandle,
+        provider: Arc<dyn HelpScoutProvider>,
+    ) -> Arc<WorkerManager> {
+        Arc::new(WorkerManager::new(
+            db.clone(),
+            None,
+            provider,
+            crate::event_bus::EventBus::default(),
+            std::env::temp_dir(),
+            None,
+        ))
+    }
+
+    fn job_state(db: &crate::db::DbHandle, id: i64) -> (String, Option<String>, i64) {
+        db.with_read(|conn| {
+            conn.query_row(
+                "SELECT status, error, attempt FROM jobs WHERE id = ?1",
+                rusqlite::params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("job row")
+        })
+    }
+
+    fn run_one_tick(manager: &Arc<WorkerManager>) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async { manager.tick().await });
+    }
+
+    #[test]
+    fn audp21_lm_error_recovers_the_typed_retryable_flag() {
+        use crate::ai_pipeline::{LmStudioError, lm_error};
+        use crate::error::Error;
+        let typed = Error::Other(Box::new(LmStudioError::new(
+            "model output unparseable",
+            false,
+        )));
+        let lm = lm_error(&typed).expect("typed error downcasts");
+        assert!(!lm.retryable, "deterministic AI failures are terminal");
+        let transport = Error::Other(Box::new(LmStudioError::new("connection refused", true)));
+        assert!(
+            lm_error(&transport).expect("transport downcasts").retryable,
+            "transport failures retry"
+        );
+        let plain = Error::Other("a plain boxed string".into());
+        assert!(
+            lm_error(&plain).is_none(),
+            "untyped errors carry no flag — the caller keeps its default"
+        );
+        assert!(
+            lm_error(&Error::Config("not a box".into())).is_none(),
+            "non-Other variants are not LmStudioErrors"
+        );
+    }
+
+    #[test]
+    fn audp21_deterministic_ai_failure_fails_the_job_terminally() {
+        let db = temp_db();
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        // The backend resolves from settings (ai_enabled defaults on,
+        // base_url falls back to the LM Studio default) — no network is
+        // touched: the pre-flight conversation check fails first.
+        let id = db.with_write(|conn| {
+            jobs::enqueue(
+                conn,
+                "analyze_ticket",
+                &serde_json::json!({"conversationId": 424242}).to_string(),
+            )
+            .expect("enqueue")
+        });
+        run_one_tick(&manager);
+
+        let (status, error, attempt) = job_state(&db, id);
+        assert_eq!(
+            status, "failed",
+            "a deterministic 'conversation not found' must not burn all attempts (A7)"
+        );
+        assert_eq!(attempt, 1, "exactly one attempt spent");
+        assert!(
+            error.as_deref().unwrap_or_default().contains("not found"),
+            "the honest error sits on the row: {error:?}"
+        );
+    }
+
+    #[test]
+    fn audp21_transport_ai_failure_still_requeues_for_retry() {
+        let db = temp_db();
+        db.with_write(|conn| {
+            // A backend pointed at a port nothing listens on: the chat
+            // call dies on transport, which the pipeline marks
+            // retryable — the job must requeue exactly like before.
+            crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:9/v1")
+                .expect("base url");
+            crate::settings::set_i64(conn, "lmstudio_timeout_ms", 2_000).expect("timeout");
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status, remote_created_at)
+                 VALUES (7001, 7001, 'Retry semantics', 'p', 'active', '2026-10-20T08:00:00.000Z')",
+                [],
+            )
+            .expect("conversation");
+        });
+        let manager = manager_with(
+            &db,
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        );
+        let id = db.with_write(|conn| {
+            let conv: i64 = conn
+                .query_row(
+                    "SELECT id FROM conversations WHERE remote_id = 7001",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("seeded");
+            jobs::enqueue(
+                conn,
+                "analyze_ticket",
+                &serde_json::json!({"conversationId": conv}).to_string(),
+            )
+            .expect("enqueue")
+        });
+        run_one_tick(&manager);
+
+        let (status, error, attempt) = job_state(&db, id);
+        assert_eq!(
+            status, "queued",
+            "a transport failure is retryable — the job requeues (A7 keeps this side)"
+        );
+        assert_eq!(attempt, 1, "one attempt spent so far");
+        assert!(
+            error.is_some(),
+            "the failure is recorded on the row: {error:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod audp2_reconcile_tests {
+    use super::*;
+
+    fn temp_db() -> crate::db::DbHandle {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-workers-audp2rec-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut conn = crate::db::open(&dir.join("workers.db")).expect("open db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::db::DbHandle::new(conn)
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
+
+    #[test]
+    fn audp25_scheduled_reconcile_skips_the_empty_provider_quietly() {
+        let db = temp_db();
+        let engine = Arc::new(crate::sync_engine::SyncEngine::new(
+            db.clone(),
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        ));
+        let manager = Arc::new(WorkerManager::new(
+            db.clone(),
+            Some(engine),
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+            crate::event_bus::EventBus::default(),
+            std::env::temp_dir(),
+            None,
+        ));
+        // No provider → the tick must return without touching sync state.
+        runtime().block_on(async { manager.scheduled_reconcile_tick().await });
+        let runs: i64 = db.with_read(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM sync_runs", [], |r| r.get(0))
+                .unwrap_or(0)
+        });
+        assert_eq!(
+            runs, 0,
+            "no reconcile run is started against the empty provider"
+        );
+    }
+
+    #[test]
+    fn audp25_scheduled_reconcile_defers_while_a_sync_is_running() {
+        let db = temp_db();
+        let engine = Arc::new(crate::sync_engine::SyncEngine::new(
+            db.clone(),
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+        ));
+        // Simulate an in-flight sync: the engine's running flag is set.
+        // The tick must defer (no reconcile error, no run recorded).
+        engine.set_running_for_tests(true);
+        let manager = Arc::new(WorkerManager::new(
+            db.clone(),
+            Some(engine.clone()),
+            Arc::new(crate::helpscout::EmptyHelpScoutProvider::new()),
+            crate::event_bus::EventBus::default(),
+            std::env::temp_dir(),
+            None,
+        ));
+        runtime().block_on(async { manager.scheduled_reconcile_tick().await });
+        let reconciling: i64 = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sync_runs WHERE kind = 'reconciliation'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        });
+        assert_eq!(
+            reconciling, 0,
+            "a running sync defers the scheduled reconcile instead of erroring"
+        );
+        engine.set_running_for_tests(false);
+    }
+
+    #[test]
+    fn audp25_reconcile_interval_setting_clamps_and_disables() {
+        // The timer's settings read: default daily, clamp band 0..=10080,
+        // 0 = off. Locked here so the Settings row and the worker agree.
+        let db = temp_db();
+        let read = |key: &str, default: i64| {
+            db.with_read(|conn| {
+                crate::settings::get_i64(conn, key, default)
+                    .unwrap_or(default)
+                    .clamp(0, 10_080)
+            })
+        };
+        assert_eq!(
+            read("reconcile_interval_minutes", 1_440),
+            1_440,
+            "default cadence is daily"
+        );
+        db.with_write(|conn| {
+            crate::settings::set_i64(conn, "reconcile_interval_minutes", 0).expect("off");
+        });
+        assert_eq!(
+            read("reconcile_interval_minutes", 1_440),
+            0,
+            "0 is in-band and means the schedule is off"
+        );
+        db.with_write(|conn| {
+            crate::settings::set_i64(conn, "reconcile_interval_minutes", 999_999).expect("huge");
+        });
+        assert_eq!(
+            read("reconcile_interval_minutes", 1_440),
+            10_080,
+            "the cadence clamps to one week"
+        );
     }
 }

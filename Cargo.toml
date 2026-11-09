@@ -32,10 +32,12 @@ chrono-tz = { version = "0.10", default-features = false, features = ["std"] }
 
 # Plan row 12 ("tokio full → slim"): the port uses exactly rt (spawn,
 # spawn_blocking, runtime builders, handles), rt-multi-thread (the
-# 2-thread background worker runtime), time (interval/sleep timers) and
-# sync (broadcast event bus, oneshot channels). net/io come in through
-# reqwest's own dependency via feature unification; fs/process/signal
-# have zero call sites.
+# 2-thread background worker runtime), time (interval/sleep timers),
+# sync (broadcast event bus, oneshot channels) and fs (the connectors
+# file tailer). net/io come in through reqwest's own dependency via
+# feature unification; process/signal have zero call sites and stay
+# off (AUD-P2-8: the old comment lumped fs in with them — connectors.rs
+# has called tokio::fs since it landed).
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "fs"] }
 
 rusqlite = { version = "0.41", features = ["bundled"] }
@@ -81,6 +83,9 @@ opt-level = "s"
 strip = true
 
 [profile.dev]
-# No debuginfo: keeps memory/disk footprint low when compiling the embedded
-# qdrant engine in constrained environments.
+# No debuginfo: keeps memory/disk footprint low when compiling in
+# constrained environments (AUD-P2-8: the original justification named
+# the embedded qdrant engine — that engine is gone; the vector index is
+# sqlite-vec inside the main database now, and the slim dev profile
+# stays worth having).
 debug = 0

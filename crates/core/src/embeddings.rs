@@ -186,33 +186,89 @@ pub(crate) fn chunk_conversation(conn: &Connection, conversation_id: i64) -> Res
         chunks.push(excerpt);
     }
 
-    conn.execute_batch("BEGIN")?;
-    let tx = (|| -> Result<()> {
-        conn.execute(
-            "DELETE FROM conversation_chunks WHERE conversation_id = ?1",
-            params![conversation_id],
-        )?;
-        let mut ins = conn.prepare(
-            "INSERT INTO conversation_chunks
-                (conversation_id, chunk_index, content, chunk_kind)
-             VALUES (?1, ?2, ?3, ?4)",
-        )?;
-        let thread_count = chunks.len().saturating_sub(usize::from(has_resolution));
-        for (i, c) in chunks.iter().enumerate() {
+    // AUD-P2-3 (D3): this used to DELETE + re-INSERT every chunk on
+    // every sync touch, resetting embedding_state to 'not_indexed' —
+    // so a mere status-change sync re-embedded the whole conversation
+    // through LM Studio. Diff the desired chunk set against the stored
+    // rows instead: unchanged (index, content, kind) rows survive
+    // verbatim with their embedding, state and attempts; only new or
+    // changed indexes are rewritten fresh.
+    let thread_count = chunks.len().saturating_sub(usize::from(has_resolution));
+    let desired: Vec<(i64, &String, &str)> = chunks
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
             let kind = if i < thread_count {
                 "thread"
             } else {
                 "resolution"
             };
-            ins.execute(params![conversation_id, i as i64, c, kind])?;
-        }
-        Ok(())
-    })();
-    match tx {
-        Ok(()) => conn.execute_batch("COMMIT")?,
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            return Err(e);
+            (i as i64, c, kind)
+        })
+        .collect();
+    let existing: Vec<(i64, String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT chunk_index, content, chunk_kind FROM conversation_chunks
+              WHERE conversation_id = ?1 ORDER BY chunk_index",
+        )?;
+        stmt.query_map(params![conversation_id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+    let unchanged = existing.len() == desired.len()
+        && existing
+            .iter()
+            .zip(desired.iter())
+            .all(|((ei, ec, ek), (di, dc, dk))| ei == di && ec == dc.as_str() && ek == dk);
+    if !unchanged {
+        conn.execute_batch("BEGIN")?;
+        let tx = (|| -> Result<()> {
+            let mut ins = conn.prepare(
+                "INSERT INTO conversation_chunks
+                    (conversation_id, chunk_index, content, chunk_kind)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (i, content, kind) in &desired {
+                let at_index = existing.iter().find(|(ei, _, _)| ei == i);
+                match at_index {
+                    Some((_, ec, ek)) if ec == content.as_str() && ek == kind => {
+                        // unchanged — keep the row (and its embedding)
+                    }
+                    Some(_) => {
+                        // content or kind changed at this index — the
+                        // stored embedding is stale; rewrite fresh.
+                        conn.execute(
+                            "DELETE FROM conversation_chunks
+                              WHERE conversation_id = ?1 AND chunk_index = ?2",
+                            params![conversation_id, i],
+                        )?;
+                        ins.execute(params![conversation_id, i, content, kind])?;
+                    }
+                    None => {
+                        ins.execute(params![conversation_id, i, content, kind])?;
+                    }
+                }
+            }
+            // surplus indexes (the new set is shorter than the old) go away
+            conn.execute(
+                "DELETE FROM conversation_chunks
+                  WHERE conversation_id = ?1 AND chunk_index >= ?2",
+                params![conversation_id, desired.len() as i64],
+            )?;
+            Ok(())
+        })();
+        match tx {
+            Ok(()) => conn.execute_batch("COMMIT")?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(e);
+            }
         }
     }
     Ok(chunks.len())
@@ -1127,6 +1183,119 @@ mod batch13_a4_tests {
             .unwrap_or(0);
         let first = chunk_conversation(&conn, conv).expect("third");
         assert_eq!(first as i64, count, "no duplication across re-chunks");
+    }
+
+    #[test]
+    fn audp23_unchanged_rechunk_preserves_embeddings() {
+        // AUD-P2-3 (D3): a sync touch with unchanged content must not
+        // reset embedding state — the old DELETE+re-INSERT re-embedded
+        // the whole conversation through LM Studio on every touch.
+        let (conn, conv) = db_with_conversation("active", None);
+        chunk_conversation(&conn, conv).expect("first chunk");
+        conn.execute(
+            "UPDATE conversation_chunks
+                SET embedding = X'0102', embedding_model = 'm',
+                    embedding_state = 'indexed', embedding_attempts = 2
+              WHERE conversation_id = ?1",
+            params![conv],
+        )
+        .expect("simulate a completed embedding pass");
+
+        let written = chunk_conversation(&conn, conv).expect("re-chunk, unchanged content");
+
+        let (total, preserved): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*),
+                        SUM(CASE WHEN embedding IS NOT NULL
+                                  AND embedding_state = 'indexed'
+                                  AND embedding_model = 'm'
+                                  AND embedding_attempts = 2
+                            THEN 1 ELSE 0 END)
+                   FROM conversation_chunks WHERE conversation_id = ?1",
+                params![conv],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or((0, 0));
+        assert!(total > 0, "the conversation has chunks");
+        assert_eq!(
+            preserved, total,
+            "an unchanged re-chunk keeps every embedding, state and attempt counter"
+        );
+        assert_eq!(
+            written as i64, total,
+            "the return contract still reports the chunk count"
+        );
+    }
+
+    #[test]
+    fn audp23_changed_content_rewrites_only_what_changed() {
+        let (conn, conv) = db_with_conversation("active", None);
+        chunk_conversation(&conn, conv).expect("first chunk");
+        conn.execute(
+            "UPDATE conversation_chunks
+                SET embedding = X'0102', embedding_model = 'm', embedding_state = 'indexed'
+              WHERE conversation_id = ?1",
+            params![conv],
+        )
+        .expect("mark indexed");
+
+        // New content: a long reply re-splits the chunk set.
+        let long_body = "A detailed resolution steps follow. ".repeat(120);
+        conn.execute(
+            "INSERT INTO conversation_threads
+                (conversation_id, type, state, body_text, remote_created_at, created_at)
+             VALUES (?1, 'reply', 'published', ?2, '2026-10-20T12:00:00Z', datetime('now'))",
+            params![conv, long_body],
+        )
+        .expect("long reply");
+        chunk_conversation(&conn, conv).expect("re-chunk after content change");
+
+        let (total, pending, stale_embedding): (i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*),
+                        SUM(CASE WHEN embedding_state = 'not_indexed' AND embedding IS NULL
+                            THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN embedding IS NOT NULL THEN 1 ELSE 0 END)
+                   FROM conversation_chunks WHERE conversation_id = ?1",
+                params![conv],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap_or((0, 0, 0));
+        assert!(
+            total > 1,
+            "the long reply split the conversation into chunks"
+        );
+        assert!(
+            pending > 0,
+            "changed content is rewritten fresh and waits for re-embedding"
+        );
+        assert_eq!(
+            stale_embedding, 0,
+            "no stale embedding survives on rewritten rows"
+        );
+
+        // Shrink: delete the long reply — the surplus chunk index must go.
+        conn.execute(
+            "DELETE FROM conversation_threads
+              WHERE conversation_id = ?1 AND body_text = ?2",
+            params![conv, long_body],
+        )
+        .expect("delete long reply");
+        chunk_conversation(&conn, conv).expect("re-chunk after shrink");
+        let (count, max_index): (i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(chunk_index), -1)
+                   FROM conversation_chunks WHERE conversation_id = ?1",
+                params![conv],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or((0, -1));
+        assert_eq!(count, 1, "the shrunk conversation is a single chunk again");
+        assert_eq!(
+            max_index,
+            count - 1,
+            "surplus chunk indexes are deleted, not orphaned"
+        );
     }
 }
 

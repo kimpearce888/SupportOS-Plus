@@ -41,7 +41,6 @@ pub struct SearchPage {
     query_edit: String,
     query: String,
     scope: Scope,
-    status_filter: Option<String>,
     response: Option<SearchResponse>,
     error: Option<String>,
     vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
@@ -54,7 +53,6 @@ impl SearchPage {
             query_edit: String::new(),
             query: String::new(),
             scope: Scope::All,
-            status_filter: None,
             response: None,
             error: None,
             vector_index: None,
@@ -82,10 +80,10 @@ impl SearchPage {
             self.error = None;
             return;
         }
-        let filters = SearchFilters {
-            status: self.status_filter.clone(),
-            ..SearchFilters::default()
-        };
+        // AUD-P2-8: the vestigial `status_filter` field (never set,
+        // always None) is gone — the page searches with default
+        // filters, which is what it always effectively did.
+        let filters = SearchFilters::default();
         let result = db.with_read(|conn| {
             spp_core::search::search_with_semantics(
                 conn,

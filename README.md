@@ -102,12 +102,12 @@ before):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SPP_LOOPBACK_PORT` | OS-assigned | Pin the localhost OAuth/webhook listener port — register the SAME port in the Help Scout app's redirect URI |
+| `SPP_LOOPBACK_PORT` | redirect-URI port (`3000`) | Pin the localhost OAuth/webhook listener port — register the SAME port in the Help Scout app's redirect URI. Unset: the port from the redirect URI is used, and only as a last fallback (or when it is busy) the OS assigns a free one |
 | `LOG_LEVEL` | `info` | tracing filter level |
 | `LMSTUDIO_BASE_URL` | `http://127.0.0.1:1234` | Local LLM server (copilot, embeddings) |
 | `LMSTUDIO_CHAT_MODEL` / `LMSTUDIO_EMBEDDING_MODEL` | server default | Model overrides |
 | `LMSTUDIO_TIMEOUT_MS` / `LMSTUDIO_CONCURRENCY` | `120000` / `2` | Request budget |
-| `QDRANT_URL` / `QDRANT_ENABLED` | `http://127.0.0.1:6333` / `true` | Vector store endpoint |
+| `QDRANT_URL` / `QDRANT_ENABLED` | *no effect* | Legacy names from the removed external vector store — the vector index is built into the app (sqlite-vec) and toggled by the `qdrant_enabled` setting (Settings → Vector index), not by these variables |
 | `SYNC_INTERVAL_MINUTES` | `1` | Incremental-sync quiet ceiling |
 | `SYNC_API_CONCURRENCY` | `2` | Parallel Help Scout requests during sync |
 
@@ -240,7 +240,10 @@ cited the alias long before it existed).
 
 `xtask package` stages the AppDir (release binary, `.desktop` entry, hicolor
 icons, `AppRun`) and runs `appimagetool` — located via `APPIMAGETOOL`, cached
-under `target/tools/`, or downloaded from the official continuous release.
+under `target/tools/`, or downloaded from the official 1.9.1 release pinned
+per arch (x86_64 + aarch64) with sha256 verification (a test forbids the
+rolling `continuous` tag — it cannot be checksum-pinned), together with the
+pinned type-2 runtime handed over via `--runtime-file`.
 The AppImage bundles the X11 keyboard libraries (`libxkbcommon`,
 `libxkbcommon-x11`, `libxcb-xkb`) from the build host so it also opens windows
 on GUI-less systems, so the build host must have `libxkbcommon0

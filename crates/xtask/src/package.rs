@@ -23,10 +23,25 @@ const ICON_SIZES: &[(&str, &str)] = &[
     ("1024x1024", "1024x1024.png"),
 ];
 
-const APPIMAGETOOL_URL: &str = "https://github.com/AppImage/appimagetool/releases/download/\
-                                1.9.1/appimagetool-x86_64.AppImage";
-const APPIMAGETOOL_SHA256: &str =
-    "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0";
+// AUD-P2-9 (I1): appimagetool is pinned per build arch — the pin used
+// to be x86_64-only, so an aarch64 build host (now a real CI lane on
+// ubuntu-24.04-arm) would have downloaded and tried to execute the
+// x86_64 binary. Same release (1.9.1), same frozen-tag + sha256
+// discipline as APPIMAGE_RUNTIMES below.
+const APPIMAGETOOL_PINS: &[(&str, &str, &str)] = &[
+    (
+        "x86_64",
+        "https://github.com/AppImage/appimagetool/releases/download/\
+                                1.9.1/appimagetool-x86_64.AppImage",
+        "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0",
+    ),
+    (
+        "aarch64",
+        "https://github.com/AppImage/appimagetool/releases/download/\
+                                1.9.1/appimagetool-aarch64.AppImage",
+        "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158",
+    ),
+];
 // CI-1-2: appimagetool itself makes a second single-shot GitHub download
 // at pack time — the type-2 runtime it embeds into every AppImage — and
 // dies the same way on the flapping release CDN ("Failed to download
@@ -496,15 +511,18 @@ fn resolve_appimagetool(
         anyhow::ensure!(path.is_file(), "APPIMAGETOOL not found: {}", path.display());
         return Ok(path.to_path_buf());
     }
+    // AUD-P2-9 (I1): the cached tool is arch-named — an arm64 build
+    // host resolves its own pin instead of executing the x86_64 one.
+    let arch = appimage_arch()?;
     let cached = workspace_root
         .join("target")
         .join("tools")
-        .join("appimagetool-x86_64.AppImage");
-    if cached.is_file() && verify_appimagetool(&cached).is_ok() {
+        .join(format!("appimagetool-{arch}.AppImage"));
+    if cached.is_file() && verify_appimagetool(&cached, arch).is_ok() {
         return Ok(cached);
     }
-    download_appimagetool(&cached)?;
-    verify_appimagetool(&cached)?;
+    download_appimagetool(&cached, arch)?;
+    verify_appimagetool(&cached, arch)?;
     Ok(cached)
 }
 
@@ -553,8 +571,18 @@ fn sha256_file(path: &Path) -> anyhow::Result<String> {
         .collect())
 }
 
-fn verify_appimagetool(path: &Path) -> anyhow::Result<()> {
-    verify_pinned_file(path, APPIMAGETOOL_SHA256, "appimagetool")
+fn verify_appimagetool(path: &Path, arch: &str) -> anyhow::Result<()> {
+    let (_, sha) = appimagetool_pin_for(arch)?;
+    verify_pinned_file(path, sha, "appimagetool")
+}
+
+/// AUD-P2-9 (I1): the appimagetool pin row for a build arch, (url, sha256).
+fn appimagetool_pin_for(arch: &str) -> anyhow::Result<(&'static str, &'static str)> {
+    APPIMAGETOOL_PINS
+        .iter()
+        .find(|(a, _, _)| *a == arch)
+        .map(|(_, url, sha)| (*url, *sha))
+        .ok_or_else(|| anyhow::anyhow!("no appimagetool pinned for arch {arch}"))
 }
 
 /// Shared checksum gate for every pinned artifact that enters the release
@@ -576,13 +604,9 @@ fn verify_icon_set(workspace_root: &Path) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("icon set failed verification: {e}"))
 }
 
-fn download_appimagetool(dest: &Path) -> anyhow::Result<()> {
-    download_pinned_asset(
-        dest,
-        APPIMAGETOOL_URL,
-        APPIMAGETOOL_SHA256,
-        "appimagetool 1.9.1",
-    )
+fn download_appimagetool(dest: &Path, arch: &str) -> anyhow::Result<()> {
+    let (url, sha) = appimagetool_pin_for(arch)?;
+    download_pinned_asset(dest, url, sha, "appimagetool 1.9.1")
 }
 
 /// Downloads one pinned release-path artifact atomically (temp file +
@@ -980,6 +1004,58 @@ mod tests {
         );
         assert!(
             appimage_runtime_for("riscv64").is_err(),
+            "unmapped arches fail instead of guessing"
+        );
+    }
+
+    #[test]
+    fn appimagetool_pins_cover_both_ci_arches_on_one_frozen_tag() {
+        // AUD-P2-9 (I1): the aarch64 CI packaging lane made the "both
+        // CI arches" claim real — the tool pin gets the same frozen-tag
+        // + sha256 discipline the runtime pins already had (and that
+        // CI-1-2 established): official appimagetool releases only, one
+        // shared 1.9.1 tag (never `continuous`), full 64-hex sha per
+        // arch, asset name matching its arch row.
+        assert_eq!(APPIMAGETOOL_PINS.len(), 2, "exactly the two CI arches");
+        for (arch, url, sha) in APPIMAGETOOL_PINS {
+            assert!(
+                ["x86_64", "aarch64"].contains(arch),
+                "unexpected arch row {arch}"
+            );
+            assert!(
+                url.starts_with("https://github.com/AppImage/appimagetool/releases/download/"),
+                "tool must come from the official appimagetool releases"
+            );
+            assert!(
+                !url.contains("/download/continuous/"),
+                "the rolling `continuous` tag is not pinnable — freeze a release tag"
+            );
+            assert_eq!(sha.len(), 64, "sha256 pin must be a full 64-hex digest");
+            assert!(
+                sha.chars().all(|c| c.is_ascii_hexdigit()),
+                "sha256 pin must be hex"
+            );
+            assert!(
+                url.ends_with(&format!("/appimagetool-{arch}.AppImage")),
+                "URL asset name must match its arch row"
+            );
+        }
+        let tags: std::collections::HashSet<&str> = APPIMAGETOOL_PINS
+            .iter()
+            .map(|(_, url, _)| {
+                url.split("/download/")
+                    .nth(1)
+                    .and_then(|rest| rest.split('/').next())
+                    .expect("download path shape")
+            })
+            .collect();
+        assert_eq!(tags.len(), 1, "all tool rows share one frozen tag");
+        assert!(
+            appimagetool_pin_for("x86_64").is_ok() && appimagetool_pin_for("aarch64").is_ok(),
+            "both CI arches resolve a tool pin"
+        );
+        assert!(
+            appimagetool_pin_for("riscv64").is_err(),
             "unmapped arches fail instead of guessing"
         );
     }

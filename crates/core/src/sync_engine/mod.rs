@@ -923,6 +923,13 @@ impl SyncEngine {
         self.running.load(Ordering::SeqCst)
     }
 
+    /// AUD-P2-5 (D6) test support: flip the running flag without a real
+    /// sync, so the scheduled-reconcile defer path is testable.
+    #[cfg(test)]
+    pub fn set_running_for_tests(&self, running: bool) {
+        self.running.store(running, Ordering::SeqCst);
+    }
+
     pub fn request_cancellation(&self) {
         self.cancel_requested.store(true, Ordering::SeqCst);
     }
