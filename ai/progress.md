@@ -1,7 +1,18 @@
 ## Active items
 
-(none — Batch AIE-1 closed 2026-11-09, record in `completed.md`; Rule 8
-STOP, the queue is empty, new work opens only on an owner directive.)
+(none — Batch AUD-1 (full product audit, report only) closed 2026-11-09,
+record in `completed.md`; Rule 8 STOP, the queue is empty, new work opens
+only on an owner directive.)
+
+Batch AUD-1 (the full product audit — gaps, bugs, blockers, features,
+workflows, options questioned on practical scenarios; report only, no
+code changes) opened on the owner's audit directive 2026-11-09 and
+closed the same session: the deliverable `docs/audit/repo-audit-v1.9.6.md`
+(what is built and why, 9 practical-scenario walkthroughs, 44 verified
+findings in 5 classes, P0/P1/P2 remediation backlog — not queued), with
+the verification battery re-run on the audited HEAD as evidence (gates,
+fmt, verify-icons, clippy ×2, tests 464/472/251/2/14, cargo-deny, CI
+run 42542458251 green 3/3). Record in `completed.md`.
 
 Batch AIE-1 (items AIE-1-1..AIE-1-4: the AI reads the help center and
 the customers' own words, and reply drafting is triggerable from the

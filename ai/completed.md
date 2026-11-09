@@ -8965,3 +8965,103 @@ contradicted by the exact pixel measurements (the documented VLM
 measurement unreliability at large scales; UXE-2 precedent: pixel probes
 are primary where a read-back is ambiguous).
 
+
+## Batch AUD-1 — 2026-11-09 — Full product audit, report only (owner directive)
+
+Opened on the owner's audit directive: "audit the repo, check for gaps,
+bugs, blockers, errors, issues. you need to check feasters, workflows,
+options, everything that the program offers, and you need to questions
+them on practical scenarios, how the program going to resolve issues,
+tasks using the features, options, workflows. what is built and why they
+are built, what purposes they serve, what is just built but not
+complete. create the report first." Seventh sandbox recycle: repo
+re-cloned at `11273bc` (AIE-1 close, CI green), Rust 1.99.1 reinstalled
+from the rust-toolchain.toml pin, git credentials restored. Report-only
+batch — no code changes.
+
+**Deliverable:** `docs/audit/repo-audit-v1.9.6.md` — the full product
+audit. Method: full-code read of all four crates (204 files, ~128k LOC),
+backend↔frontend call-tracing, marker sweeps, verification battery
+re-run on the audited HEAD, and in-source re-verification of every
+headline finding (no finding reported on agent say-so). Contents:
+
+- **What is built and why** — product map (local-first Help Scout desk:
+  the 4 crates, 22 pages, every feature surface with its purpose), plus
+  9 practical-scenario walkthroughs traced code-end-to-end (first-run
+  connect→sync→reply; AI configure→draft→insert→send; knowledge find +
+  reuse; automate triage; outreach campaign; incident management; SLA;
+  backups/restore/migration; big-account/multi-agent operation).
+- **44 verified findings** in five classes:
+  - **8 confirmed code bugs** (A1 digest `label`→`name` — top issue
+    clusters always empty; A2 freshness usage queries a never-created
+    `ai_evidence` table — usage metrics dead; A3 the whole priority
+    chain broken on real accounts (mirror hardcodes `priority: None`,
+    filter targets the dead column, no edit UI, automation no-ops);
+    A4 rejected AI drafts re-offered (no state filter in
+    `latest_ai_draft_row`); A5 malformed-payload sync jobs complete
+    silently; A6 approved SetPriority fake-completes in the audit
+    trail; A7 the worker catch-all ignores `retryable:false`; A8
+    `build_http_client`'s `.unwrap_or_default()` can silently drop the
+    timeout).
+  - **7 silent no-ops / dead engine paths** (B1 StatusChanged/TagAdded/
+    SlaRisk automation triggers never fired — the only production call
+    path emits new_conversation/customer_reply; B2 `search_similar`/
+    `check_known_issues` record completions without executing; B3
+    `TicketOperation::AddNote` discards the body; B4 `SetTicketState`
+    has no UI caller; B5 empty-tag-list update rejected remotely; B6
+    `AiStatus.provider_available` always None; B7 unknown webhook
+    events accepted-then-ignored).
+  - **14 UI dead ends** (C1 notifications carry full deep-link fields
+    but return no navigation + no unread badge; C2 connector credentials
+    hard-coded `{}` at creation, no edit/probe, refresh gives no
+    completion feedback; C3 custom-object links uncreatable while the
+    page counts them; C4 incidents lifecycle-dead after creation (9
+    fields permanently None); C5 inbox lacks tag/snooze/priority-edit/
+    merge + inert customer conversation rows; C6 automation rules not
+    editable + numeric-id assignee + unvalidated free-text status; C7
+    endpoint prices not editable post-creation; C8 Issue Radar alerts
+    read-only with no drill-down; C9 outreach raw-JSON segments + raw-id
+    targeting + no preview; C10 report-builder raw-CSV-id filters; C11
+    knowledge documents have no reader/re-ingest; C12 organizations
+    create-only; C13 operations suggestions not actionable; C14 chat→
+    conversation link never surfaced).
+  - **8 operational risks** (D1 fresh-install AI job-spam, no circuit
+    breaker; D2 embedding 60-chunk cap without self-requeue + permanent
+    5-attempt exclusion + no re-index action; D3 conversation re-embed
+    without content-hash; D4 backups don't cover `secrets.key` —
+    restored credentials unrecoverable without it; D5 me_user fallback
+    to first user on multi-user mirrors; D6 ~11h initial pull for 100k
+    conversations + 10-min clock-skew tolerance + reconcile never
+    scheduled; D7 webhooks loopback-only — polling-only without an
+    external relay; D8 retention deletes audit history when enabled).
+  - **7 doc/repo drift items** (E: USER_MANUAL + manual/ at 1.8.0 —
+    five releases stale, manual/ 7.7 MB unreferenced; README's
+    appimagetool "continuous" claim contradicts the pin + forbidding
+    test; QDRANT env-var framing; SPP_LOOPBACK_PORT default wrong in
+    README; ci.yml suite-count comment stale; two stale Cargo.toml
+    comments; vestigial inventory — icon.ico/icns never shipped,
+    aarch64 packaging support with no CI lane, tag path skips
+    cargo-deny + kittest, dead `design::quirk`, catalog "WASM-safe"
+    description).
+- **Prioritized P0/P1/P2 remediation backlog** (explicitly NOT queued —
+  Rule 8: fixes start only on an owner directive).
+
+**Verification (evidence for the "no blockers on HEAD" verdict):**
+gates (no-simulation clean; traceability 23/23 routes, 20 DC tags) ·
+`cargo fmt --all --check` clean · `cargo xtask verify-icons` clean ·
+clippy workspace `--all-targets -D warnings` clean · clippy sandbox
+lane `-D warnings` clean · tests: core 464/464, core+sandbox 472/472,
+app-shell lib 251/251, style lint 2/2, xtask+catalog 14/14 ·
+cargo-deny advisories/licenses/bans ok · CI run 42542458251 green 3/3
+on `11273bc` (kittest drift gate + packaged smoke included). Note for
+the record: the first sandbox-lane run failed 35 tests — all
+`StorageFull` from the recycled sandbox's full disk (environmental);
+after clearing `target/debug/incremental` the lane passed 472/472, no
+code changed.
+
+**Overall verdict (quoted from the report):** "nothing is broken in the
+'crashes or loses data' sense… but there is a consistent pattern of
+features built to 80–90% and then left without their last mile… the
+read path is excellent, the write/edit/manage path repeatedly
+dead-ends." Zero TODO/FIXME/unimplemented markers in the codebase —
+every gap is structural, not annotated.

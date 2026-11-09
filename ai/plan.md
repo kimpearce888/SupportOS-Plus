@@ -7,6 +7,22 @@
 
 ## Queue state
 
+**Batch AUD-1 (full product audit: gaps, bugs, blockers, features,
+workflows, options questioned on practical scenarios — report only)
+CONSUMED 2026-11-09: opened on the owner's audit directive ("audit the
+repo, check for gaps, bugs, blockers, errors, issues… what is built and
+why they are built, what purposes they serve, what is just built but not
+complete. create the report first"). No code changes — the deliverable is
+`docs/audit/repo-audit-v1.9.6.md` (44 findings: 8 confirmed code bugs,
+7 silent no-ops/dead engine paths, 14 UI dead ends, 8 operational risks,
+7 doc/repo drift items, plus a prioritized P0/P1/P2 remediation backlog
+that is NOT queued — fixes start only on an owner directive). The
+verification battery was re-run on the audited HEAD as audit evidence
+(gates, fmt, verify-icons, clippy ×2 lanes, tests 464/472/251/2/14,
+cargo-deny, CI run 42542458251 green 3/3 on `11273bc` incl. kittest).
+Record in `completed.md`. The queue is EMPTY again. New work opens only
+on an owner directive.**
+
 **Batch AIE-1 (the AI must read the help center and the customers' own
 words, and reply drafting must be triggerable) CONSUMED 2026-11-09:
 items AIE-1-1..AIE-1-4 (AIE-1-4 surfaced by the verification battery)
