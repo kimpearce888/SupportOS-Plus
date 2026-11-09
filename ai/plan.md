@@ -21,7 +21,9 @@ verification battery was re-run on the audited HEAD as audit evidence
 (gates, fmt, verify-icons, clippy ×2 lanes, tests 464/472/251/2/14,
 cargo-deny, CI run 42542458251 green 3/3 on `11273bc` incl. kittest).
 Record in `completed.md`. The queue is EMPTY again. New work opens only
-on an owner directive.**
+on an owner directive.** Ledger addendum: the report push `cdbc771`
+(markdown + ledger only, zero code changes) is CI-green 3/3 — run
+42552694312 (check, packages, kittest drift gate all success).**
 
 **Batch AIE-1 (the AI must read the help center and the customers' own
 words, and reply drafting must be triggerable) CONSUMED 2026-11-09:
