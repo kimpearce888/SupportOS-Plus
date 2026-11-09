@@ -18,9 +18,10 @@ AddNote stores its body on the outbound note lane; A3 the priority
 chain repointed at supportos_priority + the inbox Priority edit
 control) moved to `progress.md` per Rule 2, implemented, verified
 (full battery + kittest diff-locked ×2 with 21 intended goldens), and
-closed the same session; record in `completed.md`. The queue is EMPTY
-again. New work opens only on an owner directive. P1/P2 from the audit
-backlog remain NOT queued (Rule 8).**
+closed the same session; record in `completed.md`. Ledger addendum:
+the batch push `e1a7b3b` is CI-green 3/3 — run 42572981593. The queue
+is EMPTY again. New work opens only on an owner directive. P1/P2 from
+the audit backlog remain NOT queued (Rule 8).**
 
 **Batch AUD-1 (full product audit: gaps, bugs, blockers, features,
 workflows, options questioned on practical scenarios — report only)
