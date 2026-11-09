@@ -113,7 +113,9 @@ clean · tests: core 478/478, core+sandbox 486/486, app-shell lib
 457 tests, diff-locked ×2 (21 goldens regenerated for the two intended
 UI changes — the inbox action-card Priority row and the automation
 legacy-trigger markers — zero unrelated drift) · cargo-deny
-advisories/bans/licenses/sources ok.
+advisories/bans/licenses/sources ok · **CI run 42572981593 green 3/3
+on `e1a7b3b`** (fmt/clippy/test/deny, AppImage+.deb build+smoke,
+kittest drift gate).
 
 ## Batch AIE-1 — the AI reads the Help Center and the customers' own words; reply drafting is triggerable (2026-11-09)
 
