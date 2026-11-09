@@ -3,7 +3,8 @@ use spp_core::db::DbHandle;
 use spp_core::incident_workspace::IncidentListFilters;
 use spp_core::intelligence_features::ManualIncident;
 
-use super::{i64_field, opt_str_field, str_field};
+use super::inbox::assignable_users;
+use super::{ConfirmRequest, NavRequest, i64_field, opt_str_field, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -42,6 +43,14 @@ pub struct IncidentsPage {
     new_conversation_ids: String,
     new_note: String,
     link_conversation: String,
+    // AUD-P1-3 (C4): the lifecycle edit state — owner picker + the four
+    // editable long-text fields, prefilled from the detail on every load.
+    users: Vec<(i64, String)>,
+    owner_pick: Option<i64>,
+    edit_description: String,
+    edit_customer_safe: String,
+    edit_workaround: String,
+    edit_resolution: String,
     error: Option<String>,
     notice: Option<String>,
     panel_open: bool,
@@ -90,6 +99,12 @@ impl IncidentsPage {
             new_conversation_ids: String::new(),
             new_note: String::new(),
             link_conversation: String::new(),
+            users: Vec::new(),
+            owner_pick: None,
+            edit_description: String::new(),
+            edit_customer_safe: String::new(),
+            edit_workaround: String::new(),
+            edit_resolution: String::new(),
             error: None,
             notice: None,
             panel_open: false,
@@ -144,6 +159,23 @@ impl IncidentsPage {
         self.customers = customers;
         self.notes = notes;
         self.releases = releases;
+        self.sync_editors();
+    }
+
+    /// AUD-P1-3 (C4): prefill the lifecycle editors (and the owner picker)
+    /// from the freshly loaded detail, so saved changes round-trip.
+    fn sync_editors(&mut self) {
+        let Some(detail) = &self.detail else { return };
+        let incident = detail
+            .get("incident")
+            .cloned()
+            .unwrap_or_else(|| detail.clone());
+        self.edit_description = opt_str_field(&incident, "description").unwrap_or_default();
+        self.edit_customer_safe =
+            opt_str_field(&incident, "customer_safe_explanation").unwrap_or_default();
+        self.edit_workaround = opt_str_field(&incident, "workaround").unwrap_or_default();
+        self.edit_resolution = opt_str_field(&incident, "resolution").unwrap_or_default();
+        self.owner_pick = incident.get("owner_user_local_id").and_then(|v| v.as_i64());
     }
 
     fn ensure_loaded(&mut self, db: &DbHandle) {
@@ -308,8 +340,109 @@ impl IncidentsPage {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    // ---- AUD-P1-3 (C4): the lifecycle write paths ----
+
+    fn set_status(&mut self, db: &DbHandle, status: &str) {
+        let Some(incident_id) = self.selected else {
+            return;
+        };
+        let result = db.with_write(|conn| {
+            spp_core::intelligence_features::set_incident_status(conn, incident_id, status)
+        });
+        match result {
+            Ok(true) => {
+                self.reload_detail(db, incident_id);
+                self.reload_list(db);
+            }
+            Ok(false) => self.error = Some("incident not found".into()),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn set_severity(&mut self, db: &DbHandle, severity: &str) {
+        let Some(incident_id) = self.selected else {
+            return;
+        };
+        let result = db.with_write(|conn| {
+            spp_core::intelligence_features::set_incident_severity(conn, incident_id, severity)
+        });
+        match result {
+            Ok(true) => {
+                self.reload_detail(db, incident_id);
+                self.reload_list(db);
+            }
+            Ok(false) => self.error = Some("incident not found".into()),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn set_owner(&mut self, db: &DbHandle, owner: Option<i64>) {
+        let Some(incident_id) = self.selected else {
+            return;
+        };
+        let result = db.with_write(|conn| {
+            spp_core::intelligence_features::set_incident_owner(conn, incident_id, owner)
+        });
+        match result {
+            Ok(true) => {
+                self.reload_detail(db, incident_id);
+                self.reload_list(db);
+            }
+            Ok(false) => self.error = Some("incident not found".into()),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn save_field(&mut self, db: &DbHandle, field: &str, value: &str) {
+        let Some(incident_id) = self.selected else {
+            return;
+        };
+        let trimmed = value.trim();
+        let payload = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+        let result = db.with_write(|conn| {
+            spp_core::intelligence_features::set_incident_text(conn, incident_id, field, payload)
+        });
+        match result {
+            Ok(true) => {
+                self.reload_detail(db, incident_id);
+                self.reload_list(db);
+            }
+            Ok(false) => self.error = Some("incident not found".into()),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn unlink(&mut self, db: &DbHandle, conversation_id: i64) {
+        let Some(incident_id) = self.selected else {
+            return;
+        };
+        let result = db.with_write(|conn| {
+            spp_core::intelligence_features::unlink_incident_conversation(
+                conn,
+                incident_id,
+                conversation_id,
+            )
+        });
+        match result {
+            Ok(_) => {
+                self.reload_detail(db, incident_id);
+                self.reload_list(db);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
+        // AUD-P1-3 (C4): the owner picker needs the assignable users —
+        // the same list the Inbox uses.
+        if self.users.is_empty() {
+            self.users = db.with_read(assignable_users);
+        }
 
         // UXG-1-7: one count register — the counter pill carries the
         // incident count; the subtitle describes the page's scope and only
@@ -543,6 +676,9 @@ impl IncidentsPage {
             .filter(|t| !t.is_empty() && t != " · ")
             .unwrap_or_else(|| "Incident".to_string());
         let mut panel_open = self.panel_open;
+        // AUD-P1-3 (C4): the panel can now navigate (open a linked
+        // conversation) and arm the delete confirm.
+        let mut panel_nav: Option<NavRequest> = None;
         design::detail_panel(
             ui.ctx(),
             "incidents-detail",
@@ -569,6 +705,7 @@ impl IncidentsPage {
 
                 let code = str_field(&incident, "code");
                 let incident_title = str_field(&incident, "title");
+                let incident_id = i64_field(&incident, "id");
                 ui.vertical(|ui| {
                     ui.label(
                         egui::RichText::new(format!("{code} · {incident_title}"))
@@ -590,22 +727,113 @@ impl IncidentsPage {
                 });
                 design::divider(ui);
 
-                for (label, key) in [
-                    ("description", "description"),
-                    ("customer-safe", "customer_safe_explanation"),
-                    ("workaround", "workaround"),
-                    ("resolution", "resolution"),
-                ] {
-                    if let Some(text) = opt_str_field(&incident, key) {
-                        design::card_titled(ui, label, None, |ui| {
-                            ui.label(
-                                egui::RichText::new(text)
-                                    .size(design::scale::text::BODY)
-                                    .color(t.foreground),
-                            );
+                // AUD-P1-3 (C4): the lifecycle controls — status, severity
+                // and owner were permanently what the create form set
+                // (always `None` for the owner from the UI); they are live
+                // writes through the core lifecycle functions now.
+                design::card_titled(
+                    ui,
+                    "Lifecycle",
+                    Some("update this incident as it develops"),
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            design::field_label(ui, "Status");
+                            let active = INCIDENT_STATUSES
+                                .iter()
+                                .position(|s| *s == status)
+                                .unwrap_or(0);
+                            if let Some(i) = design::segmented(
+                                ui,
+                                "incident-status-edit",
+                                &INCIDENT_STATUSES,
+                                active,
+                            ) {
+                                self.set_status(db, INCIDENT_STATUSES[i]);
+                            }
                         });
-                        ui.add_space(design::scale::space::SP2);
+                        ui.horizontal(|ui| {
+                            design::field_label(ui, "Severity");
+                            let active = INCIDENT_SEVERITIES
+                                .iter()
+                                .position(|s| *s == severity)
+                                .unwrap_or(0);
+                            if let Some(i) = design::segmented(
+                                ui,
+                                "incident-severity-edit",
+                                &INCIDENT_SEVERITIES,
+                                active,
+                            ) {
+                                self.set_severity(db, INCIDENT_SEVERITIES[i]);
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            design::field_label(ui, "Owner");
+                            let owner_label = self
+                                .owner_pick
+                                .and_then(|id| {
+                                    self.users
+                                        .iter()
+                                        .find(|(uid, _)| *uid == id)
+                                        .map(|(_, name)| name.clone())
+                                })
+                                .or_else(|| opt_str_field(&incident, "owner_name"))
+                                .unwrap_or_else(|| "Unassigned".into());
+                            design::select(ui, "incident-owner", &owner_label, 200.0, |ui| {
+                                ui.selectable_value(&mut self.owner_pick, None, "Unassigned");
+                                for (id, name) in self.users.clone() {
+                                    ui.selectable_value(&mut self.owner_pick, Some(id), &name);
+                                }
+                            });
+                            if design::button(ui, "Set Owner", ButtonVariant::Secondary)
+                                .on_hover_text("the owner shows in the header line and the list")
+                                .clicked()
+                            {
+                                self.set_owner(db, self.owner_pick);
+                            }
+                        });
+                        if design::button(ui, "Delete Incident", ButtonVariant::Destructive)
+                            .on_hover_text(
+                                "asks for confirmation — the incident and its links, \
+                                 notes and events are removed",
+                            )
+                            .clicked()
+                            && panel_nav.is_none()
+                        {
+                            panel_nav = Some(NavRequest::Confirm(ConfirmRequest::delete_incident(
+                                incident_id,
+                                &code,
+                                &incident_title,
+                            )));
+                        }
+                    },
+                );
+                ui.add_space(design::scale::space::SP2);
+
+                // AUD-P1-3 (C4): the long-text lifecycle fields are editable
+                // (and visible even when unset — an empty card can be filled).
+                for (label, key) in [
+                    ("Description", "description"),
+                    ("Customer-safe summary", "customer_safe_explanation"),
+                    ("Workaround", "workaround"),
+                    ("Resolution", "resolution"),
+                ] {
+                    let mut save_clicked = false;
+                    {
+                        let slot = self.edit_slot(key);
+                        design::card_titled(ui, label, None, |ui| {
+                            ui.add_sized(
+                                [ui.available_width(), 70.0],
+                                egui::TextEdit::multiline(slot).hint_text("not set — type to add"),
+                            );
+                            save_clicked =
+                                design::button(ui, "Save", ButtonVariant::Secondary).clicked();
+                        });
                     }
+                    if save_clicked {
+                        let value = self.edit_slot(key).clone();
+                        self.save_field(db, key, &value);
+                    }
+                    ui.add_space(design::scale::space::SP2);
                 }
 
                 ui.columns(2, |columns| {
@@ -620,16 +848,42 @@ impl IncidentsPage {
                         &format!("Linked conversations ({})", conversations.len()),
                         None,
                         |ui| {
+                            // AUD-P1-3 (C4): each linked conversation opens in
+                            // the Inbox and can be unlinked (reversible — the
+                            // link form can bring it back).
                             for conv in &conversations {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "#{} · {}",
-                                        i64_field(conv, "number"),
-                                        str_field(conv, "subject")
-                                    ))
-                                    .size(design::scale::text::SMALL)
-                                    .color(t.foreground),
-                                );
+                                let conv_id = i64_field(conv, "conversation_id");
+                                ui.horizontal(|ui| {
+                                    let response = ui
+                                        .add(
+                                            egui::Label::new(
+                                                egui::RichText::new(format!(
+                                                    "#{} · {}",
+                                                    i64_field(conv, "number"),
+                                                    str_field(conv, "subject")
+                                                ))
+                                                .size(design::scale::text::SMALL)
+                                                .color(t.primary),
+                                            )
+                                            .sense(egui::Sense::click()),
+                                        )
+                                        .on_hover_text("open this conversation in the Inbox");
+                                    if response.hovered() {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                    }
+                                    if response.clicked() && panel_nav.is_none() {
+                                        panel_nav = Some(NavRequest::OpenConversation(conv_id));
+                                    }
+                                    if design::button(ui, "Unlink", ButtonVariant::Text)
+                                        .on_hover_text(
+                                            "remove the link — the conversation itself \
+                                             is untouched",
+                                        )
+                                        .clicked()
+                                    {
+                                        self.unlink(db, conv_id);
+                                    }
+                                });
                             }
                             ui.add_space(design::scale::space::SP1);
                             design::form_row(ui, "link #", |ui| {
@@ -655,11 +909,15 @@ impl IncidentsPage {
                             None,
                             |ui| {
                                 for release in &releases {
+                                    // AUD-P1-3 (C4): read the keys the reader
+                                    // actually emits (`version_label` /
+                                    // `released_at`) — the old `version` /
+                                    // `status` reads always rendered empty.
                                     ui.label(
                                         egui::RichText::new(format!(
                                             "{} · {}",
-                                            str_field(release, "version"),
-                                            str_field(release, "status")
+                                            str_field(release, "version_label"),
+                                            str_field(release, "released_at")
                                         ))
                                         .size(design::scale::text::SMALL)
                                         .color(t.foreground),
@@ -719,6 +977,26 @@ impl IncidentsPage {
             },
         );
         self.panel_open = panel_open;
+        panel_nav
+    }
+
+    /// AUD-P1-3 (C4): map a lifecycle field key to its editor slot.
+    fn edit_slot(&mut self, field: &str) -> &mut String {
+        match field {
+            "description" => &mut self.edit_description,
+            "customer_safe_explanation" => &mut self.edit_customer_safe,
+            "workaround" => &mut self.edit_workaround,
+            "resolution" => &mut self.edit_resolution,
+            _ => &mut self.edit_description,
+        }
+    }
+
+    /// AUD-P1-3 (C4): close the detail panel (called by the shell after a
+    /// confirmed delete).
+    pub(crate) fn close_panel(&mut self) {
+        self.panel_open = false;
+        self.selected = None;
+        self.detail = None;
     }
 
     fn new_incident_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -938,5 +1216,173 @@ mod tests {
         page.reload_list(&db);
         assert_eq!(page.total, 1);
         assert_eq!(str_field(&page.rows[0], "title"), "Alpha");
+    }
+
+    // ---- AUD-P1-3 (C4): the incident lifecycle ----
+
+    fn lifecycle_db() -> (spp_core::db::DbHandle, i64) {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Checkout broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let id = db
+            .with_write(|conn| {
+                spp_core::intelligence_features::create_manual_incident(
+                    conn,
+                    &ManualIncident {
+                        title: "Checkout down".into(),
+                        status: "investigating".into(),
+                        severity: "sev3".into(),
+                        owner_user_local_id: None,
+                        product: None,
+                        feature: None,
+                        description: None,
+                        internal_explanation: None,
+                        customer_safe_explanation: None,
+                        known_cause: None,
+                        workaround: None,
+                        resolution: None,
+                        started_at: None,
+                        conversation_ids: Vec::new(),
+                    },
+                )
+            })
+            .expect("incident");
+        (db, id)
+    }
+
+    #[test]
+    fn audp13_status_severity_and_owner_round_trip() {
+        let (db, id) = lifecycle_db();
+        let mut page = IncidentsPage::new();
+        page.reload_list(&db);
+        page.select(&db, id);
+
+        // status: resolved sets resolved_at and reorders the list honestly
+        page.set_status(&db, "resolved");
+        let incident = page.detail.as_ref().expect("detail");
+        let incident = incident.get("incident").unwrap_or(incident);
+        assert_eq!(str_field(incident, "status"), "resolved");
+        assert!(opt_str_field(incident, "resolved_at").is_some());
+        page.reload_list(&db);
+        assert_eq!(
+            str_field(page.rows.last().expect("rows"), "status"),
+            "resolved",
+            "resolved incidents sort last"
+        );
+
+        // reopening clears the stamp
+        page.set_status(&db, "investigating");
+        let incident = page.detail.as_ref().expect("detail");
+        let incident = incident.get("incident").unwrap_or(incident);
+        assert!(opt_str_field(incident, "resolved_at").is_none());
+
+        // severity + owner
+        page.set_severity(&db, "sev1");
+        page.set_owner(&db, Some(5));
+        let incident = page.detail.as_ref().expect("detail");
+        let incident = incident.get("incident").unwrap_or(incident);
+        assert_eq!(str_field(incident, "severity"), "sev1");
+        assert_eq!(
+            incident.get("owner_user_local_id").and_then(|v| v.as_i64()),
+            Some(5)
+        );
+        assert_eq!(
+            opt_str_field(incident, "owner_name").as_deref(),
+            Some("Ada Lovelace")
+        );
+
+        // clearing the owner works
+        page.set_owner(&db, None);
+        let incident = page.detail.as_ref().expect("detail");
+        let incident = incident.get("incident").unwrap_or(incident);
+        assert!(
+            incident
+                .get("owner_user_local_id")
+                .and_then(|v| v.as_i64())
+                .is_none()
+        );
+
+        // junk values are rejected by core, surfaced by the page
+        page.set_status(&db, "extinguished");
+        assert!(
+            page.error
+                .as_deref()
+                .unwrap_or("")
+                .contains("unknown incident status")
+        );
+        page.error = None;
+        page.set_severity(&db, "sev9");
+        assert!(
+            page.error
+                .as_deref()
+                .unwrap_or("")
+                .contains("unknown incident severity")
+        );
+    }
+
+    #[test]
+    fn audp13_lifecycle_text_fields_save_and_clear() {
+        let (db, id) = lifecycle_db();
+        let mut page = IncidentsPage::new();
+        page.reload_list(&db);
+        page.select(&db, id);
+
+        page.edit_workaround = "Clear the cache".into();
+        page.save_field(&db, "workaround", &page.edit_workaround.clone());
+        let incident = page.detail.as_ref().expect("detail");
+        let incident = incident.get("incident").unwrap_or(incident);
+        assert_eq!(
+            opt_str_field(incident, "workaround").as_deref(),
+            Some("Clear the cache")
+        );
+        // the editor round-trips the saved value
+        assert_eq!(page.edit_workaround, "Clear the cache");
+
+        // clearing: an empty save writes NULL
+        page.edit_resolution = "   ".into();
+        page.save_field(&db, "resolution", &page.edit_resolution.clone());
+        let incident = page.detail.as_ref().expect("detail");
+        let incident = incident.get("incident").unwrap_or(incident);
+        assert!(opt_str_field(incident, "resolution").is_none());
+
+        // unknown fields are rejected
+        page.save_field(&db, "title", "nope");
+        assert!(page.error.as_deref().unwrap_or("").contains("not editable"));
+    }
+
+    #[test]
+    fn audp13_unlink_and_events() {
+        let (db, id) = lifecycle_db();
+        // link one conversation, then unlink it from the page
+        let conv_id = 1;
+        db.with_write(|conn| {
+            spp_core::intelligence_features::link_incident_conversation(conn, id, conv_id, "manual")
+        })
+        .expect("link");
+
+        let mut page = IncidentsPage::new();
+        page.reload_list(&db);
+        page.select(&db, id);
+        assert_eq!(page.conversations.len(), 1);
+
+        page.unlink(&db, conv_id);
+        assert!(page.conversations.is_empty(), "the link is gone");
+        let events: i64 = db
+            .with_read(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM incident_events WHERE event_type = 'conversation_unlinked'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("events");
+        assert_eq!(events, 1, "the unlink is audited");
     }
 }

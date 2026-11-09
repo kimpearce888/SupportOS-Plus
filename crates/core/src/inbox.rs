@@ -101,6 +101,9 @@ pub struct ConversationDetail {
     pub closed_at: Option<String>,
     pub thread: Vec<ThreadEntry>,
     pub tags: Vec<String>,
+    /// AUD-P1-4 (C5): the snooze state — the local column the mirror has
+    /// kept since m030, surfaced to the reader.
+    pub snoozed_until: Option<String>,
 }
 
 pub fn list_conversations(
@@ -263,7 +266,7 @@ pub fn get_conversation(
                       ELSE TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, ''))
                     END, cu.email,
                     c.supportos_priority, c.response_state,
-                    c.created_at, c.updated_at, c.closed_at
+                    c.created_at, c.updated_at, c.closed_at, c.snoozed_until
              FROM conversations c
              LEFT JOIN mailboxes m ON m.id = c.mailbox_local_id
              LEFT JOIN users u ON u.id = c.assignee_local_id
@@ -294,7 +297,11 @@ pub fn get_conversation(
                 updated_at: row.get(18)?,
                 closed_at: row.get(19)?,
                 thread: Vec::new(),
-                tags: Vec::new(),
+                // AUD-P1-4 (C5): the tags actually stored on the mirror —
+                // this field existed but was always empty, so no reader
+                // surface could show or edit them.
+                tags: crate::conversation_ops::read_conversation_tags(conn, row.get(0)?),
+                snoozed_until: row.get::<_, Option<String>>(20).ok().flatten(),
             })
         },
     );

@@ -579,6 +579,197 @@ pub fn add_incident_note(
     Ok(note_id)
 }
 
+// ---- AUD-P1-3 (C4): the incident lifecycle --------------------------------
+//
+// Until this batch the only incident mutations were create / link / note —
+// status, severity, owner, resolution and workaround were permanently what
+// the create form set (the UI always `None`), with no delete and no unlink.
+
+fn incident_event_stamp() -> i128 {
+    chrono::Utc::now().timestamp_millis() as i128
+}
+
+/// AUD-P1-3 (C4): set the status. `resolved_at` follows the create-time
+/// rule (set iff status == "resolved"), so reopening clears the stamp and
+/// the list's "resolved last" ordering stays honest.
+pub fn set_incident_status(conn: &Connection, incident_id: i64, status: &str) -> Result<bool> {
+    if !crate::incident_workspace::INCIDENT_STATUSES.contains(&status) {
+        return Err(crate::error::Error::Config(format!(
+            "unknown incident status: {status}"
+        )));
+    }
+    let resolved_at = if status == "resolved" {
+        "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+    } else {
+        "NULL"
+    };
+    let rows = conn.execute(
+        &format!(
+            "UPDATE incidents
+             SET status = ?1, resolved_at = {resolved_at},
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2"
+        ),
+        params![status, incident_id],
+    )?;
+    if rows == 0 {
+        return Ok(false);
+    }
+    let _ = record_incident_event(
+        conn,
+        incident_id,
+        "status_changed",
+        None,
+        Some(&serde_json::json!({ "status": status })),
+        &format!(
+            "incident:{incident_id}:status_changed:{status}:{}",
+            incident_event_stamp()
+        ),
+    );
+    Ok(true)
+}
+
+/// AUD-P1-3 (C4): set the severity (sev1..sev4).
+pub fn set_incident_severity(conn: &Connection, incident_id: i64, severity: &str) -> Result<bool> {
+    if !crate::incident_workspace::INCIDENT_SEVERITIES.contains(&severity) {
+        return Err(crate::error::Error::Config(format!(
+            "unknown incident severity: {severity}"
+        )));
+    }
+    let rows = conn.execute(
+        "UPDATE incidents
+         SET severity = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id = ?2",
+        params![severity, incident_id],
+    )?;
+    if rows == 0 {
+        return Ok(false);
+    }
+    let _ = record_incident_event(
+        conn,
+        incident_id,
+        "severity_changed",
+        None,
+        Some(&serde_json::json!({ "severity": severity })),
+        &format!(
+            "incident:{incident_id}:severity_changed:{severity}:{}",
+            incident_event_stamp()
+        ),
+    );
+    Ok(true)
+}
+
+/// AUD-P1-3 (C4): set (or clear, with `None`) the owner.
+pub fn set_incident_owner(
+    conn: &Connection,
+    incident_id: i64,
+    owner_user_local_id: Option<i64>,
+) -> Result<bool> {
+    let rows = conn.execute(
+        "UPDATE incidents
+         SET owner_user_local_id = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id = ?2",
+        params![owner_user_local_id, incident_id],
+    )?;
+    if rows == 0 {
+        return Ok(false);
+    }
+    let _ = record_incident_event(
+        conn,
+        incident_id,
+        "owner_changed",
+        None,
+        Some(&serde_json::json!({ "owner_user_local_id": owner_user_local_id })),
+        &format!(
+            "incident:{incident_id}:owner_changed:{}",
+            incident_event_stamp()
+        ),
+    );
+    Ok(true)
+}
+
+/// AUD-P1-3 (C4): the editable long-text lifecycle fields. Only the four
+/// allow-listed columns are writable — no caller-supplied SQL identifiers.
+pub fn set_incident_text(
+    conn: &Connection,
+    incident_id: i64,
+    field: &str,
+    value: Option<&str>,
+) -> Result<bool> {
+    let column = match field {
+        "description" => "description",
+        "customer_safe_explanation" => "customer_safe_explanation",
+        "workaround" => "workaround",
+        "resolution" => "resolution",
+        other => {
+            return Err(crate::error::Error::Config(format!(
+                "incident field is not editable: {other}"
+            )));
+        }
+    };
+    let rows = conn.execute(
+        &format!(
+            "UPDATE incidents
+             SET {column} = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             WHERE id = ?2"
+        ),
+        params![value, incident_id],
+    )?;
+    if rows == 0 {
+        return Ok(false);
+    }
+    let _ = record_incident_event(
+        conn,
+        incident_id,
+        "field_updated",
+        None,
+        Some(&serde_json::json!({ "field": column, "set": value.is_some() })),
+        &format!(
+            "incident:{incident_id}:field_updated:{column}:{}",
+            incident_event_stamp()
+        ),
+    );
+    Ok(true)
+}
+
+/// AUD-P1-3 (C4): unlink a conversation from an incident (reversible —
+/// the link form can bring it back).
+pub fn unlink_incident_conversation(
+    conn: &Connection,
+    incident_id: i64,
+    conversation_id: i64,
+) -> Result<bool> {
+    let removed = conn.execute(
+        "DELETE FROM incident_conversations
+         WHERE incident_id = ?1 AND conversation_id = ?2",
+        params![incident_id, conversation_id],
+    )? > 0;
+    if removed {
+        conn.execute(
+            "UPDATE incidents SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1",
+            params![incident_id],
+        )?;
+        let _ = record_incident_event(
+            conn,
+            incident_id,
+            "conversation_unlinked",
+            None,
+            Some(&serde_json::json!({ "conversation_id": conversation_id })),
+            &format!(
+                "incident:{incident_id}:conversation_unlinked:conv:{conversation_id}:{}",
+                incident_event_stamp()
+            ),
+        );
+    }
+    Ok(removed)
+}
+
+/// AUD-P1-3 (C4): delete an incident. The child tables (links, notes,
+/// events, related, refs, releases) cascade.
+pub fn delete_incident(conn: &Connection, incident_id: i64) -> Result<bool> {
+    Ok(conn.execute("DELETE FROM incidents WHERE id = ?1", params![incident_id])? > 0)
+}
+
 fn conversation_customer_id(conn: &Connection, conversation_id: i64) -> Option<i64> {
     conn.query_row(
         "SELECT customer_local_id FROM conversations WHERE id = ?1",
@@ -915,5 +1106,135 @@ mod item150_tests {
     fn combined_sweep_succeeds_on_clean_database() {
         let conn = db();
         crate::intelligence_features::sweep(&conn).expect("combined sweep");
+    }
+}
+
+#[cfg(test)]
+mod audp13_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("bootstrap");
+        conn
+    }
+
+    fn incident(conn: &Connection) -> i64 {
+        create_manual_incident(
+            conn,
+            &ManualIncident {
+                title: "Lifecycle".into(),
+                status: "investigating".into(),
+                severity: "sev3".into(),
+                owner_user_local_id: None,
+                product: None,
+                feature: None,
+                description: None,
+                internal_explanation: None,
+                customer_safe_explanation: None,
+                known_cause: None,
+                workaround: None,
+                resolution: None,
+                started_at: None,
+                conversation_ids: Vec::new(),
+            },
+        )
+        .expect("incident")
+    }
+
+    #[test]
+    fn audp13_status_rejects_junk_and_manages_resolved_at() {
+        let conn = db();
+        let id = incident(&conn);
+
+        let err = set_incident_status(&conn, id, "extinguished").expect_err("junk rejected");
+        assert!(err.to_string().contains("unknown incident status"));
+
+        set_incident_status(&conn, id, "resolved").expect("resolve");
+        let (status, resolved_at): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, resolved_at FROM incidents WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(status, "resolved");
+        assert!(resolved_at.is_some());
+
+        set_incident_status(&conn, id, "investigating").expect("reopen");
+        let resolved_at: Option<String> = conn
+            .query_row(
+                "SELECT resolved_at FROM incidents WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .expect("row");
+        assert!(resolved_at.is_none(), "reopening clears the stamp");
+
+        // unknown id is a no-op false, not an error
+        assert!(!set_incident_status(&conn, 999, "resolved").expect("no-op"));
+    }
+
+    #[test]
+    fn audp13_severity_owner_and_text_write_and_audit() {
+        let conn = db();
+        let id = incident(&conn);
+
+        assert!(set_incident_severity(&conn, id, "sev2").expect("severity"));
+        let err = set_incident_severity(&conn, id, "sev9").expect_err("junk rejected");
+        assert!(err.to_string().contains("unknown incident severity"));
+
+        assert!(set_incident_owner(&conn, id, Some(5)).expect("owner"));
+        assert!(set_incident_text(&conn, id, "workaround", Some("cache")).expect("text"));
+        assert!(set_incident_text(&conn, id, "resolution", None).expect("clear"));
+        let err = set_incident_text(&conn, id, "code", Some("no")).expect_err("guard");
+        assert!(err.to_string().contains("not editable"));
+
+        for event_type in ["severity_changed", "owner_changed", "field_updated"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM incident_events
+                     WHERE incident_id = ?1 AND event_type = ?2",
+                    params![id, event_type],
+                    |r| r.get(0),
+                )
+                .expect("events");
+            assert!(n > 0, "{event_type} must be audited");
+        }
+    }
+
+    #[test]
+    fn audp13_delete_cascades_the_workspace() {
+        let conn = db();
+        let id = incident(&conn);
+        add_incident_note(&conn, id, None, "note").expect("note");
+
+        assert!(delete_incident(&conn, id).expect("delete"));
+        for table in [
+            "incident_conversations",
+            "incident_notes",
+            "incident_events",
+            "incident_related",
+            "incident_refs",
+            "incident_releases",
+        ] {
+            let n: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE incident_id = ?1"),
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            assert_eq!(n, 0, "{table} must be empty after the delete");
+        }
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM incidents WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(n, 0);
     }
 }

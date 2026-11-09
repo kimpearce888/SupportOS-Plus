@@ -7,6 +7,31 @@
 
 ## Queue state
 
+**Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
+items of `docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-10:
+opened on the owner's "continue" (offered the P1/P2 round after the
+AUD-P0 close; the continue is the authorization). Items AUD-P1-1..AUD-P1-8
+(C1 notification click-through + unread badge; C2 connector
+credentials edit/probe + refresh completion feedback; C4 incident
+lifecycle edits; C5 inbox tags/snooze + clickable customer
+conversation rows — the priority-edit sub-item already shipped as
+AUD-P0-10; C6 automation rule editing + validated assignee/status
+inputs; C7 editable endpoint prices; D1 fresh-install AI circuit
+breaker; D2 embedding re-index action + self-requeue past the 60-chunk
+cap) moved to `progress.md` per Rule 2, implemented, verified (full
+battery + kittest diff-locked ×2 with 30 intended golden changes + 4
+new goldens for the new interactive states), and closed the same
+session; record in `completed.md`. Two ride-alongs, both forced:
+rusqlite 0.40.2 → 0.41.1 (libsqlite3-sys 0.39.1, bundled SQLite
+3.54.1) for the day-fresh RUSTSEC-2026-0459 — the deny lane would
+have failed CI otherwise — and the automation kittest seed's
+`priority` → `new_priority` typo fix (the base goldens had locked an
+accidental "0 rules + error banner" state). Constraint carried over
+from AUD-P0 honored: fix the existing implementation inside the
+existing stack — no new frameworks, no new dependencies. The queue is
+EMPTY again. New work opens only on an owner directive. P2 from the
+audit backlog (§5 items 15–18) remains NOT queued (Rule 8).**
+
 **Batch AUD-P0 (fix the P0 backlog — the six clusters of
 `docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-09: opened on
 the owner's "fix P0" directive. Items AUD-P0-1..AUD-P0-10 (A1 digest

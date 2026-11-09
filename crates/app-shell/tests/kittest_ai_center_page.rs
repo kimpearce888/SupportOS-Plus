@@ -232,3 +232,62 @@ fn render_seeded_tab(tab: &str, width: f32, name: &str) {
     h.run_steps(2);
     h.snapshot(name);
 }
+
+/// AUD-P1-6 (C7): the price-editor state — a custom (non-builtin)
+/// endpoint carries the $/mtok line with the "Edit Prices" act; opening
+/// it shows the inline prompt/completion pair with Save/Cancel. The
+/// builtin endpoints (the base goldens) have no price line — prices are
+/// a remote-endpoint concept.
+#[test]
+fn audp1_ai_center_price_editor_light() {
+    let (page, db) = seeded_page();
+    db.with_write(|conn| {
+        spp_core::ai_hub::save_endpoints(
+            conn,
+            &[spp_core::ai_hub::EndpointConfig {
+                id: "groq-remote".into(),
+                name: "Groq (remote)".into(),
+                base_url: "https://api.groq.example.test/openai/v1".into(),
+                enabled: true,
+                price_prompt_per_mtok: 0.59,
+                price_completion_per_mtok: 0.79,
+                builtin: false,
+            }],
+        )
+        .expect("custom endpoint");
+        Ok::<(), spp_core::Error>(())
+    })
+    .expect("seed");
+    // tall harness: the endpoints card sits below the Health tab's upper
+    // cards — the Edit Prices act must be inside the screen rect for the
+    // click to land (a found-but-below-the-fold widget ignores clicks).
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 2400.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db);
+            },
+            AiCenterPageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    h.get_all_by_label("Edit Prices")
+        .next()
+        .expect("the custom endpoint's Edit Prices act")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.get_all_by_label("Save Prices").next().is_some(),
+        "the inline price editor must carry its save act"
+    );
+    h.snapshot("audp1_ai_center_price_editor_light");
+}

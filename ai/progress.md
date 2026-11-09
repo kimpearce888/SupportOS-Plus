@@ -1,8 +1,10 @@
 ## Active items
 
-(none — Batch AUD-P0 (fix the P0 backlog from the repo audit) closed
-2026-11-09, record in `completed.md`; Rule 8 STOP, the queue is empty,
-new work opens only on an owner directive.)
+(none — Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
+items of the repo audit §5) closed 2026-11-10, record in
+`completed.md`; Rule 8 STOP, the queue is empty, new work opens only
+on an owner directive. The audit's P2 backlog (§5 items 15–18) remains
+NOT queued.)
 
 Batch AUD-1 (the full product audit — gaps, bugs, blockers, features,
 workflows, options questioned on practical scenarios; report only, no

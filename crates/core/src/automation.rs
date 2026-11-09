@@ -149,6 +149,22 @@ pub fn set_rule_enabled(conn: &Connection, rule_id: i64, enabled: bool) -> Resul
     Ok(rows > 0)
 }
 
+/// AUD-P1-5 (C6): edit an existing rule — name, trigger and action. The
+/// enabled flag and the engine's bookkeeping (run_count, last_run_at) are
+/// intentionally untouched by an edit.
+pub fn update_rule(conn: &Connection, rule_id: i64, rule: &AutomationRule) -> Result<bool> {
+    let trigger_json = serde_json::to_string(&rule.trigger)
+        .map_err(|e| crate::error::Error::Config(format!("trigger serialization failed: {e}")))?;
+    let action_json = serde_json::to_string(&rule.action)
+        .map_err(|e| crate::error::Error::Config(format!("action serialization failed: {e}")))?;
+    let rows = conn.execute(
+        "UPDATE automation_rules SET name = ?1, trigger_json = ?2, action_json = ?3
+         WHERE id = ?4",
+        params![rule.name, trigger_json, action_json, rule_id],
+    )?;
+    Ok(rows > 0)
+}
+
 pub fn delete_rule(conn: &Connection, rule_id: i64) -> Result<bool> {
     let rows = conn.execute(
         "DELETE FROM automation_rules WHERE id = ?1",
@@ -1771,5 +1787,55 @@ mod audp0_tests {
             })
             .expect("outbound count");
         assert_eq!(outbound, 0, "no bodiless note job was queued");
+    }
+    #[test]
+    fn audp15_update_rule_edits_name_trigger_action_and_keeps_enabled() {
+        let mut handle = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut handle).expect("migrations");
+        let conn = handle;
+        let id = create_rule(
+            &conn,
+            &AutomationRule {
+                id: None,
+                name: "Triage".into(),
+                trigger: Trigger::CustomerReply,
+                action: Action::AddTag {
+                    tag: "triage".into(),
+                },
+                enabled: false,
+                created_at: None,
+            },
+        )
+        .expect("create");
+        // disable it explicitly so the edit-preservation can be asserted
+        assert!(set_rule_enabled(&conn, id, false).expect("disable"));
+
+        let updated = AutomationRule {
+            id: Some(id),
+            name: "Triage v2".into(),
+            trigger: Trigger::NewConversation,
+            action: Action::ChangeStatus {
+                new_status: "pending".into(),
+            },
+            enabled: true, // ignored by update_rule on purpose
+            created_at: None,
+        };
+        assert!(update_rule(&conn, id, &updated).expect("update"));
+
+        let rules = list_rules(&conn).expect("list");
+        let rule = rules.iter().find(|r| r.id == Some(id)).expect("rule");
+        assert_eq!(rule.name, "Triage v2");
+        assert!(matches!(rule.trigger, Trigger::NewConversation));
+        assert!(matches!(
+            &rule.action,
+            Action::ChangeStatus { new_status } if new_status == "pending"
+        ));
+        assert!(
+            !rule.enabled,
+            "the edit must not silently re-enable a disabled rule"
+        );
+
+        // unknown id is a clean false
+        assert!(!update_rule(&conn, 999, &updated).expect("no-op"));
     }
 }

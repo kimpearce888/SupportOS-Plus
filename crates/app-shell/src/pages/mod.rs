@@ -40,6 +40,10 @@ pub enum DestructiveAction {
     DeleteConnector {
         id: i64,
     },
+    /// AUD-P1-3 (C4): delete an incident (with confirm).
+    DeleteIncident {
+        id: i64,
+    },
     DeleteSegment {
         id: i64,
     },
@@ -135,6 +139,23 @@ impl ConfirmRequest {
             confirm_label: "Delete connector".into(),
             danger: true,
             action: DestructiveAction::DeleteConnector { id },
+        }
+    }
+
+    /// AUD-P1-3 (C4): incident deletion confirm — the workspace (links,
+    /// notes, events) is removed with the incident.
+    #[must_use]
+    pub(crate) fn delete_incident(id: i64, code: &str, title: &str) -> Self {
+        Self {
+            title: "Delete incident?".into(),
+            message: format!(
+                "The incident {code} (\"{title}\") and its workspace — links, notes \
+                 and events — are removed. Linked conversations themselves are \
+                 untouched. This cannot be undone."
+            ),
+            confirm_label: "Delete incident".into(),
+            danger: true,
+            action: DestructiveAction::DeleteIncident { id },
         }
     }
 

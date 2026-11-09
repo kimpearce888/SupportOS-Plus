@@ -106,6 +106,12 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
+/// AUD-P1-5 (C6): the Help Scout status vocabulary — the same list the
+/// inbox status control uses and `ticket_ops::execute_change_status`
+/// enforces. The automation form validates against it instead of accepting
+/// free text.
+pub(crate) const CONVERSATION_STATUSES: [&str; 4] = ["active", "pending", "closed", "spam"];
+
 #[derive(Debug, Clone)]
 pub(crate) struct ApprovalRow {
     pub id: i64,
@@ -139,13 +145,19 @@ pub struct AutomationPage {
     loaded: bool,
     approvals: Vec<ApprovalRow>,
     show_new_rule: bool,
+    /// AUD-P1-5 (C6): Some(id) puts the form into edit mode for that rule
+    /// (prefilled); None is the plain create form.
+    edit_id: Option<i64>,
     new_name: String,
     trigger_kind: TriggerKind,
     action_kind: ActionKind,
-    action_assignee: String,
+    /// AUD-P1-5 (C6): the assignee picker (the assignable-users list the
+    /// Inbox already uses) replaces the raw numeric-id text field.
+    action_assignee_pick: Option<i64>,
     action_tag: String,
     action_note: String,
     action_status: String,
+    users: Vec<(i64, String)>,
     error: Option<String>,
 }
 
@@ -157,13 +169,15 @@ impl AutomationPage {
             loaded: false,
             approvals: Vec::new(),
             show_new_rule: false,
+            edit_id: None,
             new_name: String::new(),
             trigger_kind: TriggerKind::CustomerReply,
             action_kind: ActionKind::AddTag,
-            action_assignee: String::new(),
+            action_assignee_pick: None,
             action_tag: String::new(),
             action_note: String::new(),
             action_status: String::new(),
+            users: Vec::new(),
             error: None,
         }
     }
@@ -184,6 +198,9 @@ impl AutomationPage {
             Err(e) => self.error = Some(e.to_string()),
         }
         self.approvals = db.with_read(load_pending_approvals);
+        // AUD-P1-5 (C6): the assignable-users list for the assignee picker —
+        // the same source the Inbox uses.
+        self.users = db.with_read(crate::pages::inbox::assignable_users);
         self.loaded = true;
     }
 
@@ -213,11 +230,11 @@ impl AutomationPage {
     fn form_action(&self) -> Result<Action, String> {
         match self.action_kind {
             ActionKind::Assign => {
-                let id: i64 = self
-                    .action_assignee
-                    .trim()
-                    .parse()
-                    .map_err(|_| "assignee must be a numeric user id")?;
+                // AUD-P1-5 (C6): the picker replaced the free numeric-id
+                // text field — an unpicked user is the only failure left.
+                let id = self
+                    .action_assignee_pick
+                    .ok_or_else(|| "assignee required — pick a user".to_string())?;
                 Ok(Action::Assign {
                     assignee_remote_id: id,
                 })
@@ -239,10 +256,100 @@ impl AutomationPage {
                 })
             }
             ActionKind::ChangeStatus => {
+                // AUD-P1-5 (C6): the status vocabulary is validated, not
+                // free text — a typo used to store silently and only
+                // Rejected at execute time.
                 let status = required(&self.action_status, "status")?;
+                if !CONVERSATION_STATUSES.contains(&status.as_str()) {
+                    return Err(format!(
+                        "status must be one of: {}",
+                        CONVERSATION_STATUSES.join(", ")
+                    ));
+                }
                 Ok(Action::ChangeStatus { new_status: status })
             }
         }
+    }
+
+    fn start_edit(&mut self, db: &DbHandle, rule: &AutomationRule) {
+        let id = rule.id;
+        // Only the form's own vocabulary is editable — legacy triggers
+        // (never fire) and action kinds the form doesn't offer are refused
+        // honestly; delete + recreate is the right path for those.
+        let trigger_kind = match &rule.trigger {
+            Trigger::NewConversation => Some(TriggerKind::NewConversation),
+            Trigger::CustomerReply => Some(TriggerKind::CustomerReply),
+            _ => None,
+        };
+        let (action_kind, pick, tag, note, status) = match &rule.action {
+            Action::Assign { assignee_remote_id } => {
+                // the executor resolves local OR remote ids — map the stored
+                // id onto the picker's local ids.
+                let local: Option<i64> = db.with_read(|conn| {
+                    conn.query_row(
+                        "SELECT id FROM users WHERE id = ?1 OR remote_id = ?1 LIMIT 1",
+                        rusqlite::params![assignee_remote_id],
+                        |r| r.get(0),
+                    )
+                    .ok()
+                });
+                (Some(ActionKind::Assign), local, None, None, None)
+            }
+            Action::AddTag { tag } => (
+                Some(ActionKind::AddTag),
+                None,
+                Some(tag.clone()),
+                None,
+                None,
+            ),
+            Action::SendNote { body } => (
+                Some(ActionKind::SendNote),
+                None,
+                None,
+                Some(body.clone()),
+                None,
+            ),
+            Action::ChangeStatus { new_status } => (
+                Some(ActionKind::ChangeStatus),
+                None,
+                None,
+                None,
+                Some(new_status.clone()),
+            ),
+            Action::SetPriority { .. } => (None, None, None, None, None),
+        };
+        let Some(trigger_kind) = trigger_kind else {
+            self.error = Some(
+                "this rule's trigger is a legacy kind that never fires — delete and \
+                 recreate the rule with a live trigger"
+                    .into(),
+            );
+            return;
+        };
+        let Some(action_kind) = action_kind else {
+            self.error = Some(
+                "this rule's action kind is not editable in the form — delete and \
+                 recreate the rule"
+                    .into(),
+            );
+            return;
+        };
+        self.edit_id = id;
+        self.show_new_rule = true;
+        self.error = None;
+        self.new_name = rule.name.clone();
+        self.trigger_kind = trigger_kind;
+        self.action_kind = action_kind;
+        self.action_assignee_pick = pick;
+        self.action_tag = tag.unwrap_or_default();
+        self.action_note = note.unwrap_or_default();
+        self.action_status = status.unwrap_or_default();
+    }
+
+    fn close_form(&mut self) {
+        self.show_new_rule = false;
+        self.edit_id = None;
+        self.error = None;
     }
 
     fn create_rule(&mut self, db: &DbHandle) {
@@ -264,6 +371,29 @@ impl AutomationPage {
                 return;
             }
         };
+        // AUD-P1-5 (C6): edit mode reuses the same form — the write goes to
+        // update_rule and keeps the enabled flag untouched.
+        if let Some(edit_id) = self.edit_id {
+            let rule = AutomationRule {
+                id: Some(edit_id),
+                name: self.new_name.trim().to_string(),
+                trigger,
+                action,
+                enabled: true,
+                created_at: None,
+            };
+            let result =
+                db.with_write(|conn| spp_core::automation::update_rule(conn, edit_id, &rule));
+            match result {
+                Ok(true) => {
+                    self.close_form();
+                    self.reload(db);
+                }
+                Ok(false) => self.error = Some("rule not found — it may have been deleted".into()),
+                Err(e) => self.error = Some(e.to_string()),
+            }
+            return;
+        }
         let rule = AutomationRule {
             id: None,
             name: self.new_name.trim().to_string(),
@@ -333,6 +463,8 @@ impl AutomationPage {
         let rules = self.rules.clone();
         let mut toggled: Option<(i64, bool)> = None;
         let mut delete_requested: Option<(i64, String)> = None;
+        // AUD-P1-5 (C6): the edit target, if any.
+        let mut edit_requested: Option<AutomationRule> = None;
         design::card_titled_wide(
             ui,
             "Rules",
@@ -427,6 +559,14 @@ impl AutomationPage {
                             {
                                 toggled = Some((id, !rule.enabled));
                             }
+                            // AUD-P1-5 (C6): edit the rule in the form above —
+                            // delete + recreate is no longer the only path.
+                            if design::button(ui, "Edit", ButtonVariant::Outline)
+                                .on_hover_text("open this rule in the form above")
+                                .clicked()
+                            {
+                                edit_requested = Some(rule.clone());
+                            }
                             if design::button(ui, "Delete", ButtonVariant::Destructive)
                                 .on_hover_text("asks for confirmation before deleting")
                                 .clicked()
@@ -440,6 +580,9 @@ impl AutomationPage {
         );
         if let Some((id, enabled)) = toggled {
             self.toggle_rule(db, id, enabled);
+        }
+        if let Some(rule) = edit_requested {
+            self.start_edit(db, &rule);
         }
         let mut nav = None;
         if let Some((id, name)) = delete_requested {
@@ -519,8 +662,10 @@ impl AutomationPage {
 
     fn new_rule_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let t = design::tokens(ui);
+        // AUD-P1-5 (C6): one form, two modes — create and edit.
+        let editing = self.edit_id.is_some();
         design::card(ui, |ui| {
-            design::section_title(ui, "New Rule");
+            design::section_title(ui, if editing { "Edit Rule" } else { "New Rule" });
             ui.horizontal(|ui| {
                 Icon::AlertTriangle.show(ui, 14.0, t.warning_foreground);
                 ui.label(
@@ -563,12 +708,28 @@ impl AutomationPage {
 
                 match self.action_kind {
                     ActionKind::Assign => {
-                        design::field_label(ui, "Assignee id");
-                        ui.add_sized(
-                            [180.0, 28.0],
-                            egui::TextEdit::singleline(&mut self.action_assignee)
-                                .hint_text("numeric user id"),
-                        );
+                        // AUD-P1-5 (C6): the assignable-users list — the
+                        // same picker the Inbox uses — replaces the raw
+                        // numeric-id text field.
+                        design::field_label(ui, "Assignee");
+                        let assign_label = self
+                            .action_assignee_pick
+                            .and_then(|id| {
+                                self.users
+                                    .iter()
+                                    .find(|(uid, _)| *uid == id)
+                                    .map(|(_, name)| name.clone())
+                            })
+                            .unwrap_or_else(|| "pick a user…".into());
+                        design::select(ui, "automation-assign", &assign_label, 200.0, |ui| {
+                            for (id, name) in self.users.clone() {
+                                ui.selectable_value(
+                                    &mut self.action_assignee_pick,
+                                    Some(id),
+                                    &name,
+                                );
+                            }
+                        });
                         ui.end_row();
                     }
                     ActionKind::AddTag => {
@@ -589,19 +750,43 @@ impl AutomationPage {
                         ui.end_row();
                     }
                     ActionKind::ChangeStatus => {
+                        // AUD-P1-5 (C6): the status vocabulary is a segmented
+                        // control — no unvalidated free text.
                         design::field_label(ui, "Status");
-                        ui.add_sized(
-                            [180.0, 28.0],
-                            egui::TextEdit::singleline(&mut self.action_status)
-                                .hint_text("new status"),
-                        );
+                        let active = CONVERSATION_STATUSES
+                            .iter()
+                            .position(|s| *s == self.action_status)
+                            .unwrap_or(usize::MAX);
+                        if let Some(i) = design::segmented(
+                            ui,
+                            "automation-status",
+                            &CONVERSATION_STATUSES,
+                            active,
+                        ) {
+                            self.action_status = CONVERSATION_STATUSES[i].to_string();
+                        }
                         ui.end_row();
                     }
                 }
             });
-            if design::button(ui, "Create Rule", ButtonVariant::Primary).clicked() {
-                self.create_rule(db);
-            }
+            ui.horizontal(|ui| {
+                if design::button(
+                    ui,
+                    if editing {
+                        "Save Changes"
+                    } else {
+                        "Create Rule"
+                    },
+                    ButtonVariant::Primary,
+                )
+                .clicked()
+                {
+                    self.create_rule(db);
+                }
+                if editing && design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                    self.close_form();
+                }
+            });
         });
     }
 }
@@ -626,16 +811,10 @@ mod tests {
     use super::*;
     use crate::testsupport::fixture;
 
-    fn page() -> AutomationPage {
-        let mut page = AutomationPage::new();
-        page.show_new_rule = true;
-        page
-    }
-
     #[test]
     fn create_toggle_and_delete_rules_round_trip() {
         let db = fixture(Vec::new());
-        let mut page = page();
+        let mut page = AutomationPage::new();
         page.new_name = "Escalate urgent".into();
         // AU2-1/D10: the form now offers the engine's fire vocabulary.
         page.trigger_kind = TriggerKind::CustomerReply;
@@ -667,7 +846,7 @@ mod tests {
     #[test]
     fn audit70_delete_needs_confirmation_and_cancel_keeps_the_rule() {
         let db = fixture(Vec::new());
-        let mut page = page();
+        let mut page = AutomationPage::new();
         page.new_name = "Escalate urgent".into();
         page.trigger_kind = TriggerKind::NewConversation;
         page.action_kind = ActionKind::ChangeStatus;
@@ -695,18 +874,26 @@ mod tests {
 
     #[test]
     fn form_validation_rejects_empty_fields() {
-        let mut page = page();
+        let mut page = AutomationPage::new();
         page.new_name = "Rule".into();
         // AU2-1/D10: trigger forms carry no parameters; validation lives on the
         // action side now. The trigger form always succeeds.
         assert!(page.form_trigger().is_ok());
         page.action_kind = ActionKind::Assign;
-        page.action_assignee = "ada".into();
+        // AUD-P1-5 (C6): the numeric-id text field is gone — an unpicked
+        // user is the rejection case now.
         assert!(page.form_action().is_err());
         page.action_kind = ActionKind::SendNote;
         assert!(page.form_action().is_err());
         page.action_note = "  ".into();
         assert!(page.form_action().is_err());
+        // AUD-P1-5 (C6): the status vocabulary is validated, not free text.
+        page.action_kind = ActionKind::ChangeStatus;
+        page.action_status = "Extenguished".into();
+        let err = page.form_action().expect_err("junk status rejected");
+        assert!(err.contains("status must be one of"), "got: {err}");
+        page.action_status = "closed".into();
+        assert!(page.form_action().is_ok());
         page.new_name.clear();
         page.action_kind = ActionKind::ChangeStatus;
         let db = fixture(Vec::new());
@@ -872,6 +1059,125 @@ mod batch27_audit80_tests {
             db.with_read(|conn| decided_by(conn, approval)),
             Some(5),
             "without a captured identity the Ada stand-in decides (pre-fix behavior)"
+        );
+    }
+    // ---- AUD-P1-5 (C6): rule editing + validated inputs ----
+
+    #[test]
+    fn audp15_edit_round_trips_through_the_form() {
+        let db = fixture(Vec::new());
+        let mut page = AutomationPage::new();
+        page.reload(&db);
+        assert!(!page.users.is_empty(), "the assignee picker has users");
+
+        // create a rule to edit
+        page.new_name = "Triage".into();
+        page.trigger_kind = TriggerKind::CustomerReply;
+        page.action_kind = ActionKind::AddTag;
+        page.action_tag = "triage".into();
+        page.create_rule(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let rule = page.rules[0].clone();
+        let id = rule.id.expect("id");
+
+        // open the edit form — prefilled
+        page.start_edit(&db, &rule);
+        assert_eq!(page.edit_id, Some(id));
+        assert_eq!(page.new_name, "Triage");
+        assert_eq!(page.trigger_kind, TriggerKind::CustomerReply);
+        assert_eq!(page.action_kind, ActionKind::AddTag);
+        assert_eq!(page.action_tag, "triage");
+
+        // change name + action, save
+        page.new_name = "Triage v2".into();
+        page.action_kind = ActionKind::ChangeStatus;
+        page.action_status = "pending".into();
+        page.create_rule(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert!(page.edit_id.is_none(), "edit mode closes on save");
+
+        let updated = page
+            .rules
+            .iter()
+            .find(|r| r.id == Some(id))
+            .expect("rule")
+            .clone();
+        assert_eq!(updated.name, "Triage v2");
+        assert!(
+            matches!(updated.action, Action::ChangeStatus { ref new_status } if new_status == "pending")
+        );
+    }
+
+    #[test]
+    fn audp15_edit_preserves_the_disabled_flag() {
+        let db = fixture(Vec::new());
+        let mut page = AutomationPage::new();
+        page.reload(&db);
+        page.new_name = "Keep".into();
+        page.action_kind = ActionKind::AddTag;
+        page.action_tag = "x".into();
+        page.create_rule(&db);
+        let id = page.rules[0].id.expect("id");
+        page.toggle_rule(&db, id, false);
+        assert!(
+            !page
+                .rules
+                .iter()
+                .find(|r| r.id == Some(id))
+                .expect("r")
+                .enabled,
+            "precondition: disabled"
+        );
+
+        let rule = page
+            .rules
+            .iter()
+            .find(|r| r.id == Some(id))
+            .expect("r")
+            .clone();
+        page.start_edit(&db, &rule);
+        page.action_tag = "y".into();
+        page.create_rule(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert!(
+            !page
+                .rules
+                .iter()
+                .find(|r| r.id == Some(id))
+                .expect("r")
+                .enabled,
+            "the edit must not silently re-enable a disabled rule"
+        );
+    }
+
+    #[test]
+    fn audp15_legacy_shapes_are_refused_honestly() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO automation_rules (name, trigger_json, action_json, enabled)
+                 VALUES ('Legacy', '{\"kind\":\"sla_risk\"}', '{\"kind\":\"assign\",\"assignee_remote_id\":5}', 1)",
+                [],
+            )
+            .expect("legacy rule");
+        });
+        let mut page = AutomationPage::new();
+        page.reload(&db);
+        let legacy = page
+            .rules
+            .iter()
+            .find(|r| r.name == "Legacy")
+            .cloned()
+            .expect("legacy rule");
+        page.start_edit(&db, &legacy);
+        assert!(
+            page.edit_id.is_none(),
+            "legacy triggers never open the form"
+        );
+        assert!(
+            page.error.as_deref().unwrap_or("").contains("legacy"),
+            "the refusal names the reason: {:?}",
+            page.error
         );
     }
 }

@@ -814,6 +814,54 @@ pub(crate) fn embed_pending_conversation_chunks(
     embed_pending_chunks(conn, "conversation_chunks", qdrant)
 }
 
+/// AUD-P1-8 (D2): did a pass hit its chunk cap? A full pass means more
+/// chunks may be waiting — the caller requeues the same job kind so a
+/// large first sync no longer starves semantic indexing after 60 chunks.
+pub fn pass_hit_cap(embedded: usize) -> bool {
+    embedded >= EMBED_PASS_LIMIT as usize
+}
+
+/// AUD-P1-8 (D2): the user-facing semantic re-index. Five failed attempts
+/// used to exclude a chunk permanently, and no surface anywhere offered a
+/// reset — one transient LM Studio outage at the wrong moment degraded
+/// semantic search indefinitely and invisibly. This resets every chunk's
+/// embedding state (attempts included), drops the local vector collection,
+/// and requeues the three embedding passes.
+pub fn reindex_all(
+    conn: &Connection,
+    qdrant: Option<&crate::vectorstore_sqlitevec::VectorIndex>,
+) -> Result<usize> {
+    if let Some(index) = qdrant {
+        let _ = index.drop_collection();
+    }
+    let mut reset = 0usize;
+    for table in ["knowledge_chunks", "docs_chunks", "conversation_chunks"] {
+        reset += conn.execute(
+            &format!(
+                "UPDATE {table}
+                    SET embedding_state = 'not_indexed',
+                        embedding_attempts = 0,
+                        embedding = NULL,
+                        embedding_model = NULL"
+            ),
+            [],
+        )?;
+    }
+    for kind in [
+        "embed_knowledge_chunks",
+        "embed_docs_chunks",
+        "embed_conversation_chunks",
+    ] {
+        let _ = crate::jobs::enqueue_on(conn, "embeddings", kind, "{}", 4, 2);
+    }
+    tracing::info!(
+        operation = "reindex_all",
+        reset,
+        "semantic index reset — the corpus re-embeds through the configured endpoint"
+    );
+    Ok(reset)
+}
+
 #[cfg(test)]
 mod batch20_audit21_tests {
     use super::*;
@@ -1331,5 +1379,185 @@ mod batch29_audit100_tests {
             .expect("chunk after");
         assert_eq!(state, "failed");
         assert_eq!(attempts, 1, "the attempt must be counted");
+    }
+}
+
+#[cfg(test)]
+mod audp18_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn temp_data_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "spp-embed-audp18-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    fn healthy_handler() -> std::sync::Arc<
+        dyn Fn(&crate::mockserver::MockRequest) -> crate::mockserver::MockResponse + Send + Sync,
+    > {
+        std::sync::Arc::new(|req: &crate::mockserver::MockRequest| {
+            let body: serde_json::Value =
+                serde_json::from_str(&req.body).unwrap_or(serde_json::Value::Null);
+            let inputs = body
+                .get("input")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let data: Vec<serde_json::Value> = inputs
+                .iter()
+                .map(|_| serde_json::json!({ "embedding": [0.25, 0.5] }))
+                .collect();
+            crate::mockserver::MockResponse::json(200, serde_json::json!({ "data": data }))
+        })
+    }
+
+    #[test]
+    fn audp18_pass_hit_cap_marks_full_passes() {
+        assert!(pass_hit_cap(EMBED_PASS_LIMIT as usize));
+        assert!(pass_hit_cap(EMBED_PASS_LIMIT as usize + 10));
+        assert!(!pass_hit_cap(EMBED_PASS_LIMIT as usize - 1));
+        assert!(!pass_hit_cap(0));
+    }
+
+    #[test]
+    fn audp18_reindex_resets_states_and_requeues() {
+        let conn = db();
+        // one permanently-failed conversation chunk (5 attempts = excluded
+        // from every future pass by the < 5 predicate)
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9701, 97, 'Reindex', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        conn.execute(
+            "INSERT INTO conversation_chunks
+                 (conversation_id, chunk_index, content, embedding_state, embedding_attempts)
+             VALUES (1, 0, 'conv chunk', 'failed', 5)",
+            [],
+        )
+        .expect("failed conversation chunk");
+        // one indexed knowledge chunk carrying an embedding blob
+        conn.execute(
+            "INSERT INTO knowledge_sources (name, kind) VALUES ('s', 'local_file')",
+            [],
+        )
+        .expect("source");
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, content)
+             VALUES (1, 'Runbook', 'restart the widget')",
+            [],
+        )
+        .expect("doc");
+        conn.execute(
+            "INSERT INTO knowledge_chunks
+                 (document_id, chunk_index, content, embedding_state, embedding, embedding_model)
+             VALUES (1, 0, 'restart the widget', 'indexed', X'0202', 'old-model')",
+            [],
+        )
+        .expect("indexed knowledge chunk");
+        // one failed docs chunk
+        conn.execute(
+            "INSERT INTO docs_chunks
+                 (article_id, chunk_index, content, embedding_state, embedding_attempts)
+             VALUES (1, 0, 'doc chunk', 'failed', 3)",
+            [],
+        )
+        .expect("failed docs chunk");
+
+        let reset = reindex_all(&conn, None).expect("reindex");
+        assert_eq!(reset, 3, "every chunk is reset");
+
+        for table in ["knowledge_chunks", "docs_chunks", "conversation_chunks"] {
+            let bad: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM {table}
+                          WHERE embedding_state != 'not_indexed'
+                             OR embedding_attempts != 0
+                             OR embedding IS NOT NULL"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("count");
+            assert_eq!(bad, 0, "{table} fully reset (state, attempts, blobs)");
+        }
+        for kind in [
+            "embed_knowledge_chunks",
+            "embed_docs_chunks",
+            "embed_conversation_chunks",
+        ] {
+            assert!(
+                crate::jobs::has_pending(&conn, "embeddings", kind).unwrap_or(false),
+                "{kind} must be queued by the re-index"
+            );
+        }
+    }
+
+    #[test]
+    fn audp18_large_first_sync_flows_across_capped_passes() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9801, 98, 'Bulk', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        for i in 0..130 {
+            conn.execute(
+                "INSERT INTO conversation_chunks
+                     (conversation_id, chunk_index, content, embedding_state)
+                 VALUES (1, ?1, 'bulk chunk', 'not_indexed')",
+                params![i],
+            )
+            .expect("chunk");
+        }
+        let dir = temp_data_dir("bulk");
+        let index = crate::vectorstore_sqlitevec::VectorIndex::new(&dir, true);
+        let mock = crate::mockserver::MockServer::start(healthy_handler()).expect("mock");
+        crate::settings::set_string(&conn, "lmstudio_base_url", &mock.url()).expect("base url");
+        crate::settings::set_string(&conn, "lmstudio_embedding_model", "test-embed")
+            .expect("model");
+
+        // pass 1: capped at EMBED_PASS_LIMIT — the handler requeues on cap
+        let n = embed_pending_conversation_chunks(&conn, Some(&index)).expect("pass 1");
+        assert_eq!(n, EMBED_PASS_LIMIT as usize, "the cap holds per pass");
+        assert!(pass_hit_cap(n), "the full pass signals the requeue");
+
+        // the requeued passes (what the handler's self-requeue drives)
+        let n2 = embed_pending_conversation_chunks(&conn, Some(&index)).expect("pass 2");
+        assert!(pass_hit_cap(n2), "still full — more waiting");
+        let n3 = embed_pending_conversation_chunks(&conn, Some(&index)).expect("pass 3");
+        assert!(!pass_hit_cap(n3), "the backlog is drained");
+
+        assert_eq!(
+            n + n2 + n3,
+            130,
+            "a large first sync drains across capped passes instead of starving"
+        );
+        let indexed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM conversation_chunks WHERE embedding_state = 'indexed'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(indexed, 130);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

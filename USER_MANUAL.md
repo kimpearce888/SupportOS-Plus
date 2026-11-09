@@ -380,6 +380,8 @@ Below the cards: a **"New conversations per day"** line chart, breakdown cards *
 - **status:** four chips — `active`, `pending`, `closed`, `spam`. Clicking applies the status locally and queues it for Help Scout (green line: *"... — sending to Help Scout"*). There is no separate "close" button — `closed` *is* closing.
 - **assign:** pick a person (or "unassigned") in the dropdown, press **"assign"**. Team assignments show as `team: {name}`.
 - **priority:** four chips — `low`, `normal`, `high`, `urgent`. Clicking sets the conversation's priority immediately (no chip is highlighted while it is unset — the header line shows `Priority: none` until then). Priority is a **SupportOS-local** concept: it is not pushed to Help Scout, and it feeds the Operations "Urgent / high priority" tile, reports and the workload ordering.
+- **tags:** the conversation's current tags are chips — click one to remove it. Type in **"add tag…"** (or press Enter) and press **"add"** to attach a new one. Every change writes the local mirror and queues the full tag list for Help Scout (the same lane automation's add-tag uses). An empty save clears all tags.
+- **snooze:** three preset chips — **"2h"**, **"tomorrow"**, **"3d"** — snooze the conversation until that moment (Help Scout's snooze; a customer reply wakes it up). While snoozed the row shows the exact timestamp and an **"unsnooze"** button wakes it immediately.
 
 **Replying — the composer**
 
@@ -483,7 +485,7 @@ The hint above the tiles shows when the snapshot was generated and the waiting t
   - **"Support health"** — open conversations, not-good ratings (90 days), SLA breaches.
   - **"Event mix"** — bars showing what kinds of events this customer generated.
   - **"Interaction profile"** (marked **AI**) — how this customer communicates, with a badge showing whether it came from rules (**"heuristic"**) or AI; below it a **"Support approach"** block recommending how to handle them.
-  - **"Timeline"** — up to 100 recent events; **"Support milestones"** — SLA breaches, high-effort moments; **"Conversations"** — their 20 most recent tickets with status badges.
+  - **"Timeline"** — up to 100 recent events; **"Support milestones"** — SLA breaches, high-effort moments; **"Conversations"** — their 20 most recent tickets with status badges. Click a conversation's subject to open it in the Inbox.
 - **"← back to search"** returns to your results.
 - **"Sync now"** (top right) pulls fresh customer data.
 
@@ -587,8 +589,8 @@ Every document is split into searchable chunks (the table shows the count). Row 
 
 - Press **"New Incident"**, fill **title**, **status** (`investigating` / `identified` / `fix_in_progress` / `monitoring` / `resolved`), **severity** (`sev1` most severe … `sev4`), **description**, and optionally link **conversation ids** (comma-separated). **"create incident"** assigns a code like `INC-003`.
 - Filter the list with **status:**, **severity:**, **"open only"**, and the search box + **"apply"**.
-- In the detail workspace: **"link conversation #: {id}" + "link"** to attach more conversations; **"add note"** keeps a timestamped history; cards show **Linked conversations**, **Affected customers**, **Notes**, and **Releases** when present.
-- To resolve an incident, create it with status `resolved` (which stamps the resolution time) — the current version has no in-place status change button.
+- In the detail workspace: the **"Lifecycle"** card updates the incident as it develops — **status** chips (`investigating` → `identified` → `fix_in_progress` → `monitoring` → `resolved`; reaching `resolved` stamps the resolution time, reopening clears it), **severity** chips (`sev1`…`sev4`), and an **owner** dropdown (**"set owner"**; pick "Unassigned" to clear). Below it, **Description**, **Customer-safe summary**, **Workaround** and **Resolution** are editable text cards — type and press **"save"** (an empty save clears the field). **"delete incident"** (with confirmation) removes the incident and its workspace; the linked conversations themselves are untouched.
+- **"link conversation #: {id}" + "link"** attaches more conversations; each linked conversation's row opens in the Inbox when clicked, and **"unlink"** removes the link (reversible — the link form can bring it back). **"add note"** keeps a timestamped history; cards show **Linked conversations**, **Affected customers**, **Notes**, and **Releases** when present.
 
 ---
 
@@ -612,14 +614,14 @@ Every document is split into searchable chunks (the table shows the count). Row 
 
 1. **name:**
 2. **trigger:** two chips — **"New conversation"** (a customer starts a conversation) or **"Customer reply"** (the customer replies on an existing conversation). These are the only triggers the engine can fire.
-3. **action:** four chips — **"Assign"** (an **assignee id:** — the agent's numeric user id), **"Add tag"** (a **tag:**), **"Send note"** (a **note body:**), **"Change status"** (a **status:**).
+3. **action:** four chips — **"Assign"** (an **assignee:** dropdown listing your synced users), **"Add tag"** (a **tag:**), **"Send note"** (a **note body:**), **"Change status"** (a **status:** chip row — `active`, `pending`, `closed`, `spam`; no free text).
 4. **"Create Rule"** — the rule is created **enabled**.
 
 A warning line reminds you: *"enabled rules act on conversations automatically — actions that need review park in the approvals queue."*
 
 **Safety valves** — Assign and Change status actions **always** need approval; Add tag and Send note never do. Riskier actions therefore wait in the **"Pending approvals"** card, where each item shows the rule, the conversation, and the proposed action, with **"approve"** / **"reject"** buttons.
 
-**Managing rules** — the table lists each rule with its **"when"** and **"then"** in plain words (e.g. `the customer replies on a conversation` → `add tag 'done'`). Click the **enabled/disabled** chip to switch a rule on/off instantly; **"delete"** asks *"Delete automation rule?"* first. There is no edit button — delete and re-create instead. Rules left over from an older version that use a **"status changed"**, **"tag added"** or **"SLA at risk"** trigger are shown with a warning: *legacy trigger — never fires* — the engine has no emitter for them, so they can never run; delete and re-create them with a live trigger.
+**Managing rules** — the table lists each rule with its **"when"** and **"then"** in plain words (e.g. `the customer replies on a conversation` → `add tag 'done'`). Click the **enabled/disabled** chip to switch a rule on/off instantly; **"edit"** opens the rule in the form above (prefilled — change what you need and **"save changes"**; the enabled/disabled state survives an edit); **"delete"** asks *"Delete automation rule?"* first. Rules left over from an older version that use a **"status changed"**, **"tag added"** or **"SLA at risk"** trigger are shown with a warning: *legacy trigger — never fires* — the engine has no emitter for them, so they can never run, and they cannot be opened in the editor; delete and re-create them with a live trigger.
 
 ---
 
@@ -634,6 +636,7 @@ A warning line reminds you: *"enabled rules act on conversations automatically �
 - **"Provider hub — endpoints"** — where AI endpoints live. Two are built in: **"LM Studio (local)"** (`http://127.0.0.1:1234/v1`) and **"Ollama (local, optional)"** (`http://127.0.0.1:11434/v1`). You can add cloud endpoints (bring-your-own-key, off by default) in the collapsible **"add endpoint (cloud BYOK — off by default per-feature)"** section: name, base url, api key (password box), and optional price-per-million-tokens (feeds the cost estimate). Per endpoint:
   - **"probe"** — lists the models once; shows a green `reachable — {n} model(s) · {ms} ms` or red `offline — …` light.
   - **"set key"** — stores an API key *"in the encrypted envelope — never in plaintext"* (an empty save deletes it).
+  - **"edit prices"** — only for endpoints you added yourself: shows the current `$ X.XX prompt · $ Y.YY completion / mtok` pair and opens an inline editor (non-negative numbers; the cost ledger uses the new pair immediately).
   - **"remove"** — only for endpoints you added yourself.
 - **"Model-role routing"** — the heart of the AI setup. Every AI task goes through one of five roles; assign an endpoint and a model name to each:
 
@@ -646,6 +649,8 @@ A warning line reminds you: *"enabled rules act on conversations automatically �
   | `agent` | the tool-calling copilot chat |
 
   Changing any routing automatically re-runs the "golden set" evaluation (a built-in quality test).
+
+  One guard is worth knowing: **no backend configured → no AI jobs.** On a fresh install the AI features are on but nothing is routed — in that state the app does not spawn analyze/attribute jobs for synced conversations at all (there is nothing to run them through), so a fresh install stays quiet instead of collecting "check that LM Studio… is running" failures. Route a role (or set the legacy LM Studio base URL) and the pipeline picks up.
 - **"Features & kill switches"** — 16 individual feature checkboxes (ticket_analysis, ai_note, draft, attributes, memory_extraction, issue_clustering, copilot, draft_coaching, translation, post_resolution_qa, interaction_intelligence, retrieval, golden_eval, gap_detection, article_drafting, weekly_digest). Each click saves immediately. Above them, the big switch: when AI is on, **"global kill switch: AI is ON — click to disable all AI"** asks *"Disable all AI?"* and turns everything off at once; when off, one click re-enables.
 - **"Cost ledger — last 7 days"** — tokens, latency and estimated spend per feature per day (only meaningful for priced cloud endpoints; local LM Studio costs $0).
 
@@ -690,7 +695,7 @@ Segments can be deleted (**"Delete segment?"**) — campaigns that already targe
 
 ### 8.15 Notifications
 
-**What it's for** — the in-app notification feed: @mentions, campaign replies, sync failures. Header shows **"{total} total · {unread} unread"** with a **"mark all read"** button. Tabs: **"All"**, **"Mentions"**, **"Unread"**. Each card shows its type badge, time, title and body, plus a **"mark read"** / **"unread"** toggle. New notifications arrive automatically (the app re-checks every ~15 seconds).
+**What it's for** — the in-app notification feed: @mentions, campaign replies, sync failures. Header shows **"{total} total · {unread} unread"** with a **"mark all read"** button. Tabs: **"All"**, **"Mentions"**, **"Unread"**. Each card shows its type badge, time, title and body, plus a **"mark read"** / **"unread"** toggle and — when the notification is about a specific thing — an **"open"** button that jumps there (a mention or reply opens the conversation in the Inbox, a customer event opens their profile, an issue opens Issue Radar, a campaign reply opens Outreach, a job failure opens Diagnostics). The sidebar's Notifications row carries a small unread-count pill (cleared as you read). New notifications arrive automatically (the app re-checks every ~15 seconds).
 
 ---
 
@@ -710,8 +715,8 @@ Segments can be deleted (**"Delete segment?"**) — campaigns that already targe
 
 **What it's for** — attaching outside data as read-only tables the AI tools may query (when you allow it). Subtitle: *"Attach external data sources (HTTP endpoints, CSV files inside the data directory) as read-only tables; the AI tools can query them when allowed."*
 
-- Press **"New Connector"**: a **name**, **kind** (**"http"** or **"csv"**), then either a **file (data dir):** (the name of a CSV file you placed inside the app's data folder, e.g. `billing.csv`) or a **url:** (`https://…`), a **refresh seconds:** number (60–86400; default 3600 = hourly), and the **"AI tools may query"** checkbox. Press **"create"**.
-- The table shows each connector's **health** (`ok` green / `stale` amber / `error` red), refresh method and last sync. Buttons per row: **"rows"** (browse the stored rows), **"refresh"** (re-fetch now), **"delete"** (asks first — stored rows stay in the mirror).
+- Press **"New Connector"**: a **name**, **kind** (**"http"** or **"csv"**), then either a **file (data dir):** (the name of a CSV file you placed inside the app's data folder, e.g. `billing.csv`) or a **url:** (`https://…`), a **refresh seconds:** number (60–86400; default 3600 = hourly), and the **"AI tools may query"** checkbox. For **http** connectors a **credentials** section follows: **none**, **header** (a header name like `X-Api-Key` + its value) or **bearer** (a token) — exactly what the fetch sends. Press **"create"**.
+- The table shows each connector's **health** (`ok` green / `stale` amber / `error` red), refresh method and last sync (with the row count; hover a failing last sync for the error). Buttons per row: **"refresh"** (re-fetch now — the outcome lands as a toast: *Connector "…" refreshed — N rows* or the failure), **"edit"** (reopens the form prefilled — name, source, credentials, cadence and the AI permission), **"delete"** (asks first — stored rows stay in the mirror). Click a connector's name to browse its stored rows.
 
 ---
 
@@ -772,7 +777,7 @@ The control panel, in six tabs. Every value is stored locally; nothing is sent a
 
 **Tab "LM Studio"** — three fields for the local AI gateway: **"base url:"** (placeholder `http://localhost:1234/v1`), **"chat model:"**, **"embedding model:"** — press **"save"**. (Test the connection from the AI Center page.)
 
-**Tab "Vector index"** — the AI search index. Shows where the store lives (`<data folder>/vectors/vectors.db`) and one checkbox, **"vector index enabled"** (default on; saves immediately; *"applies on the next start"*). When off, searches fall back to keyword-only.
+**Tab "Vector index"** — the AI search index. Shows where the store lives (`<data folder>/vectors/vectors.db`) and one checkbox, **"vector index enabled"** (default on; saves immediately; *"applies on the next start"*). When off, searches fall back to keyword-only. **"Rebuild vector index"** resets every chunk's embedding state (including chunks that failed too many times and were permanently skipped), drops the local vector collection and re-embeds the whole corpus through the configured embedding endpoint — use it after an LM Studio outage degraded semantic search, or after switching embedding models.
 
 **Tab "Business hours"** — per-mailbox working hours used by SLA math. Press **"edit"** on a mailbox row: **timezone** (e.g. `UTC`, `Asia/Dhaka`), **days** (`0=Sun…6=Sat`, e.g. `1,2,3,4,5`), **start/end** times (sliders, minutes of the day — defaults 540/1020 = 09:00–17:00), **"first response target (min):"** (default 240) and **"resolution target (min):"** (default 1440). **"save hours"** / **"cancel"**. The SLA tab in Reports uses these numbers.
 
@@ -999,6 +1004,7 @@ VALUES ('ops_waiting_threshold_minutes', '120');
 | Delete a custom-object type | **"Delete custom type?"** — *"The type "{name}" and every record stored under it are removed. This cannot be undone."* → **"Delete type"** |
 | Delete one custom object | **"Delete object?"** — *"The object "{name}" is removed from its type. This cannot be undone."* → **"Delete object"** |
 | Delete a connector | **"Delete connector?"** — *"The connector "{name}" stops syncing immediately; its stored rows stay in the mirror. This cannot be undone."* → **"Delete connector"** |
+| Delete an incident | **"Delete incident?"** — *"The incident {code} ("{title}") and its workspace — links, notes and events — are removed. Linked conversations themselves are untouched. This cannot be undone."* → **"Delete incident"** |
 | Delete an outreach segment | **"Delete segment?"** — *"The segment "{name}" is removed; campaigns that targeted it keep their recipient snapshots. This cannot be undone."* → **"Delete segment"** |
 | Clear the diagnostics event log | **"Clear the event log?"** — *"All {count} stored diagnostics event(s) are deleted. This cannot be undone."* → **"Clear log"** |
 | Delete a saved report | **"Delete saved report?"** — *"The saved report "{name}" is removed. This cannot be undone."* → **"Delete report"** |

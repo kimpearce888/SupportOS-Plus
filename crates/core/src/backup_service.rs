@@ -310,11 +310,8 @@ fn try_export_json(conn: &Connection, backups_dir: &Path) -> Result<Value> {
             format!("SELECT * FROM {table}")
         };
         let mut stmt = conn.prepare(&sql)?;
-        let col_names: Vec<String> = stmt
-            .column_names()
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect();
+        // rusqlite 0.41: `column_names` returns an iterator directly.
+        let col_names: Vec<String> = stmt.column_names().map(|s| s.to_string()).collect();
         let rows = stmt.query_map([], |r| {
             let mut obj = serde_json::Map::new();
             for (i, name) in col_names.iter().enumerate() {

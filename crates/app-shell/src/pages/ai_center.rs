@@ -223,6 +223,11 @@ pub struct AiCenterPage {
     probe_slot: Arc<Mutex<Option<(String, String)>>>,
     key_edit_for: Option<String>,
     key_edit_value: String,
+    /// AUD-P1-6 (C7): the inline price editor (Some(endpoint id) while
+    /// open) — prices became editable after creation.
+    price_edit_for: Option<String>,
+    price_edit_prompt: String,
+    price_edit_completion: String,
     add_name: String,
     add_url: String,
     add_key: String,
@@ -270,6 +275,9 @@ impl AiCenterPage {
             probe_slot: Arc::new(Mutex::new(None)),
             key_edit_for: None,
             key_edit_value: String::new(),
+            price_edit_for: None,
+            price_edit_prompt: String::new(),
+            price_edit_completion: String::new(),
             add_name: String::new(),
             add_url: String::new(),
             add_key: String::new(),
@@ -1251,12 +1259,113 @@ impl AiCenterPage {
                             }
                         }
                         if !endpoint.builtin {
-                            ui.horizontal(|ui| {
-                                design::hint_text(
-                                    ui,
-                                    "price USD per million tokens — the cost ledger's estimation input",
-                                );
-                            });
+                            // AUD-P1-6 (C7): the price line is real now — the
+                            // current $/mtok pair with an inline editor,
+                            // instead of a hint floating next to nothing.
+                            if self.price_edit_for.as_deref() == Some(endpoint.id.as_str()) {
+                                ui.horizontal(|ui| {
+                                    design::field_label(ui, "$ / mtok prompt:");
+                                    ui.add_sized(
+                                        [90.0, 26.0],
+                                        egui::TextEdit::singleline(&mut self.price_edit_prompt)
+                                            .hint_text("0.00"),
+                                    );
+                                    design::field_label(ui, "completion:");
+                                    ui.add_sized(
+                                        [90.0, 26.0],
+                                        egui::TextEdit::singleline(
+                                            &mut self.price_edit_completion,
+                                        )
+                                        .hint_text("0.00"),
+                                    );
+                                    if design::button(ui, "Save Prices", ButtonVariant::Primary)
+                                        .clicked()
+                                    {
+                                        let prompt: Option<f64> =
+                                            self.price_edit_prompt.trim().parse().ok();
+                                        let completion: Option<f64> =
+                                            self.price_edit_completion.trim().parse().ok();
+                                        match (prompt, completion) {
+                                            (Some(p), Some(c)) if p >= 0.0 && c >= 0.0 => {
+                                                let id = endpoint.id.clone();
+                                                let updated = db.with_write(|conn| {
+                                                    spp_core::ai_hub::update_endpoint_prices(
+                                                        conn, &id, p, c,
+                                                    )
+                                                });
+                                                // the per-endpoint status line
+                                                // (the probe display slot) carries
+                                                // the outcome
+                                                let id_for_note = endpoint.id.clone();
+                                                match updated {
+                                                    Ok(true) => {
+                                                        self.price_edit_for = None;
+                                                        self.probe_results.insert(
+                                                            id_for_note,
+                                                            "prices saved".into(),
+                                                        );
+                                                        self.reload_hub(db);
+                                                    }
+                                                    Ok(false) => {
+                                                        self.probe_results.insert(
+                                                            id_for_note,
+                                                            "endpoint vanished — reload the page".into(),
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        self.probe_results.insert(
+                                                            id_for_note,
+                                                            format!("price save failed: {e}"),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            _ => {
+                                                self.probe_results.insert(
+                                                    endpoint.id.clone(),
+                                                    "prices must be non-negative numbers (USD per million tokens)".into(),
+                                                );
+                                            }
+                                        }
+                                    }
+                                    if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+                                        self.price_edit_for = None;
+                                    }
+                                });
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "${:.2} prompt · ${:.2} completion / mtok",
+                                            endpoint.price_prompt_per_mtok,
+                                            endpoint.price_completion_per_mtok
+                                        ))
+                                        .small()
+                                        .color(design::tokens(ui).muted_foreground),
+                                    )
+                                    .on_hover_text(
+                                        "price USD per million tokens — the cost ledger's \
+                                         estimation input",
+                                    );
+                                    if design::button(ui, "Edit Prices", ButtonVariant::Outline)
+                                        .on_hover_text(
+                                            "correct the $/mtok pair — the cost ledger \
+                                             uses it immediately",
+                                        )
+                                        .clicked()
+                                    {
+                                        self.price_edit_for = Some(endpoint.id.clone());
+                                        self.price_edit_prompt = format!(
+                                            "{}",
+                                            endpoint.price_prompt_per_mtok
+                                        );
+                                        self.price_edit_completion = format!(
+                                            "{}",
+                                            endpoint.price_completion_per_mtok
+                                        );
+                                    }
+                                });
+                            }
                         }
                         ui.add_space(4.0);
                     });

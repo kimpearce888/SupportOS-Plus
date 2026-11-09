@@ -387,6 +387,9 @@ pub struct SettingsPage {
     lmstudio_embedding_model: String,
     lmstudio_persisted: (String, String, String),
     vector_store_path: String,
+    /// AUD-P1-8 (D2): for the re-index action (drops + rebuilds the
+    /// semantic vector collection).
+    vector_index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
     hours: Vec<BusinessHoursRow>,
     hours_edit: Option<BusinessHoursRow>,
     backups: Vec<serde_json::Value>,
@@ -433,6 +436,7 @@ impl SettingsPage {
             lmstudio_embedding_model: String::new(),
             lmstudio_persisted: (String::new(), String::new(), String::new()),
             vector_store_path: String::new(),
+            vector_index: None,
             hours: Vec::new(),
             hours_edit: None,
             backups: Vec::new(),
@@ -491,6 +495,15 @@ impl SettingsPage {
 
     pub(crate) fn set_bus(&mut self, bus: spp_core::event_bus::EventBus) {
         self.bus = Some(bus);
+    }
+
+    /// AUD-P1-8 (D2): the vector index handle — the re-index action needs
+    /// it to drop the local collection before the corpus re-embeds.
+    pub(crate) fn set_vector_index(
+        &mut self,
+        index: Option<std::sync::Arc<spp_core::vectorstore_sqlitevec::VectorIndex>>,
+    ) {
+        self.vector_index = index;
     }
 
     pub(crate) fn invalidate(&mut self) {
@@ -2147,6 +2160,42 @@ impl SettingsPage {
                             Err(e) => self.error = Some(e.to_string()),
                         }
                     }
+                    // AUD-P1-8 (D2): the user-facing semantic re-index — the
+                    // reset the audit found missing everywhere (5 failed
+                    // attempts used to exclude a chunk permanently).
+                    design::field_label(ui, "Re-index");
+                    ui.horizontal(|ui| {
+                        if design::button(ui, "Rebuild vector index", ButtonVariant::Outline)
+                            .on_hover_text(
+                                "resets every chunk's embedding state (including \
+                                 permanently-failed ones), drops the local vector \
+                                 collection and re-embeds the whole corpus through \
+                                 the configured embedding endpoint",
+                            )
+                            .clicked()
+                        {
+                            let index = self.vector_index.clone();
+                            let result = db.with_write(|conn| {
+                                spp_core::embeddings::reindex_all(conn, index.as_deref())
+                            });
+                            match result {
+                                Ok(reset) => {
+                                    self.message = Some(format!(
+                                        "semantic re-index started — {reset} chunk(s) reset; \
+                                         embedding runs in the background through the \
+                                         configured endpoint"
+                                    ));
+                                }
+                                Err(e) => self.error = Some(e.to_string()),
+                            }
+                        }
+                        design::hint_text(
+                            ui,
+                            "use this after an LM Studio outage degraded semantic search, \
+                             or after switching embedding models",
+                        );
+                    });
+                    ui.end_row();
                 });
             },
         );

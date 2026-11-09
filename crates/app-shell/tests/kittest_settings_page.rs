@@ -122,3 +122,43 @@ fn r3_settings_helpscout_tab_light() {
     );
     h.snapshot("r3_settings_helpscout_tab_light");
 }
+
+/// AUD-P1-8 (D2): the Vector index tab carries the user-facing semantic
+/// re-index act — the reset the audit found missing everywhere (5 failed
+/// attempts used to exclude a chunk permanently, with no way back).
+#[test]
+fn audp1_settings_vector_reindex_light() {
+    let (page, db) = seeded_page();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db);
+            },
+            SettingsPageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    h.get_all_by_label("Vector index")
+        .next()
+        .expect("the Vector index tab")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.get_all_by_label("Rebuild vector index").next().is_some(),
+        "the re-index act must be on the Vector index tab"
+    );
+    h.snapshot_options(
+        "audp1_settings_vector_reindex_light",
+        &SnapshotOptions::new().max_failed_pixels(32),
+    );
+}

@@ -165,7 +165,9 @@ pub struct LatestOutbound {
 pub fn latest_for_conversation(conn: &Connection, conversation_id: i64) -> Option<LatestOutbound> {
     conn.query_row(
         "SELECT kind, status, error, updated_at FROM outbound_jobs
-          WHERE conversation_id = ?1 AND kind IN ('create_reply','create_note','update_status','assign')
+          WHERE conversation_id = ?1 AND kind IN
+                ('create_reply','create_note','update_status','assign',
+                 'update_tags','snooze','unsnooze')
           ORDER BY id DESC LIMIT 1",
         params![conversation_id],
         |r| {

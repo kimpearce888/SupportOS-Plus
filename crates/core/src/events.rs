@@ -105,6 +105,22 @@ pub struct OutboundJobFinishedEvent {
     pub at: String,
 }
 
+/// AUD-P1-2 (C2): a connector refresh finished (ok or failed) — the
+/// completion signal the Connectors page never had. Carries the connector
+/// id/name so the toast can name the source, and the row count so the
+/// manual refresh answers "did it work?".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorRefreshedEvent {
+    pub connector_id: i64,
+    pub name: String,
+    pub ok: bool,
+    pub rows: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ServerEvent {
     RatingReceived(RatingReceivedEvent),
@@ -114,6 +130,7 @@ pub enum ServerEvent {
     NotificationReceived(NotificationReceivedEvent),
     ErrorOccurred(ErrorOccurredEvent),
     OutboundJobFinished(OutboundJobFinishedEvent),
+    ConnectorRefreshed(ConnectorRefreshedEvent),
 }
 
 impl ServerEvent {
@@ -127,6 +144,7 @@ impl ServerEvent {
             Self::NotificationReceived { .. } => "notification",
             Self::ErrorOccurred { .. } => "error",
             Self::OutboundJobFinished { .. } => "outbound",
+            Self::ConnectorRefreshed { .. } => "connectors",
         }
     }
 
@@ -260,6 +278,25 @@ impl ServerEvent {
             message: message.to_string(),
             service: service.to_string(),
             conversation_id,
+            at: Self::now_iso(),
+        })
+    }
+
+    /// AUD-P1-2 (C2): completion signal for a connector refresh.
+    #[must_use]
+    pub fn connector_refreshed(
+        connector_id: i64,
+        name: &str,
+        ok: bool,
+        rows: u32,
+        error: Option<&str>,
+    ) -> Self {
+        Self::ConnectorRefreshed(ConnectorRefreshedEvent {
+            connector_id,
+            name: name.to_string(),
+            ok,
+            rows,
+            error: error.map(str::to_string),
             at: Self::now_iso(),
         })
     }

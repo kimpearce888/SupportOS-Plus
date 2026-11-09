@@ -251,6 +251,8 @@ pub struct InboxPage {
     directory: Directory,
     status: Option<String>,
     assign_pick: Option<i64>,
+    /// AUD-P1-4 (C5): the tag editor's input on the action card.
+    tag_edit: String,
     detail_error: Option<String>,
     outbound_note: Option<(String, bool)>,
     status_message: Option<String>,
@@ -346,6 +348,7 @@ impl InboxPage {
             status: None,
             detail_error: None,
             assign_pick: None,
+            tag_edit: String::new(),
             outbound_note: None,
             status_message: None,
             status_is_error: false,
@@ -918,6 +921,133 @@ impl InboxPage {
                 ActionOutcome::Success(message)
             }
             Ok(OperationResult::Rejected { reason }) => ActionOutcome::Rejected(reason),
+            Err(reason) => ActionOutcome::Rejected(reason),
+        };
+        self.set_status_message(outcome.message(), outcome.is_rejected());
+        self.reload_detail(db);
+        self.reload_list(db);
+        outcome
+    }
+
+    // AUD-P1-4 (C5): the tag edit write path — the same lane automation's
+    // add_tag uses (local mirror write + the idempotency-keyed "update_tags"
+    // outbound job), opened up to the full list replace the provider API
+    // models (add + remove + clear).
+    pub(crate) fn set_tags(
+        &mut self,
+        db: &DbHandle,
+        bus: &EventBus,
+        tags: Vec<String>,
+    ) -> ActionOutcome {
+        let Some(detail) = self.detail.clone() else {
+            return ActionOutcome::Rejected("No conversation selected.".into());
+        };
+        let result: std::result::Result<(), String> = db.with_write(|conn| {
+            guard_eval_mode(conn)?;
+            if !provider_connected(conn) {
+                return Err(NOT_CONNECTED.to_string());
+            }
+            spp_core::conversation_ops::write_conversation_tags(conn, detail.id, &tags);
+            queue_job(
+                conn,
+                "update_tags",
+                &json!({ "conversationId": detail.id, "tags": tags }),
+                Some(detail.id),
+                None,
+            )?;
+            Ok(())
+        });
+        let outcome = match result {
+            Ok(()) => {
+                emit_updated(bus, detail.id, detail.number);
+                ActionOutcome::Success("tags updated — sending to Help Scout".into())
+            }
+            Err(reason) => ActionOutcome::Rejected(reason),
+        };
+        self.set_status_message(outcome.message(), outcome.is_rejected());
+        self.reload_detail(db);
+        self.reload_list(db);
+        outcome
+    }
+
+    // AUD-P1-4 (C5): the snooze write path — local column (the mirror's
+    // snoozed_until) + the new "snooze"/"unsnooze" outbound jobs. Presets
+    // keep it one click; the provider gets the exact timestamp.
+    pub(crate) fn snooze(
+        &mut self,
+        db: &DbHandle,
+        bus: &EventBus,
+        snoozed_until: String,
+    ) -> ActionOutcome {
+        let Some(detail) = self.detail.clone() else {
+            return ActionOutcome::Rejected("No conversation selected.".into());
+        };
+        let result: std::result::Result<(), String> = db.with_write(|conn| {
+            guard_eval_mode(conn)?;
+            if !provider_connected(conn) {
+                return Err(NOT_CONNECTED.to_string());
+            }
+            conn.execute(
+                "UPDATE conversations SET snoozed_until = ?1 WHERE id = ?2",
+                rusqlite::params![snoozed_until, detail.id],
+            )
+            .map_err(|e| e.to_string())?;
+            queue_job(
+                conn,
+                "snooze",
+                &json!({
+                    "conversationId": detail.id,
+                    "snoozedUntil": snoozed_until,
+                    "unsnoozeOnCustomerReply": true,
+                }),
+                Some(detail.id),
+                None,
+            )?;
+            Ok(())
+        });
+        let outcome = match result {
+            Ok(()) => {
+                emit_updated(bus, detail.id, detail.number);
+                ActionOutcome::Success(format!(
+                    "snoozed until {snoozed_until} — sending to Help Scout"
+                ))
+            }
+            Err(reason) => ActionOutcome::Rejected(reason),
+        };
+        self.set_status_message(outcome.message(), outcome.is_rejected());
+        self.reload_detail(db);
+        self.reload_list(db);
+        outcome
+    }
+
+    pub(crate) fn unsnooze(&mut self, db: &DbHandle, bus: &EventBus) -> ActionOutcome {
+        let Some(detail) = self.detail.clone() else {
+            return ActionOutcome::Rejected("No conversation selected.".into());
+        };
+        let result: std::result::Result<(), String> = db.with_write(|conn| {
+            guard_eval_mode(conn)?;
+            if !provider_connected(conn) {
+                return Err(NOT_CONNECTED.to_string());
+            }
+            conn.execute(
+                "UPDATE conversations SET snoozed_until = NULL WHERE id = ?1",
+                rusqlite::params![detail.id],
+            )
+            .map_err(|e| e.to_string())?;
+            queue_job(
+                conn,
+                "unsnooze",
+                &json!({ "conversationId": detail.id }),
+                Some(detail.id),
+                None,
+            )?;
+            Ok(())
+        });
+        let outcome = match result {
+            Ok(()) => {
+                emit_updated(bus, detail.id, detail.number);
+                ActionOutcome::Success("snooze removed — sending to Help Scout".into())
+            }
             Err(reason) => ActionOutcome::Rejected(reason),
         };
         self.set_status_message(outcome.message(), outcome.is_rejected());
@@ -1754,6 +1884,87 @@ impl InboxPage {
                     && detail.priority.as_deref() != Some(priorities[i])
                 {
                     self.set_priority(db, bus, priorities[i]);
+                }
+            });
+            ui.add_space(design::scale::space::SP1);
+            // AUD-P1-4 (C5): the tag editor — current tags are removable
+            // chips, new tags land in the same full-list replace the
+            // provider models (local mirror write + the "update_tags"
+            // outbound lane automation already uses).
+            ui.horizontal(|ui| {
+                design::field_label(ui, "Tags");
+                for tag in &detail.tags {
+                    if design::chip(ui, false, tag.as_str())
+                        .on_hover_text("click to remove this tag")
+                        .clicked()
+                    {
+                        let remaining: Vec<String> = detail
+                            .tags
+                            .iter()
+                            .filter(|t| !t.eq_ignore_ascii_case(tag))
+                            .cloned()
+                            .collect();
+                        self.set_tags(db, bus, remaining);
+                    }
+                }
+                let add_clicked = ui
+                    .add_sized(
+                        [110.0, 26.0],
+                        egui::TextEdit::singleline(&mut self.tag_edit).hint_text("add tag…"),
+                    )
+                    .lost_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if add_clicked
+                    || (design::button(ui, "Add", ButtonVariant::Secondary)
+                        .on_hover_text("adds the tag locally and queues the Help Scout update")
+                        .clicked()
+                        && !self.tag_edit.trim().is_empty())
+                {
+                    let tag = self.tag_edit.trim().to_string();
+                    if !tag.is_empty() {
+                        let mut next = detail.tags.clone();
+                        if !next.iter().any(|t| t.eq_ignore_ascii_case(&tag)) {
+                            next.push(tag);
+                        }
+                        self.set_tags(db, bus, next);
+                        self.tag_edit.clear();
+                    }
+                }
+            });
+            ui.add_space(design::scale::space::SP1);
+            // AUD-P1-4 (C5): the snooze control — core had the provider
+            // calls and the local column; the presets ride the new
+            // "snooze"/"unsnooze" outbound jobs.
+            ui.horizontal(|ui| {
+                design::field_label(ui, "Snooze");
+                if let Some(until) = detail.snoozed_until.as_deref() {
+                    design::badge(ui, until, BadgeTone::Warning)
+                        .on_hover_text("snoozed until this moment (Help Scout)");
+                    if design::button(ui, "Unsnooze", ButtonVariant::Secondary)
+                        .on_hover_text("wake the conversation up now — local and Help Scout")
+                        .clicked()
+                    {
+                        self.unsnooze(db, bus);
+                    }
+                } else {
+                    let now = chrono::Utc::now();
+                    let presets = [
+                        ("2h", now + chrono::Duration::hours(2)),
+                        ("tomorrow", now + chrono::Duration::hours(24)),
+                        ("3d", now + chrono::Duration::hours(72)),
+                    ];
+                    for (label, at) in presets {
+                        if design::chip(ui, false, label)
+                            .on_hover_text(format!(
+                                "snooze until {} (Help Scout); a customer reply wakes it up",
+                                at.format("%Y-%m-%d %H:%M UTC")
+                            ))
+                            .clicked()
+                        {
+                            let until = at.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+                            self.snooze(db, bus, until);
+                        }
+                    }
                 }
             });
             self.expire_status_message();
@@ -4033,5 +4244,161 @@ mod audp0_tests {
             matches!(rejected, ActionOutcome::Rejected(_)),
             "unknown priorities are rejected, not invented: {rejected:?}"
         );
+    }
+    // ---- AUD-P1-4 (C5): tags + snooze write paths ----
+
+    #[test]
+    fn audp14_set_tags_writes_the_mirror_and_queues_the_update_tags_job() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let bus = EventBus::new(8);
+        let mut page = InboxPage::new();
+        page.selected = Some(1);
+        page.detail = Some(
+            db.with_read(|conn| spp_core::inbox::get_conversation(conn, 1))
+                .expect("detail")
+                .expect("conversation 1 exists"),
+        );
+
+        // add two tags
+        let outcome = page.set_tags(&db, &bus, vec!["vip".into(), "billing".into()]);
+        assert!(
+            matches!(outcome, ActionOutcome::Success(_)),
+            "the write path succeeds: {outcome:?}"
+        );
+        db.with_read(|conn| {
+            let mut tags: Vec<String> = spp_core::conversation_ops::read_conversation_tags(conn, 1);
+            tags.sort();
+            assert_eq!(tags, vec!["billing".to_string(), "vip".to_string()]);
+            let (kind, payload): (String, String) = conn
+                .query_row(
+                    "SELECT kind, payload FROM outbound_jobs ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("job");
+            assert_eq!(kind, "update_tags");
+            let value: serde_json::Value = serde_json::from_str(&payload).expect("payload");
+            assert_eq!(
+                value["tags"],
+                serde_json::json!(["vip", "billing"]),
+                "the full replace list rides the job verbatim"
+            );
+        });
+
+        // the reloaded detail carries the tags (the dead field is live)
+        let mut reloaded = page.detail.clone().expect("detail").tags;
+        reloaded.sort();
+        assert_eq!(reloaded, vec!["billing".to_string(), "vip".to_string()]);
+
+        // remove one — the job carries the remaining list
+        let outcome = page.set_tags(&db, &bus, vec!["billing".into()]);
+        assert!(matches!(outcome, ActionOutcome::Success(_)));
+        db.with_read(|conn| {
+            let tags: Vec<String> = spp_core::conversation_ops::read_conversation_tags(conn, 1);
+            assert_eq!(tags, vec!["billing".to_string()]);
+        });
+
+        // clearing all tags is a legitimate full replace
+        let outcome = page.set_tags(&db, &bus, Vec::new());
+        assert!(matches!(outcome, ActionOutcome::Success(_)));
+        db.with_read(|conn| {
+            let tags: Vec<String> = spp_core::conversation_ops::read_conversation_tags(conn, 1);
+            assert!(tags.is_empty());
+        });
+    }
+
+    #[test]
+    fn audp14_snooze_writes_the_local_column_and_queues_the_job() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let bus = EventBus::new(8);
+        let mut page = InboxPage::new();
+        page.selected = Some(1);
+        page.detail = Some(
+            db.with_read(|conn| spp_core::inbox::get_conversation(conn, 1))
+                .expect("detail")
+                .expect("conversation 1 exists"),
+        );
+        assert!(
+            page.detail
+                .as_ref()
+                .expect("detail")
+                .snoozed_until
+                .is_none()
+        );
+
+        let until = "2026-12-01T09:00:00Z".to_string();
+        let outcome = page.snooze(&db, &bus, until.clone());
+        assert!(
+            matches!(outcome, ActionOutcome::Success(ref m) if m.contains(&until)),
+            "the write path succeeds: {outcome:?}"
+        );
+        db.with_read(|conn| {
+            let stored: Option<String> = conn
+                .query_row(
+                    "SELECT snoozed_until FROM conversations WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("row");
+            assert_eq!(stored.as_deref(), Some(until.as_str()));
+            let (kind, payload): (String, String) = conn
+                .query_row(
+                    "SELECT kind, payload FROM outbound_jobs ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("job");
+            assert_eq!(kind, "snooze");
+            let value: serde_json::Value = serde_json::from_str(&payload).expect("payload");
+            assert_eq!(value["snoozedUntil"], until);
+        });
+        assert_eq!(
+            page.detail
+                .clone()
+                .expect("detail")
+                .snoozed_until
+                .as_deref(),
+            Some(until.as_str()),
+            "the reloaded detail shows the snooze state"
+        );
+
+        let outcome = page.unsnooze(&db, &bus);
+        assert!(matches!(outcome, ActionOutcome::Success(_)));
+        db.with_read(|conn| {
+            let stored: Option<String> = conn
+                .query_row(
+                    "SELECT snoozed_until FROM conversations WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("row");
+            assert!(stored.is_none(), "unsnooze clears the local column");
+            let (kind, _): (String, String) = conn
+                .query_row(
+                    "SELECT kind, payload FROM outbound_jobs ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("job");
+            assert_eq!(kind, "unsnooze");
+        });
     }
 }

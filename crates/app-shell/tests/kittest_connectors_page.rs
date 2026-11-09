@@ -4,6 +4,7 @@ use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use spp_core::db::DbHandle;
+use spp_core::event_bus::EventBus;
 use spp_shell::design;
 use spp_shell::pages::connectors::ConnectorsPage;
 
@@ -11,9 +12,10 @@ struct ConnectorsPageState {
     installed: bool,
     page: ConnectorsPage,
     db: DbHandle,
+    bus: EventBus,
 }
 
-fn seeded_page() -> (ConnectorsPage, DbHandle) {
+fn seeded_page() -> (ConnectorsPage, DbHandle, EventBus) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
     let mk = |name: &str, kind: &str, url: &str, file: &str| {
@@ -67,11 +69,11 @@ fn seeded_page() -> (ConnectorsPage, DbHandle) {
         )
         .expect("connector row");
     }
-    (ConnectorsPage::new(), DbHandle::new(conn))
+    (ConnectorsPage::new(), DbHandle::new(conn), EventBus::new(8))
 }
 
 fn render_connectors_page(dark: bool, width: f32, name: &str) {
-    let (page, db) = seeded_page();
+    let (page, db, bus) = seeded_page();
     let mut h = Harness::builder()
         .with_size(egui::vec2(width, 900.0))
         .with_theme(if dark {
@@ -85,12 +87,13 @@ fn render_connectors_page(dark: bool, width: f32, name: &str) {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                s.page.ui(ui, &s.db, &s.bus);
             },
             ConnectorsPageState {
                 installed: false,
                 page,
                 db,
+                bus,
             },
         );
     h.run_ok();
@@ -134,7 +137,7 @@ fn r3_connectors_page_800_dark() {
 
 #[test]
 fn r3_connectors_new_connector_light() {
-    let (page, db) = seeded_page();
+    let (page, db, bus) = seeded_page();
     let mut h = Harness::builder()
         .with_size(egui::vec2(1440.0, 900.0))
         .with_theme(egui::Theme::Light)
@@ -144,12 +147,13 @@ fn r3_connectors_new_connector_light() {
                     design::install(ui.ctx());
                     s.installed = true;
                 }
-                s.page.ui(ui, &s.db);
+                s.page.ui(ui, &s.db, &s.bus);
             },
             ConnectorsPageState {
                 installed: false,
                 page,
                 db,
+                bus,
             },
         );
     h.run_ok();

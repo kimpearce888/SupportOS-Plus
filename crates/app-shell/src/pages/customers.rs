@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use spp_core::db::DbHandle;
 
-use super::{i64_field, opt_str_field, relative_time, str_field};
+use super::{NavRequest, i64_field, opt_str_field, relative_time, str_field};
 use crate::design::{self, AvatarSize, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
 
@@ -312,7 +312,7 @@ impl CustomersPage {
         ui: &mut egui::Ui,
         db: &DbHandle,
         engine: Option<&std::sync::Arc<spp_core::sync_engine::SyncEngine>>,
-    ) {
+    ) -> Option<NavRequest> {
         if self.stale {
             self.stale = false;
             self.reload_search(db);
@@ -507,6 +507,9 @@ impl CustomersPage {
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| "Customer".to_string());
         let mut panel_open = self.panel_open;
+        // AUD-P1-4 (C5): the profile panel can navigate (a conversation
+        // row opens the Inbox).
+        let mut panel_nav: Option<NavRequest> = None;
         design::detail_panel(
             ui.ctx(),
             "customers-detail",
@@ -551,13 +554,20 @@ impl CustomersPage {
                         interaction.as_ref(),
                         recommendation.as_ref(),
                     );
-                    conversations_ui(&mut cols[1], &conversations);
+                    // AUD-P1-4 (C5): a clicked conversation row surfaces as
+                    // the page's nav request.
+                    if let Some(nav) = conversations_ui(&mut cols[1], &conversations)
+                        && panel_nav.is_none()
+                    {
+                        panel_nav = Some(nav);
+                    }
                 });
                 ui.add_space(design::scale::space::SP2);
                 timeline_ui(ui, &timeline);
             },
         );
         self.panel_open = panel_open;
+        panel_nav
     }
 
     fn count_label(&self) -> String {
@@ -844,8 +854,14 @@ fn milestones_ui(ui: &mut egui::Ui, events: &[spp_core::reports::TimelineEvent])
     );
 }
 
-fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationListItem]) {
+fn conversations_ui(
+    ui: &mut egui::Ui,
+    items: &[spp_core::inbox::ConversationListItem],
+) -> Option<NavRequest> {
     let t = design::tokens(ui);
+    // AUD-P1-4 (C5): the clicked conversation, if any — the rows are
+    // finally clickable and land in the Inbox reader.
+    let mut opened: Option<NavRequest> = None;
     design::card_titled_wide(ui, "Conversations", None, |ui| {
         if items.is_empty() {
             design::hint_text(ui, "(no conversations)");
@@ -863,11 +879,24 @@ fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationLis
             |ui, i| {
                 let item = &items[i];
                 design::td_num(ui, &item.number.to_string());
-                ui.label(
-                    egui::RichText::new(item.subject.as_deref().unwrap_or("(no subject)"))
-                        .size(design::scale::text::CONTROL)
-                        .color(t.foreground),
-                );
+                // AUD-P1-4 (C5): the subject opens the conversation in the
+                // Inbox (the audit's "not clickable" dead end).
+                let response = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(item.subject.as_deref().unwrap_or("(no subject)"))
+                                .size(design::scale::text::CONTROL)
+                                .color(t.primary),
+                        )
+                        .sense(egui::Sense::click()),
+                    )
+                    .on_hover_text("open this conversation in the Inbox");
+                if response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if response.clicked() && opened.is_none() {
+                    opened = Some(NavRequest::OpenConversation(item.id));
+                }
                 let (tone, label) = design::status_tone(item.status.as_str());
                 design::badge(ui, label, tone);
                 ui.label(
@@ -878,6 +907,7 @@ fn conversations_ui(ui: &mut egui::Ui, items: &[spp_core::inbox::ConversationLis
             },
         );
     });
+    opened
 }
 
 fn initials(name: &str) -> String {

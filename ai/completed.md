@@ -5,6 +5,127 @@
 
 ## Completed
 
+## Batch AUD-P1-1 — fix the P1 backlog from the repo audit (2026-11-10)
+
+**Owner directive:** "continue" (the P1/P2 round offered at the AUD-P0
+close) — the eight P1 dead-end/workflow items of
+`docs/audit/repo-audit-v1.9.6.md` §5. Constraint honored throughout:
+fix the existing implementation inside the existing stack — no new
+frameworks, no new dependencies.
+
+**Items AUD-P1-1..AUD-P1-8:**
+
+- **AUD-P1-1 (C1)** — notification cards carried full deep-link fields
+  but no navigation, and the chrome had no unread badge. The page now
+  maps each record's deep-link columns onto the existing `NavRequest`
+  space (conversation > customer > issue > campaign > job, first hit
+  wins) with an "Open" button + hover naming the destination;
+  `NotificationsPage::ui` returns the nav request. The sidebar's
+  Notifications row carries a live unread-count pill (99+ capped),
+  seeded from the mirror at launch (`unread_count` made public),
+  live-updated from `NotificationReceived` events (which already
+  carried the count), synced from the page's mark-read writes.
+- **AUD-P1-2 (C2)** — connector credentials could never be configured
+  (auth hard-coded `json!({})` at create). The create/edit form now
+  has a credentials section for http connectors — none / header
+  (`X-Api-Key`-style name + value) / bearer token — serialized to the
+  exact shapes the fetch branch reads; `connectors::update` edits
+  name/config/auth/cadence/AI-permission with the same duplicate-name
+  guard as create; the row shows last-sync row counts (error on
+  hover); `refresh` takes the event bus and emits a new
+  `ConnectorRefreshed` event (ok/rows/error) — the manual refresh
+  answers "did it work?" with a toast, and the pages reload on it.
+- **AUD-P1-3 (C4)** — incident lifecycle was dead after creation.
+  New `intelligence_features` lifecycle writes: `set_incident_status`
+  (validated vocabulary; `resolved_at` stamped on reaching resolved,
+  cleared on reopening), `set_incident_severity` (sev1..sev4),
+  `set_incident_owner` (nullable), `set_incident_text` (description /
+  customer-safe summary / workaround / resolution — empty save
+  clears), `unlink_incident_conversation` (reversible),
+  `delete_incident` (child tables cascade; linked conversations
+  untouched). The detail workspace surfaces all of it: a Lifecycle
+  card (status/severity chips + owner dropdown), editable text cards,
+  clickable linked-conversation rows (navigate to the Inbox), unlink,
+  and delete-with-confirmation (a new `DestructiveAction` wired in
+  the shell).
+- **AUD-P1-4 (C5)** — inbox had no tag add/remove and no snooze (core
+  provider calls existed, UI absent); customers' conversation rows in
+  the profile panel were not clickable. The conversation action card
+  now has a tags editor (chips remove, "add tag…" attaches, writes go
+  through the same outbound lane automation's add-tag uses) and a
+  snooze control (2h / tomorrow / 3d presets via the existing snooze
+  lane; a snoozed row shows the exact wake timestamp + "unsnooze").
+  Customers' profile conversation rows navigate to the Inbox.
+- **AUD-P1-5 (C6)** — automation had no rule editing; the assignee
+  was a raw numeric-id text input while an assignable-users list
+  existed 30 lines away; status was unvalidated free text. Rules now
+  open in the form for editing (`update_rule`; the enabled/disabled
+  state survives; the form's own vocabulary only — legacy never-fire
+  triggers and unformable action kinds are refused honestly with
+  delete-and-recreate guidance). The assignee is a dropdown of synced
+  users (prefilled by resolving the stored remote id to the local
+  user); the status is a validated chip row over the Help Scout
+  vocabulary (`active`/`pending`/`closed`/`spam`).
+- **AUD-P1-6 (C7)** — AI Center endpoint $/mtok prices were not
+  editable after creation. Custom (non-builtin) endpoints carry the
+  current `$ X.XX prompt · $ Y.YY completion / mtok` line with an
+  "Edit Prices" inline editor (non-negative validation; the probe
+  status line carries save outcomes); `ai_hub::update_endpoint_prices`
+  is the write.
+- **AUD-P1-7 (D1)** — fresh installs spawned analyze/attribute jobs
+  per synced conversation that really ran, really failed and really
+  notified, because AI is on by default with no backend. New
+  `ai_hub::backend_configured` (a role routed or a legacy base URL);
+  the enqueue sites gate on it — no backend → no AI jobs, no noise.
+  Two worker tests pin both directions.
+- **AUD-P1-8 (D2)** — embedding dead-ends: the 60-chunk pass cap
+  starved large first syncs (no continuation), 5 failed attempts
+  permanently excluded a chunk, and there was no user-facing reset.
+  `embed_knowledge_chunks` now self-requeues when a pass hit its cap
+  (`embeddings::pass_hit_cap`), so indexing continues across passes;
+  the Settings → Vector index tab gained a "Rebuild vector index"
+  action (`embeddings::reindex_all`: resets every chunk's state —
+  including permanently-failed ones — drops the local vector
+  collection, re-embeds the corpus; the toast reports the reset
+  count).
+
+**Two forced ride-alongs:**
+
+- **rusqlite 0.40.2 → 0.41.1** (libsqlite3-sys 0.38.2 → 0.39.1,
+  bundled SQLite 3.53.2 → 3.54.1): the day-fresh RUSTSEC-2026-0459
+  (bundled SQLite < 3.54.0 uninitialized-memory exposure) hit the
+  advisory DB mid-batch; the deny lane fails on it, so CI would have
+  gone red. A version bump of an existing dependency — not a new
+  dependency. One-line clippy follow-up in `backup_service.rs`
+  (`column_names` now returns an iterator). All 490+498+268+14 tests
+  re-run green on the new engine; cargo-deny clean.
+- **kittest automation seed fix**: the seed's second rule stored
+  `{"kind":"set_priority","priority":…}` but the serde field is
+  `new_priority` — the whole rules load failed, so the seven base
+  goldens had locked an accidental "0 rules + error banner" state.
+  The seed now uses the correct field; the goldens lock the rules
+  list this seed was always written to show (plus the new C6
+  edit/assignee UI on it).
+
+**Verification (Rule 5):** no-simulation gate clean; traceability
+gate OK (23 routes, 20 DC tags, 27 ids); `cargo fmt --all --check`
+clean; `cargo xtask verify-icons` verified; clippy workspace
+`-D warnings` clean; clippy sandbox lane
+(`-p supportos-plus-core --features sandbox`) `-D warnings` clean;
+tests — core 490 passed / 0 failed (+26 this batch), sandbox-feature
+lane 498 / 0, app-shell 268 / 0, catalog 0, xtask 14 / 0; cargo-deny
+(advisories, licenses, bans) ok on 0.19.9 (CI installs latest);
+kittest 26 suites + style lint diff-locked twice — 29 test binaries
+ok, 0 failed, both passes — with 30 intended golden changes (7
+automation seed-fix+C6, 7 connectors C2, 14 inbox/copilot/customers
+C5, 1 incidents C4, 1 uxg inbox reader C5) and 4 new goldens locking
+the new interactive states (audp1_notifications_deep_link,
+audp1_automation_edit_assign_rule, audp1_ai_center_price_editor,
+audp1_settings_vector_reindex). Note for reproducibility: the local
+sandbox lost its Vulkan software rasterizer mid-session — the kittest
+lane now runs through lavapipe installed at
+`~/.local/share/vulkan/icd.d/` (the same ICD family CI uses).
+
 ## Batch AUD-P0 — fix the P0 backlog from the repo audit (2026-11-09)
 
 **Owner directive:** "fix P0" — the six P0 clusters of

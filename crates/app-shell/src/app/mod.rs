@@ -77,9 +77,27 @@ pub(crate) struct ShellApp {
     toasts: Toasts,
     dialog: Option<ConfirmDialog>,
     pending_confirm: Option<DestructiveAction>,
+    /// AUD-P1-1 (C1): unread notification count driving the sidebar badge.
+    /// Seeded from the DB at launch, live-updated from
+    /// `NotificationReceived` events, and synced from the Notifications
+    /// page whenever it reloads (mark-read / mark-all-read).
+    unread_notifications: u32,
 }
 
 impl ShellApp {
+    /// AUD-P1-1 (C1): seed the sidebar unread badge from the mirror at
+    /// launch (events only carry the count once one arrives).
+    fn unread_seed(db: &DbHandle) -> u32 {
+        db.with_read(|conn| {
+            let me = spp_core::notifications::me_user_local_id(conn)
+                .ok()
+                .flatten();
+            spp_core::notifications::unread_count(conn, me)
+        })
+        .map(|n| n.clamp(0, u32::MAX as i64) as u32)
+        .unwrap_or(0)
+    }
+
     #[must_use]
     pub fn new(cc: &eframe::CreationContext<'_>, options: ShellOptions) -> Self {
         Self::new_with_context(&cc.egui_ctx, options)
@@ -108,11 +126,17 @@ impl ShellApp {
         }
         settings.set_sync_engine(sync.clone());
         settings.set_bus(options.bus.clone());
+        // AUD-P1-8 (D2): the Settings re-index action needs the vector
+        // index handle.
+        settings.set_vector_index(options.vector_index.clone());
         let mut connectors = ConnectorsPage::new();
         connectors.set_data_dir(options.data_dir.clone());
         let mut knowledge = KnowledgePage::new();
         knowledge.set_data_dir(options.data_dir);
         let vector_index = options.vector_index.clone();
+        // AUD-P1-1 (C1): seed the sidebar unread badge before `options.db`
+        // moves into the struct.
+        let unread_notifications = Self::unread_seed(&options.db);
         let mut inbox = InboxPage::new();
         inbox.set_vector_index(vector_index.clone());
         let mut search = SearchPage::new();
@@ -160,6 +184,7 @@ impl ShellApp {
             toasts: Toasts::new(),
             dialog: None,
             pending_confirm: None,
+            unread_notifications,
         };
         #[cfg(feature = "ui-screenshot")]
         app.apply_screenshot_env(ctx);
@@ -281,6 +306,21 @@ impl ShellApp {
             ),
             DestructiveAction::DeleteConnector { id } => {
                 ("connector", "deleted", self.connectors.delete(&self.db, id))
+            }
+            DestructiveAction::DeleteIncident { id } => {
+                // AUD-P1-3 (C4): incident deletion — the child tables
+                // (links, notes, events, related, refs, releases) cascade.
+                let outcome = self
+                    .db
+                    .with_write(|conn| spp_core::intelligence_features::delete_incident(conn, id))
+                    .and_then(|removed| {
+                        removed
+                            .then_some(())
+                            .ok_or_else(|| spp_core::Error::Config("incident not found".into()))
+                    });
+                self.incidents.invalidate();
+                self.incidents.close_panel();
+                ("incident", "deleted", outcome)
             }
             DestructiveAction::DeleteSegment { id } => (
                 "segment",
@@ -535,7 +575,16 @@ impl ShellApp {
                             );
                             ui.add_space(design::scale::space::SP1);
                             for key in keys.iter() {
-                                if nav_row(ui, self.page, *key) {
+                                // AUD-P1-1 (C1): the Notifications nav row
+                                // carries the live unread count as a pill.
+                                let badge = if *key == PageKey::Notifications
+                                    && self.unread_notifications > 0
+                                {
+                                    Some(self.unread_notifications)
+                                } else {
+                                    None
+                                };
+                                if nav_row(ui, self.page, *key, badge) {
                                     self.page = *key;
                                 }
                             }
@@ -734,6 +783,28 @@ impl ShellApp {
                     self.toasts.push(kind, e.message.clone(), None);
                 }
                 spp_core::events::ServerEvent::ErrorOccurred(_) => {}
+                spp_core::events::ServerEvent::NotificationReceived(e) => {
+                    // AUD-P1-1 (C1): the event carries the fresh unread
+                    // count — feed the sidebar badge.
+                    self.unread_notifications = e.unread_count;
+                }
+                // AUD-P1-2 (C2): the manual refresh answers "did it work?"
+                // with a toast (the page reloads via invalidated_pages).
+                spp_core::events::ServerEvent::ConnectorRefreshed(e) => {
+                    if e.ok {
+                        self.toasts.push(
+                            crate::toasts::ToastKind::Success,
+                            format!("Connector \"{}\" refreshed — {} rows", e.name, e.rows),
+                            Some("Health, last sync and the rows view are up to date.".into()),
+                        );
+                    } else {
+                        self.toasts.push(
+                            crate::toasts::ToastKind::Error,
+                            format!("Connector \"{}\" refresh failed", e.name),
+                            e.error.clone(),
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -826,7 +897,7 @@ impl ShellApp {
                                             self.dashboard.ui(ui, &self.db, sync.as_ref());
                                         }
                                         PageKey::Customers => {
-                                            self.customers.ui(ui, &self.db, sync.as_ref());
+                                            nav = self.customers.ui(ui, &self.db, sync.as_ref());
                                         }
                                         PageKey::Knowledge => {
                                             nav = self.knowledge.ui(ui, &self.db, sync.as_ref());
@@ -847,15 +918,22 @@ impl ShellApp {
                                             nav = self.automation.ui(ui, &self.db);
                                         }
                                         PageKey::Connectors => {
-                                            nav = self.connectors.ui(ui, &self.db);
+                                            nav = self.connectors.ui(ui, &self.db, &bus);
                                         }
                                         PageKey::CustomObjects => {
                                             nav = self.custom_objects.ui(ui, &self.db);
                                         }
-                                        PageKey::Incidents => self.incidents.ui(ui, &self.db),
+                                        PageKey::Incidents => {
+                                            nav = self.incidents.ui(ui, &self.db);
+                                        }
                                         PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
                                         PageKey::Notifications => {
-                                            self.notifications.ui(ui, &self.db);
+                                            nav = self.notifications.ui(ui, &self.db);
+                                            // AUD-P1-1 (C1): the page just
+                                            // (re)loaded — its unread count
+                                            // is fresher than the last event.
+                                            self.unread_notifications =
+                                                self.notifications.unread_badge();
                                         }
                                         PageKey::Onboarding => {
                                             self.onboarding.ui(ui, &self.db, sync.as_ref());

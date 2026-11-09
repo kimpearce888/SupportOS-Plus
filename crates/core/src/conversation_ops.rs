@@ -96,7 +96,9 @@ pub(crate) fn conv_exists(conn: &Connection, id: i64) -> bool {
     .is_ok()
 }
 
-pub(crate) fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
+/// AUD-P1-4 (C5): public alongside `write_conversation_tags` so the inbox
+/// reader and its tests can read the same mirror state.
+pub fn read_conversation_tags(conn: &Connection, conversation_id: i64) -> Vec<String> {
     let mut stmt = match conn.prepare(
         "SELECT t.name FROM conversation_tags ct
             JOIN tags t ON t.id = ct.tag_id
@@ -111,7 +113,9 @@ pub(crate) fn read_conversation_tags(conn: &Connection, conversation_id: i64) ->
         .unwrap_or_default()
 }
 
-pub(crate) fn write_conversation_tags(conn: &Connection, conversation_id: i64, tags: &[String]) {
+/// AUD-P1-4 (C5): public so the inbox tag editor can write the same local
+/// mirror state the automation lane and the sync mirror write.
+pub fn write_conversation_tags(conn: &Connection, conversation_id: i64, tags: &[String]) {
     let _ = conn.execute(
         "DELETE FROM conversation_tags WHERE conversation_id = ?1",
         params![conversation_id],

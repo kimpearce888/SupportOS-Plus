@@ -199,8 +199,47 @@ pub fn remove_endpoint(conn: &Connection, id: &str) -> Result<()> {
     save_roles(conn, &roles)
 }
 
+/// AUD-P1-6 (C7): edit an endpoint's $/mtok prices after creation — the
+/// cost ledger's estimation input. Prices were write-only at creation
+/// before this (the page even hinted at them next to nothing).
+pub fn update_endpoint_prices(
+    conn: &Connection,
+    id: &str,
+    price_prompt_per_mtok: f64,
+    price_completion_per_mtok: f64,
+) -> Result<bool> {
+    let mut list: Vec<EndpointConfig> = load_endpoints(conn)?;
+    let Some(endpoint) = list.iter_mut().find(|e| e.id == id) else {
+        return Ok(false);
+    };
+    endpoint.price_prompt_per_mtok = price_prompt_per_mtok;
+    endpoint.price_completion_per_mtok = price_completion_per_mtok;
+    save_endpoints(conn, &list)?;
+    Ok(true)
+}
+
 fn endpoint_by_id<'a>(list: &'a [EndpointConfig], id: &str) -> Option<&'a EndpointConfig> {
     list.iter().find(|e| e.id == id && e.enabled)
+}
+
+/// AUD-P1-7 (D1): is any AI backend actually configured? A fresh install
+/// has the AI features on by default but no model-role routed and no
+/// legacy base URL — `backend_for_role` would still synthesize a phantom
+/// default LM Studio endpoint, so every synced conversation spawned
+/// analyze/attribute jobs that really ran, really failed (twice), and
+/// really notified ("check that LM Studio… is running"). The enqueue sites
+/// gate on this predicate instead: no backend configured → no AI jobs.
+pub fn backend_configured(conn: &Connection) -> bool {
+    if AiRole::ALL
+        .iter()
+        .any(|role| resolve_role(conn, *role).is_some())
+    {
+        return true;
+    }
+    settings::get_string(conn, "lmstudio_base_url")
+        .ok()
+        .flatten()
+        .is_some_and(|s| !s.is_empty())
 }
 
 #[must_use]
@@ -605,5 +644,36 @@ mod tests {
         assert_eq!(legacy.prompt_tokens, 0);
         assert_eq!(legacy.est_cost_usd, 0.0);
         assert_eq!(legacy.runs, 1);
+    }
+    #[test]
+    fn audp16_update_endpoint_prices_edits_and_reports_unknown_ids() {
+        let _g = key_guard();
+        crate::settings::set_master_key_for_tests([7u8; 32]);
+        let conn = conn();
+        let mut list = load_endpoints(&conn).expect("seed");
+        list.push(EndpointConfig {
+            id: "priced".into(),
+            name: "Priced".into(),
+            base_url: "http://priced:1/v1".into(),
+            enabled: true,
+            price_prompt_per_mtok: 0.0,
+            price_completion_per_mtok: 0.0,
+            builtin: false,
+        });
+        save_endpoints(&conn, &list).expect("save");
+
+        assert!(
+            update_endpoint_prices(&conn, "priced", 1.25, 6.0).expect("update"),
+            "the edit lands"
+        );
+        let after = load_endpoints(&conn).expect("reload");
+        let endpoint = after.iter().find(|e| e.id == "priced").expect("priced");
+        assert_eq!(endpoint.price_prompt_per_mtok, 1.25);
+        assert_eq!(endpoint.price_completion_per_mtok, 6.0);
+
+        assert!(
+            !update_endpoint_prices(&conn, "nope", 1.0, 1.0).expect("no-op"),
+            "unknown ids report false, not an error"
+        );
     }
 }

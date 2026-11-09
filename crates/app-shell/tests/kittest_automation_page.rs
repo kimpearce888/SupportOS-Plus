@@ -23,11 +23,15 @@ fn seeded_page() -> (AutomationPage, DbHandle) {
     )
     .expect("users");
     conn.execute(
+        // AUD-P1-5 (C6) seed fix: the action field is `new_priority` — the
+        // old `priority` typo failed the whole rules load, so the base
+        // goldens locked an accidental "0 rules + error banner" state
+        // instead of the rules list this seed was written to show.
         "INSERT INTO automation_rules (name, trigger_json, action_json, enabled)
          VALUES ('Close stale solved', '{\"kind\":\"sla_risk\"}',
                  '{\"kind\":\"add_tag\",\"tag\":\"stale\"}', 1),
                 ('Escalate urgent replies', '{\"kind\":\"tag_added\",\"tag\":\"urgent\"}',
-                 '{\"kind\":\"set_priority\",\"priority\":\"urgent\"}', 1)",
+                 '{\"kind\":\"set_priority\",\"new_priority\":\"urgent\"}', 1)",
         [],
     )
     .expect("rules");
@@ -130,4 +134,58 @@ fn r3_automation_new_rule_light() {
         "the New Rule form must show the Create Rule act"
     );
     h.snapshot("r3_automation_new_rule_light");
+}
+
+/// AUD-P1-5 (C6): the edit state — a seeded Assign rule (live trigger,
+/// editable action) opens the form in edit mode with the assignee picker
+/// prefilled from the rule's action. The raw numeric-id text field is
+/// gone; the picker is the same assignable-users list the Inbox uses.
+#[test]
+fn audp1_automation_edit_assign_rule_light() {
+    let (page, db) = seeded_page();
+    db.with_write(|conn| {
+        conn.execute(
+            "INSERT INTO automation_rules (name, trigger_json, action_json, enabled)
+             VALUES ('Assign escalations', '{\"kind\":\"customer_reply\"}',
+                     '{\"kind\":\"assign\",\"assignee_remote_id\":505}', 1)",
+            [],
+        )
+        .expect("assign rule");
+        Ok::<(), rusqlite::Error>(())
+    })
+    .expect("seed");
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db);
+            },
+            AutomationPageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    // the third rule row's Edit act (the rules list renders in id order)
+    h.get_all_by_label("Edit")
+        .nth(2)
+        .expect("the third rule's Edit act")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.get_all_by_label("Edit Rule").next().is_some(),
+        "the form must open in edit mode for the seeded rule"
+    );
+    assert!(
+        h.get_all_by_label("Ada Lovelace").next().is_some(),
+        "the assignee picker must be prefilled with the rule's assignee"
+    );
+    h.snapshot("audp1_automation_edit_assign_rule_light");
 }

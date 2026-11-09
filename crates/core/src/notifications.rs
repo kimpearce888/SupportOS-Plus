@@ -343,7 +343,10 @@ pub fn mentions_for_me(conn: &Connection, me: i64, limit: i64) -> Result<Vec<Not
     Ok(rows)
 }
 
-pub(crate) fn unread_count(conn: &Connection, me: Option<i64>) -> Result<i64> {
+/// AUD-P1-1 (C1): public so the shell chrome can seed the sidebar unread
+/// badge at startup (the event bus only carries the count once the first
+/// notification lands after launch).
+pub fn unread_count(conn: &Connection, me: Option<i64>) -> Result<i64> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM notifications
          WHERE (target_user_id IS NULL OR target_user_id = ?1) AND read_at IS NULL",

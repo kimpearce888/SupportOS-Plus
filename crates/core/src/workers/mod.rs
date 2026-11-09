@@ -685,24 +685,53 @@ impl WorkerManager {
                         })
                 }
             }
-            "update_tags" => {
-                let tags: Vec<String> = payload["tags"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if tags.is_empty() {
-                    Err(Error::Other("tag update with an empty tag list".into()))
-                } else {
+            "update_tags" => match payload.get("tags").and_then(|v| v.as_array()) {
+                // AUD-P1-4 (C5): a missing tags key is a malformed job, but
+                // an explicit empty array is a legitimate "clear all tags"
+                // from the inbox edit control.
+                None => Err(Error::Other("tag update job has no tags list".into())),
+                Some(values) => {
+                    let tags: Vec<String> = values
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect();
                     self.provider
                         .update_tags(remote_id, tags)
                         .await
                         .map(|_| format!("tags updated on conversation {remote_id}"))
                 }
+            },
+            // AUD-P1-4 (C5): the snooze lane — core had the provider calls
+            // and the local column, but no outbound job kind ever reached
+            // them from the UI.
+            "snooze" => {
+                let until = payload["snoozedUntil"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_string);
+                match until {
+                    None => Err(Error::Other(
+                        "snooze job is missing the snoozedUntil timestamp".into(),
+                    )),
+                    Some(snoozed_until) => {
+                        let unsnooze_on_reply =
+                            payload["unsnoozeOnCustomerReply"].as_bool().unwrap_or(true);
+                        self.provider
+                            .snooze_conversation(
+                                remote_id,
+                                snoozed_until.clone(),
+                                unsnooze_on_reply,
+                            )
+                            .await
+                            .map(|_| format!("snoozed until {snoozed_until}"))
+                    }
+                }
             }
+            "unsnooze" => self
+                .provider
+                .unsnooze_conversation(remote_id)
+                .await
+                .map(|_| "snooze removed".to_string()),
             other => Err(Error::Other(
                 format!("unknown outbound job kind {other}").into(),
             )),
@@ -728,6 +757,8 @@ impl WorkerManager {
                         "create_note" => "note_sent",
                         "update_status" => "status_changed",
                         "update_tags" => "tags_updated",
+                        "snooze" => "snoozed",
+                        "unsnooze" => "unsnoozed",
                         _ => "conversation_assigned",
                     };
                     let _ = crate::jobs::audit(
@@ -1127,7 +1158,7 @@ impl WorkerManager {
         };
         let data_dir = self.data_dir.clone();
         for id in due {
-            match crate::connectors::refresh(&self.db, id, &data_dir).await {
+            match crate::connectors::refresh(&self.db, Some(&self.bus), id, &data_dir).await {
                 Ok(result) if !result.ok => {
                     tracing::warn!(
                         operation = "connector_refresh",
@@ -1276,6 +1307,80 @@ mod batch20_audit22_tests {
             )
             .unwrap_or(0)
         })
+    }
+
+    // ---- AUD-P1-7 (D1): the fresh-install AI circuit breaker ----
+
+    fn ai_job_count(db: &crate::db::DbHandle) -> i64 {
+        db.with_read(|conn| {
+            conn.query_row("SELECT COUNT(*) FROM jobs WHERE queue = 'ai'", [], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0)
+        })
+    }
+
+    #[test]
+    fn audp17_no_backend_configured_means_no_ai_jobs() {
+        let db = temp_db();
+        // a fresh install: AI features default on, nothing routed
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (9501, 95, 'Fresh install', 'preview', 'active')",
+                [],
+            )
+            .expect("conversation");
+        });
+        assert!(
+            !db.with_read(crate::ai_hub::backend_configured),
+            "precondition: a fresh mirror has no AI backend configured"
+        );
+
+        // the bulk post-initial-sync fan-out stays quiet
+        let manager = manager(&db);
+        manager.on_after_initial_sync();
+        assert_eq!(
+            ai_job_count(&db),
+            0,
+            "no backend configured — no doomed analyze/attribute jobs"
+        );
+        // the non-AI post-sync jobs still run
+        assert_eq!(rebuild_activity_jobs(&db), 1);
+
+        // the per-conversation fan-out stays quiet too
+        db.with_write(|conn| {
+            let _ = conn.execute("DELETE FROM jobs", []);
+        });
+        manager.on_conversation_changed(1);
+        assert_eq!(
+            ai_job_count(&db),
+            0,
+            "the per-conversation fan-out is gated as well"
+        );
+    }
+
+    #[test]
+    fn audp17_a_configured_backend_restores_the_fan_out() {
+        let db = temp_db();
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (9601, 96, 'Configured', 'preview', 'active')",
+                [],
+            )
+            .expect("conversation");
+            crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:1234/v1")
+                .expect("legacy url");
+        });
+        assert!(db.with_read(crate::ai_hub::backend_configured));
+
+        let manager = manager(&db);
+        manager.on_after_initial_sync();
+        assert!(
+            ai_job_count(&db) >= 1,
+            "a configured backend restores the AI job fan-out"
+        );
     }
 
     #[test]
@@ -2298,7 +2403,13 @@ mod batch28_workers_tests {
     #[test]
     fn audit90_post_sync_ai_backfill_covers_every_conversation() {
         let db = temp_db();
-        db.with_write(|conn| seed_conversations(conn, 60));
+        // AUD-P1-7 (D1): the backfill is gated on a configured backend now —
+        // seed one so this test still exercises the backfill path itself.
+        db.with_write(|conn| {
+            crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:1234/v1")
+                .expect("backend");
+            seed_conversations(conn, 60);
+        });
         let manager = manager(&db);
         manager.on_after_initial_sync();
 
@@ -2318,6 +2429,9 @@ mod batch28_workers_tests {
     fn audit90_post_sync_ai_backfill_skips_deleted_conversations() {
         let db = temp_db();
         db.with_write(|conn| {
+            // AUD-P1-7 (D1): configured backend — see the covers-every test.
+            crate::settings::set_string(conn, "lmstudio_base_url", "http://127.0.0.1:1234/v1")
+                .expect("backend");
             seed_conversations(conn, 3);
             conn.execute(
                 "UPDATE conversations SET deleted_at = datetime('now') WHERE remote_id = 9002",

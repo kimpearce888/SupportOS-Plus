@@ -168,6 +168,26 @@ impl WorkerManager {
                     )
                     .unwrap_or(0);
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
+                    // AUD-P1-8 (D2): a full pass means more chunks may be
+                    // waiting — requeue so a large corpus keeps flowing
+                    // instead of stalling at the 60-chunk cap.
+                    if crate::embeddings::pass_hit_cap(n)
+                        && !crate::jobs::has_pending(
+                            &conn,
+                            "embeddings",
+                            "embed_knowledge_chunks",
+                        )
+                        .unwrap_or(false)
+                    {
+                        let _ = crate::jobs::enqueue_on(
+                            &conn,
+                            "embeddings",
+                            "embed_knowledge_chunks",
+                            "{}",
+                            4,
+                            2,
+                        );
+                    }
                 }
                 "embed_docs_chunks" => {
                     let conn = self.db.long_op_guard();
@@ -177,6 +197,14 @@ impl WorkerManager {
                     )
                     .unwrap_or(0);
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
+                    // AUD-P1-8 (D2): see embed_knowledge_chunks.
+                    if crate::embeddings::pass_hit_cap(n)
+                        && !crate::jobs::has_pending(&conn, "embeddings", "embed_docs_chunks")
+                            .unwrap_or(false)
+                    {
+                        let _ =
+                            crate::jobs::enqueue_on(&conn, "embeddings", "embed_docs_chunks", "{}", 4, 2);
+                    }
                 }
                 "embed_conversation_chunks" => {
                     let conn = self.db.long_op_guard();
@@ -186,6 +214,24 @@ impl WorkerManager {
                     )
                     .unwrap_or(0);
                     tracing::debug!(operation = kind, embedded = n, "embedding pass");
+                    // AUD-P1-8 (D2): see embed_knowledge_chunks.
+                    if crate::embeddings::pass_hit_cap(n)
+                        && !crate::jobs::has_pending(
+                            &conn,
+                            "embeddings",
+                            "embed_conversation_chunks",
+                        )
+                        .unwrap_or(false)
+                    {
+                        let _ = crate::jobs::enqueue_on(
+                            &conn,
+                            "embeddings",
+                            "embed_conversation_chunks",
+                            "{}",
+                            4,
+                            2,
+                        );
+                    }
                 }
                 "rebuild_search_index" => {
                     let conn = self.lock();
@@ -487,7 +533,12 @@ impl WorkerManager {
                 2,
             );
         }
-        if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis") {
+        if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis")
+            // AUD-P1-7 (D1): no backend configured → no bulk AI jobs (the
+            // fresh-install noise: every conversation used to spawn a
+            // doomed analyze job pair).
+            && crate::ai_hub::backend_configured(&conn)
+        {
             let fresh: Vec<i64> = {
                 let mut stmt = match conn.prepare(
                     "SELECT c.id FROM conversations c
@@ -519,7 +570,9 @@ impl WorkerManager {
                 );
             }
         }
-        if crate::ai_hub::ai_feature_enabled(&conn, "attributes") {
+        if crate::ai_hub::ai_feature_enabled(&conn, "attributes")
+            && crate::ai_hub::backend_configured(&conn)
+        {
             let mut stmt = match conn.prepare(
                 "SELECT c.id FROM conversations c
                       WHERE NOT EXISTS (
@@ -657,47 +710,59 @@ impl WorkerManager {
             }
             {
                 let conn = self.lock();
-                if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis") {
-                    let _ = jobs::enqueue_on(
-                        &conn,
-                        "ai",
-                        "analyze_ticket",
-                        &format!("{{\"conversationId\":{conversation_local_id}}}"),
-                        3,
-                        2,
+                // AUD-P1-7 (D1): the per-conversation AI fan-out is gated on a
+                // configured backend — a fresh install (no role routed, no
+                // legacy base URL) no longer spawns jobs that can only fail
+                // with the "check that LM Studio… is running" notification.
+                if !crate::ai_hub::backend_configured(&conn) {
+                    tracing::debug!(
+                        conversation_id = conversation_local_id,
+                        operation = "on_conversation_changed",
+                        "no AI backend configured — skipping the AI job fan-out"
                     );
-                }
-                if !crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis")
-                    && crate::ai_hub::ai_feature_enabled(&conn, "attributes")
-                {
-                    let _ = jobs::enqueue_on(
-                        &conn,
-                        "ai",
-                        "extract_attributes",
-                        &format!("{{\"conversationId\":{conversation_local_id}}}"),
-                        3,
-                        2,
-                    );
-                }
-                if crate::ai_hub::ai_feature_enabled(&conn, "memory_extraction") {
-                    let _ = jobs::enqueue_on(
-                        &conn,
-                        "ai",
-                        "extract_memories",
-                        &format!("{{\"conversationId\":{conversation_local_id}}}"),
-                        3,
-                        2,
-                    );
-                }
-                if crate::ai_hub::ai_feature_enabled(&conn, "interaction_intelligence") {
-                    let _ = jobs::enqueue_on(
-                        &conn,
-                        "ai",
-                        "analyze_interaction",
-                        &format!("{{\"conversationId\":{conversation_local_id}}}"),
-                        3,
-                        2,
-                    );
+                } else {
+                    if crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis") {
+                        let _ = jobs::enqueue_on(
+                            &conn,
+                            "ai",
+                            "analyze_ticket",
+                            &format!("{{\"conversationId\":{conversation_local_id}}}"),
+                            3,
+                            2,
+                        );
+                    }
+                    if !crate::ai_hub::ai_feature_enabled(&conn, "ticket_analysis")
+                        && crate::ai_hub::ai_feature_enabled(&conn, "attributes")
+                    {
+                        let _ = jobs::enqueue_on(
+                            &conn,
+                            "ai",
+                            "extract_attributes",
+                            &format!("{{\"conversationId\":{conversation_local_id}}}"),
+                            3,
+                            2,
+                        );
+                    }
+                    if crate::ai_hub::ai_feature_enabled(&conn, "memory_extraction") {
+                        let _ = jobs::enqueue_on(
+                            &conn,
+                            "ai",
+                            "extract_memories",
+                            &format!("{{\"conversationId\":{conversation_local_id}}}"),
+                            3,
+                            2,
+                        );
+                    }
+                    if crate::ai_hub::ai_feature_enabled(&conn, "interaction_intelligence") {
+                        let _ = jobs::enqueue_on(
+                            &conn,
+                            "ai",
+                            "analyze_interaction",
+                            &format!("{{\"conversationId\":{conversation_local_id}}}"),
+                            3,
+                            2,
+                        );
+                    }
                 }
                 let _ = crate::interaction_signals::record_current_interaction(
                     &conn,

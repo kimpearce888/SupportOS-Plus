@@ -179,6 +179,56 @@ pub fn delete(conn: &Connection, id: i64) -> Result<bool> {
     Ok(n > 0)
 }
 
+/// AUD-P1-2 (C2): edit an existing connector — name, config, credentials
+/// (auth), refresh cadence and the AI permission. Mirrors `create`'s
+/// duplicate-name guard, excluding the row being edited.
+#[allow(clippy::too_many_arguments)]
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    kind: &str,
+    config: &Value,
+    auth: &Value,
+    refresh_method: &str,
+    refresh_seconds: i64,
+    allowed_ai: bool,
+) -> Result<Value> {
+    let duplicate: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM connectors WHERE name = ?1 AND id != ?2",
+            params![name, id],
+            |r| r.get(0),
+        )
+        .ok();
+    if duplicate.is_some() {
+        return Err(Error::Config(format!(
+            "Connector \"{name}\" already exists"
+        )));
+    }
+    let rows = conn.execute(
+        "UPDATE connectors
+         SET name = ?1, kind = ?2, config_json = ?3, auth = ?4,
+             refresh_method = ?5, refresh_seconds = ?6, allowed_ai = ?7,
+             updated_at = datetime('now')
+         WHERE id = ?8",
+        params![
+            name,
+            kind,
+            serde_json::to_string(config).unwrap_or_else(|_| "{}".into()),
+            serde_json::to_string(auth).unwrap_or_else(|_| "{}".into()),
+            refresh_method,
+            refresh_seconds,
+            i64::from(allowed_ai),
+            id,
+        ],
+    )?;
+    if rows == 0 {
+        return Err(Error::Config(format!("Connector {id} not found")));
+    }
+    get(conn, id)?.ok_or_else(|| Error::Config("connector vanished".into()))
+}
+
 fn connector_row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let data: String = row.get(3)?;
     Ok(json!({
@@ -325,8 +375,12 @@ fn sqlite_now() -> String {
     format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}:{s:02}")
 }
 
+/// AUD-P1-2 (C2): refresh now takes the event bus and emits
+/// `ConnectorRefreshed` on completion (ok or failed) — the manual refresh
+/// button finally answers "did it work?" and the page can reload itself.
 pub async fn refresh(
     conn: &crate::db::DbHandle,
+    bus: Option<&crate::event_bus::EventBus>,
     connector_id: i64,
     data_dir: &Path,
 ) -> std::result::Result<RefreshResult, Error> {
@@ -335,29 +389,54 @@ pub async fn refresh(
         get(&c, connector_id)?
     };
     let Some(connector) = record else {
-        return Ok(RefreshResult {
+        let result = RefreshResult {
             ok: false,
             rows: 0,
             pruned: 0,
             schema: None,
             error: Some("connector not found".into()),
-        });
+        };
+        if let Some(bus) = bus {
+            bus.emit(&crate::events::ServerEvent::connector_refreshed(
+                connector_id,
+                "(deleted)",
+                false,
+                0,
+                result.error.as_deref(),
+            ));
+        }
+        return Ok(result);
     };
-    match refresh_inner(conn, &connector, data_dir).await {
-        Ok(result) => Ok(result),
+    let name = connector
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let result = match refresh_inner(conn, &connector, data_dir).await {
+        Ok(result) => result,
         Err(e) => {
             let message = e.to_string().chars().take(500).collect::<String>();
             let c = conn.write_guard();
             record_sync(&c, connector_id, "error", None, Some(&message), None)?;
-            Ok(RefreshResult {
+            RefreshResult {
                 ok: false,
                 rows: 0,
                 pruned: 0,
                 schema: None,
                 error: Some(message),
-            })
+            }
         }
+    };
+    if let Some(bus) = bus {
+        bus.emit(&crate::events::ServerEvent::connector_refreshed(
+            connector_id,
+            &name,
+            result.ok,
+            u32::try_from(result.rows).unwrap_or(u32::MAX),
+            result.error.as_deref(),
+        ));
     }
+    Ok(result)
 }
 
 async fn refresh_inner(
@@ -883,5 +962,203 @@ mod batch31_tests {
         assert_eq!(plain.len(), 1);
         assert_eq!(plain[0]["x"], "10");
         assert_eq!(plain[0]["y"], "20");
+    }
+}
+
+#[cfg(test)]
+mod audp12_tests {
+    use super::*;
+    use crate::db::DbHandle;
+    use crate::event_bus::EventBus;
+
+    fn db() -> DbHandle {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("bootstrap");
+        DbHandle::new(conn)
+    }
+
+    #[test]
+    fn audp12_update_edits_fields_and_guards_duplicate_names() {
+        let handle = db();
+        handle
+            .with_write(|conn| {
+                create(
+                    conn,
+                    "One",
+                    "csv",
+                    &json!({"kind": "csv", "file": "one.csv"}),
+                    &json!({}),
+                    "manual",
+                    3600,
+                    false,
+                )?;
+                create(
+                    conn,
+                    "Two",
+                    "http",
+                    &json!({"kind": "http", "url": "https://example.com"}),
+                    &json!({"mode": "bearer", "token": "tok"}),
+                    "manual",
+                    600,
+                    true,
+                )
+            })
+            .expect("seed");
+
+        // edit Two: rename stays, credentials swap to a header, ai off
+        let two_id = handle
+            .with_read(|conn| {
+                list(conn).map(|rows| {
+                    rows.iter()
+                        .find(|r| r["name"] == "Two")
+                        .and_then(|r| r["id"].as_i64())
+                })
+            })
+            .expect("list")
+            .expect("two");
+        let updated = handle
+            .with_write(|conn| {
+                update(
+                    conn,
+                    two_id,
+                    "Two",
+                    "http",
+                    &json!({"kind": "http", "url": "https://example.com/v2"}),
+                    &json!({"mode": "header", "headerName": "X-Api-Key", "headerValue": "k"}),
+                    "manual",
+                    120,
+                    false,
+                )
+            })
+            .expect("update");
+        assert_eq!(updated["config"]["url"], "https://example.com/v2");
+        assert_eq!(updated["auth"]["mode"], "header");
+        assert_eq!(updated["allowed_ai"], 0);
+
+        // renaming onto the other connector's name is rejected
+        let err = handle
+            .with_write(|conn| {
+                update(
+                    conn,
+                    two_id,
+                    "One",
+                    "http",
+                    &json!({"kind": "http", "url": "https://example.com/v2"}),
+                    &json!({}),
+                    "manual",
+                    120,
+                    false,
+                )
+            })
+            .expect_err("duplicate name rejected");
+        assert!(err.to_string().contains("already exists"), "got: {err}");
+
+        // unknown id reports not found
+        let err = handle
+            .with_write(|conn| {
+                update(
+                    conn,
+                    999,
+                    "Whatever",
+                    "csv",
+                    &json!({"kind": "csv", "file": "x.csv"}),
+                    &json!({}),
+                    "manual",
+                    120,
+                    false,
+                )
+            })
+            .expect_err("missing id rejected");
+        assert!(err.to_string().contains("not found"), "got: {err}");
+    }
+
+    #[test]
+    fn audp12_refresh_emits_the_completion_event() {
+        let handle = db();
+        let dir = std::env::temp_dir().join(format!(
+            "spp-audp12-refresh-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        // the fetch branch jails `file` under <data_dir>/connectors/
+        std::fs::create_dir_all(dir.join("connectors")).expect("dir");
+        std::fs::write(
+            dir.join("connectors/ledger.csv"),
+            "sku,amount\nA-1,10\nA-2,20\n",
+        )
+        .expect("csv");
+
+        let record = handle
+            .with_write(|conn| {
+                create(
+                    conn,
+                    "Ledger",
+                    "csv",
+                    &json!({"kind": "csv", "file": "ledger.csv"}),
+                    &json!({}),
+                    "manual",
+                    3600,
+                    false,
+                )
+            })
+            .expect("create");
+        let id = record["id"].as_i64().expect("id");
+
+        let bus = EventBus::default();
+        let mut rx = bus.subscribe();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = rt
+            .block_on(refresh(&handle, Some(&bus), id, &dir))
+            .expect("refresh");
+        assert!(result.ok, "csv refresh succeeds: {:?}", result.error);
+        assert_eq!(result.rows, 2);
+
+        // the completion event is on the bus — the manual refresh answers
+        let event = rx.try_recv().expect("ConnectorRefreshed emitted");
+        match event {
+            crate::events::ServerEvent::ConnectorRefreshed(e) => {
+                assert_eq!(e.connector_id, id);
+                assert_eq!(e.name, "Ledger");
+                assert!(e.ok);
+                assert_eq!(e.rows, 2);
+            }
+            other => panic!("wrong event: {other:?}"),
+        }
+
+        // a failing refresh emits the failure shape (bad file)
+        handle
+            .with_write(|conn| {
+                update(
+                    conn,
+                    id,
+                    "Ledger",
+                    "csv",
+                    &json!({"kind": "csv", "file": "missing.csv"}),
+                    &json!({}),
+                    "manual",
+                    3600,
+                    false,
+                )
+            })
+            .expect("break it");
+        let result = rt
+            .block_on(refresh(&handle, Some(&bus), id, &dir))
+            .expect("refresh call");
+        assert!(!result.ok);
+        let event = rx.try_recv().expect("failure event emitted");
+        match event {
+            crate::events::ServerEvent::ConnectorRefreshed(e) => {
+                assert_eq!(e.name, "Ledger");
+                assert!(!e.ok);
+                assert!(e.error.is_some());
+            }
+            other => panic!("wrong event: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

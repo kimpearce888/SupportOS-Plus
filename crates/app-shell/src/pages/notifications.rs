@@ -5,6 +5,7 @@ use spp_core::notifications::{ListOptions, NotificationRecord};
 use super::relative_time;
 use crate::design::{self, BadgeTone, ButtonVariant};
 use crate::icons::Icon;
+use crate::pages::{NavRequest, PageKey};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -109,6 +110,50 @@ fn type_label(notification_type: &str) -> String {
     }
 }
 
+/// AUD-P1-1 (C1): resolve a notification's deep-link fields to the page
+/// that shows the thing it is about. The records already carry
+/// `conversation_id`, `customer_local_id`, `issue_id`, `campaign_id` and
+/// `job_id` — this maps them onto the existing NavRequest deep links
+/// (conversation > customer > issue > campaign > job, first hit wins).
+fn deep_link(record: &NotificationRecord) -> Option<NavRequest> {
+    if record.conversation_id.is_some() {
+        return record.conversation_id.map(NavRequest::OpenConversation);
+    }
+    if record.customer_local_id.is_some() {
+        return record.customer_local_id.map(NavRequest::OpenCustomer);
+    }
+    if record.issue_id.is_some() {
+        return Some(NavRequest::OpenKnownIssues);
+    }
+    if record.campaign_id.is_some() {
+        return Some(NavRequest::Page(PageKey::Outreach));
+    }
+    if record.job_id.is_some() {
+        return Some(NavRequest::Page(PageKey::Diagnostics));
+    }
+    None
+}
+
+/// AUD-P1-1 (C1): where the Open button takes you, in hover text.
+fn deep_link_hover(record: &NotificationRecord) -> Option<String> {
+    let nav = deep_link(record)?;
+    Some(match nav {
+        NavRequest::OpenConversation(id) => format!(
+            "open conversation #{} in the Inbox",
+            record.conversation_number.unwrap_or(id)
+        ),
+        NavRequest::OpenCustomer(id) => format!("open this customer's profile (#{id})"),
+        NavRequest::OpenKnownIssues => "open Issue Radar on the Known issues tab".to_string(),
+        NavRequest::Page(PageKey::Outreach) => {
+            "open Outreach — the campaign this reply belongs to".to_string()
+        }
+        NavRequest::Page(PageKey::Diagnostics) => {
+            "open Diagnostics — the background job that failed".to_string()
+        }
+        _ => "open the related page".to_string(),
+    })
+}
+
 pub struct NotificationsPage {
     tab: Tab,
     records: Vec<NotificationRecord>,
@@ -205,7 +250,7 @@ impl NotificationsPage {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
 
         let subtitle = format!("{} total · {} unread", self.total, self.unread);
@@ -244,13 +289,14 @@ impl NotificationsPage {
                 "No notifications",
                 "Nothing here for this tab yet — new alerts arrive with the sync.",
             );
-            return;
+            return None;
         }
 
         // UX-13: collapse identical notifications into one card per group so
         // a repeated failure reads as "×18", not as 18 duplicate cards.
         let groups = group_records(&rows);
         let mut toggled: Option<(Vec<i64>, bool)> = None;
+        let mut nav: Option<NavRequest> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             for group in &groups {
                 let unread = group.any_unread();
@@ -300,6 +346,17 @@ impl NotificationsPage {
                             {
                                 toggled = Some((group.ids(), !unread));
                             }
+                            // AUD-P1-1 (C1): the card's deep-link fields are
+                            // live — "mentioned you on #501" is one click
+                            // from the conversation now.
+                            if nav.is_none()
+                                && let Some(hover) = deep_link_hover(sample)
+                                && design::button(ui, "Open", ButtonVariant::Outline)
+                                    .on_hover_text(hover)
+                                    .clicked()
+                            {
+                                nav = deep_link(sample);
+                            }
                         });
                     });
                     ui.label(
@@ -341,6 +398,14 @@ impl NotificationsPage {
         if let Some((ids, read)) = toggled {
             self.toggle_group(db, &ids, read);
         }
+        nav
+    }
+
+    /// AUD-P1-1 (C1): the current unread count, for the shell chrome's
+    /// sidebar badge (synced after every reload).
+    #[must_use]
+    pub fn unread_badge(&self) -> u32 {
+        self.unread.max(0) as u32
     }
 }
 
@@ -570,5 +635,87 @@ mod tests {
         assert_eq!(relative_time("not a timestamp"), "not a timestamp");
         let past = spp_core::business_hours::iso_days_ago(2);
         assert_eq!(relative_time(&past), "2d ago");
+    }
+
+    // ---- AUD-P1-1 (C1): notification click-through + unread badge ----
+
+    fn link_record(
+        conversation_id: Option<i64>,
+        customer_local_id: Option<i64>,
+        issue_id: Option<i64>,
+        campaign_id: Option<i64>,
+        job_id: Option<i64>,
+    ) -> NotificationRecord {
+        NotificationRecord {
+            id: 1,
+            notification_type: spp_core::catalog::NotificationType::Mentioned,
+            severity: "info".to_string(),
+            title: "mentioned you".to_string(),
+            body: None,
+            target_user_local_id: Some(5),
+            actor_user_local_id: None,
+            conversation_id,
+            conversation_number: conversation_id.map(|id| 500 + id),
+            customer_local_id,
+            issue_id,
+            campaign_id,
+            job_id,
+            side_thread_id: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            read_at: None,
+            payload: None,
+        }
+    }
+
+    #[test]
+    fn audp11_deep_link_prefers_the_conversation_over_everything_else() {
+        let record = link_record(Some(42), Some(9), Some(3), Some(7), Some(11));
+        assert_eq!(
+            deep_link(&record),
+            Some(NavRequest::OpenConversation(42)),
+            "conversation wins when several targets are present"
+        );
+    }
+
+    #[test]
+    fn audp11_deep_link_falls_through_the_target_chain() {
+        assert_eq!(
+            deep_link(&link_record(None, Some(9), None, None, None)),
+            Some(NavRequest::OpenCustomer(9))
+        );
+        assert_eq!(
+            deep_link(&link_record(None, None, Some(3), Some(7), Some(11))),
+            Some(NavRequest::OpenKnownIssues)
+        );
+        assert_eq!(
+            deep_link(&link_record(None, None, None, Some(7), Some(11))),
+            Some(NavRequest::Page(PageKey::Outreach))
+        );
+        assert_eq!(
+            deep_link(&link_record(None, None, None, None, Some(11))),
+            Some(NavRequest::Page(PageKey::Diagnostics))
+        );
+        assert_eq!(
+            deep_link(&link_record(None, None, None, None, None)),
+            None,
+            "no deep-link fields — no Open affordance"
+        );
+    }
+
+    #[test]
+    fn audp11_unread_badge_tracks_the_page_reload() {
+        let db = fixture(Vec::new());
+        db.with_write(|conn| {
+            set_me(conn);
+            seed_notification(conn, 1, "mentioned", "one", false);
+            seed_notification(conn, 2, "sync_failure", "two", false);
+            seed_notification(conn, 3, "mentioned", "three", true);
+        });
+        let mut page = NotificationsPage::new();
+        assert_eq!(page.unread_badge(), 0, "nothing loaded yet");
+        page.reload(&db);
+        assert_eq!(page.unread_badge(), 2);
+        page.mark_all_read(&db);
+        assert_eq!(page.unread_badge(), 0, "the badge clears with the reload");
     }
 }

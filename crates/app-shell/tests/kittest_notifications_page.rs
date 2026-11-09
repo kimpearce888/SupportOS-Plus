@@ -228,3 +228,74 @@ fn r3_notifications_mentions_tab_light() {
     );
     h.snapshot("r3_notifications_mentions_tab_light");
 }
+
+/// AUD-P1-1 (C1): the deep-link state — a notification whose row carries
+/// the conversation deep-link columns gets the live "Open" act (its hover
+/// names the destination). The base goldens above lock the bare rows
+/// (no deep-link columns → no act, unchanged).
+#[test]
+fn audp1_notifications_deep_link_light() {
+    let (page, db) = seeded_page();
+    db.with_write(|conn| {
+        // the conversation the deep-link points at (the notifications FK
+        // references the mirror's conversations table)
+        conn.execute(
+            "INSERT INTO mailboxes (id, remote_id, name, email)
+             VALUES (1, 101, 'Support', 'support@example.com')",
+            [],
+        )
+        .expect("mailbox");
+        conn.execute(
+            "INSERT INTO customers (id, remote_id, first_name, last_name, email)
+             VALUES (9, 909, 'Kim', 'Pearce', 'kim@example.com')",
+            [],
+        )
+        .expect("customer");
+        conn.execute(
+            "INSERT INTO conversations (id, remote_id, number, subject, preview, status,
+                 type, mailbox_local_id, customer_local_id, priority,
+                 created_at, updated_at, local_created_at)
+             VALUES (1, 1001, 777, 'License key not arriving', 'License key preview',
+                     'active', 'email', 1, 9, 'none', '2026-11-10T09:00:00.000Z',
+                     '2026-11-10T09:00:00.000Z', '2026-11-10T09:00:00.000Z')",
+            [],
+        )
+        .expect("conversation");
+        conn.execute(
+            "INSERT INTO notifications
+             (type, severity, title, body, target_user_id, conversation_id,
+              conversation_number, dedup_key, created_at, payload)
+             VALUES ('customer_replied', 'info',
+                     'Customer replied on #777 License key not arriving',
+                     'Any news on this?', 5, 1, 777, 'seed-deeplink',
+                     ?1, NULL)",
+            rusqlite::params![spp_core::business_hours::iso_days_ago(0)],
+        )
+        .expect("deep-link notification");
+        Ok::<(), rusqlite::Error>(())
+    })
+    .expect("seed");
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db);
+            },
+            NotificationsPageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    assert!(
+        h.get_all_by_label("Open").next().is_some(),
+        "a deep-linked card must carry the Open act"
+    );
+    h.snapshot("audp1_notifications_deep_link_light");
+}

@@ -94,7 +94,15 @@ pub(super) const NAV_GROUPS: &[(&str, &[PageKey])] = &[
     ),
 ];
 
-pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool {
+/// AUD-P1-1 (C1): nav rows can carry a small unread-count pill on the
+/// right edge — today only the Notifications row uses it (the version-pill
+/// idiom from the sidebar brand row, at nav scale).
+pub(super) fn nav_row(
+    ui: &mut egui::Ui,
+    current: PageKey,
+    key: PageKey,
+    badge: Option<u32>,
+) -> bool {
     let selected = current == key;
     let t = design::tokens(ui);
     let fg = if selected {
@@ -148,6 +156,44 @@ pub(super) fn nav_row(ui: &mut egui::Ui, current: PageKey, key: PageKey) -> bool
         galley,
         fg,
     );
+    if let Some(count) = badge {
+        let text = if count > 99 {
+            "99+".to_string()
+        } else {
+            count.to_string()
+        };
+        let pill = egui::WidgetText::from(
+            egui::RichText::new(text.as_str())
+                .size(10.5)
+                .strong()
+                .color(t.primary_foreground),
+        )
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Small,
+        );
+        let pad = egui::vec2(5.0, 1.5);
+        let size = pill.size() + 2.0 * pad;
+        let pill_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.max.x - size.x - 8.0, rect.center().y - size.y / 2.0),
+            egui::pos2(rect.max.x - 8.0, rect.center().y + size.y / 2.0),
+        );
+        ui.painter().rect_filled(
+            pill_rect,
+            egui::CornerRadius::same(design::scale::radius::BADGE),
+            t.primary,
+        );
+        ui.painter().galley(
+            egui::pos2(
+                pill_rect.min.x + pad.x,
+                pill_rect.center().y - pill.size().y / 2.0,
+            ),
+            pill,
+            t.primary_foreground,
+        );
+    }
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect.expand(2.0),
