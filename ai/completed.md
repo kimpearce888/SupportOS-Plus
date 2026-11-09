@@ -5,6 +5,90 @@
 
 ## Completed
 
+## Batch AIE-1 — the AI reads the Help Center and the customers' own words; reply drafting is triggerable (2026-11-09)
+
+**Owner directive:** "the program should read all the contents in inbox,
+tickets and their answers from clients and support reps, and at the same
+time all the contents in help center and other sources, and it should
+write the reply to clients so it can be sent if ok to client via inbox,
+that should be done with help of ai connected with lm studio … when we
+start writing article on the program for helpcenter it should check all
+the clients response from inbox their answers to help draft the contents
+using ai connected with lm studio."
+
+**Audit verdict first (code-traced end to end):** the LM Studio wiring
+is real (AI Center model-role routing, Draft role → `chat_json` with
+schema); the reply pipeline reads the full thread (every customer and
+agent message with author/date/kind), customer history, similar past
+conversations (FTS + semantic), customer memory, known issues, saved
+replies and local knowledge documents; drafts land as an "LM Studio
+draft" card with Insert → composer → Send (human-approved, verified
+against unsupported claims/internal leakage); article drafting grounds
+in closed conversations' published agent replies via the gap → draft →
+review → publish-to-Help-Scout chain. Three gaps kept it short of the
+directive — fixed as items below.
+
+**Items:** AIE-1-1 help center in the reply evidence · AIE-1-2 the
+customer's question in article citations · AIE-1-3 the reply-draft
+trigger · AIE-1-4 the verification-surfaced customers-golden clock pin.
+
+**Implementation:**
+- AIE-1-1 (`crates/core/src/ai_evidence.rs`): `help_center_entries` —
+  a `docs_fts` search (the index the Docs sync maintains) joining
+  `docs_articles` for name/text/status; published → `customer_safe`,
+  draft/internal → `internal_only` and only included when internal
+  evidence is allowed, so `build_customer_draft_user`'s safety filter
+  keeps them out of customer replies exactly like internal local
+  documents. Entries ride the existing knowledge lane (4 local + 4 help
+  center max); `sources_for` cites articles as `help_center_article`
+  in their own id space (never the knowledge_documents join); the
+  coaching leakage auditor's internal-material corpus now also includes
+  non-published help center articles linked via ai_sources
+  (`coaching/checks.rs`).
+- AIE-1-2 (`crates/core/src/quality/mod.rs` + `ai_prompts.rs`):
+  `ResolutionCitation.customer_question` — the customer's first
+  published message (HTML→text, 400-char excerpt), rendered in
+  `build_article_draft_user` as `Customer asked: "…"` above
+  `Resolution (agent reply):` — the drafted article now answers what
+  customers actually wrote, not just the agent's subject line.
+- AIE-1-3 (`crates/app-shell/src/pages/inbox.rs`): the copilot pane
+  carries a "Draft reply with LM Studio" button (Ai variant) above the
+  draft card it feeds, guarded by `generative_backend_available`
+  (Draft-role routing; unrouted installs show the routing hint,
+  matching the pane's established guard pattern); it enqueues the
+  existing `generate_draft` job via `enqueue_composer_ai` and the poll
+  announces "LM Studio draft ready" when the card picks the row up —
+  completing generate → review → Insert → Send entirely from the UI.
+- AIE-1-4 (`crates/app-shell/tests/kittest_list_pages.rs` +
+  `kittest_clock_pin.rs` comment): the six customers goldens' "Nd ago"
+  Last Contact column ticked a day (pre-existing — proven by a stash
+  re-run at clean HEAD `d6ac37c` failing identically); the fixture now
+  pins `KITTEST_PINNED_NOW_ISO` like sync_health/operations/
+  notifications/reports, and the six goldens regenerated frozen.
+
+**Regression locks:** 5 core unit tests (help center rides the
+knowledge lane with the published/internal visibility split; articles
+cite their own source type; the customer's question rides the citation
+with the agent reply intact and the no-customer-message fallback; the
+article prompt carries/omits the Customer-asked line) + the new
+`aie1_inbox_copilot_draft_button_1920_light` golden with a functional
+probe (the button exists when a Draft model is routed).
+
+**Local verification battery:** gates (no-simulation clean,
+traceability OK); fmt clean; clippy `--workspace --all-targets
+-D warnings` clean + the sandbox lane clean + the kittest lane clean
+for the touched target (the pre-existing `show_inside` deprecation in
+kittest_reports_page is untouched — CI does not clippy that lane);
+tests core 464/464 (+3 ignored, 5 new) · app-shell lib 251/251 ·
+sandbox 472/472 (+3 ignored) · cargo-deny advisories/licenses/bans ok;
+kittest diff-locked across all 24 suites + style lint — exactly 7
+intended golden changes (the copilot hint line on
+r5_inbox_copilot_docked_1920_light + the six pinned customers goldens)
+and 1 new golden, zero unexpected drift; SPP_SMOKE rc=0 (24 pages /
+4348 shapes); VLM read-backs: the routed golden shows the "Draft reply
+with LM Studio" button in the pane, the unrouted golden shows the
+routing hint and no button.
+
 ## Batch UXH-1 — help center articles render as articles, not HTML source (2026-11-09)
 
 **Owner directive:** the screenshot report "it should show help center

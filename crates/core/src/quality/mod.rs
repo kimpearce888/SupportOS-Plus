@@ -1596,6 +1596,10 @@ pub(crate) struct ResolutionCitation {
     pub number: i64,
     pub subject: Option<String>,
     pub closed_at: Option<String>,
+    /// AIE-1-2: the customer's own words — their first published message on
+    /// the conversation, the question the drafted article must actually
+    /// answer (not just the subject line the agent saw).
+    pub customer_question: String,
     pub excerpt: String,
 }
 
@@ -1637,11 +1641,13 @@ pub(crate) fn best_resolutions(
         if excerpt.is_empty() {
             continue;
         }
+        let customer_question = customer_question_of(conn, id);
         out.push(ResolutionCitation {
             conversation_local_id: id,
             number,
             subject,
             closed_at,
+            customer_question,
             excerpt,
         });
     }
@@ -1673,6 +1679,38 @@ fn resolution_excerpt_of(conn: &Connection, conversation_id: i64) -> String {
         })
         .unwrap_or_default();
     excerpt_of(body.trim(), 900)
+}
+
+/// AIE-1-2: the customer's first published message on the conversation —
+/// their question in their own words. Falls back to empty when the mirror
+/// holds no customer message (the subject line still carries the topic).
+fn customer_question_of(conn: &Connection, conversation_id: i64) -> String {
+    let raw: Option<(Option<String>, Option<String>)> = conn
+        .query_row(
+            "SELECT body_text, body_html
+               FROM conversation_threads
+              WHERE conversation_id = ?1
+                AND type IN ('customer', 'customer_message')
+                AND state = 'published' AND deleted_at IS NULL
+                AND COALESCE(body_text, body_html, '') <> ''
+              ORDER BY COALESCE(remote_created_at, created_at) ASC, id ASC
+              LIMIT 1",
+            params![conversation_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((body_text, body_html)) = raw else {
+        return String::new();
+    };
+    let body = body_text
+        .filter(|b| !b.trim().is_empty())
+        .or_else(|| {
+            body_html
+                .map(|h| crate::textutil::html_to_text(&h))
+                .filter(|t| !t.trim().is_empty())
+        })
+        .unwrap_or_default();
+    excerpt_of(body.trim(), 400)
 }
 
 #[cfg(test)]
@@ -1739,6 +1777,38 @@ mod k2_tests {
         );
         assert_eq!(best_resolutions(&conn, &[first], 1).len(), 1);
         assert!(best_resolutions(&conn, &[], 5).is_empty());
+    }
+
+    #[test]
+    fn best_resolutions_carries_the_customers_own_question() {
+        let conn = db();
+        let id = seed_closed_with_reply(&conn, 201, 2);
+        conn.execute(
+            "INSERT INTO conversation_threads (conversation_id, type, state, body_text, remote_created_at)
+             VALUES (?1, 'customer', 'published',
+                     'Every night our weekly export dies at 2am — how do we stop the timeouts?',
+                     '2026-10-18T08:00:00.000Z')",
+            params![id],
+        )
+        .expect("customer thread");
+        let cites = best_resolutions(&conn, &[id], 5);
+        assert_eq!(cites.len(), 1);
+        assert!(
+            cites[0].customer_question.contains("weekly export dies"),
+            "the customer's own words ride the citation: {:?}",
+            cites[0].customer_question
+        );
+        assert!(
+            cites[0].excerpt.contains("nightly profile"),
+            "the agent's published reply stays the resolution excerpt"
+        );
+
+        // The gap-only fixture (no customer message) degrades to an empty
+        // question, never a panic or a fabricated one.
+        let bare = seed_closed_with_reply(&conn, 202, 1);
+        let bare_cites = best_resolutions(&conn, &[bare], 5);
+        assert_eq!(bare_cites.len(), 1);
+        assert_eq!(bare_cites[0].customer_question, "");
     }
 
     #[test]

@@ -634,8 +634,16 @@ pub(crate) fn build_article_draft_user(
     let mut sources = String::new();
     for (i, c) in resolutions.iter().enumerate() {
         let subject = c.subject.as_deref().unwrap_or("(no subject)");
+        // AIE-1-2: the customer's own words beside the agent's resolution —
+        // the article must answer what customers actually asked, phrased the
+        // way they asked it, not just the subject the agent filed under.
+        let customer_line = if c.customer_question.is_empty() {
+            String::new()
+        } else {
+            format!("Customer asked: \"{}\"\n", c.customer_question)
+        };
         sources.push_str(&format!(
-            "[^{}] Conversation #{} \"{}\" (closed {}):\n{}\n\n",
+            "[^{}] Conversation #{} \"{}\" (closed {}):\n{customer_line}Resolution (agent reply):\n{}\n\n",
             i + 1,
             c.number,
             subject,
@@ -662,4 +670,49 @@ pub(crate) fn build_weekly_digest_user(facts: &serde_json::Value) -> String {
          Write the weekly digest narrative from these facts.",
         serde_json::to_string_pretty(facts).unwrap_or_else(|_| "{}".into())
     )
+}
+
+#[cfg(test)]
+mod aie1_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn article_draft_prompt_carries_the_customers_question() {
+        let c = crate::quality::ResolutionCitation {
+            conversation_local_id: 1,
+            number: 42,
+            subject: Some("Export timeouts".into()),
+            closed_at: Some("2026-11-01".into()),
+            customer_question: "Our nightly export dies at 2am, how do we stop it?".into(),
+            excerpt: "Clear the export cache and re-run with the nightly profile.".into(),
+        };
+        let prompt = build_article_draft_user("nightly export timeouts", std::slice::from_ref(&c));
+        assert!(
+            prompt.contains("Customer asked: \"Our nightly export dies at 2am"),
+            "the customer's own words ride the source block: {prompt}"
+        );
+        assert!(
+            prompt.contains("Resolution (agent reply):"),
+            "the agent answer stays labelled as the resolution"
+        );
+        assert!(prompt.contains("Clear the export cache"));
+    }
+
+    #[test]
+    fn article_draft_prompt_omits_an_empty_customer_line() {
+        let c = crate::quality::ResolutionCitation {
+            conversation_local_id: 1,
+            number: 43,
+            subject: Some("No customer text".into()),
+            closed_at: None,
+            customer_question: String::new(),
+            excerpt: "The only resolution.".into(),
+        };
+        let prompt = build_article_draft_user("q", std::slice::from_ref(&c));
+        assert!(
+            !prompt.contains("Customer asked:"),
+            "no fabricated customer line: {prompt}"
+        );
+        assert!(prompt.contains("The only resolution."));
+    }
 }

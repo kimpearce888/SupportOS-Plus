@@ -205,6 +205,53 @@ fn render_copilot_state(dark: bool, w: f32, h: f32, open_copilot: bool, name: &s
     harness.snapshot(name);
 }
 
+// AIE-1-3: with a Draft-role model routed (the legacy LM Studio settings
+// form), the copilot pane carries the "Draft reply with LM Studio"
+// trigger above the draft card it feeds; unrouted installs show the
+// routing hint instead (the four open-copilot goldens above).
+fn render_copilot_routed(name: &str) {
+    let (page, db, bus) = seeded_page();
+    db.with_write(|conn| {
+        spp_core::settings::set_string(conn, "lmstudio_chat_model", "qwen2.5-7b-instruct")
+            .expect("route the draft model");
+    });
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1920.0, 960.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db, &s.bus, None);
+            },
+            CopilotPageState {
+                installed: false,
+                page,
+                db,
+                bus,
+            },
+        );
+    harness.run_ok();
+    harness.get_by_label("Copilot").click();
+    harness.run_ok();
+    harness.run_ok();
+    assert!(
+        harness
+            .get_all_by_label("Draft reply with LM Studio")
+            .next()
+            .is_some(),
+        "the routed pane must offer the LM Studio draft trigger"
+    );
+    harness.snapshot(name);
+}
+
+#[test]
+fn aie1_inbox_copilot_draft_button_1920_light() {
+    render_copilot_routed("aie1_inbox_copilot_draft_button_1920_light");
+}
+
 #[test]
 fn r4_inbox_copilot_open_1625_light() {
     render_copilot_state(

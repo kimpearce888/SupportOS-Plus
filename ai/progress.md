@@ -1,7 +1,21 @@
 ## Active items
 
-(none — Batch UXH-1 closed 2026-11-09, record in `completed.md`; Rule 8
+(none — Batch AIE-1 closed 2026-11-09, record in `completed.md`; Rule 8
 STOP, the queue is empty, new work opens only on an owner directive.)
+
+Batch AIE-1 (items AIE-1-1..AIE-1-4: the AI reads the help center and
+the customers' own words, and reply drafting is triggerable from the
+Inbox) moved through this file per Rules 2 and 4 on 2026-11-09 — opened
+on the owner's AI-pipeline directive, implemented (help center articles
+in the reply-draft evidence + their own citation id-space + the leakage
+auditor corpus; the customer's question in article citations + prompt;
+the "Draft reply with LM Studio" trigger in the copilot pane; the
+AIE-1-4 verification-surfaced customers-golden clock pin), verified
+(gates, fmt, clippy ×2 lanes + the kittest lane for the touched target,
+tests 464+472+251, cargo-deny, kittest diff-locked on all 24 suites +
+style lint with 7 intended golden changes + 1 new golden and a stash
+re-run proving the customers drift pre-existing, SPP_SMOKE, VLM
+read-backs), and closed the same session (record in `completed.md`).
 
 Batch UXH-1 (item UXH-1-1: the help center article reader must render
 the synced Help Scout HTML body as a readable article, not the raw

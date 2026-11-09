@@ -1,11 +1,12 @@
 #![cfg(feature = "kittest-ui")]
 
 // UXB-T1: the golden date-tick freeze, proven at the mechanism level. The
-// three shot fixtures that render relative time (sync_health, operations,
-// notifications) pin `business_hours`' clock to `KITTEST_PINNED_NOW_ISO`
-// before seeding; this suite pins the same anchor and asserts that every
-// clock read on the golden render path reports it — the wall clock never
-// reaches the screenshots again, so the goldens hold on any calendar day.
+// shot fixtures that render relative time (sync_health, operations,
+// notifications, reports, and — since AIE-1-4 — the customers list) pin
+// `business_hours`' clock to `KITTEST_PINNED_NOW_ISO` before seeding; this
+// suite pins the same anchor and asserts that every clock read on the
+// golden render path reports it — the wall clock never reaches the
+// screenshots again, so the goldens hold on any calendar day.
 
 use spp_core::business_hours::{
     KITTEST_PINNED_NOW_ISO, iso_days_ago, now_iso_millis, pin_now_for_kittest, wall_minutes_between,

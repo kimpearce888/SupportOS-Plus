@@ -2007,6 +2007,47 @@ impl InboxPage {
                     self.draft_saved = false;
                 }
                 ui.add_space(design::scale::space::SP2);
+                // AIE-1-3: the LM Studio reply-draft trigger. The job reads
+                // the full thread, the knowledge base, the help center and
+                // similar resolutions, then writes a verified draft into the
+                // card below — review + Insert before anything is sent.
+                let lmstudio_ok = db.with_read(spp_core::ai_local::generative_backend_available);
+                if lmstudio_ok {
+                    let drafting = self
+                        .pending_ai
+                        .as_ref()
+                        .is_some_and(|p| p.kind == "generate_draft");
+                    if design::button(
+                        ui,
+                        if drafting {
+                            "Drafting with LM Studio…"
+                        } else {
+                            "Draft reply with LM Studio"
+                        },
+                        ButtonVariant::Ai,
+                    )
+                    .on_hover_text(
+                        "read the full thread, the knowledge base, the help center and similar \
+                         resolutions, then draft a grounded reply — review it and Insert before \
+                         sending",
+                    )
+                    .clicked()
+                        && self.pending_ai.is_none()
+                    {
+                        self.enqueue_composer_ai(
+                            db,
+                            "generate_draft",
+                            json!({ "conversationId": detail.id }),
+                            detail.id,
+                        );
+                    }
+                } else {
+                    design::hint_text(
+                        ui,
+                        "Reply drafting needs a routed Draft role (AI Center > Model-role routing).",
+                    );
+                }
+                ui.add_space(design::scale::space::SP2);
                 if let Some((draft_id, draft, model)) =
                     db.with_read(|conn| spp_core::ai_local::latest_ai_draft_row(conn, detail.id))
                 {
@@ -2294,6 +2335,15 @@ impl InboxPage {
                             spp_core::quality::get_qa(conn, p.conversation_id, true)
                         });
                         self.set_status_message("Post-resolution QA AI review finished.", false);
+                    }
+                    // AIE-1-3: the draft card below reads the fresh row on
+                    // the next frame — announce it so the reviewer knows.
+                    "generate_draft" => {
+                        self.set_status_message(
+                            "LM Studio draft ready — review the draft card, then Insert into \
+                             the composer before sending.",
+                            false,
+                        );
                     }
                     _ => {}
                 }

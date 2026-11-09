@@ -510,6 +510,33 @@ pub(super) fn check_internal_leakage(
             }
         }
     }
+    {
+        // AIE-1-1: draft/internal help center articles are AI evidence now —
+        // the leakage auditor must see them alongside internal local docs.
+        let articles: Vec<(String, String)> = match conn.prepare(
+            "SELECT DISTINCT da.name, COALESCE(da.text, '') FROM ai_sources s
+                JOIN ai_runs r ON r.id = s.run_id
+                JOIN docs_articles da ON da.id = s.source_id
+             WHERE r.conversation_id = ?1 AND s.source_type = 'help_center_article'
+               AND COALESCE(da.status, 'draft') != 'published'",
+        ) {
+            Ok(mut stmt) => stmt
+                .query_map(params![conv.id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        for (title, content) in articles.into_iter().take(10) {
+            if !content.trim().is_empty() {
+                corpus.push((
+                    format!("internal help center article \"{title}\""),
+                    content.chars().take(8000).collect(),
+                ));
+            }
+        }
+    }
     if corpus.is_empty() {
         return result(
             kind,

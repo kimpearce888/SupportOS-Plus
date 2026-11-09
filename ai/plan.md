@@ -7,28 +7,56 @@
 
 ## Queue state
 
-**Batch UXH-1 (help center articles must render as articles, not HTML
-source) CONSUMED 2026-11-09: item UXH-1-1 moved to `progress.md` per
-Rule 2, implemented, verified, and closed the same session; record in
-`completed.md`. The Help center article reader (`KnowledgePage::
-reader_ui`) had printed the synced `docs_articles.text` — the raw Help
-Scout Docs HTML body — verbatim in a monospace label (the owner's
-screenshot report: "it should show help center articles in a correct
-way, it is showing them with html syntax"). UXH-1-1 renders the body
-through the app's existing sanitized rich-text pipeline
-(`spp_core::richtext::html_to_spans` — the same one the inbox reader
-uses for HTML mail bodies), splits the span stream into blocks at its
-newline separators so paragraphs, headings, list items and code blocks
-lay out as a readable article (proportional body, styled inline runs,
-links, monospace code) inside the shared `READER_MEASURE` reading
-column; plain-text bodies degrade to one readable block. Display-path
-fix only — the stored mirror, sync, FTS and embedding pipelines are
-untouched, so already-synced articles render correctly without a
-re-sync. Verified: full local battery (gates, fmt, clippy ×2 lanes,
-tests 251+459+467+14+2, cargo-deny, kittest diff-locked ×2 on all 24
-suites + style lint with zero drift on the 189 existing goldens + 3 new
-reader goldens, SPP_SMOKE, VLM read-back). The queue is EMPTY again.
-New work opens only on an owner directive.**
+**Batch AIE-1 (the AI must read the help center and the customers' own
+words, and reply drafting must be triggerable) CONSUMED 2026-11-09:
+items AIE-1-1..AIE-1-4 (AIE-1-4 surfaced by the verification battery)
+moved to `progress.md` per Rule 2, implemented, verified, and closed the
+same session; record in `completed.md`. The audit verdict (code-traced end
+to end): the LM Studio wiring is real (model-role routing, Draft role →
+chat_json), the reply pipeline reads the full thread (every customer and
+agent message with authorship), customer history, similar past
+conversations (FTS + semantic), customer memory, known issues, saved
+replies and local knowledge documents, drafts land as an "LM Studio
+draft" card with Insert → composer → Send (human-approved), and article
+drafting grounds in closed conversations' published agent replies — but
+three gaps kept it short of the directive:**
+
+- **AIE-1-1** — the reply-draft evidence never reads the Help Center:
+  `build_evidence`'s knowledge lane searches only `fts_knowledge`
+  (imported documents) and the semantic lane filters to
+  `conversation_chunk`, so synced help center articles (indexed in
+  `docs_fts`, embedded as `docs_chunk` — used by the Search page and the
+  local copilot report's related-articles card but NOT by the LM Studio
+  draft path) are invisible to reply drafting. Fix: a docs_fts search in
+  `build_evidence` (published → customer_safe, draft/internal →
+  internal_only only when internal evidence is allowed — the existing
+  safety filter in `build_customer_draft_user` keeps applying) +
+  `sources_for` citations.
+- **AIE-1-2** — article drafting never sees the customers' own words:
+  `best_resolutions` cites only the conversation subject + the last
+  published agent reply (900 chars); the customer's question text (what
+  they actually asked, the thing the article must answer) is absent.
+  Fix: `ResolutionCitation.customer_question` (first published customer
+  message, excerpted) rendered into `build_article_draft_user` as
+  "Customer asked:" beside the agent resolution.
+- **AIE-1-3** — reply drafting has no user-facing trigger:
+  `generate_draft` is only queueable by AI-proposed automation actions
+  (the rule builder offers no AI action), so the LM Studio draft flow
+  cannot actually be started from the UI. Fix: a "Draft reply with LM
+  Studio" button in the Inbox copilot pane next to the draft card it
+  feeds, guarded by the Draft-role routing check
+  (`generative_backend_available`), reusing the existing
+  `enqueue_composer_ai` job/poll machinery.
+- **AIE-1-4** (verification-surfaced, the batch extended mid-flight):
+  the kittest drift gate fired on the six customers-page goldens during
+  the battery — proven pre-existing by a stash re-run at clean HEAD
+  (`d6ac37c` fails identically): the UXB-T1 date-tick freeze pinned the
+  clock for sync_health, operations, notifications and reports but the
+  customers fixtures were left on the wall clock, so their fixed 2026-02
+  seeds' "Nd ago" Last Contact column ticked a day further after the
+  2026-11-08 UTC midnight class boundary. Fix: pin the customers fixture
+  to `KITTEST_PINNED_NOW_ISO` like the other four suites and regenerate
+  the six goldens (values frozen, gate green on any calendar day).
 
 **Batch REL-5 (release v1.9.6 from the final source) CONSUMED
 2026-11-08: items REL-5-1..REL-5-4 moved to `progress.md` per Rule 2,

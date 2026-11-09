@@ -254,6 +254,18 @@ struct CustomersPageState {
 fn seeded_customers_page() -> (CustomersPage, DbHandle) {
     let mut conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
     spp_core::bootstrap::apply_all(&mut conn).expect("bootstrap");
+    // AIE-1-4: pin the shot clock so the fixed 2026-02 seeds render the
+    // same "Nd ago" Last Contact column on every calendar day — the
+    // UXB-T1 freeze covered sync_health, operations, notifications and
+    // reports, but the customers fixtures were left on the wall clock and
+    // their goldens ticked one day further at a UTC midnight (the drift
+    // gate fired on 2026-11-09, a day after the UXG-1 regen).
+    assert!(
+        spp_core::business_hours::pin_now_for_kittest(
+            spp_core::business_hours::KITTEST_PINNED_NOW_ISO
+        ),
+        "the shot clock must pin to the golden anchor"
+    );
     seed_mailbox(&conn);
     let northwind = spp_core::people_store::create_organization(
         &conn,

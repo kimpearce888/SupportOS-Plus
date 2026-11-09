@@ -211,7 +211,7 @@ pub fn build(
         .take(3)
         .collect();
 
-    let knowledge: Vec<KnowledgeEntry> = search_knowledge_raw(
+    let mut knowledge: Vec<KnowledgeEntry> = search_knowledge_raw(
         conn,
         &query,
         if include_internal {
@@ -249,6 +249,11 @@ pub fn build(
         .ok()
     })
     .collect();
+
+    // AIE-1-1: the Help Center rides the same knowledge lane — the
+    // customer-facing docs are often the strongest grounding for a reply,
+    // and the Docs sync keeps `docs_fts` current on every article.
+    knowledge.extend(help_center_entries(conn, &query, include_internal, 4));
 
     let saved_replies: Vec<SavedReplyEntry> = search_saved_replies(conn, &query, 3)
         .unwrap_or_default()
@@ -551,6 +556,67 @@ pub(crate) struct AiSourceRef {
     pub timestamp: Option<String>,
 }
 
+/// AIE-1-1: Help Center articles as AI knowledge evidence. The Docs sync
+/// indexes every article into `docs_fts`; the reply-draft evidence searches
+/// it with the same query as the local knowledge lane. Published articles
+/// are customer-facing (`customer_safe`); draft/internal articles are
+/// `internal_only` and only ride along when internal evidence is allowed
+/// (`include_internal`), so the safety filter in `build_customer_draft_user`
+/// keeps them out of customer replies exactly like internal local documents.
+fn help_center_entries(
+    conn: &Connection,
+    query: &str,
+    include_internal: bool,
+    limit: usize,
+) -> Vec<KnowledgeEntry> {
+    let fts = fts_query_or(query, 10);
+    if fts == "\"\"" || limit == 0 {
+        return Vec::new();
+    }
+    let Ok(ids) = conn
+        .prepare("SELECT article_id FROM docs_fts WHERE docs_fts MATCH ?1 ORDER BY rank LIMIT ?2")
+        .and_then(|mut stmt| {
+            stmt.query_map(params![fts, limit as i64], |r| r.get::<_, i64>(0))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<i64>>())
+        })
+    else {
+        return Vec::new();
+    };
+    let mut out: Vec<KnowledgeEntry> = Vec::new();
+    for id in ids {
+        let Ok((name, text, status)) = conn.query_row(
+            "SELECT name, COALESCE(text, ''), COALESCE(status, 'draft')
+               FROM docs_articles WHERE id = ?1 AND deleted_at IS NULL",
+            params![id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            },
+        ) else {
+            continue;
+        };
+        if !include_internal && status != "published" {
+            continue;
+        }
+        out.push(KnowledgeEntry {
+            title: name,
+            text: text.chars().take(1200).collect(),
+            visibility: if status == "published" {
+                "customer_safe".to_string()
+            } else {
+                "internal_only".to_string()
+            },
+        });
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
+}
+
 pub(crate) fn sources_for(conn: &Connection, ctx: &EvidenceContext) -> Vec<AiSourceRef> {
     let mut sources: Vec<AiSourceRef> = Vec::new();
     let conv_id_by_number = |number: i64| -> Option<i64> {
@@ -593,6 +659,22 @@ pub(crate) fn sources_for(conn: &Connection, ctx: &EvidenceContext) -> Vec<AiSou
         ) {
             sources.push(AiSourceRef {
                 source_type: "knowledge_document".into(),
+                source_id: id,
+                title: k.title.clone(),
+                relevance: Some(0.8),
+                visibility: k.visibility.clone(),
+                timestamp: None,
+            });
+        } else if let Ok(id) = conn.query_row(
+            "SELECT id FROM docs_articles WHERE name = ?1 AND deleted_at IS NULL",
+            params![k.title],
+            |r| r.get(0),
+        ) {
+            // AIE-1-1: help center articles are cited by their own id
+            // space (`help_center_article`), never folded into the
+            // knowledge_documents join.
+            sources.push(AiSourceRef {
+                source_type: "help_center_article".into(),
                 source_id: id,
                 title: k.title.clone(),
                 relevance: Some(0.8),
@@ -822,5 +904,99 @@ mod batch13_a4_evidence_tests {
         let hits = semantic_hits(&conn, &index, conv, 5);
         assert!(hits.is_empty(), "the kill switch dominates the lane");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod aie1_help_center_evidence_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db_with_help_center() -> (Connection, i64) {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9801, 98, 'Export timeouts nightly',
+                     'The nightly export keeps timing out.', 'active')",
+            [],
+        )
+        .expect("conversation");
+        let conv = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO docs_collections (id, remote_id, name, slug)
+             VALUES (1, 11, 'Guides', 'guides')",
+            [],
+        )
+        .expect("collection");
+        conn.execute(
+            "INSERT INTO docs_articles (collection_local_id, remote_id, number, name, status, text, preview)
+             VALUES (1, 'a1', 1, 'Fixing nightly export timeouts', 'published',
+                     'Clear the export cache and re-run the job with the nightly profile.',
+                     'Clear the export cache'),
+                    (1, 'a2', 2, 'Internal export runbook', 'internal',
+                     'The stale lock file lives under /var/lib/export; delete it manually.',
+                     'The stale lock file')",
+            [],
+        )
+        .expect("articles");
+        crate::search::rebuild_indexes(&conn).expect("fts");
+        (conn, conv)
+    }
+
+    #[test]
+    fn help_center_articles_ride_the_knowledge_lane() {
+        let (conn, conv) = db_with_help_center();
+        let ctx = build(&conn, None, conv, false)
+            .expect("evidence result")
+            .expect("customer-facing evidence");
+        let published = ctx
+            .knowledge
+            .iter()
+            .find(|k| k.title == "Fixing nightly export timeouts")
+            .expect("the published help center article is reply evidence");
+        assert_eq!(published.visibility, "customer_safe");
+        assert!(
+            published.text.contains("nightly profile"),
+            "the article body rides along: {:?}",
+            published.text
+        );
+        assert!(
+            !ctx.knowledge
+                .iter()
+                .any(|k| k.title == "Internal export runbook"),
+            "internal articles stay out of customer-facing evidence"
+        );
+
+        let internal_ctx = build(&conn, None, conv, true)
+            .expect("evidence result")
+            .expect("internal evidence");
+        let internal = internal_ctx
+            .knowledge
+            .iter()
+            .find(|k| k.title == "Internal export runbook")
+            .expect("internal evidence includes non-published articles");
+        assert_eq!(internal.visibility, "internal_only");
+    }
+
+    #[test]
+    fn help_center_sources_cite_their_own_id_space() {
+        let (conn, conv) = db_with_help_center();
+        let ctx = build(&conn, None, conv, false)
+            .expect("evidence result")
+            .expect("evidence");
+        let sources = sources_for(&conn, &ctx);
+        let article_ref = sources
+            .iter()
+            .find(|s| s.source_type == "help_center_article")
+            .expect("the article is cited as its own source type");
+        assert_eq!(article_ref.title, "Fixing nightly export timeouts");
+        assert_eq!(article_ref.visibility, "customer_safe");
+        assert!(
+            sources
+                .iter()
+                .all(|s| s.source_type != "knowledge_document" || s.title != article_ref.title),
+            "an article never masquerades as a local knowledge document"
+        );
     }
 }
