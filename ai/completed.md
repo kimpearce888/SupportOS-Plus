@@ -88,6 +88,11 @@ and 1 new golden, zero unexpected drift; SPP_SMOKE rc=0 (24 pages /
 4348 shapes); VLM read-backs: the routed golden shows the "Draft reply
 with LM Studio" button in the pane, the unrouted golden shows the
 routing hint and no button.
+- CI run 42540828574 on the batch push `d6e5888`: green 3/3 —
+  fmt/clippy/test/deny, AppImage + .deb build & smoke, and the kittest
+  snapshot drift gate (the 7 intended golden changes + the new copilot
+  golden accepted, the clock-pinned customers goldens holding) all
+  succeeded.
 
 ## Batch UXH-1 — help center articles render as articles, not HTML source (2026-11-09)
 
