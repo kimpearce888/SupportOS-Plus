@@ -7,6 +7,21 @@
 
 ## Queue state
 
+**Batch AUD-P0 (fix the P0 backlog — the six clusters of
+`docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-09: opened on
+the owner's "fix P0" directive. Items AUD-P0-1..AUD-P0-10 (A1 digest
+label→name; A2 freshness usage wired to ai_sources; A4 rejected-draft
+filter; A5 malformed sync payloads fail loudly; B1 dead triggers
+marked honestly in display + docs; A6 SetPriority made real + honest
+catch-all + honest approval records; B2 read actions honest-skip; B3
+AddNote stores its body on the outbound note lane; A3 the priority
+chain repointed at supportos_priority + the inbox Priority edit
+control) moved to `progress.md` per Rule 2, implemented, verified
+(full battery + kittest diff-locked ×2 with 21 intended goldens), and
+closed the same session; record in `completed.md`. The queue is EMPTY
+again. New work opens only on an owner directive. P1/P2 from the audit
+backlog remain NOT queued (Rule 8).**
+
 **Batch AUD-1 (full product audit: gaps, bugs, blockers, features,
 workflows, options questioned on practical scenarios — report only)
 CONSUMED 2026-11-09: opened on the owner's audit directive ("audit the

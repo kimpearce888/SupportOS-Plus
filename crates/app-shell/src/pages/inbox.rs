@@ -885,6 +885,47 @@ impl InboxPage {
         outcome
     }
 
+    // AUD-P0-10 (A3): the local priority edit control's write path. Priority
+    // is a SupportOS-local concept — the write goes through the existing
+    // ticket-op (supportos_priority + a ticket_state_transitions record) and
+    // is NOT pushed to Help Scout, so unlike status/assign there is no
+    // outbound job after the local half.
+    pub(crate) fn set_priority(
+        &mut self,
+        db: &DbHandle,
+        bus: &EventBus,
+        priority: &str,
+    ) -> ActionOutcome {
+        let Some(detail) = self.detail.clone() else {
+            return ActionOutcome::Rejected("No conversation selected.".into());
+        };
+        let Some(new_priority) = spp_core::ticket_states::TicketPriority::parse(priority) else {
+            return ActionOutcome::Rejected(format!("unknown priority: {priority}"));
+        };
+        let result: std::result::Result<OperationResult, String> = db.with_write(|conn| {
+            guard_eval_mode(conn)?;
+            let op = TicketOperation::SetPriority {
+                conversation_remote_id: detail.remote_id,
+                new_priority,
+                actor_type: "user".into(),
+                actor_id: None,
+            };
+            spp_core::ticket_ops::execute(conn, &op).map_err(|e| e.to_string())
+        });
+        let outcome = match result {
+            Ok(OperationResult::Success { message }) => {
+                emit_updated(bus, detail.id, detail.number);
+                ActionOutcome::Success(message)
+            }
+            Ok(OperationResult::Rejected { reason }) => ActionOutcome::Rejected(reason),
+            Err(reason) => ActionOutcome::Rejected(reason),
+        };
+        self.set_status_message(outcome.message(), outcome.is_rejected());
+        self.reload_detail(db);
+        self.reload_list(db);
+        outcome
+    }
+
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -1693,6 +1734,26 @@ impl InboxPage {
                 });
                 if design::button(ui, "Assign", ButtonVariant::Secondary).clicked() {
                     self.assign(db, bus, self.assign_pick);
+                }
+            });
+            ui.add_space(design::scale::space::SP1);
+            // AUD-P0-10 (A3): the priority edit control — the local
+            // (SupportOS) priority, written through ticket_ops and recorded
+            // in ticket_state_transitions. No segment is highlighted while
+            // the priority is unset (the reader header shows "Priority:
+            // none"); it is not pushed to Help Scout.
+            ui.horizontal(|ui| {
+                design::field_label(ui, "Priority");
+                let priorities = ["low", "normal", "high", "urgent"];
+                let active_idx = priorities
+                    .iter()
+                    .position(|p| Some(*p) == detail.priority.as_deref())
+                    // usize::MAX matches no segment — honest "nothing set".
+                    .unwrap_or(usize::MAX);
+                if let Some(i) = design::segmented(ui, "inbox-priority", &priorities, active_idx)
+                    && detail.priority.as_deref() != Some(priorities[i])
+                {
+                    self.set_priority(db, bus, priorities[i]);
                 }
             });
             self.expire_status_message();
@@ -3900,6 +3961,77 @@ mod batch33_audit143_tests {
             parse_number_entry("##42"),
             Some(42),
             "leading hashes all strip"
+        );
+    }
+}
+
+#[cfg(test)]
+mod audp0_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    // AUD-P0-10 (A3): the priority control writes the local priority through
+    // the real ticket-op path (supportos_priority + a transition record) and
+    // — unlike status/assign — queues no outbound job, because priority is a
+    // SupportOS-local concept.
+    #[test]
+    fn set_priority_writes_the_local_priority_without_an_outbound_job() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let bus = EventBus::new(8);
+        let mut page = InboxPage::new();
+        page.selected = Some(1);
+        page.detail = Some(
+            db.with_read(|conn| spp_core::inbox::get_conversation(conn, 1))
+                .expect("detail")
+                .expect("conversation 1 exists"),
+        );
+
+        let outcome = page.set_priority(&db, &bus, "urgent");
+        assert!(
+            matches!(outcome, ActionOutcome::Success(ref m) if m.contains("urgent")),
+            "the write path succeeds: {outcome:?}"
+        );
+
+        db.with_read(|conn| {
+            let (priority, transitions): (String, i64) = conn
+                .query_row(
+                    "SELECT supportos_priority,
+                            (SELECT COUNT(*) FROM ticket_state_transitions
+                              WHERE conversation_remote_id = 1001)
+                       FROM conversations WHERE id = 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("conversation");
+            assert_eq!(priority, "urgent");
+            assert_eq!(transitions, 1, "the transition is recorded");
+            let outbound: i64 = conn
+                .query_row("SELECT COUNT(*) FROM outbound_jobs", [], |r| r.get(0))
+                .expect("outbound count");
+            assert_eq!(outbound, 0, "a local priority is not pushed to Help Scout");
+        });
+
+        // The reloaded detail carries the new priority — the control and the
+        // reader header now reflect the same live column.
+        assert_eq!(
+            page.detail.as_ref().and_then(|d| d.priority.clone()),
+            Some("urgent".to_string())
+        );
+
+        // A junk priority never reaches the write path.
+        let rejected = page.set_priority(&db, &bus, "mega-critical");
+        assert!(
+            matches!(rejected, ActionOutcome::Rejected(_)),
+            "unknown priorities are rejected, not invented: {rejected:?}"
         );
     }
 }

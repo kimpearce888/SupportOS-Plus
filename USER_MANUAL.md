@@ -379,6 +379,7 @@ Below the cards: a **"New conversations per day"** line chart, breakdown cards *
 
 - **status:** four chips — `active`, `pending`, `closed`, `spam`. Clicking applies the status locally and queues it for Help Scout (green line: *"... — sending to Help Scout"*). There is no separate "close" button — `closed` *is* closing.
 - **assign:** pick a person (or "unassigned") in the dropdown, press **"assign"**. Team assignments show as `team: {name}`.
+- **priority:** four chips — `low`, `normal`, `high`, `urgent`. Clicking sets the conversation's priority immediately (no chip is highlighted while it is unset — the header line shows `Priority: none` until then). Priority is a **SupportOS-local** concept: it is not pushed to Help Scout, and it feeds the Operations "Urgent / high priority" tile, reports and the workload ordering.
 
 **Replying — the composer**
 
@@ -610,15 +611,15 @@ Every document is split into searchable chunks (the table shows the count). Row 
 **Creating a rule** — press **"New Rule"**:
 
 1. **name:**
-2. **trigger:** three chips — **"Status changed"** (with optional **from → to** status boxes; blank = any), **"Tag added"** (a **tag:** box), or **"SLA at risk"** (no parameters).
-3. **action:** five chips — **"Assign"** (an **assignee id:** — the agent's numeric user id), **"Add tag"** (a **tag:**), **"Send note"** (a **note body:**), **"Change status"** (a **status:**), **"Set priority"** (a **priority:**).
+2. **trigger:** two chips — **"New conversation"** (a customer starts a conversation) or **"Customer reply"** (the customer replies on an existing conversation). These are the only triggers the engine can fire.
+3. **action:** four chips — **"Assign"** (an **assignee id:** — the agent's numeric user id), **"Add tag"** (a **tag:**), **"Send note"** (a **note body:**), **"Change status"** (a **status:**).
 4. **"Create Rule"** — the rule is created **enabled**.
 
 A warning line reminds you: *"enabled rules act on conversations automatically — actions that need review park in the approvals queue."*
 
-**Safety valves** — Assign and Change status actions **always** need approval; Set priority needs it when the priority is `urgent`; Add tag and Send note never do. Riskier actions therefore wait in the **"Pending approvals"** card, where each item shows the rule, the conversation, and the proposed action, with **"approve"** / **"reject"** buttons.
+**Safety valves** — Assign and Change status actions **always** need approval; Add tag and Send note never do. Riskier actions therefore wait in the **"Pending approvals"** card, where each item shows the rule, the conversation, and the proposed action, with **"approve"** / **"reject"** buttons.
 
-**Managing rules** — the table lists each rule with its **"when"** and **"then"** in plain words (e.g. `status changed from any to resolved` → `add tag 'done'`). Click the **enabled/disabled** chip to switch a rule on/off instantly; **"delete"** asks *"Delete automation rule?"* first. There is no edit button — delete and re-create instead.
+**Managing rules** — the table lists each rule with its **"when"** and **"then"** in plain words (e.g. `the customer replies on a conversation` → `add tag 'done'`). Click the **enabled/disabled** chip to switch a rule on/off instantly; **"delete"** asks *"Delete automation rule?"* first. There is no edit button — delete and re-create instead. Rules left over from an older version that use a **"status changed"**, **"tag added"** or **"SLA at risk"** trigger are shown with a warning: *legacy trigger — never fires* — the engine has no emitter for them, so they can never run; delete and re-create them with a live trigger.
 
 ---
 

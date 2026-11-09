@@ -133,7 +133,12 @@ pub fn list_conversations(
         params_vec.push(customer_id.into());
     }
     if let Some(ref priority) = filters.priority {
-        where_parts.push("c.priority = ?".to_string());
+        // AUD-P0-9 (A3): the live priority column is supportos_priority —
+        // the mirror `priority` column is never populated on real accounts
+        // (the Help Scout API supplies no conversation priority), so the
+        // old filter could never match. Reports, workload and the
+        // operations tiles already read supportos_priority.
+        where_parts.push("c.supportos_priority = ?".to_string());
         params_vec.push(priority.clone().into());
     }
     if let Some(ref channel) = filters.channel {
@@ -257,7 +262,7 @@ pub fn get_conversation(
                       THEN COALESCE(NULLIF(TRIM(COALESCE(cu.email, '')), ''), 'customer')
                       ELSE TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, ''))
                     END, cu.email,
-                    c.priority, c.response_state,
+                    c.supportos_priority, c.response_state,
                     c.created_at, c.updated_at, c.closed_at
              FROM conversations c
              LEFT JOIN mailboxes m ON m.id = c.mailbox_local_id
@@ -445,6 +450,87 @@ mod batch27_audit83_tests {
         assert!(
             names.contains(&"Named Customer".to_string()),
             "a real name is untouched: {names:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod audp0_tests {
+    use super::*;
+
+    // AUD-P0-9 (A3): the priority chain must read the live local column.
+    // A priority set through the real write path (ticket_ops SetPriority →
+    // supportos_priority) is returned by the detail query and matched by
+    // the inbox filter; the never-populated mirror column is not consulted.
+    #[test]
+    fn priority_filter_and_detail_read_the_local_priority() {
+        let mut conn = rusqlite::Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9601, 96, 'Urgent export failure', 'preview', 'active'),
+                    (9602, 97, 'Routine question', 'preview', 'active')",
+            [],
+        )
+        .expect("conversations");
+        conn.execute(
+            "UPDATE conversations SET priority = 'urgent' WHERE remote_id = 9602",
+            [],
+        )
+        .expect("mirror priority on the routine row (provider-supplied)");
+        crate::ticket_ops::execute(
+            &mut conn,
+            &crate::ticket_ops::TicketOperation::SetPriority {
+                conversation_remote_id: 9601,
+                new_priority: crate::ticket_states::TicketPriority::Urgent,
+                actor_type: "user".into(),
+                actor_id: None,
+            },
+        )
+        .expect("the real write path");
+
+        let filters = InboxFilters {
+            priority: Some("urgent".into()),
+            ..Default::default()
+        };
+        let (items, total) = list_conversations(&conn, &filters).expect("list");
+        assert_eq!(total, 1, "only the locally-urgent conversation matches");
+        assert_eq!(
+            items[0].subject.as_deref(),
+            Some("Urgent export failure"),
+            "the mirror column does not drive the filter"
+        );
+
+        let urgent = conn
+            .query_row(
+                "SELECT id FROM conversations WHERE remote_id = 9601",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .expect("urgent id");
+        let detail = get_conversation(&conn, urgent)
+            .expect("detail")
+            .expect("row");
+        assert_eq!(
+            detail.priority.as_deref(),
+            Some("urgent"),
+            "the reader displays the local priority"
+        );
+
+        let routine = conn
+            .query_row(
+                "SELECT id FROM conversations WHERE remote_id = 9602",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .expect("routine id");
+        let detail = get_conversation(&conn, routine)
+            .expect("detail")
+            .expect("row");
+        assert_eq!(
+            detail.priority.as_deref(),
+            Some("none"),
+            "a mirror-only priority is not the reader's priority — the local column is"
         );
     }
 }

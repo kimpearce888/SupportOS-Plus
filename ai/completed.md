@@ -5,6 +5,116 @@
 
 ## Completed
 
+## Batch AUD-P0 — fix the P0 backlog from the repo audit (2026-11-09)
+
+**Owner directive:** "fix P0" — the six P0 clusters of
+`docs/audit/repo-audit-v1.9.6.md` §5 (wrong data / lying audit trail /
+user-visible malfunction). Constraint honored throughout: fix the
+existing implementation, no new frameworks, no new dependencies —
+every fix wires or repairs machinery that already exists.
+
+**Items AUD-P0-1..AUD-P0-10 (all six clusters):**
+
+- **AUD-P0-1 (A1)** — `digest.rs` `topic_facts` selected the
+  non-existent `label` column from `issue_clusters` (schema column is
+  `name`, M016); the prepare failed and `.unwrap_or_default()` shipped
+  an empty `top_issue_clusters` in every weekly digest. Fixed the
+  SELECT; regression tests prove seeded clusters surface (and stay
+  empty-but-preparable with no rows).
+- **AUD-P0-2 (A2)** — Knowledge Freshness `usage_count` queried an
+  `ai_evidence` table that is never created (the sqlite_master guard
+  was always false → literal `0`), so "low usage" fired on age alone
+  and "recurring questions" (>5) could never fire. Wired the subquery
+  to the real citations path (`ai_sources` `source_type =
+  'knowledge_document'` joined to `ai_runs` for the distinct citing
+  conversations); regression test proves usage_count 6 → recurring
+  flagged, an old uncited document stays low-usage.
+- **AUD-P0-3 (A4)** — `latest_ai_draft_row` had no state filter, so a
+  discarded draft (state `rejected`) re-rendered in the copilot card
+  and could be re-inserted. Added `state IS NOT 'rejected'` (NULL-safe
+  for legacy rows); three regression tests (rejected skipped, newer
+  rejected + older generated → the generated one, NULL-state legacy
+  rows still selectable).
+- **AUD-P0-4 (A5)** — `sync_conversation`/`sync_conversation_merge`/
+  `delete_conversation`/`sync_customer`/`delete_customer` jobs with
+  malformed payloads (no `remoteId`) completed silently (`if let` with
+  no else). Added else branches using the existing `jobs::fail` idiom
+  (non-retryable — a malformed payload is deterministic); integration
+  test proves all four kinds fail loudly with "missing remoteId" and
+  make zero provider calls.
+- **AUD-P0-5 (B1)** — the dead M007 triggers (`StatusChanged`/
+  `TagAdded`/`SlaRisk`) have no emitter in program code (D10) and the
+  creation UI deliberately offers only the two live triggers, but the
+  display surfaces still presented legacy rules as functional. Firing
+  them would contradict D10; deleting the enum variants would poison
+  `list_rules` on legacy stored rows. Honest fix: `trigger_is_legacy`
+  marks the three in the rules table (warning icon + "legacy trigger —
+  never fires" + hover explanation), and the USER_MANUAL rule-creation
+  section now documents the real vocabulary (two triggers, four
+  actions) plus the legacy warning. Unit test covers the predicate.
+- **AUD-P0-6 (A6)** — automation `SetPriority` fake-completed after
+  approval (the `execute_non_destructive` catch-all `_ => Ok(true)`
+  recorded a successful run that did nothing; the fire path honestly
+  skipped with "no engine handler"). Made the action REAL: `risk_tier`
+  carries `set_priority` as non-destructive (a SupportOS-local write),
+  `canonical_actions` lifts the M007 shape (`new_priority`/`priority`),
+  and the arm routes through the existing
+  `TicketOperation::SetPriority` → `ticket_states::set_priority`
+  (writes `supportos_priority` + a `ticket_state_transitions` row; no
+  outbound push). The catch-all is now honest (`Ok(false)`), `add_tag`
+  without a tag and `send_note` with blank text report not-executed,
+  the fire path records "missing or invalid action parameters" vs "AI
+  is disabled" accurately, and the approval worker records an honest
+  skipped run when an approved action does not execute. Four
+  regression tests (fire path writes priority + transition, approved
+  path executes, unknown kinds no longer fake-complete, junk priority
+  values rejected, missing params skip).
+- **AUD-P0-7 (B2)** — the read actions `search_similar`/
+  `check_known_issues` recorded "completed / Executed read action"
+  without executing anything (no job kind or tool exists for them).
+  Removed them from `risk_tier` — they now fall to the existing honest
+  "no engine handler — skipped" record — and deleted the
+  fake-completed else branch (the read tier is `analyze_ticket` only).
+  Regression test proves such rules record skipped, never completed.
+- **AUD-P0-8 (B3)** — `TicketOperation::AddNote` discarded its `_body`
+  (a bodiless activity event; the real note path is the outbound
+  `create_note` lane). The body now rides the outbound lane (same
+  payload shape as automation `send_note`, idempotency-keyed by
+  content hash) with the local activity event kept; the success message
+  is honest ("note queued for delivery"). Regression test proves the
+  outbound job exists with the body and the idempotency key.
+- **AUD-P0-9 (A3 backend)** — the inbox priority filter matched
+  `conversations.priority` (the mirror column the Help Scout mapper
+  hardcodes to `None` — the API supplies no conversation priority) and
+  the reader displayed it, while reports/workload/operations/AI tools
+  all read the live local `supportos_priority`. Filter and the
+  conversation-detail query now read `supportos_priority`; regression
+  test proves a priority set through the real write path is returned by
+  the detail query and matched by the filter, and a mirror-only
+  priority does not drive either.
+- **AUD-P0-10 (A3 frontend)** — no edit surface existed for the local
+  priority (read-only "Priority: none"). Added the Priority segmented
+  control (`low`/`normal`/`high`/`urgent`, nothing highlighted while
+  unset) to the inbox action card, writing through the local ticket-op
+  path (no outbound push) with the reader header reflecting the same
+  live column; `ticket_states` became `pub` so the shell can parse the
+  priority (only `TicketPriority` and `set_priority` are public in it).
+  USER_MANUAL documents the control (and that priority is a
+  SupportOS-local concept feeding the Operations tile/reports/workload).
+  Regression test proves the write path (priority + transition, zero
+  outbound jobs, reloaded detail carries the value, junk rejected).
+
+**Verification (full battery on the final code):** gates (no-simulation
+clean; traceability 23 routes, 20 DC tags) · `cargo fmt --all --check`
+clean · `cargo xtask verify-icons` clean · clippy workspace
+`--all-targets -D warnings` clean · clippy sandbox lane `-D warnings`
+clean · tests: core 478/478, core+sandbox 486/486, app-shell lib
+253/253, style lint 2/2, xtask+catalog 14/14 · kittest all 24 suites
+457 tests, diff-locked ×2 (21 goldens regenerated for the two intended
+UI changes — the inbox action-card Priority row and the automation
+legacy-trigger markers — zero unrelated drift) · cargo-deny
+advisories/bans/licenses/sources ok.
+
 ## Batch AIE-1 — the AI reads the Help Center and the customers' own words; reply drafting is triggerable (2026-11-09)
 
 **Owner directive:** "the program should read all the contents in inbox,

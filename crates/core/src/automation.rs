@@ -240,12 +240,20 @@ pub fn reject(conn: &Connection, approval_id: i64, decided_by_user_id: i64) -> R
 #[must_use]
 pub(crate) fn risk_tier(kind: &str) -> Option<&'static str> {
     match kind {
-        "analyze_ticket" | "search_similar" | "check_known_issues" => Some("read"),
-        "create_ai_note" | "create_ai_draft" | "add_tag" | "manual_review_queue" => {
-            Some("non_destructive")
-        }
+        "analyze_ticket" => Some("read"),
+        // AUD-P0-6 (A6): set_priority is real now — a SupportOS-local write
+        // (supportos_priority + a ticket_state_transitions record), no
+        // external push, so it sits with the non-destructive tier.
+        "create_ai_note"
+        | "create_ai_draft"
+        | "add_tag"
+        | "manual_review_queue"
+        | "set_priority" => Some("non_destructive"),
         // AU2-1/D10: posting a note to Help Scout is an external write.
         "set_status" | "assign" | "send_note" => Some("higher_risk"),
+        // AUD-P0-7 (B2): search_similar / check_known_issues deliberately
+        // have NO tier — they fall to the honest "no engine handler"
+        // skip instead of fake-completing as read actions.
         _ => None,
     }
 }
@@ -378,7 +386,9 @@ pub(crate) fn list_rule_records(conn: &Connection) -> Result<Vec<RuleRecord>> {
         .collect())
 }
 
-fn record_run(
+// AUD-P0-6 (A6): pub(crate) so the approval worker can record the honest
+// skipped run when an approved action does not execute.
+pub(crate) fn record_run(
     conn: &Connection,
     rule_id: i64,
     conversation_id: Option<i64>,
@@ -465,6 +475,12 @@ pub(crate) fn canonical_actions(actions: &serde_json::Value) -> Vec<serde_json::
                     "send_note" => serde_json::json!({
                         "text": item.get("body").or_else(|| item.get("text"))?
                     }),
+                    // AUD-P0-6 (A6): the M007 SetPriority variant stores
+                    // `new_priority`; older stored shapes used `priority`.
+                    "set_priority" => serde_json::json!({
+                        "priority": item.get("new_priority")
+                            .or_else(|| item.get("priority"))?
+                    }),
                     _ => serde_json::Value::Object(serde_json::Map::new()),
                 }
             };
@@ -501,6 +517,9 @@ pub fn describe_action_json(raw: &str) -> String {
         "add_tag" => format!("add tag '{}'", detail("tag")),
         "set_status" => format!("change status to {}", detail("status")),
         "send_note" => format!("post note '{}'", detail("text")),
+        // AUD-P0-6 (A6): the stored vocabulary includes set_priority —
+        // describe it like the M007 UI did.
+        "set_priority" => format!("set priority to {}", detail("priority")),
         "create_ai_note" => "queue an AI note".to_string(),
         "create_ai_draft" => "queue an AI draft".to_string(),
         "manual_review_queue" => "queue for manual review".to_string(),
@@ -512,7 +531,7 @@ pub fn describe_action_json(raw: &str) -> String {
 }
 
 fn execute_non_destructive(
-    conn: &Connection,
+    conn: &mut Connection,
     kind: &str,
     params: &serde_json::Value,
     conversation_id: i64,
@@ -548,23 +567,25 @@ fn execute_non_destructive(
             Ok(true)
         }
         "add_tag" => {
-            if let Some(tag) = params.get("tag").and_then(|t| t.as_str()) {
-                let mut tags =
-                    crate::conversation_ops::read_conversation_tags(conn, conversation_id);
-                if !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
-                    tags.push(tag.to_string());
-                    crate::conversation_ops::write_conversation_tags(conn, conversation_id, &tags);
-                    crate::conversation_ops::create_outbound_job_keyed(
-                        conn,
-                        "update_tags",
-                        &serde_json::json!({
-                            "conversationId": conversation_id,
-                            "tags": tags,
-                        }),
-                        Some(conversation_id),
-                        Some(&format!("automation_tags_{conversation_id}")),
-                    )?;
-                }
+            // AUD-P0-6 (A6): an action with no tag parameter executed
+            // nothing — it must not report success.
+            let Some(tag) = params.get("tag").and_then(|t| t.as_str()) else {
+                return Ok(false);
+            };
+            let mut tags = crate::conversation_ops::read_conversation_tags(conn, conversation_id);
+            if !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                tags.push(tag.to_string());
+                crate::conversation_ops::write_conversation_tags(conn, conversation_id, &tags);
+                crate::conversation_ops::create_outbound_job_keyed(
+                    conn,
+                    "update_tags",
+                    &serde_json::json!({
+                        "conversationId": conversation_id,
+                        "tags": tags,
+                    }),
+                    Some(conversation_id),
+                    Some(&format!("automation_tags_{conversation_id}")),
+                )?;
             }
             Ok(true)
         }
@@ -578,27 +599,71 @@ fn execute_non_destructive(
         // AU2-1/D10: a static internal note via the outbound create_note lane
         // (Help Scout notes are internal — not visible to customers).
         "send_note" => {
-            if let Some(text) = params.get("text").and_then(|t| t.as_str())
-                && !text.trim().is_empty()
-            {
-                let stamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis())
-                    .unwrap_or(0);
-                crate::conversation_ops::create_outbound_job_keyed(
-                    conn,
-                    "create_note",
-                    &serde_json::json!({
-                        "conversationId": conversation_id,
-                        "text": text,
-                    }),
-                    Some(conversation_id),
-                    Some(&format!("automation_note_{conversation_id}_{stamp}")),
-                )?;
+            // AUD-P0-6 (A6): an empty or missing note body executed nothing —
+            // it must not report success.
+            let Some(text) = params.get("text").and_then(|t| t.as_str()) else {
+                return Ok(false);
+            };
+            if text.trim().is_empty() {
+                return Ok(false);
             }
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            crate::conversation_ops::create_outbound_job_keyed(
+                conn,
+                "create_note",
+                &serde_json::json!({
+                    "conversationId": conversation_id,
+                    "text": text,
+                }),
+                Some(conversation_id),
+                Some(&format!("automation_note_{conversation_id}_{stamp}")),
+            )?;
             Ok(true)
         }
-        _ => Ok(true),
+        // AUD-P0-6 (A6): the local priority write — the chain the M007 UI
+        // promised. Routing through the existing TicketOperation writes
+        // supportos_priority and records a ticket_state_transitions row; no
+        // outbound push (priority is a SupportOS-local concept).
+        "set_priority" => {
+            let Some(priority) = params.get("priority").and_then(|p| p.as_str()) else {
+                return Ok(false);
+            };
+            let Some(new_priority) = crate::ticket_states::TicketPriority::parse(priority) else {
+                return Ok(false);
+            };
+            let remote: Option<i64> = conn
+                .query_row(
+                    "SELECT remote_id FROM conversations WHERE id = ?1",
+                    params![conversation_id],
+                    |r| r.get(0),
+                )
+                .ok()
+                .flatten();
+            let Some(conversation_remote_id) = remote else {
+                return Ok(false);
+            };
+            match crate::ticket_ops::execute(
+                conn,
+                &crate::ticket_ops::TicketOperation::SetPriority {
+                    conversation_remote_id,
+                    new_priority,
+                    actor_type: "automation".to_string(),
+                    actor_id: None,
+                },
+            ) {
+                Ok(crate::ticket_ops::OperationResult::Success { .. }) => Ok(true),
+                Ok(crate::ticket_ops::OperationResult::Rejected { .. }) => Ok(false),
+                Err(_) => Ok(false),
+            }
+        }
+        // AUD-P0-6 (A6): the catch-all used to return Ok(true), so an
+        // approved action with no engine handler (e.g. a legacy set_priority
+        // before this batch) recorded a successful run that did nothing.
+        // Nothing executed → report exactly that.
+        _ => Ok(false),
     }
 }
 
@@ -1038,39 +1103,35 @@ pub(crate) fn fire_trigger_for_conversation(
             let kind = kind.as_str();
             match tier {
                 "read" => {
-                    if kind == "analyze_ticket" {
-                        if ai_enabled {
-                            let _ = crate::jobs::enqueue_on(
-                                conn,
-                                "ai",
-                                "analyze_ticket",
-                                &format!("{{\"conversationId\":{conversation_id}}}"),
-                                3,
-                                2,
-                            );
-                            record_run(
-                                conn,
-                                rule.id,
-                                Some(conversation_id),
-                                "completed",
-                                &format!("Executed read action {kind}"),
-                            )?;
-                        } else {
-                            record_run(
-                                conn,
-                                rule.id,
-                                Some(conversation_id),
-                                "skipped",
-                                "AI action analyze_ticket skipped: AI is disabled",
-                            )?;
-                        }
-                    } else {
+                    // AUD-P0-7 (B2): the read tier executes analyze_ticket
+                    // only — the old else branch recorded
+                    // "completed / Executed read action" for search_similar
+                    // and check_known_issues without executing anything.
+                    // Those kinds carry no tier now and hit the honest
+                    // no-handler skip above.
+                    if ai_enabled {
+                        let _ = crate::jobs::enqueue_on(
+                            conn,
+                            "ai",
+                            "analyze_ticket",
+                            &format!("{{\"conversationId\":{conversation_id}}}"),
+                            3,
+                            2,
+                        );
                         record_run(
                             conn,
                             rule.id,
                             Some(conversation_id),
                             "completed",
-                            &format!("Executed read action {kind}"),
+                            "Executed read action analyze_ticket",
+                        )?;
+                    } else {
+                        record_run(
+                            conn,
+                            rule.id,
+                            Some(conversation_id),
+                            "skipped",
+                            "AI action analyze_ticket skipped: AI is disabled",
                         )?;
                     }
                 }
@@ -1093,13 +1154,17 @@ pub(crate) fn fire_trigger_for_conversation(
                             ai_enabled,
                         )?;
                         if !executed {
-                            record_run(
-                                conn,
-                                rule.id,
-                                Some(conversation_id),
-                                "skipped",
-                                &format!("AI action {kind} skipped: AI is disabled"),
-                            )?;
+                            // AUD-P0-6 (A6): Ok(false) covers both "AI is
+                            // disabled" (the AI actions) and "missing action
+                            // parameters" — record which one it was.
+                            let detail = if matches!(kind, "create_ai_note" | "create_ai_draft") {
+                                format!("AI action {kind} skipped: AI is disabled")
+                            } else {
+                                format!(
+                                    "Action {kind} skipped: missing or invalid action parameters"
+                                )
+                            };
+                            record_run(conn, rule.id, Some(conversation_id), "skipped", &detail)?;
                         }
                         if executed {
                             record_run(
@@ -1434,5 +1499,277 @@ mod batch25_item57_tests {
         );
         apply_m060_automation_once_guard(&conn).expect("second apply is a no-op");
         assert!(has_column(&conn));
+    }
+}
+
+#[cfg(test)]
+mod audp0_tests {
+    use super::*;
+    use crate::db::DbHandle;
+
+    fn db() -> DbHandle {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        DbHandle::new(conn)
+    }
+
+    fn seed_conversation(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (9301, 93, 'Export broken', 'preview', 'active')",
+            [],
+        )
+        .expect("conversation");
+        conn.last_insert_rowid()
+    }
+
+    fn insert_rule(
+        conn: &Connection,
+        name: &str,
+        trigger_json: &str,
+        action_json: &str,
+        requires_approval: i64,
+    ) -> i64 {
+        conn.execute(
+            "INSERT INTO automation_rules
+                (name, trigger_json, action_json, enabled, conditions, requires_approval)
+             VALUES (?1, ?2, ?3, 1, '[]', ?4)",
+            params![name, trigger_json, action_json, requires_approval],
+        )
+        .expect("rule");
+        conn.last_insert_rowid()
+    }
+
+    fn enable_automation(conn: &Connection, write_actions: bool) {
+        crate::settings::set_bool(conn, "automation_enabled", true).expect("automation on");
+        crate::settings::set_bool(conn, "automation_write_actions_enabled", write_actions)
+            .expect("write toggle");
+    }
+
+    fn runs_for(conn: &Connection, rule_id: i64) -> Vec<(String, String)> {
+        let mut stmt = conn
+            .prepare("SELECT outcome, detail FROM automation_runs WHERE rule_id = ?1")
+            .expect("runs query");
+        let rows = stmt
+            .query_map(params![rule_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("map");
+        rows.filter_map(|x| x.ok()).collect()
+    }
+
+    // AUD-P0-6 (A6): set_priority executes for real on the fire path — the
+    // local priority column changes and a transition is recorded — instead
+    // of being skipped as "no engine handler".
+    #[test]
+    fn set_priority_fires_for_real_through_the_local_write_path() {
+        let db = db();
+        let conv = db.with_write(|c| {
+            let conv = seed_conversation(c);
+            insert_rule(
+                c,
+                "Escalate",
+                "\"customer_reply\"",
+                r#"[{"kind":"set_priority","params":{"priority":"urgent"}}]"#,
+                0,
+            );
+            enable_automation(c, false);
+            conv
+        });
+
+        db.with_write(|c| fire_trigger_for_conversation(c, "customer_reply", conv))
+            .expect("fire");
+
+        let (priority, transitions): (String, i64) = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT supportos_priority,
+                        (SELECT COUNT(*) FROM ticket_state_transitions
+                          WHERE conversation_remote_id = 9301)
+                   FROM conversations WHERE id = ?1",
+                    params![conv],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .expect("conversation row");
+        assert_eq!(priority, "urgent", "the local priority was written");
+        assert_eq!(transitions, 1, "the transition is on the record");
+
+        let runs = db.with_read(|c| runs_for(c, 1));
+        assert!(
+            runs.iter()
+                .any(|(o, d)| o == "completed" && d.contains("set_priority")),
+            "the run records a real completion: {runs:?}"
+        );
+    }
+
+    // AUD-P0-6 (A6): the approved path executes set_priority too — and the
+    // pre-fix lying catch-all (Ok(true) for unknown kinds) now reports
+    // false so the worker records an honest skip.
+    #[test]
+    fn approved_set_priority_executes_and_unknown_kinds_do_not_fake_complete() {
+        let db = db();
+        let conv = db.with_write(|c| seed_conversation(c));
+
+        let executed = db
+            .with_write(|c| {
+                execute_approved_action(
+                    c,
+                    conv,
+                    &serde_json::json!({
+                        "kind": "set_priority",
+                        "params": { "priority": "high" },
+                    }),
+                )
+            })
+            .expect("approved set_priority");
+        assert!(executed, "the local write succeeded");
+        let priority: String = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT supportos_priority FROM conversations WHERE id = ?1",
+                    params![conv],
+                    |r| r.get(0),
+                )
+            })
+            .expect("conversation");
+        assert_eq!(priority, "high");
+
+        let fabricated = db
+            .with_write(|c| {
+                execute_approved_action(
+                    c,
+                    conv,
+                    &serde_json::json!({ "kind": "gibberish_kind", "params": {} }),
+                )
+            })
+            .expect("still parses and answers");
+        assert!(
+            !fabricated,
+            "an unknown action kind must not fake-complete after approval"
+        );
+    }
+
+    // AUD-P0-6 (A6): an approved set_priority with a bad priority value is
+    // honestly not-executed, and a valid one through the M007 stored shape
+    // ("priority" lifted from the top level) parses.
+    #[test]
+    fn set_priority_rejects_unknown_values_instead_of_inventing_them() {
+        let db = db();
+        let conv = db.with_write(|c| seed_conversation(c));
+        let executed = db
+            .with_write(|c| {
+                execute_approved_action(
+                    c,
+                    conv,
+                    &serde_json::json!({
+                        "kind": "set_priority",
+                        "params": { "priority": "mega-critical" },
+                    }),
+                )
+            })
+            .expect("execute");
+        assert!(!executed, "only urgent/high/normal/low are real priorities");
+
+        let lifted = canonical_actions(&serde_json::json!({
+            "kind": "set_priority", "priority": "low"
+        }));
+        assert_eq!(
+            lifted,
+            vec![serde_json::json!({
+                "kind": "set_priority",
+                "params": { "priority": "low" }
+            })],
+            "the M007 stored shape lifts its top-level priority field"
+        );
+    }
+
+    // AUD-P0-7 (B2): search_similar / check_known_issues record an honest
+    // skip ("no engine handler") — never a fabricated completion.
+    #[test]
+    fn read_actions_without_handlers_skip_instead_of_fake_completing() {
+        let db = db();
+        let conv = db.with_write(|c| {
+            let conv = seed_conversation(c);
+            insert_rule(
+                c,
+                "Find similar",
+                "\"customer_reply\"",
+                r#"[{"kind":"search_similar","params":{}}]"#,
+                0,
+            );
+            enable_automation(c, false);
+            conv
+        });
+
+        db.with_write(|c| fire_trigger_for_conversation(c, "customer_reply", conv))
+            .expect("fire");
+
+        let runs = db.with_read(|c| runs_for(c, 1));
+        assert!(!runs.is_empty(), "the rule was evaluated: {runs:?}");
+        for (outcome, detail) in &runs {
+            assert_eq!(outcome, "skipped", "no fabricated completion: {runs:?}");
+            assert!(
+                detail.contains("no engine handler"),
+                "the skip says why: {detail}"
+            );
+        }
+    }
+
+    // AUD-P0-6 (A6): actions with missing parameters skip honestly — add_tag
+    // without a tag executed nothing pre-reject; an approved send_note with
+    // blank text must not record a completion either.
+    #[test]
+    fn missing_action_parameters_skip_instead_of_completing() {
+        let db = db();
+        let conv = db.with_write(|c| {
+            let conv = seed_conversation(c);
+            insert_rule(
+                c,
+                "Untagged tag",
+                "\"customer_reply\"",
+                r#"[{"kind":"add_tag","params":{}}]"#,
+                0,
+            );
+            enable_automation(c, true);
+            conv
+        });
+
+        db.with_write(|c| fire_trigger_for_conversation(c, "customer_reply", conv))
+            .expect("fire");
+
+        let runs = db.with_read(|c| runs_for(c, 1));
+        assert!(
+            runs.iter()
+                .all(|(o, d)| o == "skipped" && d.contains("missing or invalid")),
+            "add_tag with no tag parameter skips honestly: {runs:?}"
+        );
+
+        // send_note is higher-risk: its empty-text guard matters on the
+        // approved path, where the pre-fix catch-all faked a completion.
+        let approved = db
+            .with_write(|c| {
+                execute_approved_action(
+                    c,
+                    conv,
+                    &serde_json::json!({
+                        "kind": "send_note",
+                        "params": { "text": "   " },
+                    }),
+                )
+            })
+            .expect("approved send_note");
+        assert!(
+            !approved,
+            "an approved blank note executed nothing — no fake completion"
+        );
+        let outbound: i64 = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM outbound_jobs WHERE kind = 'create_note'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("outbound count");
+        assert_eq!(outbound, 0, "no bodiless note job was queued");
     }
 }

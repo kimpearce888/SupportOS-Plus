@@ -17,6 +17,10 @@ impl WorkerManager {
             let mut composer_result: Option<String> = None;
             match kind {
                 "sync_conversation" | "sync_conversation_merge" => {
+                    // AUD-P0-4 (A5): a malformed payload (missing remoteId /
+                    // conversationId) must fail the job loudly — the pre-fix
+                    // `if let` with no else let a producer bug complete green
+                    // while doing nothing.
                     if let Some(remote) = num("remoteId").or_else(|| num("conversationId")) {
                         self.run_engine(|e| async move { e.sync_single_conversation(remote).await.map(|_| ()) })
                             .await?;
@@ -26,6 +30,10 @@ impl WorkerManager {
                                 self.on_conversation_changed(local);
                             }
                         }
+                    } else {
+                        let conn = self.lock();
+                        jobs::fail(&conn, job_id, "sync_conversation missing remoteId", false)?;
+                        return Ok(());
                     }
                 }
                 "delete_conversation" => {
@@ -37,6 +45,11 @@ impl WorkerManager {
                                WHERE remote_id = ?1",
                             rusqlite::params![remote],
                         )?;
+                    } else {
+                        // AUD-P0-4 (A5): fail loudly on a malformed payload.
+                        let conn = self.lock();
+                        jobs::fail(&conn, job_id, "delete_conversation missing remoteId", false)?;
+                        return Ok(());
                     }
                 }
                 "sync_customer" => {
@@ -44,7 +57,13 @@ impl WorkerManager {
                         && let Some(customer) = self.provider.get_customer(remote).await? {
                             let conn = self.lock();
                             crate::mirror::upsert_customer(&conn, &customer)?;
-                        }
+                        } else if num("remoteId").is_none() {
+                        // AUD-P0-4 (A5): fail loudly on a malformed payload —
+                        // an absent remote customer is a legitimate no-op.
+                        let conn = self.lock();
+                        jobs::fail(&conn, job_id, "sync_customer missing remoteId", false)?;
+                        return Ok(());
+                    }
                 }
                 "delete_customer" => {
                     if let Some(remote) = num("remoteId") {
@@ -53,6 +72,11 @@ impl WorkerManager {
                             "UPDATE customers SET deleted_at = datetime('now') WHERE remote_id = ?1",
                             rusqlite::params![remote],
                         )?;
+                    } else {
+                        // AUD-P0-4 (A5): fail loudly on a malformed payload.
+                        let conn = self.lock();
+                        jobs::fail(&conn, job_id, "delete_customer missing remoteId", false)?;
+                        return Ok(());
                     }
                 }
                 "sync_organizations" => {
@@ -378,6 +402,27 @@ impl WorkerManager {
                                     rule_id,
                                     conversation_id,
                                     &kind,
+                                )?;
+                            } else {
+                                // AUD-P0-6 (A6): an approved action that did
+                                // not execute used to record nothing at all
+                                // (and pre-batch, unknown kinds fake-completed
+                                // via the catch-all). Record the honest skip.
+                                let kind = action
+                                    .get("kind")
+                                    .and_then(|k| k.as_str())
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let conn = self.lock();
+                                crate::automation::record_run(
+                                    &conn,
+                                    rule_id,
+                                    Some(conversation_id),
+                                    "skipped",
+                                    &format!(
+                                        "Approved action {kind} was not executed \
+                                         (no engine handler or missing parameters)"
+                                    ),
                                 )?;
                             }
                         }

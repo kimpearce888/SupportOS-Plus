@@ -254,7 +254,7 @@ fn execute_set_ticket_state(
 fn execute_add_note(
     conn: &mut Connection,
     remote_id: i64,
-    _body: &str,
+    body: &str,
     actor_type: &str,
     actor_id: Option<i64>,
 ) -> Result<OperationResult> {
@@ -275,10 +275,31 @@ fn execute_add_note(
 
     tx.commit()?;
 
+    // AUD-P0-8 (B3): the note body used to be discarded (`_body`) — the
+    // operation recorded a bodiless activity event and the text was lost.
+    // The real note path is the outbound create_note lane (the same one the
+    // composer and automation send_note use): the body rides the job
+    // payload, is delivered to Help Scout, and mirrors back as a thread.
+    if !body.trim().is_empty() {
+        crate::conversation_ops::create_outbound_job_keyed(
+            conn,
+            "create_note",
+            &serde_json::json!({
+                "conversationId": local_id,
+                "text": body,
+            }),
+            Some(local_id),
+            Some(&format!(
+                "ticket_note_{local_id}_{}",
+                crate::embeddings::content_hash(body)
+            )),
+        )?;
+    }
+
     crate::activity::update_derived_columns_by_local_id(conn, local_id)?;
 
     Ok(OperationResult::Success {
-        message: format!("note added to conversation {remote_id}"),
+        message: format!("note queued for delivery on conversation {remote_id}"),
     })
 }
 
@@ -432,5 +453,62 @@ mod batch19_tests {
             matches!(rejected, OperationResult::Rejected { .. }),
             "an unknown remote conversation is rejected, not invented"
         );
+    }
+
+    // AUD-P0-8 (B3): AddNote used to discard its body — a bodiless activity
+    // event while the text vanished. The body must ride the real note path
+    // (the outbound create_note lane), same as the composer and automation.
+    #[test]
+    fn add_note_stores_its_body_on_the_outbound_note_lane() {
+        let db = db();
+        let outcome = db
+            .with_write(|c| {
+                let _local = seed(c);
+                execute(
+                    c,
+                    &TicketOperation::AddNote {
+                        conversation_remote_id: 4201,
+                        body: "checked the refund ledger — held by fraud rule".into(),
+                        actor_type: "user".into(),
+                        actor_id: None,
+                    },
+                )
+            })
+            .expect("note");
+        assert!(matches!(outcome, OperationResult::Success { .. }));
+
+        let (payload, idem): (String, String) = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT payload, idempotency_key FROM outbound_jobs
+                      WHERE kind = 'create_note'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+            })
+            .expect("the note was queued on the outbound lane");
+        let parsed: serde_json::Value = serde_json::from_str(&payload).expect("payload json");
+        assert_eq!(
+            parsed["text"], "checked the refund ledger — held by fraud rule",
+            "the body is stored, not discarded"
+        );
+        assert!(
+            parsed["conversationId"].is_i64(),
+            "the lane gets the LOCAL conversation id: {parsed}"
+        );
+        assert!(
+            idem.starts_with("ticket_note_"),
+            "the job is idempotently keyed: {idem}"
+        );
+        let events: i64 = db
+            .with_read(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM activity_events WHERE event_type = 'note'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("activity count");
+        assert_eq!(events, 1, "the local activity event is still recorded");
     }
 }

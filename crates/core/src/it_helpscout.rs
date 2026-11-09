@@ -1619,3 +1619,74 @@ fn audit92_get_rating_maps_404_to_none_not_an_error() {
         .expect_err("a hard 400 stays an error");
     assert_eq!(hs_status(&err), Some(400), "the error keeps its status");
 }
+
+// AUD-P0-4 (A5): sync/delete jobs with malformed payloads (no remoteId)
+// must fail loudly. Pre-fix, `if let Some(remote) = …` with no else let a
+// producer bug complete green while doing nothing — silent data loss that
+// never surfaced in Jobs/Diagnostics.
+#[test]
+fn audp0_malformed_sync_job_payloads_fail_loudly() {
+    let _secrets = secrets_guard();
+    let mock = MockServer::start(Arc::new(|_req: &crate::mockserver::MockRequest| {
+        // Nothing here should be reached — every malformed-payload branch
+        // fails before any provider call.
+        MockResponse::json(500, r#"{"error":"unreachable"}"#)
+    }))
+    .expect("mock server");
+    let db = fixture_db();
+    let p = provider_with_token(&db, &creds(&mock));
+    let manager = crate::workers::WorkerManager::new(
+        db.clone(),
+        None,
+        Arc::new(p) as Arc<dyn HelpScoutProvider>,
+        crate::event_bus::EventBus::default(),
+        std::env::temp_dir(),
+        None,
+    );
+
+    for kind in [
+        "sync_conversation",
+        "delete_conversation",
+        "sync_customer",
+        "delete_customer",
+    ] {
+        db.with_write(|conn| crate::jobs::enqueue_on(conn, "sync", kind, "{}", 1, 3))
+            .expect("enqueue malformed");
+    }
+
+    runtime().block_on(async { manager.tick().await });
+
+    let outcomes: Vec<(String, String, Option<String>)> = db.with_read(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT type, status, error FROM jobs
+                      WHERE type IN ('sync_conversation','delete_conversation',
+                                    'sync_customer','delete_customer')
+                      ORDER BY id ASC",
+            )
+            .expect("jobs query");
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("map");
+        rows.filter_map(|x| x.ok()).collect()
+    });
+    assert_eq!(outcomes.len(), 4, "all four jobs ran: {outcomes:?}");
+    for (kind, status, error) in &outcomes {
+        assert_eq!(
+            status, "failed",
+            "{kind} with a malformed payload must fail, not complete: {outcomes:?}"
+        );
+        assert!(
+            error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("missing remoteId"),
+            "{kind} must say why it failed: {error:?}"
+        );
+    }
+    assert_eq!(
+        mock.hits().len(),
+        0,
+        "no provider call happens for a malformed payload"
+    );
+}

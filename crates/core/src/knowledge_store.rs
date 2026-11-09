@@ -338,19 +338,15 @@ pub fn freshness_report(conn: &Connection) -> Value {
         crate::settings::get_int(conn, "freshness_unreviewed_days", 90).unwrap_or(90);
     let low_usage_days =
         crate::settings::get_int(conn, "freshness_low_usage_days", 60).unwrap_or(60);
-    let has_ai_evidence: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ai_evidence'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    let usage_subquery = if has_ai_evidence {
-        "(SELECT COUNT(DISTINCT r.conversation_id) FROM ai_evidence r WHERE r.document_id = d.id)"
-    } else {
-        "0"
-    };
+    // AUD-P0-2 (A2): the usage metric used to query an `ai_evidence` table
+    // that is never created (guarded by an sqlite_master check that was
+    // always false), so usage_count was a literal 0. The real citations
+    // path is `ai_sources` (source_type 'knowledge_document', source_id =
+    // the document id) joined to `ai_runs` for the distinct conversations
+    // that cited the document.
+    let usage_subquery = "(SELECT COUNT(DISTINCT r.conversation_id) \
+         FROM ai_sources s JOIN ai_runs r ON r.id = s.run_id \
+         WHERE s.source_type = 'knowledge_document' AND s.source_id = d.id)";
     let sql = format!(
         "SELECT d.id, d.title, d.visibility, d.version, d.updated_at,
                 d.last_reviewed_at, d.last_verified_at, s.name AS source_name,
@@ -1378,5 +1374,91 @@ mod batch31_tests {
         );
         let out2 = html_to_text_keep_structure("İ<br>next");
         assert!(out2.contains("next"), "br handling still works: {out2:?}");
+    }
+}
+
+#[cfg(test)]
+mod audp0_tests {
+    use super::*;
+
+    fn fresh_conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory connection");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    // AUD-P0-2 (A2): usage_count must count the distinct conversations whose
+    // AI runs cited the document through the real ai_sources citations table.
+    // Pre-fix the metric queried an ai_evidence table that never exists, so
+    // usage_count was always 0, "low usage" fired on age alone and
+    // "recurring questions" (usage_count > 5) could never fire.
+    #[test]
+    fn freshness_usage_counts_real_ai_source_citations() {
+        let conn = fresh_conn();
+        conn.execute(
+            "INSERT INTO knowledge_sources (name) VALUES ('team wiki')",
+            [],
+        )
+        .expect("source");
+        conn.execute(
+            "INSERT INTO knowledge_documents (source_id, title, created_at, updated_at)
+             VALUES (1, 'Cited runbook', datetime('now', '-70 days'), datetime('now', '-70 days')),
+                    (1, 'Unused handbook', datetime('now', '-70 days'), datetime('now', '-70 days'))",
+            [],
+        )
+        .expect("documents");
+
+        // Six conversations, each with one analysis run citing document 1.
+        for n in 0..6 {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, status)
+                 VALUES (?1, ?1, 'Cited runbook question', 'active')",
+                rusqlite::params![900 + n],
+            )
+            .expect("conversation");
+            let conv = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO ai_runs (type, conversation_id, status, model, prompt_version,
+                                      input_hash, response_json)
+                 VALUES ('ticket_analysis', ?1, 'completed', 'test-model', 'v1', ?2, '{}')",
+                rusqlite::params![conv, format!("hash-{n}")],
+            )
+            .expect("run");
+            let run = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO ai_sources (run_id, source_type, source_id, title, relevance)
+                 VALUES (?1, 'knowledge_document', 1, 'Cited runbook', 0.9)",
+                rusqlite::params![run],
+            )
+            .expect("citation");
+        }
+
+        let report = freshness_report(&conn);
+        let rows = report["documents"].as_array().expect("documents");
+        let runbook = rows
+            .iter()
+            .find(|d| d["title"] == "Cited runbook")
+            .expect("runbook row");
+        let handbook = rows
+            .iter()
+            .find(|d| d["title"] == "Unused handbook")
+            .expect("handbook row");
+        assert_eq!(
+            runbook["usage_count"], 6,
+            "six distinct citing conversations"
+        );
+        assert_eq!(
+            runbook["flags"]["recurring_questions"], true,
+            "usage_count > 5 flags recurring questions"
+        );
+        assert_eq!(
+            runbook["flags"]["low_usage"], false,
+            "a cited document is not low-usage"
+        );
+        assert_eq!(handbook["usage_count"], 0, "never cited");
+        assert_eq!(
+            handbook["flags"]["low_usage"], true,
+            "an old uncited document stays low-usage"
+        );
     }
 }

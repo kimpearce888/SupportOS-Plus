@@ -73,6 +73,19 @@ pub(crate) fn trigger_description(trigger: &Trigger) -> String {
     }
 }
 
+// AUD-P0-5 (B1): the three M007 triggers have no emitter in program code —
+// the only production fire path emits new_conversation/customer_reply, and
+// the creation form deliberately offers nothing else (AU2-1/D10). Stored
+// legacy rules must not be presented as functional: they never fire and
+// record nothing.
+#[must_use]
+pub(crate) fn trigger_is_legacy(trigger: &Trigger) -> bool {
+    matches!(
+        trigger,
+        Trigger::StatusChanged { .. } | Trigger::TagAdded { .. } | Trigger::SlaRisk
+    )
+}
+
 #[must_use]
 pub(crate) fn action_description(action: &Action) -> String {
     match action {
@@ -362,11 +375,36 @@ impl AutomationPage {
                                 .strong()
                                 .color(t.foreground),
                         );
-                        ui.label(
-                            egui::RichText::new(trigger_description(&rule.trigger))
-                                .size(13.0)
-                                .color(t.foreground),
-                        );
+                        // AUD-P0-5 (B1): legacy-trigger rules are displayed
+                        // with the truth — they never fire, so they must not
+                        // read as working automations.
+                        if trigger_is_legacy(&rule.trigger) {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(trigger_description(&rule.trigger))
+                                        .size(13.0)
+                                        .color(t.muted_foreground),
+                                );
+                                Icon::AlertTriangle.show(ui, 13.0, t.warning_foreground);
+                                ui.label(
+                                    egui::RichText::new("legacy trigger — never fires")
+                                        .small()
+                                        .color(t.warning_foreground),
+                                );
+                            })
+                            .response
+                            .on_hover_text(
+                                "This rule uses a legacy trigger with no emitter in the \
+                                 engine — it can never run. Rules can only start on a new \
+                                 customer conversation or a customer reply.",
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new(trigger_description(&rule.trigger))
+                                    .size(13.0)
+                                    .color(t.foreground),
+                            );
+                        }
                         ui.horizontal(|ui| {
                             let action = action_description(&rule.action);
                             ui.label(egui::RichText::new(action).size(13.0).color(t.foreground));
@@ -750,6 +788,20 @@ mod tests {
         };
         assert!(!note.requires_approval());
         assert!(action_description(&note).starts_with("send note: "));
+    }
+
+    // AUD-P0-5 (B1): exactly the three M007 triggers are legacy — the two
+    // fire-vocabulary triggers are live.
+    #[test]
+    fn legacy_triggers_are_identified_for_honest_display() {
+        assert!(trigger_is_legacy(&Trigger::StatusChanged {
+            from_status: None,
+            to_status: None
+        }));
+        assert!(trigger_is_legacy(&Trigger::TagAdded { tag: "vip".into() }));
+        assert!(trigger_is_legacy(&Trigger::SlaRisk));
+        assert!(!trigger_is_legacy(&Trigger::NewConversation));
+        assert!(!trigger_is_legacy(&Trigger::CustomerReply));
     }
 }
 

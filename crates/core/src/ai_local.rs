@@ -502,8 +502,14 @@ pub fn latest_ai_draft_row(
     conversation_local_id: i64,
 ) -> Option<(i64, String, String)> {
     conn.query_row(
+        // AUD-P0-3 (A4): discarded drafts (state 'rejected') must not be
+        // re-offered — the pre-fix query had no state filter, so after
+        // "Discard draft" the same rejected draft re-rendered in the
+        // copilot card and could be re-inserted. `IS NOT` keeps rows with
+        // a NULL state (legacy rows) selectable.
         "SELECT id, content, model FROM ai_drafts
-          WHERE conversation_id = ?1 ORDER BY id DESC LIMIT 1",
+          WHERE conversation_id = ?1 AND state IS NOT 'rejected'
+          ORDER BY id DESC LIMIT 1",
         params![conversation_local_id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )
@@ -702,6 +708,134 @@ mod batch29_audit102_tests {
             report.suggested_reply.contains("Best,\nSupport"),
             "an unassigned conversation falls back to the Support signature: {}",
             report.suggested_reply
+        );
+    }
+}
+
+#[cfg(test)]
+mod audp0_tests {
+    use super::*;
+
+    fn db() -> crate::db::DbHandle {
+        let mut conn = Connection::open_in_memory().expect("in-memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        crate::db::DbHandle::new(conn)
+    }
+
+    fn seed_draft(conn: &Connection, conv: i64, content: &str, state: &str) -> i64 {
+        conn.execute(
+            "INSERT INTO ai_drafts (conversation_id, content, state, model)
+             VALUES (?1, ?2, ?3, 'test-model')",
+            params![conv, content, state],
+        )
+        .expect("draft");
+        conn.last_insert_rowid()
+    }
+
+    // AUD-P0-3 (A4): a discarded (rejected) draft must not come back as the
+    // latest draft — the pre-fix query had no state filter, so "Discard
+    // draft" appeared not to work and the rejected text could be re-inserted.
+    #[test]
+    fn a_rejected_draft_is_not_re_offered() {
+        let db = db();
+        let (conv, kept_id) = db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (7101, 71, 'Export broken', 'preview', 'active')",
+                [],
+            )
+            .expect("conversation");
+            let conv = conn.last_insert_rowid();
+            let kept = seed_draft(conn, conv, "first attempt", "generated");
+            let rejected = seed_draft(conn, conv, "second attempt", "generated");
+            crate::ai_pipeline::set_draft_state(conn, rejected, "rejected").expect("reject");
+            (conv, kept)
+        });
+
+        let latest = db.with_read(|conn| latest_ai_draft_row(conn, conv));
+        assert_eq!(
+            latest.map(|(id, content, _)| (id, content)),
+            Some((kept_id, "first attempt".to_string())),
+            "the newest non-rejected draft is offered, not the rejected one"
+        );
+    }
+
+    #[test]
+    fn an_all_rejected_history_offers_nothing() {
+        let db = db();
+        let conv = db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (7102, 72, 'Login loop', 'preview', 'active')",
+                [],
+            )
+            .expect("conversation");
+            let conv = conn.last_insert_rowid();
+            let only = seed_draft(conn, conv, "bad draft", "generated");
+            crate::ai_pipeline::set_draft_state(conn, only, "rejected").expect("reject");
+            conv
+        });
+        assert!(
+            db.with_read(|conn| latest_ai_draft_row(conn, conv))
+                .is_none(),
+            "only a rejected draft exists — the card must not re-offer it"
+        );
+    }
+
+    #[test]
+    fn a_generated_draft_still_offers_and_null_state_rows_survive() {
+        let db = db();
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (7103, 73, 'Billing address', 'preview', 'active')",
+                [],
+            )
+            .expect("conversation A");
+            let conv_a = conn.last_insert_rowid();
+            let _kept = seed_draft(conn, conv_a, "good draft", "generated");
+
+            conn.execute(
+                "INSERT INTO conversations (remote_id, number, subject, preview, status)
+                 VALUES (7104, 74, 'Sync stalled', 'preview', 'active')",
+                [],
+            )
+            .expect("conversation B");
+            let conv_b = conn.last_insert_rowid();
+            conn.execute(
+                "INSERT INTO ai_drafts (conversation_id, content, model)
+                 VALUES (?1, 'legacy row', 'old')",
+                params![conv_b],
+            )
+            .expect("legacy NULL-state row");
+        });
+        let conv_a = db
+            .with_read(|conn| {
+                conn.query_row(
+                    "SELECT id FROM conversations WHERE remote_id = 7103",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .unwrap();
+        let conv_b = db
+            .with_read(|conn| {
+                conn.query_row(
+                    "SELECT id FROM conversations WHERE remote_id = 7104",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .unwrap();
+        assert!(
+            db.with_read(|conn| latest_ai_draft_row(conn, conv_a))
+                .is_some_and(|(_, content, _)| content == "good draft"),
+            "generated drafts are still offered"
+        );
+        assert!(
+            db.with_read(|conn| latest_ai_draft_row(conn, conv_b))
+                .is_some_and(|(_, content, _)| content == "legacy row"),
+            "a legacy NULL-state row is selectable (IS NOT, not !=)"
         );
     }
 }
