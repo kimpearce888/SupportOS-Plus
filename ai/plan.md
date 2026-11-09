@@ -28,7 +28,11 @@ settings goldens + VLM read-back), and closed the same session; record
 in `completed.md`. Constraint carried over from AUD-P0/AUD-P1 honored:
 fix the existing implementation inside the existing stack — no new
 frameworks, no new dependencies. Row 15 of the P2 tier remains QUEUED
-below for batch AUD-P2-2 (Rule 8 STOP — say "continue" to proceed).**
+below for batch AUD-P2-2 (Rule 8 STOP — say "continue" to proceed).
+Ledger addendum: the batch push `2ae9c60` is CI-green 4/4 — run
+42648571360 (check, packages, packages-arm64 on ubuntu-24.04-arm, and
+the kittest drift gate all success; the arm64 lane passed on its first
+run, validating the arch-aware appimagetool pin end-to-end).**
 
 **QUEUED (row 15, batch AUD-P2-2 on "continue"): C3 custom-object
 links + type/object edit + pager; C8 radar alert drill-downs +
