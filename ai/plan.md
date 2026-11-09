@@ -30,7 +30,8 @@ accidental "0 rules + error banner" state). Constraint carried over
 from AUD-P0 honored: fix the existing implementation inside the
 existing stack — no new frameworks, no new dependencies. The queue is
 EMPTY again. New work opens only on an owner directive. P2 from the
-audit backlog (§5 items 15–18) remains NOT queued (Rule 8).**
+audit backlog (§5 items 15–18) remains NOT queued (Rule 8). Ledger
+addendum: the batch push `d407aad` is CI-green 3/3 — run 42623896332.**
 
 **Batch AUD-P0 (fix the P0 backlog — the six clusters of
 `docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-09: opened on

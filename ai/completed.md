@@ -125,6 +125,8 @@ audp1_settings_vector_reindex). Note for reproducibility: the local
 sandbox lost its Vulkan software rasterizer mid-session — the kittest
 lane now runs through lavapipe installed at
 `~/.local/share/vulkan/icd.d/` (the same ICD family CI uses).
+**CI: run 42623896332 on the batch push `d407aad` — green 3/3**
+(check / AppImage+deb smoke / kittest drift gate).
 
 ## Batch AUD-P0 — fix the P0 backlog from the repo audit (2026-11-09)
 
