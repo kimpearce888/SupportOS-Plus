@@ -5,6 +5,165 @@
 
 ## Completed
 
+## Batch AUD-P2-2 — fix the P2 backlog, part two: row 15's eight UI dead-end clusters + the two remaining fixable no-op findings (2026-11-10)
+
+**Owner directive:** "check the repo again for latest update first and
+then follow the instructions" — the standing fix-everything directive
+of `docs/audit/repo-audit-v1.9.6.md` ("fix everything reported here,
+do not ignore anything"), re-confirmed after a sandbox recycle forced
+a repo re-sync (the parallel AUD-P1-1/AUD-P2-1 sessions had already
+pushed and closed their batches; this message is the Rule 8 continue
+authorization for the queued remainder). Constraint carried over from
+AUD-P0/AUD-P1/AUD-P2-1 honored: fix the existing implementation inside
+the existing stack — no new frameworks, no new dependencies.
+
+**Items AUD-P2-11..AUD-P2-20:**
+
+- **AUD-P2-11 (C3)** — custom objects' three dead ends closed. Core:
+  `add_link`/`remove_link`/`list_object_links` (the post-creation link
+  lane; labels resolve to customer names/#numbers), `update_type`
+  (refuses to drop a field still set on objects, with the count),
+  `update_object`, `LINK_TARGET_KINDS` (the six validated kinds). Page:
+  links row per object (removable chips + add form), link fields in the
+  new-object form (the hard-coded `Vec::new()` is gone), object/type
+  edit via the connectors `start_edit` idiom, a real pager
+  (`design::pager`, offset wiring, "showing X–Y of Z"). Tests: 3 core
+  (link add/list/remove + validation refusal; object edit; type edit +
+  in-use field refusal) + 5 page (round-trips + pager page-two) + the
+  `audp2_custom_objects_links_light` golden.
+- **AUD-P2-12 (C8)** — the radar's dead ends closed. Core: the
+  known-issue lifecycle (`set_known_issue_status` with the closed
+  vocabulary, `set_known_issue_text`, `link`/`unlink_known_issue_conversation`,
+  `delete_known_issue`, `KNOWN_ISSUE_STATUSES`) and the cluster
+  completion event (`run_clustering_job` now emits the same
+  conversation_updated event the gap rebuild does — `invalidated_pages`
+  already maps it to IssueRadar, so a queued "Cluster now" refreshes the
+  tab). Page: `ui()` returns NavRequest (alert rows gain "Open" on the
+  first member conversation; SLA rows an "open →" link; gap examples and
+  cluster member chips are clickable #N labels); the Known tab gained
+  status chips, an Edit form, link/unlink evidence management, and the
+  shell-confirm Delete (`ConfirmRequest::delete_known_issue` +
+  `DestructiveAction::DeleteKnownIssue`); `load_known`/`load_clusters`
+  carry row ids + member samples. Tests: 3 page (lifecycle round-trip
+  incl. junk-status refusal + unlink/relink + delete; loader ids;
+  evidence pairs) + radar goldens regenerated.
+- **AUD-P2-13 (C9)** — outreach's dead ends closed. Core:
+  `update_outreach_campaign` (draft-guarded content edit; refuses
+  non-drafts with the honest reason; validates mailbox + fields). Page:
+  mailbox/segment pickers replace the raw id fields; the segment card
+  gained "Preview" (the engine's count/notes surfaced pre-save); draft
+  campaigns and segments carry Edit (the core `save_segment_v2(Some(id))`
+  path the page never used); the DNC add is a customer search + picker.
+  Tests: 1 core (edit round-trip + all four refusal guards) + 4 page +
+  the `audp2_outreach_segment_preview_light` golden.
+- **AUD-P2-14 (C10)** — the reports dead ends closed. Core:
+  `happiness_overview` recent rows carry `conversation_id` (the
+  deep-link target); `delete_graph_node` (node + touching human edges).
+  Page: builder filters are pickers (status chips, mailbox/assignee
+  chip rows over the live lists; open-vocabulary filters stay text),
+  happiness conversation numbers are clickable labels →
+  `OpenConversation`, the Insights graph table's reserved trailing
+  column gained Delete → `ConfirmRequest::delete_graph_node` +
+  `DestructiveAction::DeleteGraphNode`. Tests: 2 core + 2 page (csv
+  helper round-trip + confirm shape) + builder golden.
+- **AUD-P2-15 (C11)** — knowledge's dead ends closed. Core:
+  `get_document` (full record incl. chunk/indexed/exhausted counts),
+  `update_document` (by-id edit — NOT the (source,title) upsert, which
+  would fork a renamed document: checksum-disciplined version bump,
+  re-chunk, per-chunk FTS rewrite, re-embed enqueue),
+  `reindex_document` (scoped chunk re-arm incl. the permanently
+  excluded 5-attempt rows). Page: "Read" opens a document reader (the
+  UXH-1 reading column + `article_body_ui` pipeline on the stored
+  content), `go_to_documents` lands the deep-linked id in it, "Edit"
+  and "Re-index" row actions. Tests: 3 core + 3 page + the
+  `audp2_knowledge_doc_reader_light` golden.
+- **AUD-P2-16 (C12)** — organizations' dead ends closed. Core:
+  `update_organization` (validated) + `delete_organization` (soft
+  delete, audited). Page: Edit (start_edit idiom), Delete through the
+  new `ConfirmRequest::delete_organization` +
+  `DestructiveAction::DeleteOrganization` arm, clickable member rows →
+  `OpenCustomer` (the page's `ui()` now returns NavRequest), and the
+  200-row cap made honest ("showing the first 200 — refine the
+  search"). Tests: 1 core + the page round-trips + the
+  `audp2_organizations_members_clickable_light` golden.
+- **AUD-P2-17 (C13)** — operations' dead ends closed. The suggested
+  assignees card's rows carry an **Assign** button writing through the
+  inbox lane (eval-mode + connected guards, local
+  `TicketOperation::Assign`, the idempotency-keyed outbound job, the
+  bus event; the page's `ui()` takes the bus); suggestions reload with
+  the new load. The Library tab's Workflows section carries the honest
+  scope note (mirrored Help Scout objects — run-only through the API;
+  create/edit belongs there). Tests: 1 page (assign writes locally +
+  queues the job + unknown-conversation refusal) + the workload golden.
+- **AUD-P2-18 (C14)** — live chats' dead ends closed. Core: `end_chat`
+  (local terminal write — state/ended_at; the sticky upsert keeps a
+  late webhook from resurrecting it; `EndChatOutcome::{Ended,
+  AlreadyEnded, Missing, HeldByOther}` — the assignment guard mirrors
+  send_block's). Page: the detail card carries the clickable "became
+  conversation #N" link (remote→local resolution with the honest
+  not-in-mirror fallback), the clickable customer name (remote→local),
+  and the End chat button. Tests: 1 core (all four outcomes + the send
+  guard blocking afterwards) + the page tests + the
+  `audp2_live_chats_conversation_link_light` golden.
+- **AUD-P2-19 (B4)** — `TicketOperation::SetTicketState` finally has a
+  caller. Core: `TICKET_WORKFLOW_STATES` (the six built-ins as a closed
+  vocabulary; junk states are refused), `set_ticket_state` validates +
+  also stamps `supportos_state_id` (the column reports' CustomState
+  dimension and the AI metadata tool read but nothing ever populated —
+  the chain now connects like AUD-P0-9 did for priority), and
+  `list_state_transitions` (the surfaced audit trail). Page: a State
+  segmented row in the inbox action card (local-only write, the
+  set_priority lane), `ConversationDetail.workflow_state` rides the
+  query, and a "State history" card under the thread lists the state
+  and priority transitions. Tests: 3 core (validation + id linkage +
+  history order) + 1 page (write path: state + id + transition + zero
+  outbound jobs + junk refusal) + inbox/copilot/reader goldens.
+- **AUD-P2-20 (B7)** — unknown webhook event types are marked honestly:
+  the `_ => {}` fallthrough now writes state "ignored" + the note
+  "unknown event type … — stored, not processed" (payload kept; never
+  retried by drain_pending; dedupe keeps one row), and the Sync Health
+  Engine line counts the bucket. Tests: 1 core (state + note + payload
+  kept + zero jobs + duplicate dedupe) + the 7 sync-health goldens.
+
+**Verification (full battery on the final code):**
+
+- Gates: no-simulation gate clean; traceability gate OK (23 routes
+  covered, 20 design.rs DC tags valid, 27 DC ids, alias declared).
+- `cargo fmt --all --check` clean; `cargo xtask verify-icons` verified.
+- clippy: workspace `--all-targets -- -D warnings` clean; sandbox lane
+  (`-p supportos-plus-core --features sandbox`) `-D warnings` clean.
+- Tests: core lib 517 passed / 3 ignored (pre-existing) — including the
+  12 new audp2 core tests; app-shell lib 293 passed (22 new audp2 page
+  tests); xtask 15; catalog 0.
+- cargo-deny: `check advisories licenses bans sources` — all ok.
+- kittest drift gate ×2 (UPDATE_SNAPSHOTS pass, then diff-locked pass):
+  all 26 suites green in both passes — 204 kittest + 2 style lint
+  tests, 202 goldens (197 prior + 5 new: audp2_custom_objects_links,
+  audp2_knowledge_doc_reader, audp2_live_chats_conversation_link,
+  audp2_organizations_members_clickable, audp2_outreach_segment_preview);
+  65 intended golden changes (custom-objects 7, outreach 9,
+  organizations 7, live-chats 7, knowledge 6, issue-radar 7, inbox 6 +
+  7 copilot/reader variants, sync-health 7, reports builder 1,
+  operations workload 1); zero unrelated drift (the reports Insights
+  golden is byte-identical because the graph-nodes card sits below the
+  900px fold at 1440 — the delete control is unit-tested instead).
+  ci.yml's suite-count comment refreshed to the verified 26 / 206 / 202.
+- VLM read-backs of the regenerated radar and custom-objects goldens
+  confirm the new affordances render (Open buttons, open→ links, #N
+  chips, links rows + add forms, Edit buttons; no overlaps).
+- USER_MANUAL updated for every new control (State lane + history
+  card, radar drill-downs + known lifecycle, ops assign + workflow
+  scope note, orgs edit/delete/members/cap, knowledge reader/edit/
+  re-index, outreach pickers/preview/edit/DNC, reports pickers +
+  clickable happiness + node delete, chats links/end, the ignored
+  webhook bucket).
+- Environment note: the recycled sandbox lost the Rust toolchain and
+  the lavapipe ICD — both re-provisioned (rustup 1.99.1 pinned;
+  lavapipe extracted to `~/.local/share/vulkan/icd.d/` with the
+  library at an absolute path); the kittest battery again ran
+  suite-by-suite on the disk-bounded sandbox (9.9G, 3.3G free after
+  trimming target/debug/incremental).
+
 ## Batch AUD-P2-1 — fix the P2 backlog, part one: the code fixes, docs and infra of the repo audit (2026-11-10)
 
 **Owner directive:** "fix P2" — §5 rows 16–18 of

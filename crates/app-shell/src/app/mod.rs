@@ -335,6 +335,44 @@ impl ShellApp {
                 "deleted",
                 self.reports.delete_saved_report(&self.db, id),
             ),
+            DestructiveAction::DeleteOrganization { id } => {
+                // AUD-P2-16 (C12): soft-delete via people_store.
+                let outcome = self
+                    .db
+                    .with_write(|conn| spp_core::people_store::delete_organization(conn, id))
+                    .and_then(|removed| {
+                        removed
+                            .ok_or_else(|| spp_core::Error::Config("organization not found".into()))
+                    });
+                self.organizations.invalidate();
+                ("organization", "deleted", outcome)
+            }
+            DestructiveAction::DeleteGraphNode { id } => {
+                // AUD-P2-14 (C10): node + touching human edges.
+                let outcome = self
+                    .db
+                    .with_write(|conn| spp_core::reports::delete_graph_node(conn, id))
+                    .and_then(|removed| {
+                        removed
+                            .ok_or_else(|| spp_core::Error::Config("graph node not found".into()))
+                    });
+                self.reports.invalidate();
+                ("graph node", "deleted", outcome)
+            }
+            DestructiveAction::DeleteKnownIssue { id } => {
+                // AUD-P2-12 (C8): known-issue deletion.
+                let outcome = self
+                    .db
+                    .with_write(|conn| {
+                        spp_core::intelligence_features::delete_known_issue(conn, id)
+                    })
+                    .and_then(|removed| {
+                        removed
+                            .ok_or_else(|| spp_core::Error::Config("known issue not found".into()))
+                    });
+                self.issue_radar.invalidate();
+                ("known issue", "deleted", outcome)
+            }
             DestructiveAction::RemoveFromDnc { customer_id } => (
                 "do-not-contact entry",
                 "removed",
@@ -909,7 +947,7 @@ impl ShellApp {
                                             nav = self.live_chats.ui(ui, &self.db);
                                         }
                                         PageKey::Operations => {
-                                            nav = self.operations.ui(ui, &self.db);
+                                            nav = self.operations.ui(ui, &self.db, &self.bus);
                                         }
                                         PageKey::AiCenter => {
                                             nav = self.ai_center.ui(ui, &self.db);
@@ -926,7 +964,11 @@ impl ShellApp {
                                         PageKey::Incidents => {
                                             nav = self.incidents.ui(ui, &self.db);
                                         }
-                                        PageKey::IssueRadar => self.issue_radar.ui(ui, &self.db),
+                                        // AUD-P2-12 (C8): the radar drill-downs
+                                        // surface as NavRequests now.
+                                        PageKey::IssueRadar => {
+                                            nav = self.issue_radar.ui(ui, &self.db);
+                                        }
                                         PageKey::Notifications => {
                                             nav = self.notifications.ui(ui, &self.db);
                                             // AUD-P1-1 (C1): the page just
@@ -939,7 +981,8 @@ impl ShellApp {
                                             self.onboarding.ui(ui, &self.db, sync.as_ref());
                                         }
                                         PageKey::Organizations => {
-                                            self.organizations.ui(ui, &self.db, sync.as_ref());
+                                            nav =
+                                                self.organizations.ui(ui, &self.db, sync.as_ref());
                                         }
                                         PageKey::Outreach => {
                                             nav = self.outreach.ui(ui, &self.db);

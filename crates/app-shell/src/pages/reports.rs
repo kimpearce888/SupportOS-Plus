@@ -98,6 +98,13 @@ pub struct ReportsPage {
     b_f_state_key: String,
     b_f_mailbox_ids: String,
     b_f_assignee_ids: String,
+    /// AUD-P2-14 (C10): picker selections replace the raw CSV id fields —
+    /// mailboxes and assignees pick from the live lists (the same sources
+    /// the Inbox uses); the text fields remain the serialization (load/
+    /// save round-trips keep working) but editing goes through the
+    /// pickers' chip rows.
+    b_mailboxes: Vec<(i64, String)>,
+    b_assignees: Vec<(i64, String)>,
     b_outcome: Option<std::result::Result<spp_core::reports::ReportRunOutcome, String>>,
     b_saved: Vec<spp_core::reports::SavedReport>,
     b_save_name: String,
@@ -175,6 +182,8 @@ impl ReportsPage {
             b_f_state_key: String::new(),
             b_f_mailbox_ids: String::new(),
             b_f_assignee_ids: String::new(),
+            b_mailboxes: Vec::new(),
+            b_assignees: Vec::new(),
             b_outcome: None,
             b_saved: Vec::new(),
             b_save_name: String::new(),
@@ -218,6 +227,10 @@ impl ReportsPage {
     }
 
     fn reload(&mut self, db: &DbHandle) {
+        // AUD-P2-14 (C10): the builder's picker lists — the same sources
+        // the Inbox uses (mailboxes + assignable users).
+        self.b_mailboxes = db.with_read(crate::pages::dashboard::mailboxes);
+        self.b_assignees = db.with_read(crate::pages::inbox::assignable_users);
         let now = self.today.unwrap_or_else(chrono::Utc::now);
         let from = spp_core::business_hours::iso_days_ago_at(self.days, now);
         let to = spp_core::business_hours::now_iso_millis_at(now);
@@ -410,6 +423,7 @@ impl ReportsPage {
         }
 
         let (why, questions) = (self.why_contacting.clone(), self.top_questions.clone());
+        let mut nav: Option<NavRequest> = None;
         match self.tab {
             Tab::Overview => self.overview_ui(ui),
             Tab::Sla => self.sla_ui(ui, db),
@@ -418,7 +432,8 @@ impl ReportsPage {
             Tab::Radar => self.radar_ui(ui),
             Tab::Quality => self.quality_ui(ui),
             Tab::Digest => self.digest_ui(ui, db),
-            Tab::Happiness => self.happiness_ui(ui),
+            // AUD-P2-14 (C10): happiness rows drill to conversations.
+            Tab::Happiness => self.happiness_ui(ui, &mut nav),
             Tab::HelpScout => self.help_scout_ui(ui, db),
             Tab::Builder => self.builder_ui(ui, db),
             Tab::Insights => self.insights_ui(ui, db),
@@ -426,7 +441,7 @@ impl ReportsPage {
         if let Some(request) = self.pending_confirm.take() {
             return Some(NavRequest::Confirm(request));
         }
-        None
+        nav
     }
 
     fn overview_ui(&mut self, ui: &mut egui::Ui) {
@@ -897,18 +912,95 @@ impl ReportsPage {
             });
             ui.add_space(4.0);
             design::section_title(ui, "Filters (blank = unfiltered)");
+            // AUD-P2-14 (C10): the closed-vocabulary filters are pickers
+            // now — statuses as chips over the Help Scout vocabulary,
+            // mailboxes and assignees as chip rows over the live lists
+            // (the raw CSV serialization round-trips through load/save;
+            // the chip state derives from and writes back to it).
+            {
+                ui.horizontal(|ui| {
+                    design::field_label(ui, "Statuses");
+                    for status in ["active", "pending", "closed", "spam"] {
+                        let selected = self
+                            .b_f_statuses
+                            .split(',')
+                            .map(str::trim)
+                            .any(|s| s == status);
+                        if design::chip(ui, selected, status)
+                            .on_hover_text(if selected {
+                                "click to remove this status filter"
+                            } else {
+                                "click to filter to this status too"
+                            })
+                            .clicked()
+                        {
+                            let mut parts: Vec<String> = self
+                                .b_f_statuses
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            if selected {
+                                parts.retain(|p| p != status);
+                            } else {
+                                parts.push(status.to_string());
+                            }
+                            self.b_f_statuses = parts.join(",");
+                        }
+                    }
+                });
+                ui.add_space(design::scale::space::SP1);
+                ui.horizontal_wrapped(|ui| {
+                    design::field_label(ui, "Mailboxes");
+                    for (id, name) in self.b_mailboxes.clone() {
+                        let selected = csv_contains_id(&self.b_f_mailbox_ids, id);
+                        if design::chip(ui, selected, name.as_str())
+                            .on_hover_text(if selected {
+                                "click to remove this mailbox filter"
+                            } else {
+                                "click to filter to this mailbox too"
+                            })
+                            .clicked()
+                        {
+                            self.b_f_mailbox_ids = toggle_csv_id(&self.b_f_mailbox_ids, id);
+                        }
+                    }
+                    if self.b_mailboxes.is_empty() {
+                        design::hint_text(ui, "no mailboxes synced yet");
+                    }
+                });
+                ui.add_space(design::scale::space::SP1);
+                ui.horizontal_wrapped(|ui| {
+                    design::field_label(ui, "Assignees");
+                    for (id, name) in self.b_assignees.clone() {
+                        let selected = csv_contains_id(&self.b_f_assignee_ids, id);
+                        if design::chip(ui, selected, name.as_str())
+                            .on_hover_text(if selected {
+                                "click to remove this assignee filter"
+                            } else {
+                                "click to filter to this assignee too"
+                            })
+                            .clicked()
+                        {
+                            self.b_f_assignee_ids = toggle_csv_id(&self.b_f_assignee_ids, id);
+                        }
+                    }
+                    if self.b_assignees.is_empty() {
+                        design::hint_text(ui, "no synced users yet");
+                    }
+                });
+                ui.add_space(design::scale::space::SP1);
+            }
+            // The open-vocabulary filters stay as text fields.
             design::form_grid(ui, "b-filters", |ui| {
                 for (label, field) in [
                     ("channel:", &mut self.b_f_channel),
-                    ("statuses (csv):", &mut self.b_f_statuses),
                     ("tags any (csv):", &mut self.b_f_tags_any),
                     ("tags none (csv):", &mut self.b_f_tags_none),
                     ("min priority:", &mut self.b_f_min_priority),
                     ("attribute key:", &mut self.b_f_attr_key),
                     ("attribute value:", &mut self.b_f_attr_value),
                     ("state key:", &mut self.b_f_state_key),
-                    ("mailbox ids (csv):", &mut self.b_f_mailbox_ids),
-                    ("assignee ids (csv):", &mut self.b_f_assignee_ids),
                 ] {
                     let label = design::field_label(ui, label);
                     ui.add(egui::TextEdit::singleline(field).desired_width(180.0))
@@ -1412,9 +1504,24 @@ impl ReportsPage {
                                     .unwrap_or_else(|| "—".into()),
                             );
                             design::td_num(ui, &node.created_at);
-                            if design::button(ui, "Inspect", ButtonVariant::Outline).clicked() {
-                                self.inspect_graph_node(db, node.id);
-                            }
+                            ui.horizontal(|ui| {
+                                if design::button(ui, "Inspect", ButtonVariant::Outline).clicked() {
+                                    self.inspect_graph_node(db, node.id);
+                                }
+                                // AUD-P2-14 (C10): the node delete the
+                                // table's trailing column always reserved.
+                                if design::button(ui, "Delete", ButtonVariant::Ghost)
+                                    .on_hover_text("delete this node and its human edges")
+                                    .clicked()
+                                    && self.pending_confirm.is_none()
+                                    && let Some(node_id) = node.id
+                                {
+                                    self.pending_confirm = Some(ConfirmRequest::delete_graph_node(
+                                        node_id,
+                                        node.label.as_deref().unwrap_or(node.kind.as_str()),
+                                    ));
+                                }
+                            });
                         },
                     );
                 }
@@ -1677,7 +1784,7 @@ impl ReportsPage {
         );
     }
 
-    fn happiness_ui(&mut self, ui: &mut egui::Ui) {
+    fn happiness_ui(&mut self, ui: &mut egui::Ui, nav: &mut Option<NavRequest>) {
         let Some(data) = &self.happiness else {
             ui.spinner();
             return;
@@ -1751,10 +1858,31 @@ impl ReportsPage {
                     ui.label("Okay");
                 }
                 let number = r["conversation_number"].as_i64();
-                design::td_num(
-                    ui,
-                    &number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
-                );
+                // AUD-P2-14 (C10): the conversation number is a deep-link
+                // now (inert text pre-fix) — the local id rides the row.
+                let conversation_id = r["conversation_id"].as_i64();
+                match (number, conversation_id) {
+                    (Some(n), Some(id)) => {
+                        let label = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("#{n}"))
+                                    .size(design::scale::text::SMALL)
+                                    .color(design::tokens(ui).primary),
+                            )
+                            .sense(egui::Sense::click()),
+                        );
+                        if label.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if label.clicked() && nav.is_none() {
+                            *nav = Some(NavRequest::OpenConversation(id));
+                        }
+                    }
+                    _ => design::td_num(
+                        ui,
+                        &number.map(|n| n.to_string()).unwrap_or_else(|| "—".into()),
+                    ),
+                }
                 ui.label(str_field(r, "customer"));
                 ui.label(str_field(r, "comments"));
             },
@@ -2172,5 +2300,69 @@ mod tests {
         page.add_graph_node_action(&db);
         assert!(!page.i_note.as_ref().expect("note").0, "rejected");
         assert_eq!(page.i_graph_nodes.len(), 1, "nothing was written");
+    }
+}
+
+// AUD-P2-14 (C10): CSV id helpers for the picker chips.
+fn csv_contains_id(csv: &str, id: i64) -> bool {
+    csv.split(',')
+        .map(str::trim)
+        .any(|s| s.parse::<i64>().map(|parsed| parsed == id).unwrap_or(false))
+}
+
+fn toggle_csv_id(csv: &str, id: i64) -> String {
+    let mut parts: Vec<i64> = csv
+        .split(',')
+        .map(str::trim)
+        .filter_map(|s| s.parse::<i64>().ok())
+        .collect();
+    if let Some(pos) = parts.iter().position(|p| *p == id) {
+        parts.remove(pos);
+    } else {
+        parts.push(id);
+    }
+    parts
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+// AUD-P2-14 (C10): builder picker serialization + the node delete arm.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+
+    #[test]
+    fn audp2_csv_id_helpers_round_trip() {
+        let mut csv = String::new();
+        assert!(!csv_contains_id(&csv, 1));
+        csv = toggle_csv_id(&csv, 1);
+        assert_eq!(csv, "1");
+        assert!(csv_contains_id(&csv, 1));
+        // Toggle on more ids (order preserved).
+        csv = toggle_csv_id(&csv, 2);
+        assert_eq!(csv, "1,2");
+        assert!(csv_contains_id(&csv, 2));
+        // Remove one.
+        csv = toggle_csv_id(&csv, 1);
+        assert_eq!(csv, "2");
+        assert!(!csv_contains_id(&csv, 1));
+        // Junk fields are ignored, not parsed into false positives.
+        let junk = " 5 , x , 7 ";
+        assert!(csv_contains_id(junk, 5));
+        assert!(csv_contains_id(junk, 7));
+        assert!(!csv_contains_id(junk, 6));
+    }
+
+    #[test]
+    fn audp2_delete_graph_node_confirm_request_shapes() {
+        let req = ConfirmRequest::delete_graph_node(7, "Kim Pearce");
+        assert!(req.danger);
+        assert!(req.message.contains("Kim Pearce"));
+        assert!(matches!(
+            req.action,
+            super::super::DestructiveAction::DeleteGraphNode { id: 7 }
+        ));
     }
 }

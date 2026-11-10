@@ -1418,6 +1418,25 @@ pub fn get_graph_neighbors(
     Ok(out)
 }
 
+/// AUD-P2-14 (C10): delete a manually-added graph node. Human-authored
+/// edges that touch the node's (kind, entity) pair are removed too —
+/// they were about this node. Returns false when the id is unknown.
+pub fn delete_graph_node(conn: &Connection, node_id: i64) -> Result<bool> {
+    let Some(node) = get_graph_node(conn, node_id)? else {
+        return Ok(false);
+    };
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM graph_edges
+          WHERE (source_kind = ?1 AND source_local_id = ?2)
+             OR (target_kind = ?1 AND target_local_id = ?2)",
+        params![node.kind.as_str(), node.entity_id],
+    )?;
+    let changed = tx.execute("DELETE FROM graph_nodes WHERE id = ?1", params![node_id])?;
+    tx.commit()?;
+    Ok(changed > 0)
+}
+
 pub fn get_graph_node(conn: &Connection, node_id: i64) -> Result<Option<GraphNode>> {
     struct NodeRow {
         id: i64,
@@ -1505,7 +1524,7 @@ pub fn happiness_overview(conn: &Connection, days: i64) -> serde_json::Value {
     let recent: Vec<serde_json::Value> = conn
         .prepare(
             "SELECT r.rating, r.comments, r.remote_created_at,
-                    c.number, COALESCE(cu.first_name || ' ' || cu.last_name, '')
+                    c.number, COALESCE(cu.first_name || ' ' || cu.last_name, ''), c.id
                FROM ratings r
                LEFT JOIN conversations c ON c.id = r.conversation_id
                LEFT JOIN customers cu ON cu.id = r.customer_local_id
@@ -1520,6 +1539,9 @@ pub fn happiness_overview(conn: &Connection, days: i64) -> serde_json::Value {
                     "created_at": r.get::<_, Option<String>>(2)?,
                     "conversation_number": r.get::<_, Option<i64>>(3)?,
                     "customer": r.get::<_, Option<String>>(4)?.filter(|s| !s.is_empty()),
+                    // AUD-P2-14 (C10): the local conversation id — the
+                    // clickable happiness row's deep-link target.
+                    "conversation_id": r.get::<_, Option<i64>>(5)?,
                 }))
             })
             .map(|rows| rows.filter_map(|r| r.ok()).collect())
@@ -1826,5 +1848,75 @@ mod item56_tests {
                 .as_str(),
             "product"
         );
+    }
+}
+
+// AUD-P2-14 (C10): the clickable happiness row (conversation_id now rides
+// the query) + the graph-node delete lane.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn conn() -> Connection {
+        let mut c = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut c).expect("migrations");
+        c
+    }
+
+    #[test]
+    fn audp2_happiness_recent_rows_carry_the_conversation_id() {
+        let c = conn();
+        c.execute(
+            "INSERT INTO conversations (remote_id, number, subject, status) VALUES (31, 531, 's', 'closed')",
+            [],
+        )
+        .expect("conversation");
+        let conv = c.last_insert_rowid();
+        c.execute(
+            "INSERT INTO ratings (conversation_id, customer_local_id, rating, comments, remote_created_at)
+             VALUES (?1, NULL, 'great', 'loved it', '2026-11-10T10:00:00.000Z')",
+            rusqlite::params![conv],
+        )
+        .expect("rating");
+
+        let data = happiness_overview(&c, 30);
+        let recent = data["recent"].as_array().expect("recent");
+        assert_eq!(recent.len(), 1);
+        assert_eq!(
+            recent[0]["conversation_id"].as_i64(),
+            Some(conv),
+            "the deep-link target rides the row"
+        );
+        assert_eq!(recent[0]["conversation_number"].as_i64(), Some(531));
+    }
+
+    #[test]
+    fn audp2_delete_graph_node_removes_the_node_and_touching_edges() {
+        let c = conn();
+        // A node with a human edge to another node.
+        let a = add_graph_node(&c, "customer", Some(9), Some("Kim"), None).expect("node a");
+        let b = add_graph_node(&c, "organization", Some(3), Some("Globex"), None).expect("node b");
+        c.execute(
+            "INSERT INTO graph_edges (source_kind, source_local_id, target_kind, target_local_id, relation)
+             VALUES ('customer', 9, 'organization', 3, 'related_to')",
+            [],
+        )
+        .expect("edge");
+
+        assert!(delete_graph_node(&c, a).expect("delete"));
+        assert!(
+            get_graph_node(&c, a).expect("get").is_none(),
+            "the node is gone"
+        );
+        let edges: i64 = c
+            .query_row("SELECT COUNT(*) FROM graph_edges", [], |r| r.get(0))
+            .expect("edges");
+        assert_eq!(edges, 0, "the touching human edge is removed with it");
+
+        // The untouched node survives; a second delete of the gone node
+        // is a clean false.
+        assert!(get_graph_node(&c, b).expect("get").is_some());
+        assert!(!delete_graph_node(&c, a).expect("delete again"));
     }
 }

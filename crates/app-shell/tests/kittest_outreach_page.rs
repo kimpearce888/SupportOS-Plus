@@ -59,6 +59,10 @@ fn seeded_page() -> (OutreachPage, DbHandle) {
         .expect("conversation");
     }
 
+    // AUD-P2-13 (C9): the campaign form's pickers read exactly these
+    // seeds — mailbox 1 "Support" is the only option, and the two saved
+    // segments are the segment picker's options — so the picker states
+    // are deterministic in every golden below.
     let ticket_segment = spp_core::outreach::save_segment_v2(
         &conn,
         None,
@@ -255,5 +259,95 @@ fn r3_outreach_new_campaign_light() {
         h.get_all_by_label("Create Campaign").next().is_some(),
         "the New Campaign form must show the create act"
     );
+    // AUD-P2-13 (C9): the pickers replaced the raw "Mailbox id"/"Segment
+    // id" text fields — the old labels and the "saved segments: …" hint
+    // line are gone, and the form's two combo boxes open on the seeded
+    // options (mailbox 1 "Support" is the only mailbox).
+    assert!(
+        h.query_all_by_label("Mailbox id").next().is_none(),
+        "the raw mailbox id field is gone"
+    );
+    assert!(
+        h.query_all_by_label("Segment id").next().is_none(),
+        "the raw segment id field is gone"
+    );
+    assert!(
+        h.query_all_by_label_contains("saved segments")
+            .next()
+            .is_none(),
+        "the saved-segments hint line is gone — the picker is the hint"
+    );
+    let picker_count = h
+        .query_all(egui_kittest::kittest::By::new().role(egui::Role::ComboBox))
+        .count();
+    assert_eq!(
+        picker_count, 2,
+        "the mailbox and segment pickers are the form's two combo boxes"
+    );
+    // open the mailbox picker — the seeded mailbox is its only option
+    h.query_all(egui_kittest::kittest::By::new().role(egui::Role::ComboBox))
+        .next()
+        .expect("the mailbox picker")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.query_all(
+            egui_kittest::kittest::By::new()
+                .role(egui::Role::Button)
+                .label("Support")
+        )
+        .next()
+        .is_some(),
+        "the seeded mailbox 'Support' is the picker's option"
+    );
+    h.get_all_by_label("Support")
+        .next()
+        .expect("the Support option")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
     h.snapshot("r3_outreach_new_campaign_light");
+}
+
+#[test]
+fn audp2_outreach_segment_preview_light() {
+    // AUD-P2-13 (C9): the saved segment's Preview act — the recipient
+    // count guard that used to be missing before save/target.
+    let (page, db) = seeded_page();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db);
+            },
+            OutreachPageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    h.get_all_by_label("Segments")
+        .next()
+        .expect("the tab")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    h.get_all_by_label("Preview")
+        .next()
+        .expect("the preview act on the segment rows")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.query_all_by_label_contains("recipients").next().is_some(),
+        "the preview must show a recipient count"
+    );
+    h.snapshot("audp2_outreach_segment_preview_light");
 }

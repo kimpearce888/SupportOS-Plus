@@ -393,6 +393,54 @@ pub struct SendBlock {
     pub hint: String,
 }
 
+// AUD-P2-18 (C14): the agent's end-chat action — a local lane only
+// (Help Scout exposes no end-chat endpoint in the provider surface),
+// writing the same terminal state the webhook's ended event writes.
+// The sticky upsert keeps a late webhook from resurrecting it, and
+// send_block then honestly blocks further replies.
+pub fn end_chat(
+    conn: &Connection,
+    chat_id: &str,
+    me_remote_id: Option<i64>,
+) -> Result<EndChatOutcome> {
+    // The state check comes FIRST — send_block reports an ended chat as
+    // `chat_open: false`, which would misroute AlreadyEnded to Missing.
+    let state: Option<String> = conn
+        .query_row(
+            "SELECT state FROM beacon_chats WHERE chat_id = ?1",
+            params![chat_id],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    let Some(state) = state else {
+        return Ok(EndChatOutcome::Missing);
+    };
+    if state == "ended" {
+        return Ok(EndChatOutcome::AlreadyEnded);
+    }
+    let block = send_block(conn, chat_id, me_remote_id)?;
+    if block.held_by_other {
+        return Ok(EndChatOutcome::HeldByOther(block.hint));
+    }
+    conn.execute(
+        "UPDATE beacon_chats
+            SET state = 'ended', ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE chat_id = ?1 AND state != 'ended'",
+        params![chat_id],
+    )?;
+    tracing::info!(chat_id, "chat ended locally by the agent");
+    Ok(EndChatOutcome::Ended)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EndChatOutcome {
+    Ended,
+    AlreadyEnded,
+    Missing,
+    HeldByOther(String),
+}
+
 pub fn send_block(
     conn: &Connection,
     chat_id: &str,
@@ -460,13 +508,13 @@ pub fn send_block(
 mod tests {
     use super::*;
 
-    fn fresh_conn() -> Connection {
+    pub(super) fn fresh_conn() -> Connection {
         let mut conn = Connection::open_in_memory().expect("in-memory connection");
         crate::bootstrap::apply_all(&mut conn).expect("migrations");
         conn
     }
 
-    fn chat_payload(chat_id: &str) -> Value {
+    pub(super) fn chat_payload(chat_id: &str) -> Value {
         serde_json::json!({
             "id": chat_id,
             "beaconId": "b-1",
@@ -494,7 +542,7 @@ mod tests {
 
     #[test]
     fn m059_is_idempotent_and_creates_both_tables() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         let before: i64 = conn
             .query_row("SELECT COUNT(*) FROM beacon_chats", [], |r| r.get(0))
             .expect("beacon_chats exists");
@@ -510,7 +558,7 @@ mod tests {
 
     #[test]
     fn created_event_upserts_the_mirror() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-1")).expect("ingest created");
         let chat = chat_by_id(&conn, "c-1").expect("read").expect("row");
         assert_eq!(chat.state, "open");
@@ -521,7 +569,7 @@ mod tests {
 
     #[test]
     fn reply_event_stores_the_message_and_dedupes() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-1")).expect("created");
         let payload = replied_payload("c-1", "m-1", "hello there");
         ingest_event(&conn, "beacon.chat.customer.replied", &payload).expect("replied");
@@ -539,7 +587,7 @@ mod tests {
 
     #[test]
     fn assigned_event_moves_the_assignee() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-1")).expect("created");
         let assigned = serde_json::json!({
             "id": "c-1",
@@ -555,7 +603,7 @@ mod tests {
 
     #[test]
     fn ended_event_closes_the_chat_and_keeps_it() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-1")).expect("created");
         let ended = serde_json::json!({
             "id": "c-1",
@@ -578,7 +626,7 @@ mod tests {
 
     #[test]
     fn list_orders_open_chats_first() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-open")).expect("open");
         let ended = serde_json::json!({
             "id": "c-done", "mailboxId": 3, "state": "ended",
@@ -597,7 +645,7 @@ mod tests {
 
     #[test]
     fn payload_without_a_chat_object_is_a_validation_error() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         let err = ingest_event(&conn, "beacon.chat.created", &serde_json::json!({"id": 1}))
             .expect_err("numeric id is not a chat uuid object");
         assert!(err.to_string().contains("no chat object"), "{err}");
@@ -606,7 +654,7 @@ mod tests {
 
     #[test]
     fn send_block_enforces_the_assigned_agent_rule() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-1")).expect("created");
         let assigned = serde_json::json!({
             "id": "c-1", "mailboxId": 3, "state": "open",
@@ -640,7 +688,7 @@ mod tests {
 
     #[test]
     fn outgoing_messages_share_the_webhook_echo_key() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         ingest_event(&conn, "beacon.chat.created", &chat_payload("c-1")).expect("created");
         let mid = new_message_id();
         record_outgoing_message(&conn, "c-1", &mid, "we are on it").expect("record");
@@ -669,7 +717,7 @@ mod tests {
 
     #[test]
     fn a_chat_missing_from_the_mirror_answers_none_and_guards_honestly() {
-        let conn = fresh_conn();
+        let conn = super::tests::fresh_conn();
         assert!(chat_by_id(&conn, "ghost-chat").expect("read").is_none());
         assert!(
             messages_for(&conn, "ghost-chat")
@@ -679,5 +727,80 @@ mod tests {
         let guard = send_block(&conn, "ghost-chat", Some(9)).expect("guard");
         assert!(!guard.can_send);
         assert!(guard.hint.contains("not in the mirror"), "{}", guard.hint);
+    }
+}
+
+// AUD-P2-18 (C14): the agent end-chat lane.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+
+    #[test]
+    fn audp2_end_chat_closes_open_chats_and_guards_assignment() {
+        let conn = super::tests::fresh_conn();
+        // chat-1 open, assigned to agent 5 (the fixture's me).
+        ingest_event(
+            &conn,
+            "beacon.chat.created",
+            &super::tests::chat_payload("chat-1"),
+        )
+        .expect("c1");
+        let assigned_5 = serde_json::json!({
+            "id": "chat-1",
+            "assignee": {"id": 5, "first": "Ada", "last": "Lovelace"},
+        });
+        ingest_event(&conn, "beacon.chat.assigned", &assigned_5).expect("assign 5");
+        // chat-2 open, held by agent 9.
+        ingest_event(
+            &conn,
+            "beacon.chat.created",
+            &super::tests::chat_payload("chat-2"),
+        )
+        .expect("c2");
+        let assigned_9 = serde_json::json!({
+            "id": "chat-2",
+            "assignee": {"id": 9, "first": "Grace", "last": "Hopper"},
+        });
+        ingest_event(&conn, "beacon.chat.assigned", &assigned_9).expect("assign 9");
+
+        // Ending a chat you hold succeeds.
+        assert_eq!(
+            end_chat(&conn, "chat-1", Some(5)).expect("end"),
+            EndChatOutcome::Ended
+        );
+        let (state, ended_at): (String, Option<String>) = conn
+            .query_row(
+                "SELECT state, ended_at FROM beacon_chats WHERE chat_id = 'chat-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(state, "ended");
+        assert!(ended_at.is_some(), "the ended timestamp lands");
+
+        // Already ended is a clean no-op.
+        assert_eq!(
+            end_chat(&conn, "chat-1", Some(5)).expect("already"),
+            EndChatOutcome::AlreadyEnded
+        );
+
+        // Held by another agent refuses with the honest hint.
+        match end_chat(&conn, "chat-2", Some(5)).expect("held") {
+            EndChatOutcome::HeldByOther(hint) => {
+                assert!(hint.contains("only the assigned agent"), "{hint}");
+            }
+            other => panic!("expected HeldByOther, got {other:?}"),
+        }
+
+        // The send guard then blocks replies on the ended chat with the
+        // conversation link hint.
+        let block = send_block(&conn, "chat-1", Some(5)).expect("block");
+        assert!(!block.can_send);
+
+        // Unknown chat reports Missing.
+        assert_eq!(
+            end_chat(&conn, "chat-404", Some(5)).expect("missing"),
+            EndChatOutcome::Missing
+        );
     }
 }

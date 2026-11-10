@@ -34,15 +34,41 @@ Ledger addendum: the batch push `2ae9c60` is CI-green 4/4 — run
 the kittest drift gate all success; the arm64 lane passed on its first
 run, validating the arch-aware appimagetool pin end-to-end).**
 
-**QUEUED (row 15, batch AUD-P2-2 on "continue"): C3 custom-object
-links + type/object edit + pager; C8 radar alert drill-downs +
-known-issue edit/status/delete + queued-job auto-refresh; C9 outreach
-segment recipient preview + targeting/DNC pickers + campaign edit;
-C10 report filter pickers + clickable happiness rows + support-graph
-node delete; C11 knowledge document reader + per-document re-ingest;
-C12 organization edit/delete + clickable members; C13 operations
-one-click assign + workflow create/edit; C14 live-chat conversation
-links + end-chat + customer navigation.**
+**Batch AUD-P2-2 (fix the P2 backlog, part two — row 15's eight UI
+dead-end clusters plus the remaining unremediated no-op findings of
+`docs/audit/repo-audit-v1.9.6.md`) CONSUMED 2026-11-10: opened on the
+owner's "follow the instructions" (the standing fix-everything
+directive, re-confirmed after a sandbox-recycle repo re-sync; per Rule
+8 this is the continue authorization). Items AUD-P2-11..AUD-P2-20
+(C3 custom-object links + type/object edit + pager; C8 radar alert
+drill-downs + known-issue lifecycle + cluster auto-refresh; C9
+outreach segment preview + targeting/DNC pickers + campaign/segment
+edit; C10 report filter pickers + clickable happiness rows +
+support-graph node delete; C11 knowledge document reader + edit +
+per-document re-ingest; C12 organization edit/delete + clickable
+members + the honest 200-row cap; C13 operations one-click assign +
+the honest workflow scope note; C14 live-chat conversation links +
+end-chat + customer navigation; B4 the six local workflow states
+surfaced — the State control + State-history card on the
+`SetTicketState` lane, with the supportos_state_id chain connected;
+B7 unknown webhook event types marked honestly — the "ignored" state +
+note + the Sync Health bucket) moved to `progress.md` per Rule 2,
+implemented, verified (full battery + kittest diff-locked ×2 with 65
+intended golden changes + 5 new goldens + VLM read-backs), and closed
+the same session; record in `completed.md`. Full-finding accounting
+vs. the audit's 44: A1–A8, B1–B3, B5, C1–C7, D1–D6, E1–E7 closed
+(AUD-P0/AUD-P1-1/AUD-P2-1) + C3/C8–C14, B4, B7 closed (this batch) =
+41 of 44. QUEUED below for the final batch AUD-P2-3: B6, D7, D8
+(Rule 8 STOP — say "continue" to proceed).**
+
+**QUEUED (final batch AUD-P2-3 on "continue"): B6 vestigial
+`provider_available` column (remove or probe-populate honestly — it
+has zero consumers); D7 webhook loopback-only reality gap (the health
+system self-heals and instructs — verify the polling-only-without-
+relay reality is honestly surfaced everywhere it matters); D8
+retention_days deletes audit history when enabled (default off,
+disclosed in Settings — verify the disclosure is complete and
+document the compliance trade-off in USER_MANUAL).**
 
 **Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
 items of `docs/audit/repo-audit-v1.9.6.md` §5) CONSUMED 2026-11-10:

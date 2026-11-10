@@ -113,6 +113,15 @@ pub(crate) fn set_ticket_state(
     actor_type: &str,
     actor_id: Option<i64>,
 ) -> Result<()> {
+    // AUD-P2-19 (B4): a closed vocabulary — a typo must not encode a
+    // bogus state silently (the same honesty `TicketPriority::parse`
+    // gives the priority lane).
+    if !workflow_state_is_valid(new_state) {
+        return Err(crate::error::Error::Validation(format!(
+            "unknown workflow state {new_state:?} — expected one of {}",
+            TICKET_WORKFLOW_STATES.join(", ")
+        )));
+    }
     let tx = conn.transaction()?;
 
     let old_state: Option<String> = tx
@@ -124,9 +133,22 @@ pub(crate) fn set_ticket_state(
         .ok()
         .flatten();
 
+    // AUD-P2-19 (B4): also resolve and stamp `supportos_state_id` — the
+    // reports `CustomState` dimension and the AI `get_supportos_metadata`
+    // tool read the id column, which nothing ever populated; writing it
+    // here connects the whole chain the way AUD-P0-9 did for priority.
+    let state_row_id: Option<i64> = tx
+        .query_row(
+            "SELECT id FROM ticket_states WHERE key = ?1",
+            params![new_state],
+            |r| r.get(0),
+        )
+        .ok();
+
     tx.execute(
-        "UPDATE conversations SET supportos_state = ?1 WHERE remote_id = ?2",
-        params![new_state, conversation_remote_id],
+        "UPDATE conversations SET supportos_state = ?1, supportos_state_id = ?2
+          WHERE remote_id = ?3",
+        params![new_state, state_row_id, conversation_remote_id],
     )?;
 
     tx.execute(
@@ -144,6 +166,74 @@ pub(crate) fn set_ticket_state(
 
     tx.commit()?;
     Ok(())
+}
+
+/// AUD-P2-19 (B4): the six built-in local workflow states, as a closed
+/// vocabulary beside `TicketPriority` (the same ALL/as_str/parse shape).
+/// Pre-fix the keys existed only as SQL rows in the `ticket_states`
+/// lookup table while `set_ticket_state` accepted ANY string — a typo
+/// encoded a bogus state silently. Every caller now validates.
+pub const TICKET_WORKFLOW_STATES: [&str; 6] = [
+    "new",
+    "investigating",
+    "waiting-customer",
+    "waiting-engineering",
+    "ready-verify",
+    "resolved",
+];
+
+#[must_use]
+pub fn workflow_state_is_valid(key: &str) -> bool {
+    TICKET_WORKFLOW_STATES.contains(&key)
+}
+
+/// AUD-P2-19 (B4): the transition history for a conversation — the
+/// `ticket_state_transitions` audit rows (both state and priority
+/// transitions) surfaced for the reader's history card. Pre-fix no
+/// query fn existed; the table was only read by report metrics.
+#[derive(Debug, Clone, Serialize)]
+pub struct StateTransitionRow {
+    pub from_state: Option<String>,
+    pub to_state: Option<String>,
+    pub from_priority: Option<String>,
+    pub to_priority: Option<String>,
+    pub actor_type: String,
+    pub actor_id: Option<i64>,
+    pub transitioned_at: String,
+}
+
+pub fn list_state_transitions(
+    conn: &Connection,
+    conversation_remote_id: i64,
+    limit: u32,
+) -> Vec<StateTransitionRow> {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT from_state, to_state, from_priority, to_priority,
+                actor_type, actor_id, transitioned_at
+           FROM ticket_state_transitions
+          WHERE conversation_remote_id = ?1
+          ORDER BY transitioned_at DESC, id DESC
+          LIMIT ?2",
+    ) else {
+        return Vec::new();
+    };
+    match stmt.query_map(
+        params![conversation_remote_id, i64::from(limit.clamp(1, 100))],
+        |r| {
+            Ok(StateTransitionRow {
+                from_state: r.get(0)?,
+                to_state: r.get(1)?,
+                from_priority: r.get(2)?,
+                to_priority: r.get(3)?,
+                actor_type: r.get(4)?,
+                actor_id: r.get(5)?,
+                transitioned_at: r.get(6)?,
+            })
+        },
+    ) {
+        Ok(rows) => rows.filter_map(|x| x.ok()).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 pub(crate) fn apply_m032(conn: &Connection) -> Result<()> {
@@ -198,4 +288,128 @@ pub(crate) fn apply_m032(conn: &Connection) -> Result<()> {
     }
     let _ = conn.execute("UPDATE app_state SET schema_version = 32 WHERE id = 1", []);
     Ok(())
+}
+
+// AUD-P2-19 (B4): the workflow-state lane — vocabulary validation, the
+// supportos_state_id linkage (reports/AI read it), and the surfaced
+// transition history.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn seed_conversation(conn: &Connection) -> i64 {
+        conn.execute(
+            "INSERT INTO conversations (remote_id, number, subject, preview, status)
+             VALUES (1001, 51, 'B4 subject', 'p', 'active')",
+            [],
+        )
+        .expect("conversation");
+        1001
+    }
+
+    #[test]
+    fn audp2_workflow_state_writes_state_id_and_transition() {
+        let mut c = conn();
+        let remote = seed_conversation(&c);
+
+        set_ticket_state(&mut c, remote, "investigating", "user", Some(5)).expect("set state");
+
+        let (state, state_id): (Option<String>, Option<i64>) = c
+            .query_row(
+                "SELECT supportos_state, supportos_state_id FROM conversations WHERE remote_id = ?1",
+                params![remote],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(state.as_deref(), Some("investigating"));
+        // The id linkage the reports CustomState dimension and the AI
+        // metadata tool read — previously never populated by any writer.
+        let resolved_id: i64 = c
+            .query_row(
+                "SELECT id FROM ticket_states WHERE key = 'investigating'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("lookup row");
+        assert_eq!(state_id, Some(resolved_id));
+
+        set_ticket_state(&mut c, remote, "resolved", "user", None).expect("second set");
+        let rows: Vec<(Option<String>, Option<String>)> = {
+            let mut stmt = c
+                .prepare(
+                    "SELECT from_state, to_state FROM ticket_state_transitions
+                      WHERE conversation_remote_id = ?1 ORDER BY id",
+                )
+                .expect("stmt");
+            stmt.query_map(params![remote], |r| Ok((r.get(0)?, r.get(1)?)))
+                .expect("map")
+                .filter_map(|x| x.ok())
+                .collect()
+        };
+        assert_eq!(
+            rows,
+            vec![
+                (None, Some("investigating".into())),
+                (Some("investigating".into()), Some("resolved".into()))
+            ],
+            "both transitions recorded with the from-state chain"
+        );
+    }
+
+    #[test]
+    fn audp2_junk_workflow_states_are_rejected() {
+        let mut c = conn();
+        let remote = seed_conversation(&c);
+        let err = set_ticket_state(&mut c, remote, "investigating-typo", "user", None)
+            .expect_err("a typo must not encode a bogus state");
+        assert!(
+            err.to_string().contains("unknown workflow state"),
+            "the error names the problem: {err}"
+        );
+        let state: Option<String> = c
+            .query_row(
+                "SELECT supportos_state FROM conversations WHERE remote_id = ?1",
+                params![remote],
+                |r| r.get(0),
+            )
+            .expect("row");
+        assert_eq!(state, None, "nothing was written");
+        let transitions: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM ticket_state_transitions WHERE conversation_remote_id = ?1",
+                params![remote],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(transitions, 0);
+    }
+
+    #[test]
+    fn audp2_state_history_lists_both_lanes_newest_first() {
+        let mut c = conn();
+        let remote = seed_conversation(&c);
+        set_ticket_state(&mut c, remote, "new", "user", None).expect("state");
+        set_priority(&mut c, remote, TicketPriority::High, "user", Some(5)).expect("priority");
+        set_ticket_state(&mut c, remote, "investigating", "automation", None).expect("state 2");
+
+        let rows = list_state_transitions(&c, remote, 20);
+        assert_eq!(rows.len(), 3);
+        // Newest first.
+        assert_eq!(rows[0].to_state.as_deref(), Some("investigating"));
+        assert_eq!(rows[0].actor_type, "automation");
+        // The priority row renders through the priority columns.
+        assert_eq!(rows[1].to_priority.as_deref(), Some("high"));
+        assert!(rows[1].to_state.is_none());
+        // The oldest row is the initial state set.
+        assert_eq!(rows[2].to_state.as_deref(), Some("new"));
+        assert_eq!(rows[2].from_state, None);
+        // The limit clamps.
+        assert_eq!(list_state_transitions(&c, remote, 1).len(), 1);
+    }
 }

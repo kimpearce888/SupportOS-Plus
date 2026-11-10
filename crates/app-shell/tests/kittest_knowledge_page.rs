@@ -288,3 +288,58 @@ fn uxh1_help_center_reader_html_body_1440_dark() {
 fn uxh1_help_center_reader_html_body_800_light() {
     render_help_center_reader(false, 800.0, "uxh1_help_center_reader_html_body_800_light");
 }
+
+/// AUD-P2-15 (C11): the Documents-tab document reader — the audit dead
+/// end where the palette deep link and the row hits had no per-document
+/// view at all. The fixture's documents carry full content (the list rows
+/// only ever showed a preview); clicking "Read" on the first row (the
+/// title-sorted "Billing FAQ") opens the reading surface with that
+/// content rendered — the plain-text body degrades to one readable
+/// block through the same UXH-1 pipeline.
+#[test]
+fn audp2_knowledge_doc_reader_light() {
+    let (page, db) = seeded_page();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                s.page.ui(ui, &s.db, None);
+            },
+            KnowledgePageState {
+                installed: false,
+                page,
+                db,
+            },
+        );
+    h.run_ok();
+    assert!(
+        h.get_all_by_label("Read").next().is_some(),
+        "the documents rows must carry the read act"
+    );
+    h.get_all_by_label("Read")
+        .next()
+        .expect("the first document's read button")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.get_all_by_label("Billing FAQ").next().is_some(),
+        "the reader shows the document's title"
+    );
+    assert!(
+        h.get_all_by_label("Billing answers for the support desk.")
+            .next()
+            .is_some(),
+        "the reader renders the stored document content"
+    );
+    assert!(
+        h.get_all_by_label("← back to list").next().is_some(),
+        "the reader carries the back act"
+    );
+    h.snapshot("audp2_knowledge_doc_reader_light");
+}

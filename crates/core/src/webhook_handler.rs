@@ -171,7 +171,20 @@ pub(crate) fn process_event(conn: &Connection, row_id: i64, event_type: &str, ra
                 }
             }
         }
-        _ => {}
+        // AUD-P2-20 (B7): unknown event types used to fall through
+        // `_ => {}` and land in the generic "processed" state below —
+        // accepted, deduped, persisted, then indistinguishable from a
+        // handled event. Mark them honestly instead: the row keeps the
+        // payload (raw storage), the state names what happened, and the
+        // note says why. `get_pending_webhook_events` drains only
+        // pending/failed, so an ignored row never retries; the dedupe
+        // keeps repeat deliveries as one honest row.
+        _ => {
+            let note = format!("unknown event type {event_type:?} — stored, not processed");
+            tracing::info!(event_type, "webhook event type is unknown; marking ignored");
+            let _ = webhook::set_webhook_event_state(conn, row_id, "ignored", Some(&note));
+            return;
+        }
     }
 
     if let Some((kind, payload)) = enqueued
@@ -396,5 +409,73 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM beacon_chats", [], |r| r.get(0))
             .expect("mirror readable");
         assert_eq!(mirrored, 0);
+    }
+    // AUD-P2-20 (B7): unknown event types must be marked "ignored" with
+    // an honest note — not silently "processed". Pre-fix, `_ => {}` let
+    // a brand-new Help Scout event type vanish beyond raw storage.
+    #[test]
+    fn unknown_event_type_is_marked_ignored_with_a_note() {
+        let conn = fresh_conn();
+        let secret = b"top-secret";
+        let body = br#"{"objectID":777}"#;
+        let sig = signed(secret, body);
+
+        let row_id = match process_webhook(&conn, secret, body, Some(&sig), "convo.pinned") {
+            WebhookProcessResult::Accepted { row_id } => row_id,
+            other => panic!("expected Accepted, got {other:?}"),
+        };
+
+        let (state, note): (String, Option<String>) = conn
+            .query_row(
+                "SELECT processing_state, processing_error FROM webhook_events WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("event row");
+        assert_eq!(
+            state, "ignored",
+            "an unknown type is accepted-and-stored, but must not claim processed"
+        );
+        let note = note.unwrap_or_default();
+        assert!(
+            note.contains("unknown event type"),
+            "the note must say why it was skipped: {note:?}"
+        );
+        assert!(
+            note.contains("convo.pinned"),
+            "the note must name the type: {note:?}"
+        );
+
+        // The payload is still stored (raw storage promise).
+        let payload: String = conn
+            .query_row(
+                "SELECT payload FROM webhook_events WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| r.get(0),
+            )
+            .expect("payload row");
+        assert!(payload.contains("777"));
+
+        // No jobs were spawned for an unknown type.
+        let jobs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0))
+            .expect("jobs count");
+        assert_eq!(jobs, 0, "an unknown type must not enqueue work");
+
+        // A duplicate delivery of the same unknown type dedupes to the
+        // one honest row (state stays ignored).
+        let dup = process_webhook(&conn, secret, body, Some(&sig), "convo.pinned");
+        assert!(
+            matches!(dup, WebhookProcessResult::Duplicate { .. }),
+            "repeat delivery dedupes: {dup:?}"
+        );
+        let states: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM webhook_events WHERE event_type = 'convo.pinned'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(states, 1);
     }
 }

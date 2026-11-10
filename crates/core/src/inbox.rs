@@ -104,6 +104,10 @@ pub struct ConversationDetail {
     /// AUD-P1-4 (C5): the snooze state — the local column the mirror has
     /// kept since m030, surfaced to the reader.
     pub snoozed_until: Option<String>,
+    /// AUD-P2-19 (B4): the local workflow state (`supportos_state`),
+    /// previously written only by automation and never surfaced — the
+    /// reader needs it to render the State control.
+    pub workflow_state: Option<String>,
 }
 
 pub fn list_conversations(
@@ -266,7 +270,8 @@ pub fn get_conversation(
                       ELSE TRIM(COALESCE(cu.first_name, '') || ' ' || COALESCE(cu.last_name, ''))
                     END, cu.email,
                     c.supportos_priority, c.response_state,
-                    c.created_at, c.updated_at, c.closed_at, c.snoozed_until
+                    c.created_at, c.updated_at, c.closed_at, c.snoozed_until,
+                    c.supportos_state
              FROM conversations c
              LEFT JOIN mailboxes m ON m.id = c.mailbox_local_id
              LEFT JOIN users u ON u.id = c.assignee_local_id
@@ -302,6 +307,7 @@ pub fn get_conversation(
                 // surface could show or edit them.
                 tags: crate::conversation_ops::read_conversation_tags(conn, row.get(0)?),
                 snoozed_until: row.get::<_, Option<String>>(20).ok().flatten(),
+                workflow_state: row.get::<_, Option<String>>(21).ok().flatten(),
             })
         },
     );

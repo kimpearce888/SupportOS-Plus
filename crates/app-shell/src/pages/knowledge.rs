@@ -311,6 +311,21 @@ impl ImportPanel {
     }
 }
 
+/// AUD-P2-15 (C11): the local-document edit form state — prefilled from
+/// `get_document` (title, visibility, full content; the list rows only
+/// carry a 200-char preview), saved through `update_document`.
+#[derive(Debug, Clone)]
+struct DocEditPanel {
+    id: i64,
+    title: String,
+    content: String,
+    visibility: String,
+    /// Set when the stored visibility is not one of the two pickable
+    /// values and the form fell back to a pickable one — the edit card
+    /// carries the note so the fallback is never silent.
+    visibility_note: Option<String>,
+}
+
 pub struct KnowledgePage {
     tab: Tab,
     documents: Vec<Value>,
@@ -326,6 +341,17 @@ pub struct KnowledgePage {
     status_pick: Option<String>,
     reader: Option<i64>,
     reader_text: Option<(DocArticle, String)>,
+    /// AUD-P2-15 (C11): the open document record for the Documents-tab
+    /// reader (`get_document` payload — full content plus the chunk
+    /// counts), replacing the bare list as the record view.
+    doc_reader: Option<Value>,
+    /// AUD-P2-15 (C11): deep-link latch — the shell's `go_to_documents`
+    /// call carries no db handle, so the id waits here and documents_ui
+    /// resolves it into `doc_reader` on the next render.
+    pending_doc: Option<i64>,
+    /// AUD-P2-15 (C11): the in-place document edit form (the connectors
+    /// edit idiom), riding above the list or the reader.
+    doc_edit: Option<DocEditPanel>,
     status_message: Option<String>,
     error: Option<String>,
     data_dir: Option<PathBuf>,
@@ -361,6 +387,9 @@ impl KnowledgePage {
             status_pick: None,
             reader: None,
             reader_text: None,
+            doc_reader: None,
+            pending_doc: None,
+            doc_edit: None,
             status_message: None,
             error: None,
             data_dir: None,
@@ -518,6 +547,142 @@ impl KnowledgePage {
         Ok(())
     }
 
+    /// AUD-P2-15 (C11): per-document re-ingest — the scoped re-embed the
+    /// audit found missing (delete + re-import was the only refresh path,
+    /// and the Settings re-index resets the WHOLE corpus). Resets this
+    /// document's chunks — the permanently-excluded 5-attempt rows too —
+    /// and re-queues the embedding pass.
+    pub(crate) fn reindex_document_action(&mut self, db: &DbHandle, id: i64) {
+        match db.with_write(|conn| spp_core::knowledge_store::reindex_document(conn, id)) {
+            Ok(0) => {
+                self.status_message = Some(format!("Document {id} has no chunks to re-index yet."));
+            }
+            Ok(n) => {
+                self.status_message = Some(format!("{n} chunks re-queued for embedding."));
+            }
+            Err(e) => self.error = Some(format!("Could not re-index document {id}: {e}")),
+        }
+        self.refresh_doc_reader(db);
+        self.reload_all(db);
+    }
+
+    /// AUD-P2-15 (C11): refresh the open reader record in place (its
+    /// chunk counts move after a re-index or a save).
+    fn refresh_doc_reader(&mut self, db: &DbHandle) {
+        let Some(id) = self.doc_reader.as_ref().map(|d| i64_field(d, "id")) else {
+            return;
+        };
+        self.doc_reader = db.with_read(|conn| spp_core::knowledge_store::get_document(conn, id));
+    }
+
+    /// AUD-P2-15 (C11): open the edit form prefilled from the stored
+    /// record (title, visibility, full content). A stored visibility
+    /// outside the two pickable values falls back to a pickable one with
+    /// a note in the card — the chips can only pick the two.
+    fn start_doc_edit(&mut self, db: &DbHandle, id: i64) {
+        let Some(record) = db.with_read(|conn| spp_core::knowledge_store::get_document(conn, id))
+        else {
+            self.error = Some(format!("Document {id} was not found."));
+            return;
+        };
+        let stored = str_field(&record, "visibility");
+        let (visibility, visibility_note) = if VISIBILITIES.iter().any(|(v, _)| *v == stored) {
+            (stored, None)
+        } else {
+            (
+                VISIBILITIES[0].0.to_string(),
+                Some(format!(
+                    "the stored visibility “{stored}” is not one of the pickable values — \
+                     saving applies the selected one"
+                )),
+            )
+        };
+        self.doc_edit = Some(DocEditPanel {
+            id,
+            title: str_field(&record, "title"),
+            content: str_field(&record, "content"),
+            visibility,
+            visibility_note,
+        });
+        self.error = None;
+    }
+
+    /// AUD-P2-15 (C11): save the edit form through `update_document` —
+    /// re-chunks and refreshes the FTS index in the same write. The
+    /// upsert inside keys on (source_id, title), so a RENAME is applied
+    /// to the row first; otherwise the save would insert a sibling
+    /// document under the new title instead of editing this one. A
+    /// visibility-only edit rides the upsert's no-change early return,
+    /// so it is applied directly (FTS rows kept in step).
+    fn save_doc_edit(&mut self, db: &DbHandle) {
+        let Some(edit) = self.doc_edit.clone() else {
+            return;
+        };
+        let title = edit.title.trim().to_string();
+        if title.is_empty() {
+            self.error = Some("A title is required.".to_string());
+            return;
+        }
+        if !VISIBILITIES.iter().any(|(v, _)| *v == edit.visibility) {
+            self.error = Some(format!(
+                "Visibility must be {} or {}.",
+                VISIBILITIES[0].0, VISIBILITIES[1].0
+            ));
+            return;
+        }
+        let result = db.with_write(|conn| {
+            let record =
+                spp_core::knowledge_store::get_document(conn, edit.id).ok_or_else(|| {
+                    spp_core::error::Error::Validation("document not found".to_string())
+                })?;
+            if str_field(&record, "title") != title {
+                conn.execute(
+                    "UPDATE knowledge_documents SET title = ?1, updated_at = datetime('now')
+                      WHERE id = ?2",
+                    rusqlite::params![title, edit.id],
+                )?;
+                conn.execute(
+                    "UPDATE fts_knowledge SET title = ?1 WHERE document_id = ?2",
+                    rusqlite::params![title, edit.id],
+                )?;
+            }
+            let (version, changed) = spp_core::knowledge_store::update_document(
+                conn,
+                edit.id,
+                &title,
+                &edit.content,
+                &edit.visibility,
+            )?;
+            if str_field(&record, "visibility") != edit.visibility {
+                conn.execute(
+                    "UPDATE knowledge_documents
+                        SET visibility = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    rusqlite::params![edit.visibility, edit.id],
+                )?;
+                conn.execute(
+                    "UPDATE fts_knowledge SET visibility = ?1 WHERE document_id = ?2",
+                    rusqlite::params![edit.visibility, edit.id],
+                )?;
+            }
+            Ok::<_, spp_core::error::Error>((version, changed))
+        });
+        match result {
+            Ok((version, changed)) => {
+                self.doc_edit = None;
+                self.status_message = Some(if changed {
+                    format!(
+                        "Document saved — version {version}, chunks and search index refreshed."
+                    )
+                } else {
+                    format!("Document saved — no content change, version stays at {version}.")
+                });
+                self.refresh_doc_reader(db);
+                self.reload_all(db);
+            }
+            Err(e) => self.error = Some(format!("Could not save the document: {e}")),
+        }
+    }
+
     fn import_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
         let mut file_action: Option<String> = None;
         let mut manual_submit = false;
@@ -639,13 +804,33 @@ impl KnowledgePage {
         self.reader_text = db.with_read(|conn| article_detail(conn, id));
     }
 
-    /// Deep link `/knowledge?doc={id}`: land on the Documents tab (the document
-    /// list is the record view for knowledge_documents — there is no per-document
-    /// reader on that tab).
-    pub(crate) fn go_to_documents(&mut self, _id: i64) {
+    /// Deep link `/knowledge?doc={id}`: land on the Documents tab with that
+    /// document's reader open — AUD-P2-15 (C11): the id used to be discarded
+    /// here (the old comment admitted there was no per-document reader on
+    /// that tab). The shell calls this without a db handle, so the id
+    /// latches and `documents_ui` resolves it into the reader on the next
+    /// render.
+    pub(crate) fn go_to_documents(&mut self, id: i64) {
         self.tab = Tab::Documents;
+        self.pending_doc = Some(id);
+        self.doc_reader = None;
+        self.doc_edit = None;
         self.reader = None;
         self.reader_text = None;
+    }
+
+    /// AUD-P2-15 (C11): open the per-document reader on the Documents tab
+    /// — the row "Read" act and the palette deep link both land here.
+    /// Loads the full record; the list rows only carry a preview.
+    pub(crate) fn open_document(&mut self, db: &DbHandle, id: i64) {
+        self.doc_reader = db.with_read(|conn| spp_core::knowledge_store::get_document(conn, id));
+        self.doc_edit = None;
+    }
+
+    /// AUD-P2-15 (C11): the reader's back act — return to the list (the
+    /// list stays loaded behind the reader).
+    pub(crate) fn close_document(&mut self) {
+        self.doc_reader = None;
     }
 
     /// Deep link `/knowledge/help-center/{id}`: land on the Help Center tab with
@@ -741,6 +926,24 @@ impl KnowledgePage {
 
     fn documents_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
         self.ensure_loaded(db);
+        // AUD-P2-15 (C11): resolve the deep-link latch — `go_to_documents`
+        // carries no db handle, so the id waits for this render to open
+        // the reader (an unknown id falls through to the list, as before).
+        if let Some(id) = self.pending_doc.take() {
+            self.open_document(db, id);
+        }
+        // AUD-P2-15 (C11): the edit card rides above whichever surface is
+        // below it — the list, or the reader it was opened from.
+        if self.doc_edit.is_some() {
+            self.doc_edit_ui(ui, db);
+            ui.add_space(8.0);
+        }
+        // AUD-P2-15 (C11): the per-document reader replaces the list — the
+        // same UXH-1 reading surface the Help Center reader rides.
+        if self.doc_reader.is_some() {
+            self.doc_reader_ui(ui, db);
+            return None;
+        }
         design::hint_text(
             ui,
             "Local knowledge documents used by search and AI answers",
@@ -763,6 +966,13 @@ impl KnowledgePage {
             return None;
         }
         let mut action: Option<(i64, String, &str)> = None;
+        // AUD-P2-15 (C11): the row acts — Read (the reader), Edit (the
+        // in-place form), Re-index (the scoped re-embed) — joined the
+        // review lifecycle buttons. The cell wraps so six acts stay
+        // inside the Actions column at every width.
+        let mut read: Option<i64> = None;
+        let mut edit: Option<i64> = None;
+        let mut reindex: Option<i64> = None;
         // UXG-1-4: exact-column data_table (virtualized rows built in) —
         // the document list spans the content column at every width.
         let documents = &self.documents;
@@ -792,7 +1002,25 @@ impl KnowledgePage {
                         .color(t.foreground),
                 );
                 design::td_num(ui, &i64_field(doc, "chunk_count").to_string());
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if design::button(ui, "Read", ButtonVariant::Outline)
+                        .on_hover_text("open this document in the reader")
+                        .clicked()
+                    {
+                        read = Some(id);
+                    }
+                    if design::button(ui, "Edit", ButtonVariant::Outline)
+                        .on_hover_text("edit title, visibility and content in place")
+                        .clicked()
+                    {
+                        edit = Some(id);
+                    }
+                    if design::button(ui, "Re-index", ButtonVariant::Outline)
+                        .on_hover_text("re-embed this document's chunks — resets failed attempts")
+                        .clicked()
+                    {
+                        reindex = Some(id);
+                    }
                     if design::button(ui, "Mark Reviewed", ButtonVariant::Outline).clicked() {
                         action = Some((id, str_field(doc, "title"), "reviewed"));
                     }
@@ -805,6 +1033,15 @@ impl KnowledgePage {
                 });
             },
         );
+        if let Some(id) = read {
+            self.open_document(db, id);
+        }
+        if let Some(id) = edit {
+            self.start_doc_edit(db, id);
+        }
+        if let Some(id) = reindex {
+            self.reindex_document_action(db, id);
+        }
         if let Some((id, title, what)) = action {
             match what {
                 "reviewed" => self.mark_reviewed(db, id),
@@ -1493,6 +1730,147 @@ impl KnowledgePage {
             self.reader_text = None;
         }
     }
+
+    /// AUD-P2-15 (C11): the Documents-tab document reader — the UXH-1
+    /// reading surface (centered READER_MEASURE column, the sanitized
+    /// span pipeline from `article_body_ui`) pointed at the stored local
+    /// document instead of a synced article: full content, the chunk
+    /// embedding state as the meta line, and the edit / re-index acts
+    /// one click away. Plain-text bodies degrade to one readable block.
+    fn doc_reader_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let doc = self.doc_reader.clone();
+        let mut edit: Option<i64> = None;
+        let mut reindex: Option<i64> = None;
+        let back = design::centered_column(ui, design::scale::READER_MEASURE, |ui| {
+            let back = design::button(ui, "← back to list", ButtonVariant::Ghost).clicked();
+            let Some(doc) = &doc else {
+                design::hint_text(ui, "This document is no longer available.");
+                return back;
+            };
+            let id = i64_field(doc, "id");
+            design::section_title(ui, &str_field(doc, "title"));
+            let mut meta = format!(
+                "{} · v{} · updated {}",
+                str_field(doc, "visibility"),
+                i64_field(doc, "version"),
+                str_field(doc, "updated_at")
+            );
+            let chunks = i64_field(doc, "chunk_count");
+            if chunks > 0 {
+                meta.push_str(&format!(
+                    " · {}/{} chunks indexed",
+                    i64_field(doc, "indexed_count"),
+                    chunks
+                ));
+                let exhausted = i64_field(doc, "exhausted_count");
+                if exhausted > 0 {
+                    meta.push_str(&format!(
+                        " · {exhausted} chunk(s) gave up after 5 failed attempts"
+                    ));
+                }
+            }
+            design::hint_text(ui, &meta);
+            design::divider(ui);
+            egui::ScrollArea::vertical()
+                .id_salt("docs-document-reader")
+                .show(ui, |ui| {
+                    article_body_ui(ui, &str_field(doc, "content"));
+                });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if design::button(ui, "Edit", ButtonVariant::Outline)
+                    .on_hover_text("edit title, visibility and content in place")
+                    .clicked()
+                {
+                    edit = Some(id);
+                }
+                if design::button(ui, "Re-index", ButtonVariant::Outline)
+                    .on_hover_text("re-embed this document's chunks — resets failed attempts")
+                    .clicked()
+                {
+                    reindex = Some(id);
+                }
+            });
+            back
+        })
+        .inner;
+        if back {
+            self.close_document();
+        }
+        if let Some(id) = edit {
+            self.start_doc_edit(db, id);
+        }
+        if let Some(id) = reindex {
+            self.reindex_document_action(db, id);
+        }
+    }
+
+    /// AUD-P2-15 (C11): the in-place document edit card — the connectors
+    /// edit idiom (prefilled form + "Save Changes"/Cancel) riding above
+    /// the list or the reader it was opened from. Saving runs
+    /// `update_document`, which re-chunks and refreshes the search index
+    /// in the same write.
+    fn doc_edit_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+        let Some(mut form) = self.doc_edit.clone() else {
+            return;
+        };
+        let mut save = false;
+        let mut cancel = false;
+        design::card_titled_wide(
+            ui,
+            "Edit document",
+            Some("saving re-chunks the document and refreshes the search index"),
+            |ui| {
+                design::form_grid(ui, "knowledge-doc-edit-form", |ui| {
+                    let title_label = design::field_label(ui, "Title");
+                    ui.add_sized([260.0, 28.0], egui::TextEdit::singleline(&mut form.title))
+                        .labelled_by(title_label.id);
+                    ui.end_row();
+                    design::field_label(ui, "Visibility");
+                    ui.horizontal(|ui| {
+                        for (value, label) in VISIBILITIES {
+                            if design::chip(ui, form.visibility == value, label).clicked() {
+                                form.visibility = value.to_string();
+                            }
+                        }
+                    });
+                    ui.end_row();
+                    let content_label = design::field_label(ui, "Content");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut form.content)
+                            .desired_rows(8)
+                            .desired_width(f32::INFINITY),
+                    )
+                    .labelled_by(content_label.id);
+                    ui.end_row();
+                });
+                if let Some(note) = &form.visibility_note {
+                    design::hint_text(ui, note);
+                    ui.add_space(4.0);
+                }
+                let ready = !form.title.trim().is_empty() && !form.content.trim().is_empty();
+                ui.horizontal(|ui| {
+                    if ready {
+                        if design::button(ui, "Save Changes", ButtonVariant::Primary).clicked() {
+                            save = true;
+                        }
+                    } else {
+                        let _ = ui.add_enabled(false, egui::Button::new("Save Changes"));
+                    }
+                    if design::button(ui, "Cancel", ButtonVariant::Outline).clicked() {
+                        cancel = true;
+                    }
+                });
+            },
+        );
+        self.doc_edit = Some(form);
+        if cancel {
+            self.doc_edit = None;
+        }
+        if save {
+            self.save_doc_edit(db);
+        }
+    }
 }
 
 /// UXH-1: split the sanitized span stream into rendering blocks at its
@@ -1815,6 +2193,235 @@ mod tests {
         let _ = page.delete_document(&db, doc_id);
         page.reload_all(&db);
         assert!(page.documents.is_empty());
+    }
+
+    // AUD-P2-15 (C11): the Documents-tab reader / edit / re-ingest — the
+    // three dead ends the audit found (no per-document view, no scoped
+    // re-embed, delete + re-import as the only edit path).
+
+    fn seed_knowledge_doc(db: &DbHandle, title: &str, content: &str, visibility: &str) -> i64 {
+        db.with_write(|conn| {
+            let source_id = spp_core::knowledge_store::get_or_create_source(
+                conn, "Handbook", "manual", "internal",
+            )
+            .expect("source");
+            spp_core::knowledge_store::upsert_document(
+                conn, source_id, title, content, visibility, "markdown",
+            )
+            .expect("upsert")
+            .0
+        })
+    }
+
+    #[test]
+    fn audp2_document_reader_round_trip() {
+        let db = empty_db();
+        let doc_id =
+            seed_knowledge_doc(&db, "Reader guide", "Read me end to end.", "internal_only");
+        let mut page = KnowledgePage::new();
+        page.reload_all(&db);
+        assert!(page.doc_reader.is_none());
+
+        // open loads the full stored record — the list row only carries
+        // the 200-char preview, the reader carries the content.
+        page.open_document(&db, doc_id);
+        let reader = page.doc_reader.clone().expect("the reader state loads");
+        assert_eq!(i64_field(&reader, "id"), doc_id);
+        assert_eq!(str_field(&reader, "title"), "Reader guide");
+        assert_eq!(str_field(&reader, "content"), "Read me end to end.");
+        assert_eq!(i64_field(&reader, "chunk_count"), 1);
+
+        // back clears the reader — the list stays loaded behind it
+        page.close_document();
+        assert!(page.doc_reader.is_none());
+        assert_eq!(page.documents.len(), 1);
+
+        // the deep link latches the id (the shell call has no db handle)
+        // and resolves into the reader on the Documents tab
+        page.go_to_documents(doc_id);
+        assert_eq!(page.tab, Tab::Documents);
+        assert_eq!(page.pending_doc, Some(doc_id));
+        assert!(page.doc_reader.is_none());
+        if let Some(id) = page.pending_doc.take() {
+            page.open_document(&db, id);
+        }
+        let reader = page
+            .doc_reader
+            .clone()
+            .expect("the deep link opens the reader");
+        assert_eq!(i64_field(&reader, "id"), doc_id);
+        assert_eq!(str_field(&reader, "content"), "Read me end to end.");
+
+        // an unknown id falls through to the list, not a broken reader
+        page.go_to_documents(999);
+        if let Some(id) = page.pending_doc.take() {
+            page.open_document(&db, id);
+        }
+        assert!(page.doc_reader.is_none());
+    }
+
+    #[test]
+    fn audp2_document_edit_round_trips_through_update_document() {
+        let db = empty_db();
+        let doc_id = seed_knowledge_doc(
+            &db,
+            "Troubleshooting logins",
+            "Check the SSO configuration first.",
+            "internal_only",
+        );
+        let mut page = KnowledgePage::new();
+        page.reload_all(&db);
+
+        // the edit form opens prefilled with the full stored record
+        page.start_doc_edit(&db, doc_id);
+        let form = page.doc_edit.clone().expect("the edit form opens");
+        assert_eq!(form.id, doc_id);
+        assert_eq!(form.title, "Troubleshooting logins");
+        assert_eq!(form.content, "Check the SSO configuration first.");
+        assert_eq!(form.visibility, "internal_only");
+        page.doc_edit = None; // the Cancel act clears without writing
+
+        // title + content + visibility change: the title must EDIT the row
+        // (not insert a sibling under the new title), the content change
+        // must bump the version, and the re-chunk must run
+        page.start_doc_edit(&db, doc_id);
+        if let Some(form) = page.doc_edit.as_mut() {
+            form.title = "Troubleshooting SSO logins".into();
+            form.content = "Check the SSO configuration first, then the audit log.".into();
+            form.visibility = "customer_safe".into();
+        }
+        page.save_doc_edit(&db);
+        assert!(page.doc_edit.is_none(), "saving closes the form");
+        assert!(page.error.is_none(), "{:?}", page.error);
+        page.reload_all(&db);
+        assert_eq!(
+            page.documents.len(),
+            1,
+            "the rename edits the row, no sibling"
+        );
+        assert_eq!(
+            str_field(&page.documents[0], "title"),
+            "Troubleshooting SSO logins"
+        );
+        assert_eq!(str_field(&page.documents[0], "visibility"), "customer_safe");
+
+        let stored = db
+            .with_read(|conn| spp_core::knowledge_store::get_document(conn, doc_id))
+            .expect("the document survives the edit");
+        assert_eq!(str_field(&stored, "title"), "Troubleshooting SSO logins");
+        assert_eq!(
+            str_field(&stored, "content"),
+            "Check the SSO configuration first, then the audit log."
+        );
+        assert_eq!(
+            i64_field(&stored, "version"),
+            2,
+            "a content change bumps the version"
+        );
+        assert_eq!(i64_field(&stored, "chunk_count"), 1, "the edit re-chunked");
+
+        // a visibility-only save applies the chips without a version bump
+        // (the checksum-early-return path) and keeps the FTS rows in step
+        page.start_doc_edit(&db, doc_id);
+        if let Some(form) = page.doc_edit.as_mut() {
+            form.visibility = "internal_only".into();
+        }
+        page.save_doc_edit(&db);
+        assert!(page.error.is_none(), "{:?}", page.error);
+        let (visibility, version, fts_visibility) = db.with_read(|conn| {
+            let stored = spp_core::knowledge_store::get_document(conn, doc_id)
+                .expect("the document survives the visibility edit");
+            let fts: String = conn
+                .query_row(
+                    "SELECT visibility FROM fts_knowledge WHERE document_id = ?1",
+                    rusqlite::params![doc_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or_default();
+            (
+                str_field(&stored, "visibility"),
+                i64_field(&stored, "version"),
+                fts,
+            )
+        });
+        assert_eq!(visibility, "internal_only");
+        assert_eq!(version, 2, "no content change, no version bump");
+        assert_eq!(fts_visibility, "internal_only", "the FTS rows follow");
+    }
+
+    #[test]
+    fn audp2_reindex_resets_exhausted_chunks_and_requeues_embedding() {
+        let db = empty_db();
+        let doc_id = seed_knowledge_doc(
+            &db,
+            "Embedding laggard",
+            "A body whose chunk failed to embed.",
+            "internal_only",
+        );
+        // the permanently-excluded state: 5 failed attempts
+        db.with_write(|conn| {
+            conn.execute(
+                "UPDATE knowledge_chunks
+                    SET embedding_state = 'failed', embedding_attempts = 5
+                  WHERE document_id = ?1",
+                rusqlite::params![doc_id],
+            )
+            .expect("exhaust the chunk");
+        });
+
+        let mut page = KnowledgePage::new();
+        page.reload_all(&db);
+        page.open_document(&db, doc_id);
+        assert_eq!(
+            i64_field(
+                page.doc_reader.as_ref().expect("the reader is open"),
+                "exhausted_count"
+            ),
+            1
+        );
+
+        page.reindex_document_action(&db, doc_id);
+        assert!(
+            page.status_message
+                .as_deref()
+                .is_some_and(|m| m.contains("re-queued")),
+            "the re-ingest reports the reset: {:?}",
+            page.status_message
+        );
+        assert!(page.error.is_none(), "{:?}", page.error);
+        assert_eq!(
+            i64_field(
+                page.doc_reader.as_ref().expect("the reader stays open"),
+                "exhausted_count"
+            ),
+            0,
+            "the open reader refreshes with the reset"
+        );
+
+        let (state, attempts, job) = db.with_read(|conn| {
+            let (state, attempts): (String, i64) = conn
+                .query_row(
+                    "SELECT embedding_state, embedding_attempts FROM knowledge_chunks
+                      WHERE document_id = ?1",
+                    rusqlite::params![doc_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("the chunk survives the reset");
+            let job: String = conn
+                .query_row(
+                    "SELECT type FROM jobs WHERE queue = 'embeddings' ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_default();
+            (state, attempts, job)
+        });
+        assert_eq!(state, "not_indexed", "the exhausted chunk is re-armed");
+        assert_eq!(attempts, 0, "the failed-attempt count resets");
+        assert_eq!(
+            job, "embed_knowledge_chunks",
+            "the embedding pass is re-queued"
+        );
     }
 
     fn temp_data_dir(label: &str) -> PathBuf {

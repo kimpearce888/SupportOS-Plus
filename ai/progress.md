@@ -1,14 +1,63 @@
 ## Active items
 
-(none — Batch AUD-P2-1 (fix the P2 backlog, part one — §5 rows 16–18:
+(none — Batch AUD-P2-2 (row 15's eight UI dead-end clusters + B4 + B7)
+closed 2026-11-10, record in `completed.md`; Rule 8 STOP. The final
+three findings — B6, D7, D8 — stay QUEUED in `plan.md` for batch
+AUD-P2-3 on the owner's "continue".)
+
+**Batch AUD-P2-2 (moved here from `plan.md` per Rule 2, 2026-11-10,
+on the owner's standing "fix everything" directive re-confirmed after
+the repo re-sync) — CONSUMED:**
+
+- **AUD-P2-11 (C3)** — Custom objects: links can never be created
+  (`links: Vec::new()` hard-coded) while the page counts and
+  advertises "N links"; no edit for types/objects; no pager (self-
+  admitted "showing first N of M — the list has no pager"). Fix:
+  link creation, type/object edit, a pager.
+- **AUD-P2-12 (C8)** — Issue radar: alerts tab is read-only with no
+  drill-down (radar alerts, SLA callouts, clusters, gap evidence —
+  inert text); known issues are create-only (no edit/status/delete);
+  queued cluster/gap jobs need a manual reload. Fix: drill-downs,
+  known-issue lifecycle, auto-refresh.
+- **AUD-P2-13 (C9)** — Outreach: segments are raw-JSON textareas with
+  no recipient-count preview before save; campaign targeting needs
+  raw mailbox/segment ids from a hint line; no campaign edit; DNC add
+  needs a raw customer id. Fix: preview, pickers, campaign edit.
+- **AUD-P2-14 (C10)** — Reports builder: filters are raw CSV id fields
+  ("mailbox ids (csv):" etc.) — no pickers; happiness table's
+  conversation numbers are inert; support-graph nodes have no delete.
+  Fix: pickers, clickable rows, node delete.
+- **AUD-P2-15 (C11)** — Knowledge documents: no document reader
+  (palette hits land on the list — acknowledged in code); no
+  per-document re-ingest; local docs can't be edited. Fix: reader
+  (the help-center reader pattern), re-ingest action, doc edit.
+- **AUD-P2-16 (C12)** — Organizations: create-only (no edit/delete);
+  members not clickable to customer profiles; capped at 200. Fix:
+  edit/delete, clickable members, honest cap surfacing.
+- **AUD-P2-17 (C13)** — Operations: "suggested assignees" is
+  display-only text — no Assign button; workflows can be run but not
+  created/edited. Fix: one-click assign, workflow create/edit.
+- **AUD-P2-18 (C14)** — Live chats: the chat→conversation link
+  (conversation_remote_id/number) exists in the model but is never
+  displayed/clickable; no agent "end chat"; no navigation to the
+  customer. Fix: links + end-chat + customer navigation.
+- **AUD-P2-19 (B4)** — `TicketOperation::SetTicketState` has no UI
+  caller: the six local workflow states and transition audit exist in
+  core (`ticket_ops.rs`/`ticket_states`); nothing surfaces them. Fix:
+  a UI surface for the local workflow state + its transition history.
+- **AUD-P2-20 (B7)** — Webhook unknown event types are accepted,
+  deduped, persisted — then marked "processed" (`_ => {}`): a new
+  Help Scout event type vanishes without a trace beyond raw storage.
+  Fix: mark unknown types honestly (visible state + note) so
+  Diagnostics shows what was skipped and why.
+
+Batch AUD-P2-1 (fix the P2 backlog, part one — §5 rows 16–18:
 A7 retryable-flag honor, A8 timeout fallback, D3 conversation-chunk
 content-hash dedup, D5 me-user fallback guard, D6 scheduled reconcile,
 E1 USER_MANUAL/manual re-stamp, E2 README rows, E3 ci.yml counts +
 Cargo/catalog comments + status_filter, I1 tag path + aarch64 lane +
 deny [sources], D4 secrets.key guidance + restore warning) closed
-2026-11-10, record in `completed.md`; Rule 8 STOP. Row 15 — the eight
-remaining UI dead-end clusters C3/C8–C14 — stays QUEUED in `plan.md`
-for batch AUD-P2-2 on the owner's "continue".)
+2026-11-10, record in `completed.md`; Rule 8 STOP.
 
 Batch AUD-P1-1 (fix the P1 backlog — the eight dead-end/workflow
 items of the repo audit §5) closed 2026-11-10, record in

@@ -106,6 +106,136 @@ pub fn create_known_issue(conn: &Connection, name: &str, description: Option<&st
     Ok(conn.last_insert_rowid())
 }
 
+// AUD-P2-12 (C8): the known-issue lifecycle — the page's Known tab was
+// create-only (no edit, no status change, no delete), mirroring the
+// incident lifecycle fns above (validated vocabulary, updated_at bump,
+// honest not-found). Link management rides along: link/unlink for
+// conversation evidence, the same INSERT the create path uses.
+
+/// The status vocabulary the Known tab's create form already offered.
+pub const KNOWN_ISSUE_STATUSES: [&str; 4] =
+    ["investigating", "identified", "fix_in_progress", "resolved"];
+
+/// Set a known issue's status (validated vocabulary). Returns false
+/// when the id is unknown.
+pub fn set_known_issue_status(
+    conn: &Connection,
+    known_issue_id: i64,
+    status: &str,
+) -> Result<bool> {
+    if !KNOWN_ISSUE_STATUSES.contains(&status) {
+        return Err(crate::error::Error::Config(format!(
+            "unknown known-issue status: {status}"
+        )));
+    }
+    let rows = conn.execute(
+        "UPDATE known_issues
+            SET status = ?1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE id = ?2",
+        params![status, known_issue_id],
+    )?;
+    Ok(rows > 0)
+}
+
+/// Edit a known issue's name / symptoms / workaround (empty text clears
+/// symptoms/workaround; the name must stay non-empty). Returns false
+/// when the id is unknown.
+pub fn set_known_issue_text(
+    conn: &Connection,
+    known_issue_id: i64,
+    name: Option<&str>,
+    symptoms: Option<&str>,
+    workaround: Option<&str>,
+) -> Result<bool> {
+    if let Some(name) = name
+        && name.trim().is_empty()
+    {
+        return Err(crate::error::Error::Config(
+            "known-issue name cannot be empty".to_string(),
+        ));
+    }
+    let rows = conn.execute(
+        "UPDATE known_issues SET
+            name = COALESCE(?1, name),
+            symptoms = COALESCE(?2, symptoms),
+            workaround = COALESCE(?3, workaround),
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE id = ?4",
+        params![
+            name.map(str::trim),
+            symptoms.map(str::trim).filter(|s| !s.is_empty()),
+            workaround.map(str::trim).filter(|s| !s.is_empty()),
+            known_issue_id
+        ],
+    )?;
+    if rows > 0 {
+        refresh_known_issue_counts(conn, known_issue_id)?;
+    }
+    Ok(rows > 0)
+}
+
+/// Link a conversation as evidence for a known issue. Returns false
+/// when either side is missing or the link already exists.
+pub fn link_known_issue_conversation(
+    conn: &Connection,
+    known_issue_id: i64,
+    conversation_id: i64,
+) -> Result<bool> {
+    let known: bool = conn
+        .query_row(
+            "SELECT 1 FROM known_issues WHERE id = ?1",
+            params![known_issue_id],
+            |_| Ok(()),
+        )
+        .is_ok();
+    let conversation: bool = conn
+        .query_row(
+            "SELECT 1 FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
+            params![conversation_id],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if !known || !conversation {
+        return Ok(false);
+    }
+    let changed = conn.execute(
+        "INSERT OR IGNORE INTO known_issue_links (known_issue_id, conversation_id, link_type)
+         VALUES (?1, ?2, 'human')",
+        params![known_issue_id, conversation_id],
+    )?;
+    if changed > 0 {
+        refresh_known_issue_counts(conn, known_issue_id)?;
+    }
+    Ok(changed > 0)
+}
+
+/// Unlink a conversation. Returns false when no such link existed.
+pub fn unlink_known_issue_conversation(
+    conn: &Connection,
+    known_issue_id: i64,
+    conversation_id: i64,
+) -> Result<bool> {
+    let changed = conn.execute(
+        "DELETE FROM known_issue_links
+          WHERE known_issue_id = ?1 AND conversation_id = ?2",
+        params![known_issue_id, conversation_id],
+    )?;
+    if changed > 0 {
+        refresh_known_issue_counts(conn, known_issue_id)?;
+    }
+    Ok(changed > 0)
+}
+
+/// Delete a known issue (links cascade in the schema). Returns false
+/// when the id is unknown.
+pub fn delete_known_issue(conn: &Connection, known_issue_id: i64) -> Result<bool> {
+    let rows = conn.execute(
+        "DELETE FROM known_issues WHERE id = ?1",
+        params![known_issue_id],
+    )?;
+    Ok(rows > 0)
+}
+
 pub fn refresh_known_issue_counts(conn: &Connection, known_issue_id: i64) -> Result<()> {
     conn.execute(
         "UPDATE known_issues SET

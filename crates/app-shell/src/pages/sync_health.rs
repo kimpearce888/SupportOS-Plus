@@ -38,6 +38,7 @@ pub(crate) struct WebhookQueue {
     pub pending: i64,
     pub processed: i64,
     pub failed: i64,
+    pub ignored: i64,
     pub duplicates: i64,
 }
 
@@ -115,6 +116,7 @@ pub(crate) fn load_status(conn: &Connection) -> SyncStatus {
                     SUM(CASE WHEN processing_state = 'pending' THEN 1 ELSE 0 END),
                     SUM(CASE WHEN processing_state = 'processed' THEN 1 ELSE 0 END),
                     SUM(CASE WHEN processing_state = 'failed' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN processing_state = 'ignored' THEN 1 ELSE 0 END),
                     SUM(CASE WHEN processing_state = 'duplicate' THEN 1 ELSE 0 END)
                FROM webhook_events",
             [],
@@ -124,7 +126,8 @@ pub(crate) fn load_status(conn: &Connection) -> SyncStatus {
                     pending: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
                     processed: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
                     failed: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                    duplicates: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                    ignored: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                    duplicates: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                 })
             },
         )
@@ -408,14 +411,17 @@ impl SyncHealthPage {
             },
         );
         design::card_titled(ui, "Engine", None, |ui| {
+            // AUD-P2-20 (B7): the ignored bucket counts unknown event
+            // types — accepted and stored, but honestly not processed.
             design::hint_text(
                 ui,
                 &format!(
-                    "webhook queue: {} total · {} pending · {} processed · {} failed · {} duplicates",
+                    "webhook queue: {} total · {} pending · {} processed · {} failed · {} ignored · {} duplicates",
                     status.webhooks.total,
                     status.webhooks.pending,
                     status.webhooks.processed,
                     status.webhooks.failed,
+                    status.webhooks.ignored,
                     status.webhooks.duplicates
                 ),
             );

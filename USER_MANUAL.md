@@ -383,6 +383,7 @@ Below the cards: a **"New conversations per day"** line chart, breakdown cards *
 - **status:** four chips — `active`, `pending`, `closed`, `spam`. Clicking applies the status locally and queues it for Help Scout (green line: *"... — sending to Help Scout"*). There is no separate "close" button — `closed` *is* closing.
 - **assign:** pick a person (or "unassigned") in the dropdown, press **"assign"**. Team assignments show as `team: {name}`.
 - **priority:** four chips — `low`, `normal`, `high`, `urgent`. Clicking sets the conversation's priority immediately (no chip is highlighted while it is unset — the header line shows `Priority: none` until then). Priority is a **SupportOS-local** concept: it is not pushed to Help Scout, and it feeds the Operations "Urgent / high priority" tile, reports and the workload ordering.
+- **state:** six chips — `new`, `investigating`, `waiting-customer`, `waiting-engineering`, `ready-verify`, `resolved`. This is the second SupportOS-local workflow lane (also not pushed to Help Scout): it records where *your* handling stands, independently of the Help Scout status. It feeds the reports "Custom state" dimension and the AI metadata tool. Every change is written to an audit trail, and a **"State history"** card under the thread lists the conversation's state and priority transitions with actor and time.
 - **tags:** the conversation's current tags are chips — click one to remove it. Type in **"add tag…"** (or press Enter) and press **"add"** to attach a new one. Every change writes the local mirror and queues the full tag list for Help Scout (the same lane automation's add-tag uses). An empty save clears all tags.
 - **snooze:** three preset chips — **"2h"**, **"tomorrow"**, **"3d"** — snooze the conversation until that moment (Help Scout's snooze; a customer reply wakes it up). While snoozed the row shows the exact timestamp and an **"unsnooze"** button wakes it immediately.
 
@@ -414,7 +415,7 @@ Below the cards: a **"New conversations per day"** line chart, breakdown cards *
 
 - *Nothing is in the list* — if Help Scout isn't connected the page says so: *"Help Scout is not connected — nothing can sync yet. Add your app credentials in Settings (Help Scout tab), press connect, and this inbox fills automatically."*
 - *Where did Operations tiles go?* If you arrived from an Operations tile, a banner **"Operations drill-down: …"** filters the list — click its X to clear it.
-- *Can I merge or snooze conversations?* Not in this app — status changes (including `closed` and `spam`) and assignment are the tools available.
+- *Can I merge conversations?* Not in this app — status changes (including `closed` and `spam`), assignment, tags and snooze are the tools available.
 
 ---
 
@@ -431,6 +432,8 @@ Below the cards: a **"New conversations per day"** line chart, breakdown cards *
   - If another agent holds it, sending is blocked: *"held by {name} — only the assigned agent can message; Help Scout answers 400"*.
   - After sending: *"message queued for delivery … the platform's agent.replied echo lands it in the mirror"* — your message appears in the history a moment later.
 - When a chat ends it becomes a normal conversation; the page tells you which: *"this chat ended — it became conversation #{number}"*.
+- **"End chat"** (when a chat is open and yours to handle) closes it locally: the state flips to ended, replies are blocked with the same honest message, and a late webhook cannot resurrect it. Chats held by another agent cannot be ended from here (the same rule as sending).
+- The detail card also carries a clickable **"became conversation #{number}"** link (opens that conversation in the Inbox once it has synced) and, when the customer is in the mirror, a clickable customer name (opens their profile).
 
 **Common questions**
 
@@ -466,7 +469,7 @@ Below the cards: a **"New conversations per day"** line chart, breakdown cards *
 
 The hint above the tiles shows when the snapshot was generated and the waiting threshold in minutes.
 
-**Workload tab**
+**Workload tab** — per-agent open/waiting load, capacity (+/−) and pressure; the **"Suggested Assignees"** card below pairs each unassigned conversation with the agent the capacity model recommends. Every suggestion now carries an **"Assign"** button — the write goes through the same local-then-Help-Scout lane the Inbox's assign uses, and the suggestions refresh with the new load.
 
 - **"Team Workload"** table — per agent: **Agent / Open / Waiting / Capacity / Load / Pressure** and **+/−** buttons. The +/− buttons change that agent's capacity by 1 (between 1 and 500) and save immediately. (Note: in this version the percentage sits under the "Load" header and the weighted number under "Pressure" — the headers are swapped relative to the numbers; the values themselves are correct.)
 - **"Suggested Assignees"** — for unassigned conversations, the agents with the lowest load are suggested.
@@ -507,6 +510,9 @@ The hint above the tiles shows when the snapshot was generated and the waiting t
 - Click an organization chip (`{name} · {n} customers · {m} conversations`) to see its domains and members on the right.
 - **"New organization"**: type a **Name** and **domains** (placeholder *"acme.com, acme.io"* — comma-separated), press **"create organization"**. Without a name you get *"name required"*.
 - **"Sync now"** pulls fresh organization data.
+- **"Edit"** on an organization reopens it in the form (name + domains) — **"Save Changes"** writes it; **"Delete"** asks *"Delete organization?"* and removes it from the local mirror (members' conversations keep their historical links).
+- Member rows are clickable — they open that customer's profile.
+- The list shows the first 200 organizations; when the cap is hit it says so and refining the filter narrows it.
 
 ---
 
@@ -520,7 +526,11 @@ The hint above the tiles shows when the snapshot was generated and the waiting t
 2. **Paste a document**: fields **"Title"**, **"Visibility"** (**"internal-only (never in customer drafts)"** — default — or **"customer-safe (may support customer drafts)"**), **"Source name"** (optional; defaults to "Manual import"), and **"Content (Markdown)"**. Press **"Import document"**.
 3. **Help Center articles**: sync your Help Scout Help Center (see below).
 
-Every document is split into searchable chunks (the table shows the count). Row buttons: **"reviewed"** and **"verify"** mark the document as checked by a human; **"delete"** asks *"Delete knowledge document?"* and removes it and its search chunks. There is no editing of an existing document — re-import a corrected copy instead.
+Every document is split into searchable chunks (the table shows the count). Row buttons:
+- **"Read"** opens the document in a reader (the same reading column the Help Center articles use); **"← back to documents"** returns. Search and palette hits on a document land directly in this reader.
+- **"Edit"** reopens the document in an edit form (title, visibility, content) — **"Save Changes"** re-chunks and re-indexes it; the version bumps when the content actually changed.
+- **"Re-index"** re-arms this document's embedding chunks (including any that permanently failed after 5 attempts) and queues a re-embed — the scoped version of Settings → Vector index → **"Rebuild vector index"**.
+- **"reviewed"** and **"verify"** mark the document as checked by a human; **"delete"** asks *"Delete knowledge document?"* and removes it and its search chunks.
 
 **Sources tab** — where documents came from (name, kind, visibility, count, created).
 
@@ -558,16 +568,16 @@ Every document is split into searchable chunks (the table shows the count). Row 
 | **Quality** | Post-resolution QA aggregates plus the 25 most recent closures with their scores. |
 | **Issue radar** | The AI alert list (same data as the Issue Radar page). |
 | **Digest** | AI-written weekly summaries. Press **"Generate digest now"** or wait for the scheduled one. Each digest states honestly whether it has a narrative (**"facts + narrative"**, **"facts only (no model routed)"**, **"model failed (facts kept)"**) — the numbers are always real SQL facts. Search box filters the archive. |
-| **Happiness** | Great/Okay/Not-good counts, a CSAT percentage, and the ratings table. An honesty note explains ratings arrive via the satisfaction webhook, so *"an empty table means none arrived, not zero happened."* |
+| **Happiness** | Great/Okay/Not-good counts, a CSAT percentage, and the ratings table — each row's conversation number opens that conversation in the Inbox. An honesty note explains ratings arrive via the satisfaction webhook, so *"an empty table means none arrived, not zero happened."* |
 | **Help Scout** | Fetch **32 official Help Scout reports** via the Reports API: pick one in the dropdown, press **"Fetch from Help Scout"**. A clear banner tells you if your plan doesn't include it (Plus/Pro plans only) — a 403 answer is recorded and reported, not hidden. |
 | **Builder** | Your own reports (below). |
-| **Insights** | Health facts, QA effectiveness, customer-effort ("friction") scores with a **"Recompute (last 100 closed)"** button, and **Graph nodes** you can add for the Support Graph. |
+| **Insights** | Health facts, QA effectiveness, customer-effort ("friction") scores with a **"Recompute (last 100 closed)"** button, and **Graph nodes** you can add for the Support Graph — and **delete** (with confirmation; human-authored edges touching the node go with it). |
 
 **Builder** — custom reports in four steps:
 
 1. Pick a **"metric:"** (21 choices, e.g. "Conversations", "Avg first response time (minutes)", "Campaign reply rate") and **"grouped by:"** (14 choices: "No grouping (total)", "Day", "Week", "Month", "Mailbox", "Channel", "Tag", "Assignee", "Team", "Status", "Priority", "Custom state", "Response state", "Issue").
 2. Optionally tick **"compare with previous period"**, choose a **"sort:"** chip, and set **"from (YYYY-MM-DD):"**, **"to:"**, **"limit:"**.
-3. Optionally fill any of the ten filter boxes (**channel**, **statuses (csv)**, **tags any (csv)**, **tags none (csv)**, **min priority**, **attribute key/value**, **state key**, **mailbox ids (csv)**, **assignee ids (csv)**) — blank means unfiltered; csv means comma-separated.
+3. Filters: the closed vocabularies are pickers now — **statuses** as chips over the Help Scout vocabulary, **mailboxes** and **assignees** as chip rows over your synced lists (click to toggle a filter on/off; the chip state is what runs, blank means unfiltered). The open-vocabulary filters stay as text boxes (**channel**, **tags any (csv)**, **tags none (csv)**, **min priority**, **attribute key/value**, **state key**).
 4. Press **"Run report"**. The result is a table (group, value, Δ vs previous). Save configurations with a name via **"Save"** (+ the **"save as:"** box); **"Saved reports"** lists them with **"load"** and **"delete"** (delete asks first).
 
 *Note:* there is no CSV export button on this page — use Settings → Backups & export → "export conversations CSV" for spreadsheet data.
@@ -579,10 +589,11 @@ Every document is split into searchable chunks (the table shows the count). Row 
 **What it's for** — spotting problems that repeat across many conversations. Subtitle: *"AI-derived alerts, clusters, and known issues"*. Four tabs: **"Alerts"**, **"Clusters"**, **"Gaps"**, **"Known issues"**.
 
 - Header buttons: **"Cluster now"** (groups the last 14 days of conversations into clusters — needs the Classify AI role), **"Reload clusters"**, **"Detect gaps now"** (finds "asked often, documented nowhere" patterns from the last 90 days — needs no AI model).
-- **Alerts**: rows like `"Rising volume: Refund delays · 18 conversations"` with red **critical** / amber badges, plus an SLA card ("SLA: {n} breached · {n} at risk") listing the conversations.
-- **Clusters**: cards with trend badges (**"rising"**, **"new"**) and the count of conversations/customers affected.
-- **Gaps**: candidates with occurrence badges (`12×`), an explanation, and up to 5 example conversation numbers. **"approve"** or **"reject"** each candidate — approving only *marks* it (and decisions survive later rebuilds); approved gaps feed the Knowledge page's article drafting.
+- **Alerts**: rows like `"Rising volume: Refund delays · 18 conversations"` with red **critical** / amber badges and an **"Open"** button (opens the first conversation behind the alert), plus an SLA card ("SLA: {n} breached · {n} at risk") whose rows carry an **"open →"** link into the Inbox.
+- **Clusters**: cards with trend badges (**"rising"**, **"new"**), the count of conversations/customers affected, and clickable **member conversation chips** (`#501 …`) that open in the Inbox. Queued "Cluster now" runs refresh the tab when they finish — no manual reload needed.
+- **Gaps**: candidates with occurrence badges (`12×`), an explanation, and up to 5 clickable example conversation numbers (open in the Inbox). **"approve"** or **"reject"** each candidate — approving only *marks* it (and decisions survive later rebuilds); approved gaps feed the Knowledge page's article drafting.
 - **Known issues**: press **"New known issue"** to record a recurring problem: **title**, **status** (`investigating` / `identified` / `fix_in_progress` / `resolved`), **symptoms**, **workaround**, and optional **conversation ids** (comma-separated local conversation numbers — the `#` numbers from the Inbox; invalid ones are skipped and reported).
+- Known issues are fully manageable after creation: **status chips** on each card, **"Edit"** (title/symptoms/workaround — an empty save clears symptoms or the workaround), **"Link…"** (attach or unlink conversation evidence; linked conversations are clickable chips), and **"Delete"** (with confirmation — links go with it).
 
 ---
 
@@ -603,9 +614,10 @@ Every document is split into searchable chunks (the table shows the count). Row 
 
 - Press **"New Type"**: give a **name**, a **description**, and add fields with **"+ add field"**. Each field has a **key** (machine name), a **label** (shown name), a **type** — one of `text`, `long_text`, `number`, `date`, `select`, `boolean` — a **"required"** checkbox, and for `select` a comma-separated options list. Press **"create type"**.
 - Select the type on the left, then fill the **"New object"** card: a **title** plus one box per field (numbers must be numbers; booleans accept true/false, yes/no, 1/0, on/off). Empty boxes are skipped. Press **"create object"**.
-- **"search objects…"** + **"search"** filters the list (up to 50 shown).
+- **"search objects…"** + **"search"" filters the list; a pager (**"‹ Prev" / "Next ›"**) walks it 50 at a time when there are more.
 - Deleting: objects and whole types have **"delete"** buttons with confirmation ("Delete object?" / "Delete custom type?" — deleting a type removes every record under it).
-- This version creates and deletes only — there is no edit button for existing objects or types.
+- **Editing**: types and objects both carry an **"Edit"** button — the form reopens prefilled (**"Save Changes"** / **"Cancel"**). A type edit refuses to drop a field that objects still use (it says how many); an object edit validates against the type's fields.
+- **Links**: every object can be linked to customers, organizations, conversations, known issues, incidents or campaigns — the **"Links"** row on each card lists them as removable chips with an add form (kind dropdown + id + optional note). Links drive segment membership (`custom_object_link` conditions), the customer timeline, and the support graph. The header's link count is real now.
 
 ---
 
@@ -741,7 +753,7 @@ Segments can be deleted (**"Delete segment?"**) — campaigns that already targe
 **What it's for** — the state of the Help Scout connection: is the engine running, when did it last succeed, what's queued. Header: *"engine state, checkpoints, and recent runs"*.
 
 - A live progress line while a run executes: `progress: {stage} · resource {done}/{total} · {n} record(s) so far`.
-- **"Engine"** card: state, **"last success:"** (or "(never)"), and the webhook queue line: `webhook queue: {n} total · {n} pending · {n} processed · {n} failed · {n} duplicates`. If a webhook self-check ran: `webhook health: {verdict} · checked {time} · {detail}`.
+- **"Engine"** card: state, **"last success:"** (or "(never)"), and the webhook queue line: `webhook queue: {n} total · {n} pending · {n} processed · {n} failed · {n} ignored · {n} duplicates` — the **ignored** bucket counts webhook event types the app doesn't know: they are stored (payload kept) and honestly marked "unknown event type — stored, not processed" instead of vanishing as fake "processed" rows. If a webhook self-check ran: `webhook health: {verdict} · checked {time} · {detail}`.
 - Four buttons: **"Run initial sync"** (pull the whole history — use after connecting or when starting fresh), **"Run incremental sync"** (check for changes), **"Run reconcile"** (a thorough comparison pass), **"Cancel running sync"**.
 - **"Checkpoints"** — one row per Help Scout resource type with processed/failed/retries counts (fills after the first successful sync).
 - **"Recent runs"** — the 10 newest runs with their state and record counts.

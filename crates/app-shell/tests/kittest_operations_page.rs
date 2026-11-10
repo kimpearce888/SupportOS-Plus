@@ -198,7 +198,9 @@ fn render_operations_page(dark: bool, width: f32, name: &str) {
                     s.installed = true;
                 }
                 s.page.kittest_freeze_generated_at();
-                s.page.ui(ui, &s.db);
+                // AUD-P2-17 (C13): the bus rides along for one-click assign.
+                let bus = spp_core::event_bus::EventBus::new(8);
+                s.page.ui(ui, &s.db, &bus);
             },
             OperationsPageState {
                 installed: false,
@@ -254,7 +256,9 @@ fn r3_operations_workload_tab_light() {
                     s.installed = true;
                 }
                 s.page.kittest_freeze_generated_at();
-                s.page.ui(ui, &s.db);
+                // AUD-P2-17 (C13): the bus rides along for one-click assign.
+                let bus = spp_core::event_bus::EventBus::new(8);
+                s.page.ui(ui, &s.db, &bus);
             },
             OperationsPageState {
                 installed: false,

@@ -242,8 +242,8 @@ jobs:
           path: target/deb/supportos-plus_*_arm64.deb
           if-no-files-found: error
 
-  # RS-4 (R4, G4-rejection wave): the reskin's drift lock. The 26 suites (208 tests — 206 kittest
-  # + 2 style lint — over 197 goldens) diff-lock every rebuilt page — the REAL
+  # RS-4 (R4, G4-rejection wave): the reskin's drift lock. The 26 suites (206 tests — 204 kittest
+  # + 2 style lint — over 202 goldens) diff-lock every rebuilt page — the REAL
   # pages over seeded
   # mirrors, 1440/1024/800 × 900, light + dark, a11y check ON — against the
   # checked-in baselines. The runner has no GPU, so the frames render through

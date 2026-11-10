@@ -497,6 +497,224 @@ pub fn delete_object(conn: &Connection, object_id: i64) -> Result<bool> {
     Ok(changed > 0)
 }
 
+// AUD-P2-11 (C3): the edit/link lifecycle the page advertised but never
+// had — links were hard-wired to `Vec::new()` at creation, types and
+// objects were create-only. All writes live here so the page, the tests
+// and any future automation lane share one validation path.
+
+/// Edit a type's name, description and field set. The slug is identity
+/// and stays; a field key that existing objects still use cannot be
+/// dropped (data would go orphaned silently) — the edit is refused with
+/// the count instead.
+pub fn update_type(
+    conn: &Connection,
+    type_id: i64,
+    name: &str,
+    description: Option<&str>,
+    fields: &[FieldInput],
+) -> Result<()> {
+    let existing =
+        get_type(conn, type_id)?.ok_or_else(|| Error::Validation("Type not found".to_string()))?;
+    let trimmed_name = name.trim();
+    if trimmed_name.is_empty() {
+        return Err(Error::Validation("Type name is required".to_string()));
+    }
+    let mut keys = std::collections::HashSet::new();
+    for f in fields {
+        f.validate()?;
+        if !keys.insert(f.key.clone()) {
+            return Err(Error::Validation(format!(
+                "Duplicate field key \"{}\"",
+                f.key
+            )));
+        }
+    }
+    // Refuse to drop a key that live objects still carry.
+    for old in &existing.fields {
+        if !keys.contains(&old.key) {
+            let users: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM custom_objects
+                  WHERE type_id = ?1 AND deleted_at IS NULL
+                    AND json_extract(data_json, '$.' || ?2) IS NOT NULL",
+                params![type_id, old.key],
+                |r| r.get(0),
+            )?;
+            if users > 0 {
+                return Err(Error::Validation(format!(
+                    "Field \"{}\" is still set on {users} object(s); keep it or clear the data first",
+                    old.key
+                )));
+            }
+        }
+    }
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE custom_object_types
+            SET name = ?1, description = ?2, updated_at = datetime('now')
+          WHERE id = ?3",
+        params![trimmed_name, description, type_id],
+    )?;
+    tx.execute(
+        "DELETE FROM custom_object_fields WHERE type_id = ?1",
+        params![type_id],
+    )?;
+    for (sort, f) in fields.iter().enumerate() {
+        insert_field(&tx, type_id, f, sort)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Edit an object's title and properties (validated against the type's
+/// current field set). Links are untouched — they have their own lane.
+pub fn update_object(
+    conn: &Connection,
+    object_id: i64,
+    title: &str,
+    properties: &Map<String, Value>,
+) -> Result<()> {
+    let row: Option<(i64, i64)> = conn
+        .query_row(
+            "SELECT id, type_id FROM custom_objects WHERE id = ?1 AND deleted_at IS NULL",
+            params![object_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((_, type_id)) = row else {
+        return Err(Error::Validation("Object not found".to_string()));
+    };
+    let type_detail =
+        get_type(conn, type_id)?.ok_or_else(|| Error::Validation("Type not found".to_string()))?;
+    let clean = validate_properties(&type_detail.fields, properties).map_err(Error::Validation)?;
+    let trimmed_title = title.trim();
+    if trimmed_title.is_empty() {
+        return Err(Error::Validation("Object title is required".to_string()));
+    }
+    let search_text = build_search_text(trimmed_title, &clean);
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE custom_objects
+            SET title = ?1, data_json = ?2, search_text = ?3, updated_at = datetime('now')
+          WHERE id = ?4 AND deleted_at IS NULL",
+        params![
+            trimmed_title,
+            serde_json::to_string(&Value::Object(clean)).unwrap_or_else(|_| "{}".into()),
+            search_text,
+            object_id
+        ],
+    )?;
+    tx.execute(
+        "DELETE FROM fts_custom_objects WHERE object_id = ?1",
+        params![object_id],
+    )?;
+    tx.execute(
+        "INSERT INTO fts_custom_objects (title, search_text, object_id) VALUES (?1, ?2, ?3)",
+        params![trimmed_title, search_text, object_id],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The link vocabulary every caller shares — exactly the kinds
+/// `link_target_exists` validates.
+pub const LINK_TARGET_KINDS: [&str; 6] = [
+    "customer",
+    "organization",
+    "conversation",
+    "known_issue",
+    "incident",
+    "campaign",
+];
+
+/// Attach a link to an existing object (the post-creation lane that was
+/// missing — `create_object`'s `links` param was the only writer and the
+/// UI always passed `&[]`). Returns true when a new link landed.
+pub fn add_link(conn: &Connection, object_id: i64, link: &LinkInput) -> Result<bool> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM custom_objects WHERE id = ?1 AND deleted_at IS NULL",
+            params![object_id],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if !exists {
+        return Err(Error::Validation("Object not found".to_string()));
+    }
+    let before: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM custom_object_links WHERE object_id = ?1",
+        params![object_id],
+        |r| r.get(0),
+    )?;
+    insert_link(conn, object_id, link)?;
+    let after: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM custom_object_links WHERE object_id = ?1",
+        params![object_id],
+        |r| r.get(0),
+    )?;
+    Ok(after > before)
+}
+
+/// Remove a link. Returns true when a row was removed.
+pub fn remove_link(
+    conn: &Connection,
+    object_id: i64,
+    target_kind: &str,
+    target_local_id: i64,
+) -> Result<bool> {
+    let changed = conn.execute(
+        "DELETE FROM custom_object_links
+          WHERE object_id = ?1 AND target_kind = ?2 AND target_local_id = ?3",
+        params![object_id, target_kind, target_local_id],
+    )?;
+    Ok(changed > 0)
+}
+
+/// The links attached to an object, resolved with a display label for
+/// each target (customer name, organization name, conversation number…).
+pub fn list_object_links(conn: &Connection, object_id: i64) -> Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT target_kind, target_local_id, note, linked_by, linked_at
+           FROM custom_object_links WHERE object_id = ?1
+          ORDER BY linked_at, target_kind, target_local_id",
+    )?;
+    let raw: Vec<(String, i64, Option<String>, String, String)> = stmt
+        .query_map(params![object_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
+        .filter_map(|x| x.ok())
+        .collect();
+    let mut out = Vec::with_capacity(raw.len());
+    for (kind, id, note, linked_by, linked_at) in raw {
+        let label = link_target_label(conn, &kind, id);
+        out.push(json!({
+            "target_kind": kind,
+            "target_local_id": id,
+            "label": label,
+            "note": note,
+            "linked_by": linked_by,
+            "linked_at": linked_at,
+        }));
+    }
+    Ok(out)
+}
+
+fn link_target_label(conn: &Connection, kind: &str, id: i64) -> String {
+    let sql = match kind {
+        "customer" => {
+            "SELECT TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, ''))
+               FROM customers WHERE id = ?1"
+        }
+        "organization" => "SELECT name FROM organizations WHERE id = ?1",
+        "conversation" => "SELECT '#' || number FROM conversations WHERE id = ?1",
+        "known_issue" => "SELECT name FROM known_issues WHERE id = ?1",
+        "incident" => "SELECT title FROM incidents WHERE id = ?1",
+        "campaign" => "SELECT name FROM outreach_campaigns WHERE id = ?1",
+        _ => return format!("{kind} #{id}"),
+    };
+    conn.query_row(sql, params![id], |r| r.get::<_, String>(0))
+        .unwrap_or_else(|_| format!("{kind} #{id}"))
+}
+
 fn parse_properties(stored: Option<String>) -> Map<String, Value> {
     stored
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
@@ -729,5 +947,192 @@ mod batch31_tests {
             valid_iso_date("2024-01-15T10:00:00Z"),
             "trailing time ignored"
         );
+    }
+}
+
+// AUD-P2-11 (C3): the edit/link lifecycle — update_type/update_object,
+// add_link/remove_link/list_object_links.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("memory db");
+        crate::bootstrap::apply_all(&mut conn).expect("migrations");
+        conn
+    }
+
+    fn field(key: &str, field_type: &str) -> FieldInput {
+        FieldInput {
+            key: key.into(),
+            label: key.into(),
+            field_type: field_type.into(),
+            required: false,
+            options: None,
+        }
+    }
+
+    fn seed(conn: &Connection) -> (i64, i64, i64) {
+        let (type_id, _) =
+            create_type(conn, "Warranty", None, &[field("sku", "text")]).expect("type");
+        let mut props = Map::new();
+        props.insert("sku".into(), Value::String("WB-200".into()));
+        let object_id = create_object(conn, type_id, "Broken hinge", &props, &[]).expect("object");
+        conn.execute(
+            "INSERT INTO customers (remote_id, first_name, last_name) VALUES (70, 'Kim', 'One')",
+            [],
+        )
+        .expect("customer");
+        let customer_local = conn.last_insert_rowid();
+        (type_id, object_id, customer_local)
+    }
+
+    #[test]
+    fn audp2_links_can_be_added_listed_and_removed_after_creation() {
+        let c = conn();
+        let (_, object_id, customer_local) = seed(&c);
+
+        // The post-creation lane that never existed — the UI hard-wired
+        // `links: Vec::new()` at create.
+        let added = add_link(
+            &c,
+            object_id,
+            &LinkInput {
+                target_kind: "customer".into(),
+                target_local_id: customer_local,
+                note: Some("warranty owner".into()),
+            },
+        )
+        .expect("add link");
+        assert!(added, "the first link lands");
+
+        // A duplicate is a no-op, not an error.
+        let again = add_link(
+            &c,
+            object_id,
+            &LinkInput {
+                target_kind: "customer".into(),
+                target_local_id: customer_local,
+                note: None,
+            },
+        )
+        .expect("dup add");
+        assert!(!again, "INSERT OR IGNORE keeps one row");
+
+        let links = list_object_links(&c, object_id).expect("list");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0]["target_kind"], "customer");
+        assert_eq!(links[0]["label"], "Kim One", "the label resolves");
+
+        // A link to a missing target is refused with the honest message.
+        let err = add_link(
+            &c,
+            object_id,
+            &LinkInput {
+                target_kind: "conversation".into(),
+                target_local_id: 999_999,
+                note: None,
+            },
+        )
+        .expect_err("unknown target refused");
+        assert!(
+            err.to_string().contains("does not exist"),
+            "the error names the missing target: {err}"
+        );
+
+        assert!(remove_link(&c, object_id, "customer", customer_local).expect("remove"));
+        assert!(
+            !remove_link(&c, object_id, "customer", customer_local).expect("remove again"),
+            "the second remove is a no-op"
+        );
+        assert_eq!(list_object_links(&c, object_id).expect("list").len(), 0);
+    }
+
+    #[test]
+    fn audp2_objects_can_be_edited_with_validation() {
+        let c = conn();
+        let (type_id, object_id, _) = seed(&c);
+
+        let mut props = Map::new();
+        props.insert("sku".into(), Value::String("WB-999".into()));
+        update_object(&c, object_id, "Broken hinge (re-filed)", &props).expect("edit");
+
+        let (title, data): (String, String) = c
+            .query_row(
+                "SELECT title, data_json FROM custom_objects WHERE id = ?1",
+                params![object_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(title, "Broken hinge (re-filed)");
+        assert!(data.contains("WB-999"));
+        // FTS follows the edit.
+        let fts: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM fts_custom_objects WHERE object_id = ?1",
+                params![object_id],
+                |r| r.get(0),
+            )
+            .expect("fts");
+        assert_eq!(fts, 1);
+
+        // Wrong-typed properties are refused (the type's validation).
+        let mut bad = Map::new();
+        bad.insert("sku".into(), Value::Bool(true));
+        let err = update_object(&c, object_id, "x", &bad).expect_err("type check");
+        assert!(err.to_string().contains("sku"), "{err}");
+
+        // An empty title is refused.
+        let err = update_object(&c, object_id, "   ", &props).expect_err("title check");
+        assert!(err.to_string().contains("title"), "{err}");
+        let _ = type_id;
+    }
+
+    #[test]
+    fn audp2_types_can_be_edited_but_in_use_fields_survive() {
+        let c = conn();
+        let (type_id, object_id, _) = seed(&c);
+
+        // Adding a field + renaming works.
+        update_type(
+            &c,
+            type_id,
+            "Warranty claims",
+            Some("edited"),
+            &[field("sku", "text"), field("qty", "number")],
+        )
+        .expect("type edit");
+        let detail = get_type(&c, type_id).expect("detail").expect("exists");
+        assert_eq!(detail.name, "Warranty claims");
+        assert_eq!(detail.fields.len(), 2);
+        // The slug (identity) is untouched by a rename.
+        assert_eq!(detail.slug, "warranty");
+
+        // Dropping the field a live object uses is refused with the count.
+        let err = update_type(
+            &c,
+            type_id,
+            "Warranty claims",
+            None,
+            &[field("qty", "number")],
+        )
+        .expect_err("in-use field drop");
+        assert!(
+            err.to_string().contains("still set on 1 object"),
+            "the refusal names the count: {err}"
+        );
+
+        // Once the object no longer carries the field, the drop is allowed.
+        let mut props = Map::new();
+        props.insert("qty".into(), Value::from(2));
+        update_object(&c, object_id, "Broken hinge", &props).expect("clear sku by replace");
+        update_type(
+            &c,
+            type_id,
+            "Warranty claims",
+            None,
+            &[field("qty", "number")],
+        )
+        .expect("drop now allowed");
     }
 }

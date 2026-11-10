@@ -145,6 +145,208 @@ pub fn list_documents(conn: &Connection, source_id: Option<i64>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+// AUD-P2-15 (C11): the document reader / edit / re-ingest support the
+// Documents tab lacked — the full content fetch (list_documents only
+// exposes a 200-char preview), and the scoped re-embed that re-arms
+// one document's chunks (the Settings action resets ALL chunks; a
+// single stale doc should not re-embed the whole corpus).
+
+/// The full document record (content included) for the reader and the
+/// edit form. None when the id is unknown.
+pub fn get_document(conn: &Connection, document_id: i64) -> Option<Value> {
+    conn.query_row(
+        "SELECT d.id, d.source_id, d.title, d.visibility, d.version, d.content,
+                d.format, d.created_at, d.updated_at, d.provenance,
+                (SELECT COUNT(*) FROM knowledge_chunks c WHERE c.document_id = d.id) AS chunk_count,
+                (SELECT COUNT(*) FROM knowledge_chunks c
+                  WHERE c.document_id = d.id AND c.embedding_state = 'indexed') AS indexed_count,
+                (SELECT COUNT(*) FROM knowledge_chunks c
+                  WHERE c.document_id = d.id AND c.embedding_attempts >= 5) AS exhausted_count
+          FROM knowledge_documents d
+         WHERE d.id = ?1",
+        params![document_id],
+        |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "source_id": r.get::<_, i64>(1)?,
+                "title": r.get::<_, String>(2)?,
+                "visibility": r.get::<_, String>(3)?,
+                "version": r.get::<_, Option<i64>>(4)?.unwrap_or(1),
+                "content": r.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                "format": r.get::<_, Option<String>>(6)?,
+                "created_at": r.get::<_, String>(7)?,
+                "updated_at": r.get::<_, String>(8)?,
+                "provenance": r.get::<_, Option<String>>(9)?,
+                "chunk_count": r.get::<_, i64>(10)?,
+                "indexed_count": r.get::<_, i64>(11)?,
+                "exhausted_count": r.get::<_, i64>(12)?,
+            }))
+        },
+    )
+    .ok()
+}
+
+/// Edit a local document IN PLACE — keyed by id (unlike
+/// `upsert_document`, which matches on (source, title) and would fork a
+/// renamed document into a second row). The checksum discipline is
+/// preserved: unchanged content is a no-op; changed content bumps the
+/// version, rewrites the chunks (FTS + re-embed through the normal
+/// pipeline). Returns (new_version, changed).
+pub fn update_document(
+    conn: &Connection,
+    document_id: i64,
+    title: &str,
+    content: &str,
+    visibility: &str,
+) -> Result<(i64, bool)> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT COALESCE(content, ''), COALESCE(checksum, '') FROM knowledge_documents WHERE id = ?1",
+            params![document_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((old_content, old_checksum)) = row else {
+        return Err(crate::error::Error::Config(
+            "document not found".to_string(),
+        ));
+    };
+    let trimmed_title = title.trim();
+    if trimmed_title.is_empty() {
+        return Err(crate::error::Error::Config(
+            "document title is required".to_string(),
+        ));
+    }
+    if !["internal_only", "customer_safe"].contains(&visibility) {
+        return Err(crate::error::Error::Config(format!(
+            "unknown visibility {visibility:?}"
+        )));
+    }
+    let new_checksum = checksum(content);
+    let changed = new_checksum != old_checksum;
+    let tx = conn.unchecked_transaction()?;
+    if changed {
+        let format = detect_format_for_content(content);
+        // The same re-chunk `upsert_document` performs: drop + recreate
+        // (fresh embedding state), stamp last_indexed_at, bump version.
+        tx.execute(
+            "DELETE FROM knowledge_chunks WHERE document_id = ?1",
+            params![document_id],
+        )?;
+        // The old FTS rows (their chunk_ids point at the dropped chunks)
+        // go before the rewrite — exactly the delete-then-recreate order
+        // `upsert_document` uses.
+        tx.execute(
+            "DELETE FROM fts_knowledge WHERE document_id = ?1",
+            params![document_id],
+        )?;
+        let chunks = chunk_text(content, 1200, 150);
+        for (idx, chunk) in chunks.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO knowledge_chunks (document_id, chunk_index, content, embedding_state)
+                 VALUES (?1, ?2, ?3, 'not_indexed')",
+                params![document_id, i64::try_from(idx).unwrap_or(0), chunk],
+            )?;
+            let chunk_id = tx.last_insert_rowid();
+            // The same per-chunk FTS shape `upsert_document` writes
+            // (visibility rides every row — the search lane filters on it).
+            tx.execute(
+                "INSERT INTO fts_knowledge (title, content, chunk_id, document_id, visibility)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![trimmed_title, chunk, chunk_id, document_id, visibility],
+            )?;
+        }
+        tx.execute(
+            "UPDATE knowledge_documents
+                SET title = ?1, content = ?2, visibility = ?3, format = ?4,
+                    checksum = ?5, version = COALESCE(version, 1) + 1,
+                    last_indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+              WHERE id = ?6",
+            params![
+                trimmed_title,
+                content,
+                visibility,
+                format,
+                new_checksum,
+                document_id
+            ],
+        )?;
+        // The new chunks need embedding — the normal post-import side
+        // effect rides along.
+        let _ = crate::jobs::enqueue_on(&tx, "embeddings", "embed_knowledge_chunks", "{}", 4, 2);
+    } else {
+        // Even an unchanged-content edit may fix title/visibility.
+        tx.execute(
+            "UPDATE knowledge_documents
+                SET title = ?1, visibility = ?2,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+              WHERE id = ?3",
+            params![trimmed_title, visibility, document_id],
+        )?;
+        let _ = old_content;
+    }
+    tx.commit()?;
+    let version: i64 = conn
+        .query_row(
+            "SELECT COALESCE(version, 1) FROM knowledge_documents WHERE id = ?1",
+            params![document_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(1);
+    Ok((version, changed))
+}
+
+/// Re-arm ONE document's chunks: reset embedding state/attempts (the
+/// permanently-excluded 5-attempt rows too) and re-enqueue the
+/// knowledge-embedding pass. Returns the reset chunk count.
+pub fn reindex_document(conn: &Connection, document_id: i64) -> Result<usize> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM knowledge_documents WHERE id = ?1",
+            params![document_id],
+            |_| Ok(()),
+        )
+        .is_ok();
+    if !exists {
+        return Err(crate::error::Error::Config(
+            "document not found".to_string(),
+        ));
+    }
+    let reset = conn.execute(
+        "UPDATE knowledge_chunks
+            SET embedding_state = 'not_indexed',
+                embedding_attempts = 0,
+                embedding = NULL,
+                embedding_model = NULL
+          WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    if reset > 0 {
+        let _ = crate::jobs::enqueue_on(conn, "embeddings", "embed_knowledge_chunks", "{}", 4, 2);
+    }
+    tracing::info!(
+        operation = "reindex_document",
+        document_id,
+        reset,
+        "one document's chunks re-armed for embedding"
+    );
+    Ok(reset)
+}
+
+/// A pragmatic format guess for edited content: fenced code or heading
+/// markers → markdown; tag-heavy text → html; otherwise txt.
+fn detect_format_for_content(content: &str) -> String {
+    let head: String = content.chars().take(4000).collect();
+    if head.contains("```") || head.contains("# ") || head.contains("## ") {
+        "markdown".to_string()
+    } else if head.matches('<').count() > 4 && head.matches('>').count() > 4 {
+        "html".to_string()
+    } else {
+        "txt".to_string()
+    }
+}
+
 pub fn upsert_document(
     conn: &Connection,
     source_id: i64,
@@ -1460,5 +1662,143 @@ mod audp0_tests {
             handbook["flags"]["low_usage"], true,
             "an old uncited document stays low-usage"
         );
+    }
+}
+
+// AUD-P2-15 (C11): the document reader/edit/re-ingest support.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn conn() -> Connection {
+        let mut c = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut c).expect("migrations");
+        c
+    }
+
+    fn seed_doc(c: &Connection) -> i64 {
+        let source = get_or_create_source(c, "local docs", "manual", "internal_only").expect("src");
+        let (id, _) = upsert_document(
+            c,
+            source,
+            "Export guide",
+            "Step one. Step two.",
+            "internal_only",
+            "markdown",
+        )
+        .expect("doc");
+        id
+    }
+
+    #[test]
+    fn audp2_get_document_returns_the_full_record() {
+        let c = conn();
+        let id = seed_doc(&c);
+        let doc = get_document(&c, id).expect("doc");
+        assert_eq!(doc["title"], "Export guide");
+        assert_eq!(doc["content"], "Step one. Step two.");
+        assert!(doc["chunk_count"].as_i64().unwrap_or(0) > 0);
+        assert_eq!(get_document(&c, 999), None);
+    }
+
+    #[test]
+    fn audp2_update_document_rechunks_and_bumps_version_only_on_change() {
+        let c = conn();
+        let id = seed_doc(&c);
+        let v0: i64 = c
+            .query_row(
+                "SELECT COALESCE(version,1) FROM knowledge_documents WHERE id = ?1",
+                rusqlite::params![id],
+                |r| r.get(0),
+            )
+            .expect("v");
+
+        // Unchanged content: no version bump, still Ok.
+        let (_, changed) = update_document(
+            &c,
+            id,
+            "Export guide",
+            "Step one. Step two.",
+            "internal_only",
+        )
+        .expect("no-op");
+        assert!(!changed);
+
+        // Changed content: version bumps, FTS follows.
+        let (v1, changed) = update_document(
+            &c,
+            id,
+            "Export guide v2",
+            "Entirely new body.",
+            "customer_safe",
+        )
+        .expect("edit");
+        assert!(changed);
+        assert!(v1 > v0, "the version advanced");
+        let (title, content, visibility): (String, String, String) = c
+            .query_row(
+                "SELECT title, content, visibility FROM knowledge_documents WHERE id = ?1",
+                rusqlite::params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("row");
+        assert_eq!(title, "Export guide v2");
+        assert_eq!(content, "Entirely new body.");
+        assert_eq!(visibility, "customer_safe");
+
+        // Guards: blank title + unknown visibility.
+        let err = update_document(&c, id, "  ", "x", "internal_only").expect_err("title");
+        assert!(err.to_string().contains("required"), "{err}");
+        let err = update_document(&c, id, "t", "x", "secret").expect_err("visibility");
+        assert!(err.to_string().contains("visibility"), "{err}");
+        let err = update_document(&c, 999, "t", "x", "internal_only").expect_err("missing");
+        assert!(err.to_string().contains("not found"), "{err}");
+    }
+
+    #[test]
+    fn audp2_reindex_document_rearms_only_that_documents_chunks() {
+        let c = conn();
+        let id = seed_doc(&c);
+        // A second doc whose chunks must NOT be touched.
+        let source =
+            get_or_create_source(&c, "local docs", "manual", "internal_only").expect("src");
+        let (other, _) =
+            upsert_document(&c, source, "Other", "other content", "internal_only", "txt")
+                .expect("other");
+
+        // Exhaust one of the target's chunks the way 5 failed attempts do.
+        c.execute(
+            "UPDATE knowledge_chunks SET embedding_state = 'failed', embedding_attempts = 5 WHERE document_id = ?1",
+            rusqlite::params![id],
+        )
+        .expect("exhaust");
+
+        let reset = reindex_document(&c, id).expect("reindex");
+        assert!(reset > 0, "the exhausted chunk was re-armed");
+        let (state, attempts): (String, i64) = c
+            .query_row(
+                "SELECT embedding_state, embedding_attempts FROM knowledge_chunks WHERE document_id = ?1",
+                rusqlite::params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(state, "not_indexed");
+        assert_eq!(attempts, 0, "the permanent-exclusion counter resets");
+
+        // The other document's chunks are untouched (still indexed-or-
+        // pending with their attempts).
+        let other_attempts: i64 = c
+            .query_row(
+                "SELECT COALESCE(MAX(embedding_attempts), -1) FROM knowledge_chunks WHERE document_id = ?1",
+                rusqlite::params![other],
+                |r| r.get(0),
+            )
+            .expect("other");
+        assert_eq!(other_attempts, 0, "a fresh doc carries no exhausted rows");
+
+        // Unknown document refuses.
+        let err = reindex_document(&c, 999).expect_err("missing");
+        assert!(err.to_string().contains("not found"), "{err}");
     }
 }

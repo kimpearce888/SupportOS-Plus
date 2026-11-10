@@ -5,6 +5,7 @@ use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use spp_core::db::DbHandle;
 use spp_shell::design;
+use spp_shell::pages::NavRequest;
 use spp_shell::pages::customers::CustomersPage;
 use spp_shell::pages::organizations::OrganizationsPage;
 
@@ -650,4 +651,65 @@ fn organizations_open_detail_light() {
         "the DetailPanel must be open after the row's open act"
     );
     h.snapshot("r3_organizations_detail_light");
+}
+
+/// AUD-P2-16 (C12): the detail panel's member rows are deep links — the
+/// first row (Acme) opens its panel, and clicking a member routes to that
+/// customer's profile.
+struct OrganizationsPageNavState {
+    installed: bool,
+    page: OrganizationsPage,
+    db: DbHandle,
+    nav: Option<NavRequest>,
+}
+
+#[test]
+fn audp2_organizations_members_clickable_light() {
+    let (page, db) = seeded_page();
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1440.0, 900.0))
+        .with_theme(egui::Theme::Light)
+        .build_ui_state(
+            move |ui, s| {
+                if !s.installed {
+                    design::install(ui.ctx());
+                    s.installed = true;
+                }
+                // Sticky capture: a later no-nav frame must not erase a
+                // nav the click frame produced.
+                if let Some(nav) = s.page.ui(ui, &s.db, None) {
+                    s.nav = Some(nav);
+                }
+            },
+            OrganizationsPageNavState {
+                installed: false,
+                page,
+                db,
+                nav: None,
+            },
+        );
+    h.run_ok();
+    h.get_all_by_label("Open")
+        .next()
+        .expect("the first row's open act")
+        .click();
+    h.run_ok();
+    h.run_steps(2);
+    assert!(
+        h.query_by_label("close panel").is_some(),
+        "the DetailPanel must be open after the row's open act"
+    );
+    assert!(
+        h.query_by_label("Marta Keller").is_some(),
+        "a member row must exist after Open"
+    );
+    h.get_by_label("Marta Keller").click();
+    h.run_ok();
+    assert_eq!(
+        h.state().nav,
+        Some(NavRequest::OpenCustomer(10)),
+        "the member click opens that customer's profile"
+    );
+    h.run_steps(2);
+    h.snapshot("audp2_organizations_members_clickable_light");
 }

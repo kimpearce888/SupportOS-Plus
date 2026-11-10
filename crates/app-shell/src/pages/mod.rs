@@ -62,6 +62,18 @@ pub enum DestructiveAction {
         mailbox_remote_id: i64,
         remote_id: i64,
     },
+    /// AUD-P2-16 (C12): delete an organization (soft delete, with confirm).
+    DeleteOrganization {
+        id: i64,
+    },
+    /// AUD-P2-14 (C10): delete a manually-added support-graph node.
+    DeleteGraphNode {
+        id: i64,
+    },
+    /// AUD-P2-12 (C8): delete a known issue.
+    DeleteKnownIssue {
+        id: i64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +141,44 @@ impl ConfirmRequest {
     }
 
     #[must_use]
+    /// AUD-P2-16 (C12): organization delete confirm.
+    pub(crate) fn delete_organization(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete organization?".into(),
+            message: format!(
+                "The organization \"{name}\" is removed from the local mirror. \
+                 Members' conversations keep their historical links. This cannot be undone."
+            ),
+            confirm_label: "Delete organization".into(),
+            danger: true,
+            action: DestructiveAction::DeleteOrganization { id },
+        }
+    }
+
+    /// AUD-P2-14 (C10): graph-node delete confirm.
+    pub(crate) fn delete_graph_node(id: i64, label: &str) -> Self {
+        Self {
+            title: "Delete graph node?".into(),
+            message: format!(
+                "The node \"{label}\" and the human-authored edges touching it are removed."
+            ),
+            confirm_label: "Delete node".into(),
+            danger: true,
+            action: DestructiveAction::DeleteGraphNode { id },
+        }
+    }
+
+    /// AUD-P2-12 (C8): known-issue delete confirm.
+    pub(crate) fn delete_known_issue(id: i64, name: &str) -> Self {
+        Self {
+            title: "Delete known issue?".into(),
+            message: format!("The known issue \"{name}\" and its conversation links are removed."),
+            confirm_label: "Delete known issue".into(),
+            danger: true,
+            action: DestructiveAction::DeleteKnownIssue { id },
+        }
+    }
+
     pub(crate) fn delete_connector(id: i64, name: &str) -> Self {
         Self {
             title: "Delete connector?".into(),

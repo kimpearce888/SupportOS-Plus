@@ -1,5 +1,5 @@
 use eframe::egui;
-use spp_core::chats::{self, MirrorChat, MirrorMessage, SendBlock};
+use spp_core::chats::{self, EndChatOutcome, MirrorChat, MirrorMessage, SendBlock};
 use spp_core::db::DbHandle;
 
 use super::{NavRequest, PageKey};
@@ -155,22 +155,34 @@ impl LiveChatsPage {
         }
 
         if ui.available_width() > 860.0 {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.set_width(LIST_COL_W);
-                    self.chat_list_ui(ui, &visible);
-                });
-                ui.add_space(design::scale::space::PAD_CARD);
-                ui.vertical(|ui| {
-                    self.chat_detail_or_hint_ui(ui, db, &model);
-                });
-            });
+            // AUD-P2-18 (C14): the detail card's drill-downs (the customer
+            // and the conversation the chat became) return the frame's
+            // first navigation request.
+            let opened = ui
+                .horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(LIST_COL_W);
+                        self.chat_list_ui(ui, &visible);
+                    });
+                    ui.add_space(design::scale::space::PAD_CARD);
+                    ui.vertical(|ui| self.chat_detail_or_hint_ui(ui, db, &model))
+                        .inner
+                })
+                .inner;
+            if let Some(request) = opened {
+                return Some(request);
+            }
         } else {
             ui.vertical(|ui| {
                 self.chat_list_ui(ui, &visible);
                 ui.add_space(design::scale::space::SP2);
-                self.chat_detail_or_hint_ui(ui, db, &model);
             });
+            if let Some(request) = ui
+                .vertical(|ui| self.chat_detail_or_hint_ui(ui, db, &model))
+                .inner
+            {
+                return Some(request);
+            }
         }
         None
     }
@@ -292,19 +304,29 @@ impl LiveChatsPage {
         }
     }
 
-    fn chat_detail_or_hint_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, model: &LiveChatsModel) {
+    fn chat_detail_or_hint_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        model: &LiveChatsModel,
+    ) -> Option<NavRequest> {
         let Some(chat_id) = self.selected.clone() else {
             design::hint_text(ui, "select a chat to answer it");
-            return;
+            return None;
         };
         let Some(chat) = model.chats.iter().find(|c| c.chat_id == chat_id).cloned() else {
             design::hint_text(ui, "select a chat to answer it");
-            return;
+            return None;
         };
-        self.chat_detail_ui(ui, db, chat);
+        self.chat_detail_ui(ui, db, chat)
     }
 
-    fn chat_detail_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, chat: MirrorChat) {
+    fn chat_detail_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        chat: MirrorChat,
+    ) -> Option<NavRequest> {
         let (guard, messages) = if self
             .detail_cache
             .as_ref()
@@ -341,6 +363,19 @@ impl LiveChatsPage {
             (guard, messages)
         };
 
+        // AUD-P2-18 (C14): resolve the chat's cross-links to local mirror
+        // rows before the card — the conversation an ended chat became,
+        // and the customer behind it (both route the clicks).
+        let conversation = chat
+            .conversation_remote_id
+            .and_then(|remote| conversation_link(db, remote));
+        let customer_id = chat
+            .customer_remote_id
+            .and_then(|remote| customer_local_id(db, remote));
+
+        // AUD-P2-18 (C14): the drill-down targets collect here — the card
+        // body closure can't return, so the page returns them after.
+        let mut nav: Option<NavRequest> = None;
         design::card_titled(
             ui,
             &format!(
@@ -354,6 +389,63 @@ impl LiveChatsPage {
                 chat.last_event_at.as_deref().unwrap_or("—")
             )),
             |ui| {
+                // AUD-P2-18 (C14): the subtitle's cross-links — the chat's
+                // customer, and (once it ends) the conversation it became.
+                // card_titled's hint slot renders plain text, so the links
+                // live on their own row directly beneath it. Unresolved
+                // remotes get the honest "not in the mirror yet" note —
+                // the webhook knows them, the local mirror doesn't.
+                ui.horizontal(|ui| {
+                    let t = design::tokens(ui);
+                    if let Some(customer_id) = customer_id {
+                        let name = chat
+                            .customer_name
+                            .clone()
+                            .unwrap_or_else(|| format!("customer {customer_id}"));
+                        let response = ui
+                            .add(
+                                egui::Label::new(
+                                    egui::RichText::new(format!("customer: {name}"))
+                                        .size(design::scale::text::SMALL)
+                                        .color(t.primary),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_text("open the customer's profile");
+                        if response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if response.clicked() && nav.is_none() {
+                            nav = Some(NavRequest::OpenCustomer(customer_id));
+                        }
+                    } else if let Some(remote) = chat.customer_remote_id {
+                        design::hint_text(ui, &format!("customer {remote} not in the mirror yet"));
+                    }
+                    if let Some((local_id, number)) = conversation {
+                        let response = ui
+                            .add(
+                                egui::Label::new(
+                                    egui::RichText::new(format!("became conversation #{number}"))
+                                        .size(design::scale::text::SMALL)
+                                        .color(t.primary),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_text("open the conversation this chat became in the Inbox");
+                        if response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if response.clicked() && nav.is_none() {
+                            nav = Some(NavRequest::OpenConversation(local_id));
+                        }
+                    } else if let Some(remote) = chat.conversation_remote_id {
+                        design::hint_text(
+                            ui,
+                            &format!("conversation {remote} not in the mirror yet"),
+                        );
+                    }
+                });
+
                 if messages.is_empty() {
                     design::hint_text(ui, "no messages stored for this chat yet");
                 } else {
@@ -388,6 +480,24 @@ impl LiveChatsPage {
                     }
                 }
 
+                // AUD-P2-18 (C14): the agent's end-chat action — placed with
+                // the reply controls (the same place the send rule lives).
+                // It stays available for open chats even when the reply box
+                // is guarded (held by another agent): the outcome's own
+                // refusal explains, instead of the button vanishing.
+                if chat.is_open() {
+                    ui.add_space(design::scale::space::SP2);
+                    if design::button(ui, "End chat", ButtonVariant::Destructive)
+                        .on_hover_text(
+                            "ends the chat on this side — it moves to the Ended \
+                             chats view; the platform keeps its own record",
+                        )
+                        .clicked()
+                    {
+                        self.end_chat(db, &chat.chat_id);
+                    }
+                }
+
                 if guard.can_send {
                     ui.add_space(design::scale::space::SP2);
                     ui.add(
@@ -413,6 +523,44 @@ impl LiveChatsPage {
                 }
             },
         );
+        nav
+    }
+
+    /// AUD-P2-18 (C14): the agent's end-chat action — routed through the
+    /// core lane so the assignee guard (Help Scout refuses a foreign
+    /// agent's writes) and the sticky ended upsert stay in one place. A
+    /// chat the loaded view already knows as ended is a quiet no-op (the
+    /// button never offers on one — this is the stale-click path).
+    fn end_chat(&mut self, db: &DbHandle, chat_id: &str) {
+        let me = self.model.as_ref().and_then(|m| m.me_remote_id);
+        let known_ended = self
+            .model
+            .as_ref()
+            .is_some_and(|m| m.chats.iter().any(|c| c.chat_id == chat_id && !c.is_open()));
+        if known_ended {
+            self.reload(db);
+            self.detail_cache = None;
+            return;
+        }
+        match db.with_write(|conn| chats::end_chat(conn, chat_id, me)) {
+            Ok(EndChatOutcome::Ended) => {
+                self.notice = Some("chat ended — it moved to the Ended chats view".into());
+                self.reload(db);
+                self.detail_cache = None;
+            }
+            Ok(EndChatOutcome::AlreadyEnded) => {
+                // no-op: the mirror already says ended — just refresh the view.
+                self.reload(db);
+                self.detail_cache = None;
+            }
+            Ok(EndChatOutcome::Missing) => {
+                self.notice = Some("this chat is not in the mirror (yet)".into());
+            }
+            Ok(EndChatOutcome::HeldByOther(hint)) => {
+                self.notice = Some(format!("could not end the chat — {hint}"));
+            }
+            Err(e) => self.notice = Some(format!("could not end the chat: {e}")),
+        }
     }
 
     fn send(&mut self, db: &DbHandle, chat_id: &str) {
@@ -479,6 +627,38 @@ fn send_payload(chat_id: &str, text: &str) -> (String, String) {
     })
     .to_string();
     (payload, message_id)
+}
+
+/// AUD-P2-18 (C14): resolve the conversation an ended chat became — the
+/// chat stores the remote conversation id; the mirror's local row carries
+/// the id the Inbox deep link routes to and the number the user cites.
+/// `None` means the webhook referenced a conversation the mirror has not
+/// synced yet (the honest fallback text renders instead of a link).
+fn conversation_link(db: &DbHandle, remote_id: i64) -> Option<(i64, i64)> {
+    db.with_read(|conn| {
+        conn.query_row(
+            "SELECT id, number FROM conversations
+              WHERE remote_id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![remote_id],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .ok()
+    })
+}
+
+/// AUD-P2-18 (C14): resolve the chat's customer to the local mirror row
+/// (the profile deep link routes to the local id). `None` = the mirror
+/// has no such customer yet — the honest fallback text renders instead.
+fn customer_local_id(db: &DbHandle, remote_id: i64) -> Option<i64> {
+    db.with_read(|conn| {
+        conn.query_row(
+            "SELECT id FROM customers
+              WHERE remote_id = ?1 AND deleted_at IS NULL",
+            rusqlite::params![remote_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .ok()
+    })
 }
 
 impl Default for LiveChatsPage {
@@ -590,5 +770,176 @@ mod tests {
         assert_eq!(page.selected.as_deref(), Some("chat-1"));
         assert!(page.draft.is_empty(), "the draft clears on selection");
         assert!(page.notice.is_none(), "a stale notice clears on selection");
+    }
+
+    /// AUD-P2-18 (C14): the conversation link resolves the chat's remote
+    /// conversation id to the mirror's local row — the click routes to the
+    /// Inbox reader; an unsynced remote resolves to nothing (the honest
+    /// fallback renders instead of a dead link).
+    #[test]
+    fn the_conversation_link_resolves_and_misses_honestly() {
+        // the fixture's seed_conversation: local id 1, remote 1001, number 501
+        let db = fixture(vec![(
+            "probe",
+            1,
+            "Export broken",
+            "closed",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        db.with_write(|conn| {
+            ingest(
+                conn,
+                serde_json::json!({
+                    "id": "chat-1", "mailboxId": 3, "state": "ended",
+                    "conversationId": 1001, "endedAt": "2026-10-21T10:05:00Z"
+                }),
+                "beacon.chat.ended",
+            );
+        });
+
+        let link = conversation_link(&db, 1001);
+        assert_eq!(
+            link,
+            Some((1, 501)),
+            "the remote id resolves to the local row"
+        );
+        assert_eq!(
+            link.map(|(local_id, _)| NavRequest::OpenConversation(local_id)),
+            Some(NavRequest::OpenConversation(1)),
+            "the click opens the conversation in the Inbox"
+        );
+        assert_eq!(
+            conversation_link(&db, 424_242),
+            None,
+            "an unsynced remote resolves to no link — the honest fallback renders"
+        );
+    }
+
+    /// AUD-P2-18 (C14): the customer link resolves the chat's remote
+    /// customer id to the local profile row; soft-deleted customers and
+    /// unsynced remotes resolve to nothing (the honest fallback renders).
+    #[test]
+    fn the_customer_link_resolves_and_misses_honestly() {
+        // the fixture seeds customers 9 (remote 909) and 10 (remote 910)
+        let db = fixture(vec![]);
+        assert_eq!(customer_local_id(&db, 909), Some(9));
+        assert_eq!(
+            customer_local_id(&db, 909).map(NavRequest::OpenCustomer),
+            Some(NavRequest::OpenCustomer(9)),
+            "the click opens the customer's profile"
+        );
+        assert_eq!(
+            customer_local_id(&db, 424_242),
+            None,
+            "an unsynced remote resolves to no link"
+        );
+
+        db.with_write(|conn| {
+            conn.execute(
+                "UPDATE customers SET deleted_at = datetime('now') WHERE remote_id = 910",
+                [],
+            )
+            .expect("soft delete");
+        });
+        assert_eq!(
+            customer_local_id(&db, 910),
+            None,
+            "a soft-deleted customer no longer resolves"
+        );
+    }
+
+    /// AUD-P2-18 (C14): the end-chat guards — the connected user can end
+    /// an open chat (the view reloads with it ended), another agent's chat
+    /// refuses with the held-by hint, an already-ended chat is a no-op,
+    /// and a chat outside the mirror says so.
+    #[test]
+    fn end_chat_guards_ending_refusal_and_the_no_op() {
+        let db = fixture(vec![]);
+        db.with_write(|conn| {
+            conn.execute(
+                "INSERT INTO accounts (remote_id, plan, raw_json, last_seen_at)
+                 VALUES (9, 'owner', '{}', datetime('now'))",
+                [],
+            )
+            .expect("seed the connected user");
+            ingest(
+                conn,
+                serde_json::json!({
+                    "id": "chat-1", "mailboxId": 3, "state": "open",
+                    "customer": {"id": 9, "first": "Kim", "last": "One"}
+                }),
+                "beacon.chat.created",
+            );
+            ingest(
+                conn,
+                serde_json::json!({
+                    "id": "chat-2", "mailboxId": 3, "state": "open",
+                    "assignee": {"id": 5, "first": "Ada"}
+                }),
+                "beacon.chat.assigned",
+            );
+        });
+        let mut page = LiveChatsPage::new();
+        page.reload(&db);
+
+        // held by another agent: refused with the hint, the chat stays open
+        page.end_chat(&db, "chat-2");
+        assert!(
+            page.notice
+                .as_deref()
+                .is_some_and(|n| n.starts_with("could not end the chat — held by")),
+            "the refusal explains who holds the chat: {:?}",
+            page.notice
+        );
+        let state: String = db
+            .with_read(|conn| {
+                conn.query_row(
+                    "SELECT state FROM beacon_chats WHERE chat_id = 'chat-2'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("chat-2 row");
+        assert_eq!(state, "open", "a held chat is not ended");
+
+        // the connected user ends the unassigned chat: it lands as ended
+        page.notice = None;
+        page.end_chat(&db, "chat-1");
+        assert_eq!(
+            page.notice.as_deref(),
+            Some("chat ended — it moved to the Ended chats view")
+        );
+        let state: String = db
+            .with_read(|conn| {
+                conn.query_row(
+                    "SELECT state FROM beacon_chats WHERE chat_id = 'chat-1'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .expect("chat-1 row");
+        assert_eq!(state, "ended");
+        assert_eq!(
+            page.model.as_ref().expect("reloaded").ended,
+            1,
+            "the view reloads with the chat counted as ended"
+        );
+        assert!(page.detail_cache.is_none(), "the stale guard cache drops");
+
+        // an already-ended chat: a no-op — no new notice
+        page.notice = None;
+        page.end_chat(&db, "chat-1");
+        assert!(page.notice.is_none(), "AlreadyEnded stays silent");
+
+        // a chat outside the mirror: said so, nothing written
+        page.notice = None;
+        page.end_chat(&db, "chat-999");
+        assert_eq!(
+            page.notice.as_deref(),
+            Some("this chat is not in the mirror (yet)")
+        );
     }
 }

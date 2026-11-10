@@ -226,6 +226,8 @@ pub struct OperationsPage {
     suggestions: Vec<spp_core::workload::SuggestedAssignee>,
     suggestions_loaded: bool,
     error: Option<String>,
+    /// AUD-P2-17 (C13): the one-click assign's success note.
+    assign_notice: Option<String>,
     library: Option<LibraryModel>,
     pending_confirm: Option<ConfirmRequest>,
     /// AU2-9: when the snapshot query fails, back off instead of re-querying
@@ -247,6 +249,7 @@ impl OperationsPage {
             suggestions: Vec::new(),
             suggestions_loaded: false,
             error: None,
+            assign_notice: None,
             library: None,
             pending_confirm: None,
             failed_reload_at: None,
@@ -305,6 +308,94 @@ impl OperationsPage {
         }
     }
 
+    // AUD-P2-17 (C13): the suggested-assign write path — the same lane
+    // the Inbox's assign uses (local mirror write via ticket_ops, then
+    // the idempotency-keyed outbound "assign" job, then the bus event).
+    fn assign_suggestion(
+        &mut self,
+        db: &DbHandle,
+        bus: &spp_core::event_bus::EventBus,
+        conversation_id: i64,
+        assignee_local_id: Option<i64>,
+    ) {
+        let Some(assignee_local_id) = assignee_local_id else {
+            return;
+        };
+        let outcome: std::result::Result<(), String> = db.with_write(|conn| {
+            // The same guards the Inbox's assign runs through.
+            if spp_core::conversation_ops::eval_mode_on(conn) {
+                return Err("AI evaluation mode is ON: no assignments are sent.".into());
+            }
+            let connected = spp_core::settings::get_string(conn, "provider_kind")
+                .ok()
+                .flatten()
+                .map(|v| v != "empty")
+                .unwrap_or(true);
+            if !connected {
+                return Err(spp_core::conversation_ops::NOT_CONNECTED.into());
+            }
+            let remote_id: Option<i64> = conn
+                .query_row(
+                    "SELECT remote_id FROM conversations WHERE id = ?1 AND deleted_at IS NULL",
+                    rusqlite::params![conversation_id],
+                    |r| r.get(0),
+                )
+                .ok()
+                .flatten();
+            let Some(remote_id) = remote_id else {
+                return Err("conversation not found in the mirror.".into());
+            };
+            let op = spp_core::ticket_ops::TicketOperation::Assign {
+                conversation_remote_id: remote_id,
+                assignee_local_id: Some(assignee_local_id),
+                actor_type: "user".into(),
+                actor_id: None,
+            };
+            spp_core::ticket_ops::execute(conn, &op)
+                .map_err(|e| e.to_string())
+                .and_then(|result| match result {
+                    spp_core::ticket_ops::OperationResult::Success { .. } => {
+                        let key = spp_core::conversation_ops::create_outbound_job_keyed(
+                            conn,
+                            "assign",
+                            &serde_json::json!({
+                                "conversationId": conversation_id,
+                                "userId": assignee_local_id,
+                            }),
+                            Some(conversation_id),
+                            None,
+                        )
+                        .map_err(|e| e.to_string())?;
+                        spp_core::conversation_ops::set_outbound_status(conn, key, "queued", None);
+                        Ok(())
+                    }
+                    spp_core::ticket_ops::OperationResult::Rejected { reason } => Err(reason),
+                })
+        });
+        match outcome {
+            Ok(()) => {
+                spp_core::event_bus::EventBus::emit(
+                    bus,
+                    &spp_core::events::ServerEvent::conversation_updated(
+                        Some(conversation_id),
+                        None,
+                        None,
+                        None,
+                        "operations_assign",
+                    ),
+                );
+                self.error = None;
+                self.assign_notice =
+                    Some("assignment written locally — sending to Help Scout.".into());
+                // Suggestions + workload refresh with the new load.
+                self.suggestions = db.with_read(|conn| {
+                    spp_core::workload::suggested_assignees(conn, 10).unwrap_or_default()
+                });
+            }
+            Err(reason) => self.error = Some(reason),
+        }
+    }
+
     fn ensure_workload(&mut self, db: &DbHandle) {
         if self.workload.is_none() && !self.in_backoff() {
             self.reload(db);
@@ -317,7 +408,14 @@ impl OperationsPage {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        bus: &spp_core::event_bus::EventBus,
+    ) -> Option<NavRequest> {
+        // AUD-P2-17 (C13): the bus rides along for the one-click assign
+        // (the same emit_updated contract the inbox write path uses).
         self.ensure_loaded(db);
 
         let mut nav = None;
@@ -345,7 +443,7 @@ impl OperationsPage {
 
         match self.tab {
             Tab::Tiles => nav = self.tiles_ui(ui),
-            Tab::Workload => self.workload_ui(ui, db),
+            Tab::Workload => self.workload_ui(ui, db, bus),
             Tab::Library => self.library_ui(ui, db),
         }
         if let Some(request) = self.pending_confirm.take() {
@@ -421,7 +519,16 @@ impl OperationsPage {
         nav
     }
 
-    fn workload_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    fn workload_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        db: &DbHandle,
+        bus: &spp_core::event_bus::EventBus,
+    ) {
+        // AUD-P2-17 (C13): the one-click assign's outcome surfaces here.
+        if let Some(note) = self.assign_notice.take() {
+            design::hint_text(ui, &note);
+        }
         self.ensure_workload(db);
         let Some(workload) = self.workload.clone() else {
             ui.spinner();
@@ -536,18 +643,35 @@ impl OperationsPage {
                     .show_rows(ui, 20.0, suggestions.len(), |ui, range| {
                         for s in &suggestions[range] {
                             let subject = s.subject.clone().unwrap_or_default();
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "#{} {subject} → {} ({})",
-                                    s.conversation_number.unwrap_or(s.conversation_id),
-                                    s.suggested_display_name
-                                        .clone()
-                                        .unwrap_or_else(|| "(any)".into()),
-                                    s.reason
-                                ))
-                                .size(13.0)
-                                .color(t.foreground),
-                            );
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "#{} {subject} → {} ({})",
+                                        s.conversation_number.unwrap_or(s.conversation_id),
+                                        s.suggested_display_name
+                                            .clone()
+                                            .unwrap_or_else(|| "(any)".into()),
+                                        s.reason
+                                    ))
+                                    .size(13.0)
+                                    .color(t.foreground),
+                                );
+                                // AUD-P2-17 (C13): the one-click assign the
+                                // audit asked for — the suggestion is now
+                                // actionable, not display-only text.
+                                if s.suggested_user_local_id.is_some()
+                                    && design::button(ui, "Assign", ButtonVariant::Secondary)
+                                        .on_hover_text("assign the suggested agent — local write + Help Scout job")
+                                        .clicked()
+                                {
+                                    self.assign_suggestion(
+                                        db,
+                                        bus,
+                                        s.conversation_id,
+                                        s.suggested_user_local_id,
+                                    );
+                                }
+                            });
                         }
                     });
             },
@@ -816,6 +940,15 @@ impl OperationsPage {
         }
 
         design::section_title(ui, "Workflows");
+        // AUD-P2-17 (C13): the honest scope note the audit asked for —
+        // workflows are mirrored Help Scout objects (the platform
+        // exposes run-only through the API), so creating or editing
+        // them belongs in Help Scout; the runner here executes them.
+        design::hint_text(
+            ui,
+            "workflows are mirrored from Help Scout — create or edit them there; \
+             this runner executes them against a conversation",
+        );
         ui.horizontal(|ui| {
             let wf_label = design::field_label(ui, "Conversation #");
             ui.add(
@@ -1294,5 +1427,77 @@ mod tests {
             "the typed workflow number is kept"
         );
         assert!(!library.stale, "the reload cleared the stale flag");
+    }
+}
+
+// AUD-P2-17 (C13): the one-click suggested assign.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+    use spp_core::event_bus::EventBus;
+
+    #[test]
+    fn audp2_assign_suggestion_writes_locally_and_queues_the_assign_job() {
+        // Conversation 1 is unassigned in the fixture; agent 5 exists.
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Orphan request",
+            "active",
+            "email",
+            1,
+            0,
+            9,
+        )]);
+        let bus = EventBus::new(8);
+        let mut page = OperationsPage::new();
+        page.reload(&db);
+
+        // The suggestion engine proposes an agent for the unassigned
+        // conversation before the click.
+        let before = db.with_read(|conn| {
+            spp_core::workload::suggested_assignees(conn, 10).expect("suggestions")
+        });
+        assert!(
+            before.iter().any(|s| s.conversation_id == 1),
+            "the fixture has an unassigned conversation"
+        );
+
+        page.assign_suggestion(&db, &bus, 1, Some(5));
+
+        db.with_read(|conn| {
+            let assignee: Option<i64> = conn
+                .query_row(
+                    "SELECT assignee_local_id FROM conversations WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("row");
+            assert_eq!(assignee, Some(5), "the local mirror carries the assignment");
+            let job: Option<String> = conn
+                .query_row(
+                    "SELECT kind FROM outbound_jobs WHERE kind = 'assign'",
+                    [],
+                    |r| r.get(0),
+                )
+                .ok()
+                .flatten();
+            assert_eq!(
+                job.as_deref(),
+                Some("assign"),
+                "the Help Scout job is queued"
+            );
+        });
+        assert!(
+            page.assign_notice.is_some() && page.error.is_none(),
+            "the write succeeded with the honest note: {:?} / {:?}",
+            page.assign_notice,
+            page.error
+        );
+
+        // An unknown conversation is refused honestly.
+        page.assign_suggestion(&db, &bus, 999, Some(5));
+        assert!(page.error.is_some(), "unknown conversations refuse");
     }
 }

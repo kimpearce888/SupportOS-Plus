@@ -1136,6 +1136,21 @@ impl WorkerManager {
         .map_err(|e| Error::Other(e.to_string().into()))?;
         let clustered = clustered?;
         tracing::info!(clusters = clustered, "issue clustering finished");
+        // AUD-P2-12 (C8): clustering completion now emits the same
+        // conversation_updated event the gap rebuild does — the issue
+        // radar is invalidated by it (queries.rs), so a queued "Cluster
+        // now" refreshes the Clusters tab instead of waiting for a
+        // manual reload (the audit's dead-end: no completion signal).
+        {
+            use crate::events::ServerEvent;
+            self.bus.emit(&ServerEvent::conversation_updated(
+                None,
+                None,
+                None,
+                None,
+                "cluster_issues",
+            ));
+        }
         Ok(())
     }
 

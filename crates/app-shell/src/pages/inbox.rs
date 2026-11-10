@@ -929,6 +929,48 @@ impl InboxPage {
         outcome
     }
 
+    // AUD-P2-19 (B4): the workflow-state write path — the local lane the
+    // Priority control above uses, now for `TicketOperation::SetTicketState`
+    // (supportos_state + supportos_state_id + the transitions audit row;
+    // deliberately no outbound job — the state is a SupportOS-local
+    // concept feeding the reports CustomState dimension and the AI
+    // metadata tool, exactly like priority).
+    pub(crate) fn set_workflow_state(
+        &mut self,
+        db: &DbHandle,
+        bus: &EventBus,
+        state: &str,
+    ) -> ActionOutcome {
+        let Some(detail) = self.detail.clone() else {
+            return ActionOutcome::Rejected("No conversation selected.".into());
+        };
+        if !spp_core::ticket_states::workflow_state_is_valid(state) {
+            return ActionOutcome::Rejected(format!("unknown workflow state: {state}"));
+        }
+        let result: std::result::Result<OperationResult, String> = db.with_write(|conn| {
+            guard_eval_mode(conn)?;
+            let op = TicketOperation::SetTicketState {
+                conversation_remote_id: detail.remote_id,
+                new_state: state.to_string(),
+                actor_type: "user".into(),
+                actor_id: None,
+            };
+            spp_core::ticket_ops::execute(conn, &op).map_err(|e| e.to_string())
+        });
+        let outcome = match result {
+            Ok(OperationResult::Success { message }) => {
+                emit_updated(bus, detail.id, detail.number);
+                ActionOutcome::Success(message)
+            }
+            Ok(OperationResult::Rejected { reason }) => ActionOutcome::Rejected(reason),
+            Err(reason) => ActionOutcome::Rejected(reason),
+        };
+        self.set_status_message(outcome.message(), outcome.is_rejected());
+        self.reload_detail(db);
+        self.reload_list(db);
+        outcome
+    }
+
     // AUD-P1-4 (C5): the tag edit write path — the same lane automation's
     // add_tag uses (local mirror write + the idempotency-keyed "update_tags"
     // outbound job), opened up to the full list replace the provider API
@@ -1708,6 +1750,11 @@ impl InboxPage {
                 }
                 self.thread_ui(ui, &detail);
                 ui.add_space(design::scale::space::SP2);
+                // AUD-P2-19 (B4): the transition history — the local audit
+                // trail ticket_state_transitions records for this
+                // conversation (workflow-state and priority moves), which
+                // existed in core but was never surfaced anywhere.
+                self.state_history_ui(ui, db, &detail);
                 if let Some(qa) = self.qa_review.clone() {
                     self.qa_card_ui(ui, db, &qa, detail.id);
                     ui.add_space(design::scale::space::SP2);
@@ -1884,6 +1931,28 @@ impl InboxPage {
                     && detail.priority.as_deref() != Some(priorities[i])
                 {
                     self.set_priority(db, bus, priorities[i]);
+                }
+            });
+            ui.add_space(design::scale::space::SP1);
+            // AUD-P2-19 (B4): the local workflow state control — the six
+            // built-in states of `ticket_states`, written through the
+            // existing `TicketOperation::SetTicketState` lane (supportos_state
+            // + supportos_state_id + a ticket_state_transitions audit row;
+            // no outbound push — it is a SupportOS-local concept). No
+            // segment is highlighted while unset, the same honesty as the
+            // Priority row above. Pre-fix the operation existed in core
+            // with no caller anywhere — built, never reachable.
+            ui.horizontal(|ui| {
+                design::field_label(ui, "State");
+                let states = spp_core::ticket_states::TICKET_WORKFLOW_STATES;
+                let active_idx = states
+                    .iter()
+                    .position(|s| Some(*s) == detail.workflow_state.as_deref())
+                    .unwrap_or(usize::MAX);
+                if let Some(i) = design::segmented(ui, "inbox-workflow-state", &states, active_idx)
+                    && detail.workflow_state.as_deref() != Some(states[i])
+                {
+                    self.set_workflow_state(db, bus, states[i]);
                 }
             });
             ui.add_space(design::scale::space::SP1);
@@ -3066,6 +3135,63 @@ impl InboxPage {
         );
     }
 
+    // AUD-P2-19 (B4): the transition-history card — the audit trail
+    // `ticket_state_transitions` keeps for this conversation (workflow
+    // state and priority moves with actor + timestamp), read through the
+    // new `ticket_states::list_state_transitions`. Hidden when empty so
+    // conversations that never used the local state/priority lanes stay
+    // clean.
+    fn state_history_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, detail: &ConversationDetail) {
+        let rows = db.with_read(|conn| {
+            spp_core::ticket_states::list_state_transitions(conn, detail.remote_id, 20)
+        });
+        if rows.is_empty() {
+            return;
+        }
+        let t = design::tokens(ui);
+        design::card_titled(
+            ui,
+            "State history",
+            Some("local workflow transitions — not sent to Help Scout"),
+            |ui| {
+                for row in rows {
+                    let change = if let Some(to) = row.to_state.as_deref() {
+                        Some(format!(
+                            "{} → {}",
+                            row.from_state.as_deref().unwrap_or("—"),
+                            to
+                        ))
+                    } else if let Some(to) = row.to_priority.as_deref() {
+                        Some(format!(
+                            "priority {} → {}",
+                            row.from_priority.as_deref().unwrap_or("—"),
+                            to
+                        ))
+                    } else {
+                        None
+                    };
+                    let Some(change) = change else { continue };
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(change)
+                                .size(design::scale::text::SMALL)
+                                .color(t.foreground),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "· {} · {}",
+                                row.actor_type,
+                                crate::pages::relative_time(&row.transitioned_at)
+                            ))
+                            .size(design::scale::text::SMALL)
+                            .color(t.muted_foreground),
+                        );
+                    });
+                }
+            },
+        );
+    }
+
     fn qa_card_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -4243,6 +4369,82 @@ mod audp0_tests {
         assert!(
             matches!(rejected, ActionOutcome::Rejected(_)),
             "unknown priorities are rejected, not invented: {rejected:?}"
+        );
+    }
+
+    // AUD-P2-19 (B4): the workflow-state control's write path — the
+    // SetTicketState operation that existed in core with no caller.
+    #[test]
+    fn audp219_set_workflow_state_writes_state_id_and_transition_without_an_outbound_job() {
+        let db = fixture(vec![(
+            "conv",
+            1,
+            "Export broken",
+            "active",
+            "email",
+            1,
+            5,
+            9,
+        )]);
+        let bus = EventBus::new(8);
+        let mut page = InboxPage::new();
+        page.selected = Some(1);
+        page.detail = Some(
+            db.with_read(|conn| spp_core::inbox::get_conversation(conn, 1))
+                .expect("detail")
+                .expect("conversation 1 exists"),
+        );
+
+        let outcome = page.set_workflow_state(&db, &bus, "investigating");
+        assert!(
+            matches!(outcome, ActionOutcome::Success(ref m) if m.contains("investigating")),
+            "the write path succeeds: {outcome:?}"
+        );
+
+        db.with_read(|conn| {
+            let (state, state_id, transitions): (String, Option<i64>, i64) = conn
+                .query_row(
+                    "SELECT supportos_state, supportos_state_id,
+                            (SELECT COUNT(*) FROM ticket_state_transitions
+                              WHERE conversation_remote_id = 1001 AND to_state IS NOT NULL)
+                       FROM conversations WHERE id = 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .expect("conversation");
+            assert_eq!(state, "investigating");
+            assert_eq!(transitions, 1, "the state transition is recorded");
+            // The id linkage the reports CustomState dimension and the AI
+            // metadata tool read — the chain nothing ever populated.
+            let resolved: i64 = conn
+                .query_row(
+                    "SELECT id FROM ticket_states WHERE key = 'investigating'",
+                    [],
+                    |r| r.get(0),
+                )
+                .expect("lookup row");
+            assert_eq!(state_id, Some(resolved));
+            let outbound: i64 = conn
+                .query_row("SELECT COUNT(*) FROM outbound_jobs", [], |r| r.get(0))
+                .expect("outbound count");
+            assert_eq!(
+                outbound, 0,
+                "a local workflow state is not pushed to Help Scout"
+            );
+        });
+
+        // The reloaded detail carries the new state — the State control
+        // reflects the live column.
+        assert_eq!(
+            page.detail.as_ref().and_then(|d| d.workflow_state.clone()),
+            Some("investigating".to_string())
+        );
+
+        // A junk state never reaches the write path.
+        let rejected = page.set_workflow_state(&db, &bus, "investigating-typo");
+        assert!(
+            matches!(rejected, ActionOutcome::Rejected(_)),
+            "unknown workflow states are rejected, not invented: {rejected:?}"
         );
     }
     // ---- AUD-P1-4 (C5): tags + snooze write paths ----

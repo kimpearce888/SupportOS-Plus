@@ -576,6 +576,64 @@ pub fn create_organization(conn: &Connection, name: &str, domains: &[String]) ->
     Ok(id)
 }
 
+// AUD-P2-16 (C12): the organization edit/delete lane — the page was
+// create-only end to end. Soft-delete keeps the mirror history (the
+// same deleted_at discipline the synced tables use), so a later sync
+// of the same remote id can still resurrect a genuinely live org.
+
+/// Edit an organization's name and domains. Returns false when the id
+/// is unknown or already soft-deleted.
+pub fn update_organization(
+    conn: &Connection,
+    org_id: i64,
+    name: &str,
+    domains: &[String],
+) -> Result<bool> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(crate::error::Error::Validation(
+            "Organization name is required".to_string(),
+        ));
+    }
+    let domains_json = serde_json::to_string(domains).unwrap_or_else(|_| "[]".into());
+    let changed = conn.execute(
+        "UPDATE organizations
+            SET name = ?1, domains = ?2, local_updated_at = datetime('now')
+          WHERE id = ?3 AND deleted_at IS NULL",
+        params![trimmed, domains_json, org_id],
+    )?;
+    if changed > 0 {
+        let _ = crate::audit::audit(
+            conn,
+            &crate::audit::AuditEntry::user("organization_updated").with_after_state(json!({
+                "organization_id": org_id,
+                "name": trimmed,
+                "domains": domains,
+            })),
+        );
+    }
+    Ok(changed > 0)
+}
+
+/// Soft-delete an organization (members' organization_id links are
+/// historical facts and stay; the lists filter them out). Returns
+/// false when the id is unknown or already soft-deleted.
+pub fn delete_organization(conn: &Connection, org_id: i64) -> Result<bool> {
+    let changed = conn.execute(
+        "UPDATE organizations SET deleted_at = datetime('now')
+          WHERE id = ?1 AND deleted_at IS NULL",
+        params![org_id],
+    )?;
+    if changed > 0 {
+        let _ = crate::audit::audit(
+            conn,
+            &crate::audit::AuditEntry::user("organization_deleted")
+                .with_after_state(json!({ "organization_id": org_id })),
+        );
+    }
+    Ok(changed > 0)
+}
+
 #[cfg(test)]
 mod batch29_audit103_104_105_tests {
     use super::*;
@@ -780,5 +838,61 @@ mod batch29_audit103_104_105_tests {
             orgs[0].get("customer_count").and_then(Value::as_i64),
             Some(2)
         );
+    }
+}
+
+// AUD-P2-16 (C12): the organization edit/delete lane.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn conn() -> Connection {
+        let mut c = Connection::open_in_memory().expect("db");
+        crate::bootstrap::apply_all(&mut c).expect("migrations");
+        c
+    }
+
+    #[test]
+    fn audp2_update_and_delete_organization_round_trip() {
+        let c = conn();
+        let org = create_organization(&c, "Acme", &["acme.com".into()]).expect("org");
+
+        assert!(
+            update_organization(
+                &c,
+                org,
+                "Acme Industries",
+                &["acme.com".into(), "acme.io".into()]
+            )
+            .expect("update")
+        );
+        let (name, domains): (String, String) = c
+            .query_row(
+                "SELECT name, domains FROM organizations WHERE id = ?1",
+                rusqlite::params![org],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(name, "Acme Industries");
+        assert!(domains.contains("acme.io"), "{domains}");
+
+        // Empty name is refused.
+        let err = update_organization(&c, org, "   ", &[]).expect_err("name guard");
+        assert!(err.to_string().contains("required"), "{err}");
+
+        // Delete is soft — the row stays, filtered from the lists.
+        assert!(delete_organization(&c, org).expect("delete"));
+        let gone: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM organizations WHERE id = ?1 AND deleted_at IS NULL",
+                rusqlite::params![org],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(gone, 0);
+        // A second delete is a clean false; update on the gone row too.
+        assert!(!delete_organization(&c, org).expect("delete again"));
+        assert!(!update_organization(&c, org, "X", &[]).expect("update gone"));
     }
 }

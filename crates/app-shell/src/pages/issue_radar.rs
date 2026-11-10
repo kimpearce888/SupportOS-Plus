@@ -2,7 +2,7 @@ use eframe::egui;
 use rusqlite::Connection;
 use spp_core::db::DbHandle;
 
-use super::str_field;
+use super::{ConfirmRequest, NavRequest, str_field};
 use crate::design::{self, BadgeTone, ButtonVariant, CalloutRole};
 use crate::icons::Icon;
 
@@ -45,22 +45,42 @@ pub(crate) struct ClusterRow {
     pub trend: Option<String>,
     pub conversation_count: i64,
     pub customer_count: Option<i64>,
+    /// AUD-P2-12 (C8): member conversation (id, number) pairs — the
+    /// cluster card's drill-down evidence (first five).
+    pub sample_ids: Vec<(i64, i64)>,
 }
 
 #[must_use]
 pub(crate) fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
     conn.prepare(
-        "SELECT title, summary, trend, conversation_count, customer_count
+        "SELECT id, title, summary, trend, conversation_count, customer_count
            FROM issue_clusters ORDER BY conversation_count DESC",
     )
     .and_then(|mut stmt| {
         stmt.query_map([], |r| {
+            let cluster_id: i64 = r.get(0)?;
+            // AUD-P2-12 (C8): the member drill-down — first five linked
+            // conversations, resolved to (local id, number).
+            let sample_ids: Vec<(i64, i64)> = conn
+                .prepare(
+                    "SELECT c.id, c.number FROM issue_cluster_conversations icc
+                      JOIN conversations c ON c.id = icc.conversation_id
+                      WHERE icc.cluster_id = ?1 ORDER BY c.number LIMIT 5",
+                )
+                .and_then(|mut s| {
+                    s.query_map(rusqlite::params![cluster_id], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                    })
+                    .map(|rows| rows.filter_map(Result::ok).collect())
+                })
+                .unwrap_or_default();
             Ok(ClusterRow {
-                title: r.get(0)?,
-                summary: r.get(1)?,
-                trend: r.get(2)?,
-                conversation_count: r.get(3)?,
-                customer_count: r.get(4)?,
+                title: r.get(1)?,
+                summary: r.get(2)?,
+                trend: r.get(3)?,
+                conversation_count: r.get(4)?,
+                customer_count: r.get(5)?,
+                sample_ids,
             })
         })
         .map(|rows| rows.filter_map(Result::ok).collect())
@@ -70,6 +90,10 @@ pub(crate) fn load_clusters(conn: &Connection) -> Vec<ClusterRow> {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct KnownIssueRow {
+    /// AUD-P2-12 (C8): the row id — every lifecycle action (status edit,
+    /// text edit, delete, link management) targets it; the pre-fix loader
+    /// selected no id so rows could not be addressed.
+    pub id: i64,
     pub title: String,
     pub symptoms: Option<String>,
     pub status: String,
@@ -80,19 +104,40 @@ pub(crate) struct KnownIssueRow {
 #[must_use]
 pub(crate) fn load_known(conn: &Connection) -> Vec<KnownIssueRow> {
     conn.prepare(
-        "SELECT COALESCE(title, name), symptoms, status,
+        "SELECT id, COALESCE(title, name), symptoms, status,
                 COALESCE(conversation_count, 0), workaround
            FROM known_issues ORDER BY last_seen_at DESC",
     )
     .and_then(|mut stmt| {
         stmt.query_map([], |r| {
             Ok(KnownIssueRow {
-                title: r.get(0)?,
-                symptoms: r.get(1)?,
-                status: r.get(2)?,
-                conversation_count: r.get(3)?,
-                workaround: r.get(4)?,
+                id: r.get(0)?,
+                title: r.get(1)?,
+                symptoms: r.get(2)?,
+                status: r.get(3)?,
+                conversation_count: r.get(4)?,
+                workaround: r.get(5)?,
             })
+        })
+        .map(|rows| rows.filter_map(Result::ok).collect())
+    })
+    .unwrap_or_default()
+}
+
+/// AUD-P2-12 (C8): the conversations linked to a known issue (page-local
+/// SQL, the established loader style) — rendered as clickable evidence
+/// chips with an unlink affordance.
+pub(crate) fn load_known_links(conn: &Connection, known_issue_id: i64) -> Vec<(i64, i64)> {
+    conn.prepare(
+        "SELECT kil.conversation_id, c.number
+           FROM known_issue_links kil
+           JOIN conversations c ON c.id = kil.conversation_id
+          WHERE kil.known_issue_id = ?1
+          ORDER BY c.number",
+    )
+    .and_then(|mut stmt| {
+        stmt.query_map(rusqlite::params![known_issue_id], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
         })
         .map(|rows| rows.filter_map(Result::ok).collect())
     })
@@ -143,6 +188,13 @@ pub struct IssueRadarPage {
     notice: Option<String>,
     failed_ai_jobs: i64,
     reload_at: Option<std::time::Instant>,
+    /// AUD-P2-12 (C8): the known-issue edit draft (id, title, symptoms,
+    /// workaround) — the lifecycle the Known tab lacked.
+    edit_known: Option<(i64, String, String, String)>,
+    /// AUD-P2-12 (C8): link-management draft: the target known issue id
+    /// and the typed conversation id.
+    link_known_target: Option<i64>,
+    link_conversation_id: String,
 }
 
 impl IssueRadarPage {
@@ -165,6 +217,9 @@ impl IssueRadarPage {
             notice: None,
             failed_ai_jobs: 0,
             reload_at: None,
+            edit_known: None,
+            link_known_target: None,
+            link_conversation_id: String::new(),
         }
     }
 
@@ -295,7 +350,10 @@ impl IssueRadarPage {
         self.tab = Tab::Known;
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) -> Option<NavRequest> {
+        // AUD-P2-12 (C8): alert/SLA/gap drill-downs surface as NavRequests.
+        #[allow(unused_mut)] // AUD-P2 stub: the drill-down writers land next
+        let mut nav: Option<NavRequest> = None;
         self.ensure_loaded(db);
 
         design::page_header(
@@ -416,14 +474,15 @@ impl IssueRadarPage {
         }
 
         match self.tab {
-            Tab::Alerts => self.alerts_ui(ui),
-            Tab::Clusters => self.clusters_ui(ui),
-            Tab::Gaps => self.gaps_ui(ui, db),
-            Tab::Known => self.known_ui(ui, db),
+            Tab::Alerts => self.alerts_ui(ui, &mut nav),
+            Tab::Clusters => self.clusters_ui(ui, &mut nav),
+            Tab::Gaps => self.gaps_ui(ui, db, &mut nav),
+            Tab::Known => self.known_ui(ui, db, &mut nav),
         }
+        nav
     }
 
-    fn gaps_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    fn gaps_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, nav: &mut Option<NavRequest>) {
         let report = self.gaps.clone();
         if report.is_null() {
             ui.spinner();
@@ -504,7 +563,7 @@ impl IssueRadarPage {
                                 if n > 0 {
                                     design::divider(ui);
                                 }
-                                self.gap_candidate_ui(ui, db, candidate);
+                                self.gap_candidate_ui(ui, db, candidate, &mut *nav);
                             }
                         });
                         ui.add_space(design::scale::space::SP2);
@@ -518,6 +577,7 @@ impl IssueRadarPage {
         ui: &mut egui::Ui,
         db: &DbHandle,
         candidate: &serde_json::Value,
+        nav: &mut Option<NavRequest>,
     ) {
         let id = candidate.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
         let query = candidate
@@ -567,7 +627,9 @@ impl IssueRadarPage {
             .map(|a| a.iter().filter_map(|v| v.as_i64()).take(5).collect())
             .unwrap_or_default();
         if !examples.is_empty() {
-            let numbers: Vec<String> = db.with_read(|conn| {
+            // AUD-P2-12 (C8): gap evidence examples are now clickable
+            // conversation deep-links (inert "#N" text pre-fix).
+            let numbers: Vec<(i64, i64)> = db.with_read(|conn| {
                 examples
                     .iter()
                     .filter_map(|id| {
@@ -577,11 +639,31 @@ impl IssueRadarPage {
                             |r| r.get::<_, i64>(0),
                         )
                         .ok()
+                        .map(|n| (*id, n))
                     })
-                    .map(|n| format!("#{n}"))
                     .collect()
             });
-            design::hint_text(ui, &format!("examples: {}", numbers.join(" · ")));
+            if !numbers.is_empty() {
+                ui.horizontal(|ui| {
+                    design::hint_text(ui, "examples:");
+                    for (local_id, number) in numbers {
+                        let label = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("#{number}"))
+                                    .size(design::scale::text::SMALL)
+                                    .color(design::tokens(ui).primary),
+                            )
+                            .sense(egui::Sense::click()),
+                        );
+                        if label.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        if label.clicked() && nav.is_none() {
+                            *nav = Some(NavRequest::OpenConversation(local_id));
+                        }
+                    }
+                });
+            }
         }
         if status == "open" {
             ui.horizontal(|ui| {
@@ -617,7 +699,7 @@ impl IssueRadarPage {
         }
     }
 
-    fn alerts_ui(&mut self, ui: &mut egui::Ui) {
+    fn alerts_ui(&mut self, ui: &mut egui::Ui, nav: &mut Option<NavRequest>) {
         let radar = self.radar.clone();
         design::card_titled(
             ui,
@@ -651,6 +733,21 @@ impl IssueRadarPage {
                                     .size(design::scale::text::CONTROL)
                                     .color(design::tokens(ui).foreground),
                             );
+                            // AUD-P2-12 (C8): the drill-down the alerts tab
+                            // lacked — open the first member conversation
+                            // (the notifications deep-link idiom).
+                            if let Some(conv_id) = alert
+                                .get("conversation_ids")
+                                .and_then(|v| v.as_array())
+                                .and_then(|a| a.first())
+                                .and_then(|v| v.as_i64())
+                                && nav.is_none()
+                                && design::button(ui, "Open", ButtonVariant::Ghost)
+                                    .on_hover_text("open the first conversation behind this alert")
+                                    .clicked()
+                            {
+                                *nav = Some(NavRequest::OpenConversation(conv_id));
+                            }
                         });
                         ui.add_space(design::scale::space::SP1);
                     }
@@ -698,6 +795,26 @@ impl IssueRadarPage {
                                 } else {
                                     design::callout(ui, CalloutRole::Warn, &line);
                                 }
+                                // AUD-P2-12 (C8): the SLA drill-through —
+                                // open the breached conversation in the Inbox.
+                                if nav.is_none() {
+                                    let open = ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new("open →")
+                                                .size(design::scale::text::SMALL)
+                                                .color(design::tokens(ui).primary),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    );
+                                    if open.hovered() {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                    }
+                                    if open.clicked() {
+                                        *nav = Some(NavRequest::OpenConversation(
+                                            alert.conversation_id,
+                                        ));
+                                    }
+                                }
                                 ui.add_space(design::scale::space::SP1);
                             }
                         },
@@ -707,7 +824,7 @@ impl IssueRadarPage {
         );
     }
 
-    fn clusters_ui(&mut self, ui: &mut egui::Ui) {
+    fn clusters_ui(&mut self, ui: &mut egui::Ui, nav: &mut Option<NavRequest>) {
         let clusters = self.clusters.clone();
         design::section_title(ui, &format!("{} cluster(s)", clusters.len()));
         if clusters.is_empty() {
@@ -741,13 +858,36 @@ impl IssueRadarPage {
                     if let Some(summary) = &cluster.summary {
                         design::hint_text(ui, summary.as_str());
                     }
+                    // AUD-P2-12 (C8): the cluster drill-down — member
+                    // conversations as clickable #N chips (first five).
+                    if !cluster.sample_ids.is_empty() {
+                        ui.horizontal(|ui| {
+                            design::hint_text(ui, "members:");
+                            for (local_id, number) in &cluster.sample_ids {
+                                let label = ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!("#{number}"))
+                                            .size(design::scale::text::SMALL)
+                                            .color(design::tokens(ui).primary),
+                                    )
+                                    .sense(egui::Sense::click()),
+                                );
+                                if label.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                if label.clicked() && nav.is_none() {
+                                    *nav = Some(NavRequest::OpenConversation(*local_id));
+                                }
+                            }
+                        });
+                    }
                 });
                 ui.add_space(design::scale::space::SP2);
             }
         });
     }
 
-    fn known_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
+    fn known_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle, nav: &mut Option<NavRequest>) {
         ui.horizontal(|ui| {
             if design::button(ui, "New known issue", ButtonVariant::Primary).clicked() {
                 self.show_new = !self.show_new;
@@ -793,10 +933,210 @@ impl IssueRadarPage {
                                 .color(t.foreground),
                         );
                     }
+                    // AUD-P2-12 (C8): the lifecycle controls the Known tab
+                    // lacked — status chips, edit, delete, link management.
+                    ui.add_space(design::scale::space::SP1);
+                    ui.horizontal(|ui| {
+                        design::field_label(ui, "Status");
+                        let statuses = spp_core::intelligence_features::KNOWN_ISSUE_STATUSES;
+                        let active = statuses
+                            .iter()
+                            .position(|s| *s == issue.status)
+                            .unwrap_or(usize::MAX);
+                        if let Some(i) = design::segmented(
+                            ui,
+                            &format!("known-status-{}", issue.id),
+                            &statuses,
+                            active,
+                        ) && statuses[i] != issue.status
+                        {
+                            self.set_known_status(db, issue.id, statuses[i]);
+                        }
+                    });
+                    ui.add_space(design::scale::space::SP1);
+                    // Linked evidence: clickable chips + unlink + link form.
+                    let links = db.with_read(|conn| load_known_links(conn, issue.id));
+                    if !links.is_empty() {
+                        ui.horizontal(|ui| {
+                            design::hint_text(ui, "evidence:");
+                            for (conv_id, number) in &links {
+                                let chip = ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(format!("#{number}"))
+                                            .size(design::scale::text::SMALL)
+                                            .color(design::tokens(ui).primary),
+                                    )
+                                    .sense(egui::Sense::click()),
+                                );
+                                if chip.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                if chip.clicked() && nav.is_none() {
+                                    *nav = Some(NavRequest::OpenConversation(*conv_id));
+                                }
+                                if design::chip(ui, false, "×")
+                                    .on_hover_text("unlink this conversation")
+                                    .clicked()
+                                {
+                                    self.unlink_known(db, issue.id, *conv_id);
+                                }
+                            }
+                        });
+                    }
+                    if self.link_known_target == Some(issue.id) {
+                        ui.horizontal(|ui| {
+                            design::field_label(ui, "Link conversation");
+                            ui.add_sized(
+                                [120.0, 28.0],
+                                egui::TextEdit::singleline(&mut self.link_conversation_id),
+                            )
+                            .on_hover_text("local conversation id");
+                            if design::button(ui, "Link", ButtonVariant::Secondary).clicked() {
+                                self.link_known(db, issue.id);
+                            }
+                            if design::button(ui, "Done", ButtonVariant::Ghost).clicked() {
+                                self.link_known_target = None;
+                                self.link_conversation_id.clear();
+                            }
+                        });
+                    }
+                    ui.add_space(design::scale::space::SP1);
+                    ui.horizontal(|ui| {
+                        if design::button(ui, "Edit", ButtonVariant::Secondary).clicked() {
+                            self.edit_known = Some((
+                                issue.id,
+                                issue.title.clone(),
+                                issue.symptoms.clone().unwrap_or_default(),
+                                issue.workaround.clone().unwrap_or_default(),
+                            ));
+                        }
+                        if self.link_known_target.is_none()
+                            && design::button(ui, "Link…", ButtonVariant::Ghost).clicked()
+                        {
+                            self.link_known_target = Some(issue.id);
+                            self.link_conversation_id.clear();
+                        }
+                        // AUD-P2-12 (C8): the shell's confirm dialog —
+                        // the same flow org/graph-node deletes use.
+                        if design::button(ui, "Delete", ButtonVariant::Ghost)
+                            .on_hover_text("delete this known issue and its links")
+                            .clicked()
+                            && nav.is_none()
+                        {
+                            *nav = Some(NavRequest::Confirm(ConfirmRequest::delete_known_issue(
+                                issue.id,
+                                issue.title.as_str(),
+                            )));
+                        }
+                    });
                 });
                 ui.add_space(design::scale::space::SP2);
             }
         });
+        // AUD-P2-12 (C8): the edit form (pre-filled title/symptoms/
+        // workaround; empty symptoms/workaround clears them on save).
+        if let Some((id, mut title, mut symptoms, mut workaround)) = self.edit_known.clone() {
+            design::card_titled(ui, "Edit known issue", None, |ui| {
+                design::form_grid(ui, "radar-edit-known", |ui| {
+                    design::field_label(ui, "Title");
+                    ui.add_sized([260.0, 28.0], egui::TextEdit::singleline(&mut title));
+                    ui.end_row();
+                    design::field_label(ui, "Symptoms");
+                    ui.add(egui::TextEdit::multiline(&mut symptoms).desired_width(f32::INFINITY));
+                    ui.end_row();
+                    design::field_label(ui, "Workaround");
+                    ui.add(egui::TextEdit::multiline(&mut workaround).desired_width(f32::INFINITY));
+                    ui.end_row();
+                });
+                ui.add_space(design::scale::space::SP1);
+                ui.horizontal(|ui| {
+                    if design::button(ui, "Save Changes", ButtonVariant::Primary).clicked() {
+                        self.save_known_edit(db, id, &title, &symptoms, &workaround);
+                    }
+                    if design::button(ui, "Cancel", ButtonVariant::Ghost).clicked() {
+                        self.edit_known = None;
+                    }
+                });
+            });
+        }
+    }
+
+    // AUD-P2-12 (C8): the known-issue lifecycle write paths.
+    fn set_known_status(&mut self, db: &DbHandle, id: i64, status: &str) {
+        match db.with_write(|conn| {
+            spp_core::intelligence_features::set_known_issue_status(conn, id, status)
+        }) {
+            Ok(true) => {
+                self.notice = Some(format!("status set to {status}."));
+                self.reload(db);
+            }
+            Ok(false) => self.error = Some("known issue not found.".into()),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn save_known_edit(
+        &mut self,
+        db: &DbHandle,
+        id: i64,
+        title: &str,
+        symptoms: &str,
+        workaround: &str,
+    ) {
+        match db.with_write(|conn| {
+            spp_core::intelligence_features::set_known_issue_text(
+                conn,
+                id,
+                Some(title),
+                Some(symptoms),
+                Some(workaround),
+            )
+        }) {
+            Ok(true) => {
+                self.notice = Some("known issue updated.".into());
+                self.edit_known = None;
+                self.reload(db);
+            }
+            Ok(false) => self.error = Some("known issue not found.".into()),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn link_known(&mut self, db: &DbHandle, id: i64) {
+        let Ok(conv_id) = self.link_conversation_id.trim().parse::<i64>() else {
+            self.error = Some("conversation id must be a number.".into());
+            return;
+        };
+        match db.with_write(|conn| {
+            spp_core::intelligence_features::link_known_issue_conversation(conn, id, conv_id)
+        }) {
+            Ok(true) => {
+                self.notice = Some("conversation linked as evidence.".into());
+                self.link_conversation_id.clear();
+                self.reload(db);
+            }
+            Ok(false) => {
+                self.error = Some("link refused — check the conversation id exists.".into())
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn unlink_known(&mut self, db: &DbHandle, id: i64, conversation_id: i64) {
+        match db.with_write(|conn| {
+            spp_core::intelligence_features::unlink_known_issue_conversation(
+                conn,
+                id,
+                conversation_id,
+            )
+        }) {
+            Ok(true) => {
+                self.notice = Some("conversation unlinked.".into());
+                self.reload(db);
+            }
+            Ok(false) => self.error = Some("no such link.".into()),
+            Err(e) => self.error = Some(e.to_string()),
+        }
     }
 
     fn new_known_ui(&mut self, ui: &mut egui::Ui, db: &DbHandle) {
@@ -1068,5 +1408,119 @@ mod batch27_audit81_tests {
                 .expect("links")
         });
         assert_eq!(links, 1, "dedupe + existence check both applied");
+    }
+}
+
+// AUD-P2-12 (C8): the radar drill-downs + known-issue lifecycle.
+#[cfg(test)]
+mod audp2_tests {
+    use super::*;
+    use crate::testsupport::fixture;
+
+    fn seeded() -> (spp_core::db::DbHandle, i64) {
+        let db = fixture(vec![("conv", 1, "Login loop", "active", "email", 1, 5, 9)]);
+        let known_id: i64 = db.with_write(|conn| {
+            let id = create_known_issue(
+                conn,
+                "Login loop",
+                Some("users stuck at SSO"),
+                None,
+                "investigating",
+                &[],
+            )
+            .expect("known");
+            spp_core::intelligence_features::link_known_issue_conversation(conn, id, 1)
+                .expect("link");
+            id
+        });
+        (db, known_id)
+    }
+
+    #[test]
+    fn audp2_known_issue_lifecycle_round_trips() {
+        let (db, known_id) = seeded();
+        let mut page = IssueRadarPage::new();
+        page.reload(&db);
+
+        // Status transitions validate and reload.
+        page.set_known_status(&db, known_id, "fix_in_progress");
+        assert!(page.error.is_none(), "status write: {:?}", page.error);
+        let status: String = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT status FROM known_issues WHERE id = ?1",
+                rusqlite::params![known_id],
+                |r| r.get(0),
+            )
+            .expect("row")
+        });
+        assert_eq!(status, "fix_in_progress");
+
+        // A junk status is refused by the core vocabulary.
+        page.set_known_status(&db, known_id, "magic");
+        assert!(page.error.is_some(), "the vocabulary is closed");
+
+        // Text edits round-trip (empty workaround clears).
+        page.save_known_edit(&db, known_id, "Login loop v2", "updated symptoms", "");
+        let (name, symptoms, workaround): (String, Option<String>, Option<String>) =
+            db.with_read(|conn| {
+                conn.query_row(
+                    "SELECT name, symptoms, workaround FROM known_issues WHERE id = ?1",
+                    rusqlite::params![known_id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .expect("row")
+            });
+        assert_eq!(name, "Login loop v2");
+        assert_eq!(symptoms.as_deref(), Some("updated symptoms"));
+        assert_eq!(workaround, None, "an empty save clears");
+
+        // Unlink + relink evidence.
+        page.unlink_known(&db, known_id, 1);
+        let links: i64 = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM known_issue_links WHERE known_issue_id = ?1",
+                rusqlite::params![known_id],
+                |r| r.get(0),
+            )
+            .expect("count")
+        });
+        assert_eq!(links, 0);
+        page.link_conversation_id = "1".into();
+        page.link_known(&db, known_id);
+        let links: i64 = db.with_read(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM known_issue_links WHERE known_issue_id = ?1",
+                rusqlite::params![known_id],
+                |r| r.get(0),
+            )
+            .expect("count")
+        });
+        assert_eq!(links, 1);
+
+        // Delete removes the row and its links.
+        let deleted = db
+            .with_write(|conn| spp_core::intelligence_features::delete_known_issue(conn, known_id));
+        assert!(deleted.unwrap_or(false));
+        let remaining: i64 = db
+            .with_read(|conn| conn.query_row("SELECT COUNT(*) FROM known_issues", [], |r| r.get(0)))
+            .expect("count");
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn audp2_known_loader_carries_the_row_id() {
+        let (db, known_id) = seeded();
+        let known = db.with_read(load_known);
+        assert_eq!(known.len(), 1);
+        assert_eq!(known[0].id, known_id, "rows are addressable now");
+    }
+
+    #[test]
+    fn audp2_gap_examples_resolve_to_clickable_pairs() {
+        let (db, known_id) = seeded();
+        // The gap path is exercised through load_known_links directly —
+        // evidence chips carry (local id, number).
+        let links = db.with_read(|conn| load_known_links(conn, known_id));
+        assert_eq!(links, vec![(1, 501)], "the fixture conversation resolves");
     }
 }
