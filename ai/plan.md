@@ -59,7 +59,11 @@ the same session; record in `completed.md`. Full-finding accounting
 vs. the audit's 44: A1–A8, B1–B3, B5, C1–C7, D1–D6, E1–E7 closed
 (AUD-P0/AUD-P1-1/AUD-P2-1) + C3/C8–C14, B4, B7 closed (this batch) =
 41 of 44. QUEUED below for the final batch AUD-P2-3: B6, D7, D8
-(Rule 8 STOP — say "continue" to proceed).**
+(Rule 8 STOP — say "continue" to proceed). Ledger addendum: the batch
+push `62f99e1` is CI-green 4/4 — run 42872374339 (check, packages,
+packages-arm64, and the kittest drift gate all success — the gate
+passed on its first run against the committed goldens, proving zero
+unintended drift).**
 
 **QUEUED (final batch AUD-P2-3 on "continue"): B6 vestigial
 `provider_available` column (remove or probe-populate honestly — it
