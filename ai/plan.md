@@ -7,6 +7,36 @@
 
 ## Queue state
 
+**Batch REL-6 (Build & Release v1.9.7 from the final repository source)
+OPENED 2026-11-11 on the owner's Build-and-Release directive: v1.9.6 was
+cut at `81f1ccd`, but main has since landed the complete audit program —
+AUD-1 (the 44-finding product audit report), AUD-P0 (the six P0
+wrong-data/lying-audit-trail clusters), AUD-P1-1 (the eight P1
+dead-end/workflow items), AUD-P2-1 (the P2 code/docs/infra backlog),
+AUD-P2-2 (row 15's eight UI dead-end clusters + B4 + B7), AUD-P2-3 (the
+final three findings B6/D7/D8 + the D14 read-clock ride-along — the audit
+program closed 44/44), plus UXH-1 (the help-center article reader) and
+AIE-1 (the AI reads the Help Center and the customers' own words; reply
+drafting triggerable from the Inbox). None of it is in any published
+release. Items:**
+
+- **REL-6-1** — workspace version 1.9.6 → 1.9.7 (root Cargo.toml, the
+  single source of truth — members are `version.workspace = true`; + the
+  four member entries in Cargo.lock) + USER_MANUAL re-stamp to 1.9.7.
+- **REL-6-2** — CHANGELOG `[1.9.7]` section in product language (the
+  audit program: P0/P1/P2 tiers; the help-center reader; the AI
+  reads-the-Help-Center batch) + the `[1.9.7]` link reference.
+- **REL-6-3** — full local verification battery on the bumped tree
+  (gates, fmt, verify-icons, clippy ×2 lanes, tests ×2 lanes,
+  cargo-deny incl. sources) + local build of both packages
+  (xtask package / xtask deb, sandbox feature on) + local smoke/launch
+  verification of both artifacts.
+- **REL-6-4** — annotated tag `v1.9.7` on the release commit (only
+  after CI green on the bump push); release.yml publishes the
+  GitHub Release (gates + package + 3-distro .deb verification +
+  AppImage verification + publish-after-green) + live post-publish
+  verification of every asset link and checksum; ledger close.
+
 **Batch AUD-P2-1 (fix the P2 backlog, part one — the code fixes, docs
 and infra of `docs/audit/repo-audit-v1.9.6.md` §5 rows 16–18) CONSUMED
 2026-11-10: opened on the owner's "fix P2" directive. Items

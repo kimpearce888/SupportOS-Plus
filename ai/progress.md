@@ -1,10 +1,20 @@
 ## Active items
 
-(none — Batch AUD-P2-3 (the final three findings: B6, D7, D8) closed
+Batch REL-6 (Build & Release v1.9.7 from the final repository source,
+items REL-6-1..REL-6-4) opened in `plan.md` per Rules 1 and 2 on
+2026-11-11 — on the owner's Build-and-Release directive (v1.9.6 at
+`81f1ccd` predates AUD-1/AUD-P0/AUD-P1-1/AUD-P2-1/AUD-P2-2/AUD-P2-3
+— the complete 44-finding audit program — plus UXH-1 and AIE-1).
+IN PROGRESS: version bump 1.9.6 → 1.9.7 + USER_MANUAL re-stamp,
+CHANGELOG section, full local battery, local build + verification of
+both packages, CI green, annotated tag, release.yml publish, live
+post-publish verification, ledger close.
+
+**(none — Batch AUD-P2-3 (the final three findings: B6, D7, D8) closed
 2026-11-10, record in `completed.md`; Rule 8 STOP. The audit program is
 COMPLETE: all 44 findings of `docs/audit/repo-audit-v1.9.6.md` are
 processed. The queue is EMPTY — new work opens only on an owner
-directive.)
+directive.)**
 
 **Batch AUD-P2-2 (moved here from `plan.md` per Rule 2, 2026-11-10,
 on the owner's standing "fix everything" directive re-confirmed after

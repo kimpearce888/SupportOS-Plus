@@ -4,6 +4,156 @@ All notable changes to **SupportOS+** (SupportOS-Plus) are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.9.7] — 2026-11-11
+
+### Fixed — the full audit program: all 44 findings of the repo audit closed
+
+A full product audit (`docs/audit/repo-audit-v1.9.6.md` — 44 verified
+findings in 5 classes, 9 practical-scenario walkthroughs) was executed
+to completion: every P0, P1 and P2 finding is fixed in this release.
+
+**P0 — wrong data, lying audit trails, user-visible malfunction:**
+
+- **The weekly digest's "top issue clusters" is real data again**: the
+  digest query read a database column that does not exist (the schema
+  names it `name`, the query asked for `label`), failed silently and
+  shipped an empty list in every weekly digest. The corrected query is
+  locked by regression tests.
+- **Knowledge Freshness counts real usage**: the "low usage" /
+  "recurring questions" heuristics queried a citations table that was
+  never created — so usage was always zero and the recurring flag could
+  never fire. Usage now counts the distinct conversations whose AI runs
+  actually cited the document.
+- **Discarded AI drafts stay discarded**: a rejected draft no longer
+  re-renders in the copilot card (where it could be re-inserted); the
+  latest-draft lookup filters by state.
+- **Malformed sync jobs fail loudly, not silently**: sync jobs with
+  malformed payloads (missing remote id) now record a failure instead
+  of "completing" without doing anything.
+- **Legacy automation rules tell the truth about their triggers**: the
+  three trigger types that no program code ever fires are surfaced as
+  legacy/inert, and firing them honestly records "no engine handler"
+  instead of a fake success.
+- **Automation `SetPriority` actually sets the priority** (it used to
+  record a successful run that did nothing), and the read-only
+  pseudo-actions were removed from the approval flow instead of
+  recording "Executed read action" for actions that read nothing.
+- **Automation notes carry their body**: the `AddNote` operation stopped
+  discarding the note text; the body now rides the real outbound
+  note lane, idempotency-keyed.
+- **The inbox priority filter filters on real data**: it used to match
+  a mirror column the Help Scout mapper hard-codes to none (so every
+  priority filter returned everything); it now filters on the local
+  workflow priority that the UI actually edits — and that priority now
+  has an edit surface (the six-state local workflow was engine-only
+  before).
+
+**P1 — dead ends and workflows that could not be completed:**
+
+- **Notifications are navigable and count themselves**: notification
+  cards deep-link to the conversation/customer/issue/campaign/job they
+  describe, and the sidebar carries a live unread badge.
+- **Connector credentials are configurable**: http connectors can be
+  given none/header/bearer auth at create and edit time; the manual
+  refresh answers "did it work?" with a toast carrying row counts or
+  the error, and the pages reload on completion.
+- **Incidents have a full lifecycle**: update, resolve, delete, unlink
+  conversations — not create-only.
+- **Inbox conversations get tags and snooze**: tag add/remove and
+  snooze controls in the conversation action card; customer profile
+  conversation rows are clickable.
+- **Automation rules are editable**: full rule editing with a real
+  assignee picker (not raw numeric ids) and a validated status
+  vocabulary, plus the approval/run history the engine already kept.
+- **AI Center endpoints are editable where they are yours**: custom
+  endpoints' $/mtok prices can be corrected after creation, copilot
+  sessions can be renamed/deleted, and golden sets can be
+  created/deactivated — all previously create-only or inert.
+- **Fresh installs no longer spawn doomed AI jobs**: with no LM
+  Studio backend configured, the analyze/attribute jobs that would
+  really-run/really-fail/really-notify on every synced conversation
+  are suppressed, with a daily notification telling you exactly why
+  (and how to enable AI).
+- **Embedding indexing completes**: the 60-chunk per-pass cap now
+  re-queues for another pass instead of stopping mid-corpus, chunks
+  that fail 5 times are evicted with a visible reason, and Settings
+  carries a "re-index vectors" action for the whole store.
+
+**P2 — the remaining backlog (code, docs, infra and the eight UI
+dead-end clusters):**
+
+- **Worker retries honor the retryable flag**: deterministic AI
+  failures fail terminally on attempt 1 instead of burning every
+  retry and re-notifying each time; transport failures still retry.
+  Every outbound HTTP lane carries explicit per-request timeouts, and
+  the no-timeout fallback is a loud warning, not silence.
+- **Embedding churn stops**: unchanged conversation chunks keep their
+  embeddings on re-sync (content-hash diffing), instead of
+  re-embedding the whole corpus every pass.
+- **The me-user badge is never wrong**: the local-me fallback only
+  applies on single-user mirrors, so multi-user Help Scout desks no
+  longer badge the wrong agent as "you".
+- **Reconcile runs on a schedule**: the drift-repair pass that was
+  manual-only now has a configurable timer (Settings, default daily,
+  off at 0) and restarts the workers on change.
+- **The eight UI dead-end clusters are closed** (audit row 15):
+  custom objects support links, editing and a pager; the issue radar
+  drill-downs, known-issue lifecycle and auto-refresh; outreach
+  segment previews, campaign editing and a DNC picker; reports
+  filters are pickers (not CSV id lists) with clickable rows and
+  deletable support-graph nodes; knowledge documents have a reader,
+  per-document re-ingest and editing; organizations support
+  edit/delete and clickable members; operations can one-click assign
+  suggested assignees and create/edit workflows; live chats link to
+  their conversation, can be ended by the agent and navigate to the
+  customer.
+- **Local ticket workflow states are surfaced** (B4): the engine's
+  six-state workflow and its transition audit trail are visible and
+  operable, not engine-only.
+- **Unknown webhook events are marked honestly** (B7): a new Help
+  Scout event type is stored with a visible "unknown type" state and
+  note instead of silently "processed".
+- **The restore flow tells the truth about secrets.key** (D4): the
+  restore warning and the backups card explain what a missing
+  secrets.key means and how to keep it with the backup.
+- **Data retention is disclosed where the setting lives** (D8): a
+  "Data retention" card on Settings → Sync & AI states exactly what a
+  non-zero horizon deletes (and never deletes), the compliance
+  trade-off and the cadence — and the retention clock now honors the
+  manual's read-notification contract (read notifications age from
+  when they were read, not from creation).
+- **Honesty in docs and CI**: the webhook "loopback" registration
+  reality (no public endpoint — the listener is loopback-only) is
+  stated everywhere it was implied otherwise (D7); the user manual is
+  re-stamped to the real version with the scheduled-reconcile and
+  secrets.key guidance; the README's three stale rows fixed; release
+  tags now run the full CI battery and the native arm64 packaging
+  lane; dependency sources are deny-checked in CI.
+
+### Fixed — the Help Center renders as articles, not HTML source
+
+- **Help center articles display as articles**: the reader now renders
+  the synced Help Scout HTML body through the same sanitized rich-text
+  pipeline the inbox reader uses — headings, paragraphs, lists, code,
+  links — instead of printing `<p>` and `<code>` tags as literal text,
+  centered in the same 860px reading measure the inbox thread uses.
+
+### Fixed — the AI reads the Help Center and the customers' own words
+
+- **Reply drafting grounds in the Help Center too**: the LM Studio
+  reply-draft evidence now includes help-center articles (via the docs
+  full-text index) with their own citation id-space, so the draft can
+  cite "how we explain this to customers" — and the leakage auditor's
+  corpus grew to cover it.
+- **Article drafting reads the customers' own words**: the gap →
+  draft → review → publish chain's article drafting now carries the
+  customer's question (not just the agent answers) in its citations
+  and prompt.
+- **"Draft reply with LM Studio" is one click in the copilot pane**:
+  the trigger is on the conversation, not buried in AI Center — the
+  draft lands as the usual "LM Studio draft" card with Insert →
+  composer → Send (human-approved, exactly as before).
+
 ## [1.9.6] — 2026-11-08
 
 ### Fixed — the dashboard and the whole app modernized (owner-directed design program)
@@ -1143,6 +1293,7 @@ verified end-to-end by the tag-triggered release pipeline.
 - CI: fmt + clippy (`-D warnings`) + tests + cargo-deny on every push,
   plus a package job that builds and smoke-boots both formats.
 
+[1.9.7]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.7
 [1.9.6]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.6
 [1.9.5]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.5
 [1.9.4]: https://github.com/kimpearce888/SupportOS-Plus/releases/tag/v1.9.4

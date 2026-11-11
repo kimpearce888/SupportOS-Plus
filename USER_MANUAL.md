@@ -1,6 +1,6 @@
 # SupportOS+ — User Manual
 
-**Version 1.9.6** · For everyday computer users — no technical knowledge required.
+**Version 1.9.7** · For everyday computer users — no technical knowledge required.
 
 SupportOS+ is a desktop program for Linux that connects to your **Help Scout** help desk and puts your whole support operation on your own computer: your conversations, your customers, your help-center articles, your reports — plus optional AI helpers that run on your machine.
 
@@ -68,26 +68,26 @@ You do **not** need: Docker, a server, a database program, programming tools, or
 ## 3. Installing SupportOS+
 
 Both installers come from the GitHub releases page of the project:
-`https://github.com/kimpearce888/SupportOS-Plus/releases` — look for the newest version (for this manual: **v1.9.6**).
+`https://github.com/kimpearce888/SupportOS-Plus/releases` — look for the newest version (for this manual: **v1.9.7**).
 
 You will see two files:
 
 | File | Best for |
 |---|---|
-| `supportos-plus_1.9.6_amd64.deb` | Debian, Ubuntu, Linux Mint, Pop!_OS, elementary and other Debian-family systems. Installs like a normal program and adds "SupportOS+" to your applications menu. |
-| `SupportOS-Plus-1.9.6-x86_64.AppImage` | Any other Linux. One single file — no installation, just run it. |
+| `supportos-plus_1.9.7_amd64.deb` | Debian, Ubuntu, Linux Mint, Pop!_OS, elementary and other Debian-family systems. Installs like a normal program and adds "SupportOS+" to your applications menu. |
+| `SupportOS-Plus-1.9.7-x86_64.AppImage` | Any other Linux. One single file — no installation, just run it. |
 
 ### Option A — install the .deb (recommended on Debian/Ubuntu/Mint)
 
-1. Download `supportos-plus_1.9.6_amd64.deb`.
+1. Download `supportos-plus_1.9.7_amd64.deb`.
 2. Double-click the downloaded file. Your software installer opens (called "Software Install", "Package Installer" or similar). Click **Install** and enter your password if asked.
    - The installer pulls in everything the program needs (its listed system dependencies) automatically — you never have to install anything by hand.
-   - Comfortable with the terminal instead? `sudo apt install ./supportos-plus_1.9.6_amd64.deb` does the same.
+   - Comfortable with the terminal instead? `sudo apt install ./supportos-plus_1.9.7_amd64.deb` does the same.
 3. After installing, find **SupportOS+** in your applications menu and click it.
 
 ### Option B — run the AppImage (no installation)
 
-1. Download `SupportOS-Plus-1.9.6-x86_64.AppImage` into any folder (for example `Applications` in your home folder).
+1. Download `SupportOS-Plus-1.9.7-x86_64.AppImage` into any folder (for example `Applications` in your home folder).
 2. Allow it to run: right-click the file → **Properties** → **Permissions** → switch on **Allow executing file as program** (wording varies slightly by system).
 3. Double-click the file. The program starts.
 
@@ -124,7 +124,7 @@ If something prevents the program from starting at all (for example a broken dat
 
 ### The sidebar (left edge)
 
-A narrow bar with the brand **"SupportOS+"** and its version (for example `v1.9.6`), a search row, and all pages grouped under five headings:
+A narrow bar with the brand **"SupportOS+"** and its version (for example `v1.9.7`), a search row, and all pages grouped under five headings:
 
 | Group | Pages |
 |---|---|
@@ -1037,7 +1037,7 @@ Cancel, the X, or **Esc** always cancels safely.
 
 ---
 
-*SupportOS+ 1.9.6 — this manual describes the program as built from its source code. Where the app shows exact texts, they are quoted as the program prints them.*
+*SupportOS+ 1.9.7 — this manual describes the program as built from its source code. Where the app shows exact texts, they are quoted as the program prints them.*
 
 
 
